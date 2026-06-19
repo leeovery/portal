@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -58,7 +58,7 @@ func TestPreviewBrandNew_EveryPaneRendersPlaceholder(t *testing.T) {
 	}
 
 	// Tab → (w0, p1).
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.windowIdx != 0 || m.paneIdx != 1 {
 		t.Fatalf("after Tab: expected (windowIdx=0, paneIdx=1), got (%d, %d)", m.windowIdx, m.paneIdx)
 	}
@@ -67,7 +67,7 @@ func TestPreviewBrandNew_EveryPaneRendersPlaceholder(t *testing.T) {
 	}
 
 	// Tab → wraps within window back to (w0, p0).
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.windowIdx != 0 || m.paneIdx != 0 {
 		t.Fatalf("after Tab wrap: expected (0, 0), got (%d, %d)", m.windowIdx, m.paneIdx)
 	}
@@ -85,7 +85,7 @@ func TestPreviewBrandNew_EveryPaneRendersPlaceholder(t *testing.T) {
 	}
 
 	// Tab → (w1, p1).
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.windowIdx != 1 || m.paneIdx != 1 {
 		t.Fatalf("after Tab in w1: expected (1, 1), got (%d, %d)", m.windowIdx, m.paneIdx)
 	}
@@ -109,15 +109,15 @@ func TestPreviewBrandNew_ChromeCountsAccurateAcrossAllPlaceholderCycles(t *testi
 	// Spec sequence pinned in the task body.
 	steps := []struct {
 		name        string
-		key         tea.KeyMsg
+		key         tea.KeyPressMsg
 		applyKey    bool // false on the initial step (no key to apply)
 		wantWindow  string
 		wantPane    string
 		wantWinName string
 	}{
 		{name: "initial (w0,p0)", applyKey: false, wantWindow: "Window 1 of 2", wantPane: "Pane 1 of 2", wantWinName: "first"},
-		{name: "Tab → (w0,p1)", applyKey: true, key: tea.KeyMsg{Type: tea.KeyTab}, wantWindow: "Window 1 of 2", wantPane: "Pane 2 of 2", wantWinName: "first"},
-		{name: "Tab → wrap (w0,p0)", applyKey: true, key: tea.KeyMsg{Type: tea.KeyTab}, wantWindow: "Window 1 of 2", wantPane: "Pane 1 of 2", wantWinName: "first"},
+		{name: "Tab → (w0,p1)", applyKey: true, key: tea.KeyPressMsg{Code: tea.KeyTab}, wantWindow: "Window 1 of 2", wantPane: "Pane 2 of 2", wantWinName: "first"},
+		{name: "Tab → wrap (w0,p0)", applyKey: true, key: tea.KeyPressMsg{Code: tea.KeyTab}, wantWindow: "Window 1 of 2", wantPane: "Pane 1 of 2", wantWinName: "first"},
 		{name: "] → (w1,p0)", applyKey: true, key: nextWindowKey, wantWindow: "Window 2 of 2", wantPane: "Pane 1 of 2", wantWinName: "second"},
 		{name: "] → wrap (w0,p0)", applyKey: true, key: nextWindowKey, wantWindow: "Window 1 of 2", wantPane: "Pane 1 of 2", wantWinName: "first"},
 		{name: "[ → wrap (w1,p0)", applyKey: true, key: prevWindowKey, wantWindow: "Window 2 of 2", wantPane: "Pane 1 of 2", wantWinName: "second"},
@@ -167,7 +167,7 @@ func TestPreviewBrandNew_NextWindowAdvancesAndTabCyclesWithinWindowUnderAllPlace
 	}
 
 	// Tab inside w1 from p0 → p1.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.windowIdx != 1 {
 		t.Errorf("Tab leaked windowIdx: got %d, want 1 (Tab is intra-window)", m.windowIdx)
 	}
@@ -175,7 +175,7 @@ func TestPreviewBrandNew_NextWindowAdvancesAndTabCyclesWithinWindowUnderAllPlace
 		t.Errorf("Tab did not advance paneIdx: got %d, want 1", m.paneIdx)
 	}
 	// Tab again wraps within w1 to p0.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.windowIdx != 1 {
 		t.Errorf("Tab wrap leaked windowIdx: got %d, want 1", m.windowIdx)
 	}
@@ -202,11 +202,11 @@ func TestPreviewBrandNew_CycleKeysDoNotSkipPlaceholderPanes(t *testing.T) {
 	visited := map[[2]int]int{}
 	visited[[2]int{m.windowIdx, m.paneIdx}]++
 
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	visited[[2]int{m.windowIdx, m.paneIdx}]++
 	m, _ = m.Update(nextWindowKey)
 	visited[[2]int{m.windowIdx, m.paneIdx}]++
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	visited[[2]int{m.windowIdx, m.paneIdx}]++
 
 	for _, coord := range [][2]int{{0, 0}, {0, 1}, {1, 0}, {1, 1}} {
@@ -260,7 +260,7 @@ func TestPreviewMixed_BytesPaneAndPlaceholderPanesCoexist(t *testing.T) {
 	}
 
 	// Tab → (w0, p1) renders placeholder.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.paneIdx != 1 {
 		t.Fatalf("expected paneIdx=1 after Tab, got %d", m.paneIdx)
 	}
@@ -308,13 +308,13 @@ func TestPreviewMixed_FocusFromBytesPaneToPlaceholderAndBackIssuesFreshTailCalls
 	}
 
 	// Tab to w0p1 (placeholder).
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := stripTrailingBlanks(m.viewport.View()); got != previewPlaceholder {
 		t.Fatalf("(w0,p1) viewport = %q; want %q", got, previewPlaceholder)
 	}
 
 	// Tab back to w0p0 (bytes again — re-issued Tail).
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.paneIdx != 0 {
 		t.Fatalf("expected paneIdx=0 after Tab back, got %d", m.paneIdx)
 	}

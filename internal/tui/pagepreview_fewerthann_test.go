@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -130,7 +130,7 @@ func TestPreviewFewerThanN_ViewportOpensAtScrollTailNotScrollTopForFewerThanNCon
 	m, _ := newFewerThanNModel(t, 50)
 
 	if !m.viewport.AtBottom() {
-		t.Errorf("expected viewport.AtBottom()=true immediately after construction (scroll-tail), got false (YOffset=%d)", m.viewport.YOffset)
+		t.Errorf("expected viewport.AtBottom()=true immediately after construction (scroll-tail), got false (YOffset=%d)", m.viewport.YOffset())
 	}
 }
 
@@ -140,15 +140,15 @@ func TestPreviewFewerThanN_ScrollUpAtTopBoundaryIsSilentNoOp(t *testing.T) {
 	m, _ := newFewerThanNModel(t, 50)
 
 	m.viewport.GotoTop()
-	if m.viewport.YOffset != 0 {
-		t.Fatalf("setup: expected YOffset=0 at top, got %d", m.viewport.YOffset)
+	if m.viewport.YOffset() != 0 {
+		t.Fatalf("setup: expected YOffset=0 at top, got %d", m.viewport.YOffset())
 	}
 	beforeView := m.viewport.View()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 
-	if updated.viewport.YOffset != 0 {
-		t.Errorf("expected YOffset still 0 after Up at top, got %d", updated.viewport.YOffset)
+	if updated.viewport.YOffset() != 0 {
+		t.Errorf("expected YOffset still 0 after Up at top, got %d", updated.viewport.YOffset())
 	}
 	if cmd != nil {
 		t.Errorf("expected nil cmd on silent no-op Up at top, got non-nil")

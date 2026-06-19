@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -78,7 +78,7 @@ func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 	}
 
 	// Real-keystroke path: 'k' opens the kill-confirm modal.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	afterK, ok := updated.(Model)
 	if !ok {
 		t.Fatalf("expected Model after 'k', got %T", updated)
@@ -91,7 +91,7 @@ func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 	}
 
 	// 'y' confirms the kill and emits the killAndRefresh cmd.
-	updated2, killCmd := afterK.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated2, killCmd := afterK.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	afterY, ok := updated2.(Model)
 	if !ok {
 		t.Fatalf("expected Model after 'y', got %T", updated2)

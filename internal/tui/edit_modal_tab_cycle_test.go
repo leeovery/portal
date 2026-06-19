@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // tabModel builds a minimal Model with the edit modal open, the given focus
@@ -21,7 +21,7 @@ func tabModel(focus editField, tags []string) Model {
 // resulting Model.
 func pressTab(t *testing.T, m Model) Model {
 	t.Helper()
-	updated, _ := m.updateEditProjectModal(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.updateEditProjectModal(tea.KeyPressMsg{Code: tea.KeyTab})
 	return updated.(Model)
 }
 

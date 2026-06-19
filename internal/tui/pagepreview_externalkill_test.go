@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -105,15 +105,15 @@ func (r *progressivePlaceholderReader) Tail(paneKey string) ([]byte, error) {
 //	Tab  : (1, 0)   (intra-window wrap)
 //
 // 8 keypresses + 1 open-time read = 9 Tail calls.
-var killedSessionSequence = []tea.KeyMsg{
-	{Type: tea.KeyTab},                       // (0,1)
-	{Type: tea.KeyRunes, Runes: []rune{']'}}, // (1,0)
-	{Type: tea.KeyTab},                       // (1,1)
-	{Type: tea.KeyTab},                       // (1,0)
-	{Type: tea.KeyRunes, Runes: []rune{'['}}, // (0,0)
-	{Type: tea.KeyRunes, Runes: []rune{']'}}, // (1,0)
-	{Type: tea.KeyTab},                       // (1,1)
-	{Type: tea.KeyTab},                       // (1,0)
+var killedSessionSequence = []tea.KeyPressMsg{
+	{Code: tea.KeyTab},     // (0,1)
+	{Code: ']', Text: "]"}, // (1,0)
+	{Code: tea.KeyTab},     // (1,1)
+	{Code: tea.KeyTab},     // (1,0)
+	{Code: '[', Text: "["}, // (0,0)
+	{Code: ']', Text: "]"}, // (1,0)
+	{Code: tea.KeyTab},     // (1,1)
+	{Code: tea.KeyTab},     // (1,0)
 }
 
 // killedSessionExpectedCoords is the post-step (windowIdx, paneIdx)
@@ -420,7 +420,7 @@ func TestPreviewExternalKill_EscDismissesCleanlyFromFullyDegradedPreview(t *test
 		}
 	}()
 
-	_, cmd := final.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := final.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatalf("expected non-nil tea.Cmd from Esc, got nil")
 	}

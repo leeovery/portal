@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
@@ -829,11 +829,6 @@ func renderKeymapFooter(l *list.Model, bindings []key.Binding) string {
 	return l.Styles.HelpStyle.Render(l.Help.FullHelpView(cols))
 }
 
-// isRuneKey reports whether msg is a rune key matching the given character.
-func isRuneKey(msg tea.KeyMsg, ch string) bool {
-	return msg.Type == tea.KeyRunes && string(msg.Runes) == ch
-}
-
 // New creates a Model that fetches sessions from the given SessionLister.
 // Optional dependencies are configured via functional options.
 func New(lister SessionLister, opts ...Option) Model {
@@ -1110,7 +1105,7 @@ func (m *Model) ensureSessionRowSelected() {
 // because no two headers are adjacent; at the very top (index 0 header) an
 // upward intent flips to a downward step so the selection never falls off the
 // list.
-func (m *Model) skipHeaderRow(msg tea.KeyMsg) {
+func (m *Model) skipHeaderRow(msg tea.KeyPressMsg) {
 	if _, isHeader := m.sessionList.SelectedItem().(HeaderItem); !isHeader {
 		return
 	}
@@ -1511,7 +1506,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Delegate to the active view
 	switch m.activePage {
 	case PageLoading:
-		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyCtrlC {
+		if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyIsCtrlC(keyMsg) {
 			return m, tea.Quit
 		}
 		return m, nil
@@ -1553,8 +1548,8 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyCtrlC {
+	case tea.KeyPressMsg:
+		if keyIsCtrlC(msg) {
 			return m, tea.Quit
 		}
 		// Swallow ? so the list can't toggle help off
@@ -1565,7 +1560,7 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		switch {
-		case msg.Type == tea.KeyEsc:
+		case keyIsCode(msg, tea.KeyEscape):
 			if m.projectList.FilterState() == list.FilterApplied {
 				break
 			}
@@ -1608,7 +1603,7 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.handleEditProjectKey()
-		case msg.Type == tea.KeyEnter:
+		case keyIsCode(msg, tea.KeyEnter):
 			return m.handleProjectEnter()
 		}
 	}
@@ -1644,7 +1639,7 @@ func (m Model) handleDeleteProjectKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateDeleteProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
@@ -1657,7 +1652,7 @@ func (m Model) updateDeleteProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingDeleteName = ""
 		return m, m.deleteAndRefreshProjects(path)
 	case isRuneKey(keyMsg, "n"),
-		keyMsg.Type == tea.KeyEsc:
+		keyIsCode(keyMsg, tea.KeyEscape):
 		m.modal = modalNone
 		m.pendingDeletePath = ""
 		m.pendingDeleteName = ""
@@ -1711,13 +1706,13 @@ func (m Model) handleEditProjectKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
 
-	switch keyMsg.Type {
-	case tea.KeyEsc:
+	switch keyMsg.Code {
+	case tea.KeyEscape:
 		m.modal = modalNone
 		m.editError = ""
 		// Tags are persisted live (Enter adds, x removes), so closing with Esc
@@ -1814,8 +1809,16 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyRunes:
-		text := string(keyMsg.Runes)
+	default:
+		// Printable-rune key press. In v1 this was the tea.KeyRunes case; in
+		// v2 a printable key carries its rune in Code (so it falls through the
+		// named-key cases to default) and the characters in Text. Guard on a
+		// non-empty Text with no modifiers so only real printable input lands
+		// here — the exact v1 `string(msg.Runes)` semantics.
+		if keyMsg.Mod != 0 || keyMsg.Text == "" {
+			return m, nil
+		}
+		text := keyMsg.Text
 		// In alias area, on an existing alias entry: x removes it
 		if m.editFocus == editFieldAliases && text == "x" && m.editAliasCursor < len(m.editAliases) {
 			removed := m.editAliases[m.editAliasCursor]
@@ -1862,8 +1865,6 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editError = ""
 		return m, nil
 	}
-
-	return m, nil
 }
 
 func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
@@ -1948,7 +1949,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Spec § Inline flash > Clear conditions, § Flash interaction with
 		// filter input: an actionable KeyMsg with an active flash clears
 		// the flash as a side effect and the keystroke continues to its
@@ -1961,7 +1962,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Deliberate fall-through: do NOT return. The keystroke
 			// continues to the existing handlers below.
 		}
-		if msg.Type == tea.KeyCtrlC {
+		if keyIsCtrlC(msg) {
 			return m, tea.Quit
 		}
 		// Swallow ? so the list can't toggle help off
@@ -1978,7 +1979,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// no item is highlighted (committed filter narrowed to zero
 		// matches), or when NewPreviewModel reports ok=false (enumeration
 		// failure or empty enumeration — both observably identical).
-		if msg.Type == tea.KeySpace {
+		if keyIsCode(msg, tea.KeySpace) {
 			if len(m.sessionList.Items()) == 0 {
 				return m, nil
 			}
@@ -1995,7 +1996,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch {
-		case msg.Type == tea.KeyEsc:
+		case keyIsCode(msg, tea.KeyEscape):
 			// Progressive back: if filter is active, let the list clear it;
 			// otherwise quit.
 			if m.sessionList.FilterState() == list.FilterApplied {
@@ -2023,7 +2024,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case isRuneKey(msg, "x"):
 			m.activePage = PageProjects
 			return m, nil
-		case msg.Type == tea.KeyEnter:
+		case keyIsCode(msg, tea.KeyEnter):
 			return m.handleSessionListEnter()
 		}
 	}
@@ -2033,7 +2034,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.sessionList, cmd = m.sessionList.Update(msg)
 	// Skip over non-selectable group headers so the cursor only ever rests on
 	// a session row (grouped modes only; a no-op in Flat / while filtering).
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		m.skipHeaderRow(keyMsg)
 	}
 	return m, cmd
@@ -2081,7 +2082,7 @@ func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
 
 func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Ctrl+C always force-quits regardless of modal state
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyCtrlC {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyIsCtrlC(keyMsg) {
 		return m, tea.Quit
 	}
 
@@ -2100,7 +2101,7 @@ func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
@@ -2112,7 +2113,7 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingKillName = ""
 		return m, m.killAndRefresh(name)
 	case isRuneKey(keyMsg, "n"),
-		keyMsg.Type == tea.KeyEsc:
+		keyIsCode(keyMsg, tea.KeyEscape):
 		m.modal = modalNone
 		m.pendingKillName = ""
 		return m, nil
@@ -2150,9 +2151,9 @@ func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateRenameModal(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if ok {
-		switch keyMsg.Type {
+		switch keyMsg.Code {
 		case tea.KeyEnter:
 			newName := strings.TrimSpace(m.renameInput.Value())
 			if newName == "" {
@@ -2162,7 +2163,7 @@ func (m Model) updateRenameModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modal = modalNone
 			m.renameTarget = ""
 			return m, m.renameAndRefresh(oldName, newName)
-		case tea.KeyEsc:
+		case tea.KeyEscape:
 			m.modal = modalNone
 			m.renameTarget = ""
 			return m, nil
@@ -2205,8 +2206,23 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// View renders the current view.
-func (m Model) View() string {
+// View renders the current view. In Bubble Tea v2 View returns a tea.View
+// struct rather than a string; the rendered content is produced by viewString
+// and the AltScreen field is set declaratively here (v2 dropped the
+// tea.WithAltScreen program option / tea.EnterAltScreen command — alt-screen
+// is now a View field, matching the prior cmd/open.go and capturetool launch
+// behaviour). Centralising the wrap here keeps every page composer
+// (viewLoading / viewProjectList / viewSessionList / preview.View) a plain
+// string builder, so the render logic is unchanged from v1 (parity).
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewString())
+	v.AltScreen = true
+	return v
+}
+
+// viewString renders the current page to a plain string. This is the v1 View
+// body verbatim; the v2 tea.View wrapping lives in View.
+func (m Model) viewString() string {
 	switch m.activePage {
 	case PageLoading:
 		return m.viewLoading()

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -67,14 +67,14 @@ func newChromeStabilityFixture() *chromeStabilityEnumerator {
 // Across a 2-window x 3-pane fixture this exercises forward window with wrap,
 // backward window with wrap, and pane cycling within a window (1->2->0).
 func driveCycleSequence(m previewModel) []previewModel {
-	keys := []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune{']'}},
-		{Type: tea.KeyRunes, Runes: []rune{']'}},
-		{Type: tea.KeyRunes, Runes: []rune{'['}},
-		{Type: tea.KeyRunes, Runes: []rune{'['}},
-		{Type: tea.KeyTab},
-		{Type: tea.KeyTab},
-		{Type: tea.KeyTab},
+	keys := []tea.KeyPressMsg{
+		{Code: ']', Text: "]"},
+		{Code: ']', Text: "]"},
+		{Code: '[', Text: "["},
+		{Code: '[', Text: "["},
+		{Code: tea.KeyTab},
+		{Code: tea.KeyTab},
+		{Code: tea.KeyTab},
 	}
 	out := make([]previewModel, 0, len(keys))
 	for _, k := range keys {

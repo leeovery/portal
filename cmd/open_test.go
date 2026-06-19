@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
@@ -883,14 +883,14 @@ func TestBuildTUIModel(t *testing.T) {
 
 		// Navigate to projects page and populate
 		var model tea.Model = m
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: projects})
 
 		// Press e to open edit modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Edit:") {
 			t.Errorf("expected edit modal to open when editors are wired, got view:\n%s", view)
 		}
@@ -980,7 +980,7 @@ func TestProcessTUIResult(t *testing.T) {
 		// Simulate user selecting a session via Update with Enter
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		m = updated.(tui.Model)
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(tui.Model)
 
 		connector := &mockSessionConnector{}

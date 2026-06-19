@@ -45,8 +45,8 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 		if !m.byTagSignpost {
 			t.Fatalf("byTagSignpost = false, want true (zero tags anywhere in By Tag mode)")
 		}
-		if !strings.Contains(m.View(), "No tags yet") {
-			t.Errorf("rendered view does not contain %q:\n%s", "No tags yet", m.View())
+		if !strings.Contains(m.View().Content, "No tags yet") {
+			t.Errorf("rendered view does not contain %q:\n%s", "No tags yet", m.View().Content)
 		}
 	})
 
@@ -74,8 +74,8 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 					i, gi.GroupKey, gi.GroupHeading, gi.CatchAll)
 			}
 		}
-		if strings.Contains(m.View(), untaggedHeading) {
-			t.Errorf("rendered view contains %q heading, want plain flat list:\n%s", untaggedHeading, m.View())
+		if strings.Contains(m.View().Content, untaggedHeading) {
+			t.Errorf("rendered view contains %q heading, want plain flat list:\n%s", untaggedHeading, m.View().Content)
 		}
 	})
 
@@ -98,8 +98,8 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 		if mm.byTagSignpost {
 			t.Errorf("byTagSignpost = true after advancing to Flat, want false (cleared on rebuild)")
 		}
-		if strings.Contains(mm.View(), "No tags yet") {
-			t.Errorf("signpost still rendered in Flat mode:\n%s", mm.View())
+		if strings.Contains(mm.View().Content, "No tags yet") {
+			t.Errorf("signpost still rendered in Flat mode:\n%s", mm.View().Content)
 		}
 	})
 
@@ -116,8 +116,8 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 		if !m.byTagSignpost {
 			t.Fatalf("byTagSignpost = false on reopen-persisted By Tag with zero tags, want true")
 		}
-		if !strings.Contains(m.View(), "No tags yet") {
-			t.Errorf("rendered view does not contain %q:\n%s", "No tags yet", m.View())
+		if !strings.Contains(m.View().Content, "No tags yet") {
+			t.Errorf("rendered view does not contain %q:\n%s", "No tags yet", m.View().Content)
 		}
 		// And the list itself is the plain flat slice.
 		got := m.sessionList.Items()
@@ -143,8 +143,8 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 		if m.byTagSignpost {
 			t.Errorf("byTagSignpost = true with a tag present, want false (normal By Tag grouping)")
 		}
-		if strings.Contains(m.View(), "No tags yet") {
-			t.Errorf("signpost rendered when a tag exists:\n%s", m.View())
+		if strings.Contains(m.View().Content, "No tags yet") {
+			t.Errorf("signpost rendered when a tag exists:\n%s", m.View().Content)
 		}
 		// Normal By Tag grouping renders the tag heading.
 		want := buildByTag(sessions, project.NewIndex(projects))
@@ -167,12 +167,12 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 		if m.byTagSignpost {
 			t.Errorf("byTagSignpost = true with tags present (all sessions tagged), want false")
 		}
-		if strings.Contains(m.View(), "No tags yet") {
-			t.Errorf("signpost rendered when tags exist (all sessions tagged):\n%s", m.View())
+		if strings.Contains(m.View().Content, "No tags yet") {
+			t.Errorf("signpost rendered when tags exist (all sessions tagged):\n%s", m.View().Content)
 		}
 		// All sessions are tagged → grouped under the tag, no Untagged heading.
-		if strings.Contains(m.View(), untaggedHeading) {
-			t.Errorf("Untagged heading rendered when all sessions are tagged:\n%s", m.View())
+		if strings.Contains(m.View().Content, untaggedHeading) {
+			t.Errorf("Untagged heading rendered when all sessions are tagged:\n%s", m.View().Content)
 		}
 		for _, si := range sessionRows(m.sessionList.Items()) {
 			if si.CatchAll {

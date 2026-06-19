@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -86,7 +86,7 @@ func pressSpaceThenEscWithRefresh(t *testing.T, m Model) Model {
 	if got.activePage != pagePreview {
 		t.Fatalf("test setup invariant: expected pagePreview after Space, got %v", got.activePage)
 	}
-	updated2, escCmd := got.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated2, escCmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	got2, ok := updated2.(Model)
 	if !ok {
 		t.Fatalf("expected Model after Esc, got %T", updated2)

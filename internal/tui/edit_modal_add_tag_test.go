@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/leeovery/portal/internal/project"
 )
@@ -24,7 +24,7 @@ func addTagModel(newTag string, tags []string) Model {
 // resulting Model.
 func pressEnter(t *testing.T, m Model) Model {
 	t.Helper()
-	updated, _ := m.updateEditProjectModal(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.updateEditProjectModal(tea.KeyPressMsg{Code: tea.KeyEnter})
 	return updated.(Model)
 }
 

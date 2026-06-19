@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
@@ -201,7 +201,7 @@ func TestView(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := tui.NewModelWithSessions(tt.sessions)
-			view := m.View()
+			view := m.View().Content
 			tt.checks(t, view)
 		})
 	}
@@ -301,9 +301,9 @@ func TestKeyboardNavigation(t *testing.T) {
 
 	t.Run("down arrow moves cursor to next item", func(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 
-		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		result, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected quit command")
 		}
@@ -315,10 +315,10 @@ func TestKeyboardNavigation(t *testing.T) {
 
 	t.Run("up arrow moves cursor up", func(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 
-		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		result, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected quit command")
 		}
@@ -332,10 +332,10 @@ func TestKeyboardNavigation(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
 		// Move down 3 times: alpha -> bravo -> charlie -> wraps to alpha
 		for i := 0; i < 3; i++ {
-			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		}
 
-		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		result, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected quit command")
 		}
@@ -347,9 +347,9 @@ func TestKeyboardNavigation(t *testing.T) {
 
 	t.Run("cursor wraps to last item when going above first", func(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 
-		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		result, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected quit command")
 		}
@@ -361,8 +361,8 @@ func TestKeyboardNavigation(t *testing.T) {
 
 	t.Run("view highlights correct row after navigation", func(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		view := m.View()
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		view := m.View().Content
 
 		lines := strings.Split(view, "\n")
 		var alphaLine, bravoLine, charlieLine string
@@ -397,15 +397,15 @@ func TestQuitHandling(t *testing.T) {
 
 	quitTests := []struct {
 		name string
-		key  tea.KeyMsg
+		key  tea.KeyPressMsg
 	}{
 		{
 			name: "q key triggers quit",
-			key:  tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}},
+			key:  tea.KeyPressMsg{Code: 'q', Text: "q"},
 		},
 		{
 			name: "Ctrl+C triggers quit",
-			key:  tea.KeyMsg{Type: tea.KeyCtrlC},
+			key:  tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl},
 		},
 	}
 
@@ -425,23 +425,23 @@ func TestQuitHandling(t *testing.T) {
 
 	noQuitTests := []struct {
 		name string
-		key  tea.KeyMsg
+		key  tea.KeyPressMsg
 	}{
 		{
 			name: "down arrow does not trigger quit",
-			key:  tea.KeyMsg{Type: tea.KeyDown},
+			key:  tea.KeyPressMsg{Code: tea.KeyDown},
 		},
 		{
 			name: "up arrow does not trigger quit",
-			key:  tea.KeyMsg{Type: tea.KeyUp},
+			key:  tea.KeyPressMsg{Code: tea.KeyUp},
 		},
 		{
 			name: "j key does not trigger quit",
-			key:  tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}},
+			key:  tea.KeyPressMsg{Code: 'j', Text: "j"},
 		},
 		{
 			name: "k key does not trigger quit",
-			key:  tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}},
+			key:  tea.KeyPressMsg{Code: 'k', Text: "k"},
 		},
 	}
 
@@ -463,7 +463,7 @@ func TestEnterSelection(t *testing.T) {
 	t.Run("enter with no sessions is a no-op", func(t *testing.T) {
 		m := tui.NewModelWithSessions(nil)
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		// Should not trigger quit
 		if cmd != nil {
@@ -490,7 +490,7 @@ func TestEnterSelection(t *testing.T) {
 		}
 		m := tui.NewModelWithSessions(sessions)
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		// Should trigger quit
 		if cmd == nil {
@@ -517,9 +517,9 @@ func TestEnterSelection(t *testing.T) {
 			{Name: "work", Windows: 1, Attached: false},
 		}
 
-		quitKeys := []tea.KeyMsg{
-			{Type: tea.KeyRunes, Runes: []rune{'q'}},
-			{Type: tea.KeyCtrlC},
+		quitKeys := []tea.KeyPressMsg{
+			{Code: 'q', Text: "q"},
+			{Code: 'c', Mod: tea.ModCtrl},
 		}
 
 		for _, key := range quitKeys {
@@ -546,11 +546,11 @@ func TestEnterSelection(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(sessions)
 
 		// Navigate down twice to "charlie"
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 
 		// Press Enter
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		// Should trigger quit
 		if cmd == nil {
@@ -590,7 +590,7 @@ func TestNKeyCreatesSessionInCWD(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press n to create session in cwd
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key, got nil")
 		}
@@ -637,7 +637,7 @@ func TestNKeyCreatesSessionInCWD(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press n — no session creator, should be no-op
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd != nil {
 			t.Errorf("expected nil command when no session creator, got non-nil")
 		}
@@ -660,7 +660,7 @@ func TestNKeyCreatesSessionInCWD(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press n
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key, got nil")
 		}
@@ -678,7 +678,7 @@ func TestNKeyCreatesSessionInCWD(t *testing.T) {
 		}
 
 		// Verify TUI still renders (no crash)
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "dev") {
 			t.Errorf("expected session list after error, got:\n%s", view)
 		}
@@ -698,7 +698,7 @@ func TestNKeyCreatesSessionInCWD(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
 
 		// Press n
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key on empty list, got nil")
 		}
@@ -847,7 +847,7 @@ func TestInitialFilter(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Exit filter with Esc (clears built-in filter)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Second SessionsMsg — should NOT re-apply filter
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
@@ -884,7 +884,7 @@ func TestInitialFilter(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		// Should show command header (command-pending mode)
 		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected command-pending mode header, got:\n%s", view)
@@ -935,9 +935,9 @@ func TestEmptyState(t *testing.T) {
 	})
 
 	t.Run("quit works in empty state", func(t *testing.T) {
-		quitKeys := []tea.KeyMsg{
-			{Type: tea.KeyRunes, Runes: []rune{'q'}},
-			{Type: tea.KeyCtrlC},
+		quitKeys := []tea.KeyPressMsg{
+			{Code: 'q', Text: "q"},
+			{Code: 'c', Mod: tea.ModCtrl},
 		}
 
 		for _, key := range quitKeys {
@@ -957,7 +957,7 @@ func TestEmptyState(t *testing.T) {
 	t.Run("enter is no-op in empty state", func(t *testing.T) {
 		m := tui.New(nil)
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
-		result, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		result, cmd := updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd != nil {
 			msg := cmd()
 			if _, ok := msg.(tea.QuitMsg); ok {
@@ -994,7 +994,7 @@ func TestInsideTmuxSessionExclusion(t *testing.T) {
 			}
 		}
 
-		view := m.View()
+		view := m.View().Content
 		if !strings.Contains(view, "alpha") {
 			t.Errorf("non-current session 'alpha' should appear in list, got:\n%s", view)
 		}
@@ -1016,7 +1016,7 @@ func TestInsideTmuxSessionExclusion(t *testing.T) {
 			t.Errorf("SessionListTitle() = %q, want %q", title, want)
 		}
 		// Title should appear in view
-		view := m.View()
+		view := m.View().Content
 		if !strings.Contains(view, "current: my-project-x7k2m9") {
 			t.Errorf("expected title with current session name in view, got:\n%s", view)
 		}
@@ -1061,7 +1061,7 @@ func TestInsideTmuxSessionExclusion(t *testing.T) {
 			t.Errorf("expected title with current session name, got: %q", title)
 		}
 
-		view := m.View()
+		view := m.View().Content
 		for _, name := range []string{"alpha", "bravo", "charlie"} {
 			if !strings.Contains(view, name) {
 				t.Errorf("expected session %q in list, got:\n%s", name, view)
@@ -1106,9 +1106,9 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k on the first session
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected confirmation prompt for 'alpha', got:\n%s", view)
 		}
@@ -1130,8 +1130,8 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		if cmd == nil {
 			t.Fatal("expected command from kill confirmation, got nil")
@@ -1167,10 +1167,10 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k then n
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 
-		view := model.View()
+		view := model.View().Content
 		// Should be back to normal session list, no confirmation prompt
 		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("confirmation prompt should be cleared after n, got:\n%s", view)
@@ -1195,10 +1195,10 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k then Esc
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("confirmation prompt should be cleared after Esc, got:\n%s", view)
 		}
@@ -1225,8 +1225,8 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k then y to kill alpha
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		// Update the lister to return remaining sessions
 		lister.sessions = remainingSessions
@@ -1237,7 +1237,7 @@ func TestKillSession(t *testing.T) {
 		// Feed the result back into the model
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "alpha") {
 			t.Errorf("killed session 'alpha' should not appear in refreshed list, got:\n%s", view)
 		}
@@ -1261,11 +1261,11 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Navigate to bravo (last session)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 
 		// Press k then y to kill bravo
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		// Update lister
 		lister.sessions = remainingSessions
@@ -1274,7 +1274,7 @@ func TestKillSession(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		// Cursor should be on alpha (index 0), which is now the last session
 		lines := strings.Split(view, "\n")
 		var alphaLine string
@@ -1301,8 +1301,8 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k then y to attempt kill
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		if cmd == nil {
 			t.Fatal("expected command from kill confirmation, got nil")
@@ -1334,8 +1334,8 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		// Execute command and feed back
 		msg := cmd()
@@ -1343,7 +1343,7 @@ func TestKillSession(t *testing.T) {
 
 		// SessionsMsg with error triggers quit, so the model should exit.
 		// But the confirmation prompt should not still be showing.
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("confirmation prompt should be cleared after kill error, got:\n%s", view)
 		}
@@ -1360,8 +1360,8 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		// Update lister to return empty
 		lister.sessions = []tmux.Session{}
@@ -1390,8 +1390,8 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k — should enter confirmation mode (not no-op)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		view := model.View()
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		view := model.View().Content
 		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected confirmation prompt via NewWithDeps, got:\n%s", view)
 		}
@@ -1411,8 +1411,8 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k — should enter confirmation mode (not no-op)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		view := model.View()
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		view := model.View().Content
 		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected confirmation prompt via NewWithAllDeps, got:\n%s", view)
 		}
@@ -1430,18 +1430,18 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k to open kill modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 
 		// Press various keys that should be ignored
-		ignoredKeys := []tea.KeyMsg{
-			{Type: tea.KeyRunes, Runes: []rune{'q'}},
-			{Type: tea.KeyRunes, Runes: []rune{'k'}},
-			{Type: tea.KeyRunes, Runes: []rune{'r'}},
-			{Type: tea.KeyRunes, Runes: []rune{'p'}},
-			{Type: tea.KeyRunes, Runes: []rune{'x'}},
-			{Type: tea.KeyDown},
-			{Type: tea.KeyUp},
-			{Type: tea.KeyEnter},
+		ignoredKeys := []tea.KeyPressMsg{
+			{Code: 'q', Text: "q"},
+			{Code: 'k', Text: "k"},
+			{Code: 'r', Text: "r"},
+			{Code: 'p', Text: "p"},
+			{Code: 'x', Text: "x"},
+			{Code: tea.KeyDown},
+			{Code: tea.KeyUp},
+			{Code: tea.KeyEnter},
 		}
 		for _, k := range ignoredKeys {
 			var cmd tea.Cmd
@@ -1455,7 +1455,7 @@ func TestKillSession(t *testing.T) {
 		}
 
 		// Modal should still be showing
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("modal should still show after ignored keys, got:\n%s", view)
 		}
@@ -1473,13 +1473,13 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
 
 		// Press k on empty list
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 
 		// Should be a no-op: no command, no modal
 		if cmd != nil {
 			t.Errorf("k on empty list should return nil command, got non-nil")
 		}
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("k on empty list should not show confirmation modal, got:\n%s", view)
 		}
@@ -1496,7 +1496,7 @@ func TestSessionListHelpBar(t *testing.T) {
 		// Use wider width so all help bindings fit without truncation
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
-		view := updated.View()
+		view := updated.View().Content
 
 		// Each description should appear in the help bar
 		expectedDescs := []string{
@@ -1546,9 +1546,9 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r (lowercase) on the first session
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
-		view := model.View()
+		view := model.View().Content
 		// Should show rename modal with "New name: " prompt
 		if !strings.Contains(view, "New name:") {
 			t.Errorf("expected rename modal with 'New name:' prompt, got:\n%s", view)
@@ -1575,16 +1575,16 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r to open rename modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		// Clear the text and type a new name
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 		for _, r := range "new-alpha" {
-			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
 
 		// Press Enter to confirm
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if cmd == nil {
 			t.Fatal("expected command from rename confirmation, got nil")
@@ -1617,13 +1617,13 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r to open rename modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		// Clear input
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 
 		// Press Enter with empty input
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		// Should not trigger rename (no command returned)
 		if cmd != nil {
@@ -1636,7 +1636,7 @@ func TestRenameSession(t *testing.T) {
 		}
 
 		// Modal should still be open (modal stays open on empty input)
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "New name:") {
 			t.Errorf("rename modal should stay open after empty enter, got:\n%s", view)
 		}
@@ -1654,12 +1654,12 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r to open rename modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		// Press Esc to dismiss
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
-		view := model.View()
+		view := model.View().Content
 		// Should be back to normal session list, no modal
 		if strings.Contains(view, "New name:") {
 			t.Errorf("rename modal should be dismissed after Esc, got:\n%s", view)
@@ -1683,10 +1683,10 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r — name is pre-filled with "alpha"
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		// Press Enter without changing — same name rename
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if cmd == nil {
 			t.Fatal("expected command from same-name rename, got nil")
@@ -1718,12 +1718,12 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// r, clear, type new name, Enter
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 		for _, r := range "bravo" {
-			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if cmd == nil {
 			t.Fatal("expected command from rename, got nil")
@@ -1747,9 +1747,9 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
 
 		// Press r on empty list
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
-		view := model.View()
+		view := model.View().Content
 		// Should not show rename modal
 		if strings.Contains(view, "New name:") {
 			t.Errorf("r on empty list should be no-op, got:\n%s", view)
@@ -1764,9 +1764,9 @@ func TestRenameSession(t *testing.T) {
 
 		// Press r — should be no-op (no renamer)
 		var model tea.Model = m
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "New name:") {
 			t.Errorf("r with no renamer should be no-op, got:\n%s", view)
 		}
@@ -1788,16 +1788,16 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		// Clear and type new name
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 		for _, r := range "new-alpha" {
-			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
 
 		// Press Enter
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		// Update lister to return renamed sessions
 		lister.sessions = renamedSessions
@@ -1806,7 +1806,7 @@ func TestRenameSession(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "new-alpha") {
 			t.Errorf("expected renamed session 'new-alpha' in list, got:\n%s", view)
 		}
@@ -1825,7 +1825,7 @@ func TestFilterMode(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(sessions)
 
 		// Enter filter mode
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 
 		// Verify we're filtering
 		model := m.(tui.Model)
@@ -1835,7 +1835,7 @@ func TestFilterMode(t *testing.T) {
 
 		// Type 'q' — should be treated as filter input, not quit
 		var cmd tea.Cmd
-		_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		_, cmd = m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 
 		if cmd != nil {
 			msg := cmd()
@@ -1853,11 +1853,11 @@ func TestFilterMode(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(sessions)
 
 		// Enter filter mode and type something
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+		m, _ = m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+		m, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 
 		// Exit via Esc (cancel filtering)
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Verify we're no longer filtering
 		model := m.(tui.Model)
@@ -1866,7 +1866,7 @@ func TestFilterMode(t *testing.T) {
 		}
 
 		// 'q' should now quit (shortcut restored)
-		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 		if cmd == nil {
 			t.Fatal("q after exiting filter mode should trigger quit command")
 		}
@@ -1913,7 +1913,7 @@ func TestCommandPendingMode(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(projectsMsg)
 
-		view := model.View()
+		view := model.View().Content
 		// Should show projects page content, not session list
 		if !strings.Contains(view, "myapp") {
 			t.Errorf("expected projects page with project items, got:\n%s", view)
@@ -1939,7 +1939,7 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected 'Select project to run: claude' status line, got:\n%s", view)
 		}
@@ -1964,7 +1964,7 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Select project to run: claude --resume --model opus") {
 			t.Errorf("expected full command in status line, got:\n%s", view)
 		}
@@ -1991,7 +1991,7 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		// Session list content should not be visible
 		if strings.Contains(view, "existing") {
 			t.Errorf("session list should not be displayed in command-pending mode, got:\n%s", view)
@@ -2018,7 +2018,7 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Select a project by pressing Enter (first project in list)
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from project selection, got nil")
 		}
@@ -2060,7 +2060,7 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press Esc - should quit directly
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from Esc in command-pending mode, got nil")
 		}
@@ -2123,7 +2123,7 @@ func TestCommandPendingMode(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(sessionsMsg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "dev") {
 			t.Errorf("expected session 'dev' in view, got:\n%s", view)
 		}
@@ -2152,7 +2152,7 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		expected := "Select project to run: " + longCmd
 		if !strings.Contains(view, expected) {
 			t.Errorf("expected full command in status line %q, got:\n%s", expected, view)
@@ -2176,7 +2176,7 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected status line in empty state, got:\n%s", view)
 		}
@@ -2213,7 +2213,7 @@ func TestCommandPendingMode(t *testing.T) {
 		}
 
 		// Press s - should do nothing (stay on projects page)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
@@ -2243,7 +2243,7 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press x - should do nothing (stay on projects page)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
@@ -2275,9 +2275,9 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press e - should do nothing (no modal should appear)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "Edit:") {
 			t.Errorf("pressing e in command-pending mode should not open edit modal, got:\n%s", view)
 		}
@@ -2303,9 +2303,9 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press d - should do nothing (no delete modal should appear)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "Delete") && strings.Contains(view, "y/n") {
 			t.Errorf("pressing d in command-pending mode should not open delete modal, got:\n%s", view)
 		}
@@ -2332,7 +2332,7 @@ func TestCommandPendingMode(t *testing.T) {
 		// Set wide width so help bar renders fully
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
-		view := model.View()
+		view := model.View().Content
 		// s, e, d should NOT appear as help keys
 		for _, desc := range []string{"sessions", "edit", "delete"} {
 			if strings.Contains(view, desc) {
@@ -2368,7 +2368,7 @@ func TestCommandPendingMode(t *testing.T) {
 		// Set wide width so help bar renders fully
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "run here") {
 			t.Errorf("help bar should show 'run here' for enter in command-pending mode, got:\n%s", view)
 		}
@@ -2393,7 +2393,7 @@ func TestCommandPendingMode(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -2401,7 +2401,7 @@ func TestCommandPendingMode(t *testing.T) {
 			},
 		})
 
-		view := model.View()
+		view := model.View().Content
 		for _, desc := range []string{"sessions", "edit", "delete"} {
 			if !strings.Contains(view, desc) {
 				t.Errorf("normal mode help bar should contain %q, got:\n%s", desc, view)
@@ -2459,7 +2459,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 		}
 		m := tui.NewModelWithSessions(sessions)
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected quit command, got nil")
 		}
@@ -2479,7 +2479,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 			{Name: "dev", Windows: 1, Attached: false},
 		})
 
-		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 		if cmd == nil {
 			t.Fatal("expected quit command, got nil")
 		}
@@ -2494,7 +2494,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 			{Name: "dev", Windows: 1, Attached: false},
 		})
 
-		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
 			t.Fatal("expected quit command, got nil")
 		}
@@ -2570,7 +2570,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 			t.Fatalf("expected 0 items, got %d", len(items))
 		}
 
-		view := updated.View()
+		view := updated.View().Content
 		if view == "" {
 			t.Error("view should not be empty even with no items")
 		}
@@ -2622,7 +2622,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 		// Send a WindowSizeMsg so the list has dimensions to render
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		view := updated.View()
+		view := updated.View().Content
 		// The view should contain session names (rendered by the list)
 		if !strings.Contains(view, "dev") {
 			t.Errorf("view should contain 'dev', got:\n%s", view)
@@ -2666,8 +2666,8 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k — should enter confirmation mode
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		view := model.View()
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		view := model.View().Content
 		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected confirmation prompt, got:\n%s", view)
 		}
@@ -2684,8 +2684,8 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r — should open rename modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-		view := model.View()
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		view := model.View().Content
 		if !strings.Contains(view, "New name:") {
 			t.Errorf("expected rename modal prompt, got:\n%s", view)
 		}
@@ -2710,7 +2710,7 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "myapp") {
 			t.Errorf("expected projects page with project items, got:\n%s", view)
 		}
@@ -2740,8 +2740,8 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Verify kill works
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
-		view := model.View()
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		view := model.View().Content
 		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected kill confirmation, got:\n%s", view)
 		}
@@ -2868,7 +2868,7 @@ func TestBuiltInFiltering(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(sessions)
 
 		// Press / to activate filter mode
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 
 		updatedModel := m.(tui.Model)
 
@@ -2906,7 +2906,7 @@ func TestBuiltInFiltering(t *testing.T) {
 		}
 
 		// Press Esc to clear the filter
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		updatedModel = model.(tui.Model)
 
@@ -2938,7 +2938,7 @@ func TestPageSwitching(t *testing.T) {
 		}
 
 		// Press p to switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
@@ -2954,10 +2954,10 @@ func TestPageSwitching(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page first
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Press s to switch back to sessions page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() != tui.PageSessions {
@@ -2973,7 +2973,7 @@ func TestPageSwitching(t *testing.T) {
 		var model tea.Model = m
 
 		// Press x to toggle from sessions to projects
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
@@ -2989,10 +2989,10 @@ func TestPageSwitching(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects first
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Press x to toggle back to sessions
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() != tui.PageSessions {
@@ -3010,24 +3010,24 @@ func TestPageSwitching(t *testing.T) {
 		var model tea.Model = m
 
 		// Move cursor down to bravo
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 
 		// Verify cursor is on bravo
-		result, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		result, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if result.(tui.Model).Selected() != "bravo" {
 			t.Fatalf("precondition: expected cursor on bravo, got %q", result.(tui.Model).Selected())
 		}
 
 		// Reset model (re-navigate to bravo without selecting)
 		model = tui.NewModelWithSessions(sessions)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 
 		// Switch to projects and back
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 
 		// Press enter to verify cursor is still on bravo
-		result, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		result, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected quit command from enter")
 		}
@@ -3044,9 +3044,9 @@ func TestPageSwitching(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page (stub with no items)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "No saved projects") {
 			t.Errorf("expected 'No saved projects' on empty projects page, got:\n%s", view)
 		}
@@ -3068,7 +3068,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Send ProjectsLoadedMsg
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -3108,7 +3108,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3116,7 +3116,7 @@ func TestProjectsPage(t *testing.T) {
 		})
 
 		// Press enter on first project
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter on project, got nil")
 		}
@@ -3145,7 +3145,7 @@ func TestProjectsPage(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
 
 		// Press n to create in cwd
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key, got nil")
 		}
@@ -3179,7 +3179,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3188,10 +3188,10 @@ func TestProjectsPage(t *testing.T) {
 		})
 
 		// Navigate to second project
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 
 		// Press enter
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter on project, got nil")
 		}
@@ -3238,7 +3238,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3246,7 +3246,7 @@ func TestProjectsPage(t *testing.T) {
 		})
 
 		// Press n to create session in cwd
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key on projects page, got nil")
 		}
@@ -3285,10 +3285,10 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Press q — should quit
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 		if cmd == nil {
 			t.Fatal("expected quit command from q on projects page, got nil")
 		}
@@ -3306,10 +3306,10 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Press Ctrl+C — should quit
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
 			t.Fatal("expected quit command from Ctrl+C on projects page, got nil")
 		}
@@ -3327,9 +3327,9 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page (no items loaded)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "No saved projects") {
 			t.Errorf("expected 'No saved projects' on empty projects page, got:\n%s", view)
 		}
@@ -3346,7 +3346,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Send ProjectsLoadedMsg with error
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -3360,7 +3360,7 @@ func TestProjectsPage(t *testing.T) {
 		}
 
 		// Should not crash — view should still render
-		view := model.View()
+		view := model.View().Content
 		if view == "" {
 			t.Error("view should not be empty after project load error")
 		}
@@ -3381,7 +3381,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3389,7 +3389,7 @@ func TestProjectsPage(t *testing.T) {
 		})
 
 		// Press enter on project
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter, got nil")
 		}
@@ -3407,7 +3407,7 @@ func TestProjectsPage(t *testing.T) {
 		}
 
 		// Verify TUI still renders
-		view := model.View()
+		view := model.View().Content
 		if view == "" {
 			t.Error("view should not be empty after session creation error")
 		}
@@ -3446,7 +3446,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page with wide width
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3454,7 +3454,7 @@ func TestProjectsPage(t *testing.T) {
 			},
 		})
 
-		view := model.View()
+		view := model.View().Content
 		expectedDescs := []string{
 			"new session",
 			"sessions",
@@ -3506,7 +3506,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects, set size, populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3515,7 +3515,7 @@ func TestProjectsPage(t *testing.T) {
 			},
 		})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "portal") {
 			t.Errorf("view should contain 'portal', got:\n%s", view)
 		}
@@ -3540,7 +3540,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3550,9 +3550,9 @@ func TestDeleteProject(t *testing.T) {
 		})
 
 		// Press d on the first project
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Delete portal? (y/n)") {
 			t.Errorf("expected delete confirmation for 'portal', got:\n%s", view)
 		}
@@ -3576,7 +3576,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3586,8 +3586,8 @@ func TestDeleteProject(t *testing.T) {
 		})
 
 		// Press d then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		if cmd == nil {
 			t.Fatal("expected command from delete confirmation, got nil")
@@ -3631,7 +3631,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3641,10 +3641,10 @@ func TestDeleteProject(t *testing.T) {
 		})
 
 		// Press d then n
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("confirmation prompt should be cleared after n, got:\n%s", view)
 		}
@@ -3670,7 +3670,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3680,10 +3680,10 @@ func TestDeleteProject(t *testing.T) {
 		})
 
 		// Press d then Esc
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("confirmation prompt should be cleared after Esc, got:\n%s", view)
 		}
@@ -3709,7 +3709,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3719,17 +3719,17 @@ func TestDeleteProject(t *testing.T) {
 		})
 
 		// Press d to open delete modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
 		// Press various keys that should be ignored
-		ignoredKeys := []tea.KeyMsg{
-			{Type: tea.KeyRunes, Runes: []rune{'q'}},
-			{Type: tea.KeyRunes, Runes: []rune{'d'}},
-			{Type: tea.KeyRunes, Runes: []rune{'s'}},
-			{Type: tea.KeyRunes, Runes: []rune{'x'}},
-			{Type: tea.KeyDown},
-			{Type: tea.KeyUp},
-			{Type: tea.KeyEnter},
+		ignoredKeys := []tea.KeyPressMsg{
+			{Code: 'q', Text: "q"},
+			{Code: 'd', Text: "d"},
+			{Code: 's', Text: "s"},
+			{Code: 'x', Text: "x"},
+			{Code: tea.KeyDown},
+			{Code: tea.KeyUp},
+			{Code: tea.KeyEnter},
 		}
 		for _, k := range ignoredKeys {
 			var cmd tea.Cmd
@@ -3743,7 +3743,7 @@ func TestDeleteProject(t *testing.T) {
 		}
 
 		// Modal should still be showing
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Delete portal? (y/n)") {
 			t.Errorf("modal should still show after ignored keys, got:\n%s", view)
 		}
@@ -3765,7 +3765,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3774,12 +3774,12 @@ func TestDeleteProject(t *testing.T) {
 		})
 
 		// Press d then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
 		// Update store to return empty after removal
 		store.projects = []project.Project{}
 
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 		if cmd == nil {
 			t.Fatal("expected command from delete confirmation, got nil")
 		}
@@ -3788,7 +3788,7 @@ func TestDeleteProject(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "No saved projects") {
 			t.Errorf("expected empty state after deleting last project, got:\n%s", view)
 		}
@@ -3805,16 +3805,16 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page (no items)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 		// Press d on empty list
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
 		if cmd != nil {
 			t.Errorf("d on empty list should return nil command, got non-nil")
 		}
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("d on empty list should not show confirmation modal, got:\n%s", view)
 		}
@@ -3835,7 +3835,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3845,8 +3845,8 @@ func TestDeleteProject(t *testing.T) {
 		})
 
 		// Press d then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		if cmd == nil {
 			t.Fatal("expected command from delete confirmation, got nil")
@@ -3881,7 +3881,7 @@ func TestDeleteProject(t *testing.T) {
 
 		// Switch to projects page and populate
 		var model tea.Model = m
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3900,15 +3900,15 @@ func TestDeleteProject(t *testing.T) {
 		model = tuiModel
 
 		// Press d — should target webapp from the filtered view
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Delete webapp? (y/n)") {
 			t.Errorf("expected delete confirmation for 'webapp', got:\n%s", view)
 		}
 
 		// Confirm deletion
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 		if cmd == nil {
 			t.Fatal("expected command from delete confirmation, got nil")
 		}
@@ -3928,7 +3928,7 @@ func TestDeleteProject(t *testing.T) {
 func TestSessionsPageEmptyText(t *testing.T) {
 	t.Run("empty sessions page shows no sessions running", func(t *testing.T) {
 		m := tui.NewModelWithSessions(nil)
-		view := m.View()
+		view := m.View().Content
 		if !strings.Contains(view, "No sessions running") {
 			t.Errorf("expected 'No sessions running' on empty sessions page, got:\n%s", view)
 		}
@@ -3944,10 +3944,10 @@ func TestProjectsStubHelpBar(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and set wide width so help bar shows
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "sessions") {
 			t.Errorf("projects help bar should contain 'sessions', got:\n%s", view)
 		}
@@ -3963,7 +3963,7 @@ func TestSessionsPageHelpBarIncludesProjects(t *testing.T) {
 		// Use wider width so all help bindings fit
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
-		view := updated.View()
+		view := updated.View().Content
 		if !strings.Contains(view, "projects") {
 			t.Errorf("sessions help bar should contain 'projects', got:\n%s", view)
 		}
@@ -3978,7 +3978,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 		m := tui.NewModelWithSessions(sessions)
 
-		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from Esc with no modal or filter, got nil")
 		}
@@ -4000,16 +4000,16 @@ func TestEscProgressiveBack(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press k to open kill modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 
 		// Verify kill modal is showing
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Fatalf("precondition: expected kill modal, got:\n%s", view)
 		}
 
 		// Press Esc — should dismiss modal, NOT quit
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Should not quit
 		if cmd != nil {
@@ -4020,7 +4020,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 
 		// Modal should be dismissed
-		view = model.View()
+		view = model.View().Content
 		if strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("kill modal should be dismissed after Esc, got:\n%s", view)
 		}
@@ -4043,16 +4043,16 @@ func TestEscProgressiveBack(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r to open rename modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		// Verify rename modal is showing
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "New name:") {
 			t.Fatalf("precondition: expected rename modal, got:\n%s", view)
 		}
 
 		// Press Esc — should dismiss modal, NOT quit
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Should not quit
 		if cmd != nil {
@@ -4063,7 +4063,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 
 		// Modal should be dismissed
-		view = model.View()
+		view = model.View().Content
 		if strings.Contains(view, "New name:") {
 			t.Errorf("rename modal should be dismissed after Esc, got:\n%s", view)
 		}
@@ -4102,7 +4102,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 
 		// Press Esc — should clear filter, NOT quit
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Should not quit
 		if cmd != nil {
@@ -4135,10 +4135,10 @@ func TestEscProgressiveBack(t *testing.T) {
 		var model tea.Model = m
 
 		// Enter filter mode by pressing /
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 
 		// Type some filter text
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 
 		// Verify we are in SettingFilter state (actively typing filter)
 		updatedModel := model.(tui.Model)
@@ -4147,7 +4147,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 
 		// Press Esc — should cancel filter, NOT quit
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Should not quit
 		if cmd != nil {
@@ -4172,7 +4172,7 @@ func TestEscProgressiveBack(t *testing.T) {
 
 		// Ctrl+C from normal session list (no modal)
 		var model tea.Model = tui.NewModelWithSessions(sessions)
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
 			t.Fatal("expected quit command from Ctrl+C, got nil")
 		}
@@ -4186,7 +4186,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		m2 = m2.WithInitialFilter("alpha")
 		model = m2
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
 			t.Fatal("expected quit command from Ctrl+C with filter, got nil")
 		}
@@ -4202,9 +4202,9 @@ func TestEscProgressiveBack(t *testing.T) {
 		model = m3
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 		// Open kill modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 		// Ctrl+C should force-quit even during kill modal
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
 			t.Fatal("expected quit command from Ctrl+C during kill modal, got nil")
 		}
@@ -4220,9 +4220,9 @@ func TestEscProgressiveBack(t *testing.T) {
 		model = m4
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 		// Open rename modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		// Ctrl+C should force-quit even during rename modal
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
 			t.Fatal("expected quit command from Ctrl+C during rename modal, got nil")
 		}
@@ -4235,15 +4235,15 @@ func TestEscProgressiveBack(t *testing.T) {
 		m5 := tui.NewModelWithSessions(sessions)
 		model = m5
 		// Enter filter mode with /
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 		// Type a character to confirm filtering
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		// Verify we are in SettingFilter state
 		if model.(tui.Model).SessionListFilterState() != list.Filtering {
 			t.Fatalf("precondition: expected Filtering state, got %v", model.(tui.Model).SessionListFilterState())
 		}
 		// Ctrl+C should force-quit even during active filtering
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
 			t.Fatal("expected quit command from Ctrl+C during active filtering, got nil")
 		}
@@ -4265,10 +4265,10 @@ func TestEscProgressiveBack(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Press r to open rename modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		// First Esc — dismisses rename modal
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd != nil {
 			msg := cmd()
 			if _, ok := msg.(tea.QuitMsg); ok {
@@ -4277,13 +4277,13 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 
 		// Verify modal is dismissed
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "New name:") {
 			t.Fatalf("rename modal should be dismissed, got:\n%s", view)
 		}
 
 		// Second Esc — should quit
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from second Esc, got nil")
 		}
@@ -4320,7 +4320,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 
 		// First Esc — clears filter
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd != nil {
 			msg := cmd()
 			if _, ok := msg.(tea.QuitMsg); ok {
@@ -4334,7 +4334,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 
 		// Second Esc — should quit
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from second Esc, got nil")
 		}
@@ -4352,7 +4352,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Verify on projects page
 		if model.(tui.Model).ActivePage() != tui.PageProjects {
@@ -4360,7 +4360,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 
 		// Press Esc — should quit
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from Esc on projects page, got nil")
 		}
@@ -4483,7 +4483,7 @@ func setupEditModel(store *mockProjectStore, editor *mockProjectEditor, aliases 
 	var model tea.Model = m
 
 	// Switch to projects page and populate
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
 	return model
@@ -4507,9 +4507,9 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Press e on first project
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Name:") {
 			t.Errorf("edit modal should contain 'Name:' field, got:\n%s", view)
 		}
@@ -4542,22 +4542,22 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open edit modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Initially focus is on name field — typing goes to name
 		// Type a character
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Z'}})
-		view := model.View()
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
+		view := model.View().Content
 		if !strings.Contains(view, "portalZ") {
 			t.Errorf("typing should append to name field, got:\n%s", view)
 		}
 
 		// Press Tab to switch to aliases
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 		// Now typing should go to alias "Add:" input, not name
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
-		view = model.View()
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		view = model.View().Content
 		if !strings.Contains(view, "Add:") {
 			t.Errorf("after Tab, view should show 'Add:' section, got:\n%s", view)
 		}
@@ -4568,10 +4568,10 @@ func TestEditProject(t *testing.T) {
 		// Tab is now a three-way cycle: Name → Aliases → Tags → Name.
 		// From Aliases, two more Tabs (Tags, then wrap) return focus to Name,
 		// where typing again appends to the name field.
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab}) // Aliases → Tags
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab}) // Tags → Name
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Y'}})
-		view = model.View()
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Aliases → Tags
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Tags → Name
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'Y', Text: "Y"})
+		view = model.View().Content
 		if !strings.Contains(view, "portalZY") {
 			t.Errorf("after wrapping back to name, typing should append to name, got:\n%s", view)
 		}
@@ -4590,21 +4590,21 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open edit modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Change name
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
 
 		// Press Enter to save
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if cmd == nil {
 			t.Fatal("Enter should return a command for refresh, got nil")
@@ -4647,13 +4647,13 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open edit modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Change name
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'X'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'X', Text: "X"})
 
 		// Press Esc to cancel
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Should not have called Rename
 		if editor.renamedPath != "" {
@@ -4664,7 +4664,7 @@ func TestEditProject(t *testing.T) {
 			t.Errorf("Esc should return nil command, got non-nil")
 		}
 		// Modal should be dismissed — view shows project list
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "Name:") {
 			t.Errorf("edit modal should be dismissed after Esc, got:\n%s", view)
 		}
@@ -4687,18 +4687,18 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open edit modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Clear name completely
 		for range len("portal") {
-			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+			model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 		}
 
 		// Press Enter with empty name
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		// Should show error
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "cannot be empty") {
 			t.Errorf("expected empty name error, got:\n%s", view)
 		}
@@ -4731,18 +4731,18 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open edit modal on portal (first project)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Switch to alias section
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 		// Type 'w' as new alias (which already exists for /code/webapp)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
 
 		// Press Enter to save
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "already exists") {
 			t.Errorf("expected alias collision error, got:\n%s", view)
 		}
@@ -4771,15 +4771,15 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open edit modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Switch to alias section
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 		// Press x to remove the first alias
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
-		view := model.View()
+		view := model.View().Content
 		// The modal should still be open
 		if !strings.Contains(view, "Name:") {
 			t.Errorf("modal should still be open after removing alias, got:\n%s", view)
@@ -4803,17 +4803,17 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open edit modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Switch to alias section (cursor starts on Add input since no existing aliases)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 		// Type new alias
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 
 		// Press Enter to save
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if cmd == nil {
 			t.Fatal("Enter should return a command for refresh, got nil")
@@ -4854,16 +4854,16 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open edit modal
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Switch to alias section
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 		// Press x to remove alias
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Press Enter to save
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if cmd == nil {
 			t.Fatal("Enter should return a command for refresh, got nil")
@@ -4891,12 +4891,12 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, nil, nil)
 
 		// Press e
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		if cmd != nil {
 			t.Errorf("e with no editor should return nil command, got non-nil")
 		}
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "Name:") {
 			t.Errorf("edit modal should not open without editor, got:\n%s", view)
 		}
@@ -4913,12 +4913,12 @@ func TestEditProject(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Press e on empty list
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		if cmd != nil {
 			t.Errorf("e on empty list should return nil command, got non-nil")
 		}
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "Name:") {
 			t.Errorf("edit modal should not open on empty list, got:\n%s", view)
 		}
@@ -4928,10 +4928,10 @@ func TestEditProject(t *testing.T) {
 // openTagsModal opens the edit modal for the (single) project and moves focus to
 // the Tags field, leaving the cursor on the Add-input row.
 func openTagsModal(model tea.Model) tea.Model {
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 	// Tab cycle: Name → Aliases → Tags.
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	return model
 }
 
@@ -4939,9 +4939,9 @@ func openTagsModal(model tea.Model) tea.Model {
 // Enter to commit it to the working buffer.
 func typeTagAndAdd(model tea.Model, tag string) tea.Model {
 	for _, r := range tag {
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	return model
 }
 
@@ -4949,8 +4949,8 @@ func typeTagAndAdd(model tea.Model, tag string) tea.Model {
 // wraps Tags → Name) and presses Enter to confirm. Enter while the Tags field is
 // focused is field-scoped (add), so confirm must originate from the Name field.
 func confirmFromTagsField(model tea.Model) (tea.Model, tea.Cmd) {
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab}) // Tags → Name
-	return model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Tags → Name
+	return model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 }
 
 func TestEditProjectTagPersistence(t *testing.T) {
@@ -4998,8 +4998,8 @@ func TestEditProjectTagPersistence(t *testing.T) {
 
 		model = openTagsModal(model)
 		// Move cursor up from the Add-input row onto the existing tag, then x.
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		_, cmd := confirmFromTagsField(model)
 
@@ -5032,8 +5032,8 @@ func TestEditProjectTagPersistence(t *testing.T) {
 
 		model = openTagsModal(model)
 		// Remove the existing "old" tag (cursor at Add row index 1 → up to 0).
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		// After removal the buffer is empty; cursor lands on the Add row. Add "new".
 		model = typeTagAndAdd(model, "new")
 
@@ -5061,8 +5061,8 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		// Open and confirm without touching tags.
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if len(editor.addedTags) != 0 {
 			t.Errorf("expected no AddTag calls, got %+v", editor.addedTags)
@@ -5089,14 +5089,14 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		// Tags persist live: the Enter that commits the add is where AddTag runs
 		// and fails — surfacing the error immediately, not at confirm.
 		for _, r := range "work" {
-			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if cmd != nil {
 			t.Error("expected nil command on AddTag failure, got non-nil")
 		}
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Error:") {
 			t.Errorf("expected an error message, got:\n%s", view)
 		}
@@ -5117,14 +5117,14 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		model = openTagsModal(model)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp}) // onto the existing tag
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp}) // onto the existing tag
 		// x is where RemoveTag runs and fails (live), surfacing the error now.
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		if cmd != nil {
 			t.Error("expected nil command on RemoveTag failure, got non-nil")
 		}
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Error:") {
 			t.Errorf("expected an error message, got:\n%s", view)
 		}
@@ -5171,8 +5171,8 @@ func TestEditProjectTagPersistence(t *testing.T) {
 
 		model = openTagsModal(model)
 		// Remove the existing "work" tag (cursor at Add row index 1 → up to 0, x).
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		// Re-add the same tag via the Add input.
 		model = typeTagAndAdd(model, "work")
 
@@ -5232,7 +5232,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		}
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Load projects
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -5284,8 +5284,8 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		model = tuiModel
 
 		// Switch to projects then back to sessions
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 
 		// Verify session filter is still applied
 		updated := model.(tui.Model)
@@ -5311,7 +5311,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page with wide width
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -5319,7 +5319,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 			},
 		})
 
-		view := model.View()
+		view := model.View().Content
 		expectedDescs := []string{
 			"sessions",
 			"edit",
@@ -5354,7 +5354,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 			},
 		})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "projects") {
 			t.Errorf("sessions help bar should contain 'projects', got:\n%s", view)
 		}
@@ -5504,21 +5504,21 @@ func TestDefaultPageSelection(t *testing.T) {
 		}
 
 		// Press p to switch to projects
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
 			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
 		}
 
 		// Press s to switch back to sessions
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageSessions {
 			t.Errorf("expected PageSessions after s, got %d", updated.ActivePage())
 		}
 
 		// Press x to toggle to projects
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
 			t.Errorf("expected PageProjects after x, got %d", updated.ActivePage())
@@ -5553,21 +5553,21 @@ func TestDefaultPageSelection(t *testing.T) {
 		}
 
 		// Press s to switch to sessions
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageSessions {
 			t.Errorf("expected PageSessions after s, got %d", updated.ActivePage())
 		}
 
 		// Press p to switch back to projects
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
 			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
 		}
 
 		// Press x to toggle to sessions
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageSessions {
 			t.Errorf("expected PageSessions after x from projects, got %d", updated.ActivePage())
@@ -5604,7 +5604,7 @@ func TestDefaultPageSelection(t *testing.T) {
 		}
 
 		// User manually switches to Projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
 			t.Fatalf("precondition: expected PageProjects after p, got %d", updated.ActivePage())
@@ -5776,7 +5776,7 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected status line 'Select project to run: claude', got:\n%s", view)
 		}
@@ -5804,7 +5804,7 @@ func TestCommandPendingStatusLine(t *testing.T) {
 			Projects: []project.Project{{Path: "/code/myapp", Name: "myapp"}},
 		})
 
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "Select project to run:") {
 			t.Errorf("status line should not appear in normal mode, got:\n%s", view)
 		}
@@ -5829,7 +5829,7 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Select project to run: claude --resume --model opus") {
 			t.Errorf("expected multi-word command in status line, got:\n%s", view)
 		}
@@ -5855,7 +5855,7 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		expected := "Select project to run: " + longCmd
 		if !strings.Contains(view, expected) {
 			t.Errorf("expected full command in status line %q, got:\n%s", expected, view)
@@ -5882,7 +5882,7 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Projects") {
 			t.Errorf("expected 'Projects' title in command-pending mode, got:\n%s", view)
 		}
@@ -5908,7 +5908,7 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
+		view := model.View().Content
 		titleIdx := strings.Index(view, "Projects")
 		statusIdx := strings.Index(view, "Select project to run: claude")
 		if titleIdx < 0 {
@@ -5945,7 +5945,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press enter on first project
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter on project, got nil")
 		}
@@ -5986,7 +5986,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press enter on project
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter, got nil")
 		}
@@ -6023,7 +6023,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press enter to create session
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command, got nil")
 		}
@@ -6057,7 +6057,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press enter to create session
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command, got nil")
 		}
@@ -6094,7 +6094,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press enter on project — will fail
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter, got nil")
 		}
@@ -6125,7 +6125,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		}
 
 		// Should still render
-		view := model.View()
+		view := model.View().Content
 		if view == "" {
 			t.Error("view should not be empty after error")
 		}
@@ -6147,7 +6147,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -6155,7 +6155,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		})
 
 		// Press enter on project
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter, got nil")
 		}
@@ -6190,7 +6190,7 @@ func TestCommandPendingNKey(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Press n to create session in cwd
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key, got nil")
 		}
@@ -6228,13 +6228,13 @@ func TestCommandPendingNKey(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: store.projects,
 		})
 
 		// Press n to create session in cwd
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key, got nil")
 		}
@@ -6274,7 +6274,7 @@ func TestCommandPendingNKey(t *testing.T) {
 		}
 
 		// Press n to create session in cwd from Sessions page
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key on Sessions page, got nil")
 		}
@@ -6309,7 +6309,7 @@ func TestCommandPendingNKey(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: store.projects,
 		})
@@ -6320,7 +6320,7 @@ func TestCommandPendingNKey(t *testing.T) {
 		}
 
 		// Press n to create session in cwd from Projects page
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		if cmd == nil {
 			t.Fatal("expected command from n key on Projects page, got nil")
 		}
@@ -6360,7 +6360,7 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// Esc with nothing active should quit
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from Esc, got nil")
 		}
@@ -6401,7 +6401,7 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		}
 
 		// Esc should clear the filter, not quit
-		model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd != nil {
 			quitMsg := cmd()
 			if _, ok := quitMsg.(tea.QuitMsg); ok {
@@ -6441,13 +6441,13 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		model = updated
 
 		// First Esc clears filter
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if model.(tui.Model).ProjectListFilterState() != list.Unfiltered {
 			t.Fatalf("first Esc should clear filter, got %v", model.(tui.Model).ProjectListFilterState())
 		}
 
 		// Second Esc should quit
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from second Esc, got nil")
 		}
@@ -6493,19 +6493,19 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		}
 
 		// Navigate to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		// Open edit modal with e
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		// Verify modal is open by checking view contains edit content
-		view := model.(tui.Model).View()
+		view := model.(tui.Model).View().Content
 		if !strings.Contains(view, "Edit:") {
 			t.Fatalf("precondition: expected edit modal open, got:\n%s", view)
 		}
 
 		// Press Esc — should dismiss modal, not quit
-		model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd != nil {
 			quitMsg := cmd()
 			if _, ok := quitMsg.(tea.QuitMsg); ok {
@@ -6514,7 +6514,7 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		}
 
 		// Modal should be dismissed — view should not contain Edit modal
-		view = model.(tui.Model).View()
+		view = model.(tui.Model).View().Content
 		if strings.Contains(view, "Edit:") {
 			t.Errorf("modal should be dismissed after Esc, got:\n%s", view)
 		}
@@ -6541,7 +6541,7 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		// q should quit from projects page with no filter
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 		if cmd == nil {
 			t.Fatal("expected quit command from q, got nil")
 		}
@@ -6577,7 +6577,7 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		}
 
 		// Esc should quit
-		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from Esc on projects page, got nil")
 		}
@@ -6853,7 +6853,7 @@ func TestInitialFilterAppliedToDefaultPage(t *testing.T) {
 		}
 
 		// Exit filter with Esc (clears built-in filter)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Second SessionsMsg — should NOT re-apply filter
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
@@ -6923,7 +6923,7 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		m := tui.NewModelWithSessions(sessions)
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
-		view := updated.View()
+		view := updated.View().Content
 		if !strings.Contains(view, "quit") {
 			t.Errorf("session help bar should contain 'quit', got:\n%s", view)
 		}
@@ -6942,7 +6942,7 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		)
 		var model tea.Model = m
 
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -6950,7 +6950,7 @@ func TestHelpBarQuitBinding(t *testing.T) {
 			},
 		})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "quit") {
 			t.Errorf("project help bar should contain 'quit', got:\n%s", view)
 		}
@@ -6976,7 +6976,7 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		model, _ = model.Update(msg)
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "quit") {
 			t.Errorf("command-pending help bar should contain 'quit', got:\n%s", view)
 		}
@@ -7016,7 +7016,7 @@ func TestLoadingPage(t *testing.T) {
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		view := model.View()
+		view := model.View().Content
 		if !strings.Contains(view, "Restoring sessions…") {
 			t.Errorf("expected loading text 'Restoring sessions…', got:\n%s", view)
 		}
@@ -7027,7 +7027,7 @@ func TestLoadingPage(t *testing.T) {
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "Starting tmux server") {
 			t.Errorf("loading view should not contain old text 'Starting tmux server', got:\n%s", view)
 		}
@@ -7038,7 +7038,7 @@ func TestLoadingPage(t *testing.T) {
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		view := model.View()
+		view := model.View().Content
 		lines := strings.Split(view, "\n")
 		// Text should not be on the first line — it should be roughly centered vertically
 		if len(lines) < 2 {
@@ -7069,7 +7069,7 @@ func TestLoadingPage(t *testing.T) {
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		view := model.View()
+		view := model.View().Content
 		if strings.Contains(view, "Sessions") {
 			t.Error("loading view should not contain session list title 'Sessions'")
 		}
@@ -7079,7 +7079,7 @@ func TestLoadingPage(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		// Do NOT send WindowSizeMsg
-		view := m.View()
+		view := m.View().Content
 		if !strings.Contains(view, "Restoring sessions…") {
 			t.Errorf("expected loading text with fallback dimensions, got:\n%s", view)
 		}
@@ -7094,7 +7094,7 @@ func TestLoadingPage(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
 			t.Fatal("expected quit command, got nil")
 		}
@@ -7296,11 +7296,11 @@ func TestLoadingPage(t *testing.T) {
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 
-		keys := []tea.KeyMsg{
-			{Type: tea.KeyRunes, Runes: []rune{'q'}},
-			{Type: tea.KeyRunes, Runes: []rune{'p'}},
-			{Type: tea.KeyEnter},
-			{Type: tea.KeyEsc},
+		keys := []tea.KeyPressMsg{
+			{Code: 'q', Text: "q"},
+			{Code: 'p', Text: "p"},
+			{Code: tea.KeyEnter},
+			{Code: tea.KeyEsc},
 		}
 		for _, k := range keys {
 			var cmd tea.Cmd

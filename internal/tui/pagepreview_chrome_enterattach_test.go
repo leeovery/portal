@@ -75,7 +75,7 @@ func TestSessionsPageView_DoesNotContainPreviewChromeEnterAttachToken(t *testing
 	}
 	m := NewModelWithSessions(sessions)
 
-	got := stripANSI(m.View())
+	got := stripANSI(m.View().Content)
 
 	// The preview chrome's specific phrasing — token between middle-dot
 	// separators — is preview-specific. The Sessions page must not contain

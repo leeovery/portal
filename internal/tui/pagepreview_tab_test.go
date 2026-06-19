@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -22,7 +22,7 @@ func newPreviewModelForTab(session string, groups []tmux.WindowGroup, windowIdx,
 		groups:    groups,
 		windowIdx: windowIdx,
 		paneIdx:   paneIdx,
-		viewport:  viewport.New(width, height),
+		viewport:  viewport.New(viewport.WithWidth(width), viewport.WithHeight(height)),
 		width:     width,
 		height:    height,
 	}
@@ -35,7 +35,7 @@ func TestPreviewTab_AdvancesPaneIdxByOneWithinMultiPaneWindow(t *testing.T) {
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if updated.paneIdx != 1 {
 		t.Errorf("expected paneIdx=1 after Tab, got %d", updated.paneIdx)
@@ -52,7 +52,7 @@ func TestPreviewTab_WrapsFromLastPaneBackToZeroWithinSameWindow(t *testing.T) {
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 2, reader, 80, 24)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if updated.paneIdx != 0 {
 		t.Errorf("expected paneIdx=0 after Tab from last pane, got %d", updated.paneIdx)
@@ -70,7 +70,7 @@ func TestPreviewTab_SinglePaneWindowIsSilentNoOpZeroTail(t *testing.T) {
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if updated.paneIdx != 0 {
 		t.Errorf("expected paneIdx=0 unchanged on single-pane window, got %d", updated.paneIdx)
@@ -93,7 +93,7 @@ func TestPreviewTab_SingleWindowSinglePaneSessionIsSilentNoOp(t *testing.T) {
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if updated.paneIdx != 0 {
 		t.Errorf("expected paneIdx=0 unchanged in degenerate session, got %d", updated.paneIdx)
@@ -116,7 +116,7 @@ func TestPreviewTab_TriggersExactlyOneTailCallWithNewlyFocusedPaneKey(t *testing
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if len(reader.calls) != 1 {
 		t.Fatalf("expected exactly 1 Tail call after Tab, got %d", len(reader.calls))
@@ -143,13 +143,13 @@ func TestPreviewTab_ResetsViewportScrollPositionToTail(t *testing.T) {
 	m.viewport.SetContent("stale\nstale\nstale\n")
 	m.viewport.GotoTop()
 	if !m.viewport.AtTop() {
-		t.Fatalf("setup: expected AtTop before Tab, got YOffset=%d", m.viewport.YOffset)
+		t.Fatalf("setup: expected AtTop before Tab, got YOffset=%d", m.viewport.YOffset())
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if !updated.viewport.AtBottom() {
-		t.Errorf("expected viewport.AtBottom()=true after Tab, got YOffset=%d", updated.viewport.YOffset)
+		t.Errorf("expected viewport.AtBottom()=true after Tab, got YOffset=%d", updated.viewport.YOffset())
 	}
 }
 
@@ -164,7 +164,7 @@ func TestPreviewTab_DoesNotModifyWindowIdx(t *testing.T) {
 	// this window, *not* advance to the next window.
 	m := newPreviewModelForTab("work", groups, 1, 2, reader, 80, 24)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if updated.windowIdx != 1 {
 		t.Errorf("expected windowIdx=1 unchanged after Tab, got %d", updated.windowIdx)
@@ -191,7 +191,7 @@ func TestPreviewTab_InterceptedBeforeViewportSeesIt(t *testing.T) {
 	reader := &recordingReader{bytes: []byte(b.String())}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 10)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	// Interception evidence #1: pane index advanced (only the Tab branch
 	// mutates paneIdx).
@@ -201,7 +201,7 @@ func TestPreviewTab_InterceptedBeforeViewportSeesIt(t *testing.T) {
 	// Interception evidence #2: viewport.SetContent + GotoBottom ran via
 	// the synchronous read, leaving us at bottom on the new content.
 	if !updated.viewport.AtBottom() {
-		t.Errorf("expected AtBottom=true after Tab interception+read, got YOffset=%d", updated.viewport.YOffset)
+		t.Errorf("expected AtBottom=true after Tab interception+read, got YOffset=%d", updated.viewport.YOffset())
 	}
 	// Interception evidence #3: synchronous read returns no tea.Cmd. If
 	// bubbles/viewport had seen Tab and emitted a cmd we'd observe non-nil.

@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/leeovery/portal/internal/project"
 )
@@ -56,27 +56,27 @@ func tagKeyModel(tags []string, newTag string, cursor int) Model {
 // pressRunes drives one runes key through updateEditProjectModal.
 func pressRunes(t *testing.T, m Model, s string) Model {
 	t.Helper()
-	updated, _ := m.updateEditProjectModal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+	updated, _ := m.updateEditProjectModal(tea.KeyPressMsg{Code: tea.KeyExtended, Text: s})
 	return updated.(Model)
 }
 
 // pressBackspaceKey drives one Backspace key through updateEditProjectModal.
 func pressBackspaceKey(t *testing.T, m Model) Model {
 	t.Helper()
-	updated, _ := m.updateEditProjectModal(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated, _ := m.updateEditProjectModal(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	return updated.(Model)
 }
 
 // pressDownKey / pressUpKey drive the corresponding key through the modal.
 func pressDownKey(t *testing.T, m Model) Model {
 	t.Helper()
-	updated, _ := m.updateEditProjectModal(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := m.updateEditProjectModal(tea.KeyPressMsg{Code: tea.KeyDown})
 	return updated.(Model)
 }
 
 func pressUpKey(t *testing.T, m Model) Model {
 	t.Helper()
-	updated, _ := m.updateEditProjectModal(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ := m.updateEditProjectModal(tea.KeyPressMsg{Code: tea.KeyUp})
 	return updated.(Model)
 }
 

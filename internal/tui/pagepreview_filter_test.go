@@ -5,15 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
 // keyRune builds a single-rune key message — bubbles/list's filter input
 // reads runes from msg.Runes regardless of msg.Type, so this helper covers
 // every printable character we feed the filter during these tests.
-func keyRune(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+func keyRune(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
 // keySpaceRune returns the Space keypress shape that bubbletea actually
@@ -22,8 +22,8 @@ func keyRune(r rune) tea.KeyMsg {
 // so a synthetic Space without Runes does NOT land a literal space — only
 // this shape does. (Verified against bubbletea v1.3.10 key.go and bubbles
 // v1.0.0 textinput.go.)
-func keySpaceRune() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
+func keySpaceRune() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 }
 
 // startFiltering sends "/" to enter filter-input mode on the session list,
@@ -168,7 +168,7 @@ func TestSpaceAfterEnterCommitOpensPreviewOnHighlightedMatch(t *testing.T) {
 	// Enter commits the filter. While SettingFilter() is true, the
 	// updateSessionList Space short-circuit forwards Enter to bubbles/list,
 	// which transitions filterState to FilterApplied.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got, ok := updated.(Model)
 	if !ok {
 		t.Fatalf("expected Model, got %T", updated)

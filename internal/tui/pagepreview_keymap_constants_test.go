@@ -1,9 +1,13 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"charm.land/lipgloss/v2"
+)
 
 // These tests pin the exact byte content of the package-level keymap constants
-// and the hex codes of the previewBorderColor AdaptiveColor variable per
+// and the hex codes of the preview-frame border colour variants per
 // specification.md § Keymap glyphs > Constants, § Border colour, and
 // § Style sourcing. Drift is caught loudly — the spec is the source of truth
 // and any change to these literals must be a deliberate spec update.
@@ -35,10 +39,20 @@ func TestCompactKeymapSingleSpaceSeparatedNoInterpuncts(t *testing.T) {
 }
 
 func TestPreviewBorderColorHexCodes(t *testing.T) {
-	if previewBorderColor.Light != "#3B5577" {
-		t.Errorf("previewBorderColor.Light = %q, want %q", previewBorderColor.Light, "#3B5577")
+	// Lipgloss v2 removed AdaptiveColor (spec § 14.5); the light/dark variants
+	// are now explicit named constants. Pin both exact hexes — unchanged from
+	// the v1 AdaptiveColor{Light, Dark} — so the migration stays parity-only.
+	if previewBorderColorLight != "#3B5577" {
+		t.Errorf("previewBorderColorLight = %q, want %q", previewBorderColorLight, "#3B5577")
 	}
-	if previewBorderColor.Dark != "#7B95BD" {
-		t.Errorf("previewBorderColor.Dark = %q, want %q", previewBorderColor.Dark, "#7B95BD")
+	if previewBorderColorDark != "#7B95BD" {
+		t.Errorf("previewBorderColorDark = %q, want %q", previewBorderColorDark, "#7B95BD")
+	}
+	// The resolved previewBorderColor must equal the DARK variant — the
+	// dark-default resolution that v1's AdaptiveColor produced in the absence
+	// of a detected light terminal background (OSC 11 light/dark detection is
+	// wired by task 1-7). lipgloss.Color of the dark hex is the expected value.
+	if want := lipgloss.Color(previewBorderColorDark); previewBorderColor != want {
+		t.Errorf("previewBorderColor = %#v, want dark variant %#v", previewBorderColor, want)
 	}
 }

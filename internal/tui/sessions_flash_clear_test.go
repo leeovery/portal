@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Tests for the Sessions-page inline-flash clear-on-keystroke behaviour
@@ -29,7 +29,7 @@ func TestSessionsFlashClear_FirstKeystrokeClearsFlash_AndLandsInFilterInput(t *t
 		t.Fatalf("setup invariant: flashText empty before keystroke")
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	mm, ok := updated.(Model)
 	if !ok {
 		t.Fatalf("Update returned %T, want tui.Model", updated)
@@ -91,7 +91,10 @@ func TestSessionsFlashClear_MouseMsgDoesNotClearFlash(t *testing.T) {
 	m := flashModelWithSessions("alpha")
 	m.setFlash("flash text")
 
-	updated, _ := m.Update(tea.MouseMsg{})
+	// Bubble Tea v2 made tea.MouseMsg an interface; a concrete mouse event is
+	// e.g. tea.MouseClickMsg. The intent is unchanged: a mouse event must not
+	// clear the flash (only an actionable key press does).
+	updated, _ := m.Update(tea.MouseClickMsg{})
 	mm, ok := updated.(Model)
 	if !ok {
 		t.Fatalf("Update returned %T, want tui.Model", updated)
@@ -111,7 +114,7 @@ func TestSessionsFlashClear_KeystrokeWithNoFlashIsNormalNoOverhead(t *testing.T)
 		t.Fatalf("setup invariant: want empty flash with gen=0, got text=%q gen=%d", m.flashText, m.flashGen)
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	mm, ok := updated.(Model)
 	if !ok {
 		t.Fatalf("Update returned %T, want tui.Model", updated)
@@ -135,7 +138,7 @@ func TestSessionsFlashClear_SuccessiveKeystrokesAllLandNormally(t *testing.T) {
 	m.setFlash("bail")
 
 	// First keystroke: '/' clears flash AND opens filter input.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(Model)
 	if m.flashText != "" {
 		t.Fatalf("flashText after first key: want empty, got %q", m.flashText)
@@ -146,7 +149,7 @@ func TestSessionsFlashClear_SuccessiveKeystrokesAllLandNormally(t *testing.T) {
 
 	// Subsequent keystrokes: type 'a' — must reach filter input as a
 	// normal character. The flash-clear path is a no-op (no flash).
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(Model)
 	if m.flashText != "" {
 		t.Fatalf("flashText after second key: want empty, got %q", m.flashText)
@@ -166,7 +169,7 @@ func TestSessionsFlashClear_FlashClearingKeystrokeAlsoReachesListBindings(t *tes
 	m.setFlash("bail")
 	cursorBefore := m.sessionList.Index()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	mm := updated.(Model)
 	if mm.flashText != "" {
 		t.Fatalf("flashText after KeyDown: want empty, got %q", mm.flashText)
@@ -182,7 +185,7 @@ func TestSessionsFlashClear_EscWithActiveFlashClearsFlashAndQuits(t *testing.T) 
 	m := flashModelWithSessions("alpha")
 	m.setFlash("bail")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	mm := updated.(Model)
 	if mm.flashText != "" {
 		t.Fatalf("flashText after Esc: want empty, got %q", mm.flashText)
@@ -204,7 +207,7 @@ func TestSessionsFlashClear_EnterWithActiveFlashClearsFlashAndRunsEnterHandler(t
 		t.Fatalf("setup invariant: filter unexpectedly applied")
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mm := updated.(Model)
 	if mm.flashText != "" {
 		t.Fatalf("flashText after Enter: want empty, got %q", mm.flashText)
@@ -219,14 +222,14 @@ func TestSessionsFlashClear_EnterWithActiveFlashClearsFlashAndRunsEnterHandler(t
 func TestIsActionableKey_Defensive(t *testing.T) {
 	tests := []struct {
 		name string
-		msg  tea.KeyMsg
+		msg  tea.KeyPressMsg
 		want bool
 	}{
-		{name: "KeyRunes with rune", msg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}, want: true},
-		{name: "named KeyEnter", msg: tea.KeyMsg{Type: tea.KeyEnter}, want: true},
-		{name: "named KeyEsc", msg: tea.KeyMsg{Type: tea.KeyEsc}, want: true},
-		{name: "named KeyDown", msg: tea.KeyMsg{Type: tea.KeyDown}, want: true},
-		{name: "zero KeyMsg", msg: tea.KeyMsg{}, want: false},
+		{name: "KeyRunes with rune", msg: tea.KeyPressMsg{Code: 'a', Text: "a"}, want: true},
+		{name: "named KeyEnter", msg: tea.KeyPressMsg{Code: tea.KeyEnter}, want: true},
+		{name: "named KeyEsc", msg: tea.KeyPressMsg{Code: tea.KeyEsc}, want: true},
+		{name: "named KeyDown", msg: tea.KeyPressMsg{Code: tea.KeyDown}, want: true},
+		{name: "zero KeyMsg", msg: tea.KeyPressMsg{}, want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

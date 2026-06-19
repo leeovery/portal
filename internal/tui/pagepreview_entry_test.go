@@ -3,15 +3,15 @@ package tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
 // keySpaceMsg synthesises a standalone Space keypress, matching the shape
 // produced by bubbletea v1.
-func keySpaceMsg() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeySpace}
+func keySpaceMsg() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 }
 
 // modelWithSeams returns a Model on the Sessions page seeded with the given
@@ -192,7 +192,7 @@ func TestSpaceDuringSettingFilterDoesNotCallNewPreviewModel(t *testing.T) {
 	m := modelWithSeams(sessions, enum, reader)
 	// Open the filter-input mode on the underlying bubbles/list so
 	// SettingFilter() returns true. The list's "/" rune key opens it.
-	updatedList, _ := m.sessionList.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updatedList, _ := m.sessionList.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m.sessionList = updatedList
 
 	if !m.sessionList.SettingFilter() {
@@ -285,7 +285,7 @@ func TestPagePreviewRoutesUpdateToPreviewModel(t *testing.T) {
 
 	// Send an arbitrary key — the top-level Update must route to preview's
 	// Update without panicking and without changing activePage.
-	updated2, _ := got.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated2, _ := got.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	got2, ok := updated2.(Model)
 	if !ok {
 		t.Fatalf("expected Model, got %T", updated2)

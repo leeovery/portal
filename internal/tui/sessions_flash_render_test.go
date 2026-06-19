@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -28,7 +28,7 @@ func lineIndexContaining(lines []string, substr string) int {
 // renderedSessionLines returns the View output of m split on newlines.
 func renderedSessionLines(t *testing.T, m Model) []string {
 	t.Helper()
-	return strings.Split(m.View(), "\n")
+	return strings.Split(m.View().Content, "\n")
 }
 
 // flashModelWithSessions builds a Model on the Sessions page seeded with
@@ -56,7 +56,7 @@ func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 		t.Fatalf("setup invariant: want empty flashText, got %q", m.flashText)
 	}
 
-	got := m.View()
+	got := m.View().Content
 	listView := m.sessionList.View()
 	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
 	want := lipgloss.JoinVertical(lipgloss.Left, listView, footer)
@@ -141,7 +141,7 @@ func TestSessionsView_FlashText_AppearsVerbatim(t *testing.T) {
 	const flash = `session "weird-name with spaces" no longer exists`
 	m.setFlash(flash)
 
-	rendered := m.View()
+	rendered := m.View().Content
 	if !strings.Contains(rendered, flash) {
 		t.Errorf("expected verbatim flash text %q in rendered output, got:\n%s", flash, rendered)
 	}
@@ -179,7 +179,7 @@ func TestProjectsPage_FlashTextNotRendered(t *testing.T) {
 
 	// Switch to Projects page; the flash row must not appear there.
 	m.activePage = PageProjects
-	out := m.View()
+	out := m.View().Content
 	if strings.Contains(out, flash) {
 		t.Errorf("flash text leaked onto Projects page render:\n%s", out)
 	}
@@ -192,7 +192,7 @@ func TestLoadingPage_FlashTextNotRendered(t *testing.T) {
 
 	// Switch to loading page; flash text must not appear there.
 	m.activePage = PageLoading
-	out := m.View()
+	out := m.View().Content
 	if strings.Contains(out, flash) {
 		t.Errorf("flash text leaked onto Loading page render:\n%s", out)
 	}

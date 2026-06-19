@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/capture"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -49,9 +49,11 @@ func run(fixture string) error {
 	}
 
 	// Alt screen mirrors cmd/open.go's production launch so the captured frame
-	// matches what a user sees. No bootstrap, no warnings staging — this is the
-	// inert, fixture-only render path.
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	// matches what a user sees. In Bubble Tea v2 the alt screen is declared via
+	// the tea.View.AltScreen field (set in tui.Model.View()), not the removed
+	// tea.WithAltScreen() option. No bootstrap, no warnings staging — this is
+	// the inert, fixture-only render path.
+	p := tea.NewProgram(m)
 	_, err = p.Run()
 	return err
 }

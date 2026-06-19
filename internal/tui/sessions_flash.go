@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Sessions-page inline-flash tick-based auto-clear infrastructure (spec
@@ -55,25 +55,25 @@ func flashTickCmd(gen uint64) tea.Cmd {
 	})
 }
 
-// isActionableKey reports whether a tea.KeyMsg is an actionable
+// isActionableKey reports whether a tea.KeyPressMsg is an actionable
 // keystroke — i.e. one that should clear an active inline flash as a
 // side effect (spec § Inline flash > Clear conditions, § Flash
 // interaction with filter input).
 //
-// Defensive shape: a KeyMsg with a non-zero Type (any named key like
-// KeyEnter, KeyEsc, KeyDown, or KeyRunes which is negative) OR a
-// non-empty Runes slice counts as actionable. The zero-zero shape
-// (Type=0 == keyNUL, Runes=nil) is treated as non-actionable — a
-// defensive guard against unusual library-emitted no-op KeyMsgs.
-// In practice every real keystroke satisfies one of these conditions,
-// so this is effectively "any non-empty KeyMsg" while remaining safe
-// against the pathological empty case.
+// Defensive shape: a key press carrying a non-zero Code (any named key like
+// KeyEnter, KeyEscape, KeyDown, or a printable rune) OR non-empty Text counts
+// as actionable. The zero-zero shape (Code=0, Text="") is treated as
+// non-actionable — a defensive guard against unusual library-emitted no-op
+// key events. In practice every real keystroke satisfies one of these
+// conditions. This is the v2 equivalent of the v1
+// `msg.Type != 0 || len(msg.Runes) > 0` test: Code replaces Type, Text
+// replaces Runes.
 //
-// Non-KeyMsg events (WindowSizeMsg, FocusMsg, BlurMsg, MouseMsg) never
-// reach a `case tea.KeyMsg` branch, so the flash is unaffected by them
-// without any code here.
-func isActionableKey(msg tea.KeyMsg) bool {
-	return msg.Type != 0 || len(msg.Runes) > 0
+// Non-key events (WindowSizeMsg, FocusMsg, BlurMsg, MouseMsg) never reach a
+// `case tea.KeyPressMsg` branch, so the flash is unaffected by them without
+// any code here.
+func isActionableKey(msg tea.KeyPressMsg) bool {
+	return msg.Code != 0 || msg.Text != ""
 }
 
 // formatSessionGoneFlash returns the spec-exact wording for the

@@ -4,7 +4,7 @@ import (
 	"io"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/leeovery/portal/internal/warning"
 )
@@ -44,25 +44,28 @@ func SetFlushWarningsToStderrForTest(fn func([]BootstrapWarning)) func() {
 }
 
 // flushBufferedWarningsCmd returns a tea.Cmd that, when run by the Bubble
-// Tea program, exits the alt-screen, emits every buffered warning to
-// stderr in order, then re-enters the alt-screen. Buffered warnings are
-// cleared at the moment this method runs so repeat transitions do not
-// re-emit the same lines.
+// Tea program, emits every buffered warning to stderr in order. Buffered
+// warnings are cleared at the moment this method runs so repeat transitions
+// do not re-emit the same lines.
 //
-// Returns nil when no warnings are buffered — avoids a spurious
-// alt-screen toggle that would briefly reveal the underlying terminal.
+// Bubble Tea v2 removed the imperative tea.ExitAltScreen / tea.EnterAltScreen
+// commands (alt-screen is now a declarative tea.View field — set once in
+// View). The v1 implementation wrapped the stderr write in an exit/enter
+// alt-screen toggle so the lines surfaced in the terminal scrollback mid-run;
+// under v2 that toggle is no longer expressible as a command, so the write
+// stands alone and the warnings surface when the alt-screen is torn down on
+// program exit. The emission itself (order, content, single-flush) is
+// unchanged.
+//
+// Returns nil when no warnings are buffered — avoids dispatching a no-op cmd.
 func (m *Model) flushBufferedWarningsCmd() tea.Cmd {
 	if len(m.bufferedWarnings) == 0 {
 		return nil
 	}
 	warnings := m.bufferedWarnings
 	m.bufferedWarnings = nil
-	return tea.Sequence(
-		tea.ExitAltScreen,
-		func() tea.Msg {
-			flushWarningsToStderr(warnings)
-			return nil
-		},
-		tea.EnterAltScreen,
-	)
+	return func() tea.Msg {
+		flushWarningsToStderr(warnings)
+		return nil
+	}
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
@@ -512,7 +512,10 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	// Init emits BootstrapCompleteMsg from its first event-loop tick, paired
 	// with a 1.2s LoadingMinElapsedMsg tea.Tick. Loading-page dismissal is
 	// gated on receipt of both — see internal/tui/model.go transitionFromLoading.
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	// Bubble Tea v2 removed the tea.WithAltScreen() program option — the
+	// alternate screen is now declared via the tea.View.AltScreen field, set
+	// in tui.Model.View(). The launch is otherwise unchanged.
+	p := tea.NewProgram(m)
 
 	finalModel, err := p.Run()
 	if err != nil {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
@@ -27,7 +27,7 @@ func (f *fakeModePersister) Save(mode prefs.SessionListMode) error {
 }
 
 // keyS is the session-list grouping switch-view key.
-var keyS = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
+var keyS = tea.KeyPressMsg{Code: 's', Text: "s"}
 
 // newSwitchViewTestModel builds a Model on the sessions page with a real
 // session list, the supplied mode + persister, and the given sessions/projects.

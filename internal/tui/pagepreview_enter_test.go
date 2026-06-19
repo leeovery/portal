@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -21,7 +21,7 @@ func newPreviewModelForEnter(session string, groups []tmux.WindowGroup, windowId
 		groups:    groups,
 		windowIdx: windowIdx,
 		paneIdx:   paneIdx,
-		viewport:  viewport.New(width, height),
+		viewport:  viewport.New(viewport.WithWidth(width), viewport.WithHeight(height)),
 		width:     width,
 		height:    height,
 	}
@@ -39,7 +39,7 @@ func TestPreviewEnter_DispatchesWithCapturedRawIndicesWhenNoNavigation(t *testin
 	attacher := &fakePreviewAttacher{}
 	m := newPreviewModelForEnter("work", groups, 0, 0, reader, attacher, 80, 24)
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(attacher.calls) != 1 {
 		t.Fatalf("expected exactly 1 attacher.Run call, got %d", len(attacher.calls))
@@ -64,12 +64,12 @@ func TestPreviewEnter_DispatchesWithWalkedIndicesAfterTab(t *testing.T) {
 	m := newPreviewModelForEnter("work", groups, 0, 0, reader, attacher, 80, 24)
 
 	// Walk forward via Tab.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if updated.paneIdx != 1 {
 		t.Fatalf("setup: expected paneIdx=1 after Tab, got %d", updated.paneIdx)
 	}
 
-	_, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(attacher.calls) != 1 {
 		t.Fatalf("expected exactly 1 attacher.Run call, got %d", len(attacher.calls))
@@ -96,12 +96,12 @@ func TestPreviewEnter_DispatchesWithWalkedIndicesAfterBracket(t *testing.T) {
 	m := newPreviewModelForEnter("work", groups, 0, 0, reader, attacher, 80, 24)
 
 	// `]` advances windowIdx by 1 and resets paneIdx to 0.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if updated.windowIdx != 1 {
 		t.Fatalf("setup: expected windowIdx=1 after `]`, got %d", updated.windowIdx)
 	}
 
-	_, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(attacher.calls) != 1 {
 		t.Fatalf("expected exactly 1 attacher.Run call, got %d", len(attacher.calls))
@@ -126,7 +126,7 @@ func TestPreviewEnter_DispatchesWithRawTmuxIndicesOnNonContiguousSession(t *test
 	// Cursor on second window (slice 1 → raw 5), only pane (slice 0 → raw 3).
 	m := newPreviewModelForEnter("work", groups, 1, 0, reader, attacher, 80, 24)
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(attacher.calls) != 1 {
 		t.Fatalf("expected exactly 1 attacher.Run call, got %d", len(attacher.calls))
@@ -163,14 +163,14 @@ func TestPreviewEnter_NotForwardedToViewport(t *testing.T) {
 	m.viewport.SetContent(lines)
 	m.viewport.GotoTop()
 	if !m.viewport.AtTop() {
-		t.Fatalf("setup: expected viewport.AtTop, got YOffset=%d", m.viewport.YOffset)
+		t.Fatalf("setup: expected viewport.AtTop, got YOffset=%d", m.viewport.YOffset())
 	}
-	prevYOffset := m.viewport.YOffset
+	prevYOffset := m.viewport.YOffset()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	if updated.viewport.YOffset != prevYOffset {
-		t.Errorf("viewport.YOffset = %d; want unchanged %d (Enter must not reach viewport)", updated.viewport.YOffset, prevYOffset)
+	if updated.viewport.YOffset() != prevYOffset {
+		t.Errorf("viewport.YOffset = %d; want unchanged %d (Enter must not reach viewport)", updated.viewport.YOffset(), prevYOffset)
 	}
 	// Sanity: Enter was intercepted, not silently ignored — the attacher fired.
 	if len(attacher.calls) != 1 {
@@ -194,7 +194,7 @@ func TestPreviewEnter_NoOpWhenAttacherIsNil(t *testing.T) {
 		}
 	}()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if cmd != nil {
 		t.Errorf("expected nil cmd on nil-attacher no-op, got non-nil")
@@ -217,7 +217,7 @@ func TestPreviewEnter_DispatchesWhenViewportHasRealBytes(t *testing.T) {
 	// Simulate a real-bytes viewport by pre-loading content.
 	m.viewport.SetContent("real content bytes")
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(attacher.calls) != 1 {
 		t.Errorf("expected attacher.Run to fire on real-bytes viewport, got %d calls", len(attacher.calls))
@@ -237,7 +237,7 @@ func TestPreviewEnter_DispatchesWhenViewportRenderedPlaceholder(t *testing.T) {
 	// observable viewport content state.
 	m.viewport.SetContent(previewPlaceholder)
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(attacher.calls) != 1 {
 		t.Errorf("expected attacher.Run to fire on placeholder viewport, got %d calls", len(attacher.calls))
@@ -256,7 +256,7 @@ func TestPreviewEnter_DispatchesWhenViewportRenderedReadError(t *testing.T) {
 	// observable viewport content state.
 	m.viewport.SetContent(previewReadError)
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(attacher.calls) != 1 {
 		t.Errorf("expected attacher.Run to fire on read-error viewport, got %d calls", len(attacher.calls))

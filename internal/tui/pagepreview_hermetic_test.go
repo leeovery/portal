@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -78,13 +78,13 @@ func TestPreviewHermetic_FullLifecycleProducesOnlyOpenEnumerationAndPerFocusRead
 		t.Fatalf("expected ok=true on construction, got false")
 	}
 
-	keys := []tea.KeyMsg{
-		{Type: tea.KeyTab},                       // (0,0) → (0,1)
-		{Type: tea.KeyTab},                       // (0,1) → (0,0) wrap
-		{Type: tea.KeyRunes, Runes: []rune{']'}}, // → (1,0)
-		{Type: tea.KeyTab},                       // (1,0) → (1,1)
-		{Type: tea.KeyTab},                       // (1,1) → (1,0) wrap
-		{Type: tea.KeyRunes, Runes: []rune{'['}}, // → (0,0)
+	keys := []tea.KeyPressMsg{
+		{Code: tea.KeyTab},     // (0,0) → (0,1)
+		{Code: tea.KeyTab},     // (0,1) → (0,0) wrap
+		{Code: ']', Text: "]"}, // → (1,0)
+		{Code: tea.KeyTab},     // (1,0) → (1,1)
+		{Code: tea.KeyTab},     // (1,1) → (1,0) wrap
+		{Code: '[', Text: "["}, // → (0,0)
 	}
 	for _, k := range keys {
 		m, _ = m.Update(k)
@@ -93,7 +93,7 @@ func TestPreviewHermetic_FullLifecycleProducesOnlyOpenEnumerationAndPerFocusRead
 	// Esc emits previewDismissedMsg — verify both that the cmd is non-nil
 	// and that the dispatched message is the dismiss shape. Esc must not
 	// trigger any Tail or enumerator call.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatalf("expected non-nil tea.Cmd from Esc, got nil")
 	}

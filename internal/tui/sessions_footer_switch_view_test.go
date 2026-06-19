@@ -30,7 +30,7 @@ func TestSessionsFooter_ShowsSwitchViewHint(t *testing.T) {
 
 	// Also assert via the full rendered View() so the hint is wired through
 	// the actual sessions page render path, not just the footer helper.
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "switch view") {
 		t.Errorf("rendered sessions View() must contain %q, got:\n%s", "switch view", view)
 	}
@@ -49,7 +49,7 @@ func TestSessionsFooter_ShowsSwitchViewHintAtZeroSessions(t *testing.T) {
 		t.Errorf("sessions footer at zero sessions must contain %q, got:\n%s", "switch view", footer)
 	}
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "switch view") {
 		t.Errorf("rendered sessions View() at zero sessions must contain %q, got:\n%s", "switch view", view)
 	}

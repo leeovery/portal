@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -32,7 +32,7 @@ func pressSpaceThenEsc(t *testing.T, m Model) Model {
 	if got.activePage != pagePreview {
 		t.Fatalf("test setup invariant: expected pagePreview after Space, got %v", got.activePage)
 	}
-	updated2, cmd := got.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated2, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	got2, ok := updated2.(Model)
 	if !ok {
 		t.Fatalf("expected Model after Esc, got %T", updated2)
@@ -176,7 +176,7 @@ func TestSecondEscClearsCommittedFilterViaListDefault(t *testing.T) {
 
 	// A second Esc on the Sessions page must reach bubbles/list's default
 	// Esc handler, which clears the committed filter (FilterApplied -> Unfiltered).
-	updated, _ := afterFirstEsc.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := afterFirstEsc.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	got, ok := updated.(Model)
 	if !ok {
 		t.Fatalf("expected Model after second Esc, got %T", updated)

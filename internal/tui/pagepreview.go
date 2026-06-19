@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/mattn/go-runewidth"
@@ -32,14 +32,30 @@ const (
 // than as a recognisable name. Per specification.md § Width cascade > Tier 2.
 const minWindowNameCells = 8
 
-// previewBorderColor is the single unified adaptive colour applied to all four
-// edges of the preview frame (the three lipgloss-rendered edges plus the
-// hand-composed top edge's border parts) per specification.md § Border colour
-// and § Style sourcing. The name foregrounds the variable's role (border
-// colour for the preview frame) rather than its current hue, so a future hue
-// change does not produce a misleading identifier. Hex values are the design
-// target; lipgloss/termenv handles NO_COLOR and palette downgrade automatically.
-var previewBorderColor = lipgloss.AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"}
+// previewBorderColorLight / previewBorderColorDark are the two explicit
+// light/dark variants of the preview-frame border colour per specification.md
+// § Border colour and § Style sourcing. Lipgloss v2 removed AdaptiveColor
+// (spec § 14.5), so the light/dark choice must be wired explicitly rather than
+// resolved implicitly by the framework. The hex values are unchanged from the
+// v1 AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"} — this migration is
+// parity-only; centralising these into the §2.9 role-token layer is a later
+// task. Lipgloss/termenv still handles NO_COLOR suppression and palette
+// downsample automatically on whichever variant is selected.
+const (
+	previewBorderColorLight = "#3B5577"
+	previewBorderColorDark  = "#7B95BD"
+)
+
+// previewBorderColor is the resolved preview-frame border colour. v1's
+// AdaptiveColor resolved light-vs-dark from termenv's detected background,
+// defaulting to the DARK variant when the terminal background was unknown
+// (termenv is dark-first; spec § 2.6 also pins the no-answer fallback to dark).
+// Light/dark detection (OSC 11) is introduced by task 1-7; until that wiring
+// lands, this resolves to the same dark-default variant the v1 AdaptiveColor
+// produced in the absence of a detected light background — so the rendered
+// border hue is identical to v1 (parity). The value flows through
+// lipgloss.Color, so NO_COLOR suppression and palette downsample still apply.
+var previewBorderColor = lipgloss.Color(previewBorderColorDark)
 
 // previewFrameOverhead is the total number of frame rows the preview's
 // rounded border occupies: top border (carrying chrome) + bottom border
@@ -292,9 +308,12 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		groups:     groups,
 		windowIdx:  0,
 		paneIdx:    0,
-		viewport:   viewport.New(innerW, innerH),
-		width:      width,
-		height:     height,
+		// bubbles v2 viewport.New takes functional options rather than the v1
+		// positional (width, height). Semantically identical: the viewport is
+		// constructed at the same inner dimensions.
+		viewport: viewport.New(viewport.WithWidth(innerW), viewport.WithHeight(innerH)),
+		width:    width,
+		height:   height,
 	}
 
 	// Single dispatcher shared with cycle handlers (Tab, ], [) so the three
@@ -448,29 +467,26 @@ type previewSessionsRefreshedMsg struct {
 func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// bubbles@v1.0.0's viewport.Model does not expose SetSize — the
-		// spec's `viewport.SetSize(W, H)` lowers to direct field assignment
-		// here. Semantically equivalent for the resize contract (adjust the
-		// visible window over the immutable buffer); YOffset auto-clamping
-		// is not observable in the preview's usage because cycle handlers
-		// re-anchor via GotoBottom and Home/End jumps are explicit.
-		// TODO: when bubbles is upgraded to a version exposing
-		// viewport.SetSize, switch to the method call so YOffset auto-clamping
-		// is engaged uniformly.
+		// bubbles v2 exposes viewport.SetWidth / SetHeight (the spec's
+		// `viewport.SetSize(W, H)` — the v1.0.0 TODO that this upgrade
+		// resolves). Switching from the v1 direct field assignment to the
+		// methods engages the viewport's YOffset auto-clamping uniformly;
+		// the preview's observable resize contract is unchanged because cycle
+		// handlers re-anchor via GotoBottom and Home/End jumps are explicit.
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = m.innerWidth()
-		m.viewport.Height = m.innerHeight()
+		m.viewport.SetWidth(m.innerWidth())
+		m.viewport.SetHeight(m.innerHeight())
 		return m, nil
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEsc:
+	case tea.KeyPressMsg:
+		switch msg.Code {
+		case tea.KeyEscape:
 			return m, func() tea.Msg { return previewDismissedMsg{} }
 		case tea.KeySpace:
 			return m, func() tea.Msg { return previewDismissedMsg{} }
-		// viewport.DefaultKeyMap (bubbles@v1.0.0) does not bind Home/End;
-		// preview must own them to satisfy the acceptance criterion that
-		// these keys jump to top/bottom inside the loaded buffer.
+		// viewport.DefaultKeyMap does not bind Home/End; preview must own them
+		// to satisfy the acceptance criterion that these keys jump to
+		// top/bottom inside the loaded buffer.
 		case tea.KeyHome:
 			m.viewport.GotoTop()
 			return m, nil
@@ -504,15 +520,18 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 			m.paneIdx = (m.paneIdx + 1) % paneCount
 			m.viewport = m.readFocusedPaneIntoViewport()
 			return m, nil
-		case tea.KeyRunes:
-			// `]` advances to the next window; `[` rewinds to the previous
-			// window. Both reset paneIdx to 0 (per § Multi-pane Rendering
-			// Shape > Pane focus on window cycle — per-window pane focus is
-			// not retained) and synchronously re-read the new pane's tail-N
-			// per § Refresh Semantics > Read Trigger Events. In a session
-			// with one window the keys are a silent no-op regardless of pane
-			// count — `]` / `[` iterate windows, not panes.
-			switch string(msg.Runes) {
+		default:
+			// Printable-rune key press. In v1 this was the tea.KeyRunes case;
+			// in v2 a printable key carries its rune in Code (so it falls
+			// through the named-key cases to default) and the characters in
+			// Text. `]` advances to the next window; `[` rewinds to the
+			// previous window. Both reset paneIdx to 0 (per § Multi-pane
+			// Rendering Shape > Pane focus on window cycle — per-window pane
+			// focus is not retained) and synchronously re-read the new pane's
+			// tail-N per § Refresh Semantics > Read Trigger Events. In a
+			// session with one window the keys are a silent no-op regardless
+			// of pane count — `]` / `[` iterate windows, not panes.
+			switch msg.Text {
 			case "]":
 				if len(m.groups) <= 1 {
 					return m, nil

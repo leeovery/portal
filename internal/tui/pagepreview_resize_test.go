@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize pins
@@ -24,11 +24,11 @@ func TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize(t *tes
 	if updated.height != 30 {
 		t.Errorf("expected m.height=30 recorded on resize, got %d", updated.height)
 	}
-	if updated.viewport.Width != 100-previewFrameOverhead {
-		t.Errorf("expected viewport.Width=%d (msg.Width − previewFrameOverhead), got %d", 100-previewFrameOverhead, updated.viewport.Width)
+	if updated.viewport.Width() != 100-previewFrameOverhead {
+		t.Errorf("expected viewport.Width=%d (msg.Width − previewFrameOverhead), got %d", 100-previewFrameOverhead, updated.viewport.Width())
 	}
-	if updated.viewport.Height != 30-previewFrameOverhead {
-		t.Errorf("expected viewport.Height=%d (msg.Height − previewFrameOverhead), got %d", 30-previewFrameOverhead, updated.viewport.Height)
+	if updated.viewport.Height() != 30-previewFrameOverhead {
+		t.Errorf("expected viewport.Height=%d (msg.Height − previewFrameOverhead), got %d", 30-previewFrameOverhead, updated.viewport.Height())
 	}
 }
 
@@ -42,10 +42,10 @@ func TestPreviewWindowSizeMsg_ClampsViewportDimensionsNonNegative(t *testing.T) 
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 1, Height: 0})
 
-	if updated.viewport.Width != 0 {
-		t.Errorf("expected viewport.Width clamped to 0 for msg.Width=1, got %d", updated.viewport.Width)
+	if updated.viewport.Width() != 0 {
+		t.Errorf("expected viewport.Width clamped to 0 for msg.Width=1, got %d", updated.viewport.Width())
 	}
-	if updated.viewport.Height != 0 {
-		t.Errorf("expected viewport.Height clamped to 0 for msg.Height=0, got %d", updated.viewport.Height)
+	if updated.viewport.Height() != 0 {
+		t.Errorf("expected viewport.Height clamped to 0 for msg.Height=0, got %d", updated.viewport.Height())
 	}
 }

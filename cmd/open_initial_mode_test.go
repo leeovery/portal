@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -26,7 +26,7 @@ func (f *fakeModePersister) Save(mode prefs.SessionListMode) error {
 }
 
 // keyS is the browse-mode switch-view key.
-var keyS = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
+var keyS = tea.KeyPressMsg{Code: 's', Text: "s"}
 
 func TestBuildTUIModel_InjectsInitialMode(t *testing.T) {
 	t.Run("Flat initial mode paints the plain Sessions title", func(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -54,12 +54,12 @@ func TestPreviewWindowSizeMsg_SetsViewportHeightToMsgHeightMinusChrome(t *testin
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
 	wantWidth := 120 - previewFrameOverhead
-	if updated.viewport.Width != wantWidth {
-		t.Errorf("expected viewport.Width=%d (msg.Width - previewFrameOverhead), got %d", wantWidth, updated.viewport.Width)
+	if updated.viewport.Width() != wantWidth {
+		t.Errorf("expected viewport.Width=%d (msg.Width - previewFrameOverhead), got %d", wantWidth, updated.viewport.Width())
 	}
 	wantHeight := 40 - previewFrameOverhead
-	if updated.viewport.Height != wantHeight {
-		t.Errorf("expected viewport.Height=%d (msg.Height - previewFrameOverhead), got %d", wantHeight, updated.viewport.Height)
+	if updated.viewport.Height() != wantHeight {
+		t.Errorf("expected viewport.Height=%d (msg.Height - previewFrameOverhead), got %d", wantHeight, updated.viewport.Height())
 	}
 }
 
@@ -83,19 +83,19 @@ func TestPreviewView_ChromeRowCountConstantAcrossTabAndBracketCycles(t *testing.
 	before := chromeLineCount(chromeLineForTest(m))
 
 	// Tab → next pane within current window.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := chromeLineCount(chromeLineForTest(m)); got != before {
 		t.Errorf("chrome line count changed after Tab: before=%d after=%d", before, got)
 	}
 
 	// `]` → next window.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	m, _ = m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if got := chromeLineCount(chromeLineForTest(m)); got != before {
 		t.Errorf("chrome line count changed after ]: before=%d after=%d", before, got)
 	}
 
 	// `[` → previous window.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	m, _ = m.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if got := chromeLineCount(chromeLineForTest(m)); got != before {
 		t.Errorf("chrome line count changed after [: before=%d after=%d", before, got)
 	}
@@ -106,13 +106,13 @@ func TestPreviewWindowSizeMsg_SmallHeightDoesNotProduceNegativeViewportHeight(t 
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 1})
 
-	if updated.viewport.Height < 0 {
-		t.Errorf("expected viewport.Height >= 0 for small terminal, got %d", updated.viewport.Height)
+	if updated.viewport.Height() < 0 {
+		t.Errorf("expected viewport.Height >= 0 for small terminal, got %d", updated.viewport.Height())
 	}
 
 	updated2, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 0})
-	if updated2.viewport.Height < 0 {
-		t.Errorf("expected viewport.Height >= 0 for height=0, got %d", updated2.viewport.Height)
+	if updated2.viewport.Height() < 0 {
+		t.Errorf("expected viewport.Height >= 0 for height=0, got %d", updated2.viewport.Height())
 	}
 }
 
@@ -131,7 +131,7 @@ func TestNewPreviewModel_SizesViewportWithChromeSubtracted(t *testing.T) {
 	}
 
 	wantHeight := initialHeight - previewFrameOverhead
-	if m.viewport.Height != wantHeight {
-		t.Errorf("expected viewport.Height=%d (initialHeight - previewFrameOverhead), got %d", wantHeight, m.viewport.Height)
+	if m.viewport.Height() != wantHeight {
+		t.Errorf("expected viewport.Height=%d (initialHeight - previewFrameOverhead), got %d", wantHeight, m.viewport.Height())
 	}
 }

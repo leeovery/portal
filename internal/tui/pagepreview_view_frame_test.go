@@ -1,26 +1,24 @@
 package tui
 
 import (
-	"os"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/tmux"
-	"github.com/muesli/termenv"
 )
 
-// TestMain forces lipgloss's default renderer to emit TrueColor SGRs even when
-// running under `go test` (no TTY → default Ascii profile → no SGRs). The
-// preview frame tests assert on the emitted '\x1b[38;...m' foreground bytes,
-// so without this override they would all observe stripped output and fail
-// for the wrong reason. Tests that strip ANSI before asserting (the vast
-// majority across this package) are unaffected.
-func TestMain(m *testing.M) {
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	os.Exit(m.Run())
-}
+// Lipgloss v2 changed where the colour profile is applied: Style.Render now
+// always emits the full TrueColor SGR sequences in-string, and palette
+// downsampling / NO_COLOR suppression happen at the OUTPUT-writer layer (the
+// Bubble Tea renderer / colorprofile.Writer when content is flushed to the
+// terminal), not inside Render. So the preview-frame tests below — which
+// assert on the emitted '\x1b[38;...m' foreground bytes — see those bytes by
+// default under `go test`, with no profile override needed. The v1 TestMain
+// here called lipgloss.SetColorProfile(termenv.TrueColor) to force SGRs under
+// the non-TTY test environment; that API was removed in v2 (Render is
+// unconditionally TrueColor), so the override is gone.
 
 // TestPreviewView_FrameContainsAllFourRoundedCorners pins the acceptance
 // criterion that View() output contains the rounded corner glyphs sourced

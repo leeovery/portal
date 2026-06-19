@@ -41,7 +41,7 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 		t.Fatalf("expected activePage=pagePreview, got %v", got.activePage)
 	}
 
-	rendered := got.View()
+	rendered := got.View().Content
 
 	if !strings.Contains(rendered, "Window 1 of 1") {
 		t.Errorf("expected rendered output to contain chrome 'Window 1 of 1', got:\n%s", rendered)

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -54,7 +54,7 @@ func TestPreviewPlaceholder_RendersAfterTabCycleWhenTailReturnsNilNil(t *testing
 	reader := &nilNilReader{}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if updated.paneIdx != 1 {
 		t.Fatalf("setup: expected paneIdx=1 after Tab, got %d", updated.paneIdx)
@@ -73,7 +73,7 @@ func TestPreviewPlaceholder_RendersAfterNextWindowCycleWhenTailReturnsNilNil(t *
 	reader := &nilNilReader{}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 
 	if updated.windowIdx != 1 {
 		t.Fatalf("setup: expected windowIdx=1 after ], got %d", updated.windowIdx)

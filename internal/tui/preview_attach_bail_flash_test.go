@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -205,7 +205,7 @@ func TestPreviewAttachBail_FlashVisibleBeforeRefreshResolves(t *testing.T) {
 
 	got, _ := pressSpaceThenBail(t, m, "foo")
 
-	rendered := got.View()
+	rendered := got.View().Content
 	want := `session "foo" no longer exists`
 	if !strings.Contains(rendered, want) {
 		t.Errorf("rendered View must contain flash %q before refresh resolves, got:\n%s", want, rendered)

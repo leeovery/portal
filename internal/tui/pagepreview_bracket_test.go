@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -13,8 +13,8 @@ import (
 // `[`. The codebase represents printable runes with Type=KeyRunes, so the
 // bracket bindings follow the same shape.
 var (
-	nextWindowKey = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}
-	prevWindowKey = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}}
+	nextWindowKey = tea.KeyPressMsg{Code: ']', Text: "]"}
+	prevWindowKey = tea.KeyPressMsg{Code: '[', Text: "["}
 )
 
 func TestPreviewBracket_NextAdvancesWindowIdxByOneAndResetsPaneIdx(t *testing.T) {
@@ -209,12 +209,12 @@ func TestPreviewBracket_WindowCycleResetsViewportScrollPositionToTail(t *testing
 	m.viewport.SetContent("stale\nstale\nstale\n")
 	m.viewport.GotoTop()
 	if !m.viewport.AtTop() {
-		t.Fatalf("setup: expected AtTop before ], got YOffset=%d", m.viewport.YOffset)
+		t.Fatalf("setup: expected AtTop before ], got YOffset=%d", m.viewport.YOffset())
 	}
 
 	updated, _ := m.Update(nextWindowKey)
 
 	if !updated.viewport.AtBottom() {
-		t.Errorf("expected viewport.AtBottom()=true after ] cycle, got YOffset=%d", updated.viewport.YOffset)
+		t.Errorf("expected viewport.AtBottom()=true after ] cycle, got YOffset=%d", updated.viewport.YOffset())
 	}
 }

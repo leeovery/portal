@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -28,10 +28,10 @@ func newCursorTestModel(t *testing.T, items []list.Item) Model {
 // keyG is the bubbles/list GoToStart binding (g/home); keyShiftG is GoToEnd
 // (G/end). keyUp/keyDown drive single-row navigation.
 var (
-	keyG      = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}}
-	keyShiftG = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}}
-	keyUp     = tea.KeyMsg{Type: tea.KeyUp}
-	keyDown   = tea.KeyMsg{Type: tea.KeyDown}
+	keyG      = tea.KeyPressMsg{Code: 'g', Text: "g"}
+	keyShiftG = tea.KeyPressMsg{Code: 'G', Text: "G"}
+	keyUp     = tea.KeyPressMsg{Code: tea.KeyUp}
+	keyDown   = tea.KeyPressMsg{Code: tea.KeyDown}
 )
 
 // selectedHeader reports whether the cursor currently rests on a HeaderItem.
