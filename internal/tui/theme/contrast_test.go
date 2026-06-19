@@ -219,17 +219,14 @@ func TestBgSelectionPairRule(t *testing.T) {
 // TestBgWarningPairRule verifies the warning band (bg.warning) as a pair, same
 // three legs as bg.selection but with text.on-warning and the accent.orange bar.
 //
-// The LIGHT bg.warning value is PROVISIONAL (1-9 finalises — §2.9 leaves it as
-// "light amber (§15)"). Its pair assertion is therefore provisional-pending-1-9:
-// it clears the legs against the provisional placeholder, but the placeholder is
-// derived (dark anchor + light canvas), not a locked final value. The dark legs
-// are firm.
+// The LIGHT bg.warning value (#E8D6A8) is PINNED at the 1-9 gate (§2.9 / §15.6):
+// the 1-4 derived value held — it clears all three legs against the light canvas,
+// so no more-contrast remedy was needed. Both modes' legs are firm.
 func TestBgWarningPairRule(t *testing.T) {
 	modes := []struct {
 		name              string
 		canvas            string
 		tint, onTint, bar string
-		provisional       bool
 	}{
 		{
 			name:   "dark",
@@ -239,19 +236,15 @@ func TestBgWarningPairRule(t *testing.T) {
 			bar:    theme.MV.AccentOrange.Dark, // §2.2 warning ⚠ left-bar
 		},
 		{
-			name:        "light",
-			canvas:      canvasLight,
-			tint:        theme.MV.BgWarning.Light,
-			onTint:      theme.MV.TextOnWarning.Light,
-			bar:         theme.MV.AccentOrange.Light,
-			provisional: true, // §2.9 / §15.6: provisional-pending-1-9
+			name:   "light",
+			canvas: canvasLight,
+			tint:   theme.MV.BgWarning.Light,
+			onTint: theme.MV.TextOnWarning.Light,
+			bar:    theme.MV.AccentOrange.Light,
 		},
 	}
 	for _, m := range modes {
 		t.Run(m.name, func(t *testing.T) {
-			if m.provisional {
-				t.Log("bg.warning light is PROVISIONAL (1-9 eyeball finalises — §2.9 / §15.6); these legs assert against the derived placeholder, not a locked final value")
-			}
 			// Leg 1: text-on-tint ≥ text floor.
 			if got := contrastRatio(t, m.onTint, m.tint); got < floorNormal {
 				t.Errorf("text.on-warning %s vs bg.warning = %.2f, want >= %.2f (leg 1: text-on-tint)", m.name, got, floorNormal)
@@ -284,31 +277,179 @@ func TestEveryTokenHasLightVariant(t *testing.T) {
 	}
 }
 
-// TestLightSurfaceTintsProvisional documents — and pins as a guard — that the
-// light surface tints are PROVISIONAL pending the 1-9 in-terminal eyeball. A
-// numeric pass alone is insufficient for the light-tint-on-light-canvas case
-// (§2.9 / §15.6); the recurring failure class is a light tint that is numerically
-// fine but visually indistinct on the light canvas. This test records the current
-// provisional values so a later change is a deliberate, visible edit (the eyeball
-// lock lands in 1-9, not here).
-func TestLightSurfaceTintsProvisional(t *testing.T) {
-	t.Log("LIGHT surface tints are PROVISIONAL pending 1-9 eyeball (§2.9 / §15.6): bg.selection, bg.warning, bg.track, and the light borders. Numeric pass alone is insufficient on a light-tint-on-light-canvas; 1-9 is the visual lock.")
-
-	provisional := []struct {
+// TestLightSurfaceTintsPinned pins the four light surface tints to their
+// CONCRETE 1-9-locked hexes. Task 1-4 left these provisional; the 1-9 in-terminal
+// validation gate pins each (derived from its dark anchor + the surface it renders
+// on — §2.9 / §15.6) and the human eyeball confirms it against `#e1e2e7`. This
+// test guards the pinned hexes so a later change is a deliberate, visible edit;
+// the numeric legs each tint must clear are asserted by the pair tests below and
+// TestLightTintFillsArePerceptible.
+func TestLightSurfaceTintsPinned(t *testing.T) {
+	pinned := []struct {
 		name string
 		got  string
+		want string
 	}{
-		{"bg.selection light", theme.MV.BgSelection.Light},         // #D0C6F0 (§2.9, provisional-pending-eyeball)
-		{"bg.warning light", theme.MV.BgWarning.Light},             // derived placeholder, NOT final (§2.9 "light amber (§15)")
-		{"bg.track light", theme.MV.BgTrack.Light},                 // derived placeholder, NOT final (§2.9 "light grey (§15)")
-		{"border.separator light", theme.MV.BorderSeparator.Light}, // #C9CDDB (§2.9, provisional-pending-eyeball)
-		{"border.footer light", theme.MV.BorderFooter.Light},       // #C9CDDB shared (§2.9, provisional-pending-eyeball)
+		// bg.selection: confirmed at the 1-9 gate (derivation: dark violet anchor
+		// #28243a lifted onto the light canvas #e1e2e7).
+		{"bg.selection light", theme.MV.BgSelection.Light, "#D0C6F0"},
+		// bg.warning: pinned at 1-9 (derivation: dark amber anchor #241B10 + light
+		// canvas #e1e2e7; the 1-4 derived value held — it clears perceptible + the
+		// on-warning leg, so no more-contrast remedy was needed).
+		{"bg.warning light", theme.MV.BgWarning.Light, "#E8D6A8"},
+		// bg.track: pinned at 1-9 (derivation: dark grey anchor #26283A + light
+		// canvas #e1e2e7; the 1-4 derived value held — it clears perceptible and
+		// reads as a distinct empty-track surface, so no remedy was needed).
+		{"bg.track light", theme.MV.BgTrack.Light, "#D2D4DE"},
+		// borders: confirmed at the 1-9 gate (shared separator/footer light rule).
+		{"border.separator light", theme.MV.BorderSeparator.Light, "#C9CDDB"},
+		{"border.footer light", theme.MV.BorderFooter.Light, "#C9CDDB"},
 	}
-	for _, p := range provisional {
+	for _, p := range pinned {
 		t.Run(p.name, func(t *testing.T) {
-			if p.got == "" {
-				t.Errorf("%s is empty — provisional placeholder must still be populated", p.name)
+			if p.got != p.want {
+				t.Errorf("%s = %q, want pinned %q (1-9 lock-in)", p.name, p.got, p.want)
 			}
 		})
+	}
+}
+
+// TestLightTintFillsArePerceptible asserts every light surface tint reads as a
+// perceptible surface against the light canvas `#e1e2e7` — the leg-3 fill check
+// of the approved pair rule (≥1.1, NOT 3:1; a subtle highlight tint cannot meet
+// 3:1 against its own canvas, §2.2's accent bar carries the UI distinction). This
+// is the numeric floor for the light-tint-on-light-canvas case; the in-terminal
+// eyeball (1-9) is the visual lock layered on top (a numeric pass alone is
+// insufficient, §2.9 / §15.6).
+func TestLightTintFillsArePerceptible(t *testing.T) {
+	tints := []struct {
+		name string
+		hex  string
+	}{
+		{"bg.selection", theme.MV.BgSelection.Light},
+		{"bg.warning", theme.MV.BgWarning.Light},
+		{"bg.track", theme.MV.BgTrack.Light},
+		{"border.separator", theme.MV.BorderSeparator.Light},
+		{"border.footer", theme.MV.BorderFooter.Light},
+	}
+	for _, tnt := range tints {
+		t.Run(tnt.name, func(t *testing.T) {
+			if got := contrastRatio(t, tnt.hex, canvasLight); got < floorFillPerceptible {
+				t.Errorf("%s light %s vs %s = %.2f, want >= %.2f (perceptible surface, NOT a wash-out)",
+					tnt.name, tnt.hex, canvasLight, got, floorFillPerceptible)
+			}
+		})
+	}
+}
+
+// TestBgTrackPairRule pins the now-concrete light bg.track value as a perceptible
+// surface in both modes. bg.track is the loading-bar EMPTY track — it carries no
+// on-band text (the filled portion uses accent.violet / the bar token, not text),
+// so it is a single-leg fill-perceptibility check, not the three-leg text-pair
+// rule. The dark anchor (#26283A) and the now-concrete light value (#D2D4DE) each
+// clear the perceptible floor against their own canvas.
+func TestBgTrackPairRule(t *testing.T) {
+	modes := []struct {
+		name   string
+		tint   string
+		canvas string
+	}{
+		{"dark", theme.MV.BgTrack.Dark, canvasDark},
+		{"light", theme.MV.BgTrack.Light, canvasLight},
+	}
+	for _, m := range modes {
+		t.Run(m.name, func(t *testing.T) {
+			if got := contrastRatio(t, m.tint, m.canvas); got < floorFillPerceptible {
+				t.Errorf("bg.track fill %s vs canvas = %.2f, want >= %.2f (perceptible empty track, NOT 3:1)",
+					m.tint, got, floorFillPerceptible)
+			}
+		})
+	}
+}
+
+// TestForegroundOnTintPairings is the §4.1 foreground-on-tint gate: EVERY
+// selected-row foreground (name text.on-selection, count text.strong, attached
+// bullet state.green-on-selection) measured against bg.selection, plus
+// text.on-warning against bg.warning — in BOTH modes, each against the relevant
+// tint (not the canvas). These are the pairings §4.1 / §2.9 require verified
+// against the tints in ADDITION to the §2.3 canvas gate.
+//
+// Floor classification (§2.3):
+//   - name / count / on-warning are functional NORMAL TEXT → 4.5:1.
+//   - the `● attached` marker on the selected row uses the dedicated darker
+//     state.green-on-selection (§2.8 defaulted override), the remedy for the 1-9
+//     human-eyeball wash-out finding: the global state.green light #456E1C on
+//     bg.selection light #D0C6F0 measured 3.72 (legible at the 3:1 UI bar but the
+//     human eyeballed it as washed out). The override #3B5E18 clears the 4.5:1
+//     NORMAL-TEXT floor with margin (4.65 vs #D0C6F0); the dark variant keeps the
+//     global state.green dark (#9ECE6A, 8.19 on dark bg.selection — already crisp,
+//     light-only remedy). It is held to 4.5 here accordingly. The global
+//     state.green token is unchanged (its canvas usages stay crisp).
+func TestForegroundOnTintPairings(t *testing.T) {
+	pairings := []struct {
+		name   string
+		fg     theme.Token
+		tint   theme.Token
+		floor  float64
+		darkFG string // for clarity in failure messages only
+	}{
+		{"text.on-selection on bg.selection", theme.MV.TextOnSelection, theme.MV.BgSelection, floorNormal, ""},
+		{"text.strong on bg.selection", theme.MV.TextStrong, theme.MV.BgSelection, floorNormal, ""},
+		// §4.1 attached marker: the dedicated darker on-selection override (the 1-9
+		// wash-out remedy) is held to the 4.5 normal-text floor on the tint.
+		{"state.green-on-selection on bg.selection", theme.MV.StateGreenOnSelection, theme.MV.BgSelection, floorNormal, ""},
+		{"text.on-warning on bg.warning", theme.MV.TextOnWarning, theme.MV.BgWarning, floorNormal, ""},
+	}
+	for _, p := range pairings {
+		t.Run(p.name+"/dark", func(t *testing.T) {
+			if got := contrastRatio(t, p.fg.Dark, p.tint.Dark); got < p.floor {
+				t.Errorf("%s dark %s vs %s = %.2f, want >= %.2f (§4.1 foreground-on-tint)",
+					p.name, p.fg.Dark, p.tint.Dark, got, p.floor)
+			}
+		})
+		t.Run(p.name+"/light", func(t *testing.T) {
+			if got := contrastRatio(t, p.fg.Light, p.tint.Light); got < p.floor {
+				t.Errorf("%s light %s vs %s = %.2f, want >= %.2f (§4.1 foreground-on-tint)",
+					p.name, p.fg.Light, p.tint.Light, got, p.floor)
+			}
+		})
+	}
+}
+
+// TestStateGreenOnSelectionRemedy is the dedicated numeric gate for the 1-9
+// human-eyeball wash-out remedy: the darker on-selection green (StateGreenOnSelection)
+// MUST clear the 4.5:1 normal-text floor against bg.selection LIGHT #D0C6F0 (the
+// global state.green #456E1C measured only 3.72 there — the wash-out the human
+// found). The DARK variant keeps the global state.green dark (#9ECE6A); it already
+// clears comfortably on dark bg.selection (#28243a), so the remedy is light-only —
+// but we still assert the dark variant clears 4.5 on its dark tint to prove the
+// no-dark-override decision holds. This is a §2.8 defaulted override; the global
+// state.green token is UNCHANGED (asserted separately).
+func TestStateGreenOnSelectionRemedy(t *testing.T) {
+	tok := theme.MV.StateGreenOnSelection
+
+	// Light: the remedy must clear 4.5 with margin against bg.selection light.
+	if got := contrastRatio(t, tok.Light, theme.MV.BgSelection.Light); got < floorNormal {
+		t.Errorf("state.green-on-selection light %s vs bg.selection %s = %.2f, want >= %.2f (1-9 wash-out remedy — MORE contrast, never lower the floor)",
+			tok.Light, theme.MV.BgSelection.Light, got, floorNormal)
+	}
+	// Dark: the kept global state.green dark already clears 4.5 on the dark tint —
+	// proves no dark override was needed (light-only remedy).
+	if got := contrastRatio(t, tok.Dark, theme.MV.BgSelection.Dark); got < floorNormal {
+		t.Errorf("state.green-on-selection dark %s vs bg.selection %s = %.2f, want >= %.2f (dark already clears — light-only remedy)",
+			tok.Dark, theme.MV.BgSelection.Dark, got, floorNormal)
+	}
+
+	// The remedy must NOT touch the global state.green token (the foundation
+	// Sessions captures stay byte-identical; its canvas usages stay crisp).
+	if theme.MV.StateGreen.Light != "#456E1C" {
+		t.Errorf("global state.green light = %q, want unchanged %q — the remedy is on-selection-only", theme.MV.StateGreen.Light, "#456E1C")
+	}
+	if theme.MV.StateGreen.Dark != "#9ECE6A" {
+		t.Errorf("global state.green dark = %q, want unchanged %q — the remedy is on-selection-only", theme.MV.StateGreen.Dark, "#9ECE6A")
+	}
+	// And the dark on-selection green IS the global state.green dark (light-only override).
+	if tok.Dark != theme.MV.StateGreen.Dark {
+		t.Errorf("state.green-on-selection dark = %q, want = global state.green dark %q (light-only remedy)", tok.Dark, theme.MV.StateGreen.Dark)
 	}
 }

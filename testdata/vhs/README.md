@@ -19,6 +19,9 @@ harness fakes/fixtures (an import-guard test enforces this).
 |---|---|
 | `sessions-flat.tape` | vhs tape that drives the `sessions-flat` fixture and screenshots it |
 | `sessions-flat.png` | The captured frame (current design) — committed, overwritten in place so "latest" is always current |
+| `contrast-validation-{dark,light}.tape` | vhs tapes that drive the `contrast-validation` swatch (the §16.5 lock-in/bail gate, task 1-9) in each owned-canvas mode |
+| `contrast-validation-{dark,light}.png` | The captured swatch frames — labelled tint bands the human eyeballs against `#0b0c14` / `#e1e2e7` |
+| `LOCK-IN.md` | The committed lock-in/bail record (pinned hexes + derivations + ratios + a PENDING human-eyeball decision section) |
 | `trail/<screen>/<phase>-<task>.png` | **Per-task snapshots** of each screen — a committed, browsable visual history (see "Capture trail" below) |
 | `reference/sessions-modern-vivid-v2.png` | The committed Paper export of frame **Sessions — Modern Vivid v2** (the build target) — the comparison reference, kept in-repo so no live MCP is needed |
 | `*.gif` | Transient vhs byproduct (vhs requires an `Output`); **git-ignored**, not committed |
@@ -125,12 +128,22 @@ cmd/capturetool/main.go     # the separate harness binary (package main; NOT a p
 internal/capture/           # in-memory fakes + named fixtures (imported ONLY by the capture tool)
   fakes.go                  #   every tmux seam, faked: read seams return canned data; mutators are no-ops
   fixtures.go               #   FixtureByName / FixtureNames + the deterministic session sets
+  swatch.go                 #   the contrast-validation swatch (a standalone tea.Model; NOT tui.Build)
 ```
 
-The tool takes `--fixture <name>`, resolves it via `capture.FixtureByName`, builds
-the production model with `tui.Build(fixture.Deps())`, and runs the Bubble Tea
-program on the alt screen — exactly the model and launch shape `cmd/open.go`
-uses, so the captured frame is the **real** TUI.
+The tool takes `--fixture <name>`, resolves it via `resolveProgram`, and runs the
+resulting Bubble Tea model on the alt screen. Most fixtures resolve to the
+production model with `tui.Build(fixture.Deps())` — exactly the model and launch
+shape `cmd/open.go` uses, so the captured frame is the **real** TUI.
+
+**One deliberate exception:** the `contrast-validation` swatch (the §16.5
+lock-in/bail gate, task 1-9) is a standalone validation surface — a labelled set
+of tint bands on the owned canvas — that does **not** route through `tui.Build`.
+The four light-tint *surfaces* it validates (selection row, separator/footer
+borders, warning band, loading track) are built in later phases; the swatch
+validates the colour TOKENS before those phases invest in the surfaces
+(anti-sunk-cost). It is driven by `--appearance dark|light` to pin the owned
+canvas, identically to the other fixtures.
 
 ### Adding a new fixture / screen
 

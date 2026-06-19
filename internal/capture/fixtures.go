@@ -63,9 +63,11 @@ func FixtureByName(name string) (*Fixture, error) {
 
 // FixtureNames returns the sorted list of registered fixture names — the single
 // source of truth for "what can --fixture take", used by FixtureByName's error
-// and the capture tool's help text.
+// and the capture tool's help text. It includes the contrast-validation swatch
+// (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
+// *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat"}
+	names := []string{"sessions-flat", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }

@@ -41,11 +41,11 @@ func main() {
 	}
 }
 
-// run resolves the fixture into a production model and runs the Bubble Tea
+// run resolves the fixture into a renderable model and runs the Bubble Tea
 // program on the alt screen until the user (or vhs) quits. It returns any
 // resolution or program error so main can map it to a non-zero exit.
 func run(fixture, appearance string) error {
-	m, err := resolveModel(fixture, appearance)
+	m, err := resolveProgram(fixture, appearance)
 	if err != nil {
 		return err
 	}
@@ -71,6 +71,29 @@ func run(fixture, appearance string) error {
 		tui.RestoreTerminalBackground(os.Stdout, fm)
 	}
 	return nil
+}
+
+// resolveProgram maps a fixture name to the tea.Model the harness runs. Most
+// fixtures resolve to the production tui.Model via the shared tui.Build
+// constructor (resolveModel) so the capture is the REAL production frame. The
+// contrast-validation swatch (§16.5 lock-in/bail gate, task 1-9) is the one
+// exception: it is a standalone validation surface (a labelled tint swatch on the
+// owned canvas) — the four tint SURFACES it validates land in later phases, so it
+// deliberately does NOT route through tui.Build. Returning tea.Model lets run()
+// drive both identically. An invalid appearance fails loudly for either path.
+func resolveProgram(fixture, appearance string) (tea.Model, error) {
+	if fixture == capture.ContrastValidationFixture {
+		pin, err := resolveAppearance(appearance)
+		if err != nil {
+			return nil, err
+		}
+		return capture.NewContrastValidationModel(pin), nil
+	}
+	m, err := resolveModel(fixture, appearance)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // resolveModel maps a fixture name to the production tui.Model via the shared
