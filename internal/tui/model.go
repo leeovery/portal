@@ -720,12 +720,20 @@ func WithDirResolver(reader session.PaneCurrentPathReader, runner resolver.Comma
 }
 
 // sessionHelpKeys returns key.Binding entries for session-specific actions.
+//
+// DEPRECATED for the keymap source of truth: the Sessions keymap descriptor
+// (sessionsKeymap) is now authoritative for the footer (task 2-4) and the ?
+// help modal (Phase 3, §8.5). These entries remain only to keep the legacy
+// three-column footer plumbing compiling until 2-4 retires it; the §12.2
+// revision is reflected here too — the former p/x "projects" binding is now the
+// single x toggle (the dropped p alias no longer appears in any displayed
+// label).
 func sessionHelpKeys() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rename")),
 		key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill")),
-		key.NewBinding(key.WithKeys("p"), key.WithHelp("p/x", "projects")),
+		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "projects")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
 		key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "preview")),
 		// "s switch view" sits adjacent to the other view-related action
@@ -849,9 +857,29 @@ func newSessionList(items []list.Item) list.Model {
 	l.SetShowHelp(false)
 	l.KeyMap.ShowFullHelp.Unbind()
 	l.KeyMap.CloseFullHelp.Unbind()
+	pinArrowOnlyNav(&l.KeyMap)
 	l.InfiniteScrolling = true
 	brightenHelpStyles(&l)
 	return l
+}
+
+// pinArrowOnlyNav rebinds the bubbles/list nav KeyMap to the §12.2 keymap
+// revision: navigation is ↑/↓ only and paging is Ctrl+↑/↓ only. The v2
+// DefaultKeyMap re-introduces the vim aliases (h/j/k/l, g/G) and the
+// PgUp/PgDn/Home/End/b/u/f/d page-jump keys this codebase deliberately drops;
+// it also binds k to CursorUp, which would shadow the Sessions k=kill verb.
+// Rebinding here (rather than at the dispatch layer) keeps the §12.2 "arrows
+// only" rule in the single place the list itself consults, so a banned key
+// never reaches the list's own Update. GoToStart/GoToEnd are emptied (no g/G,
+// no Home/End) — the cursor-skip logic in skipHeaderRow still key.Matches
+// against the rebound bindings, so an empty binding simply never matches.
+func pinArrowOnlyNav(km *list.KeyMap) {
+	km.CursorUp.SetKeys("up")
+	km.CursorDown.SetKeys("down")
+	km.PrevPage.SetKeys("ctrl+up")
+	km.NextPage.SetKeys("ctrl+down")
+	km.GoToStart.SetKeys()
+	km.GoToEnd.SetKeys()
 }
 
 // projectHelpKeys returns key.Binding entries for the projects page.
@@ -2384,9 +2412,8 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// focused. Do NOT hoist this case above that guard.
 		case isRuneKey(msg, "s"):
 			return m.handleSwitchViewKey()
-		case isRuneKey(msg, "p"):
-			m.activePage = PageProjects
-			return m, nil
+		// x is the sole Sessions↔Projects toggle (§12.2). The former p alias
+		// (Sessions → Projects) is dropped so each key has a single meaning.
 		case isRuneKey(msg, "x"):
 			m.activePage = PageProjects
 			return m, nil

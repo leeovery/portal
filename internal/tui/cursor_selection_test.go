@@ -25,13 +25,12 @@ func newCursorTestModel(t *testing.T, items []list.Item) Model {
 	return m
 }
 
-// keyG is the bubbles/list GoToStart binding (g/home); keyShiftG is GoToEnd
-// (G/end). keyUp/keyDown drive single-row navigation.
+// keyUp/keyDown drive single-row navigation. Per §12.2 the g/G (GoToStart /
+// GoToEnd) and Home/End jump bindings are dropped — navigation is arrows only —
+// so the cursor-skip contract is exercised purely with up/down here.
 var (
-	keyG      = tea.KeyPressMsg{Code: 'g', Text: "g"}
-	keyShiftG = tea.KeyPressMsg{Code: 'G', Text: "G"}
-	keyUp     = tea.KeyPressMsg{Code: tea.KeyUp}
-	keyDown   = tea.KeyPressMsg{Code: tea.KeyDown}
+	keyUp   = tea.KeyPressMsg{Code: tea.KeyUp}
+	keyDown = tea.KeyPressMsg{Code: tea.KeyDown}
 )
 
 // selectedHeader reports whether the cursor currently rests on a HeaderItem.
@@ -118,8 +117,11 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 		items := buildByProject(sessions, project.NewIndex(projects))
 		m := newCursorTestModel(t, items)
 
-		// Move to the last row (bravo-1), then Up: it must skip H(Bravo) back to alpha-1.
-		updated, _ := m.Update(keyShiftG)
+		// Move to the last row (bravo-1) via Down — the slice is
+		// [H(Alpha), alpha-1, H(Bravo), bravo-1] and the cursor starts on
+		// alpha-1, so one Down skips H(Bravo) to bravo-1. Then Up must skip
+		// H(Bravo) back to alpha-1.
+		updated, _ := m.Update(keyDown)
 		m = updated.(Model)
 		updated, _ = m.Update(keyUp)
 		m = updated.(Model)
@@ -133,7 +135,11 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 		}
 	})
 
-	t.Run("it lands g/G on the first and last session row, never a header", func(t *testing.T) {
+	t.Run("it lands on the first and last session row via arrow nav, never a header", func(t *testing.T) {
+		// §12.2 dropped g/G/Home/End, so the extremes are reached with arrows.
+		// The skip contract must still hold at both ends: stepping Down to the
+		// last row and Up to the first must each land on a session row, never a
+		// header (here the leading H(Alpha) and the interior H(Bravo)).
 		dirA := t.TempDir()
 		dirB := t.TempDir()
 		projects := []project.Project{
@@ -150,33 +156,37 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 
 		m := newCursorTestModel(t, items)
 
-		// G → GoToEnd: last list item is a session row.
-		updated, _ := m.Update(keyShiftG)
-		m = updated.(Model)
+		// Step Down to the last row (more presses than there are rows so we
+		// settle on the end; InfiniteScrolling is off for grouped nav here).
+		for range len(items) {
+			updated, _ := m.Update(keyDown)
+			m = updated.(Model)
+		}
 		if selectedHeader(m) {
-			t.Fatalf("after G the cursor rests on a header")
+			t.Fatalf("after Down-to-end the cursor rests on a header")
 		}
 		last, ok := m.selectedSessionItem()
 		if !ok {
-			t.Fatalf("selectedSessionItem ok=false after G")
+			t.Fatalf("selectedSessionItem ok=false at the end")
 		}
 		if last.Session.Name != rows[len(rows)-1].Session.Name {
-			t.Errorf("after G, selected = %q, want %q (last session row)", last.Session.Name, rows[len(rows)-1].Session.Name)
+			t.Errorf("at the end, selected = %q, want %q (last session row)", last.Session.Name, rows[len(rows)-1].Session.Name)
 		}
 
-		// g → GoToStart: lands on the leading header, which the skip carries to
-		// the first session row.
-		updated, _ = m.Update(keyG)
-		m = updated.(Model)
+		// Step Up to the first row; the skip must carry past the leading header.
+		for range len(items) {
+			updated, _ := m.Update(keyUp)
+			m = updated.(Model)
+		}
 		if selectedHeader(m) {
-			t.Fatalf("after g the cursor rests on a header")
+			t.Fatalf("after Up-to-start the cursor rests on a header")
 		}
 		first, ok := m.selectedSessionItem()
 		if !ok {
-			t.Fatalf("selectedSessionItem ok=false after g")
+			t.Fatalf("selectedSessionItem ok=false at the start")
 		}
 		if first.Session.Name != rows[0].Session.Name {
-			t.Errorf("after g, selected = %q, want %q (first session row)", first.Session.Name, rows[0].Session.Name)
+			t.Errorf("at the start, selected = %q, want %q (first session row)", first.Session.Name, rows[0].Session.Name)
 		}
 	})
 

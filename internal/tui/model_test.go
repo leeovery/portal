@@ -2435,7 +2435,7 @@ func TestCommandPendingMode(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -2963,7 +2963,9 @@ func TestBuiltInFiltering(t *testing.T) {
 }
 
 func TestPageSwitching(t *testing.T) {
-	t.Run("p on sessions page switches to projects page", func(t *testing.T) {
+	t.Run("p on sessions page no longer switches to projects page", func(t *testing.T) {
+		// §12.2: the p → Projects alias is dropped; x is the sole toggle. p is
+		// now a no-op on the Sessions page (not bound to any action).
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
@@ -2976,12 +2978,12 @@ func TestPageSwitching(t *testing.T) {
 			t.Fatalf("expected initial page to be PageSessions, got %d", m.ActivePage())
 		}
 
-		// Press p to switch to projects page
+		// Press p — it must NOT switch to projects (the alias is gone).
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 
 		updated := model.(tui.Model)
-		if updated.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected to stay on PageSessions after p (alias dropped), got %d", updated.ActivePage())
 		}
 	})
 
@@ -2992,8 +2994,8 @@ func TestPageSwitching(t *testing.T) {
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
 
-		// Switch to projects page first
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		// Switch to projects page first (x is the sole toggle now).
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Press s to switch back to sessions page
 		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
@@ -3028,7 +3030,7 @@ func TestPageSwitching(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects first
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Press x to toggle back to sessions
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
@@ -3062,7 +3064,7 @@ func TestPageSwitching(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 
 		// Switch to projects and back
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 
 		// Press enter to verify cursor is still on bravo
@@ -3083,7 +3085,7 @@ func TestPageSwitching(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page (stub with no items)
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		view := model.View().Content
 		if !strings.Contains(view, "No saved projects") {
@@ -3107,7 +3109,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Send ProjectsLoadedMsg
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -3147,7 +3149,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3218,7 +3220,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3277,7 +3279,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3324,7 +3326,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Press q — should quit
 		_, cmd := model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
@@ -3345,7 +3347,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Press Ctrl+C — should quit
 		_, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -3366,7 +3368,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page (no items loaded)
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		view := model.View().Content
 		if !strings.Contains(view, "No saved projects") {
@@ -3385,7 +3387,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Send ProjectsLoadedMsg with error
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -3420,7 +3422,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3485,7 +3487,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page with wide width
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3545,7 +3547,7 @@ func TestProjectsPage(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects, set size, populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3579,7 +3581,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3615,7 +3617,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3670,7 +3672,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3709,7 +3711,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3748,7 +3750,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3804,7 +3806,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3844,7 +3846,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page (no items)
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 		// Press d on empty list
@@ -3874,7 +3876,7 @@ func TestDeleteProject(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3920,7 +3922,7 @@ func TestDeleteProject(t *testing.T) {
 
 		// Switch to projects page and populate
 		var model tea.Model = m
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -3983,7 +3985,7 @@ func TestProjectsStubHelpBar(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and set wide width so help bar shows
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
 		view := model.View().Content
@@ -4391,7 +4393,7 @@ func TestEscProgressiveBack(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Verify on projects page
 		if model.(tui.Model).ActivePage() != tui.PageProjects {
@@ -4522,7 +4524,7 @@ func setupEditModel(store *mockProjectStore, editor *mockProjectEditor, aliases 
 	var model tea.Model = m
 
 	// Switch to projects page and populate
-	model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
 	return model
@@ -5271,7 +5273,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		}
 
 		// Switch to projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Load projects
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -5323,7 +5325,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		model = tuiModel
 
 		// Switch to projects then back to sessions
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 
 		// Verify session filter is still applied
@@ -5350,7 +5352,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page with wide width
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
@@ -5543,7 +5545,7 @@ func TestDefaultPageSelection(t *testing.T) {
 		}
 
 		// Press p to switch to projects
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
 			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
@@ -5599,7 +5601,7 @@ func TestDefaultPageSelection(t *testing.T) {
 		}
 
 		// Press p to switch back to projects
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
 			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
@@ -5643,7 +5645,7 @@ func TestDefaultPageSelection(t *testing.T) {
 		}
 
 		// User manually switches to Projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
 			t.Fatalf("precondition: expected PageProjects after p, got %d", updated.ActivePage())
@@ -6181,7 +6183,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -6262,7 +6264,7 @@ func TestCommandPendingNKey(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: store.projects,
 		})
@@ -6343,7 +6345,7 @@ func TestCommandPendingNKey(t *testing.T) {
 		var model tea.Model = m
 
 		// Switch to projects page and populate
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: store.projects,
 		})
@@ -6526,8 +6528,15 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 			}
 		}
 
-		// Navigate to projects page
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		// With an empty session list the model defaults to the Projects page
+		// (evaluateDefaultPage), so no page toggle is needed here. (Pre-§12.2
+		// this used the inert-on-Projects p key as a redundant "navigate";
+		// after the alias drop x is the sole toggle and would bounce us back to
+		// the empty Sessions page, so we simply assert we are already on
+		// Projects.)
+		if model.(tui.Model).ActivePage() != tui.PageProjects {
+			t.Fatalf("precondition: expected default Projects page with empty sessions, got %d", model.(tui.Model).ActivePage())
+		}
 
 		// Open edit modal with e
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
@@ -6973,7 +6982,7 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		)
 		var model tea.Model = m
 
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
 			Projects: []project.Project{

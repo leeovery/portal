@@ -890,7 +890,9 @@ func TestBuildTUIModel(t *testing.T) {
 		// the OSC 11 reply exactly as the live program does so View paints the real
 		// content (the edit modal) this test asserts on.
 		model, _ = model.Update(tea.BackgroundColorMsg{Color: color.RGBA{R: 0x0b, G: 0x0c, B: 0x14, A: 0xff}})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		// x is the sole Sessions↔Projects toggle (§12.2; the former p alias is
+		// dropped). The model starts on Sessions, so x navigates to Projects.
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: projects})
 
