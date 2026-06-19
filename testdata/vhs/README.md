@@ -19,6 +19,7 @@ harness fakes/fixtures (an import-guard test enforces this).
 |---|---|
 | `sessions-flat.tape` | vhs tape that drives the `sessions-flat` fixture and screenshots it |
 | `sessions-flat.png` | The captured frame (current design) — committed, overwritten in place so "latest" is always current |
+| `trail/<screen>/<phase>-<task>.png` | **Per-task snapshots** of each screen — a committed, browsable visual history (see "Capture trail" below) |
 | `reference/sessions-modern-vivid-v2.png` | The committed Paper export of frame **Sessions — Modern Vivid v2** (the build target) — the comparison reference, kept in-repo so no live MCP is needed |
 | `*.gif` | Transient vhs byproduct (vhs requires an `Output`); **git-ignored**, not committed |
 
@@ -98,6 +99,24 @@ vhs testdata/vhs/sessions-flat.tape && shasum -a 256 testdata/vhs/sessions-flat.
 Determinism is load-bearing because the fixture data is injected **in-memory** —
 the harness reads no real config and contacts no tmux server, so the only inputs
 are the fixed fixture + the fixed font/size/dimensions pinned in the tape.
+
+## Capture trail (per-task history)
+
+The canonical `testdata/vhs/<screen>.png` is the **latest** capture — overwritten
+in place so the reviewer/human always open the current frame. But a single
+overwritten file destroys the screen's *history* once reskin tasks begin. So each
+task that (re)captures a screen also commits a permanent, task-stamped snapshot:
+
+```
+testdata/vhs/trail/<screen>/<phase>-<task>.png    # e.g. trail/sessions-flat/1-1.png
+```
+
+This gives a committed, browsable evolution of every screen — `1-1` (baseline),
+`1-3`, `1-5`, … side by side — without `git` archaeology. The orchestrator copies
+the fresh capture into the trail when it commits the task. Parity-only tasks whose
+capture is byte-identical to the prior frame reuse it (no new trail entry — the gap
+in numbering means "unchanged here"). Open the trail files in any image viewer
+(images do not render in the Claude Code terminal).
 
 ## The capture tool + fixture design
 
