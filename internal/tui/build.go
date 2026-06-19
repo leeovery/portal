@@ -4,7 +4,6 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
-	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 // Deps is the compiler-enforced seam set from which Build assembles a Model.
@@ -46,17 +45,16 @@ type Deps struct {
 	// Scalar configuration.
 	CWD         string
 	InitialMode prefs.SessionListMode
-	// Appearance is the persisted colour-scheme preference (auto by default). Like
-	// InitialMode it is a scalar with a meaningful zero value (AppearanceAuto), so
-	// Build always injects it via WithAppearance.
-	Appearance prefs.Appearance
-	// CanvasMode is the RESOLVED light/dark appearance the owned canvas (§1) is
-	// painted for — distinct from Appearance (the pref). theme.Dark is the
-	// zero-value default (the §2.6 no-answer fallback), so Build always injects it
-	// via WithCanvasMode. Detection (1-7) will resolve it from Appearance + OSC 11
-	// before constructing Deps; the capture harness injects it from its
-	// --appearance flag so the light canvas can be captured.
-	CanvasMode     theme.Mode
+	// Appearance is the persisted colour-scheme preference (auto/light/dark). It
+	// is the SINGLE driver of the owned canvas (§1): Build injects it via
+	// WithAppearance and the model resolves the painted canvas mode from it plus
+	// OSC 11 detection (the §2.6 detect-or-timeout gate). A pinned light/dark
+	// appearance paints that canvas from frame one with no detection; auto detects
+	// with a dark fallback. The offline capture harness drives a deterministic
+	// canvas by PINNING Appearance to light/dark (the pin path), so its frames are
+	// un-gated and byte-stable. There is no separate injected CanvasMode — the
+	// former temporary 1-6 seam is gone now that detection resolves the mode.
+	Appearance     prefs.Appearance
 	InitialFilter  string
 	Command        []string
 	ServerStarted  bool
@@ -107,11 +105,10 @@ func Build(deps Deps) Model {
 	// recomputes the list title after options apply so the first frame paints the
 	// correct mode heading.
 	opts = append(opts, WithInitialMode(deps.InitialMode))
-	// Appearance is always injected — AppearanceAuto is a valid explicit value.
+	// Appearance is always injected — AppearanceAuto is a valid explicit value
+	// and the sole driver of the owned canvas mode. The model resolves the
+	// painted canvas from it (pin → immediate; auto → OSC 11 detect-or-timeout).
 	opts = append(opts, WithAppearance(deps.Appearance))
-	// Canvas mode is always injected — theme.Dark is a valid explicit value and
-	// the §2.6 no-answer fallback, so an unset CanvasMode paints the dark canvas.
-	opts = append(opts, WithCanvasMode(deps.CanvasMode))
 	if deps.ModePersister != nil {
 		opts = append(opts, WithModePersister(deps.ModePersister))
 	}
@@ -126,5 +123,14 @@ func Build(deps Deps) Model {
 	if deps.InsideTmux && deps.CurrentSession != "" {
 		m = m.WithInsideTmux(deps.CurrentSession)
 	}
+	// Open the §2.6 detect-or-timeout first-paint window for the LIVE picker. New
+	// constructs an auto gate already resolved to the dark fallback (so directly
+	// constructed test models paint immediately); production opens the window here
+	// so the live program holds the neutral blank frame until OSC 11 resolves the
+	// mode — no paint-then-flip. armAppearanceDetection is a no-op on a pinned
+	// (light/dark) appearance and on a WithCanvasMode capture override, so those
+	// keep painting from frame one. The capture harness drives the pin path, so
+	// its frames stay deterministic and un-gated.
+	m.armAppearanceDetection()
 	return m
 }

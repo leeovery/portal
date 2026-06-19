@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -883,6 +884,12 @@ func TestBuildTUIModel(t *testing.T) {
 
 		// Navigate to projects page and populate
 		var model tea.Model = m
+		// Resolve the §2.6 detect-or-timeout first-paint gate: Build arms it for
+		// the default (auto) appearance, so View renders the neutral blank frame
+		// until OSC 11 detection (or the timeout) resolves the canvas mode. Deliver
+		// the OSC 11 reply exactly as the live program does so View paints the real
+		// content (the edit modal) this test asserts on.
+		model, _ = model.Update(tea.BackgroundColorMsg{Color: color.RGBA{R: 0x0b, G: 0x0c, B: 0x14, A: 0xff}})
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: projects})

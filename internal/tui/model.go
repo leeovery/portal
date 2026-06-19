@@ -185,10 +185,20 @@ type Model struct {
 	// styles take their Background(canvas) from it and the outer full-terminal
 	// fill in View() sources its whitespace background from it, so both layers
 	// always agree. theme.Dark is the zero value (the §2.6 no-answer fallback),
-	// so an unconfigured model paints the dark canvas. Detection (1-7) derives
-	// the real mode from appearance + OSC 11 and injects it via WithCanvasMode —
-	// no change to the View() wrap point.
-	canvasMode        theme.Mode
+	// so an unconfigured model paints the dark canvas. It is the painted mirror
+	// of gate.mode: every resolution (OSC 11 reply, timeout, or pin) syncs it via
+	// applyResolvedMode, so the existing render path (View / applyCanvasMode)
+	// keeps reading a single mode field.
+	canvasMode theme.Mode
+	// gate is the §2.6 detect-or-timeout first-paint mechanism and the SINGLE
+	// source of truth for whether the real canvas may paint (modeResolved()
+	// reads it). In auto mode Build opens its detect-or-timeout window via arm()
+	// and it resolves on whichever of the OSC 11 BackgroundColorMsg or the
+	// appearanceTimeoutMsg fires first; a pinned appearance (light/dark) and a
+	// directly constructed model are already resolved (the zero-value gate is
+	// resolved), so detection and the wait are skipped. canvasMode mirrors
+	// gate.mode for the render path (see syncResolvedMode).
+	gate              appearanceGate
 	selected          string
 	sessionLister     SessionLister
 	sessionKiller     SessionKiller
@@ -568,16 +578,25 @@ func WithAppearance(appearance prefs.Appearance) Option {
 	}
 }
 
-// WithCanvasMode sets the RESOLVED light/dark appearance the owned canvas is
-// painted for (§1). Both the leaf row/footer Background(canvas) styles and the
-// outer full-terminal fill in View() source their canvas colour from this single
-// value, so they can never disagree. theme.Dark is the zero-value default, so an
-// omitted option paints the dark canvas (the §2.6 no-answer fallback). This is
-// the seam task 1-7 wires the OSC 11 detection result into — it swaps the mode in
-// here without touching the View() wrap point or any call site.
+// WithCanvasMode is the test/capture-only DIRECT override of the resolved canvas
+// mode (§1): it pins canvasMode AND marks the appearance gate already resolved,
+// so the model paints that exact canvas from frame one with no OSC 11 detection
+// and no first-paint wait. It exists so tests and the offline capture harness can
+// render a deterministic mode without driving the async detection race.
+//
+// PRODUCTION never uses this seam — cmd/open.go drives the mode through the
+// appearance pref + OSC 11 detection (the appearance gate). When used, it must
+// not be combined with a non-auto appearance (the pin would win the gate
+// re-init in New); both light and dark canvases are owned-canvas paths, so a
+// direct override and an appearance pin are mutually exclusive ways to land the
+// same resolved mode.
 func WithCanvasMode(mode theme.Mode) Option {
 	return func(m *Model) {
 		m.canvasMode = mode
+		// pinned=true (and pending=false, the zero value) so the gate is resolved
+		// and New's gate-init guard preserves this direct override instead of
+		// rebuilding an auto gate over it.
+		m.gate = appearanceGate{mode: mode, pinned: true}
 	}
 }
 
@@ -942,12 +961,56 @@ func New(lister SessionLister, opts ...Option) Model {
 	// 3-9 injects the persisted mode via an Option, so opening in By Tag must
 	// paint "Sessions — by tag" on the first frame.
 	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
-	// Apply the resolved canvas mode to the leaf styles now that WithCanvasMode
-	// has run — the session row delegate and the keymap footer paint their own
-	// Background(canvas) so the foundation Sessions screen reads on the owned
-	// canvas (§1), agreeing with the outer fill in View().
-	m.applyCanvasMode()
+	// Initialise the §2.6 detect-or-timeout gate from the appearance pref now that
+	// WithAppearance has run. A pinned light/dark appearance resolves the canvas
+	// mode immediately (paint from frame one, no detection, no wait); auto is
+	// constructed RESOLVED to the dark fallback so a directly constructed model
+	// (tests, non-program callers) paints immediately. PRODUCTION opens the
+	// detect-or-timeout window explicitly via Build → arm (only for auto), so the
+	// live picker gates the first paint while a direct New(...) does not.
+	//
+	// WithCanvasMode is a test/capture-only DIRECT override: when it was applied
+	// in the options loop it set its own resolved gate AND left appearance at the
+	// auto zero value, so reconstructing the gate from auto would discard that
+	// override. Guard against that — only (re)build the gate from appearance when
+	// WithCanvasMode did NOT pin a mode (the common path), or when an explicit
+	// non-auto appearance was passed (a pin must win over a stray default gate).
+	if m.appearance != prefs.AppearanceAuto || !m.gate.pinned {
+		m.gate = newAppearanceGate(m.appearance)
+	}
+	m.syncResolvedMode()
 	return m
+}
+
+// armAppearanceDetection opens the §2.6 detect-or-timeout first-paint window on
+// an auto gate (a no-op when the appearance is pinned or a WithCanvasMode capture
+// override is in force). It is the production entry point — Build calls it so the
+// live picker holds the neutral blank frame until OSC 11 detection or the timeout
+// resolves the mode. A directly constructed model (tests, non-program callers)
+// never calls this, so it paints immediately. The method re-syncs the painted
+// fields so View observes the now-unresolved state.
+func (m *Model) armAppearanceDetection() {
+	m.gate.arm()
+	m.syncResolvedMode()
+}
+
+// modeResolved reports whether the §2.6 first-paint gate has resolved — the
+// single read View uses to decide between the neutral blank frame and the real
+// canvas. It delegates to the gate so there is no duplicated flag to keep in
+// sync: a zero-value gate (a directly constructed test model) is resolved, an
+// armed auto gate is unresolved until OSC 11 or the timeout fires.
+func (m Model) modeResolved() bool {
+	return m.gate.resolved()
+}
+
+// syncResolvedMode mirrors the gate's resolved mode onto the model's painted
+// canvasMode and re-applies the leaf canvas styles. It is called after every gate
+// transition (arm, OSC 11 reply, timeout, or pin) so the existing render path
+// keeps reading m.canvasMode while the gate owns the single-resolution race. It
+// is a no-op for the leaf styles when the mode is unchanged, but always cheap.
+func (m *Model) syncResolvedMode() {
+	m.canvasMode = m.gate.mode
+	m.applyCanvasMode()
 }
 
 // applyCanvasMode re-points the foundation Sessions screen's leaf styles at the
@@ -979,6 +1042,12 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 		sessionList: l,
 		projectList: pl,
 		activePage:  PageSessions,
+		// The zero-value gate is already resolved to the dark canvas (pending is
+		// false by default), so this directly constructed test model paints
+		// immediately — the detect-or-timeout first-paint window is opened only by
+		// the production Build path / explicit arm. Left implicit here; documented
+		// so a reader knows the blank-frame gate does not apply to struct-literal
+		// test models.
 	}
 	// Apply construction-time fallback dimensions through the size helper
 	// so each list reserves room for the manual keymap footer at every
@@ -1465,8 +1534,16 @@ func (m Model) Init() tea.Cmd {
 	// later consume the captured value for auto-appearance resolution.
 	requestBg := tea.Cmd(tea.RequestBackgroundColor)
 
+	// Arm the §2.6 detect-or-timeout deadline. The gate returns nil for a pinned
+	// (already-resolved) appearance — the pin path skips the wait entirely — and
+	// an appearanceTimeoutMsg tick for an unresolved auto gate so a non-responding
+	// terminal still resolves to the dark fallback. Batched alongside the OSC 11
+	// query so the two race; whichever fires first resolves the mode (Update),
+	// the loser is ignored (no flip). A nil cmd is harmless inside tea.Batch.
+	detectTimeout := m.gate.timeoutCmd()
+
 	if m.commandPending {
-		return tea.Batch(requestBg, m.loadProjects())
+		return tea.Batch(requestBg, detectTimeout, m.loadProjects())
 	}
 	fetchSessions := func() tea.Msg {
 		sessions, err := m.sessionLister.ListSessions()
@@ -1488,7 +1565,7 @@ func (m Model) Init() tea.Cmd {
 		// flushBufferedWarningsCmd.
 		pending := m.pendingBootstrapWarnings
 		bootstrapCompleteCmd := func() tea.Msg { return BootstrapCompleteMsg{Warnings: pending} }
-		cmds := []tea.Cmd{requestBg, fetchSessions, loadingPadTick, bootstrapCompleteCmd}
+		cmds := []tea.Cmd{requestBg, detectTimeout, fetchSessions, loadingPadTick, bootstrapCompleteCmd}
 		if loadProjects != nil {
 			cmds = append(cmds, loadProjects)
 		}
@@ -1496,9 +1573,9 @@ func (m Model) Init() tea.Cmd {
 	}
 
 	if loadProjects != nil {
-		return tea.Batch(requestBg, fetchSessions, loadProjects)
+		return tea.Batch(requestBg, detectTimeout, fetchSessions, loadProjects)
 	}
-	return tea.Batch(requestBg, fetchSessions)
+	return tea.Batch(requestBg, detectTimeout, fetchSessions)
 }
 
 // Update handles messages and updates the model.
@@ -1514,16 +1591,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle cross-view messages regardless of view state
 	switch msg := msg.(type) {
 	case tea.BackgroundColorMsg:
-		// Async, non-gating capture of the terminal's ORIGINAL background for
-		// restore-on-exit. The query was issued from Init; this stores the hex
-		// form so the launch sites can SET it back on quit (terminals that ignore
-		// the OSC 111 reset still honour the set). It deliberately does NOT touch
-		// canvasMode or trigger any re-render — the rendered frame is unchanged
-		// whether or not this message ever arrives, so the vhs captures stay
-		// byte-deterministic. The nil guard is required — BackgroundColorMsg.String()
-		// panics on a nil Color (a no-answer), which leaves originalBg empty.
+		// Two independent jobs ride this one message:
+		//
+		// 1. Capture the terminal's ORIGINAL background for restore-on-exit. The
+		//    query was issued from Init; this stores the hex form so the launch
+		//    sites can SET it back on quit (terminals that ignore the OSC 111
+		//    reset still honour the set). The nil guard is required —
+		//    BackgroundColorMsg.String() panics on a nil Color (a no-answer),
+		//    which leaves originalBg empty.
+		//
+		// 2. Resolve the §2.6 appearance gate in AUTO mode. msg.IsDark() is
+		//    nil-safe (nil → dark), so a no-answer-shaped reply collapses to the
+		//    dark fallback. resolveFromDark is the single-resolution core: it is a
+		//    no-op once the gate already resolved (a pinned appearance, or the
+		//    timeout already won the race), so a late OSC 11 reply never flips the
+		//    painted canvas. COLORFGBG is deliberately NOT consulted here — OSC 11
+		//    is authoritative; the weak COLORFGBG hint must never override it.
 		if msg.Color != nil {
 			m.originalBg = msg.String()
+		}
+		if m.gate.resolveFromDark(msg.IsDark()) {
+			m.syncResolvedMode()
+		}
+		return m, nil
+	case appearanceTimeoutMsg:
+		// The detect-or-timeout deadline fired. If the OSC 11 reply has not yet
+		// resolved the gate, fall through to the dark fallback (§2.6). resolveDark
+		// is a no-op once already resolved, so a timeout that lost the race (the
+		// reply arrived first) never re-resolves — no second resolution, no flip.
+		if m.gate.resolveDark() {
+			m.syncResolvedMode()
 		}
 		return m, nil
 	case SessionsMsg:
@@ -2405,6 +2502,24 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 // (viewLoading / viewProjectList / viewSessionList / preview.View) a plain
 // string builder, so the render logic is unchanged from v1 (parity).
 func (m Model) View() tea.View {
+	// §2.6 / §10.2 first-paint gate: in auto mode, hold the real canvas/content
+	// paint until the appearance gate resolves (the OSC 11 reply or the timeout).
+	// Painting the real canvas before the mode is decided would risk a visible
+	// flip — a defect. The wait is tens of ms (appearanceDetectTimeout), invisible
+	// against the multi-hundred-ms bootstrap, so the user never sees the blank.
+	// A pinned appearance constructs the gate already resolved, so this branch is
+	// never taken for light/dark pins — they paint from frame one.
+	//
+	// Scope: the gate holds the owned-canvas pages (the foundation Sessions
+	// screen and the views composed over fillCanvas). The cold-path loading page
+	// (§10) keeps its current un-gated render here — Phase 5 reworks it to gate on
+	// this same mechanism (the reusable appearanceGate). Excluding it now keeps
+	// the loading-page behaviour unchanged while the gate is wired into Sessions.
+	if !m.modeResolved() && m.activePage != PageLoading {
+		v := tea.NewView(m.blankFrame())
+		v.AltScreen = true
+		return v
+	}
 	v := tea.NewView(m.fillCanvas(m.viewString()))
 	v.AltScreen = true
 	// Gutter aid for the owned canvas (§1): set the screen's background colour
@@ -2416,6 +2531,31 @@ func (m Model) View() tea.View {
 	// through mid-line gaps. This stays as a belt-and-braces gutter fill only.
 	v.BackgroundColor = theme.MV.Canvas.ColorFor(m.canvasMode)
 	return v
+}
+
+// blankFrame is the neutral pre-resolution frame held by the §2.6 first-paint
+// gate while the appearance is still being detected. It paints NO canvas
+// background — the light/dark mode is undecided, so committing to either canvas
+// here is exactly the flip the gate exists to avoid. It is a full-terminal block
+// of plain spaces (no SGR), sized to the cached terminal dimensions with the same
+// 80x24 zero-size fallback as fillCanvas, so the terminal shows an empty screen
+// (the user's own background) for the tens-of-ms wait rather than a half-painted
+// canvas. The wait is invisible against the multi-hundred-ms bootstrap.
+func (m Model) blankFrame() string {
+	w := m.termWidth
+	h := m.termHeight
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+	blank := strings.Repeat(" ", w)
+	lines := make([]string, h)
+	for i := range lines {
+		lines[i] = blank
+	}
+	return strings.Join(lines, "\n")
 }
 
 // fillCanvas is the SINGLE outer full-terminal canvas fill (§1) — the LAST

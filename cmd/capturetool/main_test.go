@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/tui"
-	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 // TestResolveModel verifies the capture tool resolves a fixture name into a real
@@ -45,33 +45,34 @@ func TestResolveModel(t *testing.T) {
 	})
 }
 
-// TestResolveMode verifies the --appearance flag maps to the owned-canvas
-// theme.Mode the model paints (detection 1-7 is not landed, so the harness
-// injects the mode explicitly).
-func TestResolveMode(t *testing.T) {
-	t.Run("dark resolves to theme.Dark", func(t *testing.T) {
-		mode, err := resolveMode("dark")
+// TestResolveAppearance verifies the --appearance flag maps to the pinned
+// prefs.Appearance the model resolves the owned canvas from. The harness drives
+// the pin path (no OSC 11 detection / no first-paint wait), so the captured
+// canvas is deterministic while still exercising the real §2.6 resolution.
+func TestResolveAppearance(t *testing.T) {
+	t.Run("dark pins AppearanceDark", func(t *testing.T) {
+		got, err := resolveAppearance("dark")
 		if err != nil {
-			t.Fatalf("resolveMode(dark): %v", err)
+			t.Fatalf("resolveAppearance(dark): %v", err)
 		}
-		if mode != theme.Dark {
-			t.Errorf("resolveMode(dark) = %v, want theme.Dark", mode)
+		if got != prefs.AppearanceDark {
+			t.Errorf("resolveAppearance(dark) = %v, want AppearanceDark", got)
 		}
 	})
 
-	t.Run("light resolves to theme.Light", func(t *testing.T) {
-		mode, err := resolveMode("light")
+	t.Run("light pins AppearanceLight", func(t *testing.T) {
+		got, err := resolveAppearance("light")
 		if err != nil {
-			t.Fatalf("resolveMode(light): %v", err)
+			t.Fatalf("resolveAppearance(light): %v", err)
 		}
-		if mode != theme.Light {
-			t.Errorf("resolveMode(light) = %v, want theme.Light", mode)
+		if got != prefs.AppearanceLight {
+			t.Errorf("resolveAppearance(light) = %v, want AppearanceLight", got)
 		}
 	})
 
 	t.Run("invalid value is an error", func(t *testing.T) {
-		if _, err := resolveMode("purple"); err == nil {
-			t.Fatal("resolveMode(purple) returned nil error, want error")
+		if _, err := resolveAppearance("purple"); err == nil {
+			t.Fatal("resolveAppearance(purple) returned nil error, want error")
 		}
 	})
 }

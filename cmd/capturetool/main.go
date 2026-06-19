@@ -26,8 +26,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/capture"
+	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/tui"
-	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 func main() {
@@ -74,14 +74,18 @@ func run(fixture, appearance string) error {
 }
 
 // resolveModel maps a fixture name to the production tui.Model via the shared
-// tui.Build constructor, injecting the owned-canvas mode resolved from the
-// --appearance flag. An empty or unknown fixture, or an invalid appearance, is
-// an error so a bad flag fails loudly.
+// tui.Build constructor, PINNING the owned-canvas appearance from the
+// --appearance flag. Driving the pin (not a direct canvas-mode injection)
+// exercises the real §2.6 resolution path: a pinned light/dark appearance
+// resolves the canvas immediately (no OSC 11 detection, no first-paint wait), so
+// the capture is byte-deterministic AND covers the production pin path. An empty
+// or unknown fixture, or an invalid appearance, is an error so a bad flag fails
+// loudly.
 func resolveModel(fixture, appearance string) (tui.Model, error) {
 	if fixture == "" {
 		return tui.Model{}, fmt.Errorf("--fixture is required (available: %v)", capture.FixtureNames())
 	}
-	mode, err := resolveMode(appearance)
+	pin, err := resolveAppearance(appearance)
 	if err != nil {
 		return tui.Model{}, err
 	}
@@ -90,22 +94,22 @@ func resolveModel(fixture, appearance string) (tui.Model, error) {
 		return tui.Model{}, err
 	}
 	deps := fx.Deps()
-	deps.CanvasMode = mode
+	deps.Appearance = pin
 	return tui.Build(deps), nil
 }
 
-// resolveMode maps the --appearance flag to the resolved owned-canvas theme.Mode
-// the model paints. Detection (task 1-7) is not landed, so the capture harness
-// injects the mode explicitly: dark renders the #0b0c14 canvas, light the
-// #e1e2e7 canvas. An unrecognised value fails loudly rather than silently
-// defaulting, so a typo in a tape is caught.
-func resolveMode(appearance string) (theme.Mode, error) {
+// resolveAppearance maps the --appearance flag to the pinned prefs.Appearance the
+// model resolves the owned canvas from: dark pins the #0b0c14 canvas, light the
+// #e1e2e7 canvas. Pinning skips OSC 11 detection and the first-paint wait, so the
+// capture renders the correct canvas from frame one. An unrecognised value fails
+// loudly rather than silently defaulting, so a typo in a tape is caught.
+func resolveAppearance(appearance string) (prefs.Appearance, error) {
 	switch appearance {
 	case "dark":
-		return theme.Dark, nil
+		return prefs.AppearanceDark, nil
 	case "light":
-		return theme.Light, nil
+		return prefs.AppearanceLight, nil
 	default:
-		return theme.Dark, fmt.Errorf("--appearance must be dark or light, got %q", appearance)
+		return prefs.AppearanceAuto, fmt.Errorf("--appearance must be dark or light, got %q", appearance)
 	}
 }
