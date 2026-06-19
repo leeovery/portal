@@ -17,6 +17,7 @@ import (
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 // page tracks which page the TUI is currently displaying.
@@ -629,11 +630,15 @@ func sessionHelpKeys() []key.Binding {
 	}
 }
 
-// brightenHelpStyles makes the help bar text lighter so it's easier to read.
+// brightenHelpStyles re-points the footer keymap colours onto the §2.9 role
+// tokens (colour source only — the structural footer restyle is Phase 2):
+// key glyphs use the footer key-hint role (accent.blue), labels the detail
+// role (text.detail), and the inter-entry separator / ellipsis is decorative
+// chrome (text.faint — decorative-only, never functional text).
 func brightenHelpStyles(l *list.Model) {
-	keyColor := lipgloss.Color("#999999")
-	descColor := lipgloss.Color("#777777")
-	sepColor := lipgloss.Color("#555555")
+	keyColor := theme.MV.AccentBlue.Color()
+	descColor := theme.MV.TextDetail.Color()
+	sepColor := theme.MV.TextFaint.Color()
 	l.Help.Styles.ShortKey = lipgloss.NewStyle().Foreground(keyColor)
 	l.Help.Styles.ShortDesc = lipgloss.NewStyle().Foreground(descColor)
 	l.Help.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(sepColor)
@@ -2389,7 +2394,7 @@ func insertRowBelowTitle(listView, row string) string {
 // the two rows have distinct lifecycles and the signpost must remain visually
 // distinct from a transient flash. Package-level + immutable (lipgloss value
 // semantics prevent mutation bleed across renders).
-var byTagSignpostStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Italic(true)
+var byTagSignpostStyle = lipgloss.NewStyle().Foreground(theme.MV.TextStrong.Color()).Italic(true)
 
 // byTagSignpostText is the exact, persistent signpost wording rendered in By
 // Tag mode when no project carries any tag (spec § Empty states → By Tag with
@@ -2405,10 +2410,11 @@ func renderByTagSignpostRow() string {
 }
 
 // flashRowStyle is a package-level immutable lipgloss style; lipgloss
-// value semantics prevent mutation bleed across renders. Subdued / dim
-// foreground keeps the chrome low-emphasis (spec § Inline flash —
-// feature-local infrastructure > Render: "styled row").
-var flashRowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+// value semantics prevent mutation bleed across renders. The inline-flash
+// message uses the warning-flash message token (text.on-warning) per §2.9 /
+// §11.2 — colour source only here; the band's bg.warning tint, ▌ left-bar, and
+// ⚠/✓ glyph are the Phase 2 structural restyle.
+var flashRowStyle = lipgloss.NewStyle().Foreground(theme.MV.TextOnWarning.Color())
 
 // renderFlashRow returns the styled flash row for the Sessions page.
 // flashText is rendered verbatim (no truncation, no transformation); the

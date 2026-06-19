@@ -8,13 +8,20 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 var (
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
-	nameStyle     = lipgloss.NewStyle().Bold(true)
-	detailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
-	attachedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
+	// cursorStyle marks the cursor/selection — the primary accent role
+	// (accent.violet); the former pink ANSI 212 was a scattered literal.
+	cursorStyle = lipgloss.NewStyle().Foreground(theme.MV.AccentViolet.Color())
+	nameStyle   = lipgloss.NewStyle().Bold(true)
+	// detailStyle paints functional metadata (the window count) — this is
+	// functional text, so it maps to text.detail, NOT decorative text.faint.
+	detailStyle = lipgloss.NewStyle().Foreground(theme.MV.TextDetail.Color())
+	// attachedStyle paints the "● attached" live marker — the one positive/live
+	// signal, so state.green; reserved for live/positive, never a chip/decoration.
+	attachedStyle = lipgloss.NewStyle().Foreground(theme.MV.StateGreen.Color())
 	// headingStyle dims the group heading so it reads as a separator rather
 	// than a selectable row. Layered alongside the existing delegate styles
 	// per spec § Group headers (dimmed).

@@ -8,11 +8,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 var (
 	projectNameStyle = lipgloss.NewStyle().Bold(true)
-	projectPathStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
+	// projectPathStyle paints the project's path — functional metadata, so
+	// text.detail (not decorative text.faint).
+	projectPathStyle = lipgloss.NewStyle().Foreground(theme.MV.TextDetail.Color())
 )
 
 // ProjectItem wraps a project.Project and implements the list.Item interface
