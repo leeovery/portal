@@ -170,9 +170,14 @@ type Model struct {
 	// builders so a grouped render is map lookups, not an
 	// O(sessions × projects) CanonicalDirKey/EvalSymlinks scan. It MUST be
 	// rebuilt whenever projects changes — always mutate both via setProjects.
-	projectIndex      project.Index
-	sessionListMode   prefs.SessionListMode
-	modePersister     ModePersister
+	projectIndex    project.Index
+	sessionListMode prefs.SessionListMode
+	modePersister   ModePersister
+	// appearance is the persisted colour-scheme preference read once at TUI
+	// construction (WithAppearance). The model only stores it here; honouring it
+	// (skip detection + first-paint wait) is a later task. AppearanceAuto is the
+	// zero-value default, so an omitted option leaves the model in auto.
+	appearance        prefs.Appearance
 	selected          string
 	sessionLister     SessionLister
 	sessionKiller     SessionKiller
@@ -513,6 +518,18 @@ func WithInitialMode(mode prefs.SessionListMode) Option {
 func WithModePersister(p ModePersister) Option {
 	return func(m *Model) {
 		m.modePersister = p
+	}
+}
+
+// WithAppearance sets the persisted colour-scheme preference (auto/light/dark) the
+// model opens with. Production wiring reads it from prefs.json (via cmd/open.go's
+// loadPrefsStore + Store.LoadAppearance, tolerant to AppearanceAuto) and injects it
+// here, sibling to WithInitialMode. The model only STORES the value at this point;
+// honouring it (skip detection + first-paint wait) is a later task. AppearanceAuto
+// is the zero-value default, so omitting the option leaves the model in auto.
+func WithAppearance(appearance prefs.Appearance) Option {
+	return func(m *Model) {
+		m.appearance = appearance
 	}
 }
 

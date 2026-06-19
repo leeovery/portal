@@ -43,8 +43,12 @@ type Deps struct {
 	ModePersister   ModePersister
 
 	// Scalar configuration.
-	CWD            string
-	InitialMode    prefs.SessionListMode
+	CWD         string
+	InitialMode prefs.SessionListMode
+	// Appearance is the persisted colour-scheme preference (auto by default). Like
+	// InitialMode it is a scalar with a meaningful zero value (AppearanceAuto), so
+	// Build always injects it via WithAppearance.
+	Appearance     prefs.Appearance
 	InitialFilter  string
 	Command        []string
 	ServerStarted  bool
@@ -95,6 +99,8 @@ func Build(deps Deps) Model {
 	// recomputes the list title after options apply so the first frame paints the
 	// correct mode heading.
 	opts = append(opts, WithInitialMode(deps.InitialMode))
+	// Appearance is always injected — AppearanceAuto is a valid explicit value.
+	opts = append(opts, WithAppearance(deps.Appearance))
 	if deps.ModePersister != nil {
 		opts = append(opts, WithModePersister(deps.ModePersister))
 	}

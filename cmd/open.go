@@ -343,6 +343,7 @@ type tuiConfig struct {
 	dirReader       session.PaneCurrentPathReader
 	dirRunner       resolver.CommandRunner
 	initialMode     prefs.SessionListMode
+	appearance      prefs.Appearance
 	modePersister   tui.ModePersister
 	cwd             string
 	insideTmux      bool
@@ -373,6 +374,7 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		ModePersister:   cfg.modePersister,
 		CWD:             cfg.cwd,
 		InitialMode:     cfg.initialMode,
+		Appearance:      cfg.appearance,
 		InitialFilter:   initialFilter,
 		Command:         command,
 		ServerStarted:   cfg.serverStarted,
@@ -443,6 +445,15 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	if prefsStore != nil {
 		initialMode, _ = prefsStore.Load()
 	}
+	// Read the persisted appearance preference from the SAME prefsStore instance.
+	// LoadAppearance is tolerant — every degenerate case collapses to AppearanceAuto
+	// — so the discarded error is acceptable: a read failure can only yield Auto,
+	// which is the default detection behaviour anyway. The model only stores it for
+	// now; honouring it (skip detection + first-paint wait) is a later task.
+	appearance := prefs.AppearanceAuto
+	if prefsStore != nil {
+		appearance, _ = prefsStore.LoadAppearance()
+	}
 
 	// Resolve the connector once. It is used post-TUI by processTUIResult
 	// for both Sessions-page Enter and Preview-page Enter. Both
@@ -482,6 +493,7 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		dirReader:     client,
 		dirRunner:     &resolver.RealCommandRunner{},
 		initialMode:   initialMode,
+		appearance:    appearance,
 		cwd:           cwd,
 		serverStarted: serverStarted,
 	}
