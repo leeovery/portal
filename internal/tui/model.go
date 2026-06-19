@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"slices"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
@@ -177,7 +179,16 @@ type Model struct {
 	// construction (WithAppearance). The model only stores it here; honouring it
 	// (skip detection + first-paint wait) is a later task. AppearanceAuto is the
 	// zero-value default, so an omitted option leaves the model in auto.
-	appearance        prefs.Appearance
+	appearance prefs.Appearance
+	// canvasMode is the RESOLVED light/dark appearance the owned canvas (§1) is
+	// painted for — distinct from appearance (the pref). The leaf row/footer
+	// styles take their Background(canvas) from it and the outer full-terminal
+	// fill in View() sources its whitespace background from it, so both layers
+	// always agree. theme.Dark is the zero value (the §2.6 no-answer fallback),
+	// so an unconfigured model paints the dark canvas. Detection (1-7) derives
+	// the real mode from appearance + OSC 11 and injects it via WithCanvasMode —
+	// no change to the View() wrap point.
+	canvasMode        theme.Mode
 	selected          string
 	sessionLister     SessionLister
 	sessionKiller     SessionKiller
@@ -216,6 +227,21 @@ type Model struct {
 
 	// Terminal dimensions (cached for re-applying after data loads)
 	termWidth, termHeight int
+
+	// originalBg is the terminal's ACTUAL background colour as reported by the
+	// OSC 11 query (tea.RequestBackgroundColor) issued from Init, captured for
+	// RESTORE-ON-EXIT only. It is a hex string like "#1e1e2e" (empty if no
+	// response ever arrives). Distinct from canvasMode (Portal's CHOSEN canvas):
+	// this is what the terminal looked like before Portal painted, so the launch
+	// sites can SET it back on exit (OSC 11 set) — terminals that ignore the
+	// OSC 111 reset (mosh/Blink) still honour the set, so the canvas colour does
+	// not stick after Portal quits.
+	//
+	// Capture is ASYNC and NON-GATING: the first paint never waits on this. The
+	// detect-or-timeout first-paint gate and the auto-appearance resolution that
+	// consume this captured value are a later task (1-7) — only the fire-and-
+	// forget capture lives here.
+	originalBg string
 
 	// Preview page seams and live model. enumerator and reader are
 	// constructor-injected at TUI startup (wired in task 2-7) — declared
@@ -440,6 +466,15 @@ func (m Model) CWD() string {
 	return m.cwd
 }
 
+// OriginalBackground returns the terminal's original background colour as
+// captured via the OSC 11 query (a hex string like "#1e1e2e"), or empty if no
+// response ever arrived. The program-launch sites read it after p.Run() returns
+// and, when non-empty, SET it back on exit via RestoreTerminalBackground so the
+// owned canvas does not stick on terminals that ignore the OSC 111 reset.
+func (m Model) OriginalBackground() string {
+	return m.originalBg
+}
+
 // WithInitialFilter returns a copy of the Model with the initial filter set.
 // The filter is applied to the session list after items load.
 func (m Model) WithInitialFilter(filter string) Model {
@@ -530,6 +565,19 @@ func WithModePersister(p ModePersister) Option {
 func WithAppearance(appearance prefs.Appearance) Option {
 	return func(m *Model) {
 		m.appearance = appearance
+	}
+}
+
+// WithCanvasMode sets the RESOLVED light/dark appearance the owned canvas is
+// painted for (§1). Both the leaf row/footer Background(canvas) styles and the
+// outer full-terminal fill in View() source their canvas colour from this single
+// value, so they can never disagree. theme.Dark is the zero-value default, so an
+// omitted option paints the dark canvas (the §2.6 no-answer fallback). This is
+// the seam task 1-7 wires the OSC 11 detection result into — it swaps the mode in
+// here without touching the View() wrap point or any call site.
+func WithCanvasMode(mode theme.Mode) Option {
+	return func(m *Model) {
+		m.canvasMode = mode
 	}
 }
 
@@ -663,6 +711,32 @@ func brightenHelpStyles(l *list.Model) {
 	l.Help.Styles.FullDesc = lipgloss.NewStyle().Foreground(descColor)
 	l.Help.Styles.FullSeparator = lipgloss.NewStyle().Foreground(sepColor)
 	l.Help.Styles.Ellipsis = lipgloss.NewStyle().Foreground(sepColor)
+}
+
+// canvasHelpStyles re-points the footer keymap help styles onto the §2.9 role
+// tokens AND paints each through Background(canvas) for the resolved mode, so the
+// footer (a leaf surface of the foundation Sessions screen, §1) renders on the
+// owned canvas. It mirrors brightenHelpStyles' colour roles exactly — only the
+// canvas background and the mode-resolved foregrounds differ — and additionally
+// backgrounds the HelpStyle wrapper so the footer's own padding cells are canvas
+// too. The outer fill in View() pads the line-ends; this fills the cells behind
+// the footer glyphs and their inter-glyph spacers.
+func canvasHelpStyles(l *list.Model, mode theme.Mode) {
+	canvas := theme.MV.Canvas.ColorFor(mode)
+	keyColor := theme.MV.AccentBlue.ColorFor(mode)
+	descColor := theme.MV.TextDetail.ColorFor(mode)
+	sepColor := theme.MV.TextFaint.ColorFor(mode)
+	onCanvas := func(fg color.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(fg).Background(canvas)
+	}
+	l.Help.Styles.ShortKey = onCanvas(keyColor)
+	l.Help.Styles.ShortDesc = onCanvas(descColor)
+	l.Help.Styles.ShortSeparator = onCanvas(sepColor)
+	l.Help.Styles.FullKey = onCanvas(keyColor)
+	l.Help.Styles.FullDesc = onCanvas(descColor)
+	l.Help.Styles.FullSeparator = onCanvas(sepColor)
+	l.Help.Styles.Ellipsis = onCanvas(sepColor)
+	l.Styles.HelpStyle = l.Styles.HelpStyle.Background(canvas)
 }
 
 // sessionListTitleForMode computes the session list title for the active
@@ -868,7 +942,31 @@ func New(lister SessionLister, opts ...Option) Model {
 	// 3-9 injects the persisted mode via an Option, so opening in By Tag must
 	// paint "Sessions — by tag" on the first frame.
 	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
+	// Apply the resolved canvas mode to the leaf styles now that WithCanvasMode
+	// has run — the session row delegate and the keymap footer paint their own
+	// Background(canvas) so the foundation Sessions screen reads on the owned
+	// canvas (§1), agreeing with the outer fill in View().
+	m.applyCanvasMode()
 	return m
+}
+
+// applyCanvasMode re-points the foundation Sessions screen's leaf styles at the
+// model's resolved canvasMode: the session row delegate paints every run through
+// Background(canvas) (SessionDelegate.Mode), and the keymap footer's help styles
+// carry the same canvas background. newSessionList builds with the Dark default
+// before the WithCanvasMode option is known; this runs once in New after the
+// options apply, so the first frame paints the correct canvas. Scope is the
+// foundation Sessions screen (per the canvas task); the projects screen's leaf
+// restyle is a later phase, and the outer fill in View() paints around it.
+func (m *Model) applyCanvasMode() {
+	m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode})
+	canvasHelpStyles(&m.sessionList, m.canvasMode)
+	// Background the title bar so its leading left-pad cells (bubbles/list's
+	// TitleBar PaddingLeft) are canvas rather than the terminal background. The
+	// "Sessions" title box keeps its own colour (the wordmark/header chrome
+	// restyle is Phase 2); this only paints the padding around it.
+	canvas := theme.MV.Canvas.ColorFor(m.canvasMode)
+	m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.Background(canvas)
 }
 
 // NewModelWithSessions creates a Model pre-populated with sessions, for testing.
@@ -905,8 +1003,33 @@ func (m *Model) applyListSize(l *list.Model, bindings []key.Binding, width, heig
 // applySessionListSize is the per-page wrapper that owns the
 // (&m.sessionList, sessionFooterBindings(&m.sessionList)) pairing so call
 // sites cannot pair the wrong list with the wrong bindings function.
+//
+// It also subtracts the height of any active notice band (the §11.2 flash row
+// and/or the By-Tag "No tags yet" signpost) inserted beneath the title by
+// viewSessionList, so the composed Sessions view stays within termH. This is the
+// "list height recompute underneath the fill" of §1: when a band appears or
+// clears the list reserves one fewer / one more row and the outer canvas fill
+// simply re-pads to termH — the one-row-per-delegate pagination invariant (§3.5
+// / §4.1) holds and the frame never overflows the viewport.
 func (m *Model) applySessionListSize(width, height int) {
-	m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), width, height)
+	m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), width, height-m.sessionBandHeight())
+}
+
+// sessionBandHeight returns the total rendered height of the notice bands
+// viewSessionList inserts beneath the title — the persistent By-Tag signpost and
+// the transient inline flash. It is the amount applySessionListSize reserves out
+// of the list's height budget so the bands never push the composed view past
+// termH. Both are at most one row each in v1, but the height is measured (not
+// hardcoded) so a future multi-line band stays correct.
+func (m *Model) sessionBandHeight() int {
+	h := 0
+	if m.byTagSignpost {
+		h += lipgloss.Height(renderByTagSignpostRow())
+	}
+	if m.flashText != "" {
+		h += lipgloss.Height(m.renderFlashRow())
+	}
+	return h
 }
 
 // applyProjectListSize is the per-page wrapper that owns the
@@ -1253,19 +1376,41 @@ func (m *Model) reanchorSessionCursor(name string) {
 // clear must capture the post-bump generation and compare against the
 // live flashGen on fire so a stale tick from a superseded flash cannot
 // early-clear the current one (spec § Replacement on rapid successive
-// bails). Pure state primitive — no render, no scheduling. setFlash("")
-// still bumps the generation; the caller decides what counts as a flash.
+// bails). setFlash("") still bumps the generation; the caller decides what
+// counts as a flash.
+//
+// It also re-syncs the session list layout (resyncSessionLayout) so the list
+// reserves a row for the inserted flash band and the composed view stays within
+// termH — the §1 "list height recompute underneath the fill". The re-sync is a
+// no-op until the first WindowSizeMsg sets the dimensions, so the gen/text state
+// primitive remains observable in isolation on a zero-size model.
 func (m *Model) setFlash(text string) {
 	m.flashGen++
 	m.flashText = text
+	m.resyncSessionLayout()
 }
 
 // clearFlash zeros flashText, leaving flashGen untouched. Idempotent: a
 // clear of an already-cleared state is a no-op observable to callers.
 // flashGen is preserved so any in-flight ticks scheduled before the clear
-// continue to compare against the same monotonic sequence.
+// continue to compare against the same monotonic sequence. Like setFlash it
+// re-syncs the session list layout so the row reserved for the (now cleared)
+// band is returned to the list under the fill.
 func (m *Model) clearFlash() {
 	m.flashText = ""
+	m.resyncSessionLayout()
+}
+
+// resyncSessionLayout re-applies the session list size for the current notice
+// band state, so a band appearing or clearing recomputes the list height
+// underneath the outer canvas fill (§1). It no-ops before the first
+// WindowSizeMsg (dimensions still zero), keeping the flash state primitives
+// observable on a bare Model{} in unit tests.
+func (m *Model) resyncSessionLayout() {
+	if m.termWidth <= 0 || m.termHeight <= 0 {
+		return
+	}
+	m.applySessionListSize(m.termWidth, m.termHeight)
 }
 
 // loadProjects returns a command that cleans stale projects and loads the list.
@@ -1310,8 +1455,18 @@ func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
 // the bootstrap orchestrator (see task 5-7); both are required to
 // dismiss the loading page.
 func (m Model) Init() tea.Cmd {
+	// Capture the terminal's original background for RESTORE-ON-EXIT (§
+	// background restore-on-exit). tea.RequestBackgroundColor is itself a tea.Cmd
+	// (func() tea.Msg) that emits the OSC 11 query ESC]11;? — its
+	// tea.BackgroundColorMsg response is stored in Update. This is ASYNC and
+	// NON-GATING: it is batched alongside whatever Init already returns, never
+	// gating the first paint, and a missing response simply leaves originalBg
+	// empty. It is distinct from canvasMode (Portal's chosen canvas); 1-7 will
+	// later consume the captured value for auto-appearance resolution.
+	requestBg := tea.Cmd(tea.RequestBackgroundColor)
+
 	if m.commandPending {
-		return m.loadProjects()
+		return tea.Batch(requestBg, m.loadProjects())
 	}
 	fetchSessions := func() tea.Msg {
 		sessions, err := m.sessionLister.ListSessions()
@@ -1333,7 +1488,7 @@ func (m Model) Init() tea.Cmd {
 		// flushBufferedWarningsCmd.
 		pending := m.pendingBootstrapWarnings
 		bootstrapCompleteCmd := func() tea.Msg { return BootstrapCompleteMsg{Warnings: pending} }
-		cmds := []tea.Cmd{fetchSessions, loadingPadTick, bootstrapCompleteCmd}
+		cmds := []tea.Cmd{requestBg, fetchSessions, loadingPadTick, bootstrapCompleteCmd}
 		if loadProjects != nil {
 			cmds = append(cmds, loadProjects)
 		}
@@ -1341,9 +1496,9 @@ func (m Model) Init() tea.Cmd {
 	}
 
 	if loadProjects != nil {
-		return tea.Batch(fetchSessions, loadProjects)
+		return tea.Batch(requestBg, fetchSessions, loadProjects)
 	}
-	return fetchSessions
+	return tea.Batch(requestBg, fetchSessions)
 }
 
 // Update handles messages and updates the model.
@@ -1358,6 +1513,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle cross-view messages regardless of view state
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		// Async, non-gating capture of the terminal's ORIGINAL background for
+		// restore-on-exit. The query was issued from Init; this stores the hex
+		// form so the launch sites can SET it back on quit (terminals that ignore
+		// the OSC 111 reset still honour the set). It deliberately does NOT touch
+		// canvasMode or trigger any re-render — the rendered frame is unchanged
+		// whether or not this message ever arrives, so the vhs captures stay
+		// byte-deterministic. The nil guard is required — BackgroundColorMsg.String()
+		// panics on a nil Color (a no-answer), which leaves originalBg empty.
+		if msg.Color != nil {
+			m.originalBg = msg.String()
+		}
+		return m, nil
 	case SessionsMsg:
 		if msg.Err != nil {
 			return m, tea.Quit
@@ -2237,9 +2405,285 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 // (viewLoading / viewProjectList / viewSessionList / preview.View) a plain
 // string builder, so the render logic is unchanged from v1 (parity).
 func (m Model) View() tea.View {
-	v := tea.NewView(m.viewString())
+	v := tea.NewView(m.fillCanvas(m.viewString()))
 	v.AltScreen = true
+	// Gutter aid for the owned canvas (§1): set the screen's background colour
+	// (OSC 11) to the mode-matched canvas so the terminal's padding/gutter OUTSIDE
+	// the rendered grid reads on the canvas too, on terminals that honour it
+	// (Ghostty). In-grid correctness no longer DEPENDS on this — fillCanvas's
+	// per-line backfill now paints every interior cell with an explicit canvas
+	// SGR, so mosh/Blink (which ignore OSC 11) no longer bleed the terminal theme
+	// through mid-line gaps. This stays as a belt-and-braces gutter fill only.
+	v.BackgroundColor = theme.MV.Canvas.ColorFor(m.canvasMode)
 	return v
+}
+
+// fillCanvas is the SINGLE outer full-terminal canvas fill (§1) — the LAST
+// layer wrapped over the already-composed per-page view (header + any notice
+// band + list + footer). It pads every content line to the full terminal width
+// and fills the full terminal height with the mode-matched canvas background, so
+// no edge bleeds at line ends and no mid-screen row is left unpainted. It is an
+// OUTER WRAP, not per-delegate painting: the list's width/height budget is
+// unchanged, so the one-row-per-delegate pagination invariant (§3.5 / §4.1) is
+// untouched — a dynamic vertical change (e.g. the §11.2 flash band) recomputes
+// the list height UNDERNEATH the fill, which simply re-pads to termH.
+//
+// It pads each line INDIVIDUALLY to the terminal width (rather than via
+// lipgloss.Place, which pads only the gap BEYOND the single widest line — so a
+// content line already at the terminal width would suppress padding of every
+// shorter line). Each line is first stripped of trailing background-less spaces
+// (the raw block-padding bubbles/list appends to its shorter lines — the title
+// bar and pagination dots — which would otherwise leave a terminal-bg seam), so
+// the canvas pad owns every line's trailing region. Styled trailing cells (the
+// delegate's own canvas runs) end in a reset, not a bare space, and survive.
+// Rows beyond the composed content are emitted as full-width canvas blanks up to
+// termH; content taller than termH is clamped so the frame never overflows.
+//
+// Pre-first-WindowSizeMsg the cached dimensions are 0; the fill falls back to
+// 80x24 exactly as viewLoading does, so it never sizes to zero and blanks the
+// screen.
+func (m Model) fillCanvas(view string) string {
+	w := m.termWidth
+	h := m.termHeight
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+	canvas := lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(m.canvasMode))
+	blank := canvas.Render(strings.Repeat(" ", w))
+	canvasBg := canvasBgParams(theme.MV.Canvas.ColorFor(m.canvasMode))
+	parser := ansi.NewParser() // one instance reused across every line this frame
+
+	lines := strings.Split(view, "\n")
+	out := make([]string, 0, h)
+	for _, line := range lines {
+		if len(out) == h {
+			break // clamp: never exceed the terminal height (no overflow)
+		}
+		// Backfill mid-line gaps FIRST (so every interior cell carries the
+		// canvas bg without depending on the terminal default / OSC 11), then
+		// pad the trailing region to the full width.
+		line = backfillCanvasBackground(line, canvasBg, parser)
+		out = append(out, padLineToCanvasWidth(line, w, canvas))
+	}
+	for len(out) < h {
+		out = append(out, blank)
+	}
+	return strings.Join(out, "\n")
+}
+
+// backfillCanvasBackground rewrites a single composed line so the canvas
+// background stays continuously active across EVERY interior cell — the fix for
+// the mid-line bleed that mosh/Blink exposed (§1: "every cell carries the canvas
+// bg"). Sub-renderers (bubbles/list's help/footer composition, the title row)
+// emit bare spacer/gap cells between styled segments whose only background is the
+// terminal default re-established by a `0`/empty SGR reset or an explicit `49`
+// (background-default). On terminals that ignore OSC 11 (the `tea.View`
+// BackgroundColor set), those cells render the terminal's own theme — the
+// reported grey bleed right of the title box and through the footer inter-column
+// gaps.
+//
+// The transform is surface-agnostic: it walks the line's SGR sequences and,
+// whenever one resets the background to default (a full `0`/empty reset or a
+// `49`), it appends the canvas background parameters to THAT SAME sequence —
+// preserving any foreground / attribute codes the original reset also carried.
+// SGRs that set an explicit background (selected-row tint, the violet title box,
+// any `48;…` / `40-47` / `100-107`) are left untouched, so content backgrounds
+// survive verbatim. A leading text run with no SGR at all (none is emitted by the
+// current renderers, but a future one might) is prefixed with the canvas bg.
+//
+// Each canvas re-establishment is balanced by the reset already present at the
+// run's end, so no extra terminal state leaks past the line; the SINGLE wrap
+// point (fillCanvas) is preserved.
+//
+// The parser is passed in (not allocated here) so the per-line loop in fillCanvas
+// reuses a single instance instead of allocating a 64 KiB-buffered parser per line
+// per frame; this function never reads parser.Params (it re-derives params via
+// sgrParamsList), so a shared instance is safe.
+func backfillCanvasBackground(line, canvasBg string, parser *ansi.Parser) string {
+	if canvasBg == "" {
+		return line
+	}
+	canvasSetParams := strings.Split(canvasBg, ";")
+
+	var b strings.Builder
+	b.Grow(len(line) + len(canvasBg) + 8)
+
+	src := []byte(line)
+	state := byte(0)
+	bgActive := false // an explicit background SGR is currently in effect
+
+	// Printable content arrives grapheme-by-grapheme from DecodeSequence; buffer
+	// a contiguous run so a no-background run is wrapped ONCE (not per cell),
+	// keeping the rendered text searchable and the SGR overhead minimal.
+	var run []byte
+	flushRun := func() {
+		if len(run) == 0 {
+			return
+		}
+		if bgActive {
+			b.Write(run)
+		} else {
+			// A bare printable run on the terminal default — open the canvas bg
+			// around it and close with a reset so no state leaks past the run.
+			b.WriteString("\x1b[")
+			b.WriteString(canvasBg)
+			b.WriteByte('m')
+			b.Write(run)
+			b.WriteString("\x1b[m")
+		}
+		run = run[:0]
+	}
+
+	for len(src) > 0 {
+		seq, width, n, newState := ansi.DecodeSequence(src, state, parser)
+		if n == 0 {
+			break
+		}
+		isSGR := ansi.HasCsiPrefix(seq) && seq[len(seq)-1] == 'm'
+		switch {
+		case isSGR:
+			flushRun()
+			params := sgrParamsList(string(seq))
+			bgActive = sgrBackgroundActive(bgActive, params)
+			if !bgActive {
+				// This reset/49 dropped the bg to terminal-default. Re-establish
+				// the canvas bg by folding its params into THIS sequence, so the
+				// following cells stay on the canvas.
+				b.WriteString(rewriteSGRWithCanvasBg(params, canvasSetParams))
+				bgActive = true
+			} else {
+				b.Write(seq)
+			}
+		case width > 0:
+			// Printable grapheme — accumulate into the current run.
+			run = append(run, seq...)
+		default:
+			// Non-SGR control / escape — flush text, pass through verbatim.
+			flushRun()
+			b.Write(seq)
+		}
+		src = src[n:]
+		state = newState
+	}
+	flushRun()
+	return b.String()
+}
+
+// rewriteSGRWithCanvasBg renders an SGR ...m sequence built from the original
+// params with the canvas background parameters appended. The original params'
+// own background codes have just reset to default (that is why the caller is
+// re-establishing), so the canvas bg is the only background that survives; the
+// foreground / attribute codes carry through unchanged.
+func rewriteSGRWithCanvasBg(originalParams, canvasParams []string) string {
+	merged := make([]string, 0, len(originalParams)+len(canvasParams))
+	for _, p := range originalParams {
+		// A bare reset arrives as a single empty param ("\x1b[m") or an explicit
+		// "0"; keep a "0" so the reset semantics are unambiguous, but drop the
+		// empty placeholder so the rewritten sequence has no leading ";".
+		if p == "" {
+			merged = append(merged, "0")
+			continue
+		}
+		merged = append(merged, p)
+	}
+	merged = append(merged, canvasParams...)
+	return "\x1b[" + strings.Join(merged, ";") + "m"
+}
+
+// sgrParamsList splits the ";"-separated parameters from a CSI ...m sequence
+// (e.g. "\x1b[38;2;1;2;3m" → ["38","2","1","2","3"]). A bare "\x1b[m" yields a
+// single empty element so callers can treat it as a full reset.
+func sgrParamsList(seq string) []string {
+	inner := strings.TrimSuffix(strings.TrimPrefix(seq, "\x1b["), "m")
+	if inner == "" {
+		return []string{""}
+	}
+	return strings.Split(inner, ";")
+}
+
+// sgrBackgroundActive folds an SGR sequence's parameters into the running
+// "is an explicit background active?" flag. Mirrors the background-relevant codes
+// the test scanner honours: 0/empty and 49 clear it; 48;… and the named bg codes
+// (40-47, 100-107) set it; everything else (foreground, attrs) leaves it.
+//
+// Extended-colour runs (48;2;r;g;b / 48;5;n for the background, and 38;… for the
+// foreground) are consumed WHOLE via consumeExtendedColorRun so a colour channel
+// value that happens to equal a bg code (e.g. 49 or a 40-47) can never be misread
+// as a background change. The foreground skip is belt-and-braces: today the
+// renderers always emit fg immediately followed by bg, so the bg would decide the
+// final state regardless — the skip just makes the scan correct for any ordering.
+func sgrBackgroundActive(active bool, params []string) bool {
+	for i := 0; i < len(params); i++ {
+		switch p := params[i]; {
+		case p == "" || p == "0" || p == "49":
+			active = false
+		case p == "48":
+			active = true
+			i = consumeExtendedColorRun(params, i)
+		case p == "38":
+			i = consumeExtendedColorRun(params, i)
+		case isNamedBackground(p):
+			active = true
+		}
+	}
+	return active
+}
+
+// consumeExtendedColorRun returns the index of the last channel parameter of an
+// extended-colour SGR run starting at i (a 38/48 followed by 2;r;g;b or 5;n). The
+// caller's loop does i++ and re-checks the bound, so an over-run index is harmless
+// (it simply ends the loop) — no clamp is needed.
+func consumeExtendedColorRun(params []string, i int) int {
+	if i+1 >= len(params) {
+		return i
+	}
+	switch params[i+1] {
+	case "2":
+		return i + 4
+	case "5":
+		return i + 2
+	}
+	return i
+}
+
+func isNamedBackground(p string) bool {
+	switch p {
+	case "40", "41", "42", "43", "44", "45", "46", "47",
+		"100", "101", "102", "103", "104", "105", "106", "107":
+		return true
+	}
+	return false
+}
+
+// canvasBgParams returns the raw background-parameter form (e.g.
+// "48;2;11;12;20") that the given canvas colour renders as, derived from
+// lipgloss so the backfill folds the SAME bytes the leaf styles and outer fill
+// paint. An empty result (colour produced no SGR) disables the backfill.
+func canvasBgParams(c color.Color) string {
+	probe := lipgloss.NewStyle().Background(c).Render(" ")
+	idx := strings.IndexByte(probe, 'm')
+	if idx <= 0 || !strings.HasPrefix(probe, "\x1b[") {
+		return ""
+	}
+	return probe[len("\x1b["):idx]
+}
+
+// padLineToCanvasWidth right-pads a single composed line to width with
+// canvas-background whitespace, after stripping any trailing background-less
+// spaces (bubbles/list's raw block-padding) so the canvas pad owns the trailing
+// region. A line already at/over width keeps its content (it is not truncated —
+// horizontal overflow is a §2.7 degrade concern handled by name truncation, not
+// here).
+func padLineToCanvasWidth(line string, width int, canvas lipgloss.Style) string {
+	line = strings.TrimRight(line, " ")
+	gap := width - lipgloss.Width(line)
+	if gap <= 0 {
+		return line
+	}
+	return line + canvas.Render(strings.Repeat(" ", gap))
 }
 
 // viewString renders the current page to a plain string. This is the v1 View

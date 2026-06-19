@@ -51,6 +51,11 @@ func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 	// three-column keymap footer (see renderKeymapFooter) composed below
 	// it via lipgloss.JoinVertical. No flash row is inserted and no
 	// existing list chrome is replaced; only the manual footer is added.
+	//
+	// The composed view is then wrapped by the single outer canvas fill (§1) as
+	// the LAST layer in View(); the assertion compares against the same
+	// fillCanvas wrap so it pins "no flash row, footer composed below" without
+	// re-asserting the fill (covered by canvas_paint_test.go).
 	m := flashModelWithSessions("alpha-row")
 	if m.flashText != "" {
 		t.Fatalf("setup invariant: want empty flashText, got %q", m.flashText)
@@ -59,9 +64,9 @@ func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 	got := m.View().Content
 	listView := m.sessionList.View()
 	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
-	want := lipgloss.JoinVertical(lipgloss.Left, listView, footer)
+	want := m.fillCanvas(lipgloss.JoinVertical(lipgloss.Left, listView, footer))
 	if got != want {
-		t.Errorf("View() with empty flashText must equal list.View() + manual footer\nwant:\n%s\n\ngot:\n%s", want, got)
+		t.Errorf("View() with empty flashText must equal fillCanvas(list.View() + manual footer)\nwant:\n%s\n\ngot:\n%s", want, got)
 	}
 }
 
@@ -155,12 +160,18 @@ func TestSessionsView_OnlyOneFlashRowAdded(t *testing.T) {
 	m.setFlash(flash)
 	flashedLines := renderedSessionLines(t, m)
 
-	if len(flashedLines)-len(baselineLines) != 1 {
-		t.Errorf("flash insertion should add exactly one row: baseline=%d flashed=%d diff=%d",
-			len(baselineLines), len(flashedLines), len(flashedLines)-len(baselineLines))
+	// The flash band is inserted as a single row whose height is absorbed by the
+	// list shrinking one row underneath the outer canvas fill (§1, the "list
+	// height recompute underneath the fill") — so the rendered frame height does
+	// NOT grow with the band; it re-pads to exactly termH. (Pre-canvas the band
+	// was additive and overflowed termH by one; that overflow is the bug class
+	// §3.5 / §4.1 forbids, so the frame height must stay constant now.)
+	if len(flashedLines) != len(baselineLines) {
+		t.Errorf("flash insertion must not change the frame height (band absorbed under the fill): baseline=%d flashed=%d",
+			len(baselineLines), len(flashedLines))
 	}
 
-	// And the flash text itself appears on exactly one line.
+	// The flash text itself appears on exactly one line — exactly one band row.
 	count := 0
 	for _, l := range flashedLines {
 		if strings.Contains(l, flash) {

@@ -4,6 +4,7 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 // Deps is the compiler-enforced seam set from which Build assembles a Model.
@@ -48,7 +49,14 @@ type Deps struct {
 	// Appearance is the persisted colour-scheme preference (auto by default). Like
 	// InitialMode it is a scalar with a meaningful zero value (AppearanceAuto), so
 	// Build always injects it via WithAppearance.
-	Appearance     prefs.Appearance
+	Appearance prefs.Appearance
+	// CanvasMode is the RESOLVED light/dark appearance the owned canvas (§1) is
+	// painted for — distinct from Appearance (the pref). theme.Dark is the
+	// zero-value default (the §2.6 no-answer fallback), so Build always injects it
+	// via WithCanvasMode. Detection (1-7) will resolve it from Appearance + OSC 11
+	// before constructing Deps; the capture harness injects it from its
+	// --appearance flag so the light canvas can be captured.
+	CanvasMode     theme.Mode
 	InitialFilter  string
 	Command        []string
 	ServerStarted  bool
@@ -101,6 +109,9 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithInitialMode(deps.InitialMode))
 	// Appearance is always injected — AppearanceAuto is a valid explicit value.
 	opts = append(opts, WithAppearance(deps.Appearance))
+	// Canvas mode is always injected — theme.Dark is a valid explicit value and
+	// the §2.6 no-answer fallback, so an unset CanvasMode paints the dark canvas.
+	opts = append(opts, WithCanvasMode(deps.CanvasMode))
 	if deps.ModePersister != nil {
 		opts = append(opts, WithModePersister(deps.ModePersister))
 	}

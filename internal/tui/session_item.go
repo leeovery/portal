@@ -13,19 +13,19 @@ import (
 
 var (
 	// cursorStyle marks the cursor/selection — the primary accent role
-	// (accent.violet); the former pink ANSI 212 was a scattered literal.
+	// (accent.violet); the former pink ANSI 212 was a scattered literal. Retained
+	// for the projects page (project_item.go), which still resolves the dark
+	// default until its own canvas restyle lands in a later phase; the sessions
+	// delegate resolves accent.violet per mode inline (see Render).
 	cursorStyle = lipgloss.NewStyle().Foreground(theme.MV.AccentViolet.Color())
-	nameStyle   = lipgloss.NewStyle().Bold(true)
-	// detailStyle paints functional metadata (the window count) — this is
-	// functional text, so it maps to text.detail, NOT decorative text.faint.
-	detailStyle = lipgloss.NewStyle().Foreground(theme.MV.TextDetail.Color())
-	// attachedStyle paints the "● attached" live marker — the one positive/live
-	// signal, so state.green; reserved for live/positive, never a chip/decoration.
-	attachedStyle = lipgloss.NewStyle().Foreground(theme.MV.StateGreen.Color())
-	// headingStyle dims the group heading so it reads as a separator rather
-	// than a selectable row. Layered alongside the existing delegate styles
-	// per spec § Group headers (dimmed).
-	headingStyle = lipgloss.NewStyle().Faint(true)
+	// nameBase carries the session name's NON-colour attribute (bold); the
+	// delegate layers text.primary + Background(canvas) for the resolved mode
+	// (SessionDelegate.tokenStyle) so the colour pair is mode-matched.
+	nameBase = lipgloss.NewStyle().Bold(true)
+	// headingBase carries the group heading's NON-colour attribute (faint, so it
+	// reads as a dimmed separator); the delegate layers text.detail +
+	// Background(canvas) for the resolved mode.
+	headingBase = lipgloss.NewStyle().Faint(true)
 )
 
 // groupSeparator is the heading glyph between the group label and its count,
@@ -138,7 +138,39 @@ func (h HeaderItem) label() string {
 }
 
 // SessionDelegate implements list.ItemDelegate for rendering session items.
-type SessionDelegate struct{}
+//
+// Mode is the resolved canvas appearance (§1): every run the delegate emits —
+// cursor, name, the structural spacers, the window count, the attached marker,
+// and the dimmed group heading — is painted with the §2.9 role-token FOREGROUND
+// resolved for this Mode over a Background(canvas) for this Mode. So a content
+// row both reads correctly (the light variants on the light canvas, the dark
+// variants on the dark canvas) and carries the canvas colour on every cell (no
+// terminal-bg islands behind the styled text). The OUTER fill in View() then
+// pads each line-end and fills the empty rows. The zero value is theme.Dark, so
+// a bare SessionDelegate{} (the value used across the existing unit tests) paints
+// the dark canvas it was tuned for. New sets it from the model's resolved
+// canvasMode after the options apply.
+type SessionDelegate struct {
+	Mode theme.Mode
+}
+
+// canvasBg is the bare Background(canvas) style for the delegate's mode, used to
+// paint the structural spacers (no foreground run) so every cell of a content
+// row is the canvas colour.
+func (d SessionDelegate) canvasBg() lipgloss.Style {
+	return lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(d.Mode))
+}
+
+// tokenStyle returns base with the role token's mode-resolved FOREGROUND and the
+// mode-resolved Background(canvas) applied — the leaf paint of one run: correct
+// foreground for the resolved mode, sitting on the owned canvas. base carries
+// the non-colour attributes (Bold for the name); a zero base is fine for runs
+// that only need the colour pair.
+func (d SessionDelegate) tokenStyle(base lipgloss.Style, fg theme.Token) lipgloss.Style {
+	return base.
+		Foreground(fg.ColorFor(d.Mode)).
+		Background(theme.MV.Canvas.ColorFor(d.Mode))
+}
 
 // Height returns 1, matching the single-line item display. Both SessionItem and
 // HeaderItem render as exactly one line, so a uniform Height of 1 makes
@@ -155,23 +187,34 @@ func (d SessionDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 // "Heading ··· N" separator (no cursor, never selectable — the cursor-skip in
 // model.go guarantees the selection never rests on a header). A SessionItem
 // renders the cursor indicator, styled name, dimmed window count, and green
-// attached badge. Flat items (HeaderItem absent from the slice entirely) render
-// byte-identically to the pre-grouping delegate.
+// attached badge. Every run is painted with its §2.9 role-token foreground and
+// the owned canvas background for the delegate's Mode (the leaf layer of §1):
+// the row TEXT and column structure are unchanged from the pre-canvas delegate,
+// only the colour pair is now mode-matched and canvas-backed.
 func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	bg := d.canvasBg()
+	var row string
 	switch it := item.(type) {
 	case HeaderItem:
-		_, _ = fmt.Fprint(w, groupHeaderIndent+headingStyle.Render(it.label()))
+		// Group heading: the §2.9 group-heading role (text.detail), dimmed so it
+		// reads as a separator rather than a selectable row.
+		heading := d.tokenStyle(headingBase, theme.MV.TextDetail).Render(it.label())
+		row = bg.Render(groupHeaderIndent) + heading
 	case SessionItem:
-		cursor := "  "
+		cursor := bg.Render("  ")
 		if index == m.Index() {
-			cursor = cursorStyle.Render("> ")
+			// Cursor / selector — accent.violet (§2.9).
+			cursor = d.tokenStyle(lipgloss.Style{}, theme.MV.AccentViolet).Render("> ")
 		}
 
-		name := nameStyle.Render(it.Session.Name)
+		// Name — text.primary, bold (§4.1).
+		name := d.tokenStyle(nameBase, theme.MV.TextPrimary).Render(it.Session.Name)
 
-		detail := detailStyle.Render(windowLabel(it.Session.Windows))
+		// Window count — text.detail (§4.1).
+		detail := d.tokenStyle(lipgloss.Style{}, theme.MV.TextDetail).Render(windowLabel(it.Session.Windows))
 		if it.Session.Attached {
-			detail += "  " + attachedStyle.Render("● attached")
+			// Attached marker — state.green (§4.1).
+			detail += bg.Render("  ") + d.tokenStyle(lipgloss.Style{}, theme.MV.StateGreen).Render("● attached")
 		}
 
 		// Grouped rows (GroupKey set in By Project / By Tag) nest under their
@@ -181,8 +224,18 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			indent = groupRowIndent
 		}
 
-		_, _ = fmt.Fprintf(w, "%s%s%s  %s", indent, cursor, name, detail)
+		row = fmt.Sprintf("%s%s%s%s%s", bg.Render(indent), cursor, name, bg.Render("  "), detail)
+	default:
+		return
 	}
+
+	// The row is composed entirely of canvas-backgrounded runs (no bare spaces),
+	// so its own cells are canvas. bubbles/list may block-pad this row to its
+	// widest sibling with raw, background-less trailing spaces; the outer canvas
+	// fill (model.fillCanvas) strips those and re-pads every line to the terminal
+	// width, so the trailing region is canvas too. The delegate therefore emits
+	// only the row's own content and leaves width-padding to the single fill.
+	_, _ = fmt.Fprint(w, row)
 }
 
 // ToListItems converts a slice of tmux sessions to a slice of list.Item.

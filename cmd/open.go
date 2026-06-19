@@ -539,6 +539,19 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		return fmt.Errorf("unexpected model type: %T", finalModel)
 	}
 
+	// Restore the terminal's original background on exit (§ background restore-
+	// on-exit), BEFORE any session attach/exec handoff. The owned canvas paint
+	// sets the terminal background via OSC 11 so it extends into the gutter;
+	// terminals that ignore the OSC 111 reset (mosh/Blink) keep the canvas
+	// colour after Portal quits, so SET the captured original back. It MUST run
+	// before processTUIResult: on the quit-to-shell path (no selection) this is
+	// the restore the user sees; on the attach-handoff path it is harmless (tmux
+	// takes over the screen). No-op when no OSC 11 response was captured (best-
+	// effort fallback to Bubble Tea's own OSC 111 reset). Shared helper with
+	// cmd/capturetool so both restore identically; writes to os.Stdout (the
+	// program's output).
+	tui.RestoreTerminalBackground(os.Stdout, model)
+
 	return processTUIResult(model, connector)
 }
 

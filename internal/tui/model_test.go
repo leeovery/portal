@@ -15,6 +15,55 @@ import (
 	"github.com/leeovery/portal/internal/tui"
 )
 
+// flattenInitMsgs executes an Init (or any) cmd and returns every leaf message
+// it produces, recursively draining tea.BatchMsg. Init now batches the OSC 11
+// background-color query (tea.RequestBackgroundColor) alongside the data-load
+// cmds, so its top-level result is a tea.BatchMsg; this helper lets a test reach
+// the underlying SessionsMsg / ProjectsLoadedMsg without coupling to the batch
+// shape. A nil cmd yields no messages; the OSC 11 query cmd produces a
+// BackgroundColorMsg with no terminal response in the test harness, which is
+// simply included in the returned slice (callers ignore it).
+func flattenInitMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		out = append(out, flattenInitMsgs(c)...)
+	}
+	return out
+}
+
+// applyInit runs the model's Init, flattens the resulting batch, and applies
+// every produced message to the model in turn, returning the updated model. It
+// drives the real Init → Update flow through the now-batched Init (which includes
+// the async OSC 11 background-color query) so a test can assert on the rendered
+// result exactly as before the query was added.
+func applyInit(m tui.Model) tui.Model {
+	var model tea.Model = m
+	for _, msg := range flattenInitMsgs(m.Init()) {
+		model, _ = model.Update(msg)
+	}
+	return model.(tui.Model)
+}
+
+// firstMsgOfType scans the flattened Init messages for the first one of type T
+// and returns it with true; otherwise the zero value and false.
+func firstMsgOfType[T tea.Msg](msgs []tea.Msg) (T, bool) {
+	for _, msg := range msgs {
+		if typed, ok := msg.(T); ok {
+			return typed, true
+		}
+	}
+	var zero T
+	return zero, false
+}
+
 func TestView(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -231,10 +280,12 @@ func TestInit(t *testing.T) {
 			t.Fatal("Init() returned nil command")
 		}
 
-		msg := cmd()
-		sessionsMsg, ok := msg.(tui.SessionsMsg)
+		// Init now batches the async OSC 11 background-color query alongside the
+		// session fetch, so its top-level msg is a tea.BatchMsg; flatten it to
+		// reach the SessionsMsg.
+		sessionsMsg, ok := firstMsgOfType[tui.SessionsMsg](flattenInitMsgs(cmd))
 		if !ok {
-			t.Fatalf("expected SessionsMsg, got %T", msg)
+			t.Fatalf("expected a SessionsMsg in the Init batch")
 		}
 		if sessionsMsg.Err != nil {
 			t.Fatalf("unexpected error: %v", sessionsMsg.Err)
@@ -879,18 +930,16 @@ func TestInitialFilter(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude"}).WithInitialFilter("myapp")
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// Init now batches the async OSC 11 query; applyInit flattens it and
+		// applies every produced message so the project load still drives render.
+		updatedModel := applyInit(m)
 
-		view := model.View().Content
+		view := updatedModel.View().Content
 		// Should show command header (command-pending mode)
 		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected command-pending mode header, got:\n%s", view)
 		}
 		// Initial filter is applied to project list and consumed
-		updatedModel := model.(tui.Model)
 		if updatedModel.ProjectListFilterState() != list.FilterApplied {
 			t.Errorf("project filter state = %v, want FilterApplied", updatedModel.ProjectListFilterState())
 		}
@@ -1893,17 +1942,16 @@ func TestCommandPendingMode(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude"})
 
-		// Init should load projects (not sessions)
-		cmd := m.Init()
-		if cmd == nil {
-			t.Fatal("Init() returned nil command")
-		}
-		msg := cmd()
-
-		// Should be a ProjectsLoadedMsg, not a SessionsMsg
-		projectsMsg, ok := msg.(tui.ProjectsLoadedMsg)
+		// Init should load projects (not sessions). It now batches the async OSC
+		// 11 query, so flatten to reach the ProjectsLoadedMsg — and assert NO
+		// SessionsMsg is present (command-pending mode loads projects only).
+		initMsgs := flattenInitMsgs(m.Init())
+		projectsMsg, ok := firstMsgOfType[tui.ProjectsLoadedMsg](initMsgs)
 		if !ok {
-			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
+			t.Fatalf("expected a ProjectsLoadedMsg in the Init batch")
+		}
+		if _, hasSessions := firstMsgOfType[tui.SessionsMsg](initMsgs); hasSessions {
+			t.Fatalf("command-pending Init must not fetch sessions")
 		}
 		if len(projectsMsg.Projects) != 2 {
 			t.Fatalf("expected 2 projects, got %d", len(projectsMsg.Projects))
@@ -2012,13 +2060,12 @@ func TestCommandPendingMode(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude", "--resume"})
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		var model tea.Model = applyInit(m)
 
 		// Select a project by pressing Enter (first project in list)
-		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from project selection, got nil")
 		}
@@ -2085,13 +2132,11 @@ func TestCommandPendingMode(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude"}).WithInitialFilter("myapp")
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		updated := applyInit(m)
 
 		// Initial filter is applied to project list
-		updated := model.(tui.Model)
 		items := updated.ProjectListItems()
 		if len(items) != 2 {
 			t.Errorf("expected 2 total projects in list, got %d", len(items))
@@ -2111,13 +2156,10 @@ func TestCommandPendingMode(t *testing.T) {
 			},
 		})
 
-		cmd := m.Init()
-		msg := cmd()
-
-		// Should be a SessionsMsg
-		sessionsMsg, ok := msg.(tui.SessionsMsg)
+		// Init now batches the async OSC 11 query; flatten to reach the SessionsMsg.
+		sessionsMsg, ok := firstMsgOfType[tui.SessionsMsg](flattenInitMsgs(m.Init()))
 		if !ok {
-			t.Fatalf("expected SessionsMsg, got %T", msg)
+			t.Fatalf("expected a SessionsMsg in the Init batch")
 		}
 
 		var model tea.Model = m
@@ -2645,10 +2687,10 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		if cmd == nil {
 			t.Fatal("Init() returned nil command")
 		}
-		msg := cmd()
-		sessionsMsg, ok := msg.(tui.SessionsMsg)
+		// Init now batches the async OSC 11 query; flatten to reach the SessionsMsg.
+		sessionsMsg, ok := firstMsgOfType[tui.SessionsMsg](flattenInitMsgs(cmd))
 		if !ok {
-			t.Fatalf("expected SessionsMsg, got %T", msg)
+			t.Fatalf("expected a SessionsMsg in the Init batch")
 		}
 		if len(sessionsMsg.Sessions) != 1 {
 			t.Fatalf("expected 1 session, got %d", len(sessionsMsg.Sessions))
@@ -2705,12 +2747,9 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"test"})
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		view := model.View().Content
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		view := applyInit(m).View().Content
 		if !strings.Contains(view, "myapp") {
 			t.Errorf("expected projects page with project items, got:\n%s", view)
 		}
@@ -5939,18 +5978,17 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude", "--resume"})
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		var model tea.Model = applyInit(m)
 
 		// Press enter on first project
-		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter on project, got nil")
 		}
 
-		msg = cmd()
+		msg := cmd()
 		createdMsg, ok := msg.(tui.SessionCreatedMsg)
 		if !ok {
 			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
@@ -5980,13 +6018,12 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude", "--resume", "--model", "opus"})
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		var model tea.Model = applyInit(m)
 
 		// Press enter on project
-		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter, got nil")
 		}
@@ -6017,17 +6054,16 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude"})
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		var model tea.Model = applyInit(m)
 
 		// Press enter to create session
-		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command, got nil")
 		}
-		msg = cmd()
+		msg := cmd()
 
 		// Feed SessionCreatedMsg back
 		model, _ = model.Update(msg)
@@ -6051,17 +6087,16 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude"})
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		var model tea.Model = applyInit(m)
 
 		// Press enter to create session
-		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command, got nil")
 		}
-		msg = cmd()
+		msg := cmd()
 
 		// Feed SessionCreatedMsg back — should return quit command
 		_, cmd = model.Update(msg)
@@ -6088,17 +6123,16 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude"})
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		var model tea.Model = applyInit(m)
 
 		// Press enter on project — will fail
-		_, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from enter, got nil")
 		}
-		msg = cmd()
+		msg := cmd()
 
 		// Should not be SessionCreatedMsg
 		if _, ok := msg.(tui.SessionCreatedMsg); ok {
@@ -6711,13 +6745,10 @@ func TestInitialFilterAppliedToDefaultPage(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude"}).WithInitialFilter("myapp")
 
-		var model tea.Model = m
-		// In command-pending mode, Init() only loads projects (no sessions fetch)
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		updated := model.(tui.Model)
+		// In command-pending mode, Init() only loads projects (no sessions fetch).
+		// Init now batches the async OSC 11 query; applyInit flattens it and applies
+		// every produced message so the project list is populated and filtered.
+		updated := applyInit(m)
 
 		// Should be on Projects page (command-pending mode)
 		if updated.ActivePage() != tui.PageProjects {
@@ -6970,10 +7001,9 @@ func TestHelpBarQuitBinding(t *testing.T) {
 			tui.WithSessionCreator(creator),
 		).WithCommand([]string{"claude"})
 
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
+		// applyInit flattens the now-batched Init (incl. the async OSC 11 query)
+		// and applies every produced message so the project list is populated.
+		var model tea.Model = applyInit(m)
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
 		view := model.View().Content

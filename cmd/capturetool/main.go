@@ -27,13 +27,15 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/capture"
 	"github.com/leeovery/portal/internal/tui"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 func main() {
 	fixture := flag.String("fixture", "", "named fixture to render (e.g. sessions-flat)")
+	appearance := flag.String("appearance", "dark", "owned-canvas mode to render: dark|light")
 	flag.Parse()
 
-	if err := run(*fixture); err != nil {
+	if err := run(*fixture, *appearance); err != nil {
 		fmt.Fprintln(os.Stderr, "capturetool:", err)
 		os.Exit(1)
 	}
@@ -42,8 +44,8 @@ func main() {
 // run resolves the fixture into a production model and runs the Bubble Tea
 // program on the alt screen until the user (or vhs) quits. It returns any
 // resolution or program error so main can map it to a non-zero exit.
-func run(fixture string) error {
-	m, err := resolveModel(fixture)
+func run(fixture, appearance string) error {
+	m, err := resolveModel(fixture, appearance)
 	if err != nil {
 		return err
 	}
@@ -54,20 +56,56 @@ func run(fixture string) error {
 	// tea.WithAltScreen() option. No bootstrap, no warnings staging — this is
 	// the inert, fixture-only render path.
 	p := tea.NewProgram(m)
-	_, err = p.Run()
-	return err
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+
+	// Restore the terminal's original background on exit (§ background restore-
+	// on-exit). The owned canvas paint sets the terminal background via OSC 11;
+	// terminals that ignore the OSC 111 reset would keep the canvas colour, so
+	// SET the captured original back. No-op when no OSC 11 response was captured.
+	// Wired identically to cmd/open.go via the shared tui helper. Writes to
+	// os.Stdout (the program's output) so the sequence reaches the terminal.
+	if fm, ok := finalModel.(tui.Model); ok {
+		tui.RestoreTerminalBackground(os.Stdout, fm)
+	}
+	return nil
 }
 
 // resolveModel maps a fixture name to the production tui.Model via the shared
-// tui.Build constructor. An empty or unknown name is an error that lists the
-// available fixtures, so a bad --fixture flag fails loudly.
-func resolveModel(fixture string) (tui.Model, error) {
+// tui.Build constructor, injecting the owned-canvas mode resolved from the
+// --appearance flag. An empty or unknown fixture, or an invalid appearance, is
+// an error so a bad flag fails loudly.
+func resolveModel(fixture, appearance string) (tui.Model, error) {
 	if fixture == "" {
 		return tui.Model{}, fmt.Errorf("--fixture is required (available: %v)", capture.FixtureNames())
+	}
+	mode, err := resolveMode(appearance)
+	if err != nil {
+		return tui.Model{}, err
 	}
 	fx, err := capture.FixtureByName(fixture)
 	if err != nil {
 		return tui.Model{}, err
 	}
-	return tui.Build(fx.Deps()), nil
+	deps := fx.Deps()
+	deps.CanvasMode = mode
+	return tui.Build(deps), nil
+}
+
+// resolveMode maps the --appearance flag to the resolved owned-canvas theme.Mode
+// the model paints. Detection (task 1-7) is not landed, so the capture harness
+// injects the mode explicitly: dark renders the #0b0c14 canvas, light the
+// #e1e2e7 canvas. An unrecognised value fails loudly rather than silently
+// defaulting, so a typo in a tape is caught.
+func resolveMode(appearance string) (theme.Mode, error) {
+	switch appearance {
+	case "dark":
+		return theme.Dark, nil
+	case "light":
+		return theme.Light, nil
+	default:
+		return theme.Dark, fmt.Errorf("--appearance must be dark or light, got %q", appearance)
+	}
 }
