@@ -42,3 +42,7 @@ dist/
 build/
 .workflows/.cache/
 /portal
+
+# vhs capture-harness transient GIF byproduct (vhs requires an Output; we only
+# commit the screenshot PNG, not the GIF). See testdata/vhs/README.md.
+testdata/vhs/*.gif

@@ -350,54 +350,35 @@ type tuiConfig struct {
 	serverStarted   bool
 }
 
-// buildTUIModel constructs a tui.Model from the given config and parameters.
+// buildTUIModel constructs a tui.Model from the given config and parameters by
+// mapping the cmd-local tuiConfig onto the shared tui.Deps seam set and
+// delegating to tui.Build — the single model-construction chokepoint shared with
+// the offline capture harness (cmd/capturetool). The mapping is field-for-field
+// (no nil-guards or option assembly here — Build owns that), so production and
+// the harness assemble the identical model.
 func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Model {
-	opts := []tui.Option{
-		tui.WithKiller(cfg.killer),
-		tui.WithRenamer(cfg.renamer),
-		tui.WithProjectStore(cfg.projectStore),
-		tui.WithSessionCreator(cfg.sessionCreator),
-		tui.WithCWD(cfg.cwd),
-	}
-	if cfg.serverStarted {
-		opts = append(opts, tui.WithServerStarted(true))
-	}
-	if cfg.projectEditor != nil {
-		opts = append(opts, tui.WithProjectEditor(cfg.projectEditor))
-	}
-	if cfg.aliasEditor != nil {
-		opts = append(opts, tui.WithAliasEditor(cfg.aliasEditor))
-	}
-	if cfg.enumerator != nil {
-		opts = append(opts, tui.WithEnumerator(cfg.enumerator))
-	}
-	if cfg.reader != nil {
-		opts = append(opts, tui.WithScrollbackReader(cfg.reader))
-	}
-	if cfg.previewAttacher != nil {
-		opts = append(opts, tui.WithPreviewAttachPipeline(cfg.previewAttacher))
-	}
-	if cfg.dirReader != nil && cfg.dirRunner != nil {
-		opts = append(opts, tui.WithDirResolver(cfg.dirReader, cfg.dirRunner))
-	}
-	// Initial mode is always injected — Flat is a valid explicit value, and the
-	// New constructor recomputes the list title after options apply so the first
-	// frame paints the correct mode heading.
-	opts = append(opts, tui.WithInitialMode(cfg.initialMode))
-	if cfg.modePersister != nil {
-		opts = append(opts, tui.WithModePersister(cfg.modePersister))
-	}
-	m := tui.New(cfg.lister, opts...)
-	if len(command) > 0 {
-		m = m.WithCommand(command)
-	}
-	if initialFilter != "" {
-		m = m.WithInitialFilter(initialFilter)
-	}
-	if cfg.insideTmux && cfg.currentSession != "" {
-		m = m.WithInsideTmux(cfg.currentSession)
-	}
-	return m
+	return tui.Build(tui.Deps{
+		Lister:          cfg.lister,
+		Killer:          cfg.killer,
+		Renamer:         cfg.renamer,
+		Creator:         cfg.sessionCreator,
+		ProjectStore:    cfg.projectStore,
+		ProjectEditor:   cfg.projectEditor,
+		AliasEditor:     cfg.aliasEditor,
+		Enumerator:      cfg.enumerator,
+		Reader:          cfg.reader,
+		PreviewAttacher: cfg.previewAttacher,
+		DirReader:       cfg.dirReader,
+		DirRunner:       cfg.dirRunner,
+		ModePersister:   cfg.modePersister,
+		CWD:             cfg.cwd,
+		InitialMode:     cfg.initialMode,
+		InitialFilter:   initialFilter,
+		Command:         command,
+		ServerStarted:   cfg.serverStarted,
+		InsideTmux:      cfg.insideTmux,
+		CurrentSession:  cfg.currentSession,
+	})
 }
 
 // processTUIResult handles the result of a TUI run.

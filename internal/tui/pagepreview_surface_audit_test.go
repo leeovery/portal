@@ -292,13 +292,18 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 	preExistingPackages := map[string]struct{}{
 		"alias":            {},
 		"bootstrapadapter": {},
-		"fileutil":         {},
-		"fuzzy":            {},
-		"hooks":            {},
-		"log":              {},
-		"logtest":          {},
-		"portalbintest":    {},
-		"portaltest":       {},
+		// capture: added by the spectrum-tui-design visual-reskin feature
+		// (the offline vhs capture harness's in-memory fakes + fixtures);
+		// unrelated to scrollback-preview, allow-listed per this audit's own
+		// guidance.
+		"capture":       {},
+		"fileutil":      {},
+		"fuzzy":         {},
+		"hooks":         {},
+		"log":           {},
+		"logtest":       {},
+		"portalbintest": {},
+		"portaltest":    {},
 		// prefs: added by the session-tagging-and-grouping feature (mode
 		// persistence store); unrelated to scrollback-preview, allow-listed
 		// per this audit's own guidance.

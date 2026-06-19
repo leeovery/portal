@@ -139,7 +139,20 @@
   "defaults": {
     "plan_format": "tick",
     "project_skills": [
-      ".claude/skills/golang-pro"
+      ".claude/skills/golang-how-to",
+      ".claude/skills/golang-testing",
+      ".claude/skills/golang-code-style",
+      ".claude/skills/golang-naming",
+      ".claude/skills/golang-error-handling",
+      ".claude/skills/golang-design-patterns",
+      ".claude/skills/golang-structs-interfaces",
+      ".claude/skills/golang-dependency-injection",
+      ".claude/skills/golang-safety",
+      ".claude/skills/golang-concurrency",
+      ".claude/skills/golang-context",
+      ".claude/skills/golang-cli",
+      ".claude/skills/golang-spf13-cobra",
+      ".claude/skills/golang-dependency-management"
     ],
     "linters": [
       {
