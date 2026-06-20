@@ -719,35 +719,6 @@ func WithDirResolver(reader session.PaneCurrentPathReader, runner resolver.Comma
 	}
 }
 
-// sessionHelpKeys returns key.Binding entries for session-specific actions.
-//
-// DEPRECATED for the keymap source of truth: the Sessions keymap descriptor
-// (sessionsKeymap) is now authoritative for the footer (task 2-4) and the ?
-// help modal (Phase 3, §8.5). These entries remain only to keep the legacy
-// three-column footer plumbing compiling until 2-4 retires it; the §12.2
-// revision is reflected here too — the former p/x "projects" binding is now the
-// single x toggle (the dropped p alias no longer appears in any displayed
-// label).
-func sessionHelpKeys() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
-		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rename")),
-		key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill")),
-		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "projects")),
-		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
-		key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "preview")),
-		// "s switch view" sits adjacent to the other view-related action
-		// ("space/preview") so it reads naturally in the manual footer. The
-		// footer column split is positional (keymapFooterColumnSize = 5, three
-		// columns in source order): with nav/filter bindings ahead of these,
-		// this entry lands in the trailing columns next to preview rather than
-		// being orphaned in a column of its own. (spec § TUI Rendering &
-		// Toggle Behaviour → Mode indication, Toggle key.)
-		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch view")),
-		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
-	}
-}
-
 // brightenHelpStyles re-points the footer keymap colours onto the §2.9 role
 // tokens (colour source only — the structural footer restyle is Phase 2):
 // key glyphs use the footer key-hint role (accent.blue), labels the detail
@@ -952,20 +923,9 @@ func listNavAndFilterBindings(l *list.Model) []key.Binding {
 	}
 }
 
-// sessionFooterBindings returns the ordered key.Binding entries that feed
-// the sessions-page manual keymap footer. The order mirrors what
-// list.Model.FullHelp would surface for the sessions list: navigation keys
-// from list.KeyMap, then filter-mode bindings, then the sessions-page-
-// specific entries from sessionHelpKeys. Disabled bindings (e.g. filter
-// keys outside filter mode, or AcceptWhileFiltering with an empty filter
-// input) are filtered downstream by chunkBindingsIntoThreeColumns so the
-// visible column lengths match what the renderer emits.
-func sessionFooterBindings(l *list.Model) []key.Binding {
-	return append(listNavAndFilterBindings(l), sessionHelpKeys()...)
-}
-
 // projectFooterBindings returns the ordered key.Binding entries for the
-// projects-page manual keymap footer. Mirrors sessionFooterBindings but
+// projects-page manual keymap footer (the §3.4 condensed footer is Sessions-only;
+// Projects retains the manual three-column footer until its own phase). It
 // sources the page-specific entries from projectHelpKeys in normal mode
 // and commandPendingHelpKeys in command-pending mode (matches the prior
 // AdditionalFullHelpKeys swap performed by WithCommand).
@@ -1183,9 +1143,10 @@ func (m *Model) applyListSize(l *list.Model, bindings []key.Binding, width, heig
 	l.SetSize(width, height-lipgloss.Height(renderKeymapFooter(l, bindings)))
 }
 
-// applySessionListSize is the per-page wrapper that owns the
-// (&m.sessionList, sessionFooterBindings(&m.sessionList)) pairing so call
-// sites cannot pair the wrong list with the wrong bindings function.
+// applySessionListSize is the per-page wrapper that owns the §3.4 Sessions
+// height budget: it reserves the header block, the condensed footer, and any
+// active notice band before sizing m.sessionList, so call sites cannot drift on
+// what the Sessions list reserves.
 //
 // It also subtracts the height of any active notice band (the §11.2 flash row
 // and/or the By-Tag "No tags yet" signpost) inserted beneath the title by
@@ -1195,14 +1156,30 @@ func (m *Model) applyListSize(l *list.Model, bindings []key.Binding, width, heig
 // simply re-pads to termH — the one-row-per-delegate pagination invariant (§3.5
 // / §4.1) holds and the frame never overflows the viewport.
 func (m *Model) applySessionListSize(width, height int) {
-	// Fold the §3.1 header block height out of the budget (in addition to the
-	// notice bands) so bubbles/list paginates against the reduced height: the
-	// header is part of the height budget, NOT an uncounted band (§3.5). The header
-	// height is resolved against the SAME width this size-apply was called with, so
-	// the budget and the viewSessionList render agree at every call site
-	// (WindowSizeMsg, rebuildSessionList, the 80x24 construction seed).
-	reserved := m.sessionBandHeight() + m.headerHeight(width)
-	m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), width, height-reserved)
+	// Fold the §3.1 header block height AND the §3.4 condensed footer height out of
+	// the budget (in addition to the notice bands) so bubbles/list paginates against
+	// the reduced height: both the header and the footer are part of the height
+	// budget, NOT uncounted bands (§3.5). Each is resolved against the SAME width
+	// this size-apply was called with, so the budget and the viewSessionList render
+	// agree at every call site (WindowSizeMsg, rebuildSessionList, the 80x24
+	// construction seed). The Sessions footer no longer routes through the manual
+	// three-column path (renderKeymapFooter); only the condensed footer height is
+	// reserved, so applyListSize is called with a zero-binding footer and the
+	// condensed height pre-subtracted.
+	reserved := m.sessionBandHeight() + m.headerHeight(width) + m.sessionFooterHeight(width)
+	m.sessionList.SetSize(width, height-reserved)
+}
+
+// sessionFooterHeight is the rendered height of the §3.4 condensed Sessions footer
+// at the given laid-out width — the amount applySessionListSize reserves out of the
+// list's height budget so the single-row footer (plus its 1px top rule) is part of
+// the budget, NOT an uncounted band (§3.5). It resolves the footer against the same
+// width/mode the render uses (via the shared headerWidthOrFallback fallback), so
+// the budget and the viewSessionList render agree exactly. With the §2-2 header
+// height already reserved, this keeps the one-row-per-delegate pagination invariant
+// exact.
+func (m Model) sessionFooterHeight(width int) int {
+	return lipgloss.Height(renderSessionsFooter(width, m.canvasMode, m.colourless))
 }
 
 // sessionBandHeight returns the total rendered height of the notice bands
@@ -3315,7 +3292,13 @@ func (m Model) viewSessionList() string {
 		// overlaid".
 		listView = insertRowBelowTitle(listView, m.renderFlashRow())
 	}
-	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
+	// §3.4 condensed footer: a single row of the Core keymap keys (sourced from the
+	// task 2-1 descriptor) over a 1px border.footer rule, replacing the manual
+	// three-column footer for Sessions. Its height is folded out of the list's budget
+	// by applySessionListSize (m.sessionFooterHeight) — resolved against the SAME
+	// contentWidth — so the composed view stays within termH and the
+	// one-row-per-delegate pagination invariant (§3.5) holds.
+	footer := renderSessionsFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	// Compose the §3.1 shared header block FIRST, above the list — it is the first
 	// visible chrome. Its height is already folded out of the list's budget by
 	// applySessionListSize (m.headerHeight), so the composed view stays within

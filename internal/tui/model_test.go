@@ -1536,29 +1536,30 @@ func TestKillSession(t *testing.T) {
 }
 
 func TestSessionListHelpBar(t *testing.T) {
-	t.Run("help bar shows session-specific keybindings", func(t *testing.T) {
+	t.Run("condensed footer shows the Core keys and omits the help-only keys", func(t *testing.T) {
+		// §3.4: the Sessions footer is the single condensed row of Core keys. The
+		// help-only keys (rename / kill / new in cwd / quit) move to the ? help modal
+		// (Phase 3) and must NOT appear in the footer.
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
-		// Use wider width so all help bindings fit without truncation
+		// Wide enough that the full condensed row renders without §2.7 truncation.
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
 		view := updated.View().Content
 
-		// Each description should appear in the help bar
-		expectedDescs := []string{
-			"attach",
-			"rename",
-			"kill",
-			"projects",
-			"new in cwd",
-			"filter",
-		}
-		for _, desc := range expectedDescs {
+		// Core (footer) descriptions present.
+		for _, desc := range []string{"navigate", "attach", "filter", "preview", "switch view", "projects", "help"} {
 			if !strings.Contains(view, desc) {
-				t.Errorf("help bar should contain %q, got:\n%s", desc, view)
+				t.Errorf("condensed footer should contain Core key %q, got:\n%s", desc, view)
+			}
+		}
+		// Help-only descriptions absent from the footer.
+		for _, desc := range []string{"rename", "kill", "new in cwd", "quit"} {
+			if strings.Contains(view, desc) {
+				t.Errorf("condensed footer must NOT contain help-only key %q (§3.4), got:\n%s", desc, view)
 			}
 		}
 	})
@@ -6958,7 +6959,10 @@ func executeBatchCmd(cmd tea.Cmd) []tea.Msg {
 }
 
 func TestHelpBarQuitBinding(t *testing.T) {
-	t.Run("session help bar includes quit binding", func(t *testing.T) {
+	t.Run("session footer omits quit (help-only) and shows the ? help hint", func(t *testing.T) {
+		// §3.4: the Sessions footer is the condensed core-keys row — q quit is
+		// help-only (it moved to the ? help modal, Phase 3), so it must NOT appear
+		// in the footer; the right-aligned ? help hint advertises where it lives.
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 		}
@@ -6966,8 +6970,14 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
 		view := updated.View().Content
-		if !strings.Contains(view, "quit") {
-			t.Errorf("session help bar should contain 'quit', got:\n%s", view)
+		if strings.Contains(view, "quit") {
+			t.Errorf("Sessions condensed footer must NOT contain 'quit' (help-only, §3.4), got:\n%s", view)
+		}
+		// The ? help label is a styled run; in the raw (un-stripped) view the "?"
+		// glyph and the "help" label are separate SGR runs, so assert the label
+		// itself (a single contiguous run) is present.
+		if !strings.Contains(view, "help") {
+			t.Errorf("Sessions condensed footer must show the right-aligned '? help' hint, got:\n%s", view)
 		}
 	})
 

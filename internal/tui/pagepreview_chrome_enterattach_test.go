@@ -56,19 +56,18 @@ func TestPreviewChromeLine_EnterAttachTokenByteIdenticalAcrossViewportStates(t *
 	}
 }
 
-// TestSessionsPageView_DoesNotContainPreviewChromeEnterAttachToken pins spec
-// § Discoverability > Sessions-page help bar: the preview chrome's new
-// 'enter attach' token must not propagate to or duplicate on the Sessions
-// page. The preview chrome renders the token surrounded by middle-dot
-// separators ("· enter attach ·") — that exact chrome phrasing is
-// preview-specific and must never appear on the Sessions page.
+// TestSessionsPageView_DoesNotContainPreviewChrome pins spec § Discoverability
+// > Sessions-page help bar: the preview chrome must not propagate to or
+// duplicate on the Sessions page. The preview chrome renders glyph-keyed,
+// dot-separated tokens (`] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋
+// back`) that are preview-specific and must never appear on the Sessions page.
 //
-// Note: the Sessions-page help bar independently renders "enter" and "attach"
-// as a bubbles/list key/help pair (see model.go binding at line ~506), which
-// is the pre-existing Sessions-page help advertised by bubbles/list. That
-// bar is "unaffected" by this change per spec — the preview chrome's
-// dot-separated chrome token does not appear there.
-func TestSessionsPageView_DoesNotContainPreviewChromeEnterAttachToken(t *testing.T) {
+// Note: the §3.4 condensed Sessions footer independently advertises `enter
+// attach` as one of its Core keys (text-keyed: "enter attach"), which is
+// unrelated to and distinct from the preview chrome's glyph-keyed `⏎ attach`
+// token. This guard targets the preview chrome's own tokens, not the Sessions
+// footer's legitimate `enter attach` entry.
+func TestSessionsPageView_DoesNotContainPreviewChrome(t *testing.T) {
 	sessions := []tmux.Session{
 		{Name: "alpha"},
 		{Name: "beta"},
@@ -77,13 +76,11 @@ func TestSessionsPageView_DoesNotContainPreviewChromeEnterAttachToken(t *testing
 
 	got := stripANSI(m.View().Content)
 
-	// The preview chrome's specific phrasing — token between middle-dot
-	// separators — is preview-specific. The Sessions page must not contain
-	// this exact phrasing.
-	if strings.Contains(got, "· enter attach") {
-		t.Errorf("Sessions-page View() contains forbidden preview-chrome token '· enter attach'; got %q", got)
-	}
-	if strings.Contains(got, "enter attach ·") {
-		t.Errorf("Sessions-page View() contains forbidden preview-chrome token 'enter attach ·'; got %q", got)
+	// The preview chrome's preview-specific glyph-keyed tokens must never appear
+	// on the Sessions page.
+	for _, forbidden := range []string{"next win", "prev win", "next pane", "⏎ attach", "⎋ back"} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("Sessions-page View() contains forbidden preview-chrome token %q; got %q", forbidden, got)
+		}
 	}
 }

@@ -47,10 +47,10 @@ func flashModelWithSessions(names ...string) Model {
 
 func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 	// Baseline contract: with flashText empty, the Sessions page renders
-	// the bubbles/list.View() output as the list section, with the manual
-	// three-column keymap footer (see renderKeymapFooter) composed below
+	// the bubbles/list.View() output as the list section, with the §3.4
+	// condensed keymap footer (see renderSessionsFooter) composed below
 	// it via lipgloss.JoinVertical. No flash row is inserted and no
-	// existing list chrome is replaced; only the manual footer is added.
+	// existing list chrome is replaced; only the condensed footer is added.
 	//
 	// The composed view is then wrapped by the single outer canvas fill (§1) as
 	// the LAST layer in View(); the assertion compares against the same
@@ -70,7 +70,7 @@ func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 	// list view with that same in-place title swap applied — no flash row, footer
 	// composed below.
 	listView := m.applySectionHeader(m.sessionList.View())
-	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
+	footer := renderSessionsFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	want := m.fillCanvas(lipgloss.JoinVertical(lipgloss.Left, header, listView, footer))
 	if got != want {
 		t.Errorf("View() with empty flashText must equal fillCanvas(header + section-headed list.View() + manual footer)\nwant:\n%s\n\ngot:\n%s", want, got)

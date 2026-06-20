@@ -3,29 +3,34 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/prefs"
 )
 
-// Tests for the sessions-page footer "s switch view" hint (spec § TUI
-// Rendering & Toggle Behaviour → Mode indication, Toggle key). The hint
-// must appear in the sessions-page manual keymap footer at all session
-// counts (including zero), must NOT appear on the projects page (where s
-// already means "go to sessions"), and the three-column footer layout
-// must remain intact.
+// Tests for the §3.4 condensed sessions footer "s switch view" / "x projects"
+// hints. Both must appear on the sessions footer at all session counts
+// (including zero) and on every session view, and must NOT appear on the
+// projects page (where s/x already mean "go to sessions").
 
-// sessionsFooterString renders the sessions-page manual keymap footer for m.
+// sessionsFooterString renders the §3.4 condensed sessions footer for m.
 func sessionsFooterString(m Model) string {
-	return renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
+	return renderSessionsFooter(m.contentWidth(), m.canvasMode, m.colourless)
 }
 
 func TestSessionsFooter_ShowsSwitchViewHint(t *testing.T) {
 	m := flashModelWithSessions("alpha-row", "beta-row")
+	// The condensed footer shows all six Core keys at the reference terminal width
+	// (the vhs capture is 1280px ≈ wide). At a narrow 80-col terminal the §2.7
+	// truncation legitimately drops the lower-priority entries, so size the model
+	// to the reference width for the full-content assertions.
+	m.termWidth = 120
 
 	footer := sessionsFooterString(m)
 	if !strings.Contains(footer, "switch view") {
 		t.Errorf("sessions footer must contain %q hint, got:\n%s", "switch view", footer)
 	}
-	if !strings.Contains(footer, "s") {
-		t.Errorf("sessions footer must advertise the %q key, got:\n%s", "s", footer)
+	if !strings.Contains(footer, "projects") {
+		t.Errorf("sessions footer must contain %q hint, got:\n%s", "projects", footer)
 	}
 
 	// Also assert via the full rendered View() so the hint is wired through
@@ -38,10 +43,10 @@ func TestSessionsFooter_ShowsSwitchViewHint(t *testing.T) {
 
 func TestSessionsFooter_ShowsSwitchViewHintAtZeroSessions(t *testing.T) {
 	// Footer is rendered independent of item count (viewSessionList composes
-	// renderKeymapFooter regardless of session count), so the hint must be
+	// renderSessionsFooter regardless of session count), so the hint must be
 	// present even with an empty list.
 	m := NewModelWithSessions(nil)
-	m.termWidth = 80
+	m.termWidth = 120
 	m.termHeight = 24
 
 	footer := sessionsFooterString(m)
@@ -85,39 +90,21 @@ func TestCommandPendingFooter_NoSwitchViewHint(t *testing.T) {
 	}
 }
 
-func TestSessionsFooter_ThreeColumnLayoutIntact(t *testing.T) {
-	// The new always-enabled binding must not break the three-column split.
-	// chunkBindingsIntoThreeColumns filters disabled bindings then splits in
-	// source order into columns of keymapFooterColumnSize; assert the new
-	// binding lands within the three-column bound and the layout still
-	// produces three columns of the fixed size with a (possibly short) tail.
+// TestSessionsFooter_ShowsSwitchAndProjectsOnFlatView asserts s switch view and
+// x projects render on the Flat view (they are NOT grouping-conditional — they
+// appear on ALL session views, §3.4 / edge cases).
+func TestSessionsFooter_ShowsSwitchAndProjectsOnFlatView(t *testing.T) {
 	m := flashModelWithSessions("alpha-row", "beta-row")
-
-	bindings := sessionFooterBindings(&m.sessionList)
-	cols := chunkBindingsIntoThreeColumns(bindings)
-	if len(cols) != 3 {
-		t.Fatalf("expected exactly 3 columns, got %d", len(cols))
+	m.termWidth = 120
+	m.sessionListMode = prefs.ModeFlat
+	if m.sessionListMode != prefs.ModeFlat {
+		t.Fatalf("precondition: want Flat view, got %v", m.sessionListMode)
 	}
 
-	// No column may exceed the fixed per-column size.
-	for i, c := range cols {
-		if len(c) > keymapFooterColumnSize {
-			t.Errorf("column %d has %d entries, exceeds keymapFooterColumnSize=%d", i, len(c), keymapFooterColumnSize)
+	footer := sessionsFooterString(m)
+	for _, want := range []string{"switch view", "projects"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("Flat-view footer must contain %q, got:\n%s", want, footer)
 		}
-	}
-
-	// The switch-view binding must be present among the enabled, chunked
-	// bindings (i.e. it survived the disabled-filter and fits within the
-	// three-column window).
-	found := false
-	for _, c := range cols {
-		for _, b := range c {
-			if b.Help().Desc == "switch view" {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Errorf("switch view binding must appear within the three-column footer chunks")
 	}
 }
