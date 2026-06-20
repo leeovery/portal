@@ -24,7 +24,7 @@ harness fakes/fixtures (an import-guard test enforces this).
 | `LOCK-IN.md` | The committed lock-in/bail record (pinned hexes + derivations + ratios + a PENDING human-eyeball decision section) |
 | `trail/<screen>/<phase>-<task>.png` | **Per-task snapshots** of each screen — a committed, browsable visual history (see "Capture trail" below) |
 | `reference/sessions-modern-vivid-v2.png` | The committed Paper export of frame **Sessions — Modern Vivid v2** (the build target) — the comparison reference, kept in-repo so no live MCP is needed |
-| `*.gif` | Transient vhs byproduct (vhs requires an `Output`); **git-ignored**, not committed |
+| `.gifcache/*.gif` | Transient vhs byproduct (vhs requires an `Output`); tapes write it into the hidden `.gifcache/` subdir so the dir listing stays clean. **git-ignored**, not committed |
 
 ## One-time setup: install + verify `vhs`
 
@@ -83,9 +83,9 @@ run fine sandboxed — only the `vhs` invocation needs loopback access.
 vhs tape paths that contain a `/` **must be quoted**, or the tape parser errors:
 
 ```
-Output "testdata/vhs/sessions-flat.gif"     # ✅ quoted
-Screenshot "testdata/vhs/sessions-flat.png" # ✅ quoted
-Output testdata/vhs/sessions-flat.gif       # ❌ parser error
+Output "testdata/vhs/.gifcache/sessions-flat.gif" # ✅ quoted
+Screenshot "testdata/vhs/sessions-flat.png"       # ✅ quoted
+Output testdata/vhs/.gifcache/sessions-flat.gif   # ❌ parser error
 ```
 
 ### Determinism (the acceptance gate)

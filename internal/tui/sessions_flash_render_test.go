@@ -65,11 +65,15 @@ func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 
 	got := m.View().Content
 	header := m.renderHeader()
-	listView := m.sessionList.View()
+	// The §3.2 / §4.2 section header replaces the plain bubbles/list title line in
+	// the composed view (applySectionHeader), so the expected list section is the
+	// list view with that same in-place title swap applied — no flash row, footer
+	// composed below.
+	listView := m.applySectionHeader(m.sessionList.View())
 	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
 	want := m.fillCanvas(lipgloss.JoinVertical(lipgloss.Left, header, listView, footer))
 	if got != want {
-		t.Errorf("View() with empty flashText must equal fillCanvas(header + list.View() + manual footer)\nwant:\n%s\n\ngot:\n%s", want, got)
+		t.Errorf("View() with empty flashText must equal fillCanvas(header + section-headed list.View() + manual footer)\nwant:\n%s\n\ngot:\n%s", want, got)
 	}
 }
 

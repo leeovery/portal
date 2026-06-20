@@ -44,5 +44,7 @@ build/
 /portal
 
 # vhs capture-harness transient GIF byproduct (vhs requires an Output; we only
-# commit the screenshot PNG, not the GIF). See testdata/vhs/README.md.
+# commit the screenshot PNG, not the GIF). Tapes write the GIF into the hidden
+# .gifcache/ subdir so the vhs dir listing stays clean. See testdata/vhs/README.md.
+testdata/vhs/.gifcache/
 testdata/vhs/*.gif

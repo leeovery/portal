@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui/theme"
 )
@@ -92,6 +93,80 @@ func TestHeaderBlock_RendersWordmarkCaretSubtitleRule(t *testing.T) {
 	}
 }
 
+// visibleContent strips ANSI/SGR sequences and returns what would actually print
+// on the terminal — used to assert a row is BLANK (no non-space printable glyph)
+// regardless of any canvas-background SGR painted across its cells.
+func visibleContent(line string) string {
+	return ansi.Strip(line)
+}
+
+// TestHeaderBlock_VerticalRhythm pins the §3.1 header-block row structure: the
+// PORTAL band, the separator rule FLUSH beneath it (the rule is the wordmark's
+// underline — no blank between them), then ONE blank row (rule → "Sessions"
+// section-header gap). Three rows total. The wordmark→rule gap is flush because a
+// blank row there renders visibly TALLER than the Vinset=1 gutter above the band
+// (glyph-to-glyph vs edge-to-glyph), which read as an imbalance. The blank row
+// carries NO visible glyph (canvas-painted spaces only). This guard exists because
+// a spacing miss slipped through the element-scoped checks; it locks the structure
+// so it cannot silently regress.
+func TestHeaderBlock_VerticalRhythm(t *testing.T) {
+	const w = 80
+	header := renderHeaderBlock(w, theme.Dark, false)
+	lines := strings.Split(header, "\n")
+
+	if len(lines) != 3 {
+		t.Fatalf("header block has %d lines, want exactly 3 (band, rule, 1 blank):\n%s", len(lines), header)
+	}
+
+	// Line 0: the wordmark band.
+	if !strings.Contains(visibleContent(lines[0]), "P O R T A L") {
+		t.Errorf("line 0 should be the PORTAL band, got %q", visibleContent(lines[0]))
+	}
+	// Line 1: the separator rule, FLUSH beneath the band (no blank between).
+	if !strings.Contains(visibleContent(lines[1]), headerRuleGlyph) {
+		t.Errorf("line 1 should be the separator rule flush under the band, got %q", visibleContent(lines[1]))
+	}
+	// Line 2: blank (rule → "Sessions" section-header gap).
+	if got := strings.TrimSpace(visibleContent(lines[2])); got != "" {
+		t.Errorf("line 2 should be blank (rule → section-header gap), got visible %q", got)
+	}
+
+	// Every line is exactly the requested width (the blank rows are full-width
+	// canvas-painted, not collapsed).
+	for i, line := range lines {
+		if lw := lipgloss.Width(line); lw != w {
+			t.Errorf("header block line %d width = %d, want exactly %d", i, lw, w)
+		}
+	}
+}
+
+// TestHeaderBlock_BlankRowsPaintCanvas asserts the band→rule and rule→section
+// blank rows carry the owned canvas background (canvas-painted spaces) so there is
+// no terminal-bg island between the chrome rows. Under the NO_COLOR carve-out the
+// same rows carry no canvas SGR (native bg).
+func TestHeaderBlock_BlankRowsPaintCanvas(t *testing.T) {
+	const w = 80
+	header := renderHeaderBlock(w, theme.Dark, false)
+	lines := strings.Split(header, "\n")
+	seq := canvasSeq(t, theme.Dark)
+	for _, idx := range []int{2} {
+		if !strings.Contains(lines[idx], seq) {
+			t.Errorf("blank row %d does not paint the canvas background sequence %q: %q", idx, seq, lines[idx])
+		}
+	}
+
+	colourless := renderHeaderBlock(w, theme.Dark, true)
+	clLines := strings.Split(colourless, "\n")
+	if len(clLines) != 3 {
+		t.Fatalf("colourless header block has %d lines, want 3", len(clLines))
+	}
+	for _, idx := range []int{2} {
+		if strings.Contains(clLines[idx], seq) {
+			t.Errorf("colourless blank row %d still paints the canvas background sequence %q", idx, seq)
+		}
+	}
+}
+
 // TestHeaderBlock_SeparatorRule asserts the separator rule is a full-width
 // single-row heavy rule (terminal 2px ≈ a heavy/thick horizontal rule, matching
 // the Paper frame weight — the reference shows one thin full-width line).
@@ -105,8 +180,12 @@ func TestHeaderBlock_SeparatorRule(t *testing.T) {
 	if lw := lipgloss.Width(rule); lw != w {
 		t.Errorf("rule width = %d, want %d (full-width)", lw, w)
 	}
-	if !strings.HasSuffix(header, rule) {
-		t.Errorf("header does not end with the separator rule")
+	// The rule row appears verbatim as one of the block's lines (its exact
+	// position — band, 1 blank, rule, 2 blank — is pinned by
+	// TestHeaderBlock_VerticalRhythm; the block no longer ENDS with the rule now
+	// that the trailing rule → section-header gap blanks follow it).
+	if !strings.Contains(header, rule) {
+		t.Errorf("header block does not contain the separator rule row")
 	}
 }
 
@@ -211,6 +290,30 @@ func TestHeaderBlock_ZeroWidthFallsBackTo80(t *testing.T) {
 		if lw := lipgloss.Width(line); lw != 80 {
 			t.Errorf("zero-width header line %d width = %d, want 80 fallback", i, lw)
 		}
+	}
+}
+
+// TestHeaderHeight_EqualsThreeRows asserts the §3.1 header-block height the list
+// budget reserves (m.headerHeight) is exactly 3 at a normal width — band + rule
+// (flush) + 1 blank. The budget auto-reserves whatever this measures, so the value
+// is the contract the §3.5 pagination invariant depends on. It stays 3 under the
+// NO_COLOR carve-out (the blank row exists either way; only the SGR differs).
+func TestHeaderHeight_EqualsThreeRows(t *testing.T) {
+	const w = 80
+	for _, tc := range []struct {
+		name       string
+		colourless bool
+	}{
+		{"coloured", false},
+		{"colourless", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(fakeLister{}, WithCanvasMode(theme.Dark))
+			m.colourless = tc.colourless
+			if got := m.headerHeight(w); got != 3 {
+				t.Errorf("headerHeight(%d) = %d, want 3 (band, rule, 1 blank)", w, got)
+			}
+		})
 	}
 }
 

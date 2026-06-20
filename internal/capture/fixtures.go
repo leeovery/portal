@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -56,6 +57,8 @@ func FixtureByName(name string) (*Fixture, error) {
 	switch name {
 	case "sessions-flat":
 		return sessionsFlatFixture(), nil
+	case "sessions-by-tag":
+		return sessionsByTagFixture(), nil
 	default:
 		return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 	}
@@ -67,7 +70,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-by-tag", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -102,5 +105,47 @@ func sessionsFlatFixture() *Fixture {
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: nil},
 		initialMode:  prefs.ModeFlat,
+	}
+}
+
+// sessionsByTagFixture builds the deterministic "sessions-by-tag" fixture: the
+// same session set as sessions-flat, but opened in By-Tag mode (initialMode) with
+// tagged projects whose paths match the session dirs. This drives the §5.3 By-Tag
+// grouped capture so the `— by tag` mode suffix (and the restyled group headings)
+// are visible in the screenshot.
+//
+// Tags are directory-anchored (§5.5): they live on the project record and a
+// session inherits its directory's tags at grouped-render time. The project paths
+// match the session Dir values exactly; both reduce to the same canonical key
+// (CanonicalDirKey falls back to Clean(abs) for these non-existent paths), so the
+// match is deterministic without a real filesystem. The `evvi` project is left
+// UNTAGGED so its sessions collect under the pinned `Untagged` catch-all — showing
+// both a tagged heading and the catch-all in one frame.
+func sessionsByTagFixture() *Fixture {
+	sessions := []tmux.Session{
+		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
+		{Name: "agentic-workflows-codify", Windows: 2, Attached: false, Dir: "/home/user/code/agentic-workflows"},
+		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
+		{Name: "evvi webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/evvi"},
+		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
+		{Name: "designlab-web-r8suyU", Windows: 2, Attached: false, Dir: "/home/user/code/designlab"},
+		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
+		{Name: "fab-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/fab"},
+	}
+
+	projects := []project.Project{
+		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows", Tags: []string{"work"}},
+		{Path: "/home/user/code/fab", Name: "fab", Tags: []string{"work", "client"}},
+		{Path: "/home/user/code/aviva", Name: "aviva", Tags: []string{"client"}},
+		{Path: "/home/user/code/designlab", Name: "designlab", Tags: []string{"personal"}},
+		// evvi is deliberately untagged → its sessions land in the Untagged catch-all.
+		{Path: "/home/user/code/evvi", Name: "evvi"},
+	}
+
+	return &Fixture{
+		name:         "sessions-by-tag",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: projects},
+		initialMode:  prefs.ModeByTag,
 	}
 }

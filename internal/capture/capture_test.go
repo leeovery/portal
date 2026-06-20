@@ -83,6 +83,54 @@ func TestFixtureByName(t *testing.T) {
 	})
 }
 
+// TestSessionsByTagFixture verifies the grouped (by-tag) fixture: it opens in
+// ModeByTag and carries tagged projects whose paths match the session dirs, so the
+// By-Tag grouping renders real `— by tag` headings (not the "No tags yet"
+// signpost). This is the fixture that drives the mode-suffix capture.
+func TestSessionsByTagFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-by-tag")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-by-tag): %v", err)
+	}
+
+	// It builds the production Sessions model opened in By-Tag mode.
+	m := tui.Build(fx.Deps())
+	if got, want := m.SessionListTitle(), "Sessions — by tag"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (fixture opens in By-Tag mode)", got, want)
+	}
+
+	// At least one project carries a tag, so the By-Tag view groups rather than
+	// degrading to the "No tags yet" signpost.
+	projects, err := fx.Deps().ProjectStore.List()
+	if err != nil {
+		t.Fatalf("ProjectStore.List: %v", err)
+	}
+	tagged := false
+	for _, p := range projects {
+		if len(p.Tags) > 0 {
+			tagged = true
+			break
+		}
+	}
+	if !tagged {
+		t.Error("sessions-by-tag fixture has no tagged project; the By-Tag view would degrade to the signpost")
+	}
+}
+
+// TestFixtureNamesIncludesByTag pins the by-tag fixture into the discoverable
+// name list (the --fixture help + FixtureByName error share this source).
+func TestFixtureNamesIncludesByTag(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "sessions-by-tag" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include sessions-by-tag", capture.FixtureNames())
+	}
+}
+
 // TestFakeSeamsAreInert verifies the mutating fakes are no-ops (the harness must
 // never mutate any tmux/server/config state) and the read seams return canned
 // data without touching a real tmux server.

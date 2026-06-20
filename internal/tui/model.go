@@ -1111,7 +1111,14 @@ func (m *Model) applyCanvasMode() {
 	if m.colourless {
 		m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode, Colourless: true})
 		colourlessHelpStyles(&m.sessionList)
-		m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.UnsetBackground()
+		// PaddingBottom(1) is the §3.2 section-header BOTTOM gap (Sessions → first
+		// session row). It makes the title bar 2 lines (line 0 = "Sessions…", line 1
+		// = the blank gap row); bubbles/list measures the rendered title-bar height
+		// and reserves it from the item area, so this is auto-budgeted (no manual
+		// reserve). DEPENDENCY: applySectionHeader's string surgery replaces ONLY line
+		// 0 (the title) and preserves line 1 — the gap is line 1, the surgery touches
+		// line 0. Under NO_COLOR the padding row is native-bg (UnsetBackground).
+		m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.UnsetBackground().PaddingBottom(1)
 		// Strip the bubbles/list default Title box colours (its violet 48;5;62
 		// background + bright foreground) so "Sessions" renders on the terminal's
 		// native fg/bg — the title is a leaf canvas-dependent surface too. The
@@ -1127,7 +1134,14 @@ func (m *Model) applyCanvasMode() {
 	// "Sessions" title box keeps its own colour (the wordmark/header chrome
 	// restyle is Phase 2); this only paints the padding around it.
 	canvas := theme.MV.Canvas.ColorFor(m.canvasMode)
-	m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.Background(canvas)
+	// PaddingBottom(1) is the §3.2 section-header BOTTOM gap (Sessions → first
+	// session row). It makes the title bar 2 lines (line 0 = "Sessions…", line 1 =
+	// the blank gap row, which inherits the canvas Background so it is canvas-painted
+	// with no terminal-bg island); bubbles/list measures the rendered title-bar
+	// height and reserves it from the item area, so this is auto-budgeted (no manual
+	// reserve). DEPENDENCY: applySectionHeader's string surgery replaces ONLY line 0
+	// (the title) and preserves line 1 — the gap is line 1, the surgery touches line 0.
+	m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.Background(canvas).PaddingBottom(1)
 }
 
 // NewModelWithSessions creates a Model pre-populated with sessions, for testing.
@@ -3277,6 +3291,14 @@ func (m Model) viewSessionList() string {
 		modalContent = m.renameInput.View()
 	}
 	listView := renderListWithModal(m.sessionList, modalContent)
+	// §3.2 / §4.2: replace the plain bubbles/list title line with the restyled
+	// section header (Sessions label + state.green count + mode suffix + the
+	// right-aligned `/ to filter` hint). The title row already costs exactly one
+	// line in the list's height budget, so swapping its CONTENT (not adding a row)
+	// keeps the one-row-per-delegate pagination invariant (§3.5) exact. While the
+	// filter input is active the title row IS that input — leave it untouched so
+	// the user sees what they type.
+	listView = m.applySectionHeader(listView)
 	if m.byTagSignpost {
 		// Persistent "No tags yet" signpost (spec § Empty states → By Tag
 		// with zero tags). Inserted additively beneath the title/filter row
@@ -3308,6 +3330,53 @@ func (m Model) viewSessionList() string {
 // computation (headerHeight) resolve the header against the SAME width/mode.
 func (m Model) renderHeader() string {
 	return renderHeaderBlock(m.contentWidth(), m.canvasMode, m.colourless)
+}
+
+// applySectionHeader swaps the §3.2 / §4.2 restyled section header in place of the
+// plain bubbles/list title line (the FIRST line of listView). Because the title
+// row already occupies exactly one line in the list's height budget, replacing its
+// content — rather than inserting a new row — keeps the one-row-per-delegate
+// pagination invariant (§3.5) exact with no budget recompute.
+//
+// While the filter input is active (FilterState == Filtering) the first line is
+// the live filter input, NOT the title — leave it untouched so the user sees what
+// they type (the section header is suppressed for that frame, matching the
+// pre-reskin behaviour where the input replaced the title).
+func (m Model) applySectionHeader(listView string) string {
+	if m.sessionList.FilterState() == list.Filtering {
+		return listView
+	}
+	header := renderSectionHeader(
+		m.sessionListMode,
+		m.insideTmux,
+		m.currentSession,
+		m.visibleSessionRowCount(),
+		m.contentWidth(),
+		m.canvasMode,
+		m.colourless,
+	)
+	idx := strings.IndexByte(listView, '\n')
+	if idx < 0 {
+		return header
+	}
+	return header + listView[idx:]
+}
+
+// visibleSessionRowCount is the §3.2 count source: the number of VISIBLE session
+// rows in the list — the SAME count the rendered list shows. It counts
+// SessionItem rows (HeaderItem group separators are excluded) among the list's
+// visible items, so it tracks the inside-tmux exclusion (filteredSessions feeds
+// the items), an applied filter (VisibleItems is the filtered set), and the By-Tag
+// per-tag row repeats (Pattern B materialises one SessionItem per (session, tag)
+// pair, so the count reflects the rows actually drawn).
+func (m Model) visibleSessionRowCount() int {
+	count := 0
+	for _, it := range m.sessionList.VisibleItems() {
+		if _, ok := it.(SessionItem); ok {
+			count++
+		}
+	}
+	return count
 }
 
 // headerHeight is the rendered height of the §3.1 header block at the given laid-

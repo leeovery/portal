@@ -21,7 +21,7 @@
 # Screenshot path below) — an unquoted slashed path is a parser error.
 
 # Output is required by vhs even though we only care about the PNG screenshot.
-Output "testdata/vhs/contrast-validation-light.gif"
+Output "testdata/vhs/.gifcache/contrast-validation-light.gif"
 
 Set FontFamily "JetBrains Mono"
 Set FontSize 16

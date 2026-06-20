@@ -23,6 +23,7 @@ var centralisedColourSites = []string{
 	"project_item.go",
 	"model.go",
 	"header.go",
+	"section_header.go",
 }
 
 // TestNoRawColourLiteralAtCentralisedSites parses each re-pointed file and fails

@@ -35,10 +35,12 @@ const (
 	// headerSubtitle is the right-aligned subtitle in text.detail (§3.1).
 	headerSubtitle = "session manager"
 	// headerRuleGlyph is the full-width separator rule glyph (border.separator).
-	// A box-drawing horizontal renders the §3.1 "2px" rule as a single thin
-	// full-width line matching the Paper frame weight (terminal 2px ≈ a heavy/thick
-	// horizontal rule — the frame shows one thin full-width line, not a 2-row band).
-	headerRuleGlyph = "─"
+	// The lower-block sits at the BOTTOM edge of its cell (not the vertical middle
+	// like the box-drawing `─`), so the rule does not "float" with whitespace above
+	// AND below it — the line lands low in its row, balancing the space above and
+	// below the PORTAL wordmark. Unlike the underscore, the lower-block draws as one
+	// continuous solid bar across the full width (no inter-cell dashing).
+	headerRuleGlyph = "▁"
 )
 
 // headerFallbackWidth is the zero/unset-width fallback (matching fillCanvas /
@@ -128,17 +130,56 @@ func headerSeparatorRule(width int, mode theme.Mode, colourless bool) string {
 	return headerStyle(theme.MV.BorderSeparator, mode, colourless).Render(rule)
 }
 
-// renderHeaderBlock renders the §3.1 header block for the given terminal width
-// and resolved canvas mode (and NO_COLOR carve-out). It joins the wordmark+caret
-// band — with the right-aligned subtitle filling the band to width via a
-// canvas-painted spacer — over the full-width separator rule. The block never
-// overflows: a width below the per-dimension thresholds drops the subtitle then
-// collapses the wordmark to its compact form (§2.7).
+// blankCanvasRow renders ONE full-width canvas-painted blank row: w spaces styled
+// with headerCanvasBg for the mode (Background(canvas) coloured, a bare style —
+// native bg — under the NO_COLOR carve-out). It is the structural vertical-spacer
+// row the header block stacks between its chrome rows so the blank-row gaps carry
+// the owned canvas with no terminal-bg island. Mirrors headerSeparatorRule's
+// structure, swapping the heavy rule glyph for a space and the rule colour for the
+// bare canvas-background style.
+func blankCanvasRow(w int, mode theme.Mode, colourless bool) string {
+	return headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", w))
+}
+
+// renderHeaderBlock renders the §3.1 header block for the given terminal width and
+// resolved canvas mode (and NO_COLOR carve-out). Three rows, top to bottom:
+//
+//	band, rule, blank
+//
+// — the wordmark+caret band (right-aligned subtitle filled to width via a
+// canvas-painted spacer), then the full-width separator rule FLUSH beneath it (the
+// rule is the wordmark's underline — one header unit, no gap between them), then
+// ONE blank row (the rule → "Sessions" section-header gap). All three rows carry
+// the owned canvas so there is no terminal-bg island between the chrome rows.
+//
+// Spacing rationale (the deliberate asymmetry, learned the hard way): a blank row
+// BETWEEN two glyph rows is a glyph-to-glyph gap — the blank row PLUS the empty
+// half-cell under the wordmark PLUS the empty half-cell above the thin rule glyph —
+// so it renders ~50% TALLER than the Vinset=1 canvas gutter ABOVE the band (an
+// edge-to-glyph gap of one clean row). A blank row below the wordmark therefore
+// reads visibly bigger than the gutter above it; counting rows does NOT balance
+// them. So the wordmark→rule gap is FLUSH (rule as underline) — the closest the
+// whole-row terminal can get to "equal space above and below the wordmark" without
+// the blank-row inflation. The breathing room is the single blank below the rule.
+//
+// The trailing blank (the rule → "Sessions" gap) lives HERE, in the block, rather
+// than as a TOP margin on the section header, for two reasons: (1) the single
+// headerHeight measurement (lipgloss.Height of this block) is what
+// applySessionListSize reserves from the list budget, so folding the gap in here
+// makes it auto-budgeted with no separate constant; (2) applySectionHeader swaps
+// the section header in by line-0 string surgery that ASSUMES the title is on line
+// 0 — a top margin on the section header would shift the title off line 0 and break
+// that surgery. (The section header's BOTTOM gap is the TitleBar PaddingBottom in
+// applyCanvasMode, which the list measures and reserves separately.)
+//
+// The block never overflows: a width below the per-dimension thresholds drops the
+// subtitle then collapses the wordmark to its compact form (§2.7).
 func renderHeaderBlock(width int, mode theme.Mode, colourless bool) string {
 	w := headerWidthOrFallback(width)
 	band := headerBand(w, mode, colourless)
 	rule := headerSeparatorRule(w, mode, colourless)
-	return lipgloss.JoinVertical(lipgloss.Left, band, rule)
+	blank := blankCanvasRow(w, mode, colourless)
+	return lipgloss.JoinVertical(lipgloss.Left, band, rule, blank)
 }
 
 // headerBand renders the single header band: PORTAL wordmark + violet caret on
