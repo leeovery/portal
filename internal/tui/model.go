@@ -1179,7 +1179,14 @@ func (m *Model) applyListSize(l *list.Model, bindings []key.Binding, width, heig
 // simply re-pads to termH — the one-row-per-delegate pagination invariant (§3.5
 // / §4.1) holds and the frame never overflows the viewport.
 func (m *Model) applySessionListSize(width, height int) {
-	m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), width, height-m.sessionBandHeight())
+	// Fold the §3.1 header block height out of the budget (in addition to the
+	// notice bands) so bubbles/list paginates against the reduced height: the
+	// header is part of the height budget, NOT an uncounted band (§3.5). The header
+	// height is resolved against the SAME width this size-apply was called with, so
+	// the budget and the viewSessionList render agree at every call site
+	// (WindowSizeMsg, rebuildSessionList, the 80x24 construction seed).
+	reserved := m.sessionBandHeight() + m.headerHeight(width)
+	m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), width, height-reserved)
 }
 
 // sessionBandHeight returns the total rendered height of the notice bands
@@ -3124,7 +3131,30 @@ func (m Model) viewSessionList() string {
 		listView = insertRowBelowTitle(listView, m.renderFlashRow())
 	}
 	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
-	return lipgloss.JoinVertical(lipgloss.Left, listView, footer)
+	// Compose the §3.1 shared header block FIRST, above the list — it is the first
+	// visible chrome. Its height is already folded out of the list's budget by
+	// applySessionListSize (m.headerHeight), so the composed view stays within
+	// termH and the one-row-per-delegate pagination invariant (§3.5) holds.
+	header := m.renderHeader()
+	return lipgloss.JoinVertical(lipgloss.Left, header, listView, footer)
+}
+
+// renderHeader renders the §3.1 shared header block for the model's current
+// terminal width and resolved canvas mode (and the NO_COLOR carve-out). It is the
+// single render entry point so the composed-view render and the height-budget
+// computation (headerHeight) resolve the header against the SAME width/mode.
+func (m Model) renderHeader() string {
+	return renderHeaderBlock(m.termWidth, m.canvasMode, m.colourless)
+}
+
+// headerHeight is the rendered height of the §3.1 header block at the given laid-
+// out width — the amount applySessionListSize reserves out of the list's height
+// budget so the header (the first visible chrome) is part of the budget, NOT an
+// uncounted band (§3.5). It resolves the header against the same width/mode the
+// render uses (via the shared headerWidthOrFallback fallback), so the budget and
+// the render agree exactly.
+func (m Model) headerHeight(width int) int {
+	return lipgloss.Height(renderHeaderBlock(width, m.canvasMode, m.colourless))
 }
 
 // insertRowBelowTitle inserts row between the first line (the list's

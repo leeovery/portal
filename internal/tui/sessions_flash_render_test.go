@@ -55,18 +55,21 @@ func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 	// The composed view is then wrapped by the single outer canvas fill (§1) as
 	// the LAST layer in View(); the assertion compares against the same
 	// fillCanvas wrap so it pins "no flash row, footer composed below" without
-	// re-asserting the fill (covered by canvas_paint_test.go).
+	// re-asserting the fill (covered by canvas_paint_test.go). The §3.1 header
+	// block is composed FIRST (above the list), so it is part of the expected
+	// composition.
 	m := flashModelWithSessions("alpha-row")
 	if m.flashText != "" {
 		t.Fatalf("setup invariant: want empty flashText, got %q", m.flashText)
 	}
 
 	got := m.View().Content
+	header := m.renderHeader()
 	listView := m.sessionList.View()
 	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
-	want := m.fillCanvas(lipgloss.JoinVertical(lipgloss.Left, listView, footer))
+	want := m.fillCanvas(lipgloss.JoinVertical(lipgloss.Left, header, listView, footer))
 	if got != want {
-		t.Errorf("View() with empty flashText must equal fillCanvas(list.View() + manual footer)\nwant:\n%s\n\ngot:\n%s", want, got)
+		t.Errorf("View() with empty flashText must equal fillCanvas(header + list.View() + manual footer)\nwant:\n%s\n\ngot:\n%s", want, got)
 	}
 }
 
