@@ -59,10 +59,15 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 	// Negative assertion: the rendered output must NOT be the sessions list
 	// title (which would appear if the View() falls through to the default
 	// branch). The default sessions title contains "session" or the list's
-	// own header — assert the chrome line is the FIRST line of output, not
+	// own header — assert the chrome line is the FIRST CONTENT row of output
+	// (the global content gutter inserts Vinset blank canvas rows on top), not
 	// a sessions-list header.
-	topRow := firstLine(rendered)
-	if !strings.Contains(topRow, "Window 1 of 1") {
-		t.Errorf("expected first line to be the preview chrome, got %q", topRow)
+	contentRows := strings.Split(rendered, "\n")
+	if len(contentRows) <= Vinset {
+		t.Fatalf("rendered frame has %d rows, fewer than the top gutter (%d)", len(contentRows), Vinset)
+	}
+	topContentRow := contentRows[Vinset]
+	if !strings.Contains(topContentRow, "Window 1 of 1") {
+		t.Errorf("expected first content row to be the preview chrome, got %q", topContentRow)
 	}
 }

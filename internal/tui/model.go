@@ -1149,9 +1149,11 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 	}
 	// Apply construction-time fallback dimensions through the size helper
 	// so each list reserves room for the manual keymap footer at every
-	// SetSize call site (including this 80x24 test seed).
-	m.applySessionListSize(80, 24)
-	m.applyProjectListSize(80, 24)
+	// SetSize call site (including this 80x24 test seed). The dims come from
+	// the inset content-region helpers (zero termWidth/Height → 80x24 fallback,
+	// then the §3 gutter folded in) so the seed agrees with the live budget.
+	m.applySessionListSize(m.contentWidth(), m.contentHeight())
+	m.applyProjectListSize(m.contentWidth(), m.contentHeight())
 	return m
 }
 
@@ -1394,7 +1396,7 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	// would size itself against pre-load defaults and overflow under the
 	// footer once items populate.
 	if m.termWidth > 0 || m.termHeight > 0 {
-		m.applySessionListSize(m.termWidth, m.termHeight)
+		m.applySessionListSize(m.contentWidth(), m.contentHeight())
 	}
 
 	// Grouped lists lead with a non-selectable HeaderItem at index 0, so a
@@ -1584,7 +1586,7 @@ func (m *Model) resyncSessionLayout() {
 	if m.termWidth <= 0 || m.termHeight <= 0 {
 		return
 	}
-	m.applySessionListSize(m.termWidth, m.termHeight)
+	m.applySessionListSize(m.contentWidth(), m.contentHeight())
 }
 
 // loadProjects returns a command that cleans stale projects and loads the list.
@@ -1698,8 +1700,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		m.termWidth = wsm.Width
 		m.termHeight = wsm.Height
-		m.applySessionListSize(wsm.Width, wsm.Height)
-		m.applyProjectListSize(wsm.Width, wsm.Height)
+		// Fold the §3 content gutter into both budgets: the lists size to the INSET
+		// content region (contentWidth × contentHeight), not the full terminal, so
+		// the composed view fits inside the global gutter.
+		m.applySessionListSize(m.contentWidth(), m.contentHeight())
+		m.applyProjectListSize(m.contentWidth(), m.contentHeight())
 	}
 
 	// Handle cross-view messages regardless of view state
@@ -1789,9 +1794,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items := ProjectsToListItems(msg.Projects)
 			setItemsCmd = m.projectList.SetItems(items)
 			// Re-apply terminal size so pagination accounts for the manual
-			// keymap footer height (see applyListSize).
+			// keymap footer height (see applyListSize), sized to the inset
+			// content region (the §3 gutter folded into the budget).
 			if m.termWidth > 0 || m.termHeight > 0 {
-				m.applyProjectListSize(m.termWidth, m.termHeight)
+				m.applyProjectListSize(m.contentWidth(), m.contentHeight())
 			}
 			// Startup-ordering correction: fetchSessions and loadProjects are
 			// batched concurrently. If SessionsMsg arrives FIRST, applySessions
@@ -1914,8 +1920,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PageProjects:
 		return m.updateProjectsPage(msg)
 	case pagePreview:
+		// Forward to the preview with the §3 gutter folded in: a WindowSizeMsg is
+		// rewritten to the inset content-region dims so the preview's framed chrome
+		// resizes to sit inside the global gutter (m.termWidth/Height were already
+		// updated from the raw msg at the top of Update).
 		var cmd tea.Cmd
-		m.preview, cmd = m.preview.Update(msg)
+		m.preview, cmd = m.preview.Update(insetWindowSizeMsg(msg, m.contentWidth(), m.contentHeight()))
 		return m, cmd
 	default:
 		return m.updateSessionList(msg)
@@ -2388,7 +2398,10 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			pmodel, ok := NewPreviewModel(si.Session.Name, m.enumerator, m.reader, m.previewAttacher, m.termWidth, m.termHeight)
+			// Size the preview to the INSET content region (the §3 gutter folded
+			// into the budget) so its framed chrome sits inside the global gutter
+			// like every other page.
+			pmodel, ok := NewPreviewModel(si.Session.Name, m.enumerator, m.reader, m.previewAttacher, m.contentWidth(), m.contentHeight())
 			if !ok {
 				return m, nil
 			}
@@ -2656,20 +2669,14 @@ func (m Model) View() tea.View {
 // blankFrame is the neutral pre-resolution frame held by the §2.6 first-paint
 // gate while the appearance is still being detected. It paints NO canvas
 // background — the light/dark mode is undecided, so committing to either canvas
-// here is exactly the flip the gate exists to avoid. It is a full-terminal block
-// of plain spaces (no SGR), sized to the cached terminal dimensions with the same
-// 80x24 zero-size fallback as fillCanvas, so the terminal shows an empty screen
-// (the user's own background) for the tens-of-ms wait rather than a half-painted
-// canvas. The wait is invisible against the multi-hundred-ms bootstrap.
+// here is exactly the flip the gate exists to avoid. It is a FULL-terminal block
+// of plain spaces (no SGR, no content inset — there is no content to inset yet),
+// sized to the cached terminal dimensions with the same 80x24 zero-size fallback
+// as fillCanvas, so the terminal shows an empty screen (the user's own
+// background) for the tens-of-ms wait rather than a half-painted canvas. The wait
+// is invisible against the multi-hundred-ms bootstrap.
 func (m Model) blankFrame() string {
-	w := m.termWidth
-	h := m.termHeight
-	if w == 0 {
-		w = 80
-	}
-	if h == 0 {
-		h = 24
-	}
+	w, h := m.termDims()
 	blank := strings.Repeat(" ", w)
 	lines := make([]string, h)
 	for i := range lines {
@@ -2678,85 +2685,219 @@ func (m Model) blankFrame() string {
 	return strings.Join(lines, "\n")
 }
 
+// Hinset / Vinset are the global content gutter (§3 frame padding): every page
+// composes into a region inset by Hinset cells left/right and Vinset rows
+// top/bottom, with the gutter cells painted the owned canvas (§1) — the
+// terminal-grid analogue of the Paper design's whole-frame container padding
+// (§15.1: paddingInline 34px L/R, paddingBlock 30px T/B). At the design's ~9px
+// char width / ~18px line-height that is ≈ 2 cells L/R and ≈ 1 row T/B. The inset
+// is folded into the width AND height budgets at every SetSize site so the
+// one-row-per-delegate pagination invariant (§3.5) stays exact — it is part of
+// the budget, NOT an uncounted band.
+const (
+	Hinset = 2 // content gutter, cells left and right (≈ 34px design paddingInline)
+	Vinset = 1 // content gutter, rows top and bottom  (≈ 30px design paddingBlock)
+)
+
+// fallbackTermWidth / fallbackTermHeight are the pre-first-WindowSizeMsg
+// dimensions: when the cached terminal size is still zero/unset the canvas (and
+// the content region derived from it) falls back to 80×24, matching viewLoading,
+// so the frame never sizes to zero and blanks the screen.
+const (
+	fallbackTermWidth  = 80
+	fallbackTermHeight = 24
+)
+
+// termDims returns the cached terminal dimensions with the zero/unset 80×24
+// fallback applied — the full-canvas size the §1 outer fill paints.
+func (m Model) termDims() (w, h int) {
+	w, h = m.termWidth, m.termHeight
+	if w <= 0 {
+		w = fallbackTermWidth
+	}
+	if h <= 0 {
+		h = fallbackTermHeight
+	}
+	return w, h
+}
+
+// insetRegion reduces a full dimension by 2× the inset, clamping the inset to 0
+// when the dimension cannot hold it (region would be ≤ 0). It is the single
+// content-region derivation so the budget computation and the fillCanvas
+// placement agree exactly, and so a tiny terminal degrades to a 0 inset rather
+// than producing a negative region or overflowing.
+func insetRegion(dim, inset int) int {
+	if dim <= 2*inset {
+		return dim // clamp the inset to 0: keep the full dimension, no negative region
+	}
+	return dim - 2*inset
+}
+
+// contentWidth is the inset content-region width every page composes into:
+// (termW − 2·Hinset), with the 80-col zero/unset fallback applied first and the
+// inset clamped to 0 on a too-narrow terminal. It is the width fed to every
+// SetSize site and content composer (header, list, footer, loading text,
+// preview) so the composed view fits inside the L/R gutter.
+func (m Model) contentWidth() int {
+	w, _ := m.termDims()
+	return insetRegion(w, Hinset)
+}
+
+// insetWindowSizeMsg rewrites a tea.WindowSizeMsg's dimensions to the inset
+// content-region size (contentW × contentH) when forwarding it to a sub-model
+// that composes its own framed view (the scrollback preview), so the sub-model
+// sizes to sit inside the global §3 gutter. Any non-WindowSizeMsg passes through
+// unchanged — only the resize carries terminal dimensions.
+func insetWindowSizeMsg(msg tea.Msg, contentW, contentH int) tea.Msg {
+	wsm, ok := msg.(tea.WindowSizeMsg)
+	if !ok {
+		return msg
+	}
+	wsm.Width = contentW
+	wsm.Height = contentH
+	return wsm
+}
+
+// contentHeight is the inset content-region height every page composes into:
+// (termH − 2·Vinset), with the 24-row zero/unset fallback applied first and the
+// inset clamped to 0 on a too-short terminal. The vertical inset is subtracted IN
+// ADDITION to the header/footer/band the list budget already reserves, so the
+// pagination invariant holds against the reduced height.
+func (m Model) contentHeight() int {
+	_, h := m.termDims()
+	return insetRegion(h, Vinset)
+}
+
 // fillCanvas is the SINGLE outer full-terminal canvas fill (§1) — the LAST
 // layer wrapped over the already-composed per-page view (header + any notice
-// band + list + footer). It pads every content line to the full terminal width
-// and fills the full terminal height with the mode-matched canvas background, so
-// no edge bleeds at line ends and no mid-screen row is left unpainted. It is an
-// OUTER WRAP, not per-delegate painting: the list's width/height budget is
-// unchanged, so the one-row-per-delegate pagination invariant (§3.5 / §4.1) is
-// untouched — a dynamic vertical change (e.g. the §11.2 flash band) recomputes
-// the list height UNDERNEATH the fill, which simply re-pads to termH.
+// band + list + footer). The composed view is sized to the INSET content region
+// (contentW × contentH); fillCanvas pads every content line to contentW, fills to
+// contentH with the mode-matched canvas background, then places that block inside
+// the full terminal canvas at (Hinset, Vinset) — Hinset canvas gutter columns
+// each side and Vinset canvas gutter rows top/bottom (§3 frame padding). The
+// result is exactly termW × termH with the owned canvas filling the gutter, so no
+// edge bleeds at line ends and no mid-screen row is left unpainted. It is an
+// OUTER WRAP, not per-delegate painting: the list's width/height budget already
+// folds in the inset (applySessionListSize), so the one-row-per-delegate
+// pagination invariant (§3.5 / §4.1) is untouched — a dynamic vertical change
+// (e.g. the §11.2 flash band) recomputes the list height UNDERNEATH the fill,
+// which simply re-pads to contentH.
 //
-// It pads each line INDIVIDUALLY to the terminal width (rather than via
+// It pads each line INDIVIDUALLY to the content width (rather than via
 // lipgloss.Place, which pads only the gap BEYOND the single widest line — so a
-// content line already at the terminal width would suppress padding of every
+// content line already at the content width would suppress padding of every
 // shorter line). Each line is first stripped of trailing background-less spaces
 // (the raw block-padding bubbles/list appends to its shorter lines — the title
 // bar and pagination dots — which would otherwise leave a terminal-bg seam), so
 // the canvas pad owns every line's trailing region. Styled trailing cells (the
 // delegate's own canvas runs) end in a reset, not a bare space, and survive.
-// Rows beyond the composed content are emitted as full-width canvas blanks up to
-// termH; content taller than termH is clamped so the frame never overflows.
+// Rows beyond the composed content are emitted as content-width canvas blanks up
+// to contentH; content taller than contentH is clamped so the frame never
+// overflows.
 //
 // Pre-first-WindowSizeMsg the cached dimensions are 0; the fill falls back to
-// 80x24 exactly as viewLoading does, so it never sizes to zero and blanks the
-// screen.
+// 80x24 exactly as viewLoading does (then insets), so it never sizes to zero and
+// blanks the screen. A terminal too small to hold the inset clamps the gutter to
+// 0 (contentW/H equal termW/H via insetRegion), so the frame renders flush.
 func (m Model) fillCanvas(view string) string {
-	w := m.termWidth
-	h := m.termHeight
-	if w == 0 {
-		w = 80
-	}
-	if h == 0 {
-		h = 24
-	}
+	w, h := m.termDims()
+	contentW := m.contentWidth()
+	contentH := m.contentHeight()
 	// NO_COLOR carve-out (§2.5): no canvas bg and no mid-line backfill — render on
 	// the terminal's native bg. Padding to width / filling to height keeps the
-	// layout (the structure parity the capture verifies) but every padding cell is
-	// a plain space with NO background SGR, so no canvas is painted.
+	// layout (the structure parity the capture verifies) but every padding/gutter
+	// cell is a plain space with NO background SGR, so no canvas is painted.
 	if m.colourless {
-		return fillColourless(view, w, h)
+		content := fillColourless(view, contentW, contentH)
+		return insetColourless(content, w, h, contentW, contentH)
 	}
 	canvas := lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(m.canvasMode))
-	blank := canvas.Render(strings.Repeat(" ", w))
 	canvasBg := canvasBgParams(theme.MV.Canvas.ColorFor(m.canvasMode))
 	parser := ansi.NewParser() // one instance reused across every line this frame
 
 	lines := strings.Split(view, "\n")
-	out := make([]string, 0, h)
+	out := make([]string, 0, contentH)
 	for _, line := range lines {
-		if len(out) == h {
-			break // clamp: never exceed the terminal height (no overflow)
+		if len(out) == contentH {
+			break // clamp: never exceed the content-region height (no overflow)
 		}
 		// Backfill mid-line gaps FIRST (so every interior cell carries the
 		// canvas bg without depending on the terminal default / OSC 11), then
-		// pad the trailing region to the full width.
+		// pad the trailing region to the content width.
 		line = backfillCanvasBackground(line, canvasBg, parser)
-		out = append(out, padLineToCanvasWidth(line, w, canvas))
+		out = append(out, padLineToCanvasWidth(line, contentW, canvas))
 	}
-	for len(out) < h {
+	blank := canvas.Render(strings.Repeat(" ", contentW))
+	for len(out) < contentH {
 		out = append(out, blank)
+	}
+	return insetCanvasCanvas(out, w, h, contentW, canvas)
+}
+
+// gutterPadding splits the total horizontal (w−contentW) and vertical
+// (h−contentH) gutter evenly across the two sides — the shared geometry both
+// inset placers use so the coloured and colourless frames are byte-identical in
+// layout. Each gutter is ≥ 0 (contentW/H are clamped to ≤ w/h by insetRegion), so
+// it degrades to 0 cleanly when the inset was clamped at a tiny terminal.
+func gutterPadding(w, h, contentW, contentH int) (leftPad, rightPad, topPad, botPad int) {
+	hGutter := w - contentW
+	leftPad = hGutter / 2
+	rightPad = hGutter - leftPad
+	vGutter := h - contentH
+	topPad = vGutter / 2
+	botPad = vGutter - topPad
+	return leftPad, rightPad, topPad, botPad
+}
+
+// insetCanvasCanvas places the content-region rows (each already contentW wide)
+// inside the full terminal canvas at (Hinset, Vinset) for the COLOURED path: it
+// emits Vinset canvas gutter rows above, pads each content row with a canvas
+// gutter column on each side (Hinset cells each), and emits Vinset canvas gutter
+// rows below — every gutter cell painted the owned canvas. The horizontal /
+// vertical gutter is derived from the actual w−contentW / h−contentH so it
+// degrades to 0 cleanly when the inset was clamped (tiny terminal).
+func insetCanvasCanvas(contentRows []string, w, h, contentW int, canvas lipgloss.Style) string {
+	leftPad, rightPad, topPad, botPad := gutterPadding(w, h, contentW, len(contentRows))
+
+	fullBlank := canvas.Render(strings.Repeat(" ", w))
+	leftCol := ""
+	if leftPad > 0 {
+		leftCol = canvas.Render(strings.Repeat(" ", leftPad))
+	}
+	rightCol := ""
+	if rightPad > 0 {
+		rightCol = canvas.Render(strings.Repeat(" ", rightPad))
+	}
+
+	out := make([]string, 0, h)
+	for i := 0; i < topPad; i++ {
+		out = append(out, fullBlank)
+	}
+	for _, row := range contentRows {
+		out = append(out, leftCol+row+rightCol)
+	}
+	for i := 0; i < botPad; i++ {
+		out = append(out, fullBlank)
 	}
 	return strings.Join(out, "\n")
 }
 
-// fillColourless is the NO_COLOR (§2.5) variant of fillCanvas: it pads every
-// content line to the full terminal width and fills to the full terminal height
+// fillColourless is the NO_COLOR (§2.5) variant of fillCanvas's per-line fill: it
+// pads every content line to the content width and fills to the content height
 // for layout parity, but emits NO background SGR — every padding cell is a plain
 // space and every overflow row a plain blank line, so the frame renders on the
 // terminal's native bg with no painted canvas. There is no mid-line backfill (no
 // canvas to re-establish) and no canvas-styled blank; the composed line's own
 // trailing block-padding is trimmed first so the plain pad owns the trailing
 // region, matching fillCanvas's line geometry exactly (the structure the capture
-// verifies). Content taller than termH is clamped (no overflow).
+// verifies). Content taller than the content height is clamped (no overflow).
 func fillColourless(view string, w, h int) string {
 	blank := strings.Repeat(" ", w)
 	lines := strings.Split(view, "\n")
 	out := make([]string, 0, h)
 	for _, line := range lines {
 		if len(out) == h {
-			break // clamp: never exceed the terminal height (no overflow)
+			break // clamp: never exceed the content-region height (no overflow)
 		}
 		line = strings.TrimRight(line, " ")
 		gap := w - lipgloss.Width(line)
@@ -2767,6 +2908,33 @@ func fillColourless(view string, w, h int) string {
 	}
 	for len(out) < h {
 		out = append(out, blank)
+	}
+	return strings.Join(out, "\n")
+}
+
+// insetColourless places the content-region block inside the full terminal frame
+// at (Hinset, Vinset) for the NO_COLOR path: the gutter rows/columns are plain
+// spaces (the terminal native bg) with no background SGR, mirroring
+// insetCanvasCanvas's geometry exactly so the colourless frame matches the
+// coloured frame's layout (the structure the capture verifies). The gutter is
+// derived from w−contentW / h−contentH so it degrades to 0 when the inset was
+// clamped.
+func insetColourless(content string, w, h, contentW, contentH int) string {
+	leftPad, rightPad, topPad, botPad := gutterPadding(w, h, contentW, contentH)
+
+	fullBlank := strings.Repeat(" ", w)
+	leftCol := strings.Repeat(" ", leftPad)
+	rightCol := strings.Repeat(" ", rightPad)
+
+	out := make([]string, 0, h)
+	for i := 0; i < topPad; i++ {
+		out = append(out, fullBlank)
+	}
+	for _, row := range strings.Split(content, "\n") {
+		out = append(out, leftCol+row+rightCol)
+	}
+	for i := 0; i < botPad; i++ {
+		out = append(out, fullBlank)
 	}
 	return strings.Join(out, "\n")
 }
@@ -3007,18 +3175,13 @@ func (m Model) viewString() string {
 	}
 }
 
-// viewLoading renders the loading interstitial with centered text.
+// viewLoading renders the loading interstitial with centered text. It composes
+// into the INSET content region (contentW × contentH) so fillCanvas places it
+// inside the global gutter like every other page; the loading text centres within
+// the inset region rather than the full terminal.
 func (m Model) viewLoading() string {
-	w := m.termWidth
-	h := m.termHeight
-	if w == 0 {
-		w = 80
-	}
-	if h == 0 {
-		h = 24
-	}
 	text := "Restoring sessions…"
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, text)
+	return lipgloss.Place(m.contentWidth(), m.contentHeight(), lipgloss.Center, lipgloss.Center, text)
 }
 
 // viewProjectList renders the project list, with optional modal overlay,
@@ -3144,7 +3307,7 @@ func (m Model) viewSessionList() string {
 // single render entry point so the composed-view render and the height-budget
 // computation (headerHeight) resolve the header against the SAME width/mode.
 func (m Model) renderHeader() string {
-	return renderHeaderBlock(m.termWidth, m.canvasMode, m.colourless)
+	return renderHeaderBlock(m.contentWidth(), m.canvasMode, m.colourless)
 }
 
 // headerHeight is the rendered height of the §3.1 header block at the given laid-
