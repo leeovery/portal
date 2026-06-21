@@ -1,11 +1,7 @@
 package tui
 
 import (
-	"strings"
-
-	"charm.land/bubbles/v2/list"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // modalState tracks which modal overlay is currently active.
@@ -24,63 +20,30 @@ var modalStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
 	Padding(1, 2)
 
-// renderListWithModal renders a list view with an optional modal overlay.
-// It applies a dimension fallback (80x24) when the list has zero dimensions,
-// then overlays the modal content centered on top of the list if modalContent
-// is non-empty.
-func renderListWithModal(l list.Model, modalContent string) string {
-	listView := l.View()
-	if modalContent == "" {
-		return listView
-	}
-
-	w, h := l.Width(), l.Height()
-	if w == 0 {
-		w = 80
-	}
-	if h == 0 {
-		h = 24
-	}
-
-	return renderModal(modalContent, listView, w, h)
-}
-
-// renderModal overlays styled modal content centered on top of the list view.
-// The list view remains visible behind the modal overlay. Uses ANSI-aware width
-// measurement so that escape sequences in the background do not shift the overlay.
-func renderModal(content string, listView string, width, height int) string {
-	styledModal := modalStyle.Render(content)
-	overlayX := max(0, (width-lipgloss.Width(styledModal))/2)
-	overlayY := max(0, (height-lipgloss.Height(styledModal))/2)
-
-	fgLines := strings.Split(styledModal, "\n")
-	bgLines := strings.Split(listView, "\n")
-
-	// Ensure background has enough lines
-	for len(bgLines) < overlayY+len(fgLines) {
-		bgLines = append(bgLines, "")
-	}
-
-	for i, fgLine := range fgLines {
-		bgIdx := overlayY + i
-		if bgIdx < 0 || bgIdx >= len(bgLines) {
-			continue
-		}
-
-		bgLine := bgLines[bgIdx]
-		fgWidth := ansi.StringWidth(fgLine)
-		bgWidth := ansi.StringWidth(bgLine)
-
-		// Pad background with spaces if it's too narrow
-		if bgWidth < overlayX+fgWidth {
-			bgLine += strings.Repeat(" ", overlayX+fgWidth-bgWidth)
-		}
-
-		// Composite: left bg + foreground + right bg (all ANSI-aware)
-		left := ansi.Truncate(bgLine, overlayX, "")
-		right := ansi.TruncateLeft(bgLine, overlayX+fgWidth, "")
-		bgLines[bgIdx] = left + fgLine + right
-	}
-
-	return strings.Join(bgLines, "\n")
+// renderModalOnClearedCanvas is the §8.1/13.5 shared blank-screen modal layer:
+// when a modal is open the page behind it is CLEARED to the owned canvas (§1) and
+// the centred border-defined panel sits on that flat fill — replacing the former
+// composite-over-the-live-list mechanic (now removed). It returns ONLY the centred
+// panel placed into the inset content region (width × height); the outer fillCanvas
+// wrap in View() then paints the owned mode-matched canvas into every surrounding
+// cell, so the cleared backdrop is the SAME Phase 1 fill the rest of Portal uses
+// (and is suppressed to the terminal native bg under NO_COLOR by the SAME
+// fillCanvas → fillColourless path — no second carve-out here).
+//
+// §14.6 DECISION — ADAPT (not a modal-system rework). The former splice mechanic
+// composited the panel OVER the rendered list view, so it structurally could not
+// clear-to-canvas: the list rows were its background. Rather than rework an overlay
+// engine, the page composers (viewSessionList / viewProjectList) call this instead
+// of building the full page when a modal is active — they hand only the
+// content-region dims, this centres the panel on a blank region, and the Phase 1
+// fillCanvas outer wrap supplies the cleared canvas.
+//
+// The panel's own styling/copy (the ⚠ header, sectioned layout, red name, footer)
+// is a LATER task (3-5); this layer keeps the existing modalStyle box and only
+// changes the BACKDROP + CENTRING. lipgloss.Place reuses the existing centre maths
+// sized to the content region (the 80×24 fallback is applied by the caller via
+// termDims so the region is never zero-sized).
+func renderModalOnClearedCanvas(content string, width, height int) string {
+	panel := modalStyle.Render(content)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }

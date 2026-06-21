@@ -3264,7 +3264,12 @@ func (m Model) viewString() string {
 	case PageLoading:
 		return m.viewLoading()
 	case PageProjects:
-		if m.commandPending {
+		// §8.1/13.5: while a projects modal is open the whole page is cleared to the
+		// owned canvas, so the command-pending status line is suppressed too —
+		// inserting it would splice a row into the centred-panel block and break the
+		// cleared-canvas geometry. viewProjectList already returns the centred panel
+		// directly in that case.
+		if m.commandPending && m.modal == modalNone {
 			listView := m.viewProjectList()
 			statusLine := "Select project to run: " + strings.Join(m.command, " ")
 			// Insert status line after the first line (title) of the list view
@@ -3290,20 +3295,25 @@ func (m Model) viewLoading() string {
 	return lipgloss.Place(m.contentWidth(), m.contentHeight(), lipgloss.Center, lipgloss.Center, text)
 }
 
-// viewProjectList renders the project list, with optional modal overlay,
-// and composes the manual three-column keymap footer beneath the
-// list-plus-modal block. The modal overlay sits inside renderListWithModal
-// over the list view only; the manual footer must sit below the composed
-// block so the modal never overlays it.
+// viewProjectList renders the project list with the manual three-column keymap
+// footer beneath it. When a modal is open the page is instead CLEARED to the owned
+// canvas (§8.1/13.5 blank-screen modal layer) and only the centred panel is
+// returned — the list and footer are not composed; see the in-body comment below.
 func (m Model) viewProjectList() string {
-	var modalContent string
+	// §8.1/13.5 blank-screen modal layer (shared — Projects inherits the same
+	// change as Sessions): when a modal is open the project list behind it is
+	// CLEARED to the owned canvas — return ONLY the centred panel sized to the
+	// inset content region and let the View()→fillCanvas outer wrap paint the
+	// cleared backdrop (NO_COLOR suppression + the 80×24 fallback inherited from
+	// that Phase 1 path). The manual footer is NOT composed while a modal is up.
+	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
 	switch m.modal {
 	case modalDeleteProject:
-		modalContent = fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName)
+		return renderModalOnClearedCanvas(fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName), m.contentWidth(), m.contentHeight())
 	case modalEditProject:
-		modalContent = m.renderEditProjectContent()
+		return renderModalOnClearedCanvas(m.renderEditProjectContent(), m.contentWidth(), m.contentHeight())
 	}
-	listView := renderListWithModal(m.projectList, modalContent)
+	listView := m.projectList.View()
 	footer := renderKeymapFooter(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending))
 	return lipgloss.JoinVertical(lipgloss.Left, listView, footer)
 }
@@ -3369,20 +3379,29 @@ func renderEditListField(b *strings.Builder, label string, focused bool, entries
 
 // viewSessionList renders the session list using bubbles/list, composes the
 // optional inline flash row between the list's title/filter row and the
-// rest, then composes the manual three-column keymap footer beneath the
-// resulting block. When the flash is inactive the list sits directly under
-// the title/filter as before (spec § Inline flash — feature-local
-// infrastructure > Render). The manual footer sits below the composed
-// list+modal+flash block so the modal overlay never overlays it.
+// rest, then composes the condensed keymap footer beneath the resulting block.
+// When the flash is inactive the list sits directly under the title/filter as
+// before (spec § Inline flash — feature-local infrastructure > Render); the footer
+// sits below the composed list+flash block. When a modal is open the page is
+// instead CLEARED to the owned canvas (§8.1/13.5) and only the centred panel is
+// returned — see the in-body comment below.
 func (m Model) viewSessionList() string {
-	var modalContent string
+	// §8.1/13.5 blank-screen modal layer: when a modal is open the page behind it
+	// is CLEARED to the owned canvas — return ONLY the centred panel sized to the
+	// inset content region and let the View()→fillCanvas outer wrap paint the
+	// cleared owned-canvas backdrop (NO_COLOR suppression and the 80×24 zero-dims
+	// fallback are inherited from that same Phase 1 path — no double-branch here).
+	// The list/header/footer chrome below is NOT composed while a modal is up, so
+	// no list rows (and no §11.2 flash band) leak into the cleared view; on dismissal
+	// the list renders normally again, leaving the pagination invariant untouched.
+	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
 	switch m.modal {
 	case modalKillConfirm:
-		modalContent = fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName)
+		return renderModalOnClearedCanvas(fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName), m.contentWidth(), m.contentHeight())
 	case modalRename:
-		modalContent = m.renameInput.View()
+		return renderModalOnClearedCanvas(m.renameInput.View(), m.contentWidth(), m.contentHeight())
 	}
-	listView := renderListWithModal(m.sessionList, modalContent)
+	listView := m.sessionList.View()
 	// §3.2 / §4.2: replace the plain bubbles/list title line with the restyled
 	// section header (Sessions label + state.green count + mode suffix + the
 	// right-aligned `/ to filter` hint). The title row already costs exactly one
