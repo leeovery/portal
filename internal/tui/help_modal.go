@@ -96,31 +96,22 @@ func renderHelpModalContent(entries []keymapEntry, mode theme.Mode, colourless b
 
 	// The content width the divider and every inset row share: the widest of the
 	// header band and the body rows. The header is then laid out to this width so
-	// `esc close` right-aligns to the same edge the longest body row reaches.
+	// `esc close` right-aligns to the same edge the longest body row reaches. The
+	// title MUST be pre-laid-out here (not inside renderJoinedPanel) because its own
+	// width depends on contentWidth — the right-aligned `esc close` fills to it.
 	contentWidth := lipgloss.Width(helpModalHeader(0, mode, colourless))
 	for _, r := range bodyRows {
 		if w := lipgloss.Width(r); w > contentWidth {
 			contentWidth = w
 		}
 	}
-	innerWidth := contentWidth + 2*helpRowInset // W — the span of every frame edge.
+	title := helpModalHeader(contentWidth, mode, colourless)
 
-	title := helpInsetRow(helpModalHeader(contentWidth, mode, colourless), contentWidth, mode, colourless)
-
-	rows := make([]string, 0, len(bodyRows)+3)
-	// Top border, then the title FLUSH inside it (no blank above).
-	rows = append(rows, helpFrameTop(innerWidth, mode, colourless))
-	rows = append(rows, helpFrameContentLine(title, mode, colourless))
-	// The joined divider directly under the title (no blank below it).
-	rows = append(rows, helpFrameDivider(innerWidth, mode, colourless))
-	// The contiguous keymap rows directly under the divider (1-row rhythm, no inter-
-	// row gaps), the last directly above the bottom border.
-	for _, r := range bodyRows {
-		row := helpInsetRow(r, contentWidth, mode, colourless)
-		rows = append(rows, helpFrameContentLine(row, mode, colourless))
-	}
-	rows = append(rows, helpFrameBottom(innerWidth, mode, colourless))
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	// Two compartments — the header band over the contiguous keymap rows — drawn by
+	// the shared single-tone joined panel (the SAME frame the kill modal uses): one
+	// joined ├───┤ divider between them, FLUSH vertical spacing, single-tone
+	// border.separator throughout.
+	return renderJoinedPanel([][]string{{title}, bodyRows}, mode, colourless)
 }
 
 // helpFrameStyle returns the single-tone frame paint: border.separator foreground

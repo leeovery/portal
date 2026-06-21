@@ -81,3 +81,14 @@ func renderHelpModalOnClearedCanvas(entries []keymapEntry, width, height int, mo
 	panel := renderHelpModalContent(entries, mode, colourless)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }
+
+// renderKillModalOnClearedCanvas composes the §8.3 kill-confirm modal panel and
+// centres it on the cleared owned canvas, exactly like renderHelpModalOnClearedCanvas
+// but with the kill modal's own hand-drawn single-tone joined panel
+// (renderKillModalContent — the SAME frame the help modal uses, three compartments
+// instead of two). The shared modalBorderStyle's Padding(1,2) is left intact for the
+// OTHER (not-yet-reskinned) modals; this path bypasses it.
+func renderKillModalOnClearedCanvas(name string, windows int, width, height int, mode theme.Mode, colourless bool) string {
+	panel := renderKillModalContent(name, windows, mode, colourless)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+}

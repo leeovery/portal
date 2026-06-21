@@ -17,6 +17,7 @@ import (
 func openKillModal(m *Model, name string) {
 	m.modal = modalKillConfirm
 	m.pendingKillName = name
+	m.pendingKillWindows = 1
 }
 
 // TestModalBlankScreen_ClearsListRowsBehindModal asserts the §8.1/13.5 blank-
@@ -41,10 +42,13 @@ func TestModalBlankScreen_ClearsListRowsBehindModal(t *testing.T) {
 	openKillModal(&m, "alpha")
 	view := m.viewSessionList()
 
-	// The panel copy is present (alpha is the kill target — it legitimately
-	// appears in the panel copy)...
-	if !strings.Contains(view, "Kill alpha?") {
-		t.Errorf("modal view should contain the kill panel copy, got:\n%s", view)
+	// The panel copy is present: the §8.3 header and the kill target name (alpha
+	// legitimately appears in the panel body)...
+	if !strings.Contains(view, "Kill session?") {
+		t.Errorf("modal view should contain the kill panel header, got:\n%s", view)
+	}
+	if !strings.Contains(view, "alpha") {
+		t.Errorf("modal view should contain the kill target name 'alpha', got:\n%s", view)
 	}
 	// ...but the OTHER session rows and the section header behind it are gone.
 	for _, gone := range []string{"bravo", "charlie", "Sessions"} {
@@ -147,8 +151,11 @@ func TestModalBlankScreen_ColourlessClearsToNativeBg(t *testing.T) {
 		t.Errorf("colourless modal frame must not contain the light canvas SGR %q (native bg only)", seq)
 	}
 	// The panel copy is still present and the list rows are still cleared.
-	if !strings.Contains(frame, "Kill alpha?") {
-		t.Errorf("colourless modal frame should contain the kill panel copy, got:\n%s", frame)
+	if !strings.Contains(frame, "Kill session?") {
+		t.Errorf("colourless modal frame should contain the kill panel header, got:\n%s", frame)
+	}
+	if !strings.Contains(frame, "alpha") {
+		t.Errorf("colourless modal frame should contain the kill target name 'alpha', got:\n%s", frame)
 	}
 	if strings.Contains(frame, "bravo") {
 		t.Errorf("colourless modal frame should NOT contain list row 'bravo' (page cleared), got:\n%s", frame)

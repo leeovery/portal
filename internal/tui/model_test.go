@@ -1168,8 +1168,12 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 
 		view := model.View().Content
-		if !strings.Contains(view, "Kill alpha? (y/n)") {
-			t.Errorf("expected confirmation prompt for 'alpha', got:\n%s", view)
+		if !strings.Contains(view, "Kill session?") {
+			t.Errorf("expected the kill-confirm modal header, got:\n%s", view)
+		}
+		// The target session name appears in the modal body (§8.3).
+		if !strings.Contains(view, "alpha") {
+			t.Errorf("expected the target session name 'alpha' in the modal body, got:\n%s", view)
 		}
 		// Modal should have border styling (box-drawing characters)
 		if !strings.ContainsAny(view, "─│╭╮╰╯") {
@@ -1214,7 +1218,9 @@ func TestKillSession(t *testing.T) {
 		}
 	})
 
-	t.Run("n in confirmation mode cancels", func(t *testing.T) {
+	t.Run("n in confirmation mode is ignored (no longer cancels)", func(t *testing.T) {
+		// §8.3 drops `n`: cancel is Esc only. `n` is ignored — the modal stays open,
+		// nothing is killed.
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
@@ -1230,12 +1236,9 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 
 		view := model.View().Content
-		// Should be back to normal session list, no confirmation prompt
-		if strings.Contains(view, "? (y/n)") {
-			t.Errorf("confirmation prompt should be cleared after n, got:\n%s", view)
-		}
-		if !strings.Contains(view, "alpha") {
-			t.Errorf("session 'alpha' should still be in list after cancel, got:\n%s", view)
+		// The modal must STAY open (n is ignored, not a cancel).
+		if !strings.Contains(view, "Kill session?") {
+			t.Errorf("n must be ignored — the kill-confirm modal should stay open, got:\n%s", view)
 		}
 		if killer.killedName != "" {
 			t.Errorf("kill should not have been called, but got %q", killer.killedName)
@@ -1258,8 +1261,8 @@ func TestKillSession(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		view := model.View().Content
-		if strings.Contains(view, "? (y/n)") {
-			t.Errorf("confirmation prompt should be cleared after Esc, got:\n%s", view)
+		if strings.Contains(view, "Kill session?") {
+			t.Errorf("kill-confirm modal should be cleared after Esc, got:\n%s", view)
 		}
 		if !strings.Contains(view, "alpha") {
 			t.Errorf("session 'alpha' should still be in list after cancel, got:\n%s", view)
@@ -1403,8 +1406,8 @@ func TestKillSession(t *testing.T) {
 		// SessionsMsg with error triggers quit, so the model should exit.
 		// But the confirmation prompt should not still be showing.
 		view := model.View().Content
-		if strings.Contains(view, "? (y/n)") {
-			t.Errorf("confirmation prompt should be cleared after kill error, got:\n%s", view)
+		if strings.Contains(view, "Kill session?") {
+			t.Errorf("kill-confirm modal should be cleared after kill error, got:\n%s", view)
 		}
 	})
 
@@ -1451,8 +1454,8 @@ func TestKillSession(t *testing.T) {
 		// Press k — should enter confirmation mode (not no-op)
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 		view := model.View().Content
-		if !strings.Contains(view, "Kill alpha? (y/n)") {
-			t.Errorf("expected confirmation prompt via NewWithDeps, got:\n%s", view)
+		if !strings.Contains(view, "Kill session?") {
+			t.Errorf("expected the kill-confirm modal via NewWithDeps, got:\n%s", view)
 		}
 	})
 
@@ -1472,8 +1475,8 @@ func TestKillSession(t *testing.T) {
 		// Press k — should enter confirmation mode (not no-op)
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 		view := model.View().Content
-		if !strings.Contains(view, "Kill alpha? (y/n)") {
-			t.Errorf("expected confirmation prompt via NewWithAllDeps, got:\n%s", view)
+		if !strings.Contains(view, "Kill session?") {
+			t.Errorf("expected the kill-confirm modal via NewWithAllDeps, got:\n%s", view)
 		}
 	})
 
@@ -1515,7 +1518,7 @@ func TestKillSession(t *testing.T) {
 
 		// Modal should still be showing
 		view := model.View().Content
-		if !strings.Contains(view, "Kill alpha? (y/n)") {
+		if !strings.Contains(view, "Kill session?") {
 			t.Errorf("modal should still show after ignored keys, got:\n%s", view)
 		}
 		// Session should not have been killed
@@ -1539,7 +1542,7 @@ func TestKillSession(t *testing.T) {
 			t.Errorf("k on empty list should return nil command, got non-nil")
 		}
 		view := model.View().Content
-		if strings.Contains(view, "? (y/n)") {
+		if strings.Contains(view, "Kill session?") {
 			t.Errorf("k on empty list should not show confirmation modal, got:\n%s", view)
 		}
 	})
@@ -2699,8 +2702,8 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		// Press k — should enter confirmation mode
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 		view := model.View().Content
-		if !strings.Contains(view, "Kill alpha? (y/n)") {
-			t.Errorf("expected confirmation prompt, got:\n%s", view)
+		if !strings.Contains(view, "Kill session?") {
+			t.Errorf("expected the kill-confirm modal, got:\n%s", view)
 		}
 	})
 
@@ -2770,8 +2773,8 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		// Verify kill works
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 		view := model.View().Content
-		if !strings.Contains(view, "Kill alpha? (y/n)") {
-			t.Errorf("expected kill confirmation, got:\n%s", view)
+		if !strings.Contains(view, "Kill session?") {
+			t.Errorf("expected the kill-confirm modal, got:\n%s", view)
 		}
 	})
 }
@@ -4044,7 +4047,7 @@ func TestEscProgressiveBack(t *testing.T) {
 
 		// Verify kill modal is showing
 		view := model.View().Content
-		if !strings.Contains(view, "Kill alpha? (y/n)") {
+		if !strings.Contains(view, "Kill session?") {
 			t.Fatalf("precondition: expected kill modal, got:\n%s", view)
 		}
 
@@ -4061,7 +4064,7 @@ func TestEscProgressiveBack(t *testing.T) {
 
 		// Modal should be dismissed
 		view = model.View().Content
-		if strings.Contains(view, "Kill alpha? (y/n)") {
+		if strings.Contains(view, "Kill session?") {
 			t.Errorf("kill modal should be dismissed after Esc, got:\n%s", view)
 		}
 

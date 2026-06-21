@@ -215,29 +215,30 @@ type Model struct {
 	// constructed colourless). Foreground hue is stripped FREE by the Bubble Tea v2
 	// writer layer (colorprofile.Detect honours NO_COLOR), so state stays
 	// glyph-distinct (§2.2: ● attached, ▌ selector, spaced headers) + bold/dim.
-	colourless        bool
-	selected          string
-	sessionLister     SessionLister
-	sessionKiller     SessionKiller
-	sessionRenamer    SessionRenamer
-	projectStore      ProjectStore
-	projectEditor     ProjectEditor
-	aliasEditor       AliasEditor
-	sessionCreator    SessionCreator
-	cwd               string
-	activePage        page
-	projectList       list.Model
-	initialFilter     string
-	insideTmux        bool
-	currentSession    string
-	modal             modalState
-	pendingKillName   string
-	renameInput       textinput.Model
-	renameTarget      string
-	pendingDeletePath string
-	pendingDeleteName string
-	command           []string
-	commandPending    bool
+	colourless         bool
+	selected           string
+	sessionLister      SessionLister
+	sessionKiller      SessionKiller
+	sessionRenamer     SessionRenamer
+	projectStore       ProjectStore
+	projectEditor      ProjectEditor
+	aliasEditor        AliasEditor
+	sessionCreator     SessionCreator
+	cwd                string
+	activePage         page
+	projectList        list.Model
+	initialFilter      string
+	insideTmux         bool
+	currentSession     string
+	modal              modalState
+	pendingKillName    string
+	pendingKillWindows int
+	renameInput        textinput.Model
+	renameTarget       string
+	pendingDeletePath  string
+	pendingDeleteName  string
+	command            []string
+	commandPending     bool
 
 	// Bootstrap loading state
 	serverStarted     bool
@@ -2644,6 +2645,7 @@ func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
 	}
 	m.modal = modalKillConfirm
 	m.pendingKillName = si.Session.Name
+	m.pendingKillWindows = si.Session.Windows
 	return m, nil
 }
 
@@ -2699,11 +2701,14 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		name := m.pendingKillName
 		m.modal = modalNone
 		m.pendingKillName = ""
+		m.pendingKillWindows = 0
 		return m, m.killAndRefresh(name)
-	case isRuneKey(keyMsg, "n"),
-		keyIsCode(keyMsg, tea.KeyEscape):
+	case keyIsCode(keyMsg, tea.KeyEscape):
+		// §8.3 drops `n` — cancel is Esc only (the §8.1 modal anatomy). `n` falls
+		// through to the "ignore all other keys" tail below (no cancel, no confirm).
 		m.modal = modalNone
 		m.pendingKillName = ""
+		m.pendingKillWindows = 0
 		return m, nil
 	}
 	// Ignore all other keys while modal is active
@@ -3548,7 +3553,11 @@ func (m Model) viewSessionList() string {
 	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
 	switch m.modal {
 	case modalKillConfirm:
-		return renderModalOnClearedCanvas(fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
+		// §8.3 kill-confirm modal: the MV hand-drawn single-tone joined panel (the
+		// SAME frame the help modal uses) — ▲ Kill session? / <name> · N window(s) +
+		// consequence / y kill · esc cancel. The confirm/cancel LOGIC is unchanged
+		// (updateKillConfirmModal); only the rendering is reskinned.
+		return renderKillModalOnClearedCanvas(m.pendingKillName, m.pendingKillWindows, m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalRename:
 		return renderModalOnClearedCanvas(m.renameInput.View(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalHelp:
