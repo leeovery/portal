@@ -58,18 +58,24 @@ func sessionsKeymap() []keymapEntry {
 	}
 }
 
-// projectsKeymap returns the ordered Projects keymap descriptor for the §6.3
-// condensed Projects footer. It carries EXACTLY the §6.3 condensed copy —
-// `enter new session` · `x sessions` · `e edit` · `/ filter`, then a
-// right-aligned `? help` — every entry Core (the §6.3 condensed string is the
-// footer's full left cluster). It is the same shape as sessionsKeymap so the
-// shared condensed-footer renderer (renderCondensedFooter) drives both pages
-// from one descriptor.
+// projectsKeymap returns the ordered Projects keymap descriptor (§12.1, post
+// §12.2 revision). It enumerates every Projects binding exactly once and
+// classifies each as a §6.3 core-footer key or a help-only key, so the SAME
+// descriptor drives BOTH the condensed Projects footer (task 3-2) and the
+// per-page ? help modal (Phase 3, §8.5) — neither hand-authored. It is the same
+// shape as sessionsKeymap, so the shared condensed-footer renderer
+// (renderCondensedFooter) drives both pages from one descriptor; this retired
+// the legacy projectHelpKeys footer/help source.
 //
-// This is a SCOPED descriptor for the footer only: the formal §12 Projects
-// keymap descriptor (with the help-only keys n / d / q surfaced in the ? help
-// modal) is task 3-3. 3-3 refactors these entries into that fuller descriptor;
-// until then this carries just the footer-core copy the §6.3 reference shows.
+// Core (footer) keys, in §6.3 footer order: ⏎ new session · x sessions · e edit
+// · / filter, then a right-aligned ? help. Help-only keys (Core=false): d delete
+// · n new in cwd · ↑/↓ navigate · Ctrl+↑/↓ page · q quit · esc back.
+//
+// Per §12.2 the descriptor carries NO Projects-side s→Sessions alias (x is the
+// sole both-directions page toggle), no vim aliases, no PgUp/PgDn/Home/End, and
+// no uppercase bindings; nav is ↑/↓ and paging is Ctrl+↑/↓ only. ? help is
+// modelled for the footer hint only — the descriptor does not bind the key
+// (Phase 3 binds it).
 func projectsKeymap() []keymapEntry {
 	return []keymapEntry{
 		{Key: "⏎", Action: "new session", Core: true},
@@ -77,5 +83,11 @@ func projectsKeymap() []keymapEntry {
 		{Key: "e", Action: "edit", Core: true},
 		{Key: "/", Action: "filter", Core: true},
 		{Key: "?", Action: "help", Core: true, RightAligned: true},
+		{Key: "d", Action: "delete"},
+		{Key: "n", Action: "new in cwd"},
+		{Key: "↑/↓", Action: "navigate"},
+		{Key: "Ctrl+↑/↓", Action: "page"},
+		{Key: "q", Action: "quit"},
+		{Key: "esc", Action: "back"},
 	}
 }

@@ -2976,7 +2976,9 @@ func TestPageSwitching(t *testing.T) {
 		}
 	})
 
-	t.Run("s on projects page switches to sessions page", func(t *testing.T) {
+	t.Run("s on projects page no longer switches to sessions page", func(t *testing.T) {
+		// §12.2: the Projects-side s→Sessions alias is dropped; x is the sole
+		// both-directions toggle. s is now a no-op on the Projects page.
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 		}
@@ -2986,12 +2988,12 @@ func TestPageSwitching(t *testing.T) {
 		// Switch to projects page first (x is the sole toggle now).
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
-		// Press s to switch back to sessions page
+		// Press s — it must NOT switch back to sessions (the alias is gone).
 		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 
 		updated := model.(tui.Model)
-		if updated.ActivePage() != tui.PageSessions {
-			t.Errorf("expected PageSessions after s, got %d", updated.ActivePage())
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected to stay on PageProjects after s (alias dropped), got %d", updated.ActivePage())
 		}
 	})
 
@@ -3052,9 +3054,9 @@ func TestPageSwitching(t *testing.T) {
 		model = tui.NewModelWithSessions(sessions)
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 
-		// Switch to projects and back
+		// Switch to projects and back (x is the sole both-directions toggle).
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Press enter to verify cursor is still on bravo
 		result, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -5321,9 +5323,10 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		tuiModel.SetSessionListFilter("alpha")
 		model = tuiModel
 
-		// Switch to projects then back to sessions
+		// Switch to projects then back to sessions (x is the sole both-directions
+		// toggle now — §12.2 drops the Projects-side s alias).
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		// Verify session filter is still applied
 		updated := model.(tui.Model)
@@ -5335,7 +5338,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		}
 	})
 
-	t.Run("projects help bar includes s for sessions and project-specific keys", func(t *testing.T) {
+	t.Run("projects footer shows the §6.3 condensed copy (x sessions, edit, filter)", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -5546,18 +5549,18 @@ func TestDefaultPageSelection(t *testing.T) {
 			t.Fatalf("precondition: expected PageSessions, got %d", updated.ActivePage())
 		}
 
-		// Press p to switch to projects
+		// Press x to switch to projects (the sole both-directions toggle, §12.2)
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
+			t.Errorf("expected PageProjects after x, got %d", updated.ActivePage())
 		}
 
-		// Press s to switch back to sessions
-		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+		// Press x to switch back to sessions (s alias dropped, §12.2)
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageSessions {
-			t.Errorf("expected PageSessions after s, got %d", updated.ActivePage())
+			t.Errorf("expected PageSessions after x, got %d", updated.ActivePage())
 		}
 
 		// Press x to toggle to projects
@@ -5595,18 +5598,18 @@ func TestDefaultPageSelection(t *testing.T) {
 			t.Fatalf("precondition: expected PageProjects, got %d", updated.ActivePage())
 		}
 
-		// Press s to switch to sessions
-		model, _ = model.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+		// Press x to switch to sessions (the sole both-directions toggle, §12.2)
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageSessions {
-			t.Errorf("expected PageSessions after s, got %d", updated.ActivePage())
+			t.Errorf("expected PageSessions after x, got %d", updated.ActivePage())
 		}
 
-		// Press p to switch back to projects
+		// Press x to switch back to projects
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
+			t.Errorf("expected PageProjects after x, got %d", updated.ActivePage())
 		}
 
 		// Press x to toggle to sessions

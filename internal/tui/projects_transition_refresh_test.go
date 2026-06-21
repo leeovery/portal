@@ -43,7 +43,9 @@ func pressProjectsKey(t *testing.T, m Model, r rune) (Model, tea.Cmd) {
 }
 
 func TestProjectsTransitionDispatchesRefresh(t *testing.T) {
-	for _, key := range []rune{'s', 'x'} {
+	// §12.2: x is the sole both-directions page toggle — the Projects-side s alias
+	// is dropped, so only x carries the return-to-Sessions re-group refresh.
+	for _, key := range []rune{'x'} {
 		t.Run(string(key), func(t *testing.T) {
 			lister := &stepListerStub{steps: [][]tmux.Session{{
 				{Name: "alpha", Windows: 1, Attached: false},
@@ -71,9 +73,10 @@ func TestProjectsTransitionDispatchesRefresh(t *testing.T) {
 
 func TestProjectsTransitionRegroupsWithUpdatedTags(t *testing.T) {
 	// By Tag mode active. The project carries a freshly-edited tag ("work"); the
-	// live session's Dir resolves to that project. After the s-transition
-	// refresh, the session must re-group under the "work" heading (mode-aware
-	// re-render path), proving tags are re-resolved live on return.
+	// live session's Dir resolves to that project. After the x-transition
+	// refresh (§12.2: x is the sole page toggle), the session must re-group under
+	// the "work" heading (mode-aware re-render path), proving tags are re-resolved
+	// live on return.
 	projects := []project.Project{
 		{Path: "/p/one", Name: "one", Tags: []string{"work"}},
 	}
@@ -83,7 +86,7 @@ func TestProjectsTransitionRegroupsWithUpdatedTags(t *testing.T) {
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := newProjectsTransitionModel(lister, projects, prefs.ModeByTag)
 
-	got, cmd := pressProjectsKey(t, m, 's')
+	got, cmd := pressProjectsKey(t, m, 'x')
 	if cmd == nil {
 		t.Fatalf("expected a non-nil refresh cmd, got nil")
 	}
@@ -117,7 +120,8 @@ func TestProjectsTransitionRegroupsWithUpdatedTags(t *testing.T) {
 }
 
 func TestProjectsTransitionToleratesNilLister(t *testing.T) {
-	for _, key := range []rune{'s', 'x'} {
+	// §12.2: only x toggles the page now (the s alias is dropped).
+	for _, key := range []rune{'x'} {
 		t.Run(string(key), func(t *testing.T) {
 			m := newProjectsTransitionModel(nil, nil, prefs.ModeFlat)
 

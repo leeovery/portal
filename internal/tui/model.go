@@ -911,18 +911,6 @@ func pinArrowOnlyNav(km *list.KeyMap) {
 	km.GoToEnd.SetKeys()
 }
 
-// projectHelpKeys returns key.Binding entries for the projects page.
-func projectHelpKeys() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "new session")),
-		key.NewBinding(key.WithKeys("s"), key.WithHelp("s/x", "sessions")),
-		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
-		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
-		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
-	}
-}
-
 // commandPendingHelpKeys returns key.Binding entries for command-pending mode.
 // Only enter (run here), n, /, and q are shown; s, x, e, and d are omitted.
 func commandPendingHelpKeys() []key.Binding {
@@ -982,17 +970,19 @@ func listNavAndFilterBindings(l *list.Model) []key.Binding {
 }
 
 // projectFooterBindings returns the ordered key.Binding entries for the
-// projects-page manual keymap footer (the §3.4 condensed footer is Sessions-only;
-// Projects retains the manual three-column footer until its own phase). It
-// sources the page-specific entries from projectHelpKeys in normal mode
-// and commandPendingHelpKeys in command-pending mode (matches the prior
-// AdditionalFullHelpKeys swap performed by WithCommand).
+// command-pending Projects footer (§11.4) — nav + filter prefix plus the
+// command-pending help keys. The normal-mode Projects footer + ? help are now
+// driven by the projectsKeymap descriptor (§6.3 / §8.5, the single source of
+// truth), so the former projectHelpKeys normal-mode source was retired in task
+// 3-3; only the command-pending branch (owned by Phase 4) routes through this
+// manual three-column path. The commandPending bool is retained for the Phase 4
+// wiring; a false value yields just the nav + filter prefix.
 func projectFooterBindings(l *list.Model, commandPending bool) []key.Binding {
 	bindings := listNavAndFilterBindings(l)
 	if commandPending {
 		return append(bindings, commandPendingHelpKeys()...)
 	}
-	return append(bindings, projectHelpKeys()...)
+	return bindings
 }
 
 // chunkBindingsIntoThreeColumns filters disabled bindings (so the visible
@@ -2147,18 +2137,6 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case isRuneKey(msg, "q"):
 			return m, tea.Quit
-		case isRuneKey(msg, "s"):
-			if m.commandPending {
-				return m, nil
-			}
-			m.activePage = PageSessions
-			// Dispatch a mode-aware re-group refresh so tag edits made in the
-			// projects modal are visible on return to the sessions page (spec
-			// § Assigning & Managing Tags → Refresh contract). Routes through
-			// applySessions, so the active grouping mode is respected. Empty
-			// preserveName: no preview-anchored cursor on a page switch. The
-			// cmd is nil when no SessionLister is wired (test harnesses).
-			return m, m.refreshSessionsAfterPreviewCmd("")
 		case isRuneKey(msg, "x"):
 			if m.commandPending {
 				return m, nil

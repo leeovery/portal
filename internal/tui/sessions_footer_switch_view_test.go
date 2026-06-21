@@ -60,20 +60,29 @@ func TestSessionsFooter_ShowsSwitchViewHintAtZeroSessions(t *testing.T) {
 	}
 }
 
-func TestProjectsFooter_UnchangedNoSwitchViewHint(t *testing.T) {
+// TestProjectsFooter_NoSwitchViewHint asserts the §6.3 condensed Projects footer
+// (driven by the projectsKeymap descriptor, the single source of truth) shows the
+// `x sessions` page toggle and never the Sessions-only `switch view` hint, and —
+// post §12.2 — never the dropped `s/x` alias copy (x is the sole both-directions
+// toggle). Asserted against the production footer renderer, not the retired
+// three-column path.
+func TestProjectsFooter_NoSwitchViewHint(t *testing.T) {
 	m := flashModelWithSessions("alpha-row")
 	m.activePage = PageProjects
+	m.termWidth = 120
 
-	footer := renderKeymapFooter(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending))
+	footer := footerVisible(renderProjectsFooter(m.contentWidth(), m.canvasMode, m.colourless))
 	if strings.Contains(footer, "switch view") {
 		t.Errorf("projects footer must NOT contain %q, got:\n%s", "switch view", footer)
 	}
-	// Projects page still binds s/x → sessions.
-	if !strings.Contains(footer, "s/x") {
-		t.Errorf("projects footer must still show %q, got:\n%s", "s/x", footer)
+	// §12.2: the Projects-side s alias is dropped — x is the sole page toggle, so
+	// the legacy `s/x` copy must be gone.
+	if strings.Contains(footer, "s/x") {
+		t.Errorf("projects footer must NOT show the dropped %q alias copy, got:\n%s", "s/x", footer)
 	}
-	if !strings.Contains(footer, "sessions") {
-		t.Errorf("projects footer must still show %q, got:\n%s", "sessions", footer)
+	// x is the sole both-directions page toggle.
+	if !strings.Contains(footer, "x sessions") {
+		t.Errorf("projects footer must show %q, got:\n%s", "x sessions", footer)
 	}
 }
 
