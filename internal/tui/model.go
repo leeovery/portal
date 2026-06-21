@@ -36,6 +36,11 @@ const (
 	pagePreview
 )
 
+// paginationDotGlyph is the bubbles/list built-in paginator dot glyph (•). The
+// §3.5 restyle recolours it (active accent.violet / inactive text.faint) and
+// centres the row without changing the glyph or the engine's page count.
+const paginationDotGlyph = "•"
+
 // SessionLister defines the interface for listing tmux sessions.
 type SessionLister interface {
 	ListSessions() ([]tmux.Session, error)
@@ -782,6 +787,59 @@ func colourlessHelpStyles(l *list.Model) {
 	l.Styles.HelpStyle = l.Styles.HelpStyle.UnsetBackground()
 }
 
+// canvasPaginationDots re-points the §3.5 height-driven paginator's dot glyph
+// styles onto the §2.9 role tokens AND paints each (plus the dot row's wrapper)
+// through Background(canvas) for the resolved mode: the active page dot in
+// accent.violet, the inactive dots in text.faint. The bubbles/list paginator is
+// kept as the engine (§14.1) — only the dot glyph styling and the centred,
+// canvas-painted placement change; the page count / per-page / paging keys are
+// untouched (parity, §3.6).
+//
+// list.New reads styles.ActivePaginationDot.String() / InactivePaginationDot
+// .String() into Paginator.ActiveDot / InactiveDot ONCE at construction, so after
+// restyling the styles the rendered dots are re-fed into the live paginator here.
+// The dots keep the engine's bullet glyph (SetString) — only the colour changes.
+func canvasPaginationDots(l *list.Model, mode theme.Mode) {
+	canvas := theme.MV.Canvas.ColorFor(mode)
+	l.Styles.ActivePaginationDot = lipgloss.NewStyle().
+		Foreground(theme.MV.AccentViolet.ColorFor(mode)).
+		Background(canvas).
+		SetString(paginationDotGlyph)
+	l.Styles.InactivePaginationDot = lipgloss.NewStyle().
+		Foreground(theme.MV.TextFaint.ColorFor(mode)).
+		Background(canvas).
+		SetString(paginationDotGlyph)
+	l.Paginator.ActiveDot = l.Styles.ActivePaginationDot.String()
+	l.Paginator.InactiveDot = l.Styles.InactivePaginationDot.String()
+	centrePaginationRow(l, lipgloss.NewStyle().Background(canvas))
+}
+
+// colourlessPaginationDots strips the paginator dot styles to bare styles for the
+// NO_COLOR carve-out (§2.5): no canvas background and no foreground hue, so the
+// dots render on the terminal's native fg/bg with the bullet glyph intact (§2.2 —
+// the dots stay glyph-legible; foreground hue would be stripped by the writer
+// layer anyway, and setting bare styles drops the canvas background lipgloss would
+// otherwise still emit). The centred placement is preserved without a canvas fill.
+func colourlessPaginationDots(l *list.Model) {
+	l.Styles.ActivePaginationDot = lipgloss.NewStyle().SetString(paginationDotGlyph)
+	l.Styles.InactivePaginationDot = lipgloss.NewStyle().SetString(paginationDotGlyph)
+	l.Paginator.ActiveDot = l.Styles.ActivePaginationDot.String()
+	l.Paginator.InactiveDot = l.Styles.InactivePaginationDot.String()
+	centrePaginationRow(l, lipgloss.NewStyle())
+}
+
+// centrePaginationRow re-points the §3.5 paginator wrapper (Styles.PaginationStyle,
+// applied by bubbles/list's paginationView to the assembled dot string) so the dot
+// row renders CENTRED across the list width, on the supplied base style (canvas-
+// painted for the coloured path, bare under NO_COLOR). It replaces the engine
+// default's PaddingLeft(2) left alignment. The width is the list's current width
+// (SetSize-driven), so the centring tracks resizes; applySessionListSize re-runs
+// this after each SetSize so the width stays current. Centring is across the LIST
+// width (not the terminal width) per §3.5.
+func centrePaginationRow(l *list.Model, base lipgloss.Style) {
+	l.Styles.PaginationStyle = base.Width(l.Width()).Align(lipgloss.Center)
+}
+
 // sessionListTitleForMode computes the session list title for the active
 // grouping mode, reconciling it with the inside-tmux current-session
 // decoration. The three base strings come from the spec (§ TUI Rendering &
@@ -1071,6 +1129,7 @@ func (m *Model) applyCanvasMode() {
 	if m.colourless {
 		m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode, Colourless: true})
 		colourlessHelpStyles(&m.sessionList)
+		colourlessPaginationDots(&m.sessionList)
 		// PaddingBottom(1) is the §3.2 section-header BOTTOM gap (Sessions → first
 		// session row). It makes the title bar 2 lines (line 0 = "Sessions…", line 1
 		// = the blank gap row); bubbles/list measures the rendered title-bar height
@@ -1089,6 +1148,7 @@ func (m *Model) applyCanvasMode() {
 	}
 	m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode})
 	canvasHelpStyles(&m.sessionList, m.canvasMode)
+	canvasPaginationDots(&m.sessionList, m.canvasMode)
 	// Background the title bar so its leading left-pad cells (bubbles/list's
 	// TitleBar PaddingLeft) are canvas rather than the terminal background. The
 	// "Sessions" title box keeps its own colour (the wordmark/header chrome
@@ -1168,6 +1228,14 @@ func (m *Model) applySessionListSize(width, height int) {
 	// condensed height pre-subtracted.
 	reserved := m.sessionBandHeight() + m.headerHeight(width) + m.sessionFooterHeight(width)
 	m.sessionList.SetSize(width, height-reserved)
+	// Re-centre the §3.5 paginator dot row across the NEW list width: SetSize
+	// changed Width(), and the centred PaginationStyle pins an explicit Width, so it
+	// must track the resize. Mirror the colourless/canvas split of applyCanvasMode.
+	if m.colourless {
+		centrePaginationRow(&m.sessionList, lipgloss.NewStyle())
+	} else {
+		centrePaginationRow(&m.sessionList, lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(m.canvasMode)))
+	}
 }
 
 // sessionFooterHeight is the rendered height of the §3.4 condensed Sessions footer

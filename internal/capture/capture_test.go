@@ -131,6 +131,63 @@ func TestFixtureNamesIncludesByTag(t *testing.T) {
 	}
 }
 
+// TestSessionsPagedFixture verifies the multi-page (sessions-paged) fixture: it
+// carries enough deterministic sessions to span more than one page at the
+// 1280×800 capture size, so the height-driven paginator renders the §3.5 dot row.
+// Determinism (a fixed session count and names) is the capture gate.
+func TestSessionsPagedFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-paged")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-paged): %v", err)
+	}
+
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	// 100 sessions spans several pages at the capture size (measured PerPage ≤ 31
+	// there, so ~4 pages), so a multi-dot row renders. The count is fixed for determinism.
+	const wantCount = 100
+	if len(sessions) != wantCount {
+		t.Fatalf("sessions-paged has %d sessions, want %d (multi-page determinism)", len(sessions), wantCount)
+	}
+	// Deterministic, unique names (no duplicates that could reorder a capture).
+	seen := map[string]bool{}
+	for i, s := range sessions {
+		if s.Name == "" {
+			t.Errorf("session[%d] has an empty name", i)
+		}
+		if seen[s.Name] {
+			t.Errorf("session[%d] name %q is a duplicate (must be deterministic & unique)", i, s.Name)
+		}
+		seen[s.Name] = true
+	}
+
+	// It builds the production Sessions model opened in Flat mode (the dots are a
+	// Flat-list concern; By-Tag has its own fixture).
+	m := tui.Build(fx.Deps())
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if got, want := m.SessionListTitle(), "Sessions"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (fixture opens in Flat mode)", got, want)
+	}
+}
+
+// TestFixtureNamesIncludesPaged pins the multi-page fixture into the discoverable
+// name list (the --fixture help + FixtureByName error share this source).
+func TestFixtureNamesIncludesPaged(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "sessions-paged" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include sessions-paged", capture.FixtureNames())
+	}
+}
+
 // TestFakeSeamsAreInert verifies the mutating fakes are no-ops (the harness must
 // never mutate any tmux/server/config state) and the read seams return canned
 // data without touching a real tmux server.
