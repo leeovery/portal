@@ -96,7 +96,12 @@ func TestProjectDelegate(t *testing.T) {
 		}
 	})
 
-	t.Run("highlights selected item", func(t *testing.T) {
+	t.Run("highlights selected item with the full-height bar, not a cursor", func(t *testing.T) {
+		// The §6.2 reskin replaced the legacy "> " pink cursor with a full-height
+		// accent.violet ▌ left bar over a bg.selection tint. The selected row carries
+		// the ▌ bar on both lines; an unselected row carries no bar. (The exact SGR
+		// roles are pinned in project_row_anatomy_test.go; this is the behavioural
+		// selected-vs-unselected check that replaces the old cursor assertion.)
 		d := tui.ProjectDelegate{}
 		items := []list.Item{
 			tui.ProjectItem{Project: project.Project{Name: "first", Path: "/home/user/first"}},
@@ -113,28 +118,39 @@ func TestProjectDelegate(t *testing.T) {
 		d.Render(&unselectedBuf, m, 1, items[1])
 		unselectedOutput := unselectedBuf.String()
 
-		if !strings.Contains(selectedOutput, ">") {
-			t.Errorf("selected item should contain cursor indicator '>': %q", selectedOutput)
+		if !strings.Contains(selectedOutput, "▌") {
+			t.Errorf("selected item should carry the ▌ full-height bar: %q", selectedOutput)
 		}
-		if strings.Contains(unselectedOutput, ">") {
-			t.Errorf("unselected item should not contain cursor indicator '>': %q", unselectedOutput)
+		// The legacy "> " cursor must be gone.
+		if strings.Contains(selectedOutput, "> ") {
+			t.Errorf("selected item should not carry the legacy '> ' cursor: %q", selectedOutput)
+		}
+		if strings.Contains(unselectedOutput, "▌") {
+			t.Errorf("unselected item should not carry the ▌ bar: %q", unselectedOutput)
 		}
 	})
 
-	t.Run("long project path renders without truncation", func(t *testing.T) {
+	t.Run("over-long project path truncates with an ellipsis (2.7)", func(t *testing.T) {
+		// The §6.2 reskin pins each row to the list width and truncates an over-long
+		// path with an ellipsis (§2.7) so the two-line height stays uniform and
+		// pagination never drifts (the legacy delegate rendered the full path verbatim).
 		longPath := "/home/user/very/deeply/nested/directory/structure/that/goes/on/and/on/project"
 		d := tui.ProjectDelegate{}
 		items := []list.Item{
 			tui.ProjectItem{Project: project.Project{Name: "deep-project", Path: longPath}},
 		}
-		m := list.New(items, d, 80, 10)
+		const width = 40
+		m := list.New(items, d, width, 10)
 
 		var buf bytes.Buffer
 		d.Render(&buf, m, 0, items[0])
 
 		output := buf.String()
-		if !strings.Contains(output, longPath) {
-			t.Errorf("render output should contain full long path %q: %q", longPath, output)
+		if strings.Contains(output, longPath) {
+			t.Errorf("over-long path should be truncated, but the full path rendered: %q", output)
+		}
+		if !strings.Contains(output, "…") {
+			t.Errorf("truncated path should carry the ellipsis glyph: %q", output)
 		}
 	})
 

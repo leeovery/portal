@@ -42,6 +42,9 @@ dist/
 build/
 .workflows/.cache/
 /portal
+# the offline capture-harness binary, pre-built before vhs runs so the tape's
+# `go run` is warm; always rm'd after, but ignored so a stray copy is never staged.
+/capturetool
 
 # vhs capture-harness transient GIF byproduct (vhs requires an Output; we only
 # commit the screenshot PNG, not the GIF). Tapes write the GIF into the hidden

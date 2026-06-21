@@ -63,6 +63,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return sessionsByTagFixture(), nil
 	case "sessions-paged":
 		return sessionsPagedFixture(), nil
+	case "projects":
+		return projectsFixture(), nil
 	default:
 		return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 	}
@@ -74,7 +76,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", "projects", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -240,6 +242,56 @@ func sessionsPagedFixture() *Fixture {
 		name:         "sessions-paged",
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: nil},
+		initialMode:  prefs.ModeFlat,
+	}
+}
+
+// projectsFixture builds the deterministic "projects" fixture: a rich project
+// store (14 projects with real-looking absolute paths, mirroring the §6 Projects
+// (MV) reference frame testdata/vhs/reference/projects-mv.png) so the §6 Projects
+// page reskin — the §3.1 PORTAL header, the state.green `Projects 14` section
+// header, the two-line MV rows (name text.primary heavy / path text.detail dim),
+// the full-height accent.violet left-bar selection over the bg.selection tint, and
+// the §6.3 condensed footer — is visible in the screenshot.
+//
+// It opens on the Sessions page (the production default for a no-arg launch); the
+// tape (testdata/vhs/projects.tape) types `x` to switch to the Projects page. The
+// first project (flow-v1-api) is the cursor row in the reference, so it carries the
+// full-height violet bar + selection tint in the capture. The session set is the
+// sessions-flat set so the pre-`x` Sessions frame is a realistic, deterministic
+// list; the capture is of the Projects page reached by the `x` key.
+//
+// Like the other fixtures it NEVER opens a tmux server or touches ~/.config/portal:
+// the project store is the in-memory fake.
+func projectsFixture() *Fixture {
+	sessions := []tmux.Session{
+		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/Users/leeovery/Code/agentic-workflows"},
+		{Name: "portal", Windows: 2, Attached: false, Dir: "/Users/leeovery/Code/portal"},
+		{Name: "flowx-7UKPZH", Windows: 1, Attached: false, Dir: "/Users/leeovery/Code/fabric/flowx"},
+	}
+
+	// 14 projects with real-looking absolute paths (matches the reference count).
+	projects := []project.Project{
+		{Name: "flow-v1-api", Path: "/Users/leeovery/Code/fabric/flowv1/flow-v1-api"},
+		{Name: "portal", Path: "/Users/leeovery/Code/portal"},
+		{Name: "mint", Path: "/Users/leeovery/Code/mint"},
+		{Name: "agntc", Path: "/Users/leeovery/Code/agntc"},
+		{Name: "agentic-workflows", Path: "/Users/leeovery/Code/agentic-workflows"},
+		{Name: "leeovery", Path: "/Users/leeovery"},
+		{Name: "flowx", Path: "/Users/leeovery/Code/fabric/flowx"},
+		{Name: "designlab-web", Path: "/Users/leeovery/Code/designlab/designlab-web"},
+		{Name: "evvi", Path: "/Users/leeovery/Code/evvi"},
+		{Name: "aviva-proxy", Path: "/Users/leeovery/Code/aviva"},
+		{Name: "fab-aws-migration", Path: "/Users/leeovery/Code/fab"},
+		{Name: "folio", Path: "/Users/leeovery/Code/folio"},
+		{Name: "fabric", Path: "/Users/leeovery/Code/fabric"},
+		{Name: "evvi-sync-engine", Path: "/Users/leeovery/Code/evvi-sync"},
+	}
+
+	return &Fixture{
+		name:         "projects",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: projects},
 		initialMode:  prefs.ModeFlat,
 	}
 }

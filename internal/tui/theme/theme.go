@@ -143,7 +143,9 @@ var MV = Theme{
 	// Text ramp (light variants vs `#e1e2e7`).
 	TextPrimary:     Token{Name: "text.primary", Dark: "#C0CAF5", Light: "#2E3C64"},
 	TextStrong:      Token{Name: "text.strong", Dark: "#A9B1D6", Light: "#3F4760"},
-	TextMutedBright: Token{Name: "text.muted-bright", Dark: "#828BB8", Light: "#515A80"},
+	// §2.9: light darkened #515A80 → #4C5478 so the selected-row path clears the 4.5
+	// floor on bg.selection (#D0C6F0 = 4.57; it was 4.17) as well as the canvas (5.70).
+	TextMutedBright: Token{Name: "text.muted-bright", Dark: "#828BB8", Light: "#4C5478"},
 	// §2.9 erratum: light #5A6296 → #586093 (4.63 vs #e1e2e7).
 	TextDetail: Token{Name: "text.detail", Dark: "#737AA2", Light: "#586093"},
 	// §2.9 erratum: light #7C84AA → #767DA2 (3.11 vs #e1e2e7, 3:1 floor).

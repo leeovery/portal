@@ -1151,6 +1151,7 @@ func (m *Model) applyCanvasMode() {
 		// coloured path leaves this default box untouched (the wordmark/header chrome
 		// restyle is Phase 2); under NO_COLOR it must carry no background SGR.
 		m.sessionList.Styles.Title = m.sessionList.Styles.Title.UnsetBackground().UnsetForeground()
+		m.applyProjectCanvasMode()
 		return
 	}
 	m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode})
@@ -1171,6 +1172,32 @@ func (m *Model) applyCanvasMode() {
 	// PaddingLeft(0): see the colourless branch above — drops the default left pad so
 	// the live filter input aligns flush with every other content line.
 	m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.Background(canvas).PaddingLeft(0).PaddingBottom(1)
+	m.applyProjectCanvasMode()
+}
+
+// applyProjectCanvasMode re-points the §6 Projects screen's leaf styles at the
+// model's resolved canvasMode (or the NO_COLOR carve-out), mirroring the Sessions
+// branch of applyCanvasMode for the project list: the two-line ProjectDelegate
+// paints every run through the resolved Mode (or drops hue under Colourless), the
+// help/pagination styles carry the canvas, and the bubbles/list TitleBar default
+// left-pad + Title box colours are stripped (PaddingLeft(0) + PaddingBottom(1) so
+// the §6 section-header surgery in viewProjectList replaces line 0 and preserves the
+// blank gap row on line 1, the SAME contract applySectionHeader relies on).
+func (m *Model) applyProjectCanvasMode() {
+	if m.colourless {
+		m.projectList.SetDelegate(ProjectDelegate{Mode: m.canvasMode, Colourless: true})
+		colourlessHelpStyles(&m.projectList)
+		colourlessPaginationDots(&m.projectList)
+		m.projectList.Styles.TitleBar = m.projectList.Styles.TitleBar.UnsetBackground().PaddingLeft(0).PaddingBottom(1)
+		m.projectList.Styles.Title = m.projectList.Styles.Title.UnsetBackground().UnsetForeground()
+		return
+	}
+	m.projectList.SetDelegate(ProjectDelegate{Mode: m.canvasMode})
+	canvasHelpStyles(&m.projectList, m.canvasMode)
+	canvasPaginationDots(&m.projectList, m.canvasMode)
+	canvas := theme.MV.Canvas.ColorFor(m.canvasMode)
+	m.projectList.Styles.TitleBar = m.projectList.Styles.TitleBar.Background(canvas).PaddingLeft(0).PaddingBottom(1)
+	m.projectList.Styles.Title = m.projectList.Styles.Title.UnsetBackground().UnsetForeground()
 }
 
 // styleFilterInput restyles the bubbles/list FilterInput to the §7 MV treatment:
@@ -1314,12 +1341,48 @@ func (m *Model) sessionBandHeight() int {
 	return h
 }
 
-// applyProjectListSize is the per-page wrapper that owns the
-// (&m.projectList, projectFooterBindings(&m.projectList, m.commandPending))
-// pairing — including the m.commandPending branch consumed by the bindings
-// builder — so call sites cannot drift on either input.
+// applyProjectListSize is the per-page wrapper that owns the §6 Projects height
+// budget: it reserves the §3.1 PORTAL header block and the §6.3 condensed footer
+// before sizing m.projectList, so bubbles/list paginates against the reduced height
+// and the composed view (header + section header + rows + footer) stays within
+// termH — the one-row-per-delegate (here, two-line) pagination invariant holds.
+// Both reserves resolve against the SAME width this size-apply was called with, so
+// the budget and the viewProjectList render agree at every call site. The Projects
+// footer no longer routes through the manual three-column path (renderKeymapFooter);
+// the header, condensed-footer, and command-pending band heights are reserved
+// directly here.
 func (m *Model) applyProjectListSize(width, height int) {
-	m.applyListSize(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending), width, height)
+	reserved := m.headerHeight(width) + m.projectFooterHeight(width) + m.projectBandHeight()
+	m.projectList.SetSize(width, height-reserved)
+	// Re-centre the §3.5 paginator dot row across the NEW list width (mirrors
+	// applySessionListSize): SetSize changed Width(), and the centred PaginationStyle
+	// pins an explicit Width, so it must track the resize.
+	if m.colourless {
+		centrePaginationRow(&m.projectList, lipgloss.NewStyle())
+	} else {
+		centrePaginationRow(&m.projectList, lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(m.canvasMode)))
+	}
+}
+
+// projectFooterHeight is the rendered height of the §6.3 condensed Projects footer
+// at the given laid-out width — the amount applyProjectListSize reserves out of the
+// list's height budget so the single-row footer (plus its 1px top rule) is part of
+// the budget, NOT an uncounted band (§3.5). It resolves the footer against the same
+// width/mode the render uses so the budget and the viewProjectList render agree
+// exactly.
+func (m Model) projectFooterHeight(width int) int {
+	return lipgloss.Height(renderProjectsFooter(width, m.canvasMode, m.colourless))
+}
+
+// projectBandHeight returns the height of the notice band viewProjectList inserts
+// below the section header — currently the command-pending status line (one row in
+// v1). It is reserved out of the list's height budget so the inserted row never
+// pushes the composed view past termH (mirrors sessionBandHeight).
+func (m Model) projectBandHeight() int {
+	if m.commandPending {
+		return 1
+	}
+	return 0
 }
 
 // filteredSessions returns sessions with the current session excluded when inside tmux.
@@ -3264,20 +3327,6 @@ func (m Model) viewString() string {
 	case PageLoading:
 		return m.viewLoading()
 	case PageProjects:
-		// §8.1/13.5: while a projects modal is open the whole page is cleared to the
-		// owned canvas, so the command-pending status line is suppressed too —
-		// inserting it would splice a row into the centred-panel block and break the
-		// cleared-canvas geometry. viewProjectList already returns the centred panel
-		// directly in that case.
-		if m.commandPending && m.modal == modalNone {
-			listView := m.viewProjectList()
-			statusLine := "Select project to run: " + strings.Join(m.command, " ")
-			// Insert status line after the first line (title) of the list view
-			if idx := strings.IndexByte(listView, '\n'); idx >= 0 {
-				return listView[:idx+1] + statusLine + "\n" + listView[idx+1:]
-			}
-			return listView + "\n" + statusLine
-		}
 		return m.viewProjectList()
 	case pagePreview:
 		return m.preview.View()
@@ -3295,17 +3344,21 @@ func (m Model) viewLoading() string {
 	return lipgloss.Place(m.contentWidth(), m.contentHeight(), lipgloss.Center, lipgloss.Center, text)
 }
 
-// viewProjectList renders the project list with the manual three-column keymap
-// footer beneath it. When a modal is open the page is instead CLEARED to the owned
-// canvas (§8.1/13.5 blank-screen modal layer) and only the centred panel is
-// returned — the list and footer are not composed; see the in-body comment below.
+// viewProjectList renders the §6 Modern Vivid Projects page: the §3.1 shared PORTAL
+// header block, the §6 Projects section header (state.green label + text.detail
+// count + right-aligned `/ to filter` hint) swapped in place of the plain
+// bubbles/list title, the two-line MV rows, and the §6.3 condensed footer — all
+// composed exactly the way viewSessionList composes the Sessions page. When a modal
+// is open the page is instead CLEARED to the owned canvas (§8.1/13.5 blank-screen
+// modal layer) and only the centred panel is returned — the list/header/footer
+// chrome is not composed; see the in-body comment below.
 func (m Model) viewProjectList() string {
 	// §8.1/13.5 blank-screen modal layer (shared — Projects inherits the same
 	// change as Sessions): when a modal is open the project list behind it is
 	// CLEARED to the owned canvas — return ONLY the centred panel sized to the
 	// inset content region and let the View()→fillCanvas outer wrap paint the
 	// cleared backdrop (NO_COLOR suppression + the 80×24 fallback inherited from
-	// that Phase 1 path). The manual footer is NOT composed while a modal is up.
+	// that Phase 1 path). The chrome is NOT composed while a modal is up.
 	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
 	switch m.modal {
 	case modalDeleteProject:
@@ -3314,8 +3367,96 @@ func (m Model) viewProjectList() string {
 		return renderModalOnClearedCanvas(m.renderEditProjectContent(), m.contentWidth(), m.contentHeight())
 	}
 	listView := m.projectList.View()
-	footer := renderKeymapFooter(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending))
-	return lipgloss.JoinVertical(lipgloss.Left, listView, footer)
+	// §6 / §3.2: replace the plain bubbles/list title line with the restyled
+	// Projects section header (state.green `Projects` label + text.detail count +
+	// right-aligned `/ to filter` hint). Like the Sessions page, swapping the title
+	// row's CONTENT (not adding a row) keeps the one-row-per-delegate pagination
+	// invariant exact. While the filter input is active the title row IS that input —
+	// leave it untouched so the user sees what they type.
+	listView = m.applyProjectsSectionHeader(listView)
+	// Command-pending status line (`Select project to run: <cmd>`): inserted BELOW
+	// the section-header row of the list block (so it reads after the `Projects`
+	// title, not after the PORTAL wordmark), additively — mirroring the Sessions
+	// notice-band insertion. Suppressed while a modal is up (handled above by the
+	// cleared-canvas return). Its height is reserved by applyProjectListSize.
+	if m.commandPending {
+		statusLine := "Select project to run: " + strings.Join(m.command, " ")
+		listView = insertRowBelowTitle(listView, statusLine)
+	}
+	// §6.3 condensed footer: the §6.3 Projects keymap copy over the shared 1px
+	// border.footer rule, replacing the legacy three-column renderKeymapFooter. Its
+	// height is reserved out of the list's budget by applyProjectListSize (resolved
+	// against the SAME contentWidth) so the composed view stays within termH.
+	footer := m.renderProjectsFooterForFilterState()
+	// Compose the §3.1 shared PORTAL header block FIRST, above the list — the first
+	// visible chrome. Its height is folded out of the list's budget by
+	// applyProjectListSize (m.headerHeight), so the composed view stays within termH.
+	header := m.renderHeader()
+	return lipgloss.JoinVertical(lipgloss.Left, header, listView, footer)
+}
+
+// applyProjectsSectionHeader swaps the §6 restyled Projects section header in place
+// of the plain bubbles/list title line (the FIRST line of listView), mirroring
+// applySectionHeader for the Sessions page. Replacing the title row's content
+// (rather than inserting a row) keeps the one-row-per-delegate pagination invariant
+// exact. While the filter input is active (FilterState == Filtering) the first line
+// is the live filter input — leave it untouched. In the list-active mode
+// (FilterState == FilterApplied) swap in the locked accent.orange `/ query` header
+// the same way the Sessions page does, so the filtered Projects list reads identically.
+func (m Model) applyProjectsSectionHeader(listView string) string {
+	if m.projectList.FilterState() == list.Filtering {
+		return listView
+	}
+	if m.projectList.FilterState() == list.FilterApplied {
+		header := renderFilterQueryHeader(
+			m.projectList.FilterValue(),
+			m.contentWidth(),
+			m.canvasMode,
+			m.colourless,
+		)
+		idx := strings.IndexByte(listView, '\n')
+		if idx < 0 {
+			return header
+		}
+		return header + listView[idx:]
+	}
+	header := renderProjectsSectionHeader(
+		m.visibleProjectRowCount(),
+		m.contentWidth(),
+		m.canvasMode,
+		m.colourless,
+	)
+	idx := strings.IndexByte(listView, '\n')
+	if idx < 0 {
+		return header
+	}
+	return header + listView[idx:]
+}
+
+// visibleProjectRowCount is the §6 / §3.2 count source for the Projects section
+// header: the number of VISIBLE project rows — the SAME count the rendered list
+// shows, so an applied filter (VisibleItems is the filtered set) is reflected.
+func (m Model) visibleProjectRowCount() int {
+	return len(m.projectList.VisibleItems())
+}
+
+// renderProjectsFooterForFilterState resolves the §6.3 condensed Projects footer to
+// the correct variant for the current filter mode (§7.1), mirroring the Sessions
+// page: while the filter input is active the input-active footer renders, once
+// committed the list-active footer renders, otherwise the standard condensed
+// Projects footer renders. All three are two rows over the SAME border.footer rule,
+// so the swap is height-neutral against the reserved budget.
+func (m Model) renderProjectsFooterForFilterState() string {
+	switch m.projectList.FilterState() {
+	case list.Filtering:
+		return renderFilteringFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	case list.FilterApplied:
+		// Projects-specific list-active footer: Enter on Projects is "new session",
+		// not "attach" — do not leak the Sessions filterAppliedFooter copy here.
+		return renderProjectsFilterAppliedFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	default:
+		return renderProjectsFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	}
 }
 
 // renderEditProjectContent builds the content string for the edit project modal.

@@ -57,3 +57,25 @@ func sessionsKeymap() []keymapEntry {
 		{Key: "Ctrl+↑/↓", Action: "page"},
 	}
 }
+
+// projectsKeymap returns the ordered Projects keymap descriptor for the §6.3
+// condensed Projects footer. It carries EXACTLY the §6.3 condensed copy —
+// `enter new session` · `x sessions` · `e edit` · `/ filter`, then a
+// right-aligned `? help` — every entry Core (the §6.3 condensed string is the
+// footer's full left cluster). It is the same shape as sessionsKeymap so the
+// shared condensed-footer renderer (renderCondensedFooter) drives both pages
+// from one descriptor.
+//
+// This is a SCOPED descriptor for the footer only: the formal §12 Projects
+// keymap descriptor (with the help-only keys n / d / q surfaced in the ? help
+// modal) is task 3-3. 3-3 refactors these entries into that fuller descriptor;
+// until then this carries just the footer-core copy the §6.3 reference shows.
+func projectsKeymap() []keymapEntry {
+	return []keymapEntry{
+		{Key: "⏎", Action: "new session", Core: true},
+		{Key: "x", Action: "sessions", Core: true},
+		{Key: "e", Action: "edit", Core: true},
+		{Key: "/", Action: "filter", Core: true},
+		{Key: "?", Action: "help", Core: true, RightAligned: true},
+	}
+}

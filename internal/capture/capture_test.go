@@ -1,6 +1,7 @@
 package capture_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/capture"
@@ -292,6 +293,66 @@ func TestFixtureNamesIncludesPaged(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("FixtureNames() %v does not include sessions-paged", capture.FixtureNames())
+	}
+}
+
+// TestProjectsFixture verifies the §6 Projects-page fixture: it opens on the
+// Sessions page (the production default; the tape types `x` to reach Projects) and
+// carries a rich project store (14 projects with real-looking absolute paths) so the
+// Projects (MV) reskin capture has a representative project set. Determinism (a
+// fixed project count, names, and paths) is the capture gate.
+func TestProjectsFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("projects")
+	if err != nil {
+		t.Fatalf("FixtureByName(projects): %v", err)
+	}
+
+	// It builds the production model opened on the Sessions page (the tape reaches
+	// Projects via the `x` key, mirroring a real no-arg launch).
+	m := tui.Build(fx.Deps())
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions (the tape types x to reach Projects)", m.ActivePage())
+	}
+
+	projects, err := fx.Deps().ProjectStore.List()
+	if err != nil {
+		t.Fatalf("ProjectStore.List: %v", err)
+	}
+	const wantCount = 14
+	if len(projects) != wantCount {
+		t.Fatalf("projects fixture has %d projects, want %d (matches the reference count)", len(projects), wantCount)
+	}
+	// Deterministic, unique names and non-empty real-looking paths.
+	seen := map[string]bool{}
+	for i, p := range projects {
+		if p.Name == "" {
+			t.Errorf("project[%d] has an empty name", i)
+		}
+		if !strings.HasPrefix(p.Path, "/") {
+			t.Errorf("project[%d] %q path %q is not an absolute real-looking path", i, p.Name, p.Path)
+		}
+		if seen[p.Name] {
+			t.Errorf("project[%d] name %q is a duplicate (must be deterministic & unique)", i, p.Name)
+		}
+		seen[p.Name] = true
+	}
+	// The reference's selected (cursor) row is flow-v1-api, so it must be first.
+	if projects[0].Name != "flow-v1-api" {
+		t.Errorf("projects fixture first project = %q, want %q (the reference cursor row)", projects[0].Name, "flow-v1-api")
+	}
+}
+
+// TestFixtureNamesIncludesProjects pins the projects fixture into the discoverable
+// name list (the --fixture help + FixtureByName error share this source).
+func TestFixtureNamesIncludesProjects(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "projects" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include projects", capture.FixtureNames())
 	}
 }
 

@@ -38,9 +38,13 @@ const (
 	// remainder after this prefix, so the two split cleanly with no duplicated
 	// wording.
 	sectionLabel = "Sessions"
+	// projectsSectionLabel is the Projects page label (state.green, §6 / §3.2).
+	// The Projects header carries no mode suffix — it is the label + a text.detail
+	// count + the shared `/ to filter` hint.
+	projectsSectionLabel = "Projects"
 	// sectionFilterHint is the persistent right-aligned hint shown on every
-	// filterable session view (§3.2 / §4.2). The `s switch view` hint is the
-	// footer's responsibility and is deliberately NOT duplicated here.
+	// filterable session/project view (§3.2 / §4.2 / §6). The `s switch view` hint
+	// is the footer's responsibility and is deliberately NOT duplicated here.
 	sectionFilterHint = "/ to filter"
 )
 
@@ -51,8 +55,36 @@ const (
 // canvas-painted flex spacer. Below the width at which the left cluster + a spacer
 // + the hint no longer fit, the right hint drops rather than overflow (§2.7).
 func renderSectionHeader(mode prefs.SessionListMode, insideTmux bool, currentSession string, count, width int, canvasMode theme.Mode, colourless bool) string {
-	w := headerWidthOrFallback(width)
 	left := sectionLeftCluster(mode, insideTmux, currentSession, count, canvasMode, colourless)
+	return renderSectionHeaderRow(left, width, canvasMode, colourless)
+}
+
+// renderProjectsSectionHeader renders the §6 / §3.2 Projects section header: a
+// left cluster — `Projects` in state.green plus the live count in text.detail (at
+// the SAME cap-height as the label, distinguished only by its dim colour, NOT a
+// smaller / superscript glyph — §13.6) — with a right-aligned `/ to filter` hint
+// (text.detail) on the same row, the gap filled with a canvas-painted flex spacer
+// to the content width. Unlike the Sessions header it carries no mode suffix.
+//
+// It shares the layout core (renderSectionHeaderRow) with the Sessions header so
+// the flex-spacer right-alignment, the §2.7 narrow degrade, and the canvas paint
+// stay identical; only the left cluster (label text + label colour + count colour)
+// differs. Under the NO_COLOR carve-out (§2.5) every hue and the canvas drop; the
+// structure (label / count / hint) renders intact on the terminal's native fg/bg.
+func renderProjectsSectionHeader(count, width int, canvasMode theme.Mode, colourless bool) string {
+	left := projectsLeftCluster(count, canvasMode, colourless)
+	return renderSectionHeaderRow(left, width, canvasMode, colourless)
+}
+
+// renderSectionHeaderRow lays out a pre-rendered left cluster and the shared
+// right-aligned `/ to filter` hint into the single section-header row, always
+// exactly width cells wide: the cluster and the hint are separated by a
+// canvas-painted flex spacer. Below the width at which the cluster + a spacer + the
+// hint no longer fit, the right hint drops rather than overflow (§2.7). It is the
+// single layout core both the Sessions and Projects section headers route through,
+// so their right-alignment and narrow degrade can never drift.
+func renderSectionHeaderRow(left string, width int, canvasMode theme.Mode, colourless bool) string {
+	w := headerWidthOrFallback(width)
 	leftWidth := lipgloss.Width(left)
 
 	hint := headerStyle(theme.MV.TextDetail, canvasMode, colourless).Render(sectionFilterHint)
@@ -68,6 +100,19 @@ func renderSectionHeader(mode prefs.SessionListMode, insideTmux bool, currentSes
 	spacerWidth := w - leftWidth - hintWidth
 	spacer := headerCanvasBg(canvasMode, colourless).Render(strings.Repeat(" ", spacerWidth))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, hint)
+}
+
+// projectsLeftCluster renders the Projects header's left cluster flush at the
+// content's left edge (col 0 of the inset region — the SAME column as the PORTAL
+// wordmark and the row selector): `Projects` in state.green, then the count one
+// space right at the SAME cap-height (a plain run — no smaller / superscript
+// glyph), distinguished only by text.detail (§13.6). NO leading indent (mirrors
+// sectionLeftCluster). No mode suffix — the Projects list has a single view.
+func projectsLeftCluster(count int, canvasMode theme.Mode, colourless bool) string {
+	label := headerStyle(theme.MV.StateGreen, canvasMode, colourless).Render(projectsSectionLabel)
+	gap := headerCanvasBg(canvasMode, colourless).Render(" ")
+	countRun := headerStyle(theme.MV.TextDetail, canvasMode, colourless).Render(strconv.Itoa(count))
+	return lipgloss.JoinHorizontal(lipgloss.Top, label, gap, countRun)
 }
 
 // sectionLeftCluster renders the left cluster flush at the content's left edge

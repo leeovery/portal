@@ -2364,7 +2364,14 @@ func TestCommandPendingMode(t *testing.T) {
 		}
 	})
 
-	t.Run("help bar omits s, x, e, and d in command-pending mode", func(t *testing.T) {
+	// The §6.3 reskin replaced the legacy three-column footer (which varied its
+	// copy by command-pending mode) with the FIXED condensed Projects footer copy
+	// (`⏎ new session · x sessions · e edit · / filter · ? help`). The help-only keys
+	// (n new in cwd, d delete, q quit) and the command-pending `run here` variation
+	// are deferred to the ? help modal / the formal Projects keymap descriptor
+	// (task 3-3, Phase 3). The footer no longer differentiates command-pending mode,
+	// so the page renders the same §6.3 copy whether or not a command is pending.
+	t.Run("condensed footer renders the §6.3 copy in command-pending mode", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -2382,55 +2389,27 @@ func TestCommandPendingMode(t *testing.T) {
 		cmd := m.Init()
 		msg := cmd()
 		model, _ = model.Update(msg)
-		// Set wide width so help bar renders fully
+		// Set wide width so the condensed footer renders fully (no §2.7 truncation).
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
 		view := model.View().Content
-		// s, e, d should NOT appear as help keys
-		for _, desc := range []string{"sessions", "edit", "delete"} {
-			if strings.Contains(view, desc) {
-				t.Errorf("help bar should not contain %q in command-pending mode, got:\n%s", desc, view)
+		// The §6.3 condensed copy renders (label runs are contiguous; the key glyph
+		// and its label are separate SGR runs in the raw view, so assert the labels).
+		for _, want := range []string{"new session", "sessions", "edit", "filter", "help"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("condensed footer missing §6.3 entry %q, got:\n%s", want, view)
 			}
 		}
-		// new in cwd should still appear
-		for _, desc := range []string{"new in cwd"} {
-			if !strings.Contains(view, desc) {
-				t.Errorf("help bar should contain %q in command-pending mode, got:\n%s", desc, view)
+		// The legacy three-column-only copy (n new in cwd, d delete, run here) is
+		// deferred to the ? help modal (Phase 3) — it must NOT leak into the footer.
+		for _, banned := range []string{"new in cwd", "delete", "run here"} {
+			if strings.Contains(view, banned) {
+				t.Errorf("condensed footer leaked deferred copy %q, got:\n%s", banned, view)
 			}
 		}
 	})
 
-	t.Run("help bar shows run here for enter in command-pending mode", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
-
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-		).WithCommand([]string{"claude"})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-		// Set wide width so help bar renders fully
-		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
-
-		view := model.View().Content
-		if !strings.Contains(view, "run here") {
-			t.Errorf("help bar should show 'run here' for enter in command-pending mode, got:\n%s", view)
-		}
-		if strings.Contains(view, "new session") {
-			t.Errorf("help bar should not show 'new session' in command-pending mode, got:\n%s", view)
-		}
-	})
-
-	t.Run("normal mode retains s, x, e, and d keybindings", func(t *testing.T) {
+	t.Run("condensed footer copy is identical in normal mode", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -2455,13 +2434,11 @@ func TestCommandPendingMode(t *testing.T) {
 		})
 
 		view := model.View().Content
-		for _, desc := range []string{"sessions", "edit", "delete"} {
-			if !strings.Contains(view, desc) {
-				t.Errorf("normal mode help bar should contain %q, got:\n%s", desc, view)
+		// The §6.3 condensed footer copy renders in normal mode (the same fixed copy).
+		for _, want := range []string{"new session", "sessions", "edit", "filter", "help"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("condensed footer missing §6.3 entry %q in normal mode, got:\n%s", want, view)
 			}
-		}
-		if !strings.Contains(view, "new session") {
-			t.Errorf("normal mode help bar should show 'new session' for enter, got:\n%s", view)
 		}
 	})
 }
@@ -3509,15 +3486,22 @@ func TestProjectsPage(t *testing.T) {
 		})
 
 		view := model.View().Content
+		// The §6.3 condensed footer copy (the `new in cwd` help-only key is deferred
+		// to the ? help modal in Phase 3 — it is no longer in the footer).
 		expectedDescs := []string{
 			"new session",
 			"sessions",
-			"new in cwd",
+			"edit",
+			"filter",
+			"help",
 		}
 		for _, desc := range expectedDescs {
 			if !strings.Contains(view, desc) {
-				t.Errorf("projects help bar should contain %q, got:\n%s", desc, view)
+				t.Errorf("projects footer should contain §6.3 entry %q, got:\n%s", desc, view)
 			}
+		}
+		if strings.Contains(view, "new in cwd") {
+			t.Errorf("projects footer should not contain the deferred 'new in cwd' help-only key, got:\n%s", view)
 		}
 	})
 
@@ -5374,15 +5358,20 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		})
 
 		view := model.View().Content
+		// The §6.3 condensed footer copy (the `delete` help-only key is deferred to
+		// the ? help modal in Phase 3 — it is no longer in the footer).
 		expectedDescs := []string{
 			"sessions",
 			"edit",
-			"delete",
+			"filter",
 		}
 		for _, desc := range expectedDescs {
 			if !strings.Contains(view, desc) {
-				t.Errorf("projects help bar should contain %q, got:\n%s", desc, view)
+				t.Errorf("projects footer should contain §6.3 entry %q, got:\n%s", desc, view)
 			}
+		}
+		if strings.Contains(view, "delete") {
+			t.Errorf("projects footer should not contain the deferred 'delete' help-only key, got:\n%s", view)
 		}
 	})
 
@@ -6991,7 +6980,11 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		}
 	})
 
-	t.Run("project help bar includes quit binding", func(t *testing.T) {
+	// The §6.3 reskin moved `quit` (a help-only key) out of the Projects footer and
+	// into the ? help modal (Phase 3) — same as the Sessions condensed footer. The
+	// condensed Projects footer must NOT contain 'quit', and the right-aligned
+	// '? help' hint must be present (where 'quit' now lives).
+	t.Run("project condensed footer omits quit and shows ? help", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -7013,12 +7006,15 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		})
 
 		view := model.View().Content
-		if !strings.Contains(view, "quit") {
-			t.Errorf("project help bar should contain 'quit', got:\n%s", view)
+		if strings.Contains(view, "quit") {
+			t.Errorf("Projects condensed footer must NOT contain 'quit' (help-only, deferred to ? help), got:\n%s", view)
+		}
+		if !strings.Contains(view, "help") {
+			t.Errorf("Projects condensed footer must show the right-aligned '? help' hint, got:\n%s", view)
 		}
 	})
 
-	t.Run("command-pending help bar includes quit binding", func(t *testing.T) {
+	t.Run("command-pending condensed footer omits quit and shows ? help", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -7038,8 +7034,11 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
 		view := model.View().Content
-		if !strings.Contains(view, "quit") {
-			t.Errorf("command-pending help bar should contain 'quit', got:\n%s", view)
+		if strings.Contains(view, "quit") {
+			t.Errorf("command-pending condensed footer must NOT contain 'quit' (deferred to ? help), got:\n%s", view)
+		}
+		if !strings.Contains(view, "help") {
+			t.Errorf("command-pending condensed footer must show the right-aligned '? help' hint, got:\n%s", view)
 		}
 	})
 }

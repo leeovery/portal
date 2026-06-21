@@ -389,6 +389,9 @@ func TestForegroundOnTintPairings(t *testing.T) {
 	}{
 		{"text.on-selection on bg.selection", theme.MV.TextOnSelection, theme.MV.BgSelection, floorNormal, ""},
 		{"text.strong on bg.selection", theme.MV.TextStrong, theme.MV.BgSelection, floorNormal, ""},
+		// §6.2 selected-row PATH: text.muted-bright on bg.selection (light darkened to
+		// #4C5478 to clear the floor — it was 4.17 in light).
+		{"text.muted-bright on bg.selection", theme.MV.TextMutedBright, theme.MV.BgSelection, floorNormal, ""},
 		// §4.1 attached marker: the single state.green (darkened light #3B5E18) is
 		// held to the 4.5 normal-text floor on the tint.
 		{"state.green on bg.selection", theme.MV.StateGreen, theme.MV.BgSelection, floorNormal, ""},

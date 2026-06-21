@@ -77,16 +77,37 @@ func filterAppliedFooterEntries() []filterFooterEntry {
 	}
 }
 
+// projectsFilterAppliedFooterEntries is the list-active footer for the PROJECTS
+// page: identical to the Sessions list-active footer except the commit key reads
+// `new session` (Enter on Projects creates a session — it does NOT attach), so the
+// shared filterAppliedFooterEntries' "attach" copy is not leaked onto Projects.
+func projectsFilterAppliedFooterEntries() []filterFooterEntry {
+	return []filterFooterEntry{
+		{Key: []keyGlyph{{"↵", theme.MV.AccentBlue}}, Label: "new session"},
+		{Key: []keyGlyph{{"↑↓", theme.MV.AccentBlue}}, Label: "navigate"},
+		{Key: []keyGlyph{{"esc", theme.MV.AccentOrange}}, Label: "clear filter"},
+	}
+}
+
 // renderFilteringFooter renders the §7.1 input-active contextual footer for the
-// given content width and resolved canvas mode (and the NO_COLOR carve-out).
+// given content width and resolved canvas mode (and the NO_COLOR carve-out). It is
+// page-agnostic (`type to filter · ↵/↓ browse results · esc clear`), shared by
+// Sessions and Projects.
 func renderFilteringFooter(width int, mode theme.Mode, colourless bool) string {
 	return renderFilterFooter(filteringFooterEntries(), width, mode, colourless)
 }
 
 // renderFilterAppliedFooter renders the §7.1 list-active contextual footer for the
-// given content width and resolved canvas mode (and the NO_COLOR carve-out).
+// given content width and resolved canvas mode (and the NO_COLOR carve-out). This is
+// the SESSIONS variant (`↵ attach`); Projects uses renderProjectsFilterAppliedFooter.
 func renderFilterAppliedFooter(width int, mode theme.Mode, colourless bool) string {
 	return renderFilterFooter(filterAppliedFooterEntries(), width, mode, colourless)
+}
+
+// renderProjectsFilterAppliedFooter renders the Projects list-active filter footer
+// (`↵ new session` instead of `↵ attach`).
+func renderProjectsFilterAppliedFooter(width int, mode theme.Mode, colourless bool) string {
+	return renderFilterFooter(projectsFilterAppliedFooterEntries(), width, mode, colourless)
 }
 
 // renderFilterFooter is the shared two-row contextual-filter footer: the 1px

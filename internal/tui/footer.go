@@ -59,9 +59,31 @@ const footerEllipsis = "…"
 // never wraps to a second line (which would steal a list row) and the ? help right
 // anchor survives as long as possible (§2.7).
 func renderSessionsFooter(width int, mode theme.Mode, colourless bool) string {
+	return renderCondensedFooter(sessionsKeymap(), width, mode, colourless)
+}
+
+// renderProjectsFooter renders the §6.3 condensed Projects footer
+// (`⏎ new session` · `x sessions` · `e edit` · `/ filter`, right-aligned
+// `? help`) through the SAME condensed-footer machinery as the Sessions footer,
+// driven by the projectsKeymap descriptor — replacing the legacy three-column
+// renderKeymapFooter for the Projects page. Same two-row shape (the shared 1px
+// border.footer top rule + one key row), so it is height-neutral against the
+// Sessions footer's reserved budget.
+func renderProjectsFooter(width int, mode theme.Mode, colourless bool) string {
+	return renderCondensedFooter(projectsKeymap(), width, mode, colourless)
+}
+
+// renderCondensedFooter is the shared §3.4 / §6.3 condensed-footer renderer for a
+// per-page keymap descriptor: the descriptor's Core entries form the dot-separated
+// left cluster and the single right-aligned entry (the ? help hint) is pinned to
+// the right, over the 1px border.footer top rule. It is the single render entry
+// point so a page's composed-view render and its height-budget computation resolve
+// the footer against the SAME width/mode and agree on its height exactly. Both the
+// Sessions and Projects footers route through here so the two never drift.
+func renderCondensedFooter(entries []keymapEntry, width int, mode theme.Mode, colourless bool) string {
 	w := headerWidthOrFallback(width)
 	rule := footerTopRule(w, mode, colourless)
-	row := footerKeyRow(w, mode, colourless)
+	row := footerKeyRow(entries, w, mode, colourless)
 	return lipgloss.JoinVertical(lipgloss.Left, rule, row)
 }
 
@@ -74,14 +96,14 @@ func footerTopRule(w int, mode theme.Mode, colourless bool) string {
 	return headerStyle(theme.MV.BorderFooter, mode, colourless).Render(rule)
 }
 
-// footerKeyRow renders the single condensed key row: the Core keymap entries as a
-// dot-separated left cluster, then a canvas-painted flex spacer, then the
-// right-aligned ? help. The row is always exactly w cells wide. When the full left
-// cluster does not fit beside the ? help, lower-priority Core entries are dropped
-// (with an ellipsis) until it fits — the ? help anchor survives as long as
-// possible (§2.7), and the row never wraps.
-func footerKeyRow(w int, mode theme.Mode, colourless bool) string {
-	core, right := splitFooterEntries(sessionsKeymap())
+// footerKeyRow renders the single condensed key row for the given keymap
+// descriptor: the Core keymap entries as a dot-separated left cluster, then a
+// canvas-painted flex spacer, then the right-aligned ? help. The row is always
+// exactly w cells wide. When the full left cluster does not fit beside the ? help,
+// lower-priority Core entries are dropped (with an ellipsis) until it fits — the
+// ? help anchor survives as long as possible (§2.7), and the row never wraps.
+func footerKeyRow(entries []keymapEntry, w int, mode theme.Mode, colourless bool) string {
+	core, right := splitFooterEntries(entries)
 
 	// Render the right-aligned ? help hint first — it is the surviving anchor, so
 	// the left cluster is fitted around the space it reserves. Its key glyph is the
