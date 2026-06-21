@@ -159,14 +159,14 @@ func renderSwatch(mode theme.Mode) string {
 	b.WriteString("\n\n")
 
 	// bg.selection band: name in text.on-selection, "3 windows" count in
-	// text.strong, "● attached" marker in state.green-on-selection (the §2.8
-	// darker on-selection override, the 1-9 wash-out remedy) — ALL on the
-	// bg.selection tint (the §4.1 selected-row foreground-on-tint pairings).
+	// text.strong, "● attached" marker in state.green (the single token, darkened
+	// to #3B5E18 light so it clears the floor on the bg.selection tint too) — ALL on
+	// the bg.selection tint (the §4.1 selected-row foreground-on-tint pairings).
 	b.WriteString(tintLabel(mode, "bg.selection", theme.MV.BgSelection))
 	b.WriteString("\n")
 	b.WriteString(selectionBand(mode))
 	b.WriteString("\n")
-	b.WriteString(pairCaption(mode, "fg-on-tint: text.on-selection · text.strong · state.green-on-selection (● attached)"))
+	b.WriteString(pairCaption(mode, "fg-on-tint: text.on-selection · text.strong · state.green (● attached)"))
 	b.WriteString("\n\n")
 
 	// bg.warning band: "⚠ message" in text.on-warning ON the bg.warning tint.
@@ -225,10 +225,9 @@ func tokenHex(tok theme.Token, mode theme.Mode) string {
 
 // selectionBand fills bandWidth cells with the bg.selection tint and lays the
 // three §4.1 selected-row foregrounds over it: the name (text.on-selection), the
-// window count (text.strong) and the "● attached" marker (state.green-on-selection
-// — the §2.8 darker on-selection override that remedies the 1-9 wash-out finding,
-// NOT the global state.green). Each run keeps the bg.selection tint as its
-// background so every pairing is rendered ON the tint.
+// window count (text.strong) and the "● attached" marker (state.green). Each run
+// keeps the bg.selection tint as its background so every pairing is rendered ON
+// the tint.
 func selectionBand(mode theme.Mode) string {
 	tint := theme.MV.BgSelection.ColorFor(mode)
 	on := func(tok theme.Token) lipgloss.Style {
@@ -236,15 +235,11 @@ func selectionBand(mode theme.Mode) string {
 	}
 	name := on(theme.MV.TextOnSelection).Bold(true).Render("agentic-workflows-code-based")
 	count := on(theme.MV.TextStrong).Render("3 windows")
-	// §2.8 defaulted-override remedy for the 1-9 human-eyeball wash-out finding:
-	// the `● attached` marker on the bg.selection tint renders in the dedicated
-	// darker StateGreenOnSelection (light #3B5E18, 4.65 vs #D0C6F0), NOT the global
-	// state.green (#456E1C, 3.72 — the washed-out finding). The global state.green
-	// is unchanged; other green usages stay normal state.green. Phase 2 task 771c41
-	// (Sessions flat row anatomy + violet selection) MUST use this on-selection
-	// green for the attached marker on the selected row so the real surface inherits
-	// the remedy.
-	attached := on(theme.MV.StateGreenOnSelection).Render("● attached")
+	// The `● attached` marker on the bg.selection tint renders in the single
+	// state.green token (light darkened to #3B5E18 = 4.65 vs #D0C6F0, dark #9ECE6A =
+	// 8.19) — the former dedicated on-selection override was folded into the global
+	// token, so the selected row uses the same green as every other state.green usage.
+	attached := on(theme.MV.StateGreen).Render("● attached")
 	gap := on(theme.MV.TextOnSelection).Render("  ")
 	content := name + gap + count + gap + attached
 	return padBand(content, bandWidth, tint)

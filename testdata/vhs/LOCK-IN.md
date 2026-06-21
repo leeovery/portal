@@ -85,41 +85,32 @@ token, co-tuned so both clear — never a lowered floor.)
 
 ## ⚠ Finding + remedy — the green-on-bg.selection pairing (light)
 
+> **SUPERSEDED (Phase 2, task 771c41):** the dedicated `StateGreenOnSelection`
+> override below was REMOVED at the user's request — "all colours come from the
+> token list as we will later theme; adapt the light-mode token, don't create a
+> special case." The fix was folded into the GLOBAL `state.green`: its light value
+> was darkened `#456E1C` → **`#3B5E18`** (the same value the override used). `#3B5E18`
+> clears the 4.5 floor on BOTH the canvas (`#e1e2e7`, > 4.64 — more margin than the
+> prior #456E1C) AND on `bg.selection` (`#D0C6F0`, 4.65), so a SINGLE `state.green`
+> token now serves every usage including the on-selection attached marker. The
+> dark variant (`#9ECE6A`) was already fine on both surfaces and is unchanged. The
+> `StateGreenOnSelection` token, its `TestStateGreenOnSelectionRemedy` gate, and the
+> swatch's per-context override were all deleted; `theme/contrast_test.go` now gates
+> `state.green` on both surfaces (`TestStateGreenClearsCanvasAndSelection` +
+> the `TestForegroundOnTintPairings` `state.green on bg.selection` leg). The original
+> Phase-1 finding/remedy below is retained as the historical record.
+
 **1-9 human-eyeball finding (recorded):** the human eyeballed the light `● attached`
 marker on the `bg.selection` band and found the global `state.green` (`#456E1C`) on
 `bg.selection` (`#D0C6F0`) — measured **3.72** — **genuinely washed out**. (3.72
 clears the 3:1 glyph+label UI bar but not 4.5; the wash-out is the human eyeball the
 numeric floor alone cannot catch, §2.9 / §15.6.)
 
-**Remedy applied (§2.8 defaulted override; MORE contrast, never lower the floor):**
-a dedicated darker green — `theme.MV.StateGreenOnSelection` — used **ONLY** for the
-`● attached` marker when it renders on the `bg.selection` tint:
-
-- **Light variant `#3B5E18`** — the minimal HSL-darkening of `state.green` light
-  `#456E1C` (hue preserved at H=90, the same yellow-green; G channel still dominates
-  so it reads positive/green) that clears 4.5:1 with margin: **measured 4.65 vs
-  `#D0C6F0`** (≥ 4.5 + 0.1).
-- **Dark variant = the global `state.green` dark `#9ECE6A`** — on dark `bg.selection`
-  `#28243a` it already clears comfortably (**8.19**), so **no dark override was
-  needed**; the remedy is **light-only**. (Documented why: the dark pairing was never
-  washed out.)
-- **The global `state.green` token is UNCHANGED** (light `#456E1C` / dark `#9ECE6A`).
-  Its canvas usages (Sessions count 4.64 light / clearing dark, Projects label, `✓`
-  done-tick, success flash) stay crisp, and the foundation Sessions captures stay
-  byte-identical. Only the on-selection attached marker uses the darker green.
-
-Derivation comment (mirrored in `theme.go` + `contrast_test.go`):
-`#3B5E18` — measured **4.65 vs `#D0C6F0`** — remedy for the 1-9 human-eyeball
-wash-out finding; §2.8 defaulted override; global `state.green` unchanged.
-
-**Phase 2 task 771c41 (Sessions flat row anatomy + violet selection) MUST use this
-`StateGreenOnSelection` green for the attached marker on the SELECTED row** so the
-real surface inherits the remedy (flagged in `theme.go` + `swatch.go`).
-
-**Human: re-eyeball the light `● attached` marker on the `bg.selection` band in the
-regenerated `contrast-validation-light.png`.** It now renders in the darker
-`#3B5E18` (4.65). Confirm the wash-out is resolved and it still reads as positive
-green; if not, record a further remedy/bail signal below.
+**Phase-1 remedy (since superseded — see the note above):** a dedicated darker green
+`StateGreenOnSelection` (light `#3B5E18`, 4.65 vs `#D0C6F0`; dark = global `#9ECE6A`)
+used only for the on-selection attached marker, leaving the global `state.green`
+light at `#456E1C`. Phase 2 folded `#3B5E18` into the global token instead, so the
+single `state.green` carries the attached marker on the selected row directly.
 
 ## Ctrl+↑ / Ctrl+↓ paging-chord finding (tick-6b0f62 note / §12.3)
 

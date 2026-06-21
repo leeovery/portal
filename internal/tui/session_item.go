@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui/theme"
 )
@@ -27,6 +28,47 @@ var (
 	// Background(canvas) for the resolved mode.
 	headingBase = lipgloss.NewStyle().Faint(true)
 )
+
+const (
+	// selectorBar is the §3.3 thick block selection glyph (U+258C LEFT HALF
+	// BLOCK), the single, consistent left-bar selection signal. It renders in
+	// accent.violet at the far-left of the selected row; the leftBarColumnWidth
+	// column it occupies replaces the former "> " / "  " cursor prefix so the name
+	// keeps the same left edge whether or not the row is selected.
+	selectorBar = "▌"
+	// leftBarColumnWidth is the fixed 2-cell left-bar column (§3.3 "full 2-cell
+	// column"): the selector glyph at col 0 plus one trailing cell, so the name
+	// always starts two cells in. Unselected rows render two blank cells here,
+	// preserving the column alignment.
+	leftBarColumnWidth = 2
+	// nameGap is the canvas-painted gap between the flexing name column and the
+	// first fixed trailing slot (the window count), so the name never abuts the
+	// count text.
+	nameGap = 2
+	// countSlotWidth is the FIXED width of the window-count trailing slot (§4.1).
+	// The count text ("N window" / "N windows") is left-aligned within it; the
+	// fixed width is what keeps the counts — and the attached bullets to their
+	// right — vertically column-aligned regardless of name length. 11 fits up to
+	// "999 windows" (11 cells) without bleeding into the attached slot.
+	countSlotWidth = 11
+	// rowRightMargin insets the trailing columns from the content's right edge so the
+	// attached bullet does not sit flush against the edge. It is SYMMETRICAL with the
+	// names' left inset: the name column starts at leftBarColumnWidth (2 cells, after
+	// the selector-bar column), so a 2-cell right margin mirrors it — the row content
+	// (name … trailing slots) sits in a symmetric 2-cell-inset band. (The design
+	// insets further, but a wide right margin reads as oversized in the terminal;
+	// matching the left edge is the cleaner, balanced choice.)
+	rowRightMargin = leftBarColumnWidth
+)
+
+// attachedMarker is the §4.1 attached badge text. Its width fixes the attached
+// trailing slot so an unattached row renders an empty slot of the SAME width,
+// keeping the bullets column-aligned down the list.
+const attachedMarker = "● attached"
+
+// attachedSlotWidth is the FIXED width of the attached trailing slot, derived
+// from the marker text so the empty (unattached) slot matches it exactly.
+var attachedSlotWidth = lipgloss.Width(attachedMarker)
 
 // groupSeparator is the heading glyph between the group label and its count,
 // rendered as "Heading ··· N" (U+00B7 MIDDLE DOT ×3) per the spec examples
@@ -197,7 +239,12 @@ func (d SessionDelegate) tokenStyle(base lipgloss.Style, fg theme.Token) lipglos
 // bubbles/list pagination exact.
 func (d SessionDelegate) Height() int { return 1 }
 
-// Spacing returns 0, no gap between items.
+// Spacing returns 0, no gap between rows. A terminal renders in whole character
+// cells, so the only "airier" option is a FULL blank line between rows (Spacing 1),
+// which reads as too much and halves the rows-per-screen — there is no half-row in a
+// terminal. The design's padded selection band comes from its 32px rows (a
+// cell-height property the terminal owns, not the app), so the snug 1-line band is
+// the terminal-faithful floor.
 func (d SessionDelegate) Spacing() int { return 0 }
 
 // Update returns nil; no item-level keybinding handling is needed.
@@ -206,11 +253,12 @@ func (d SessionDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 // Render renders one list row. A HeaderItem renders as a dimmed
 // "Heading ··· N" separator (no cursor, never selectable — the cursor-skip in
 // model.go guarantees the selection never rests on a header). A SessionItem
-// renders the cursor indicator, styled name, dimmed window count, and green
-// attached badge. Every run is painted with its §2.9 role-token foreground and
-// the owned canvas background for the delegate's Mode (the leaf layer of §1):
-// the row TEXT and column structure are unchanged from the pre-canvas delegate,
-// only the colour pair is now mode-matched and canvas-backed.
+// renders the §4.1 flat-row anatomy: a 2-cell left-bar column (a violet ▌ on the
+// selected row, two blank cells otherwise), the name as a flexing left column,
+// then fixed-width right-pinned trailing slots for the window count and the
+// attached marker. Every run is painted with its §2.9 role-token foreground and
+// the owned canvas background for the delegate's Mode (the leaf layer of §1); on
+// the selected row the structural cells carry the bg.selection tint instead.
 func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	bg := d.canvasBg()
 	var row string
@@ -221,30 +269,7 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		heading := d.tokenStyle(headingBase, theme.MV.TextDetail).Render(it.label())
 		row = bg.Render(groupHeaderIndent) + heading
 	case SessionItem:
-		cursor := bg.Render("  ")
-		if index == m.Index() {
-			// Cursor / selector — accent.violet (§2.9).
-			cursor = d.tokenStyle(lipgloss.Style{}, theme.MV.AccentViolet).Render("> ")
-		}
-
-		// Name — text.primary, bold (§4.1).
-		name := d.tokenStyle(nameBase, theme.MV.TextPrimary).Render(it.Session.Name)
-
-		// Window count — text.detail (§4.1).
-		detail := d.tokenStyle(lipgloss.Style{}, theme.MV.TextDetail).Render(windowLabel(it.Session.Windows))
-		if it.Session.Attached {
-			// Attached marker — state.green (§4.1).
-			detail += bg.Render("  ") + d.tokenStyle(lipgloss.Style{}, theme.MV.StateGreen).Render("● attached")
-		}
-
-		// Grouped rows (GroupKey set in By Project / By Tag) nest under their
-		// header; Flat rows (empty GroupKey) render flush as before.
-		indent := ""
-		if it.GroupKey != "" {
-			indent = groupRowIndent
-		}
-
-		row = fmt.Sprintf("%s%s%s%s%s", bg.Render(indent), cursor, name, bg.Render("  "), detail)
+		row = d.renderSessionRow(m, index, it)
 	default:
 		return
 	}
@@ -256,6 +281,167 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	// width, so the trailing region is canvas too. The delegate therefore emits
 	// only the row's own content and leaves width-padding to the single fill.
 	_, _ = fmt.Fprint(w, row)
+}
+
+// rowBg is the structural-cell style for a session row: the bg.selection tint
+// on the selected row, otherwise the owned canvas (or a bare style under the
+// NO_COLOR carve-out, so the cells render on the terminal's native bg).
+//
+// Padding (slot fills, the name-flex tail, the gap) is rendered through this
+// style so every structural cell carries an explicit background — no
+// terminal-bg island opens up inside a selected row's tint or the canvas.
+func (d SessionDelegate) rowBg(selected bool) lipgloss.Style {
+	if d.Colourless {
+		return lipgloss.NewStyle()
+	}
+	if selected {
+		return lipgloss.NewStyle().Background(theme.MV.BgSelection.ColorFor(d.Mode))
+	}
+	return lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(d.Mode))
+}
+
+// rowToken returns base with the role token's mode-resolved FOREGROUND over the
+// row's background (bg.selection on the selected row, canvas otherwise) — the
+// selected-row counterpart of tokenStyle. Under the NO_COLOR carve-out it
+// returns base unchanged (no hue, no background), so base's non-colour
+// attributes (Bold/Faint) still carry state glyph-distinctly (§2.2).
+func (d SessionDelegate) rowToken(base lipgloss.Style, fg theme.Token, selected bool) lipgloss.Style {
+	if d.Colourless {
+		return base
+	}
+	styled := base.Foreground(fg.ColorFor(d.Mode))
+	if selected {
+		return styled.Background(theme.MV.BgSelection.ColorFor(d.Mode))
+	}
+	return styled.Background(theme.MV.Canvas.ColorFor(d.Mode))
+}
+
+// renderSessionRow renders the §4.1 flat-row anatomy on the owned canvas:
+//
+//	[2-cell bar][grouped indent?][name flex …][gap][count slot][attached slot]
+//
+// The trailing slots (count, attached) are FIXED-WIDTH and right-pinned; the
+// name flexes to fill the remainder of the row's width so the counts and the
+// attached bullets stay vertically column-aligned regardless of name length. An
+// over-long name truncates with an ellipsis to the flex width (§2.7) so it can
+// never push the trailing slots off-row. Height stays exactly one line — the
+// §3.5 / §4.1 one-delegate-line pagination invariant.
+func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionItem) string {
+	selected := index == m.Index()
+	bg := d.rowBg(selected)
+
+	// Left-bar column (§3.3): the violet ▌ + a trailing cell on the selected row,
+	// two blank cells otherwise — a fixed 2-cell column that keeps the name at the
+	// same left edge whether or not the row is selected.
+	bar := bg.Render(padTo("", leftBarColumnWidth))
+	if selected {
+		bar = d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true).Render(selectorBar) +
+			bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(selectorBar)))
+	}
+
+	// Grouped rows (GroupKey set in By Project / By Tag) nest one level under their
+	// header; Flat rows (empty GroupKey) render flush. The indent hook is left
+	// intact for the grouped-view task (it consumes the same delegate).
+	indent := ""
+	if it.GroupKey != "" {
+		indent = groupRowIndent
+	}
+	indentCell := bg.Render(indent)
+
+	// Name — text.primary (selected: text.on-selection), bold (§4.1).
+	nameTok := theme.MV.TextPrimary
+	if selected {
+		nameTok = theme.MV.TextOnSelection
+	}
+	// Window count — text.detail (selected: text.strong) (§4.1).
+	countTok := theme.MV.TextDetail
+	if selected {
+		countTok = theme.MV.TextStrong
+	}
+	countText := windowLabel(it.Session.Windows)
+
+	// The two trailing slots are fixed-width; the name column flexes to whatever is
+	// left of the row width after the bar, indent, gap, and the slots. When the
+	// list has not been sized yet (Width() == 0, a directly-constructed model that
+	// renders before its first WindowSizeMsg) there is no width to flex against, so
+	// fall back to a left-to-right flow: full name, single gap, count, attached —
+	// no truncation, no right-pinning.
+	total := m.Width()
+	used := leftBarColumnWidth + lipgloss.Width(indent) + nameGap + countSlotWidth + attachedSlotWidth + rowRightMargin
+
+	var name, namePad string
+	if total <= 0 {
+		name = d.rowToken(nameBase, nameTok, selected).Render(it.Session.Name)
+		namePad = ""
+	} else {
+		// Truncate to the flex width with an ellipsis (§2.7), then pad the remainder
+		// so the gap and the fixed slots are right-pinned and column-aligned.
+		nameWidth := total - used
+		if nameWidth < 1 {
+			nameWidth = 1
+		}
+		visibleName := ansi.Truncate(it.Session.Name, nameWidth, "…")
+		name = d.rowToken(nameBase, nameTok, selected).Render(visibleName)
+		namePad = bg.Render(padTo("", nameWidth-lipgloss.Width(visibleName)))
+	}
+
+	gap := bg.Render(padTo("", nameGap))
+
+	// Window count slot — left-aligned text padded to the fixed slot width (§4.1).
+	count := d.rowToken(lipgloss.Style{}, countTok, selected).Render(countText) +
+		bg.Render(padTo("", countSlotWidth-lipgloss.Width(countText)))
+
+	// Attached marker — a fixed-width slot right of the count. "● attached" in
+	// state.green when attached (the single state.green token clears the floor on
+	// both the canvas and the bg.selection tint, so the selected row keeps the same
+	// green — no per-context override), an EMPTY slot of the SAME width when not, so
+	// the bullets and the counts stay column-aligned regardless of name length (§4.1).
+	attached := bg.Render(padTo("", attachedSlotWidth))
+	if it.Session.Attached {
+		attached = d.rowToken(lipgloss.Style{}, theme.MV.StateGreen, selected).Render(attachedMarker) +
+			bg.Render(padTo("", attachedSlotWidth-lipgloss.Width(attachedMarker)))
+	}
+
+	// The right margin insets the trailing columns from the content edge (§4.1) so
+	// the attached bullet does not sit flush against the edge (matching the design).
+	rightMargin := bg.Render(padTo("", rowRightMargin))
+	row := bar + indentCell + name + namePad + gap + count + attached + rightMargin
+
+	// Safety clamp (§2.7 / §3.5): the trailing slots are a FIXED 25 cells (bar +
+	// gap + count + attached + indent); at pathological narrow widths the flex name
+	// floors to 1 cell and the assembled row would be ~26 cells regardless of total,
+	// overflowing the list width and bleeding past the content gutter (corrupting the
+	// inset frame). Truncate the assembled row to total as a final guard. This is a
+	// no-op on the happy path — the row is already exactly total cells there — and
+	// engages only when total < ~26, so the row can never exceed the list width.
+	if total > 0 {
+		row = ansi.Truncate(row, total, "…")
+	}
+	return row
+}
+
+// padTo returns s padded on the right with spaces to exactly n cells (or s
+// unchanged when it already meets/exceeds n). A non-positive n yields the empty
+// string. Rendered through a background style by the caller, the spaces carry
+// the row's canvas / selection tint so no terminal-bg island opens in a slot.
+func padTo(s string, n int) string {
+	w := lipgloss.Width(s)
+	if n <= w {
+		return s
+	}
+	return s + spaces(n-w)
+}
+
+// spaces returns a string of n spaces (n<=0 → "").
+func spaces(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = ' '
+	}
+	return string(b)
 }
 
 // ToListItems converts a slice of tmux sessions to a slice of list.Item.

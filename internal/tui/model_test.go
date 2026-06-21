@@ -152,10 +152,10 @@ func TestView(t *testing.T) {
 						secondLine = line
 					}
 				}
-				if !strings.Contains(firstLine, ">") {
+				if !strings.Contains(firstLine, "▌") {
 					t.Errorf("first session should have cursor indicator: %q", firstLine)
 				}
-				if strings.Contains(secondLine, ">") {
+				if strings.Contains(secondLine, "▌") {
 					t.Errorf("second session should not have cursor indicator: %q", secondLine)
 				}
 			},
@@ -176,20 +176,30 @@ func TestView(t *testing.T) {
 				if !strings.Contains(view, "attached") {
 					t.Error("view missing 'attached' indicator")
 				}
-				if !strings.Contains(view, ">") {
+				if !strings.Contains(view, "▌") {
 					t.Error("view missing cursor indicator")
 				}
 			},
 		},
 		{
-			name: "long session name renders without truncation",
+			// §2.7: an over-long name truncates with an ellipsis so the fixed-width
+			// trailing slots (window count, attached marker) are never pushed
+			// off-row. The full name no longer appears; a leading prefix + the
+			// ellipsis glyph does.
+			name: "long session name truncates with an ellipsis",
 			sessions: []tmux.Session{
 				{Name: "my-very-long-project-name-that-should-not-be-truncated-x7k2m9", Windows: 1, Attached: false},
 			},
 			checks: func(t *testing.T, view string) {
 				t.Helper()
-				if !strings.Contains(view, "my-very-long-project-name-that-should-not-be-truncated-x7k2m9") {
-					t.Error("long session name was truncated")
+				if strings.Contains(view, "my-very-long-project-name-that-should-not-be-truncated-x7k2m9") {
+					t.Error("over-long session name should be truncated to the flex width, but the full name rendered")
+				}
+				if !strings.Contains(view, "my-very-long-project-name") {
+					t.Errorf("truncated name should keep a leading prefix of the name:\n%s", view)
+				}
+				if !strings.Contains(view, "…") {
+					t.Errorf("truncated name should carry the ellipsis glyph:\n%s", view)
 				}
 			},
 		},
@@ -428,13 +438,13 @@ func TestKeyboardNavigation(t *testing.T) {
 				charlieLine = line
 			}
 		}
-		if strings.Contains(alphaLine, ">") {
+		if strings.Contains(alphaLine, "▌") {
 			t.Errorf("alpha line should not have cursor: %q", alphaLine)
 		}
-		if !strings.Contains(bravoLine, ">") {
+		if !strings.Contains(bravoLine, "▌") {
 			t.Errorf("bravo line should have cursor: %q", bravoLine)
 		}
-		if strings.Contains(charlieLine, ">") {
+		if strings.Contains(charlieLine, "▌") {
 			t.Errorf("charlie line should not have cursor: %q", charlieLine)
 		}
 	})
@@ -1333,7 +1343,7 @@ func TestKillSession(t *testing.T) {
 				break
 			}
 		}
-		if !strings.Contains(alphaLine, ">") {
+		if !strings.Contains(alphaLine, "▌") {
 			t.Errorf("cursor should be on 'alpha' after killing last session, got:\n%s", view)
 		}
 	})

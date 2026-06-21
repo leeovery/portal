@@ -152,7 +152,7 @@ func TestSessionDelegate(t *testing.T) {
 		d := tui.SessionDelegate{}
 
 		if got := d.Spacing(); got != 0 {
-			t.Errorf("Spacing() = %d, want 0", got)
+			t.Errorf("Spacing() = %d, want 0 (tight rows; no half-row exists in a terminal)", got)
 		}
 	})
 
@@ -269,21 +269,22 @@ func TestSessionDelegate(t *testing.T) {
 		d.Render(&unselectedBuf, m, 1, items[1])
 		unselectedOutput := unselectedBuf.String()
 
-		// Selected item should have cursor indicator ">"
-		if !strings.Contains(selectedOutput, ">") {
-			t.Errorf("selected item should contain cursor indicator '>': %q", selectedOutput)
+		// Selected item has the ▌ selector-bar glyph (§3.3).
+		if !strings.Contains(selectedOutput, "▌") {
+			t.Errorf("selected item should contain selector bar glyph '▌': %q", selectedOutput)
 		}
-		// Unselected item should not have cursor indicator
-		if strings.Contains(unselectedOutput, ">") {
-			t.Errorf("unselected item should not contain cursor indicator '>': %q", unselectedOutput)
+		// Unselected item has no selector bar.
+		if strings.Contains(unselectedOutput, "▌") {
+			t.Errorf("unselected item should not contain selector bar glyph '▌': %q", unselectedOutput)
 		}
 	})
 
-	t.Run("long session name renders without truncation", func(t *testing.T) {
-		longName := "my-very-long-project-name-that-should-not-be-truncated-x7k2m9"
+	t.Run("short session name renders in full", func(t *testing.T) {
+		// A name well within the flex width at this row width renders untruncated.
+		name := "my-project"
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: longName, Windows: 3, Attached: false}},
+			tui.SessionItem{Session: tmux.Session{Name: name, Windows: 3, Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -291,8 +292,11 @@ func TestSessionDelegate(t *testing.T) {
 		d.Render(&buf, m, 0, items[0])
 
 		output := buf.String()
-		if !strings.Contains(output, longName) {
-			t.Errorf("render output should contain full long name %q: %q", longName, output)
+		if !strings.Contains(output, name) {
+			t.Errorf("render output should contain the short name %q: %q", name, output)
+		}
+		if strings.Contains(output, "…") {
+			t.Errorf("a short name should not be truncated: %q", output)
 		}
 	})
 }

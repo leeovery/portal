@@ -92,18 +92,6 @@ type Theme struct {
 	BorderSeparator Token // title rule (2px)
 	BorderFooter    Token // footer rule (1px)
 	TextOnWarning   Token // warning-flash message
-
-	// StateGreenOnSelection is a §2.8 per-context "defaulted override where a real
-	// need appears" — NOT part of the closed §2.9 vocabulary (so it is deliberately
-	// excluded from All() and the 20-token count). It is the darker green used ONLY
-	// for the `● attached` marker when it renders on the bg.selection tint, the
-	// remedy for the 1-9 human-eyeball wash-out finding (light state.green #456E1C
-	// on bg.selection #D0C6F0 measured 3.72 — legible at the 3:1 UI bar but the
-	// human eyeballed it as washed out). The global StateGreen token is unchanged
-	// (its canvas usages stay crisp); only the on-selection attached marker uses
-	// this darker green. Phase 2 task 771c41 (Sessions flat row anatomy + violet
-	// selection) MUST use this token for the attached marker on the selected row.
-	StateGreenOnSelection Token
 }
 
 // All returns every token in the theme in a stable order. Used by the closed
@@ -169,8 +157,13 @@ var MV = Theme{
 	AccentBlue: Token{Name: "accent.blue", Dark: "#7AA2F7", Light: "#2D5CCA"},
 	// §2.9 erratum: light #0E7490 → #0D6C87 (4.62 vs #e1e2e7).
 	AccentCyan: Token{Name: "accent.cyan", Dark: "#7DCFFF", Light: "#0D6C87"},
-	// §2.9 erratum: light #4C7A1F → #456E1C (4.64 vs #e1e2e7).
-	StateGreen: Token{Name: "state.green", Dark: "#9ECE6A", Light: "#456E1C"},
+	// §2.9 erratum: light #4C7A1F → #456E1C; then darkened to #3B5E18 so the SINGLE
+	// state.green token clears the floor BOTH on the canvas (#3B5E18 vs #e1e2e7 >
+	// 4.64, raises the prior margin) AND on the bg.selection tint (#3B5E18 vs #D0C6F0
+	// = 4.65). This folds the former light-only on-selection remedy into the global
+	// token — the `● attached` marker uses state.green on the selected row too, no
+	// per-context override (themeable as one green). Dark #9ECE6A clears everywhere.
+	StateGreen: Token{Name: "state.green", Dark: "#9ECE6A", Light: "#3B5E18"},
 	// §2.9 erratum: light #C32647 → #BD2545 (4.62 vs #e1e2e7).
 	StateRed:     Token{Name: "state.red", Dark: "#F7768E", Light: "#BD2545"},
 	AccentOrange: Token{Name: "accent.orange", Dark: "#FF9E64", Light: "#9A5200"},
@@ -179,8 +172,8 @@ var MV = Theme{
 	Canvas: Token{Name: "canvas", Dark: "#0b0c14", Light: "#e1e2e7"},
 	// pinned — derivation: dark violet anchor #28243a lifted onto the light canvas
 	// #e1e2e7; eyeball-confirmed at the 1-9 gate. Fill perceptible (1.25); carries
-	// text.on-selection (10.5) / text.strong (5.71) / state.green (3.72, the 3:1
-	// glyph+label UI marker, §4.1) above floor.
+	// text.on-selection (10.5) / text.strong (5.71) / state.green (4.65 with the
+	// darkened #3B5E18 light value, §4.1 `● attached` marker) above the 4.5 floor.
 	BgSelection: Token{Name: "bg.selection", Dark: "#28243a", Light: "#D0C6F0"},
 	// pinned — derivation: dark amber anchor #241B10 lifted onto the light canvas
 	// #e1e2e7; eyeball-confirmed at the 1-9 gate. The 1-4 derived value held — fill
@@ -196,16 +189,4 @@ var MV = Theme{
 	BorderSeparator: Token{Name: "border.separator", Dark: "#292E42", Light: "#C9CDDB"},
 	BorderFooter:    Token{Name: "border.footer", Dark: "#20232E", Light: "#C9CDDB"},
 	TextOnWarning:   Token{Name: "text.on-warning", Dark: "#E8C9A0", Light: "#7A4B12"},
-
-	// state.green-on-selection: §2.8 defaulted override (per-context, NOT in All()).
-	// Remedy for the 1-9 human-eyeball wash-out finding. The LIGHT variant #3B5E18 is
-	// the minimal HSL-darkening (hue preserved at H=90, the same yellow-green as the
-	// global state.green #456E1C; G channel still dominates so it reads positive) that
-	// clears 4.5:1 vs bg.selection light #D0C6F0 with margin: measured 4.65 vs #D0C6F0
-	// (global #456E1C measured 3.72 — the wash-out). The DARK variant keeps the global
-	// state.green dark #9ECE6A: on dark bg.selection #28243a it already clears
-	// comfortably (8.19), so NO dark override is needed — this is a light-only remedy.
-	// The global state.green token is unchanged (canvas usages 4.64 light / clearing
-	// dark stay crisp; the foundation Sessions captures stay byte-identical).
-	StateGreenOnSelection: Token{Name: "state.green-on-selection", Dark: "#9ECE6A", Light: "#3B5E18"},
 }

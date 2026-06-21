@@ -35,17 +35,16 @@ func TestSwatchBandsCoverEveryLightTint(t *testing.T) {
 // TestSwatchCoversForegroundOnTintPairings asserts the swatch renders every §4.1
 // foreground-on-tint pairing's label so the human can eyeball each on its tint:
 // the name (text.on-selection), the count (text.strong) and the attached marker
-// (state.green-on-selection — the §2.8 darker on-selection override, the 1-9
-// wash-out remedy) ON bg.selection; the warning message (text.on-warning) ON
-// bg.warning.
+// (state.green — the single token, darkened light so it clears on bg.selection too)
+// ON bg.selection; the warning message (text.on-warning) ON bg.warning.
 func TestSwatchCoversForegroundOnTintPairings(t *testing.T) {
 	out := renderSwatch(theme.Light)
 
 	mustContain := []string{
 		"text.on-selection",
 		"text.strong",
-		"state.green-on-selection", // the 1-9 wash-out remedy override (§2.8)
-		"● attached",               // the green-on-bg.selection glyph+label marker (§4.1)
+		"state.green", // the single green carries the §4.1 `● attached` marker on the tint
+		"● attached",  // the green-on-bg.selection glyph+label marker (§4.1)
 		"text.on-warning",
 		"⚠", // the warning glyph on bg.warning
 	}
@@ -56,21 +55,19 @@ func TestSwatchCoversForegroundOnTintPairings(t *testing.T) {
 	}
 }
 
-// TestSwatchAttachedMarkerUsesOnSelectionGreen pins that the `● attached` marker
-// on the bg.selection band renders in the darker StateGreenOnSelection override
-// (the 1-9 wash-out remedy), NOT the washed-out global state.green light value.
-// The swatch must surface the remedied colour so the human re-eyeballs the fix.
-func TestSwatchAttachedMarkerUsesOnSelectionGreen(t *testing.T) {
+// TestSwatchAttachedMarkerUsesStateGreen pins that the `● attached` marker on the
+// bg.selection band renders in the SINGLE state.green token — whose light value was
+// darkened to #3B5E18 so it clears the floor on the tint (the former per-context
+// on-selection override was folded into the global token). The swatch surfaces the
+// marker so the human re-eyeballs the fix.
+func TestSwatchAttachedMarkerUsesStateGreen(t *testing.T) {
 	out := selectionBand(theme.Light)
-	// The remedy override light hex must drive the marker; the washed-out global
-	// state.green light hex must NOT appear as the marker colour. (They differ:
-	// #3B5E18 vs #456E1C.)
-	if theme.MV.StateGreenOnSelection.Light == theme.MV.StateGreen.Light {
-		t.Fatal("override and global green light hexes are equal — the remedy did not darken the on-selection green")
+	// The marker renders in the light state.green value (#3B5E18 = rgb 59,94,24).
+	if theme.MV.StateGreen.Light != "#3B5E18" {
+		t.Fatalf("state.green light = %q, want #3B5E18 (darkened so the single token clears bg.selection)", theme.MV.StateGreen.Light)
 	}
-	// ANSI escape carrying the override hex's RGB must be present in the rendered band.
 	if !strings.Contains(out, "59;94;24") { // #3B5E18 = rgb(59,94,24)
-		t.Errorf("selection band does not render the attached marker in the on-selection green #3B5E18 (rgb 59,94,24)\n--- band ---\n%q", out)
+		t.Errorf("selection band does not render the attached marker in state.green #3B5E18 (rgb 59,94,24)\n--- band ---\n%q", out)
 	}
 }
 

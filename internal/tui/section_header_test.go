@@ -316,9 +316,10 @@ func TestSectionHeader_AlignsWithHeaderWordmark(t *testing.T) {
 // TestViewSessionList_HeaderSectionCursorShareLeftEdge is the composed-view
 // cross-element alignment guard: in the fully composed Sessions view the FIRST
 // printable column of the PORTAL wordmark row, the `Sessions` section-header row,
-// and the row cursor/selector (`> `) must all be the SAME column — the content's
-// left edge. The row NAMES stay one selector-width further in (they have the `> `
-// before them); that is correct and is not what this guard measures.
+// and the row cursor/selector (the ▌ bar) must all be the SAME column — the
+// content's left edge. The row NAMES stay the 2-cell bar-column width further in
+// (they sit after the ▌ bar column); that is correct and is not what this guard
+// measures.
 func TestViewSessionList_HeaderSectionCursorShareLeftEdge(t *testing.T) {
 	m := newCanvasTestModel(t, 90, 24, theme.Dark)
 	view := m.viewSessionList()
@@ -331,7 +332,7 @@ func TestViewSessionList_HeaderSectionCursorShareLeftEdge(t *testing.T) {
 			wordmarkCol = leadingPrintableCol(line)
 		case strings.HasPrefix(stripped, "Sessions"):
 			sectionCol = leadingPrintableCol(line)
-		case strings.HasPrefix(stripped, "> ") && cursorCol < 0:
+		case strings.HasPrefix(stripped, "▌") && cursorCol < 0:
 			cursorCol = leadingPrintableCol(line)
 		}
 	}
@@ -379,8 +380,8 @@ func TestViewSessionList_HeaderZoneVerticalRhythm(t *testing.T) {
 	portalIdx := idxOf("P O R T A L")
 	ruleIdx := idxOf(headerRuleGlyph)
 	sessionsIdx := idxOf("Sessions")
-	// The first session row is the cursor row (the first `> ` selector line).
-	firstRowIdx := idxOf("> ")
+	// The first session row is the cursor row (the first ▌ selector-bar line).
+	firstRowIdx := idxOf("▌")
 
 	if portalIdx < 0 || ruleIdx < 0 || sessionsIdx < 0 || firstRowIdx < 0 {
 		t.Fatalf("composed view missing a landmark: PORTAL=%d rule=%d Sessions=%d firstRow=%d\n%s",

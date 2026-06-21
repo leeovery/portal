@@ -369,22 +369,16 @@ func TestBgTrackPairRule(t *testing.T) {
 
 // TestForegroundOnTintPairings is the §4.1 foreground-on-tint gate: EVERY
 // selected-row foreground (name text.on-selection, count text.strong, attached
-// bullet state.green-on-selection) measured against bg.selection, plus
-// text.on-warning against bg.warning — in BOTH modes, each against the relevant
-// tint (not the canvas). These are the pairings §4.1 / §2.9 require verified
-// against the tints in ADDITION to the §2.3 canvas gate.
+// bullet state.green) measured against bg.selection, plus text.on-warning against
+// bg.warning — in BOTH modes, each against the relevant tint (not the canvas).
+// These are the pairings §4.1 / §2.9 require verified against the tints in ADDITION
+// to the §2.3 canvas gate.
 //
-// Floor classification (§2.3):
-//   - name / count / on-warning are functional NORMAL TEXT → 4.5:1.
-//   - the `● attached` marker on the selected row uses the dedicated darker
-//     state.green-on-selection (§2.8 defaulted override), the remedy for the 1-9
-//     human-eyeball wash-out finding: the global state.green light #456E1C on
-//     bg.selection light #D0C6F0 measured 3.72 (legible at the 3:1 UI bar but the
-//     human eyeballed it as washed out). The override #3B5E18 clears the 4.5:1
-//     NORMAL-TEXT floor with margin (4.65 vs #D0C6F0); the dark variant keeps the
-//     global state.green dark (#9ECE6A, 8.19 on dark bg.selection — already crisp,
-//     light-only remedy). It is held to 4.5 here accordingly. The global
-//     state.green token is unchanged (its canvas usages stay crisp).
+// Floor classification (§2.3): all are functional NORMAL TEXT → 4.5:1. The
+// `● attached` marker keeps the SINGLE state.green token on the selected row; its
+// light value was darkened to #3B5E18 so it clears 4.5 on bg.selection (#D0C6F0 =
+// 4.65) as well as the canvas — folding the former on-selection override into the
+// global token (no per-context green). Dark #9ECE6A clears 8.19 on dark bg.selection.
 func TestForegroundOnTintPairings(t *testing.T) {
 	pairings := []struct {
 		name   string
@@ -395,9 +389,9 @@ func TestForegroundOnTintPairings(t *testing.T) {
 	}{
 		{"text.on-selection on bg.selection", theme.MV.TextOnSelection, theme.MV.BgSelection, floorNormal, ""},
 		{"text.strong on bg.selection", theme.MV.TextStrong, theme.MV.BgSelection, floorNormal, ""},
-		// §4.1 attached marker: the dedicated darker on-selection override (the 1-9
-		// wash-out remedy) is held to the 4.5 normal-text floor on the tint.
-		{"state.green-on-selection on bg.selection", theme.MV.StateGreenOnSelection, theme.MV.BgSelection, floorNormal, ""},
+		// §4.1 attached marker: the single state.green (darkened light #3B5E18) is
+		// held to the 4.5 normal-text floor on the tint.
+		{"state.green on bg.selection", theme.MV.StateGreen, theme.MV.BgSelection, floorNormal, ""},
 		{"text.on-warning on bg.warning", theme.MV.TextOnWarning, theme.MV.BgWarning, floorNormal, ""},
 	}
 	for _, p := range pairings {
@@ -416,40 +410,33 @@ func TestForegroundOnTintPairings(t *testing.T) {
 	}
 }
 
-// TestStateGreenOnSelectionRemedy is the dedicated numeric gate for the 1-9
-// human-eyeball wash-out remedy: the darker on-selection green (StateGreenOnSelection)
-// MUST clear the 4.5:1 normal-text floor against bg.selection LIGHT #D0C6F0 (the
-// global state.green #456E1C measured only 3.72 there — the wash-out the human
-// found). The DARK variant keeps the global state.green dark (#9ECE6A); it already
-// clears comfortably on dark bg.selection (#28243a), so the remedy is light-only —
-// but we still assert the dark variant clears 4.5 on its dark tint to prove the
-// no-dark-override decision holds. This is a §2.8 defaulted override; the global
-// state.green token is UNCHANGED (asserted separately).
-func TestStateGreenOnSelectionRemedy(t *testing.T) {
-	tok := theme.MV.StateGreenOnSelection
-
-	// Light: the remedy must clear 4.5 with margin against bg.selection light.
-	if got := contrastRatio(t, tok.Light, theme.MV.BgSelection.Light); got < floorNormal {
-		t.Errorf("state.green-on-selection light %s vs bg.selection %s = %.2f, want >= %.2f (1-9 wash-out remedy — MORE contrast, never lower the floor)",
-			tok.Light, theme.MV.BgSelection.Light, got, floorNormal)
+// TestStateGreenClearsCanvasAndSelection is the gate that justifies the SINGLE
+// state.green token (no per-context on-selection override): the light value
+// (#3B5E18) MUST clear the 4.5:1 normal-text floor against BOTH the canvas
+// (#e1e2e7) AND the bg.selection tint (#D0C6F0). The former on-selection override
+// existed only because the prior #456E1C washed out on bg.selection (3.72);
+// darkening the global token to #3B5E18 clears both surfaces, so the special-case
+// token was removed. The dark variant (#9ECE6A) clears both dark surfaces.
+func TestStateGreenClearsCanvasAndSelection(t *testing.T) {
+	g := theme.MV.StateGreen
+	for _, c := range []struct {
+		what string
+		fg   string
+		bg   string
+	}{
+		{"light vs canvas", g.Light, theme.MV.Canvas.Light},
+		{"light vs bg.selection", g.Light, theme.MV.BgSelection.Light},
+		{"dark vs canvas", g.Dark, theme.MV.Canvas.Dark},
+		{"dark vs bg.selection", g.Dark, theme.MV.BgSelection.Dark},
+	} {
+		if got := contrastRatio(t, c.fg, c.bg); got < floorNormal {
+			t.Errorf("state.green %s (%s vs %s) = %.2f, want >= %.2f (single token must clear canvas AND selection)",
+				c.what, c.fg, c.bg, got, floorNormal)
+		}
 	}
-	// Dark: the kept global state.green dark already clears 4.5 on the dark tint —
-	// proves no dark override was needed (light-only remedy).
-	if got := contrastRatio(t, tok.Dark, theme.MV.BgSelection.Dark); got < floorNormal {
-		t.Errorf("state.green-on-selection dark %s vs bg.selection %s = %.2f, want >= %.2f (dark already clears — light-only remedy)",
-			tok.Dark, theme.MV.BgSelection.Dark, got, floorNormal)
-	}
-
-	// The remedy must NOT touch the global state.green token (the foundation
-	// Sessions captures stay byte-identical; its canvas usages stay crisp).
-	if theme.MV.StateGreen.Light != "#456E1C" {
-		t.Errorf("global state.green light = %q, want unchanged %q — the remedy is on-selection-only", theme.MV.StateGreen.Light, "#456E1C")
-	}
-	if theme.MV.StateGreen.Dark != "#9ECE6A" {
-		t.Errorf("global state.green dark = %q, want unchanged %q — the remedy is on-selection-only", theme.MV.StateGreen.Dark, "#9ECE6A")
-	}
-	// And the dark on-selection green IS the global state.green dark (light-only override).
-	if tok.Dark != theme.MV.StateGreen.Dark {
-		t.Errorf("state.green-on-selection dark = %q, want = global state.green dark %q (light-only remedy)", tok.Dark, theme.MV.StateGreen.Dark)
+	// The folded-in light value is the darkened #3B5E18 (the value that clears
+	// bg.selection); a regression back to #456E1C would re-introduce the wash-out.
+	if theme.MV.StateGreen.Light != "#3B5E18" {
+		t.Errorf("state.green light = %q, want %q (darkened so the single token clears bg.selection)", theme.MV.StateGreen.Light, "#3B5E18")
 	}
 }

@@ -140,10 +140,11 @@ func TestColourless_StateStaysGlyphDistinct(t *testing.T) {
 			t.Errorf("colourless frame missing %q (state must stay glyph-distinct without colour)", want)
 		}
 	}
-	// The selector cursor glyph sits at the selected row. The "> " cursor must be
-	// present (the selector is a glyph, not a hue).
-	if !strings.Contains(frame, ">") {
-		t.Errorf("colourless frame missing the selector cursor glyph (state via glyph, not colour)")
+	// The selector cursor glyph sits at the selected row. The ▌ selector bar must
+	// be present (the selector is a glyph, not a hue) — under NO_COLOR the violet
+	// drops but the bar glyph stays, keeping the selection glyph-distinct (§2.2).
+	if !strings.Contains(frame, "▌") {
+		t.Errorf("colourless frame missing the selector bar glyph (state via glyph, not colour)")
 	}
 }
 
