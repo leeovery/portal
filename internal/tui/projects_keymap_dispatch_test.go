@@ -189,18 +189,21 @@ func TestProjectsRetainedActionParity(t *testing.T) {
 		}
 	})
 
-	t.Run("? remains swallowed (not opening help in this task)", func(t *testing.T) {
+	t.Run("? opens the per-page help modal (no list self-toggle)", func(t *testing.T) {
+		// §12.2 / §8.5: Phase 3 binds ? to OUR per-page help modal on Projects too,
+		// replacing the prior swallow. The key is still consumed (no cmd, no page
+		// change) so bubbles/list never toggles its own help.
 		m := projectsDispatchModel(t)
 		_, cmd := m.updateProjectsPage(tea.KeyPressMsg{Code: '?', Text: "?"})
 		if cmd != nil {
-			t.Errorf("? must be swallowed (return nil cmd), got a non-nil cmd")
+			t.Errorf("? must be consumed (return nil cmd), got a non-nil cmd")
 		}
 		after, _ := pressProject(t, m, tea.KeyPressMsg{Code: '?', Text: "?"})
 		if after.activePage != PageProjects {
 			t.Errorf("? must not change the active page; got %d", after.activePage)
 		}
-		if after.modal != modalNone {
-			t.Errorf("? must not open a modal (Phase 3 binds help); modal = %v", after.modal)
+		if after.modal != modalHelp {
+			t.Errorf("? must open the help modal (§8.5); modal = %v, want modalHelp", after.modal)
 		}
 	})
 }

@@ -11,20 +11,26 @@ import "testing"
 func TestSessionsKeymap(t *testing.T) {
 	entries := sessionsKeymap()
 
-	t.Run("it enumerates exactly the §12.1 Sessions bindings in order", func(t *testing.T) {
+	t.Run("it enumerates exactly the §12.1 Sessions bindings in the reference help order", func(t *testing.T) {
+		// Reference help order (testdata/vhs/reference/sessions-help-modal-mv.png):
+		// ↑/↓ → ^↑/↓ (page) → ⏎ → / → ␣ → s → n → r → k → q → x, then ? last.
+		// Per the "all symbols, caret for ctrl" decision the help body reads Key
+		// directly for nav and page; the HelpKey overrides are enter→"⏎" and
+		// space→"␣". The footer always reads Key, so its Core relative order
+		// (↑/↓ · enter · / · space · s · x · ?) is preserved.
 		want := []keymapEntry{
-			{Key: "↑/↓", Action: "navigate", Core: true},
-			{Key: "enter", Action: "attach", Core: true},
-			{Key: "/", Action: "filter", Core: true},
-			{Key: "space", Action: "preview", Core: true},
-			{Key: "s", Action: "switch view", Core: true},
-			{Key: "x", Action: "projects", Core: true},
-			{Key: "?", Action: "help", Core: true, RightAligned: true},
-			{Key: "n", Action: "new in cwd"},
-			{Key: "r", Action: "rename"},
-			{Key: "k", Action: "kill"},
-			{Key: "q", Action: "quit"},
-			{Key: "Ctrl+↑/↓", Action: "page"},
+			{Key: "↑/↓", Action: "navigate", HelpAction: "Move selection", Core: true},
+			{Key: "^↑/↓", Action: "page", HelpAction: "Next / prev page"},
+			{Key: "enter", HelpKey: "⏎", Action: "attach", HelpAction: "Open / attach session", Core: true},
+			{Key: "/", Action: "filter", HelpAction: "Filter sessions", Core: true},
+			{Key: "space", HelpKey: "␣", Action: "preview", HelpAction: "Preview scrollback", Core: true},
+			{Key: "s", Action: "switch view", HelpAction: "Switch view — flat / project / tag", Core: true},
+			{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
+			{Key: "r", Action: "rename", HelpAction: "Rename session"},
+			{Key: "k", Action: "kill", HelpAction: "Kill session"},
+			{Key: "q", Action: "quit", HelpAction: "Quit"},
+			{Key: "x", Action: "projects", HelpAction: "Switch to Projects", Core: true},
+			{Key: "?", Action: "help", HelpAction: "Show this help", Core: true, RightAligned: true},
 		}
 		if len(entries) != len(want) {
 			t.Fatalf("descriptor has %d entries, want %d: %+v", len(entries), len(want), entries)
@@ -47,7 +53,7 @@ func TestSessionsKeymap(t *testing.T) {
 				t.Errorf("key %q should be Core (footer), got Core=false", k)
 			}
 		}
-		wantHelpOnly := []string{"n", "r", "k", "q", "Ctrl+↑/↓"}
+		wantHelpOnly := []string{"n", "r", "k", "q", "^↑/↓"}
 		for _, k := range wantHelpOnly {
 			if core[k] {
 				t.Errorf("key %q should be help-only (Core=false), got Core=true", k)
@@ -60,6 +66,47 @@ func TestSessionsKeymap(t *testing.T) {
 			wantRight := e.Key == "?"
 			if e.RightAligned != wantRight {
 				t.Errorf("entry %q RightAligned = %v, want %v", e.Key, e.RightAligned, wantRight)
+			}
+		}
+	})
+
+	t.Run("it preserves the Core relative order the footer reads (footer unchanged)", func(t *testing.T) {
+		// FIX 1 invariant: the help reorder MUST NOT change the footer. The footer
+		// renders only Core entries in descriptor order, so the relative order of the
+		// Core keys must stay exactly ↑/↓ · enter · / · space · s · x · ?.
+		var coreKeys []string
+		for _, e := range entries {
+			if e.Core {
+				coreKeys = append(coreKeys, e.Key)
+			}
+		}
+		wantCoreOrder := []string{"↑/↓", "enter", "/", "space", "s", "x", "?"}
+		if len(coreKeys) != len(wantCoreOrder) {
+			t.Fatalf("Core entries = %v, want %v", coreKeys, wantCoreOrder)
+		}
+		for i, k := range wantCoreOrder {
+			if coreKeys[i] != k {
+				t.Errorf("Core entry %d = %q, want %q (footer order must not change)", i, coreKeys[i], k)
+			}
+		}
+	})
+
+	t.Run("the HelpKey overrides are enter→⏎ and space→␣; every other entry falls back to Key", func(t *testing.T) {
+		// Post the "all symbols, caret for ctrl" decision the help body reads Key
+		// directly for nav ("↑/↓") and page ("^↑/↓"). The HelpKey overrides are the
+		// Sessions enter→"⏎" (footer keeps Key "enter") and space→"␣" (footer keeps
+		// Key "space"). Every other entry must have an empty HelpKey so the help
+		// modal falls back to its Key form.
+		wantOverride := map[string]string{"enter": "⏎", "space": "␣"}
+		for _, e := range entries {
+			if want, ok := wantOverride[e.Key]; ok {
+				if e.HelpKey != want {
+					t.Errorf("%s HelpKey = %q, want %q", e.Key, e.HelpKey, want)
+				}
+				continue
+			}
+			if e.HelpKey != "" {
+				t.Errorf("key %q must have NO HelpKey override (got %q); only enter and space override", e.Key, e.HelpKey)
 			}
 		}
 	})

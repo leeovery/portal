@@ -2122,12 +2122,15 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if keyIsCtrlC(msg) {
 			return m, tea.Quit
 		}
-		// Swallow ? so the list can't toggle help off
-		if isRuneKey(msg, "?") {
-			return m, nil
-		}
 		if m.projectList.SettingFilter() {
 			break
+		}
+		// ? opens OUR per-page help modal (§8.5). This REPLACES the prior swallow —
+		// the swallow existed so bubbles/list never toggled its own help; opening
+		// our modal still consumes the key, so the list help never fires either.
+		if isRuneKey(msg, "?") {
+			m.modal = modalHelp
+			return m, nil
 		}
 		switch {
 		case keyIsCode(msg, tea.KeyEscape):
@@ -2523,13 +2526,17 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if keyIsCtrlC(msg) {
 			return m, tea.Quit
 		}
-		// Swallow ? so the list can't toggle help off
-		if isRuneKey(msg, "?") {
-			return m, nil
-		}
 		// When the list is actively filtering, let it handle all key input
+		// (so ? is a literal filter character, never the help toggle).
 		if m.sessionList.SettingFilter() {
 			break
+		}
+		// ? opens OUR per-page help modal (§8.5). This REPLACES the prior swallow —
+		// the swallow existed so bubbles/list never toggled its own help; opening
+		// our modal still consumes the key, so the list help never fires either.
+		if isRuneKey(msg, "?") {
+			m.modal = modalHelp
+			return m, nil
 		}
 		// Space opens the scrollback preview for the highlighted session.
 		// Bound before the rest of the keymap so it never collides with
@@ -2655,9 +2662,30 @@ func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateDeleteProjectModal(msg)
 	case modalEditProject:
 		return m.updateEditProjectModal(msg)
+	case modalHelp:
+		return m.updateHelpModal(msg)
 	default:
 		return m, nil
 	}
+}
+
+// updateHelpModal handles the §8.5 per-page help modal. It is key-exclusive
+// (§8.1): ? toggles it closed and Esc dismisses it (modalNone), and EVERY other
+// key is consumed — so Esc dismisses the help and does NOT fall through to the
+// page's clear-filter / quit (the edge case: help open over an applied filter
+// must dismiss the help only, leaving the filter intact). Non-key messages are
+// swallowed too while the modal owns the screen.
+func (m Model) updateHelpModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	if isRuneKey(keyMsg, "?") || keyIsCode(keyMsg, tea.KeyEscape) {
+		m.modal = modalNone
+		return m, nil
+	}
+	// Key-exclusive: consume all other keys (no fall-through to page binds).
+	return m, nil
 }
 
 func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -3340,9 +3368,13 @@ func (m Model) viewProjectList() string {
 	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
 	switch m.modal {
 	case modalDeleteProject:
-		return renderModalOnClearedCanvas(fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName), m.contentWidth(), m.contentHeight())
+		return renderModalOnClearedCanvas(fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalEditProject:
-		return renderModalOnClearedCanvas(m.renderEditProjectContent(), m.contentWidth(), m.contentHeight())
+		return renderModalOnClearedCanvas(m.renderEditProjectContent(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
+	case modalHelp:
+		// §8.5 per-page help: the Projects keymap descriptor, descriptor-driven, in
+		// the help modal's own zero-h-padding panel (FIX 4).
+		return renderHelpModalOnClearedCanvas(projectsKeymap(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	}
 	listView := m.projectList.View()
 	// §6 / §3.2: replace the plain bubbles/list title line with the restyled
@@ -3516,9 +3548,13 @@ func (m Model) viewSessionList() string {
 	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
 	switch m.modal {
 	case modalKillConfirm:
-		return renderModalOnClearedCanvas(fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName), m.contentWidth(), m.contentHeight())
+		return renderModalOnClearedCanvas(fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalRename:
-		return renderModalOnClearedCanvas(m.renameInput.View(), m.contentWidth(), m.contentHeight())
+		return renderModalOnClearedCanvas(m.renameInput.View(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
+	case modalHelp:
+		// §8.5 per-page help: the Sessions keymap descriptor, descriptor-driven, in
+		// the help modal's own zero-h-padding panel (FIX 4).
+		return renderHelpModalOnClearedCanvas(sessionsKeymap(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	}
 	listView := m.sessionList.View()
 	// §3.2 / §4.2: replace the plain bubbles/list title line with the restyled

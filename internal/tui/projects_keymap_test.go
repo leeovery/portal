@@ -13,19 +13,25 @@ import "testing"
 func TestProjectsKeymap(t *testing.T) {
 	entries := projectsKeymap()
 
-	t.Run("it enumerates exactly the §12.1 Projects bindings in order", func(t *testing.T) {
+	t.Run("it enumerates exactly the §12.1 Projects bindings nav-first", func(t *testing.T) {
+		// Nav-first ordering mirrors the Sessions help reorder (FIX 2 internal
+		// consistency): the navigation/paging entries lead. The Core relative order the
+		// footer reads (⏎ · x · e · / · ?) is preserved, so the Projects footer is
+		// unchanged. Per the "all symbols, caret for ctrl" decision the help body reads
+		// Key directly for nav ("↑/↓") and page ("^↑/↓"); the ⏎ Key is already a glyph.
+		// Projects carries NO HelpKey override.
 		want := []keymapEntry{
-			{Key: "⏎", Action: "new session", Core: true},
-			{Key: "x", Action: "sessions", Core: true},
-			{Key: "e", Action: "edit", Core: true},
-			{Key: "/", Action: "filter", Core: true},
-			{Key: "?", Action: "help", Core: true, RightAligned: true},
-			{Key: "d", Action: "delete"},
-			{Key: "n", Action: "new in cwd"},
-			{Key: "↑/↓", Action: "navigate"},
-			{Key: "Ctrl+↑/↓", Action: "page"},
-			{Key: "q", Action: "quit"},
-			{Key: "esc", Action: "back"},
+			{Key: "↑/↓", Action: "navigate", HelpAction: "Move selection"},
+			{Key: "^↑/↓", Action: "page", HelpAction: "Next / prev page"},
+			{Key: "⏎", Action: "new session", HelpAction: "New session from project", Core: true},
+			{Key: "x", Action: "sessions", HelpAction: "Switch to Sessions", Core: true},
+			{Key: "e", Action: "edit", HelpAction: "Edit project", Core: true},
+			{Key: "/", Action: "filter", HelpAction: "Filter projects", Core: true},
+			{Key: "d", Action: "delete", HelpAction: "Delete project"},
+			{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
+			{Key: "q", Action: "quit", HelpAction: "Quit"},
+			{Key: "esc", Action: "back", HelpAction: "Back / quit"},
+			{Key: "?", Action: "help", HelpAction: "Show this help", Core: true, RightAligned: true},
 		}
 		if len(entries) != len(want) {
 			t.Fatalf("descriptor has %d entries, want %d: %+v", len(entries), len(want), entries)
@@ -53,7 +59,7 @@ func TestProjectsKeymap(t *testing.T) {
 				t.Errorf("key %q should be Core (footer), got Core=false", k)
 			}
 		}
-		wantHelpOnly := []string{"d", "n", "↑/↓", "Ctrl+↑/↓", "q", "esc"}
+		wantHelpOnly := []string{"d", "n", "↑/↓", "^↑/↓", "q", "esc"}
 		for _, k := range wantHelpOnly {
 			if !seen[k] {
 				t.Errorf("descriptor missing help-only key %q", k)
@@ -84,12 +90,12 @@ func TestProjectsKeymap(t *testing.T) {
 			have[e.Key] = e.Action
 		}
 		wantHelp := map[string]string{
-			"d":        "delete",
-			"n":        "new in cwd",
-			"↑/↓":      "navigate",
-			"Ctrl+↑/↓": "page",
-			"q":        "quit",
-			"esc":      "back",
+			"d":    "delete",
+			"n":    "new in cwd",
+			"↑/↓":  "navigate",
+			"^↑/↓": "page",
+			"q":    "quit",
+			"esc":  "back",
 		}
 		for k, action := range wantHelp {
 			got, ok := have[k]
@@ -99,6 +105,27 @@ func TestProjectsKeymap(t *testing.T) {
 			}
 			if got != action {
 				t.Errorf("help-only key %q action = %q, want %q", k, got, action)
+			}
+		}
+	})
+
+	t.Run("it preserves the Core relative order the footer reads (footer unchanged)", func(t *testing.T) {
+		// The nav-first reorder must NOT change the Projects footer: the footer renders
+		// only Core entries in descriptor order, so their relative order must stay
+		// exactly ⏎ · x · e · / · ?.
+		var coreKeys []string
+		for _, e := range entries {
+			if e.Core {
+				coreKeys = append(coreKeys, e.Key)
+			}
+		}
+		wantCoreOrder := []string{"⏎", "x", "e", "/", "?"}
+		if len(coreKeys) != len(wantCoreOrder) {
+			t.Fatalf("Core entries = %v, want %v", coreKeys, wantCoreOrder)
+		}
+		for i, k := range wantCoreOrder {
+			if coreKeys[i] != k {
+				t.Errorf("Core entry %d = %q, want %q (footer order must not change)", i, coreKeys[i], k)
 			}
 		}
 	})

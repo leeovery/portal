@@ -1,0 +1,278 @@
+package tui
+
+import (
+	"strings"
+
+	"charm.land/lipgloss/v2"
+	"github.com/leeovery/portal/internal/tui/theme"
+)
+
+// The §8.5 per-page `?` help modal — a NEW modal type (§14.4): a generic
+// two-column renderer over the per-page keymap descriptor (the single source of
+// truth that also drives the footer + §12.1), NOT hand-authored content per page.
+// It lists the page's COMPLETE keymap (every descriptor entry, footer-core AND
+// help-only — the full reference, not just the footer's overflow), so a binding
+// change updates the footer and the help together.
+//
+// It is the documented §8.1 exception to the contextual-footer rule: the dismiss
+// hint lives in the HEADER right-corner (`esc close`), and the body IS the keymap
+// — there is no contextual footer. The panel reuses the shared cleared-canvas
+// placement (renderHelpModalOnClearedCanvas → lipgloss.Place on the cleared owned
+// canvas, §13.5) so the Sessions/Projects help inherits the 3-1 cleared-canvas
+// shell, but HAND-DRAWS its OWN bordered panel (no lipgloss auto-border) so the
+// header divider uses real `├`/`┤` junctions into the side frame and the vertical
+// spacing is FLUSH (zero blank rows). The whole frame — corners, sides, divider,
+// and every `─` run — is SINGLE-TONE border.separator (the 2-tone footer leg was
+// dropped). The header text + body rows carry their own per-row inset
+// (helpRowInset).
+//
+// NOTE (Phase 4, deferred): the Preview `?` help OVERLAYS the preview without
+// blanking it (§8.5/§9.3), and the Preview keymap descriptor + help-from-Preview
+// wiring are NOT built here. The Preview arm is intentionally out of scope for
+// this task — when Phase 4 wires it, it must route the Preview descriptor through
+// these SAME renderers (renderHelpModalContent) so the three help modals stay
+// descriptor-driven and never drift.
+
+const (
+	// helpTitleGlyph is the violet `?` glyph that opens the header title row,
+	// mirroring the footer's accent.violet `?` hint (§3.4) — colour reinforces
+	// that this is the help surface.
+	helpTitleGlyph = "?"
+	// helpTitle is the header title text (text.primary), the §8.5 `? Keybindings`.
+	helpTitle = "Keybindings"
+	// helpDismissHint is the right-aligned header dismiss hint (text.detail) — the
+	// §8.1 help-modal exception: the dismiss copy lives in the HEADER, not a
+	// contextual footer. The verb has no "to" (the shared modal dismiss grammar).
+	helpDismissHint = "esc close"
+	// helpColumnGap is the gap between the key-glyph column and the action-label
+	// column in the two-column body. Wide enough that the longest key glyph
+	// ("^↑/↓") clears the labels.
+	helpColumnGap = "   "
+	// helpKeyColumnWidth is the fixed width of the left key-glyph column so the
+	// action labels start on a common left edge regardless of glyph length
+	// (fixed-width slot, the §3.4 alignment convention). Sized for the widest glyph
+	// ("^↑/↓").
+	helpKeyColumnWidth = 10
+	// helpRuleGlyph is the horizontal box-drawing glyph for the divider AND every
+	// frame edge run (top / bottom border + the divider). Single-tone: it renders in
+	// border.separator everywhere (the 2-tone footer leg was dropped).
+	helpRuleGlyph = "─"
+	// helpRowInset is the per-row L/R inset (in cells) the header text and body rows
+	// carry inside the hand-drawn frame. It matches the reference's ~22px
+	// paddingInline. The divider does NOT carry this inset — it runs the full inner
+	// width (W) so its `├`/`┤` junctions meet both side borders.
+	helpRowInset = 2
+
+	// The hand-drawn frame glyphs (a rounded box with real header-divider junctions).
+	// EVERY one renders in border.separator (single-tone). The top/bottom corners and
+	// the divider tees join the side `│` runs into one continuous frame.
+	helpFrameTopLeft     = "╭"
+	helpFrameTopRight    = "╮"
+	helpFrameBottomLeft  = "╰"
+	helpFrameBottomRight = "╯"
+	helpFrameSide        = "│"
+	helpFrameTeeLeft     = "├"
+	helpFrameTeeRight    = "┤"
+)
+
+// renderHelpModalContent composes the §8.5 help modal as a fully HAND-DRAWN
+// bordered panel (no lipgloss auto-border). The vertical spacing is FLUSH — ZERO
+// blank rows anywhere — and the frame is SINGLE-TONE border.separator (corners,
+// sides, divider, and all `─` runs alike). Top to bottom, the panel is:
+//
+//	top-border · title · divider · ...bodyRows · bottom-border
+//
+// The title sits directly inside the top border, the divider directly under the
+// title, the body rows directly under the divider, the last body row directly
+// above the bottom border — no blank rows between any of them (the terminal-native
+// flush convention, deliberately diverging from the Paper reference's px title
+// padding). The header text + body rows carry a per-row L/R inset (helpRowInset);
+// the divider spans the full inner width W so its `├`/`┤` junctions meet both side
+// borders. Every assembled line is exactly W+2 cells wide (W = contentWidth +
+// 2·helpRowInset), so the frame columns align. Generated entirely from the
+// descriptor — no hand-authored copy.
+func renderHelpModalContent(entries []keymapEntry, mode theme.Mode, colourless bool) string {
+	bodyRows := helpModalBodyRows(entries, mode, colourless)
+
+	// The content width the divider and every inset row share: the widest of the
+	// header band and the body rows. The header is then laid out to this width so
+	// `esc close` right-aligns to the same edge the longest body row reaches.
+	contentWidth := lipgloss.Width(helpModalHeader(0, mode, colourless))
+	for _, r := range bodyRows {
+		if w := lipgloss.Width(r); w > contentWidth {
+			contentWidth = w
+		}
+	}
+	innerWidth := contentWidth + 2*helpRowInset // W — the span of every frame edge.
+
+	title := helpInsetRow(helpModalHeader(contentWidth, mode, colourless), contentWidth, mode, colourless)
+
+	rows := make([]string, 0, len(bodyRows)+3)
+	// Top border, then the title FLUSH inside it (no blank above).
+	rows = append(rows, helpFrameTop(innerWidth, mode, colourless))
+	rows = append(rows, helpFrameContentLine(title, mode, colourless))
+	// The joined divider directly under the title (no blank below it).
+	rows = append(rows, helpFrameDivider(innerWidth, mode, colourless))
+	// The contiguous keymap rows directly under the divider (1-row rhythm, no inter-
+	// row gaps), the last directly above the bottom border.
+	for _, r := range bodyRows {
+		row := helpInsetRow(r, contentWidth, mode, colourless)
+		rows = append(rows, helpFrameContentLine(row, mode, colourless))
+	}
+	rows = append(rows, helpFrameBottom(innerWidth, mode, colourless))
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// helpFrameStyle returns the single-tone frame paint: border.separator foreground
+// for the mode, or a bare style (native fg) under the NO_COLOR carve-out — so the
+// frame glyphs survive colourless but carry no hue. NO background is set (the frame
+// glyphs sit on whatever the placed canvas supplies).
+func helpFrameStyle(mode theme.Mode, colourless bool) lipgloss.Style {
+	if colourless {
+		return lipgloss.NewStyle()
+	}
+	return lipgloss.NewStyle().Foreground(theme.MV.BorderSeparator.ColorFor(mode))
+}
+
+// helpFrameTop renders the top border line: `╭` + `─`×w + `╮`, all border.separator.
+func helpFrameTop(w int, mode theme.Mode, colourless bool) string {
+	line := helpFrameTopLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameTopRight
+	return helpFrameStyle(mode, colourless).Render(line)
+}
+
+// helpFrameBottom renders the bottom border line: `╰` + `─`×w + `╯`.
+func helpFrameBottom(w int, mode theme.Mode, colourless bool) string {
+	line := helpFrameBottomLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameBottomRight
+	return helpFrameStyle(mode, colourless).Render(line)
+}
+
+// helpFrameDivider renders the joined header divider: `├` + `─`×w + `┤`, all
+// border.separator (single-tone). The `├`/`┤` tees visibly join the side borders.
+func helpFrameDivider(w int, mode theme.Mode, colourless bool) string {
+	line := helpFrameTeeLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameTeeRight
+	return helpFrameStyle(mode, colourless).Render(line)
+}
+
+// helpFrameContentLine wraps a content row (already exactly w cells wide) with the
+// left/right `│` side borders (border.separator), yielding a w+2 cell frame line.
+func helpFrameContentLine(row string, mode theme.Mode, colourless bool) string {
+	side := helpFrameStyle(mode, colourless).Render(helpFrameSide)
+	return lipgloss.JoinHorizontal(lipgloss.Top, side, row, side)
+}
+
+// helpInsetRow wraps a content row (whose natural width is at most contentWidth)
+// with the per-row L/R canvas inset (helpRowInset cells each side) and pads the
+// content out to contentWidth, so every header/body row is exactly innerWidth cells
+// (contentWidth + 2·inset) — the divider's width. The inset and pad are canvas-
+// painted so the row carries the owned canvas with no terminal-bg island.
+func helpInsetRow(row string, contentWidth int, mode theme.Mode, colourless bool) string {
+	inset := headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", helpRowInset))
+	padded := headerPadRight(row, lipgloss.Width(row), contentWidth, mode, colourless)
+	return lipgloss.JoinHorizontal(lipgloss.Top, inset, padded, inset)
+}
+
+// helpModalHeader renders the header row: `? Keybindings` on the LEFT (the `?`
+// glyph in accent.violet, "Keybindings" in text.primary) and a right-aligned
+// `esc close` in text.detail, filled to width. This is the §8.1 help-modal
+// exception — the dismiss hint lives here, not a contextual footer. When width is
+// at or below the header's natural width (e.g. width 0, the natural-width probe),
+// it renders at its natural width with a single canvas spacer between the title and
+// the dismiss hint — never dropping the hint, never wrapping.
+func helpModalHeader(width int, mode theme.Mode, colourless bool) string {
+	glyph := headerStyle(theme.MV.AccentViolet, mode, colourless).Bold(true).Render(helpTitleGlyph)
+	gap := headerCanvasBg(mode, colourless).Render(" ")
+	title := headerStyle(theme.MV.TextPrimary, mode, colourless).Bold(true).Render(helpTitle)
+	left := lipgloss.JoinHorizontal(lipgloss.Top, glyph, gap, title)
+	leftWidth := lipgloss.Width(left)
+
+	dismiss := headerStyle(theme.MV.TextDetail, mode, colourless).Render(helpDismissHint)
+	dismissWidth := lipgloss.Width(dismiss)
+
+	// Natural width: left segment + one spacer cell + the dismiss hint. At or below
+	// it (incl. the width-0 probe) render at the natural width rather than dropping
+	// the hint or overflowing.
+	naturalWidth := leftWidth + 1 + dismissWidth
+	spacerWidth := 1
+	if width > naturalWidth {
+		spacerWidth = width - leftWidth - dismissWidth
+	}
+	spacer := headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", spacerWidth))
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, dismiss)
+}
+
+// helpModalBody renders the two-column keymap body from the descriptor as a single
+// joined block (used by tests that assert the body content/colours). Production
+// composition uses helpModalBodyRows so each row can be inset individually.
+func helpModalBody(entries []keymapEntry, mode theme.Mode, colourless bool) string {
+	return lipgloss.JoinVertical(lipgloss.Left, helpModalBodyRows(entries, mode, colourless)...)
+}
+
+// helpModalBodyRows renders the two-column keymap body from the descriptor as one
+// string per row: a fixed-width key-glyph column (accent.blue, the destructive
+// `kill` key in state.red per §2.9) then the action label (text.strong). It lists
+// EVERY descriptor entry — footer-core AND help-only (§8.5 "the full reference") —
+// EXCEPT the `?` help self-entry (a help modal does not list its own open key; the
+// dismiss hint is in the header). The longer HelpAction label is preferred, falling
+// back to the terse footer Action when absent.
+func helpModalBodyRows(entries []keymapEntry, mode theme.Mode, colourless bool) []string {
+	rows := make([]string, 0, len(entries))
+	for _, e := range entries {
+		// Skip the ? help self-entry — the open key is not listed in its own modal.
+		if e.RightAligned {
+			continue
+		}
+		rows = append(rows, helpModalRow(e, mode, colourless))
+	}
+	return rows
+}
+
+// helpModalRow renders one keymap entry as a two-column line: the key glyph in a
+// fixed-width left column (accent.blue, or state.red for the destructive kill/
+// delete key — §2.9 reserves red for destructive actions), a fixed gap, then the
+// action label in text.strong.
+func helpModalRow(e keymapEntry, mode theme.Mode, colourless bool) string {
+	keyTok := theme.MV.AccentBlue
+	if isDestructiveHelpKey(e) {
+		keyTok = theme.MV.StateRed
+	}
+	key := headerStyle(keyTok, mode, colourless).Bold(true).Render(helpKeyGlyph(e))
+	keyWidth := lipgloss.Width(key)
+	// Pad the key column to a fixed width so labels share a left edge. The pad is
+	// canvas-painted so the column gap is not a terminal-bg island.
+	pad := ""
+	if keyWidth < helpKeyColumnWidth {
+		pad = headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", helpKeyColumnWidth-keyWidth))
+	}
+	gap := headerCanvasBg(mode, colourless).Render(helpColumnGap)
+	label := headerStyle(theme.MV.TextStrong, mode, colourless).Render(helpActionLabel(e))
+	return lipgloss.JoinHorizontal(lipgloss.Top, key, pad, gap, label)
+}
+
+// helpActionLabel returns the label the help modal shows for an entry: the longer
+// HelpAction when set, else the terse footer Action.
+func helpActionLabel(e keymapEntry) string {
+	if e.HelpAction != "" {
+		return e.HelpAction
+	}
+	return e.Action
+}
+
+// helpKeyGlyph returns the key glyph the help modal renders for an entry: the
+// glyph-rich HelpKey when set (the overrides are Sessions enter→"⏎" and
+// space→"␣"), else the terse footer Key. Post the "all symbols, caret for ctrl"
+// decision the help body reads the Key forms directly for nav ("↑/↓") and page
+// ("^↑/↓"); only enter and space diverge (footer "enter"/"space" vs help "⏎"/"␣").
+// The footer NEVER calls this — it always reads Key directly.
+func helpKeyGlyph(e keymapEntry) string {
+	if e.HelpKey != "" {
+		return e.HelpKey
+	}
+	return e.Key
+}
+
+// isDestructiveHelpKey reports whether the entry is a destructive action whose key
+// glyph renders in state.red in the help body (§2.9 red is destructive-only): the
+// Sessions `k` kill key and the Projects `d` delete key.
+func isDestructiveHelpKey(e keymapEntry) bool {
+	return e.Key == "k" || e.Key == "d"
+}

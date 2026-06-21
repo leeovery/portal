@@ -2,6 +2,7 @@ package tui
 
 import (
 	"charm.land/lipgloss/v2"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 // modalState tracks which modal overlay is currently active.
@@ -13,12 +14,29 @@ const (
 	modalRename                   // Rename session with textinput
 	modalDeleteProject            // Delete project confirmation
 	modalEditProject              // Edit project with name and alias editing
+	modalHelp                     // §8.5 per-page ? help (descriptor-driven keymap reference)
 )
 
-// modalStyle defines the bordered box style for modal overlays.
-var modalStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	Padding(1, 2)
+// modalBorderStyle is the shared border-defined panel style for the NON-help
+// modals (kill / rename / delete / edit): a rounded border whose colour is
+// border.separator per §8.1 (the OUTER panel frame is the 2-tone border's
+// separator leg), mode-aware, with the existing Padding(1,2) preserved. Under the
+// NO_COLOR carve-out (colourless) the rounded glyphs stay but NO border foreground
+// is set, so the frame renders on the terminal's native fg (matching every other
+// colourless surface). It replaces the former static modalStyle, whose missing
+// BorderForeground fell back to terminal-default white in BOTH modes (the FIX 3
+// bug). The help modal does NOT use this — it HAND-DRAWS its own frame in
+// renderHelpModalContent so its header divider joins the side borders via real
+// `├`/`┤` junctions.
+func modalBorderStyle(mode theme.Mode, colourless bool) lipgloss.Style {
+	s := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(1, 2)
+	if !colourless {
+		s = s.BorderForeground(theme.MV.BorderSeparator.ColorFor(mode))
+	}
+	return s
+}
 
 // renderModalOnClearedCanvas is the §8.1/13.5 shared blank-screen modal layer:
 // when a modal is open the page behind it is CLEARED to the owned canvas (§1) and
@@ -38,12 +56,28 @@ var modalStyle = lipgloss.NewStyle().
 // content-region dims, this centres the panel on a blank region, and the Phase 1
 // fillCanvas outer wrap supplies the cleared canvas.
 //
+// FIX 3 threads the resolved mode + colourless flag through so the panel frame is
+// drawn in border.separator (§8.1) instead of the former terminal-default white.
 // The panel's own styling/copy (the ⚠ header, sectioned layout, red name, footer)
-// is a LATER task (3-5); this layer keeps the existing modalStyle box and only
-// changes the BACKDROP + CENTRING. lipgloss.Place reuses the existing centre maths
-// sized to the content region (the 80×24 fallback is applied by the caller via
-// termDims so the region is never zero-sized).
-func renderModalOnClearedCanvas(content string, width, height int) string {
-	panel := modalStyle.Render(content)
+// is a LATER task (3-5); this layer keeps the existing Padding(1,2) box and only
+// fixes the BORDER COLOUR (and the earlier BACKDROP + CENTRING). lipgloss.Place
+// reuses the existing centre maths sized to the content region (the 80×24 fallback
+// is applied by the caller via termDims so the region is never zero-sized).
+func renderModalOnClearedCanvas(content string, width, height int, mode theme.Mode, colourless bool) string {
+	panel := modalBorderStyle(mode, colourless).Render(content)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+}
+
+// renderHelpModalOnClearedCanvas composes the §8.5 help modal panel and centres it
+// on the cleared owned canvas, exactly like renderModalOnClearedCanvas but with the
+// help modal's OWN fully HAND-DRAWN panel: renderHelpModalContent assembles the
+// whole bordered frame itself (top/bottom borders, side `│`, the joined `├`/`┤`
+// divider, and the flush content rows) — there is NO lipgloss auto-border wrap, so
+// the divider can carry real junctions into the side frame and the vertical spacing
+// is flush (zero blank rows). The frame is SINGLE-TONE border.separator, mode- and
+// colourless-aware. This leaves the shared modalBorderStyle's Padding(1,2) intact
+// for the OTHER modals. The same lipgloss.Place centres it on the inset region.
+func renderHelpModalOnClearedCanvas(entries []keymapEntry, width, height int, mode theme.Mode, colourless bool) string {
+	panel := renderHelpModalContent(entries, mode, colourless)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }

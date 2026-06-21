@@ -101,19 +101,21 @@ func TestSessionsKeymapRevision(t *testing.T) {
 		}
 	})
 
-	t.Run("it leaves ? swallowed (not bound to open help)", func(t *testing.T) {
+	t.Run("it binds ? to open the help modal (no list self-toggle)", func(t *testing.T) {
+		// §12.2 / §8.5: Phase 3 binds ? to OUR per-page help modal, replacing the
+		// prior swallow. The key is still consumed (no cmd, no page change) so
+		// bubbles/list never toggles its own help.
 		m := sessionsDispatchModel(t)
 		_, cmd := m.updateSessionList(tea.KeyPressMsg{Code: '?', Text: "?"})
 		if cmd != nil {
-			t.Errorf("? must be swallowed (return nil cmd), got a non-nil cmd")
+			t.Errorf("? must be consumed (return nil cmd), got a non-nil cmd")
 		}
-		// And it must not have opened a modal or changed page.
 		after := pressSession(t, m, tea.KeyPressMsg{Code: '?', Text: "?"})
 		if after.activePage != PageSessions {
 			t.Errorf("? must not change the active page; got %d", after.activePage)
 		}
-		if after.modal != modalNone {
-			t.Errorf("? must not open a modal (Phase 3 binds help); modal = %v", after.modal)
+		if after.modal != modalHelp {
+			t.Errorf("? must open the help modal (§8.5); modal = %v, want modalHelp", after.modal)
 		}
 	})
 
