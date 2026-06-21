@@ -3391,6 +3391,17 @@ func (m Model) viewSessionList() string {
 	// filter input is active the title row IS that input — leave it untouched so
 	// the user sees what they type.
 	listView = m.applySectionHeader(listView)
+	// §7.3 over-filtered no-matches state: an ACTIVE non-empty filter query with
+	// zero visible items. Replace the (empty) list body BELOW the title/filter row
+	// with the centred null-set glyph + `No sessions match "<query>"` message +
+	// widen/clear hint. This is DISTINCT from the §11.1 empty-sessions state (no
+	// sessions exist at all, no active query) — sessionListNoMatches REQUIRES an
+	// active non-empty query, so the two paths are NOT merged. The replacement keeps
+	// the SAME body height (Height()−1 rows), so the composed view stays within termH
+	// and the one-row-per-delegate pagination invariant (§3.5) is unaffected.
+	if m.sessionListNoMatches() {
+		listView = m.replaceListBodyWithNoMatches(listView)
+	}
 	if m.byTagSignpost {
 		// Persistent "No tags yet" signpost (spec § Empty states → By Tag
 		// with zero tags). Inserted additively beneath the title/filter row
@@ -3437,6 +3448,13 @@ func (m Model) viewSessionList() string {
 // footer renders. All three are two rows over the SAME border.footer rule, so the
 // swap is height-neutral against the reserved sessionFooterHeight budget.
 func (m Model) renderSessionsFooterForFilterState() string {
+	// §7.3 over-filtered no-matches state keeps the footer in the input-active form,
+	// REDUCED: `type to filter · esc clear` WITHOUT the `browse results` entry (there
+	// are no results to browse). It takes precedence over the plain Filtering footer
+	// so the reduced entry set renders whenever the active query matches zero.
+	if m.sessionListNoMatches() {
+		return renderNoMatchesFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	}
 	switch m.sessionList.FilterState() {
 	case list.Filtering:
 		return renderFilteringFooter(m.contentWidth(), m.canvasMode, m.colourless)
@@ -3545,6 +3563,27 @@ func insertRowBelowTitle(listView, row string) string {
 		return listView + "\n" + row
 	}
 	return listView[:idx+1] + row + "\n" + listView[idx+1:]
+}
+
+// replaceListBodyWithNoMatches swaps the list BODY (every row below the
+// title/filter row) for the §7.3 centred no-matches empty state, preserving the
+// title/filter row (the first line) byte-for-byte. The body block is rendered at the
+// SAME height the bubbles/list body occupies (Height()−1, the list height minus the
+// title row), so the composed view height is unchanged and the §3.5 one-row-per-
+// delegate pagination invariant is unaffected — the body is empty here anyway, this
+// just paints guidance into the rows the empty list would otherwise leave blank.
+func (m Model) replaceListBodyWithNoMatches(listView string) string {
+	bodyHeight := m.sessionList.Height() - 1 // minus the title/filter row
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+	body := renderNoMatchesBody(m.sessionList.FilterValue(), m.contentWidth(), bodyHeight, m.canvasMode, m.colourless)
+	idx := strings.IndexByte(listView, '\n')
+	if idx < 0 {
+		// Degenerate single-line listView (no body to replace): append the body.
+		return listView + "\n" + body
+	}
+	return listView[:idx+1] + body
 }
 
 // byTagSignpostStyle is the dimmed style for the persistent By-Tag "No tags
