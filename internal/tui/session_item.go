@@ -338,6 +338,17 @@ func (d SessionDelegate) rowToken(base lipgloss.Style, fg theme.Token, selected 
 // §3.5 / §4.1 one-delegate-line pagination invariant.
 func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionItem) string {
 	selected := index == m.Index()
+	// §7.1 input-active clarity: while the filter input is being edited (Filtering)
+	// NO list row is selected — the cursor lives in the filter input, not on a row,
+	// so the violet ▌ bar and the bg.selection band are suppressed for every row.
+	// The engine still tracks an internal cursor index (it disables CursorUp/Down
+	// while typing), but the RENDER must show no selected row, so the §7.2 "never
+	// both an input cursor AND a selected row" invariant holds. The committed
+	// (FilterApplied / list-active) and unfiltered states render the selected row
+	// as normal.
+	if m.FilterState() == list.Filtering {
+		selected = false
+	}
 	bg := d.rowBg(selected)
 
 	// Grouped rows (GroupKey set in By Project / By Tag — including the Unknown /

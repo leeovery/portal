@@ -1126,6 +1126,7 @@ func (m *Model) applyCanvasMode() {
 	// background — every cell renders on the terminal's native bg. Foreground hue
 	// is stripped FREE by the writer layer (colorprofile honours NO_COLOR), so
 	// state stays glyph-distinct (§2.2).
+	m.styleFilterInput()
 	if m.colourless {
 		m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode, Colourless: true})
 		colourlessHelpStyles(&m.sessionList)
@@ -1137,7 +1138,13 @@ func (m *Model) applyCanvasMode() {
 		// reserve). DEPENDENCY: applySectionHeader's string surgery replaces ONLY line
 		// 0 (the title) and preserves line 1 — the gap is line 1, the surgery touches
 		// line 0. Under NO_COLOR the padding row is native-bg (UnsetBackground).
-		m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.UnsetBackground().PaddingBottom(1)
+		// PaddingLeft(0) drops the bubbles/list default TitleBar left pad (=2): the
+		// section-header surgery and the delegate rows already render flush at col 0
+		// (the outer gutter insets the whole frame), so the ONLY line the left pad
+		// affected was the live filter input. Flush-aligning it keeps the input-active
+		// `/ query` at the SAME column as the wordmark / section header / list rows /
+		// the list-active locked query (the hint-to-query swap reads cleanly).
+		m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.UnsetBackground().PaddingLeft(0).PaddingBottom(1)
 		// Strip the bubbles/list default Title box colours (its violet 48;5;62
 		// background + bright foreground) so "Sessions" renders on the terminal's
 		// native fg/bg — the title is a leaf canvas-dependent surface too. The
@@ -1161,7 +1168,47 @@ func (m *Model) applyCanvasMode() {
 	// height and reserves it from the item area, so this is auto-budgeted (no manual
 	// reserve). DEPENDENCY: applySectionHeader's string surgery replaces ONLY line 0
 	// (the title) and preserves line 1 — the gap is line 1, the surgery touches line 0.
-	m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.Background(canvas).PaddingBottom(1)
+	// PaddingLeft(0): see the colourless branch above — drops the default left pad so
+	// the live filter input aligns flush with every other content line.
+	m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.Background(canvas).PaddingLeft(0).PaddingBottom(1)
+}
+
+// styleFilterInput restyles the bubbles/list FilterInput to the §7 MV treatment:
+// an accent.orange `/ ` prompt, the live query text in accent.orange, and an
+// accent.orange block cursor (input-active). It is the input-active counterpart of
+// renderFilterQueryHeader (the list-active locked-query render): the same
+// accent.orange `/ query` reads in both modes, the only difference being the
+// cursor, which the live bubbles/list FilterInput owns while Filtering.
+//
+// The leaf .Background(canvas) is deliberately NOT applied here: the filter input
+// carries NO background tint (§7.1) — it renders over the canvas the surrounding
+// title bar already paints, with no per-run band of its own. Under the NO_COLOR
+// carve-out every hue drops; the `/ ` prompt and the query render on the
+// terminal's native fg, structurally distinct from the rest of the chrome.
+//
+// Cursor blink is disabled so the captured frame is deterministic (the cursor is
+// always the solid orange block the §7.1 reference shows, never a blinked-off gap).
+func (m *Model) styleFilterInput() {
+	m.sessionList.FilterInput.Prompt = filterPromptPrefix
+	styles := m.sessionList.FilterInput.Styles()
+	if m.colourless {
+		// No canvas, no hue: the `/ ` prompt + query render on the terminal's native
+		// fg, and the cursor falls back to a bare (non-coloured) block. The colour is
+		// stripped FREE by the writer layer under NO_COLOR, but pin a hue-free style
+		// here too so no accent.orange SGR is emitted at all.
+		styles.Focused.Prompt = lipgloss.NewStyle()
+		styles.Focused.Text = lipgloss.NewStyle()
+		styles.Cursor.Color = lipgloss.NoColor{}
+		styles.Cursor.Blink = false
+		m.sessionList.FilterInput.SetStyles(styles)
+		return
+	}
+	orange := theme.MV.AccentOrange.ColorFor(m.canvasMode)
+	styles.Focused.Prompt = lipgloss.NewStyle().Foreground(orange)
+	styles.Focused.Text = lipgloss.NewStyle().Foreground(orange)
+	styles.Cursor.Color = orange
+	styles.Cursor.Blink = false
+	m.sessionList.FilterInput.SetStyles(styles)
 }
 
 // NewModelWithSessions creates a Model pre-populated with sessions, for testing.
@@ -3366,13 +3413,38 @@ func (m Model) viewSessionList() string {
 	// by applySessionListSize (m.sessionFooterHeight) — resolved against the SAME
 	// contentWidth — so the composed view stays within termH and the
 	// one-row-per-delegate pagination invariant (§3.5) holds.
-	footer := renderSessionsFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	//
+	// §7.1: while a filter mode is active the standard footer is REPLACED by one of
+	// the two contextual filter footers (input-active vs list-active). All three
+	// footers are exactly two rows (the shared border.footer rule + one entry row),
+	// so the swap is height-neutral — the budget reserved by sessionFooterHeight
+	// holds regardless of filter mode.
+	footer := m.renderSessionsFooterForFilterState()
 	// Compose the §3.1 shared header block FIRST, above the list — it is the first
 	// visible chrome. Its height is already folded out of the list's budget by
 	// applySessionListSize (m.headerHeight), so the composed view stays within
 	// termH and the one-row-per-delegate pagination invariant (§3.5) holds.
 	header := m.renderHeader()
 	return lipgloss.JoinVertical(lipgloss.Left, header, listView, footer)
+}
+
+// renderSessionsFooterForFilterState resolves the §3.4 condensed footer to the
+// correct variant for the current filter mode (§7.1). While the filter input is
+// active (FilterState == Filtering) the input-active footer renders
+// (`type to filter · ↵/↓ browse results · esc clear`); once committed
+// (FilterState == FilterApplied) the list-active footer renders
+// (`↵ attach · ↑↓ navigate · esc clear filter`). Otherwise the standard condensed
+// footer renders. All three are two rows over the SAME border.footer rule, so the
+// swap is height-neutral against the reserved sessionFooterHeight budget.
+func (m Model) renderSessionsFooterForFilterState() string {
+	switch m.sessionList.FilterState() {
+	case list.Filtering:
+		return renderFilteringFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	case list.FilterApplied:
+		return renderFilterAppliedFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	default:
+		return renderSessionsFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	}
 }
 
 // renderHeader renders the §3.1 shared header block for the model's current
@@ -3392,10 +3464,32 @@ func (m Model) renderHeader() string {
 // While the filter input is active (FilterState == Filtering) the first line is
 // the live filter input, NOT the title — leave it untouched so the user sees what
 // they type (the section header is suppressed for that frame, matching the
-// pre-reskin behaviour where the input replaced the title).
+// pre-reskin behaviour where the input replaced the title). The bubbles/list
+// FilterInput is restyled (accent.orange `/ ` prompt + query + cursor) in
+// applyCanvasMode, so the live input already reads as the §7 MV filter input.
+//
+// In the §7.1 list-active mode (FilterState == FilterApplied) bubbles/list renders
+// the TITLE (not the input) on the first line; the committed query lives only in
+// the (un-rendered) FilterInput value. Swap in the LOCKED accent.orange `/ query`
+// header (no cursor, no bg tint) so the section-header position shows the live
+// query the same way it did while typing — the cursor-less locked query is what
+// signals the list is filtered.
 func (m Model) applySectionHeader(listView string) string {
 	if m.sessionList.FilterState() == list.Filtering {
 		return listView
+	}
+	if m.sessionList.FilterState() == list.FilterApplied {
+		header := renderFilterQueryHeader(
+			m.sessionList.FilterValue(),
+			m.contentWidth(),
+			m.canvasMode,
+			m.colourless,
+		)
+		idx := strings.IndexByte(listView, '\n')
+		if idx < 0 {
+			return header
+		}
+		return header + listView[idx:]
 	}
 	header := renderSectionHeader(
 		m.sessionListMode,

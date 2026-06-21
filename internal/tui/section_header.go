@@ -102,6 +102,32 @@ func sectionLeftCluster(mode prefs.SessionListMode, insideTmux bool, currentSess
 	return cluster
 }
 
+// filterPromptPrefix is the §7 accent.orange filter prompt — the `/` glyph plus
+// one trailing space — rendered both in the live input (input-active, via the
+// bubbles/list FilterInput prompt) and in the locked-query header (list-active,
+// via renderFilterQueryHeader). It is the single source of the prompt's wording so
+// the two modes read identically aside from the cursor.
+const filterPromptPrefix = "/ "
+
+// renderFilterQueryHeader renders the §7.1 list-active LOCKED filter query in the
+// section-header row position: the accent.orange `/ ` prompt followed by the
+// committed query, also in accent.orange, with NO cursor (the cursor-less locked
+// query signals the list is filtered) and NO background tint (the filter input
+// carries no bg.selection band, §7.1). The row is padded to the content width with
+// canvas spaces so it occupies the full row like the standard section header. It
+// REPLACES the section header (and the bubbles/list title) for the FilterApplied
+// frame — the input-active frame is owned by the live bubbles/list FilterInput,
+// not this function.
+//
+// Under the NO_COLOR carve-out the hues and the canvas drop; the `/ query` text
+// renders on the terminal's native fg/bg (still structurally distinct).
+func renderFilterQueryHeader(query string, width int, mode theme.Mode, colourless bool) string {
+	w := headerWidthOrFallback(width)
+	run := headerStyle(theme.MV.AccentOrange, mode, colourless).Render(filterPromptPrefix + query)
+	runWidth := lipgloss.Width(run)
+	return headerPadRight(run, runWidth, w, mode, colourless)
+}
+
 // sectionModeSuffix returns the section header's suffix text — the mode suffix
 // (`— by project` / `— by tag`) and the inside-tmux `(current: %s)` decoration —
 // derived from sessionListTitleForMode by stripping the fixed "Sessions" prefix.
