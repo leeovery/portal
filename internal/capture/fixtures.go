@@ -57,6 +57,8 @@ func FixtureByName(name string) (*Fixture, error) {
 	switch name {
 	case "sessions-flat":
 		return sessionsFlatFixture(), nil
+	case "sessions-by-project":
+		return sessionsByProjectFixture(), nil
 	case "sessions-by-tag":
 		return sessionsByTagFixture(), nil
 	case "sessions-paged":
@@ -72,7 +74,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-by-tag", "sessions-paged", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -107,6 +109,51 @@ func sessionsFlatFixture() *Fixture {
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: nil},
 		initialMode:  prefs.ModeFlat,
+	}
+}
+
+// sessionsByProjectFixture builds the deterministic "sessions-by-project"
+// fixture: opened in By-Project mode (initialMode) with a set of projects whose
+// paths match most session dirs, plus one session whose directory matches NO
+// project so it lands in the pinned Unknown catch-all. This drives the §5.2
+// By-Project grouped capture so the `— by project` mode suffix and the restyled
+// group headings + nested rows (heading text.detail, `··· N` count text.dim,
+// rows indented one level under their heading) are visible in the screenshot.
+//
+// By-Project is Pattern A — ONE row per session under its project, the key being
+// the session's directory reduced to a canonical path. agentic-workflows carries
+// two sessions (so a group with N>1 renders), and `orphan-explore` is stamped to
+// a directory with no matching project so the Unknown catch-all heading appears in
+// the same frame. The project paths match the session Dir values exactly; both
+// reduce to the same canonical key (CanonicalDirKey falls back to Clean(abs) for
+// these non-existent paths), so the grouping is deterministic without a real
+// filesystem.
+func sessionsByProjectFixture() *Fixture {
+	sessions := []tmux.Session{
+		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
+		{Name: "agentic-workflows-codify", Windows: 2, Attached: false, Dir: "/home/user/code/agentic-workflows"},
+		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
+		{Name: "evvi webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/evvi"},
+		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
+		{Name: "designlab-web-r8suyU", Windows: 2, Attached: false, Dir: "/home/user/code/designlab"},
+		// orphan-explore's directory matches NO project → the Unknown catch-all.
+		{Name: "orphan-explore", Windows: 1, Attached: false, Dir: "/home/user/code/untracked-scratch"},
+	}
+
+	projects := []project.Project{
+		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows"},
+		{Path: "/home/user/code/fab", Name: "fab"},
+		{Path: "/home/user/code/evvi", Name: "evvi"},
+		{Path: "/home/user/code/aviva", Name: "aviva"},
+		{Path: "/home/user/code/designlab", Name: "designlab"},
+		// No project for /home/user/code/untracked-scratch → orphan-explore is Unknown.
+	}
+
+	return &Fixture{
+		name:         "sessions-by-project",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: projects},
+		initialMode:  prefs.ModeByProject,
 	}
 }
 

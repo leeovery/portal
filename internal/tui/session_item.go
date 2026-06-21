@@ -23,10 +23,6 @@ var (
 	// delegate layers text.primary + Background(canvas) for the resolved mode
 	// (SessionDelegate.tokenStyle) so the colour pair is mode-matched.
 	nameBase = lipgloss.NewStyle().Bold(true)
-	// headingBase carries the group heading's NON-colour attribute (faint, so it
-	// reads as a dimmed separator); the delegate layers text.detail +
-	// Background(canvas) for the resolved mode.
-	headingBase = lipgloss.NewStyle().Faint(true)
 )
 
 const (
@@ -76,14 +72,15 @@ var attachedSlotWidth = lipgloss.Width(attachedMarker)
 const groupSeparator = "···"
 
 const (
-	// groupHeaderIndent aligns a group header's text with the list title box.
-	// bubbles/list's default TitleBar has PaddingLeft = 2, so the purple
-	// "Sessions" title starts at column 2; headers indent to match rather than
-	// sitting flush against the left edge.
+	// groupHeaderIndent indents a group header's text to col 2 — the title-box
+	// left edge / the flat-name column (§5.1) — so the heading reads as a section
+	// label above its rows rather than sitting flush against the left edge.
 	groupHeaderIndent = "  "
-	// groupRowIndent nests a grouped session row one level under its header, so
-	// the rows read as indented children of the group heading (cursor aligned
-	// with the header text, name two columns further in).
+	// groupRowIndent nests a grouped session row ONE indent level further than
+	// flat (§5.1): rendered BEFORE the 2-cell left-bar column, it shifts the whole
+	// row right so the cursor/selector ▌ lands at col 2 (aligned with the header
+	// text) and the name at col 4 — the rows read as indented children of the
+	// heading. Flat rows (empty GroupKey) skip it and render flush (name at col 2).
 	groupRowIndent = "  "
 )
 
@@ -174,9 +171,17 @@ type HeaderItem struct {
 // vanish during filtering, giving a flat hit list for free.
 func (HeaderItem) FilterValue() string { return "" }
 
-// label renders the dimmed "Heading ··· N" separator text.
-func (h HeaderItem) label() string {
-	return fmt.Sprintf("%s %s %d", h.Heading, groupSeparator, h.Count)
+// headingText is the group label run: the heading word, plus a trailing space so
+// the dots-count run abuts it with a single gap. Rendered in text.detail (§5.1).
+func (h HeaderItem) headingText() string {
+	return h.Heading + " "
+}
+
+// countText is the dots-count run: "··· N" (the §5.1 `··· N` count). Rendered in
+// text.dim (dimmer than the heading) as a SEPARATE run, so the count reads as a
+// quieter tally beside the heading rather than one uniform faint separator.
+func (h HeaderItem) countText() string {
+	return fmt.Sprintf("%s %d", groupSeparator, h.Count)
 }
 
 // SessionDelegate implements list.ItemDelegate for rendering session items.
@@ -264,10 +269,15 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	var row string
 	switch it := item.(type) {
 	case HeaderItem:
-		// Group heading: the §2.9 group-heading role (text.detail), dimmed so it
-		// reads as a separator rather than a selectable row.
-		heading := d.tokenStyle(headingBase, theme.MV.TextDetail).Render(it.label())
-		row = bg.Render(groupHeaderIndent) + heading
+		// Group heading (§5.1): TWO separately-styled runs over the owned canvas —
+		// the heading word in text.detail (the §2.9 group-heading role) and the
+		// "··· N" count in text.dim (dimmer), so the count reads as a quieter tally
+		// rather than one uniform faint separator. No Faint(true) and no literal
+		// hex at the call site — both colours flow from §2.9 tokens. The same style
+		// renders a catch-all heading (Unknown / Untagged): they are HeaderItems too.
+		heading := d.tokenStyle(lipgloss.Style{}, theme.MV.TextDetail).Render(it.headingText())
+		count := d.tokenStyle(lipgloss.Style{}, theme.MV.TextDim).Render(it.countText())
+		row = bg.Render(groupHeaderIndent) + heading + count
 	case SessionItem:
 		row = d.renderSessionRow(m, index, it)
 	default:
@@ -318,7 +328,7 @@ func (d SessionDelegate) rowToken(base lipgloss.Style, fg theme.Token, selected 
 
 // renderSessionRow renders the §4.1 flat-row anatomy on the owned canvas:
 //
-//	[2-cell bar][grouped indent?][name flex …][gap][count slot][attached slot]
+//	[grouped indent?][2-cell bar][name flex …][gap][count slot][attached slot]
 //
 // The trailing slots (count, attached) are FIXED-WIDTH and right-pinned; the
 // name flexes to fill the remainder of the row's width so the counts and the
@@ -330,6 +340,19 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	selected := index == m.Index()
 	bg := d.rowBg(selected)
 
+	// Grouped rows (GroupKey set in By Project / By Tag — including the Unknown /
+	// Untagged catch-alls, which orderedSessionItems stamps with GroupKey = the
+	// catch-all heading) nest one indent level FURTHER than flat (§5.1): the indent
+	// sits BEFORE the left-bar column, so the cursor/selector ▌ lands at col 2 and
+	// the name at col 4. Flat rows (empty GroupKey) render flush — the bar at col 0,
+	// the name at col 2. The indent is folded into the width budget below, so it
+	// shrinks the flex name rather than pushing the row wide.
+	indent := ""
+	if it.GroupKey != "" {
+		indent = groupRowIndent
+	}
+	indentCell := bg.Render(indent)
+
 	// Left-bar column (§3.3): the violet ▌ + a trailing cell on the selected row,
 	// two blank cells otherwise — a fixed 2-cell column that keeps the name at the
 	// same left edge whether or not the row is selected.
@@ -338,15 +361,6 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 		bar = d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true).Render(selectorBar) +
 			bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(selectorBar)))
 	}
-
-	// Grouped rows (GroupKey set in By Project / By Tag) nest one level under their
-	// header; Flat rows (empty GroupKey) render flush. The indent hook is left
-	// intact for the grouped-view task (it consumes the same delegate).
-	indent := ""
-	if it.GroupKey != "" {
-		indent = groupRowIndent
-	}
-	indentCell := bg.Render(indent)
 
 	// Name — text.primary (selected: text.on-selection), bold (§4.1).
 	nameTok := theme.MV.TextPrimary
@@ -405,7 +419,7 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	// The right margin insets the trailing columns from the content edge (§4.1) so
 	// the attached bullet does not sit flush against the edge (matching the design).
 	rightMargin := bg.Render(padTo("", rowRightMargin))
-	row := bar + indentCell + name + namePad + gap + count + attached + rightMargin
+	row := indentCell + bar + name + namePad + gap + count + attached + rightMargin
 
 	// Safety clamp (§2.7 / §3.5): the trailing slots are a FIXED 25 cells (bar +
 	// gap + count + attached + indent); at pathological narrow widths the flex name

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/capture"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -81,6 +82,112 @@ func TestFixtureByName(t *testing.T) {
 			t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
 		}
 	})
+}
+
+// TestSessionsByProjectFixture verifies the grouped (by-project) fixture: it
+// opens in ModeByProject and carries projects whose paths match most session dirs,
+// plus exactly one session whose directory matches NO project so it lands in the
+// pinned Unknown catch-all. This is the fixture that drives the §5.2 By-Project
+// grouped capture (mode suffix + heading reskin + nested rows).
+func TestSessionsByProjectFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-by-project")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-by-project): %v", err)
+	}
+
+	// It builds the production Sessions model opened in By-Project mode.
+	m := tui.Build(fx.Deps())
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if got, want := m.SessionListTitle(), "Sessions — by project"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (fixture opens in By-Project mode)", got, want)
+	}
+
+	// There must be MULTIPLE projects so several group headings render.
+	projects, err := fx.Deps().ProjectStore.List()
+	if err != nil {
+		t.Fatalf("ProjectStore.List: %v", err)
+	}
+	if len(projects) < 2 {
+		t.Errorf("sessions-by-project fixture has %d projects, want >=2 (multiple group headings)", len(projects))
+	}
+
+	// At least one session's directory must match no project, so the Unknown
+	// catch-all heading renders alongside the resolvable groups.
+	idx := project.NewIndex(projects)
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	unknown := 0
+	for _, s := range sessions {
+		if _, _, ok := idx.Match(s.Dir); !ok {
+			unknown++
+		}
+	}
+	if unknown == 0 {
+		t.Error("sessions-by-project fixture has no Unknown catch-all member; the capture would not exercise the catch-all heading")
+	}
+}
+
+// TestFixtureNamesIncludesByProject pins the by-project fixture into the
+// discoverable name list (the --fixture help + FixtureByName error share this
+// source).
+func TestFixtureNamesIncludesByProject(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "sessions-by-project" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include sessions-by-project", capture.FixtureNames())
+	}
+}
+
+// TestSessionsByTagFixtureExercisesMultiTagAndUntagged pins the §5.3 Pattern B +
+// catch-all coverage the by-tag capture must exercise: at least one project with
+// MULTIPLE tags (so a session repeats under each tag heading) AND at least one
+// session whose directory is untagged (so the Untagged catch-all heading renders).
+func TestSessionsByTagFixtureExercisesMultiTagAndUntagged(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-by-tag")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-by-tag): %v", err)
+	}
+	projects, err := fx.Deps().ProjectStore.List()
+	if err != nil {
+		t.Fatalf("ProjectStore.List: %v", err)
+	}
+
+	multiTag := false
+	tagged := map[string]bool{}
+	for _, p := range projects {
+		if len(p.Tags) >= 2 {
+			multiTag = true
+		}
+		if len(p.Tags) > 0 {
+			tagged[p.Path] = true
+		}
+	}
+	if !multiTag {
+		t.Error("sessions-by-tag fixture has no multi-tag project; the Pattern B repeat (a session under each of its tags) is not exercised")
+	}
+
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	untagged := false
+	for _, s := range sessions {
+		if !tagged[s.Dir] {
+			untagged = true
+			break
+		}
+	}
+	if !untagged {
+		t.Error("sessions-by-tag fixture has no untagged-directory session; the Untagged catch-all heading is not exercised")
+	}
 }
 
 // TestSessionsByTagFixture verifies the grouped (by-tag) fixture: it opens in

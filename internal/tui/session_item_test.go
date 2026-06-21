@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/list"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -356,16 +357,20 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 		d := tui.SessionDelegate{}
 		m := list.New(nil, d, 80, 10)
 
+		// The §5.1 reskin renders the heading word (text.detail) and the "··· N"
+		// count (text.dim) as TWO separately-styled SGR runs, so the contiguous
+		// "Heading ··· N" string spans the VISIBLE (ANSI-stripped) output rather
+		// than the raw bytes — strip before asserting the visible text.
 		var portal bytes.Buffer
 		d.Render(&portal, m, 0, tui.HeaderItem{Heading: "Portal", Count: 2, Key: "/p/portal"})
-		if !strings.Contains(portal.String(), "Portal "+groupSeparator+" 2") {
-			t.Errorf("expected 'Portal %s 2', got: %q", groupSeparator, portal.String())
+		if vis := ansi.Strip(portal.String()); !strings.Contains(vis, "Portal "+groupSeparator+" 2") {
+			t.Errorf("expected 'Portal %s 2', got: %q", groupSeparator, vis)
 		}
 
 		var work bytes.Buffer
 		d.Render(&work, m, 1, tui.HeaderItem{Heading: "Work", Count: 3, Key: "/p/work"})
-		if !strings.Contains(work.String(), "Work "+groupSeparator+" 3") {
-			t.Errorf("expected 'Work %s 3', got: %q", groupSeparator, work.String())
+		if vis := ansi.Strip(work.String()); !strings.Contains(vis, "Work "+groupSeparator+" 3") {
+			t.Errorf("expected 'Work %s 3', got: %q", groupSeparator, vis)
 		}
 	})
 
@@ -377,14 +382,14 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 
 		var personal bytes.Buffer
 		d.Render(&personal, m, 0, tui.HeaderItem{Heading: "personal", Count: 1, Key: "personal"})
-		if !strings.Contains(personal.String(), "personal "+groupSeparator+" 1") {
-			t.Errorf("expected 'personal %s 1', got: %q", groupSeparator, personal.String())
+		if vis := ansi.Strip(personal.String()); !strings.Contains(vis, "personal "+groupSeparator+" 1") {
+			t.Errorf("expected 'personal %s 1', got: %q", groupSeparator, vis)
 		}
 
 		var work bytes.Buffer
 		d.Render(&work, m, 1, tui.HeaderItem{Heading: "work", Count: 1, Key: "work"})
-		if !strings.Contains(work.String(), "work "+groupSeparator+" 1") {
-			t.Errorf("expected 'work %s 1', got: %q", groupSeparator, work.String())
+		if vis := ansi.Strip(work.String()); !strings.Contains(vis, "work "+groupSeparator+" 1") {
+			t.Errorf("expected 'work %s 1', got: %q", groupSeparator, vis)
 		}
 	})
 
@@ -416,8 +421,8 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 
 		var last bytes.Buffer
 		d.Render(&last, m, 0, tui.HeaderItem{Heading: "Untagged", Count: 3, Key: "Untagged"})
-		if !strings.Contains(last.String(), "Untagged "+groupSeparator+" 3") {
-			t.Errorf("expected 'Untagged %s 3', got: %q", groupSeparator, last.String())
+		if vis := ansi.Strip(last.String()); !strings.Contains(vis, "Untagged "+groupSeparator+" 3") {
+			t.Errorf("expected 'Untagged %s 3', got: %q", groupSeparator, vis)
 		}
 	})
 
@@ -524,7 +529,9 @@ func TestSessionDelegateFlattenOnFilter(t *testing.T) {
 		for i := range restored {
 			d.Render(&buf, m, i, restored[i])
 		}
-		out := buf.String()
+		// The heading word and the "···" count are two separate SGR runs (§5.1), so
+		// "Heading ···" spans the VISIBLE (stripped) output, not the raw bytes.
+		out := ansi.Strip(buf.String())
 		if !strings.Contains(out, "Portal "+groupSeparator) || !strings.Contains(out, "Work "+groupSeparator) {
 			t.Errorf("expected By Project headings to render again on clear, got: %q", out)
 		}
@@ -561,7 +568,9 @@ func TestSessionDelegateFlattenOnFilter(t *testing.T) {
 		for i := range restored {
 			d.Render(&buf, m, i, restored[i])
 		}
-		out := buf.String()
+		// Heading word + "···" count are two separate SGR runs (§5.1) — assert on
+		// the VISIBLE (stripped) output.
+		out := ansi.Strip(buf.String())
 		if !strings.Contains(out, "personal "+groupSeparator) {
 			t.Errorf("expected By Tag heading 'personal' to return on clear, got: %q", out)
 		}
