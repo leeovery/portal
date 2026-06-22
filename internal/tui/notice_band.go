@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/tui/theme"
 )
 
@@ -133,31 +134,83 @@ func noticeBandFgStyle(fg, tint theme.Token, mode theme.Mode, colourless bool) l
 // and renders on the owned canvas (its tint token is Canvas), preserving its
 // existing flush treatment.
 //
+// The message WRAPS to the available content width (= width − the prefix width: the
+// `▌` bar + its gap + (for flashes) the `⚠`/`✓` glyph + its gap). When the message
+// is longer than that width the band returns a MULTI-LINE string (lines joined with
+// "\n"); when it fits it stays a single line. The `▌` bar repeats on EVERY wrapped
+// line (in the role colour) so the bar spans the band's full height, and
+// continuation lines indent their text under line 1's message start (the `⚠`/`✓`
+// glyph appears only on line 1). Wrapping is on word boundaries; a word longer than
+// the available width is hard-broken. Every line is padded to exactly width cells
+// with the role's tint (noticeBandPadRight) so the tint spans all wrapped lines with
+// no terminal-bg island on any line.
+//
 // onBandText is the §2.9 text token the consuming task selects for the message
 // (e.g. text.on-warning for the flashes, text.strong for the signpost). The role
 // selects the tint and the status glyph (role.tintToken / role.statusGlyph).
 //
 // Under the NO_COLOR carve-out (§2.5) the bar colour, the on-band text hue, and
-// the tint all drop; the `▌` bar, its position, the `⚠`/`✓` glyph, and the message
-// text survive on the terminal's native fg/bg so the band's STATE stays legible
-// colourlessly (§2.2 — glyph-distinct, never colour-only).
+// the tint all drop; the `▌` bar, its position, the `⚠`/`✓` glyph (line 1), and the
+// message text survive on the terminal's native fg/bg so the band's STATE stays
+// legible colourlessly (§2.2 — glyph-distinct, never colour-only). The bar survives
+// on every wrapped line.
 func renderNoticeBand(role noticeBandRole, message string, onBandText theme.Token, width int, mode theme.Mode, colourless bool) string {
 	w := headerWidthOrFallback(width)
 	tint := role.tintToken()
 	gap := noticeBandTintStyle(tint, mode, colourless).Render(" ")
 
 	bar := noticeBandFgStyle(role.barToken(), tint, mode, colourless).Render(noticeBarGlyph)
-	segs := []string{bar, gap}
-	if glyph := role.statusGlyph(); glyph != "" {
-		segs = append(segs,
-			noticeBandFgStyle(onBandText, tint, mode, colourless).Render(glyph),
-			gap,
-		)
-	}
-	segs = append(segs, noticeBandFgStyle(onBandText, tint, mode, colourless).Render(message))
+	fg := noticeBandFgStyle(onBandText, tint, mode, colourless)
 
-	row := lipgloss.JoinHorizontal(lipgloss.Top, segs...)
-	return noticeBandPadRight(row, lipgloss.Width(row), w, tint, mode, colourless)
+	// Prefix laid out before the message on line 1: the `▌` bar + gap, plus (for the
+	// flashes) the status glyph + gap. The bar (1) + gap (1) [+ glyph (1) + gap (1)]
+	// fixes the cell width the message starts at — the available content width and
+	// the continuation-line indent both derive from it so the wrapped text lines up
+	// under line 1's message start.
+	glyph := role.statusGlyph()
+	prefixWidth := lipgloss.Width(noticeBarGlyph) + 1 // bar + its gap
+	if glyph != "" {
+		prefixWidth += lipgloss.Width(glyph) + 1 // glyph + its gap
+	}
+
+	// Wrap the message to the width remaining after the prefix on word boundaries,
+	// hard-breaking only a word longer than the available width (ansi.Wrap breaks a
+	// word that does not fit). A non-positive available width (pathologically narrow
+	// band) degrades to a 1-cell column so the bar still renders.
+	avail := w - prefixWidth
+	if avail < 1 {
+		avail = 1
+	}
+	wrapped := strings.Split(ansi.Wrap(message, avail, ""), "\n")
+
+	// Continuation lines lay the bar + gap (2 cells), then pad the REMAINING prefix
+	// cells (prefixWidth − bar − gap = the glyph + gap slot, when present) so the
+	// wrapped text aligns under line 1's message start; the glyph itself is line 1
+	// only. With no glyph (prefixWidth == 2) the pad is empty and continuation text
+	// already aligns under line 1's message.
+	barGapWidth := lipgloss.Width(noticeBarGlyph) + 1
+	var contIndent string
+	if prefixWidth > barGapWidth {
+		contIndent = noticeBandTintStyle(tint, mode, colourless).Render(strings.Repeat(" ", prefixWidth-barGapWidth))
+	}
+
+	lines := make([]string, 0, len(wrapped))
+	for i, text := range wrapped {
+		segs := []string{bar, gap}
+		if i == 0 {
+			if glyph != "" {
+				segs = append(segs, fg.Render(glyph), gap)
+			}
+		} else if contIndent != "" {
+			segs = append(segs, contIndent)
+		}
+		segs = append(segs, fg.Render(text))
+
+		row := lipgloss.JoinHorizontal(lipgloss.Top, segs...)
+		lines = append(lines, noticeBandPadRight(row, lipgloss.Width(row), w, tint, mode, colourless))
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // noticeBandPadRight pads the assembled band row out to exactly w cells with

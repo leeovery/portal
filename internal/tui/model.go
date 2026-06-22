@@ -4090,11 +4090,12 @@ func (m Model) replaceListBodyWithNoMatches(listView string) string {
 }
 
 // byTagSignpostText is the exact, persistent signpost wording rendered in By
-// Tag mode when no project carries any tag (spec § Empty states → By Tag with
-// zero tags). It states the empty condition ("No tags yet") and points the
-// user at where to add tags (the projects page). Placement: the §11 single-slot
-// info notice band inserted directly beneath the title separator, above the
-// section header (the §11 arbiter funnels it through renderNoticeBand). The
+// Tag mode when no project carries any tag (spec §11.3 / §5.3 → By Tag with
+// zero tags). It states the empty condition ("No tags yet") and points the user
+// at where to add tags (the per-project editor: press x for projects, then e to
+// edit). Placement: the §11 single-slot info notice band inserted directly
+// beneath the title separator, above the section header (the §11 arbiter funnels
+// it through renderNoticeBand as the persistent accent.violet info band). The
 // per-band tint / on-band text token / left-bar colour are owned by the band
-// primitive, NOT a per-row ad-hoc style.
-const byTagSignpostText = "No tags yet — add tags on the projects page"
+// primitive, NOT a per-row ad-hoc style. The string is verbatim from spec §11.3.
+const byTagSignpostText = "No tags yet — add tags in a project's editor: press x for projects, then e to edit"

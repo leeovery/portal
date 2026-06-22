@@ -29,6 +29,21 @@ func tokenFgSeq(t *testing.T, tok theme.Token, m theme.Mode) string {
 	return probe[start+1 : end]
 }
 
+// tokenBgSeq returns the bare `48;2;r;g;b` background SGR parameter substring for
+// a role token in the given mode — the background analogue of tokenFgSeq, used to
+// assert a tint IS or is NOT painted (e.g. the §11.3 info band must NOT carry the
+// bg.warning flash tint).
+func tokenBgSeq(t *testing.T, tok theme.Token, m theme.Mode) string {
+	t.Helper()
+	probe := lipgloss.NewStyle().Background(tok.ColorFor(m)).Render("x")
+	start := strings.IndexByte(probe, '[')
+	end := strings.IndexByte(probe, 'm')
+	if start < 0 || end <= start {
+		t.Fatalf("could not derive background SGR core from %q", probe)
+	}
+	return probe[start+1 : end]
+}
+
 // TestHeaderBlock_RendersWordmarkCaretSubtitleRule asserts the §3.1 header block
 // renders the PORTAL wordmark (letter-spaced text.primary), an immediately-right
 // violet block caret, a right-aligned "session manager" subtitle (text.detail),

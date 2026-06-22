@@ -21,6 +21,50 @@ import (
 // holds AT MOST ONE band: a transient flash wins over any persistent band while
 // shown, and the persistent band returns once the flash clears.
 
+// flattenNoticeBand reconstructs a (possibly wrapped, multi-line) notice band's
+// MESSAGE text into a single line for substring matching: it strips ANSI, drops
+// each line's leading `▌` left-bar + the bar/continuation-indent whitespace, and
+// joins the per-line message fragments with a single space (mirroring how
+// ansi.Wrap split the message on a word boundary). It lets the message-identity
+// assertions stay wrap-agnostic — they care that the band carries the message,
+// not whether it spans one line or three at a given width.
+func flattenNoticeBand(band string) string {
+	frags := make([]string, 0, 4)
+	for _, line := range strings.Split(ansi.Strip(band), "\n") {
+		// Drop the leading `▌` bar then trim the bar gap + continuation indent.
+		body := strings.TrimPrefix(line, noticeBarGlyph)
+		body = strings.TrimLeft(body, " ")
+		// Trim the right-pad so fragments join cleanly.
+		body = strings.TrimRight(body, " ")
+		if body != "" {
+			frags = append(frags, body)
+		}
+	}
+	return strings.Join(frags, " ")
+}
+
+// viewHasNoticeMessage reports whether the model's rendered view carries the given
+// notice message, tolerating the §11 wrap: it renders the message exactly as the
+// view does (via the model's own band render at the model's width) and asserts each
+// non-empty wrapped fragment is present in the view. A short message yields one
+// fragment (the whole message); a wrapped message yields its per-line fragments,
+// each of which must appear on its own line in the composed view.
+func viewHasNoticeMessage(t *testing.T, m Model, role noticeBandRole, message string) bool {
+	t.Helper()
+	band := renderNoticeBand(role, message, noticeBandOnBandText(role), m.contentWidth(), m.canvasMode, m.colourless)
+	view := ansi.Strip(m.View().Content)
+	for _, line := range strings.Split(ansi.Strip(band), "\n") {
+		frag := strings.TrimRight(strings.TrimLeft(strings.TrimPrefix(line, noticeBarGlyph), " "), " ")
+		if frag == "" {
+			continue
+		}
+		if !strings.Contains(view, frag) {
+			return false
+		}
+	}
+	return true
+}
+
 // noticeBandModel builds a Sessions-page model seeded with the given session
 // names at 80x24 so the rendered list carries predictable substrings.
 func noticeBandModel(names ...string) Model {
@@ -133,7 +177,7 @@ func TestNoticeSlot_SingleBand_TransientFlashWins(t *testing.T) {
 	if !strings.Contains(view, flash) {
 		t.Errorf("transient flash must render while active:\n%s", view)
 	}
-	if strings.Contains(view, byTagSignpostText) {
+	if viewHasNoticeMessage(t, m, bandInfo, byTagSignpostText) {
 		t.Errorf("persistent signpost must NOT render while the transient flash holds the slot:\n%s", view)
 	}
 }
@@ -158,7 +202,7 @@ func TestNoticeSlot_PersistentReturnsAfterFlashClear(t *testing.T) {
 	if strings.Contains(view, flash) {
 		t.Errorf("flash must be gone after clear:\n%s", view)
 	}
-	if !strings.Contains(view, byTagSignpostText) {
+	if !viewHasNoticeMessage(t, m, bandInfo, byTagSignpostText) {
 		t.Errorf("persistent signpost must return to the slot after the flash clears:\n%s", view)
 	}
 }
@@ -330,5 +374,208 @@ func TestNoticeBand_TimeoutClearsFlash(t *testing.T) {
 	mm := updated.(Model)
 	if mm.flashText != "" {
 		t.Errorf("matching tick (timeout) must clear the flash: flashText = %q, want empty", mm.flashText)
+	}
+}
+
+// longBandMessage is a message guaranteed to exceed any narrow band width so the
+// wrap tests (below) reliably exercise the multi-line path. The signpost wording is
+// the longest real band message, so it is the canonical overflow probe.
+const longBandMessage = byTagSignpostText
+
+// TestNoticeBand_WrapsLongMessage asserts a message longer than the band's
+// available content width wraps to MULTIPLE lines, each line clamped to the band
+// width (no right-edge overflow — the §11 narrow-terminal fix).
+func TestNoticeBand_WrapsLongMessage(t *testing.T) {
+	const w = 30
+	band := renderNoticeBand(bandInfo, longBandMessage, theme.MV.TextStrong, w, theme.Dark, false)
+
+	lines := strings.Split(band, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("long message did not wrap: got %d line(s), want >1\n%s", len(lines), band)
+	}
+	for i, l := range lines {
+		if got := lipgloss.Width(l); got != w {
+			t.Errorf("wrapped line %d width = %d, want %d (clamped to band width, no overflow)", i, got, w)
+		}
+	}
+	// The full message survives across the wrapped lines.
+	if flat := flattenNoticeBand(band); !strings.Contains(flat, longBandMessage) {
+		t.Errorf("wrapped band dropped the message: flat=%q want contains %q", flat, longBandMessage)
+	}
+}
+
+// TestNoticeBand_BarOnEveryWrappedLine asserts the `▌` left-bar renders on EVERY
+// wrapped line (so the bar spans the band's full height), in the role colour, and
+// — under the NO_COLOR carve-out — the bar glyph survives on every line.
+func TestNoticeBand_BarOnEveryWrappedLine(t *testing.T) {
+	const w = 30
+
+	t.Run("coloured/role-bar-every-line", func(t *testing.T) {
+		band := renderNoticeBand(bandWarning, longBandMessage, theme.MV.TextOnWarning, w, theme.Dark, false)
+		lines := strings.Split(band, "\n")
+		if len(lines) < 2 {
+			t.Fatalf("setup: message did not wrap (%d lines)", len(lines))
+		}
+		barSeq := tokenFgSeq(t, theme.MV.AccentOrange, theme.Dark)
+		for i, l := range lines {
+			if !strings.HasPrefix(ansi.Strip(l), noticeBarGlyph) {
+				t.Errorf("line %d does not start with the %q bar: %q", i, noticeBarGlyph, ansi.Strip(l))
+			}
+			if !strings.Contains(l, barSeq) {
+				t.Errorf("line %d missing the role bar foreground sequence %q:\n%s", i, barSeq, l)
+			}
+		}
+	})
+
+	t.Run("nocolor/bar-glyph-every-line", func(t *testing.T) {
+		band := renderNoticeBand(bandWarning, longBandMessage, theme.MV.TextOnWarning, w, theme.Dark, true)
+		lines := strings.Split(band, "\n")
+		if len(lines) < 2 {
+			t.Fatalf("setup: message did not wrap (%d lines)", len(lines))
+		}
+		for i, l := range lines {
+			if !strings.HasPrefix(l, noticeBarGlyph) {
+				t.Errorf("NO_COLOR line %d does not start with the %q bar: %q", i, noticeBarGlyph, l)
+			}
+		}
+		// No colour sequences at all under the carve-out.
+		if band != ansi.Strip(band) {
+			t.Errorf("NO_COLOR wrapped band must carry no SGR colour sequences; got raw %q", band)
+		}
+	})
+}
+
+// TestNoticeBand_ContinuationLinesAlignUnderMessage asserts continuation lines
+// indent their text under line 1's message start — past the bar + gap [+ glyph +
+// gap] — and the status glyph appears ONLY on line 1.
+func TestNoticeBand_ContinuationLinesAlignUnderMessage(t *testing.T) {
+	const w = 30
+	// A warning flash carries the ⚠ glyph, so the message starts at column 4
+	// (bar + gap + glyph + gap); continuation text must start at the same column.
+	band := renderNoticeBand(bandWarning, longBandMessage, theme.MV.TextOnWarning, w, theme.Dark, true)
+	lines := strings.Split(ansi.Strip(band), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("setup: message did not wrap (%d lines)", len(lines))
+	}
+
+	// Line 1 carries the glyph; the message starts at the cell after `▌ ⚠ `.
+	const msgStartCol = 4 // bar(1) + gap(1) + glyph(1) + gap(1)
+	if got := []rune(lines[0]); string(got[:msgStartCol]) != "▌ "+flashWarningGlyph+" " {
+		t.Errorf("line 1 prefix = %q, want %q", string(got[:msgStartCol]), "▌ "+flashWarningGlyph+" ")
+	}
+
+	for i := 1; i < len(lines); i++ {
+		runes := []rune(lines[i])
+		// Glyph must NOT appear on continuation lines.
+		if strings.Contains(lines[i], flashWarningGlyph) {
+			t.Errorf("continuation line %d carries the status glyph %q (glyph is line 1 only): %q", i, flashWarningGlyph, lines[i])
+		}
+		// The bar is present; the cells between the bar and the message-start column
+		// are blank (the continuation indent), so the wrapped text lines up under
+		// line 1's message.
+		if runes[0] != []rune(noticeBarGlyph)[0] {
+			t.Errorf("continuation line %d does not start with the bar: %q", i, lines[i])
+		}
+		for c := 1; c < msgStartCol; c++ {
+			if runes[c] != ' ' {
+				t.Errorf("continuation line %d indent cell %d = %q, want a space (text must align under line 1's message)", i, c, string(runes[c]))
+			}
+		}
+		if runes[msgStartCol] == ' ' {
+			t.Errorf("continuation line %d has no text at the message-start column %d: %q", i, msgStartCol, lines[i])
+		}
+	}
+}
+
+// TestNoticeBand_FlashTintSpansEveryWrappedLine asserts the flash tint (bg.warning)
+// is painted on EVERY wrapped line and each line is padded to the full width — no
+// terminal-bg island on any line (the §11.2 tint must span the multi-line band).
+func TestNoticeBand_FlashTintSpansEveryWrappedLine(t *testing.T) {
+	const w = 30
+	band := renderNoticeBand(bandWarning, longBandMessage, theme.MV.TextOnWarning, w, theme.Dark, false)
+	lines := strings.Split(band, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("setup: message did not wrap (%d lines)", len(lines))
+	}
+	tintSeq := tokenBgSeq(t, theme.MV.BgWarning, theme.Dark)
+	for i, l := range lines {
+		if !strings.Contains(l, tintSeq) {
+			t.Errorf("wrapped line %d missing the bg.warning tint %q (no tint island allowed):\n%s", i, tintSeq, l)
+		}
+		// Each line padded to the full width (the pad carries the tint to the edge).
+		if got := lipgloss.Width(l); got != w {
+			t.Errorf("wrapped line %d width = %d, want %d (padded to full width)", i, got, w)
+		}
+	}
+}
+
+// TestNoticeBand_ShortMessageSingleLine asserts a message that fits within the
+// available content width renders as a SINGLE line (no regression from the wrap
+// change).
+func TestNoticeBand_ShortMessageSingleLine(t *testing.T) {
+	const w = 60
+	band := renderNoticeBand(bandWarning, "short notice", theme.MV.TextOnWarning, w, theme.Dark, false)
+	if h := lipgloss.Height(band); h != 1 {
+		t.Errorf("short message band height = %d, want 1 (single line)\n%s", h, band)
+	}
+	if got := lipgloss.Width(band); got != w {
+		t.Errorf("short message band width = %d, want %d (full width)", got, w)
+	}
+}
+
+// TestSessionBandHeight_TracksWrappedLineCount asserts the §11.2 F10 reserve tracks
+// the WRAPPED band height: at a narrow width the signpost band wraps to multiple
+// lines and sessionBandHeight reflects that count PLUS the one blank breathing row,
+// so the list reserves the correct number of rows and the composed view stays within
+// termH. Measured off the SAME renderSessionBandSlot block the view composes.
+func TestSessionBandHeight_TracksWrappedLineCount(t *testing.T) {
+	dir := t.TempDir()
+	projects := []project.Project{{Path: dir, Name: "Portal"}}
+	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+
+	// Narrow width so the long signpost wraps; tall enough that the list survives.
+	m := newRebuildTestModel(prefs.ModeByTag, sessions, projects)
+	m.termWidth = 40
+	m.termHeight = 40
+	m.rebuildSessionList()
+	if !m.byTagSignpost {
+		t.Fatalf("setup invariant: byTagSignpost = false, want true")
+	}
+
+	bandHeight := lipgloss.Height(m.renderActiveNoticeBand())
+	if bandHeight < 2 {
+		t.Fatalf("setup: signpost did not wrap at the narrow width (band height %d, want >1)", bandHeight)
+	}
+	// The slot is the wrapped band PLUS one blank breathing row.
+	if got, want := m.sessionBandHeight(), bandHeight+1; got != want {
+		t.Errorf("sessionBandHeight = %d, want %d (wrapped band height %d + 1 blank)", got, want, bandHeight)
+	}
+}
+
+// TestNoticeBand_WrappedFrameHeightStaysTermH asserts the composed frame height
+// stays exactly termH when the band WRAPS at a narrow width — the wrapped band +
+// blank is absorbed by the list shrinking underneath the outer canvas fill, so the
+// one-row-per-delegate pagination invariant still holds (the wrapped band does not
+// push the frame past termH).
+func TestNoticeBand_WrappedFrameHeightStaysTermH(t *testing.T) {
+	dir := t.TempDir()
+	projects := []project.Project{{Path: dir, Name: "Portal"}}
+	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+
+	m := newRebuildTestModel(prefs.ModeByTag, sessions, projects)
+	m.termWidth = 40
+	m.termHeight = 40
+	m.applySessionListSize(m.termWidth, m.termHeight)
+	m.rebuildSessionList()
+	if !m.byTagSignpost {
+		t.Fatalf("setup invariant: byTagSignpost = false, want true")
+	}
+	if h := lipgloss.Height(m.renderActiveNoticeBand()); h < 2 {
+		t.Fatalf("setup: signpost did not wrap at the narrow width (band height %d)", h)
+	}
+
+	lines := strings.Split(m.View().Content, "\n")
+	if len(lines) != m.termHeight {
+		t.Errorf("composed frame height = %d, want termHeight %d (wrapped band must not push the frame past termH)", len(lines), m.termHeight)
 	}
 }

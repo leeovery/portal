@@ -74,6 +74,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return sessionsPagedFixture(), nil
 	case "sessions-inline-flash":
 		return sessionsInlineFlashFixture(), nil
+	case "sessions-no-tags-signpost":
+		return sessionsNoTagsSignpostFixture(), nil
 	case "projects":
 		return projectsFixture(), nil
 	default:
@@ -87,7 +89,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "projects", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -284,6 +286,47 @@ func sessionsInlineFlashFixture() *Fixture {
 		projectStore: &fakeProjectStore{projects: nil},
 		initialMode:  prefs.ModeFlat,
 		initialFlash: "folio-Jiz4el closed externally — list updated",
+	}
+}
+
+// sessionsNoTagsSignpostFixture builds the deterministic
+// "sessions-no-tags-signpost" fixture: opened in By-Tag mode (initialMode) with
+// projects that carry NO tags. Because no project anywhere carries a tag,
+// anyTagsExist is false, so the By-Tag view degrades to the flat session list
+// under the §11.3 persistent violet "No tags yet" info signpost (degrade with
+// message, not silent flatten — §5.3) rather than grouping.
+//
+// The project store IS populated (the session dirs map to real project records)
+// so the gate is exercised honestly — it is the ZERO-tags condition, not a
+// missing project store, that drives the signpost. The session set matches the
+// reference frame exactly (testdata/vhs/reference/sessions-no-tags-signpost-mv.png):
+// fab-flowx-explore (attached, 3 windows), agentic-workflows-codify (1),
+// flowx-7UKPZH (2), aviva-proxy-qNyfEO (4). Every session carries a stamped Dir so
+// the §5.4 zero-pane-reads invariant on the signpost/flat arm holds without a tmux
+// server (and the harness has none anyway). Like the other fixtures it NEVER opens
+// a tmux server or touches ~/.config/portal.
+func sessionsNoTagsSignpostFixture() *Fixture {
+	sessions := []tmux.Session{
+		{Name: "fab-flowx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/fab"},
+		{Name: "agentic-workflows-codify", Windows: 1, Attached: false, Dir: "/home/user/code/agentic-workflows"},
+		{Name: "flowx-7UKPZH", Windows: 2, Attached: false, Dir: "/home/user/code/flowx"},
+		{Name: "aviva-proxy-qNyfEO", Windows: 4, Attached: false, Dir: "/home/user/code/aviva"},
+	}
+
+	// Projects exist and match the session dirs, but NONE carry a tag → the
+	// zero-tags-anywhere gate fires and the signpost shows over the flat list.
+	projects := []project.Project{
+		{Path: "/home/user/code/fab", Name: "fab"},
+		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows"},
+		{Path: "/home/user/code/flowx", Name: "flowx"},
+		{Path: "/home/user/code/aviva", Name: "aviva"},
+	}
+
+	return &Fixture{
+		name:         "sessions-no-tags-signpost",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: projects},
+		initialMode:  prefs.ModeByTag,
 	}
 }
 

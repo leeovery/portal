@@ -358,6 +358,90 @@ func TestFixtureNamesIncludesInlineFlash(t *testing.T) {
 	}
 }
 
+// TestSessionsNoTagsSignpostFixture verifies the §11.3 no-tags-signpost fixture:
+// it opens in By-Tag mode with projects that carry NO tags, so anyTagsExist is
+// false and the By-Tag view degrades to the flat list under the persistent violet
+// info signpost (rather than grouping). The session set matches the reference
+// frame exactly (testdata/vhs/reference/sessions-no-tags-signpost-mv.png).
+func TestSessionsNoTagsSignpostFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-no-tags-signpost")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-no-tags-signpost): %v", err)
+	}
+
+	// It opens in By-Tag mode (the mode that drives the zero-tags signpost).
+	m := tui.Build(fx.Deps())
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if got, want := m.SessionListTitle(), "Sessions — by tag"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (fixture opens in By-Tag mode)", got, want)
+	}
+
+	// NO project carries a tag → the signpost shows over the flat list (degrade
+	// with message, not silent flatten).
+	projects, err := fx.Deps().ProjectStore.List()
+	if err != nil {
+		t.Fatalf("ProjectStore.List: %v", err)
+	}
+	if len(projects) == 0 {
+		t.Fatal("sessions-no-tags-signpost fixture has no projects; the signpost gate needs a session→dir→project mapping to be meaningful")
+	}
+	for _, p := range projects {
+		if len(p.Tags) > 0 {
+			t.Errorf("project %q carries tags %v; the signpost fixture must have ZERO tags anywhere so anyTagsExist is false", p.Name, p.Tags)
+		}
+	}
+
+	// The session set matches the reference frame exactly, in order, with the
+	// reference window counts + attached flags.
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	type want struct {
+		name     string
+		windows  int
+		attached bool
+	}
+	wants := []want{
+		{"fab-flowx-explore", 3, true},
+		{"agentic-workflows-codify", 1, false},
+		{"flowx-7UKPZH", 2, false},
+		{"aviva-proxy-qNyfEO", 4, false},
+	}
+	if len(sessions) != len(wants) {
+		t.Fatalf("sessions-no-tags-signpost has %d sessions, want %d (reference set)", len(sessions), len(wants))
+	}
+	for i, w := range wants {
+		got := sessions[i]
+		if got.Name != w.name {
+			t.Errorf("session[%d].Name = %q, want %q", i, got.Name, w.name)
+		}
+		if got.Windows != w.windows {
+			t.Errorf("session[%d].Windows = %d, want %d (%s)", i, got.Windows, w.windows, w.name)
+		}
+		if got.Attached != w.attached {
+			t.Errorf("session[%d].Attached = %t, want %t (%s)", i, got.Attached, w.attached, w.name)
+		}
+	}
+}
+
+// TestFixtureNamesIncludesNoTagsSignpost pins the no-tags-signpost fixture into
+// the discoverable name list (the --fixture help + FixtureByName error share this
+// source).
+func TestFixtureNamesIncludesNoTagsSignpost(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "sessions-no-tags-signpost" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include sessions-no-tags-signpost", capture.FixtureNames())
+	}
+}
+
 // TestProjectsFixture verifies the §6 Projects-page fixture: it opens on the
 // Sessions page (the production default; the tape types `x` to reach Projects) and
 // carries a rich project store (14 projects with real-looking absolute paths) so the
