@@ -122,8 +122,12 @@ func TestViewProjectList_ModalClearsToCanvas(t *testing.T) {
 	view := m.viewProjectList()
 	visible := ansi.Strip(view)
 
-	if !strings.Contains(visible, "Delete portal? (y/n)") {
-		t.Errorf("delete modal not rendered on the cleared canvas:\n%s", visible)
+	// §8.6 reskin: the cleared canvas carries the destructive header + target name.
+	if !strings.Contains(visible, "▲ Delete project?") {
+		t.Errorf("delete modal header not rendered on the cleared canvas:\n%s", visible)
+	}
+	if !strings.Contains(visible, "portal") {
+		t.Errorf("delete modal target name 'portal' not rendered on the cleared canvas:\n%s", visible)
 	}
 	// The list/footer chrome must NOT be composed behind the modal.
 	if strings.Contains(visible, "⏎ new session") || strings.Contains(visible, "P O R T A L") {

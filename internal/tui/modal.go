@@ -94,6 +94,19 @@ func renderKillModalOnClearedCanvas(name string, windows int, width, height int,
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }
 
+// renderDeleteModalOnClearedCanvas composes the §8.6 delete-project confirm modal
+// panel and centres it on the cleared owned canvas, exactly like
+// renderKillModalOnClearedCanvas but with the delete modal's own hand-drawn
+// single-tone joined panel (renderDeleteModalContent — the SAME frame the kill modal
+// uses, three compartments). The confirm/cancel LOGIC is unchanged
+// (updateDeleteProjectModal); only the rendering is reskinned. The shared
+// modalBorderStyle's Padding(1,2) is left intact for the OTHER modals; this path
+// bypasses it.
+func renderDeleteModalOnClearedCanvas(name, path string, width, height int, mode theme.Mode, colourless bool) string {
+	panel := renderDeleteModalContent(name, path, mode, colourless)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+}
+
 // renderRenameModalOnClearedCanvas composes the §8.4 rename-session modal panel and
 // centres it on the cleared owned canvas, exactly like renderKillModalOnClearedCanvas
 // but with the rename modal's own hand-drawn single-tone joined panel

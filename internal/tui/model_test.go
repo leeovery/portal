@@ -3599,8 +3599,13 @@ func TestDeleteProject(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
 		view := model.View().Content
-		if !strings.Contains(view, "Delete portal? (y/n)") {
-			t.Errorf("expected delete confirmation for 'portal', got:\n%s", view)
+		// §8.6 reskin: the panel shows the destructive `▲ Delete project?` header and
+		// the project name in the body (the old `Delete portal? (y/n)` copy is gone).
+		if !strings.Contains(view, "Delete project?") {
+			t.Errorf("expected '▲ Delete project?' header, got:\n%s", view)
+		}
+		if !strings.Contains(view, "portal") {
+			t.Errorf("expected the project name 'portal' in the delete panel, got:\n%s", view)
 		}
 		// Modal should have border styling
 		if !strings.ContainsAny(view, "─│╭╮╰╯") {
@@ -3663,7 +3668,9 @@ func TestDeleteProject(t *testing.T) {
 		}
 	})
 
-	t.Run("n in delete modal dismisses without deleting", func(t *testing.T) {
+	t.Run("n in delete modal is ignored (cancel is Esc only)", func(t *testing.T) {
+		// §8.1/§8.6: the keymap drops `n` — only Esc cancels. `n` is now ignored, so the
+		// modal stays open and nothing is deleted.
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -3686,19 +3693,17 @@ func TestDeleteProject(t *testing.T) {
 			},
 		})
 
-		// Press d then n
+		// Press d then n — n must NOT dismiss the modal.
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 
 		view := model.View().Content
-		if strings.Contains(view, "? (y/n)") {
-			t.Errorf("confirmation prompt should be cleared after n, got:\n%s", view)
-		}
-		if !strings.Contains(view, "portal") {
-			t.Errorf("project 'portal' should still be in list after cancel, got:\n%s", view)
+		// The modal is STILL open (n was ignored).
+		if !strings.Contains(view, "Delete project?") {
+			t.Errorf("delete modal should still be open after n (n is ignored), got:\n%s", view)
 		}
 		if store.removeCalled {
-			t.Error("Remove should not have been called after cancel")
+			t.Error("Remove should not have been called after n")
 		}
 	})
 
@@ -3788,9 +3793,9 @@ func TestDeleteProject(t *testing.T) {
 			}
 		}
 
-		// Modal should still be showing
+		// Modal should still be showing (§8.6 reskinned header).
 		view := model.View().Content
-		if !strings.Contains(view, "Delete portal? (y/n)") {
+		if !strings.Contains(view, "Delete project?") {
 			t.Errorf("modal should still show after ignored keys, got:\n%s", view)
 		}
 		if store.removeCalled {
@@ -3949,8 +3954,12 @@ func TestDeleteProject(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
 		view := model.View().Content
-		if !strings.Contains(view, "Delete webapp? (y/n)") {
-			t.Errorf("expected delete confirmation for 'webapp', got:\n%s", view)
+		// §8.6 reskin: header is `▲ Delete project?` and the target name is in the body.
+		if !strings.Contains(view, "Delete project?") {
+			t.Errorf("expected '▲ Delete project?' header, got:\n%s", view)
+		}
+		if !strings.Contains(view, "webapp") {
+			t.Errorf("expected the target project 'webapp' in the delete panel, got:\n%s", view)
 		}
 
 		// Confirm deletion

@@ -2213,14 +2213,15 @@ func (m Model) updateDeleteProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingDeletePath = ""
 		m.pendingDeleteName = ""
 		return m, m.deleteAndRefreshProjects(path)
-	case isRuneKey(keyMsg, "n"),
-		keyIsCode(keyMsg, tea.KeyEscape):
+	case keyIsCode(keyMsg, tea.KeyEscape):
+		// §8.1/§8.6: cancel is Esc only — `n` is dropped (now ignored). Clear BOTH
+		// pending fields so no stale state leaks past dismissal.
 		m.modal = modalNone
 		m.pendingDeletePath = ""
 		m.pendingDeleteName = ""
 		return m, nil
 	}
-	// Ignore all other keys while modal is active
+	// Ignore all other keys while modal is active (including `n`).
 	return m, nil
 }
 
@@ -3376,7 +3377,11 @@ func (m Model) viewProjectList() string {
 	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
 	switch m.modal {
 	case modalDeleteProject:
-		return renderModalOnClearedCanvas(fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
+		// §8.6 delete-project confirm modal: the MV hand-drawn single-tone joined panel
+		// (the SAME frame the kill modal uses) — ▲ Delete project? / <name> + <path> +
+		// record-only consequence / y delete · esc cancel. The confirm/cancel LOGIC is
+		// unchanged (updateDeleteProjectModal); only the rendering is reskinned.
+		return renderDeleteModalOnClearedCanvas(m.pendingDeleteName, m.pendingDeletePath, m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalEditProject:
 		return renderModalOnClearedCanvas(m.renderEditProjectContent(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalHelp:

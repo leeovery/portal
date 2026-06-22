@@ -224,10 +224,15 @@ func TestModalBlankScreen_ProjectsDeleteClearsList(t *testing.T) {
 
 	m.modal = modalDeleteProject
 	m.pendingDeleteName = "proj-keep"
+	m.pendingDeletePath = "/home/user/code/keep"
 	view := m.viewProjectList()
 
-	if !strings.Contains(view, "Delete proj-keep?") {
-		t.Errorf("projects delete modal should contain the delete panel copy, got:\n%s", view)
+	// §8.6 reskin: the panel carries the destructive header + the target project name.
+	if !strings.Contains(view, "Delete project?") {
+		t.Errorf("projects delete modal should contain the '▲ Delete project?' header, got:\n%s", view)
+	}
+	if !strings.Contains(view, "proj-keep") {
+		t.Errorf("projects delete modal should contain the target name 'proj-keep', got:\n%s", view)
 	}
 	if strings.Contains(view, "proj-other") {
 		t.Errorf("projects delete modal should NOT contain other project rows (page cleared), got:\n%s", view)
