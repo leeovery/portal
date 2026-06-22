@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/tui/theme"
 )
@@ -90,5 +91,18 @@ func renderHelpModalOnClearedCanvas(entries []keymapEntry, width, height int, mo
 // OTHER (not-yet-reskinned) modals; this path bypasses it.
 func renderKillModalOnClearedCanvas(name string, windows int, width, height int, mode theme.Mode, colourless bool) string {
 	panel := renderKillModalContent(name, windows, mode, colourless)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+}
+
+// renderRenameModalOnClearedCanvas composes the §8.4 rename-session modal panel and
+// centres it on the cleared owned canvas, exactly like renderKillModalOnClearedCanvas
+// but with the rename modal's own hand-drawn single-tone joined panel
+// (renderRenameModalContent — the SAME frame the help/kill modals use, three
+// compartments with the violet-outlined input box nested in the body). The shared
+// modalBorderStyle's Padding(1,2) is left intact for the OTHER (not-yet-reskinned)
+// modals; this path bypasses it. The rename flow LOGIC (updateRenameModal /
+// renameAndRefresh) is unchanged — only the rendering is reskinned.
+func renderRenameModalOnClearedCanvas(input textinput.Model, oldName string, width, height int, mode theme.Mode, colourless bool) string {
+	panel := renderRenameModalContent(input, oldName, mode, colourless)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }

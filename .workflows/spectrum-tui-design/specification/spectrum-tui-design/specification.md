@@ -478,7 +478,7 @@ These conventions apply across surfaces; per-surface detail lives in the referen
 
 ### 13.1 Focus vs edit — unified visual grammar
 Two states, identical grammar everywhere (the Name field, chips, any editable element):
-- **Focused** (navigate): **outline only** — an `accent.violet` ring, no fill change.
+- **Focused** (navigate): **outline only, by colour** — an editable field's outline is `border.separator` (grey, matching the modal frame) when **unfocused** and **`accent.violet`** when **focused** (the field's label follows: `text.detail` → `accent.violet`); **never a fill change**. A single-input modal (e.g. rename) has one always-focused input, so it always shows the `accent.violet` outline.
 - **Editing** (cursor live): **`accent.violet` fill + cursor**, plus a `◉ EDIT MODE` indicator in the modal header (the Name field in edit mode also turns violet-filled — same treatment as chips).
 - **So: outline = focused, fill = editing** — unambiguous everywhere.
 - **Chips** (aliases AND tags) are **one neutral style**; **green is reserved for `attached` only, never chips** (detail in §8.2).

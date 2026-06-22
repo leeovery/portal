@@ -1612,15 +1612,18 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		view := model.View().Content
-		// Should show rename modal with "New name: " prompt
-		if !strings.Contains(view, "New name:") {
-			t.Errorf("expected rename modal with 'New name:' prompt, got:\n%s", view)
+		// Should show the §8.4 rename modal — `Rename session` header + `NEW NAME` label.
+		if !strings.Contains(view, "Rename session") {
+			t.Errorf("expected the rename modal ('Rename session' header), got:\n%s", view)
 		}
-		// Should have border styling (modal overlay)
+		if !strings.Contains(view, "NEW NAME") {
+			t.Errorf("expected the rename modal 'NEW NAME' field label, got:\n%s", view)
+		}
+		// Should have border styling (modal panel + input box).
 		if !strings.ContainsAny(view, "─│╭╮╰╯") {
 			t.Errorf("rename modal should contain border characters, got:\n%s", view)
 		}
-		// Should contain the pre-populated session name
+		// Should contain the pre-populated session name.
 		if !strings.Contains(view, "alpha") {
 			t.Errorf("expected pre-filled name 'alpha' in rename modal, got:\n%s", view)
 		}
@@ -1700,7 +1703,7 @@ func TestRenameSession(t *testing.T) {
 
 		// Modal should still be open (modal stays open on empty input)
 		view := model.View().Content
-		if !strings.Contains(view, "New name:") {
+		if !strings.Contains(view, "Rename session") {
 			t.Errorf("rename modal should stay open after empty enter, got:\n%s", view)
 		}
 	})
@@ -1724,7 +1727,7 @@ func TestRenameSession(t *testing.T) {
 
 		view := model.View().Content
 		// Should be back to normal session list, no modal
-		if strings.Contains(view, "New name:") {
+		if strings.Contains(view, "Rename session") {
 			t.Errorf("rename modal should be dismissed after Esc, got:\n%s", view)
 		}
 		if !strings.Contains(view, "alpha") {
@@ -1814,7 +1817,7 @@ func TestRenameSession(t *testing.T) {
 
 		view := model.View().Content
 		// Should not show rename modal
-		if strings.Contains(view, "New name:") {
+		if strings.Contains(view, "Rename session") {
 			t.Errorf("r on empty list should be no-op, got:\n%s", view)
 		}
 	})
@@ -1830,7 +1833,7 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		view := model.View().Content
-		if strings.Contains(view, "New name:") {
+		if strings.Contains(view, "Rename session") {
 			t.Errorf("r with no renamer should be no-op, got:\n%s", view)
 		}
 	})
@@ -1874,7 +1877,7 @@ func TestRenameSession(t *testing.T) {
 			t.Errorf("expected renamed session 'new-alpha' in list, got:\n%s", view)
 		}
 		// Modal should be dismissed
-		if strings.Contains(view, "New name:") {
+		if strings.Contains(view, "Rename session") {
 			t.Errorf("rename modal should be dismissed after successful rename, got:\n%s", view)
 		}
 	})
@@ -2720,8 +2723,8 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		// Press r — should open rename modal
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		view := model.View().Content
-		if !strings.Contains(view, "New name:") {
-			t.Errorf("expected rename modal prompt, got:\n%s", view)
+		if !strings.Contains(view, "Rename session") {
+			t.Errorf("expected the rename modal, got:\n%s", view)
 		}
 	})
 
@@ -4090,7 +4093,7 @@ func TestEscProgressiveBack(t *testing.T) {
 
 		// Verify rename modal is showing
 		view := model.View().Content
-		if !strings.Contains(view, "New name:") {
+		if !strings.Contains(view, "Rename session") {
 			t.Fatalf("precondition: expected rename modal, got:\n%s", view)
 		}
 
@@ -4107,7 +4110,7 @@ func TestEscProgressiveBack(t *testing.T) {
 
 		// Modal should be dismissed
 		view = model.View().Content
-		if strings.Contains(view, "New name:") {
+		if strings.Contains(view, "Rename session") {
 			t.Errorf("rename modal should be dismissed after Esc, got:\n%s", view)
 		}
 
@@ -4321,7 +4324,7 @@ func TestEscProgressiveBack(t *testing.T) {
 
 		// Verify modal is dismissed
 		view := model.View().Content
-		if strings.Contains(view, "New name:") {
+		if strings.Contains(view, "Rename session") {
 			t.Fatalf("rename modal should be dismissed, got:\n%s", view)
 		}
 

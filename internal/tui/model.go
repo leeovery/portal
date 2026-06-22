@@ -2736,7 +2736,10 @@ func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
 	m.modal = modalRename
 	m.renameTarget = si.Session.Name
 	ti := textinput.New()
-	ti.Prompt = "New name: "
+	// No inline prompt: the §8.4 reskin renders the field as a `NEW NAME` label over
+	// a violet-outlined input box (renderRenameModalContent), so the textinput shows
+	// the value alone — the former "New name: " prompt would double up inside the box.
+	ti.Prompt = ""
 	ti.SetValue(m.renameTarget)
 	ti.Focus()
 	m.renameInput = ti
@@ -3559,7 +3562,12 @@ func (m Model) viewSessionList() string {
 		// (updateKillConfirmModal); only the rendering is reskinned.
 		return renderKillModalOnClearedCanvas(m.pendingKillName, m.pendingKillWindows, m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalRename:
-		return renderModalOnClearedCanvas(m.renameInput.View(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
+		// §8.4 rename modal: the MV hand-drawn single-tone joined panel (the SAME
+		// frame the help/kill modals use) — Rename session header / NEW NAME label +
+		// violet-outlined input box + was: <old name> / ⏎ rename · esc cancel footer.
+		// The rename flow LOGIC is unchanged (updateRenameModal / renameAndRefresh);
+		// only the rendering is reskinned.
+		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget, m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalHelp:
 		// §8.5 per-page help: the Sessions keymap descriptor, descriptor-driven, in
 		// the help modal's own zero-h-padding panel (FIX 4).
