@@ -544,11 +544,10 @@ func (m Model) WithInitialFilter(filter string) Model {
 
 // WithCommand returns a copy of the Model with the given command set.
 // When command is non-empty, the TUI starts in command-pending mode:
-// the session list is skipped and the projects page is shown directly.
-// The manual keymap footer (see projectFooterBindings) switches to
-// commandPendingHelpKeys when m.commandPending is true; no list-level
-// AdditionalShortHelpKeys/AdditionalFullHelpKeys are assigned because
-// the bubbles/list help renderer is disabled via SetShowHelp(false).
+// the session list is skipped and the projects page is shown directly,
+// the §11.4 command-pending banner renders over the full Projects chrome,
+// and the Projects footer swaps to the §11.4 copy (renderCommandPendingFooter,
+// sourced from commandPendingHelpKeys).
 func (m Model) WithCommand(command []string) Model {
 	m.command = command
 	if len(command) > 0 {
@@ -962,13 +961,15 @@ func pinArrowOnlyNav(km *list.KeyMap) {
 	km.GoToEnd.SetKeys()
 }
 
-// commandPendingHelpKeys returns key.Binding entries for command-pending mode.
-// Only enter (run here), n, /, and q are shown; s, x, e, and d are omitted.
+// commandPendingHelpKeys returns the §11.4 command-pending footer binding source:
+// `enter run here · n run in cwd · esc cancel`. It is the single source of truth for
+// the swapped footer copy (renderCommandPendingFooter renders these in MV chrome).
+// q quit is deferred to the ? help modal; s/x/e/d are suppressed in command-pending.
 func commandPendingHelpKeys() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run here")),
-		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
-		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
+		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "run in cwd")),
+		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	}
 }
 
@@ -988,92 +989,6 @@ func newProjectList() list.Model {
 	l.InfiniteScrolling = true
 	brightenHelpStyles(&l)
 	return l
-}
-
-// keymapFooterColumnSize is the fixed per-column entry count for the
-// manually-rendered sessions/projects keymap footer. The footer is split
-// into exactly three columns of this size in entry-source order; the third
-// column may be short when the total entry count does not divide evenly.
-// This constant is intentionally not dynamic — it does not branch on
-// terminal width or visible entry count. Picked at ~5 to match the natural
-// shape of the existing per-page binding sets (see specification).
-const keymapFooterColumnSize = 5
-
-// listNavAndFilterBindings returns the shared navigation + filter-mode
-// binding prefix common to both the sessions-page and projects-page manual
-// keymap footers. Sourced directly from the list's KeyMap so future drift
-// in the bubbles/list nav/filter binding set can never silently diverge
-// between the two pages. Returned slice is freshly allocated so callers
-// may safely append page-specific tail entries without aliasing.
-func listNavAndFilterBindings(l *list.Model) []key.Binding {
-	return []key.Binding{
-		l.KeyMap.CursorUp,
-		l.KeyMap.CursorDown,
-		l.KeyMap.NextPage,
-		l.KeyMap.PrevPage,
-		l.KeyMap.GoToStart,
-		l.KeyMap.GoToEnd,
-		l.KeyMap.Filter,
-		l.KeyMap.ClearFilter,
-		l.KeyMap.AcceptWhileFiltering,
-		l.KeyMap.CancelWhileFiltering,
-	}
-}
-
-// projectFooterBindings returns the ordered key.Binding entries for the
-// command-pending Projects footer (§11.4) — nav + filter prefix plus the
-// command-pending help keys. The normal-mode Projects footer + ? help are now
-// driven by the projectsKeymap descriptor (§6.3 / §8.5, the single source of
-// truth), so the former projectHelpKeys normal-mode source was retired in task
-// 3-3; only the command-pending branch (owned by Phase 4) routes through this
-// manual three-column path. The commandPending bool is retained for the Phase 4
-// wiring; a false value yields just the nav + filter prefix.
-func projectFooterBindings(l *list.Model, commandPending bool) []key.Binding {
-	bindings := listNavAndFilterBindings(l)
-	if commandPending {
-		return append(bindings, commandPendingHelpKeys()...)
-	}
-	return bindings
-}
-
-// chunkBindingsIntoThreeColumns filters disabled bindings (so the visible
-// column count matches what the manual footer renderer emits, mirroring
-// help.Model.FullHelpView's own per-column Enabled() filter), then splits
-// the survivors into exactly three columns of keymapFooterColumnSize
-// entries in source order. The third column may be shorter when the
-// remaining entry count does not divide evenly; that is acceptable per
-// specification. Short trailing columns are not padded.
-func chunkBindingsIntoThreeColumns(bindings []key.Binding) [][]key.Binding {
-	enabled := make([]key.Binding, 0, len(bindings))
-	for _, b := range bindings {
-		if b.Enabled() {
-			enabled = append(enabled, b)
-		}
-	}
-	cols := make([][]key.Binding, 3)
-	for i := 0; i < 3; i++ {
-		start := i * keymapFooterColumnSize
-		if start >= len(enabled) {
-			cols[i] = nil
-			continue
-		}
-		end := start + keymapFooterColumnSize
-		if end > len(enabled) {
-			end = len(enabled)
-		}
-		cols[i] = enabled[start:end]
-	}
-	return cols
-}
-
-// renderKeymapFooter renders the three-column manual keymap footer for the
-// given list, using the list's own help.Model and styles so the rendered
-// strip is byte-identical to the previous bubbles/list-driven bar in colour
-// and separator characters. The list's Styles.HelpStyle is applied around
-// the rendered columns to preserve the previous vertical padding.
-func renderKeymapFooter(l *list.Model, bindings []key.Binding) string {
-	cols := chunkBindingsIntoThreeColumns(bindings)
-	return l.Styles.HelpStyle.Render(l.Help.FullHelpView(cols))
 }
 
 // New creates a Model that fetches sessions from the given SessionLister.
@@ -1343,8 +1258,8 @@ func (m *Model) applySessionListSize(width, height int) {
 	// height budget, NOT uncounted bands (§3.5). Each is resolved against the SAME
 	// width this size-apply was called with, so the budget and the viewSessionList
 	// render agree at every call site (WindowSizeMsg, rebuildSessionList, the 80x24
-	// construction seed). The Sessions footer no longer routes through the manual
-	// three-column path (renderKeymapFooter); the header, condensed-footer, and §11
+	// construction seed). The Sessions footer no longer routes through the former
+	// manual three-column path; the header, condensed-footer, and §11
 	// single-slot notice-band heights are reserved directly here and handed to the
 	// shared applyListSize core. sessionBandHeight is the §11.2 F10 hook: it is one
 	// row while a band owns the slot, zero when it clears, so the list reserves /
@@ -1394,7 +1309,7 @@ func (m *Model) sessionBandHeight() int {
 // termH — the one-row-per-delegate (here, two-line) pagination invariant holds.
 // Both reserves resolve against the SAME width this size-apply was called with, so
 // the budget and the viewProjectList render agree at every call site. The Projects
-// footer no longer routes through the manual three-column path (renderKeymapFooter);
+// footer no longer routes through the former manual three-column path;
 // the header, condensed-footer, and command-pending band heights are reserved
 // directly here.
 func (m *Model) applyProjectListSize(width, height int) {
@@ -1412,15 +1327,21 @@ func (m Model) projectFooterHeight(width int) int {
 	return lipgloss.Height(renderProjectsFooter(width, m.canvasMode, m.colourless))
 }
 
-// projectBandHeight returns the height of the notice band viewProjectList inserts
-// below the section header — currently the command-pending status line (one row in
-// v1). It is reserved out of the list's height budget so the inserted row never
-// pushes the composed view past termH (mirrors sessionBandHeight).
+// projectBandHeight returns the rendered height of the §11.4 command-pending notice
+// SLOT viewProjectList inserts beneath the title separator — the banner PLUS the
+// canvas-painted blank breathing row beneath it (two rows when a command is pending,
+// more if the banner ever wraps). It is reserved out of the list's height budget so
+// the slot never pushes the composed view past termH (mirrors sessionBandHeight).
+//
+// It is measured off renderProjectBandSlot — the SAME block viewProjectList composes
+// — so the reserved row count is, by construction, exactly what is inserted and the
+// two can never drift.
 func (m Model) projectBandHeight() int {
-	if m.commandPending {
-		return 1
+	slot := m.renderProjectBandSlot()
+	if slot == "" {
+		return 0
 	}
-	return 0
+	return lipgloss.Height(slot)
 }
 
 // filteredSessions returns sessions with the current session excluded when inside tmux.
@@ -3759,25 +3680,62 @@ func (m Model) viewProjectList() string {
 	// invariant exact. While the filter input is active the title row IS that input —
 	// leave it untouched so the user sees what they type.
 	listView = m.applyProjectsSectionHeader(listView)
-	// Command-pending status line (`Select project to run: <cmd>`): inserted BELOW
-	// the section-header row of the list block (so it reads after the `Projects`
-	// title, not after the PORTAL wordmark), additively — mirroring the Sessions
-	// notice-band insertion. Suppressed while a modal is up (handled above by the
-	// cleared-canvas return). Its height is reserved by applyProjectListSize.
-	if m.commandPending {
-		statusLine := "Select project to run: " + strings.Join(m.command, " ")
-		listView = insertRowBelowTitle(listView, statusLine)
-	}
 	// §6.3 condensed footer: the §6.3 Projects keymap copy over the shared 1px
-	// border.footer rule, replacing the legacy three-column renderKeymapFooter. Its
-	// height is reserved out of the list's budget by applyProjectListSize (resolved
-	// against the SAME contentWidth) so the composed view stays within termH.
+	// border.footer rule (or the §11.4 command-pending footer while a command is
+	// pending — renderProjectsFooterForFilterState arbitrates). Its height is reserved
+	// out of the list's budget by applyProjectListSize (resolved against the SAME
+	// contentWidth) so the composed view stays within termH.
 	footer := m.renderProjectsFooterForFilterState()
 	// Compose the §3.1 shared PORTAL header block FIRST, above the list — the first
 	// visible chrome. Its height is folded out of the list's budget by
 	// applyProjectListSize (m.headerHeight), so the composed view stays within termH.
 	header := m.renderHeader()
+	// §11.4 command-pending banner: the violet `▌` left-bar + `▸` caret + `Pick a
+	// project to run` + the joined command in an accent.orange chip, on a subtle
+	// tinted band. Like the Sessions notice band (§11) it sits DIRECTLY under the
+	// title separator, ABOVE the section header (line 0 of listView), full-width —
+	// the slot (renderProjectBandSlot) is the band PLUS one canvas-painted blank
+	// breathing row beneath it, so the section header + list shift down by TWO rows.
+	// The slot's height is reserved out of the list's budget by applyProjectListSize
+	// (projectBandHeight, measured off the SAME slot), so the composed view re-pads to
+	// termH and the one-row-per-delegate pagination invariant holds. Suppressed while
+	// a modal is up (handled above by the cleared-canvas return).
+	if slot := m.renderProjectBandSlot(); slot != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, header, slot, listView, footer)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, listView, footer)
+}
+
+// renderProjectCommandBand renders the §11.4 command-pending banner for the model's
+// current width / resolved canvas mode (and the NO_COLOR carve-out), or the empty
+// string when no command is pending. It is the single render entry point the band
+// SLOT (renderProjectBandSlot) composes beneath the title separator, and from which
+// the slot's height is measured, so the budget and the render agree.
+func (m Model) renderProjectCommandBand() string {
+	if !m.commandPending {
+		return ""
+	}
+	return renderCommandBand(m.command, m.contentWidth(), m.canvasMode, m.colourless)
+}
+
+// renderProjectBandSlot renders the FULL §11.4 Projects notice slot for the model's
+// current width / canvas mode — the command-pending banner PLUS one canvas-painted
+// full-width blank row BENEATH it (the band→section-header breathing gap), or the
+// empty string when no command is pending. Mirrors renderSessionBandSlot: the band
+// stays flush under the title separator, the blank separates it from the section
+// header (line 0 of listView), so the slot composes as band → blank → listView.
+//
+// This is the SINGLE source of truth for what the slot inserts: both viewProjectList
+// (composition) and projectBandHeight (the F10 height reserve) consume it, so the
+// reserved row count is, by construction, exactly the rendered height of what is
+// composed — the two can never drift.
+func (m Model) renderProjectBandSlot() string {
+	band := m.renderProjectCommandBand()
+	if band == "" {
+		return ""
+	}
+	blank := blankCanvasRow(m.contentWidth(), m.canvasMode, m.colourless)
+	return lipgloss.JoinVertical(lipgloss.Left, band, blank)
 }
 
 // applyProjectsSectionHeader swaps the §6 restyled Projects section header in place
@@ -3840,6 +3798,13 @@ func (m Model) renderProjectsFooterForFilterState() string {
 		// not "attach" — do not leak the Sessions filterAppliedFooter copy here.
 		return renderProjectsFilterAppliedFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	default:
+		// §11.4: the command-pending Projects footer (`⏎ run here · n run in cwd ·
+		// esc cancel`) replaces the standard §6.3 condensed footer while a command is
+		// pending — but only outside an active filter mode (the contextual filter
+		// footers above still own the filter states).
+		if m.commandPending {
+			return renderCommandPendingFooter(m.contentWidth(), m.canvasMode, m.colourless)
+		}
 		return renderProjectsFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	}
 }
@@ -3932,10 +3897,9 @@ func (m Model) viewSessionList() string {
 	// applySessionListSize (sessionBandHeight, measured off the SAME slot), so the
 	// composed view re-pads to termH and the §3.5 / §4.1 one-row-per-delegate
 	// pagination invariant (the §11.2 F10 recompute) holds. Composing it between the
-	// header and the list (not inside the list, where the former dual
-	// insertRowBelowTitle calls placed it) is what lands it ABOVE the section header
-	// per the §11 placement rule. The blank is below ONLY — the band stays flush
-	// under the title separator.
+	// header and the list (not inside the list, where the former in-list inserts
+	// placed it) is what lands it ABOVE the section header per the §11 placement
+	// rule. The blank is below ONLY — the band stays flush under the title separator.
 	if slot := m.renderSessionBandSlot(); slot != "" {
 		return lipgloss.JoinVertical(lipgloss.Left, header, slot, listView, footer)
 	}
@@ -4053,19 +4017,6 @@ func (m Model) visibleSessionRowCount() int {
 // the render agree exactly.
 func (m Model) headerHeight(width int) int {
 	return lipgloss.Height(renderHeaderBlock(width, m.canvasMode, m.colourless))
-}
-
-// insertRowBelowTitle inserts row between the first line (the list's
-// title / filter input row) and the remainder of listView, preserving the
-// rest byte-for-byte. A single-line (degenerate) listView appends the row
-// below instead. Shared by the persistent By-Tag signpost and the transient
-// flash so both use the identical additive-insertion mechanic.
-func insertRowBelowTitle(listView, row string) string {
-	idx := strings.IndexByte(listView, '\n')
-	if idx < 0 {
-		return listView + "\n" + row
-	}
-	return listView[:idx+1] + row + "\n" + listView[idx+1:]
 }
 
 // replaceListBodyWithNoMatches swaps the list BODY (every row below the

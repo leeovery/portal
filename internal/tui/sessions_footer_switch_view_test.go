@@ -88,12 +88,12 @@ func TestProjectsFooter_NoSwitchViewHint(t *testing.T) {
 
 func TestCommandPendingFooter_NoSwitchViewHint(t *testing.T) {
 	// command-pending lands on the projects page; the toggle is a
-	// sessions-page action and must not leak into command-pending mode.
+	// sessions-page action and must not leak into the §11.4 command-pending footer.
 	m := flashModelWithSessions("alpha-row")
 	m.activePage = PageProjects
 	m.commandPending = true
 
-	footer := renderKeymapFooter(&m.projectList, projectFooterBindings(&m.projectList, true))
+	footer := footerVisible(renderCommandPendingFooter(m.contentWidth(), m.canvasMode, m.colourless))
 	if strings.Contains(footer, "switch view") {
 		t.Errorf("command-pending footer must NOT contain %q, got:\n%s", "switch view", footer)
 	}

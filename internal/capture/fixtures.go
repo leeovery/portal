@@ -29,6 +29,10 @@ type Fixture struct {
 	// (empty for every fixture that does not capture the flash). It is the only way
 	// to render the otherwise-transient flash in the inert capture harness.
 	initialFlash string
+	// command seeds the §11.4 command-pending mode (empty for every fixture that is
+	// not the command-pending capture). When non-empty, tui.Build applies WithCommand
+	// so the model opens on the Projects page with the command-pending banner shown.
+	command []string
 }
 
 // Deps maps the fixture onto the shared tui.Deps seam set. Every tmux seam is a
@@ -52,6 +56,7 @@ func (f *Fixture) Deps() tui.Deps {
 		// ModePersister is nil so an `s`-toggle during a capture writes nowhere.
 		InitialMode:  f.initialMode,
 		InitialFlash: f.initialFlash,
+		Command:      f.command,
 		CWD:          "/home/user",
 	}
 }
@@ -78,6 +83,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return sessionsNoTagsSignpostFixture(), nil
 	case "projects":
 		return projectsFixture(), nil
+	case "projects-command-pending":
+		return projectsCommandPendingFixture(), nil
 	default:
 		return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 	}
@@ -89,7 +96,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -391,4 +398,27 @@ func projectsFixture() *Fixture {
 		}},
 		initialMode: prefs.ModeFlat,
 	}
+}
+
+// projectsCommandPendingFixture builds the deterministic "projects-command-pending"
+// fixture: the SAME rich project store as the `projects` fixture, but built with a
+// pending command so m.commandPending is true — the model opens directly on the
+// command-pending Projects page (WithCommand sets PageProjects), rendering the §11.4
+// banner (violet `▌` left-bar + `▸ Pick a project to run` + the command in an
+// accent.orange chip) over the FULL Projects chrome (green `Projects 14` header +
+// `/ to filter`), with the swapped `⏎ run here · n run in cwd · esc cancel` footer.
+// Mirrors testdata/vhs/reference/projects-command-pending-mv.png.
+//
+// The seeded command is a GENERIC build command (`npm run dev`) — Portal's
+// run-a-command mechanism is tool-agnostic, so no Portal artifact references any
+// specific tool. The reference frame's chip shows a different example command; only
+// the chip's command text differs (generic vs the frame's example) — the banner
+// structure, colours, chrome, and footer match. Like the other fixtures it NEVER
+// opens a tmux server or touches ~/.config/portal: the project store is the
+// in-memory fake.
+func projectsCommandPendingFixture() *Fixture {
+	fx := projectsFixture()
+	fx.name = "projects-command-pending"
+	fx.command = []string{"npm", "run", "dev"}
+	return fx
 }

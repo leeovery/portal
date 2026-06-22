@@ -10,8 +10,8 @@ import (
 // The §3.4 condensed Sessions footer: a SINGLE row of the Core keymap keys on
 // the left (↑/↓ navigate · enter attach · / filter · space preview · s switch
 // view · x projects) with a right-aligned `? help` hint pinned to the content
-// width, over a 1px border.footer top rule. It replaces the manual three-column
-// keymap footer (renderKeymapFooter) for Sessions; the help-only keys
+// width, over a 1px border.footer top rule. It replaces the former manual
+// three-column keymap footer for Sessions; the help-only keys
 // (n/r/k/q/Ctrl+↑/↓) live in the ? help modal (Phase 3), not the footer.
 //
 // The footer is the FIRST consumer of the §12.1 keymap descriptor (task 2-1,
@@ -65,12 +65,45 @@ func renderSessionsFooter(width int, mode theme.Mode, colourless bool) string {
 // renderProjectsFooter renders the §6.3 condensed Projects footer
 // (`⏎ new session` · `x sessions` · `e edit` · `/ filter`, right-aligned
 // `? help`) through the SAME condensed-footer machinery as the Sessions footer,
-// driven by the projectsKeymap descriptor — replacing the legacy three-column
-// renderKeymapFooter for the Projects page. Same two-row shape (the shared 1px
+// driven by the projectsKeymap descriptor — replacing the former three-column
+// keymap footer for the Projects page. Same two-row shape (the shared 1px
 // border.footer top rule + one key row), so it is height-neutral against the
 // Sessions footer's reserved budget.
 func renderProjectsFooter(width int, mode theme.Mode, colourless bool) string {
 	return renderCondensedFooter(projectsKeymap(), width, mode, colourless)
+}
+
+// renderCommandPendingFooter renders the §11.4 command-pending Projects footer:
+// `⏎ run here · n run in cwd · esc cancel` (left cluster) + the right-aligned
+// `? help` anchor, over the shared 1px border.footer top rule. The left cluster
+// entries are derived from commandPendingHelpKeys() — the single binding source
+// (§11.4) — mapped to MV chrome (key glyphs accent.blue, labels text.detail, the
+// `enter` binding shown as the `⏎` glyph). It routes through the shared
+// renderFilterFooter machinery so the `? help` anchor + the two-row structure stay
+// byte-consistent with the standard / filter footers; only the entries differ.
+func renderCommandPendingFooter(width int, mode theme.Mode, colourless bool) string {
+	return renderFilterFooter(commandPendingFooterEntries(), width, mode, colourless)
+}
+
+// commandPendingFooterEntries maps the §11.4 binding source (commandPendingHelpKeys)
+// to the filter-footer entry shape: each binding's help Desc becomes the label and
+// its help Key becomes the glyph, with the `enter` key shown as the `⏎` glyph (the
+// terse footer form, matching the modal footers). Every key glyph is accent.blue per
+// the MV footer convention (§3.4 / §8.4); labels render in text.detail.
+func commandPendingFooterEntries() []filterFooterEntry {
+	entries := make([]filterFooterEntry, 0, len(commandPendingHelpKeys()))
+	for _, b := range commandPendingHelpKeys() {
+		h := b.Help()
+		glyph := h.Key
+		if glyph == "enter" {
+			glyph = "⏎"
+		}
+		entries = append(entries, filterFooterEntry{
+			Key:   []keyGlyph{{glyph, theme.MV.AccentBlue}},
+			Label: h.Desc,
+		})
+	}
+	return entries
 }
 
 // renderCondensedFooter is the shared §3.4 / §6.3 condensed-footer renderer for a

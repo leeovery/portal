@@ -94,7 +94,7 @@ func TestRenderNoticeBand_LeftBarInRoleColour(t *testing.T) {
 	}{
 		{"warning/orange", bandWarning, theme.MV.AccentOrange, theme.MV.TextOnWarning},
 		{"success/green", bandSuccess, theme.MV.StateGreen, theme.MV.TextStrong},
-		{"info/violet", bandInfo, theme.MV.AccentViolet, theme.MV.TextStrong},
+		{"info/violet", bandInfo, theme.MV.AccentViolet, theme.MV.TextOnSelection},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			band := renderNoticeBand(tc.role, msg, tc.onBandTok, w, theme.Dark, false)
@@ -138,7 +138,7 @@ func TestRenderNoticeBand_NoColor(t *testing.T) {
 		w   = 60
 		msg = "nocolor-band-probe"
 	)
-	band := renderNoticeBand(bandInfo, msg, theme.MV.TextStrong, w, theme.Dark, true)
+	band := renderNoticeBand(bandInfo, msg, theme.MV.TextOnSelection, w, theme.Dark, true)
 
 	// Bar glyph + message survive.
 	stripped := ansi.Strip(band)
@@ -387,7 +387,7 @@ const longBandMessage = byTagSignpostText
 // width (no right-edge overflow — the §11 narrow-terminal fix).
 func TestNoticeBand_WrapsLongMessage(t *testing.T) {
 	const w = 30
-	band := renderNoticeBand(bandInfo, longBandMessage, theme.MV.TextStrong, w, theme.Dark, false)
+	band := renderNoticeBand(bandInfo, longBandMessage, theme.MV.TextOnSelection, w, theme.Dark, false)
 
 	lines := strings.Split(band, "\n")
 	if len(lines) < 2 {

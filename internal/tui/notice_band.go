@@ -40,12 +40,19 @@ const (
 	flashSuccessGlyph = "✓"
 )
 
-// noticeBandRole is one of the three §11 MV notice-band role variants. The role
-// selects the left-bar colour token:
+// noticeBandRole is one of the §11 MV notice-band role variants. The role selects
+// the left-bar colour token and the band's tint:
 //
-//   - bandWarning → accent.orange (transient / warning flash)
-//   - bandSuccess → state.green   (transient / success flash)
-//   - bandInfo    → accent.violet (persistent mode / info band)
+//   - bandWarning → accent.orange (transient / warning flash, bg.warning tint)
+//   - bandSuccess → state.green   (transient / success flash, bg.warning tint)
+//   - bandInfo    → accent.violet (persistent §11.3 info band, bg.selection tint)
+//   - bandCommand → accent.violet (persistent §11.4 command-pending banner, bg.selection tint)
+//
+// The two INFO bands (bandInfo §11.3 signpost, bandCommand §11.4 command-pending)
+// are the SAME info-message element: an identical violet `▌` left-bar on the SAME
+// bg.selection tint. They share one render base (renderNoticeBand) so their bar +
+// tint can never drift; bandCommand layers a `▸` caret + an orange command chip on
+// top (renderCommandBand). The flash roles keep their own bg.warning/glyph treatment.
 type noticeBandRole int
 
 const (
@@ -53,9 +60,25 @@ const (
 	bandWarning noticeBandRole = iota
 	// bandSuccess is the transient success flash role — a state.green left-bar.
 	bandSuccess
-	// bandInfo is the persistent mode/info band role — an accent.violet left-bar.
+	// bandInfo is the persistent §11.3 info band role — an accent.violet left-bar on
+	// the subtle bg.selection tint (the SAME tint as the §11.4 command-pending band:
+	// the signpost and the command banner are one info-message element).
 	bandInfo
+	// bandCommand is the persistent §11.4 command-pending banner role — an
+	// accent.violet left-bar on the bg.selection tint, identical to bandInfo's base;
+	// it layers a `▸` caret + an orange command chip on top (renderCommandBand).
+	bandCommand
 )
+
+// commandBandCaret is the §11.4 `▸` lead glyph that follows the `▌` left-bar on the
+// command-pending banner, just before the fixed text. It survives the NO_COLOR
+// carve-out (its position/glyph carry the banner's intent colourlessly).
+const commandBandCaret = "▸"
+
+// commandBandText is the spec-exact §11.4 fixed banner wording, sourced once here
+// as the single source of truth. The joined pending command renders beside it in an
+// accent.orange chip (renderCommandBand).
+const commandBandText = "Pick a project to run"
 
 // barToken returns the §2.9 role token whose foreground paints the role's
 // left-bar. No literal hex survives here — the colour is sourced from the closed
@@ -66,7 +89,7 @@ func (r noticeBandRole) barToken() theme.Token {
 		return theme.MV.AccentOrange
 	case bandSuccess:
 		return theme.MV.StateGreen
-	default: // bandInfo
+	default: // bandInfo, bandCommand
 		return theme.MV.AccentViolet
 	}
 }
@@ -74,14 +97,20 @@ func (r noticeBandRole) barToken() theme.Token {
 // tintToken returns the §2.9 surface token whose background fills the band's row.
 // The transient flashes (warning AND success) sit on the single co-tuned
 // bg.warning tint (§2.9 — no invented success-specific tint; the bar colour + ✓
-// glyph carry the success distinction, §11.2). The persistent info band carries
-// NO tint: it renders on the owned canvas (Canvas), matching the §11.3 signpost's
-// existing flush-on-canvas treatment. The pairing is closed-vocabulary only.
+// glyph carry the success distinction, §11.2). The TWO persistent info bands —
+// bandInfo (§11.3 signpost) AND bandCommand (§11.4 command-pending) — share the
+// SAME violet-anchored bg.selection surface, because they are one info-message
+// element (the signpost and the command banner must look identical at the base:
+// same `▌` bar, same tint). This single shared mapping is the regression guard
+// that keeps the two info bands from drifting apart. The pairing is
+// closed-vocabulary only (no invented token, no literal hex).
 func (r noticeBandRole) tintToken() theme.Token {
-	if r == bandInfo {
-		return theme.MV.Canvas
+	switch r {
+	case bandInfo, bandCommand:
+		return theme.MV.BgSelection
+	default: // bandWarning, bandSuccess
+		return theme.MV.BgWarning
 	}
-	return theme.MV.BgWarning
 }
 
 // statusGlyph returns the §11.2 status glyph that follows the bar on the role's
@@ -100,11 +129,11 @@ func (r noticeBandRole) statusGlyph() string {
 }
 
 // noticeBandTintStyle returns the band's BACKGROUND-fill style: Background(tint)
-// for the role's surface token (bg.warning for the flashes, the owned canvas for
-// the info band), or a bare style under the NO_COLOR carve-out (§2.5) so the band
+// for the role's surface token (bg.warning for the flashes, bg.selection for the
+// info bands), or a bare style under the NO_COLOR carve-out (§2.5) so the band
 // renders on the terminal's native bg. Every band cell (bar, glyph, message, the
 // gaps, and the right pad) is painted through this so the whole row is one
-// uniform tint with no terminal-bg island and no canvas island mid-band.
+// uniform tint with no terminal-bg island.
 func noticeBandTintStyle(tint theme.Token, mode theme.Mode, colourless bool) lipgloss.Style {
 	if colourless {
 		return lipgloss.NewStyle()
@@ -125,14 +154,41 @@ func noticeBandFgStyle(fg, tint theme.Token, mode theme.Mode, colourless bool) l
 		Background(tint.ColorFor(mode))
 }
 
+// bandBase is the §11 info-band base treatment shared by EVERY band render path:
+// the role's resolved tint token plus the two pre-rendered cells that paint that
+// tint — the `▌` left-bar (in the role colour) and a single tint-painted gap cell.
+// Both renderNoticeBand (the §11.3 signpost + the §11.2 flashes) and
+// renderCommandBand (the §11.4 command-pending banner) derive their bar + tint from
+// here, so the two info bands (signpost, command) can never diverge in bar glyph,
+// bar colour, or tint — there is exactly ONE place that assembles them.
+type bandBase struct {
+	tint theme.Token // the role's surface tint (bg.selection for the info bands)
+	bar  string      // the `▌` left-bar cell, painted in the role colour on the tint
+	gap  string      // a single tint-painted space cell
+}
+
+// newBandBase builds the shared info-band base for a role: the tint token + the
+// tint-painted `▌` bar and gap cells. The NO_COLOR carve-out (§2.5) is honoured by
+// the underlying style helpers, so under colourless the bar/gap carry no SGR.
+func newBandBase(role noticeBandRole, mode theme.Mode, colourless bool) bandBase {
+	tint := role.tintToken()
+	return bandBase{
+		tint: tint,
+		bar:  noticeBandFgStyle(role.barToken(), tint, mode, colourless).Render(noticeBarGlyph),
+		gap:  noticeBandTintStyle(tint, mode, colourless).Render(" "),
+	}
+}
+
 // renderNoticeBand renders the §11 shared notice band: a far-left `▌` left-bar in
 // the role colour, then — for the §11.2 flashes — a `⚠`/`✓` status glyph, then the
 // message in the supplied on-band text token, all on the role's tint and padded to
 // exactly width cells so the band occupies the full row like the section header it
 // sits above. The flash bands (warning / success) fill the row with the bg.warning
 // tint (§11.2); the persistent info band (§11.3 signpost) carries no status glyph
-// and renders on the owned canvas (its tint token is Canvas), preserving its
-// existing flush treatment.
+// and sits on the bg.selection tint — the SAME tint as the §11.4 command-pending
+// banner, since the two are one info-message element. This is the shared base both
+// info bands render through (renderCommandBand layers its caret + chip on top), so
+// the bar + tint can never diverge between them.
 //
 // The message WRAPS to the available content width (= width − the prefix width: the
 // `▌` bar + its gap + (for flashes) the `⚠`/`✓` glyph + its gap). When the message
@@ -146,8 +202,8 @@ func noticeBandFgStyle(fg, tint theme.Token, mode theme.Mode, colourless bool) l
 // no terminal-bg island on any line.
 //
 // onBandText is the §2.9 text token the consuming task selects for the message
-// (e.g. text.on-warning for the flashes, text.strong for the signpost). The role
-// selects the tint and the status glyph (role.tintToken / role.statusGlyph).
+// (e.g. text.on-warning for the flashes, text.on-selection for the signpost). The
+// role selects the tint and the status glyph (role.tintToken / role.statusGlyph).
 //
 // Under the NO_COLOR carve-out (§2.5) the bar colour, the on-band text hue, and
 // the tint all drop; the `▌` bar, its position, the `⚠`/`✓` glyph (line 1), and the
@@ -156,10 +212,10 @@ func noticeBandFgStyle(fg, tint theme.Token, mode theme.Mode, colourless bool) l
 // on every wrapped line.
 func renderNoticeBand(role noticeBandRole, message string, onBandText theme.Token, width int, mode theme.Mode, colourless bool) string {
 	w := headerWidthOrFallback(width)
-	tint := role.tintToken()
-	gap := noticeBandTintStyle(tint, mode, colourless).Render(" ")
-
-	bar := noticeBandFgStyle(role.barToken(), tint, mode, colourless).Render(noticeBarGlyph)
+	base := newBandBase(role, mode, colourless)
+	tint := base.tint
+	gap := base.gap
+	bar := base.bar
 	fg := noticeBandFgStyle(onBandText, tint, mode, colourless)
 
 	// Prefix laid out before the message on line 1: the `▌` bar + gap, plus (for the
@@ -213,6 +269,58 @@ func renderNoticeBand(role noticeBandRole, message string, onBandText theme.Toke
 	return strings.Join(lines, "\n")
 }
 
+// commandChipPadX is the §11.4 command chip's horizontal padding (cells each side)
+// inside its tinted box — so the chip reads `│ npm run dev │` compactly, matching
+// the reference's compact orange command chip.
+const commandChipPadX = 1
+
+// renderCommandBand renders the §11.4 command-pending banner: the §11 info-band
+// BASE (the bandCommand role's `▌` violet left-bar on the bg.selection tint, sourced
+// from the SAME newBandBase used by the §11.3 signpost so the bar + tint cannot
+// diverge between the two info bands) WITH a `▸` violet caret + the fixed `Pick a
+// project to run` text (text.on-selection) + the joined pending command in an
+// accent.orange chip layered on, padded to exactly width cells so the band occupies
+// the full row like the section header it sits above.
+//
+// The chip is a small box treatment (§11.4): the joined command in accent.orange on
+// a bg.warning surface fill with one cell of horizontal padding each side, so it
+// reads as a distinct orange chip ON the violet-tinted band. Both tints are existing
+// §2.9 surface tokens (no invented token, no literal hex).
+//
+// Under the NO_COLOR carve-out (§2.5) the bar/caret/text/chip colours and both tints
+// drop; the `▌` bar, the `▸` caret, the text, and the chip command survive on the
+// terminal's native fg/bg, so the chip degrades to a colourless padded box still
+// distinguishable by position (§2.2 — never colour-only).
+func renderCommandBand(command []string, width int, mode theme.Mode, colourless bool) string {
+	w := headerWidthOrFallback(width)
+	base := newBandBase(bandCommand, mode, colourless)
+
+	caret := noticeBandFgStyle(bandCommand.barToken(), base.tint, mode, colourless).Render(commandBandCaret)
+	text := noticeBandFgStyle(theme.MV.TextOnSelection, base.tint, mode, colourless).Render(commandBandText)
+	chip := renderCommandChip(strings.Join(command, " "), mode, colourless)
+
+	row := lipgloss.JoinHorizontal(lipgloss.Top, base.bar, base.gap, caret, base.gap, text, base.gap, chip)
+	return noticeBandPadRight(row, lipgloss.Width(row), w, base.tint, mode, colourless)
+}
+
+// renderCommandChip renders the §11.4 command chip: the joined command in
+// accent.orange on a bg.warning surface fill (the orange-anchored subtle tint) with
+// commandChipPadX cells of horizontal padding each side, so it reads as a distinct
+// orange box ON the violet-tinted band. Under NO_COLOR all colours + the fill drop,
+// leaving a padded colourless box distinguishable by position.
+func renderCommandChip(command string, mode theme.Mode, colourless bool) string {
+	if colourless {
+		pad := strings.Repeat(" ", commandChipPadX)
+		return pad + command + pad
+	}
+	chip := lipgloss.NewStyle().
+		Foreground(theme.MV.AccentOrange.ColorFor(mode)).
+		Background(theme.MV.BgWarning.ColorFor(mode)).
+		Padding(0, commandChipPadX).
+		Render(command)
+	return chip
+}
+
 // noticeBandPadRight pads the assembled band row out to exactly w cells with
 // tint-painted spaces, so the band carries its tint on every cell to the right
 // edge with no terminal-bg island. A row already at/over w is returned unchanged
@@ -235,11 +343,10 @@ func noticeBandPadRight(seg string, segWidth, w int, tint theme.Token, mode them
 //     the warning (bandWarning) or success (bandSuccess) styling (§11.2).
 //   - byTagSignpost     → the persistent no-tags info band (bandInfo) — §11.3.
 //
-// At most one is ever returned, so the dual independent insertRowBelowTitle calls
-// collapse to a single arbitrated insert (no double-band). The role/message the
-// arbiter returns are consumed by viewSessionList's single insertion step; the
-// on-band text token is selected at the render site so each band keeps its
-// existing on-band colour.
+// At most one is ever returned, so the two independent band sources collapse to a
+// single arbitrated insert (no double-band). The role/message the arbiter returns
+// are consumed by viewSessionList's single insertion step; the on-band text token
+// is selected at the render site so each band keeps its existing on-band colour.
 func (m Model) activeNoticeBand() (role noticeBandRole, message string, ok bool) {
 	if m.flashText != "" {
 		return flashBandRole(m.flashKind), m.flashText, true
@@ -262,11 +369,12 @@ func flashBandRole(kind flashKind) noticeBandRole {
 
 // noticeBandOnBandText selects the §2.9 on-band text token for the arbitrated
 // band role. The warning/success flash carries text.on-warning; the persistent
-// info signpost carries text.strong — preserving each band's existing on-band
-// colour as the arbiter funnels both through the shared primitive.
+// info signpost carries text.on-selection — the bright white co-tuned for the
+// bg.selection tint the info band sits on (the same token the selected
+// session-row name uses on that surface), so the message stays legible.
 func noticeBandOnBandText(role noticeBandRole) theme.Token {
 	if role == bandInfo {
-		return theme.MV.TextStrong
+		return theme.MV.TextOnSelection
 	}
 	return theme.MV.TextOnWarning
 }

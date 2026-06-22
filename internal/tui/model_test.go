@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
@@ -966,10 +967,13 @@ func TestInitialFilter(t *testing.T) {
 		// applies every produced message so the project load still drives render.
 		updatedModel := applyInit(m)
 
-		view := updatedModel.View().Content
-		// Should show command header (command-pending mode)
-		if !strings.Contains(view, "Select project to run: claude") {
-			t.Errorf("expected command-pending mode header, got:\n%s", view)
+		// Should show the §11.4 command-pending banner (Pick a project to run + chip).
+		visible := ansi.Strip(updatedModel.View().Content)
+		if !strings.Contains(visible, "Pick a project to run") {
+			t.Errorf("expected the §11.4 command-pending banner, got:\n%s", visible)
+		}
+		if !strings.Contains(visible, "claude") {
+			t.Errorf("expected the command in the banner chip, got:\n%s", visible)
 		}
 		// Initial filter is applied to project list and consumed
 		if updatedModel.ProjectListFilterState() != list.FilterApplied {
@@ -2026,9 +2030,17 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View().Content
-		if !strings.Contains(view, "Select project to run: claude") {
-			t.Errorf("expected 'Select project to run: claude' status line, got:\n%s", view)
+		// §11.4: the banner reads `Pick a project to run` + the command in an orange
+		// chip (the legacy plain `Select project to run: <cmd>` line is gone).
+		visible := ansi.Strip(model.View().Content)
+		if !strings.Contains(visible, "Pick a project to run") {
+			t.Errorf("expected the §11.4 banner text 'Pick a project to run', got:\n%s", visible)
+		}
+		if !strings.Contains(visible, "claude") {
+			t.Errorf("expected the command 'claude' in the banner chip, got:\n%s", visible)
+		}
+		if strings.Contains(visible, "Select project to run") {
+			t.Errorf("legacy plain status line must be gone, got:\n%s", visible)
 		}
 	})
 
@@ -2051,9 +2063,10 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View().Content
-		if !strings.Contains(view, "Select project to run: claude --resume --model opus") {
-			t.Errorf("expected full command in status line, got:\n%s", view)
+		// §11.4: the multi-arg command joins on spaces into the orange chip.
+		visible := ansi.Strip(model.View().Content)
+		if !strings.Contains(visible, "claude --resume --model opus") {
+			t.Errorf("expected the joined command in the banner chip, got:\n%s", visible)
 		}
 	})
 
@@ -2233,10 +2246,10 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View().Content
-		expected := "Select project to run: " + longCmd
-		if !strings.Contains(view, expected) {
-			t.Errorf("expected full command in status line %q, got:\n%s", expected, view)
+		// §11.4: the full command renders in the chip without truncation.
+		visible := ansi.Strip(model.View().Content)
+		if !strings.Contains(visible, longCmd) {
+			t.Errorf("expected full command %q in the banner chip (no truncation), got:\n%s", longCmd, visible)
 		}
 	})
 
@@ -2257,12 +2270,17 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View().Content
-		if !strings.Contains(view, "Select project to run: claude") {
-			t.Errorf("expected status line in empty state, got:\n%s", view)
+		// §11.4: the command banner shows over the empty-projects state too (the
+		// banner sits above the section header, the empty state is the list body).
+		visible := ansi.Strip(model.View().Content)
+		if !strings.Contains(visible, "Pick a project to run") {
+			t.Errorf("expected the §11.4 banner text in empty state, got:\n%s", visible)
 		}
-		if !strings.Contains(view, "No saved projects") {
-			t.Errorf("expected empty projects message, got:\n%s", view)
+		if !strings.Contains(visible, "claude") {
+			t.Errorf("expected the command in the banner chip in empty state, got:\n%s", visible)
+		}
+		if !strings.Contains(visible, "No saved projects") {
+			t.Errorf("expected empty projects message, got:\n%s", visible)
 		}
 	})
 
@@ -2392,14 +2410,11 @@ func TestCommandPendingMode(t *testing.T) {
 		}
 	})
 
-	// The §6.3 reskin replaced the legacy three-column footer (which varied its
-	// copy by command-pending mode) with the FIXED condensed Projects footer copy
-	// (`⏎ new session · x sessions · e edit · / filter · ? help`). The help-only keys
-	// (n new in cwd, d delete, q quit) and the command-pending `run here` variation
-	// are deferred to the ? help modal / the formal Projects keymap descriptor
-	// (task 3-3, Phase 3). The footer no longer differentiates command-pending mode,
-	// so the page renders the same §6.3 copy whether or not a command is pending.
-	t.Run("condensed footer renders the §6.3 copy in command-pending mode", func(t *testing.T) {
+	// §11.4 reskin (Phase 4): the command-pending Projects footer SWAPS to
+	// `⏎ run here · n run in cwd · esc cancel` (+ the right-aligned `? help` anchor),
+	// replacing the standard §6.3 copy while a command is pending. q quit stays
+	// deferred to the ? help modal.
+	t.Run("command-pending footer swaps to the §11.4 copy", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -2420,19 +2435,19 @@ func TestCommandPendingMode(t *testing.T) {
 		// Set wide width so the condensed footer renders fully (no §2.7 truncation).
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 
-		view := model.View().Content
-		// The §6.3 condensed copy renders (label runs are contiguous; the key glyph
-		// and its label are separate SGR runs in the raw view, so assert the labels).
-		for _, want := range []string{"new session", "sessions", "edit", "filter", "help"} {
-			if !strings.Contains(view, want) {
-				t.Errorf("condensed footer missing §6.3 entry %q, got:\n%s", want, view)
+		visible := ansi.Strip(model.View().Content)
+		// The §11.4 swapped copy renders (labels assert each entry; the right-aligned
+		// `? help` anchor survives).
+		for _, want := range []string{"run here", "run in cwd", "cancel", "help"} {
+			if !strings.Contains(visible, want) {
+				t.Errorf("command-pending footer missing §11.4 entry %q, got:\n%s", want, visible)
 			}
 		}
-		// The legacy three-column-only copy (n new in cwd, d delete, run here) is
-		// deferred to the ? help modal (Phase 3) — it must NOT leak into the footer.
-		for _, banned := range []string{"new in cwd", "delete", "run here"} {
-			if strings.Contains(view, banned) {
-				t.Errorf("condensed footer leaked deferred copy %q, got:\n%s", banned, view)
+		// The standard §6.3 copy must NOT leak in command-pending mode, and q quit
+		// stays deferred to the ? help modal.
+		for _, banned := range []string{"new session", "new in cwd", "quit"} {
+			if strings.Contains(visible, banned) {
+				t.Errorf("command-pending footer leaked non-§11.4 copy %q, got:\n%s", banned, visible)
 			}
 		}
 	})
@@ -5636,9 +5651,13 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View().Content
-		if !strings.Contains(view, "Select project to run: claude") {
-			t.Errorf("expected status line 'Select project to run: claude', got:\n%s", view)
+		// §11.4: the banner reads `Pick a project to run` + the command in the chip.
+		visible := ansi.Strip(model.View().Content)
+		if !strings.Contains(visible, "Pick a project to run") {
+			t.Errorf("expected the §11.4 banner text, got:\n%s", visible)
+		}
+		if !strings.Contains(visible, "claude") {
+			t.Errorf("expected the command in the banner chip, got:\n%s", visible)
 		}
 	})
 
@@ -5689,9 +5708,10 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View().Content
-		if !strings.Contains(view, "Select project to run: claude --resume --model opus") {
-			t.Errorf("expected multi-word command in status line, got:\n%s", view)
+		// §11.4: the multi-word command joins on spaces into the orange chip.
+		visible := ansi.Strip(model.View().Content)
+		if !strings.Contains(visible, "claude --resume --model opus") {
+			t.Errorf("expected the joined multi-word command in the banner chip, got:\n%s", visible)
 		}
 	})
 
@@ -5715,10 +5735,10 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View().Content
-		expected := "Select project to run: " + longCmd
-		if !strings.Contains(view, expected) {
-			t.Errorf("expected full command in status line %q, got:\n%s", expected, view)
+		// §11.4: the full command renders in the chip without truncation.
+		visible := ansi.Strip(model.View().Content)
+		if !strings.Contains(visible, longCmd) {
+			t.Errorf("expected full command %q in the banner chip (no truncation), got:\n%s", longCmd, visible)
 		}
 	})
 
@@ -5748,7 +5768,10 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		}
 	})
 
-	t.Run("status line appears after title line not before", func(t *testing.T) {
+	// §11.4 placement: the banner sits DIRECTLY under the title separator and ABOVE
+	// the green `Projects` section header (the §11 convention), so the banner text
+	// appears BEFORE the `Projects` title in the rendered view.
+	t.Run("banner appears under the separator, above the Projects section header", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -5768,18 +5791,18 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View().Content
-		titleIdx := strings.Index(view, "Projects")
-		statusIdx := strings.Index(view, "Select project to run: claude")
+		visible := ansi.Strip(model.View().Content)
+		bannerIdx := strings.Index(visible, "Pick a project to run")
+		titleIdx := strings.Index(visible, "Projects")
+		if bannerIdx < 0 {
+			t.Fatalf("banner text not found in view:\n%s", visible)
+		}
 		if titleIdx < 0 {
-			t.Fatalf("title 'Projects' not found in view:\n%s", view)
+			t.Fatalf("title 'Projects' not found in view:\n%s", visible)
 		}
-		if statusIdx < 0 {
-			t.Fatalf("status line not found in view:\n%s", view)
-		}
-		if statusIdx < titleIdx {
-			t.Errorf("status line (pos %d) appears before title (pos %d); expected status after title.\nView:\n%s",
-				statusIdx, titleIdx, view)
+		if bannerIdx > titleIdx {
+			t.Errorf("banner (pos %d) must appear before the Projects section header (pos %d) — §11.4 places it above the header.\nView:\n%s",
+				bannerIdx, titleIdx, visible)
 		}
 	})
 }

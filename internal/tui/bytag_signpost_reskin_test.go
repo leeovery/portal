@@ -14,10 +14,11 @@ import (
 // Tests for task 4-3: the "No tags yet" signpost reskin. The By-Tag zero-tags
 // signpost now routes through the §11 single-slot notice-band primitive as a
 // persistent violet INFO band — an accent.violet `▌` left-bar + the message in
-// text.strong on the owned canvas (NO tint, §11.3) — owning the slot while
-// m.byTagSignpost holds, yielding it to a transient flash (§11.2) for the flash's
-// duration, then returning. The gate (By-Tag + zero tags anywhere), the flat-items
-// arm, and the §5.4 zero-pane-reads invariant are preserved byte-for-byte.
+// text.on-selection on the SAME bg.selection tint as the §11.4 command-pending
+// banner (the two are one info-message element) — owning the slot while m.byTagSignpost
+// holds, yielding it to a transient flash (§11.2) for the flash's duration, then
+// returning. The gate (By-Tag + zero tags anywhere), the flat-items arm, and the
+// §5.4 zero-pane-reads invariant are preserved byte-for-byte.
 
 // signpostModel builds a Sessions-page model in By-Tag mode with zero-tag
 // projects (so the signpost shows over the flat list) at 80x24 so the rendered
@@ -41,8 +42,9 @@ func signpostModel(t *testing.T) Model {
 }
 
 // TestSignpostReskin_VioletInfoBand asserts the signpost renders as the §11.3
-// persistent INFO band: an accent.violet `▌` left-bar + the message in text.strong,
-// on the owned canvas (no bg.warning flash tint).
+// persistent INFO band: an accent.violet `▌` left-bar + the message in
+// text.on-selection, on the bg.selection info-band tint (the SAME tint as the §11.4
+// command-pending banner — NOT the bg.warning flash tint).
 func TestSignpostReskin_VioletInfoBand(t *testing.T) {
 	m := signpostModel(t)
 
@@ -66,16 +68,42 @@ func TestSignpostReskin_VioletInfoBand(t *testing.T) {
 	if !strings.Contains(band, violetSeq) {
 		t.Errorf("signpost band missing the accent.violet bar foreground sequence %q:\n%s", violetSeq, band)
 	}
-	// Message colour = text.strong (§2.9).
-	strongSeq := tokenFgSeq(t, theme.MV.TextStrong, m.canvasMode)
-	if !strings.Contains(band, strongSeq) {
-		t.Errorf("signpost band missing the text.strong message foreground sequence %q:\n%s", strongSeq, band)
+	// Message colour = text.on-selection (§2.9): the bright white co-tuned for the
+	// bg.selection tint the info band sits on (the same token the selected
+	// session-row name uses on that surface).
+	onSelectionSeq := tokenFgSeq(t, theme.MV.TextOnSelection, m.canvasMode)
+	if !strings.Contains(band, onSelectionSeq) {
+		t.Errorf("signpost band missing the text.on-selection message foreground sequence %q:\n%s", onSelectionSeq, band)
 	}
-	// NO tint (§11.3 info band sits on the owned canvas, not the bg.warning flash
-	// tint): the bg.warning background colour sequence must be ABSENT.
+	// Tint = bg.selection (§2.9): the info band sits on the SAME subtle tint as the
+	// §11.4 command-pending banner — it must NOT regress to a flat/Canvas band.
+	selectionBgSeq := tokenBgSeq(t, theme.MV.BgSelection, m.canvasMode)
+	if !strings.Contains(band, selectionBgSeq) {
+		t.Errorf("signpost band missing the bg.selection info-band tint %q (must not be flat):\n%s", selectionBgSeq, band)
+	}
+	// NOT the bg.warning flash tint (§11.3 info band is NOT a flash): the bg.warning
+	// background colour sequence must be ABSENT.
 	warnBgSeq := tokenBgSeq(t, theme.MV.BgWarning, m.canvasMode)
 	if strings.Contains(band, warnBgSeq) {
-		t.Errorf("signpost band carries the bg.warning flash tint %q (info band must have no tint):\n%s", warnBgSeq, band)
+		t.Errorf("signpost band carries the bg.warning flash tint %q (info band is not a flash):\n%s", warnBgSeq, band)
+	}
+}
+
+// TestInfoBands_ShareSameTint is the consolidation regression guard: the §11.3
+// no-tags signpost (bandInfo) and the §11.4 command-pending banner (bandCommand)
+// are one info-message element, so they MUST resolve the SAME tint token —
+// bg.selection. If either drifts (e.g. bandInfo regresses to Canvas, or a future
+// edit retints the command band) this fails before the visual divergence ships.
+func TestInfoBands_ShareSameTint(t *testing.T) {
+	if got := bandInfo.tintToken().Name; got != theme.MV.BgSelection.Name {
+		t.Errorf("bandInfo tint token = %q, want bg.selection (shared info-band tint)", got)
+	}
+	if got := bandCommand.tintToken().Name; got != theme.MV.BgSelection.Name {
+		t.Errorf("bandCommand tint token = %q, want bg.selection (shared info-band tint)", got)
+	}
+	if bandInfo.tintToken().Name != bandCommand.tintToken().Name {
+		t.Errorf("info bands diverge: bandInfo tint %q != bandCommand tint %q (must share one info-band tint)",
+			bandInfo.tintToken().Name, bandCommand.tintToken().Name)
 	}
 }
 
@@ -240,7 +268,7 @@ func TestSignpostReskin_YieldsToFlashThenReturns(t *testing.T) {
 // the `▌` bar, its far-left position, and the message text — and carries no SGR
 // colour sequences at all.
 func TestSignpostReskin_NoColorKeepsBarAndPosition(t *testing.T) {
-	band := renderNoticeBand(bandInfo, byTagSignpostText, theme.MV.TextStrong, 60, theme.Dark, true)
+	band := renderNoticeBand(bandInfo, byTagSignpostText, theme.MV.TextOnSelection, 60, theme.Dark, true)
 
 	stripped := ansi.Strip(band)
 	if !strings.HasPrefix(stripped, noticeBarGlyph) {
