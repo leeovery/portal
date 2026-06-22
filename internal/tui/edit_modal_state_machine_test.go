@@ -219,6 +219,78 @@ func TestSM_EnteringChipFieldLandsOnAddSlot(t *testing.T) {
 	}
 }
 
+func TestSM_DownMovesBetweenFields(t *testing.T) {
+	// ↓ is an alias for Tab: Name -> Aliases -> Tags -> Name (wrap).
+	m := smModel(&smProjectEditor{}, &smAliasEditor{}, nil, nil)
+
+	m = smKey(t, m, keyDown)
+	if m.editFocus != editFieldAliases {
+		t.Fatalf("after Down from Name, focus = %d, want Aliases", m.editFocus)
+	}
+	m = smKey(t, m, keyDown)
+	if m.editFocus != editFieldTags {
+		t.Fatalf("after Down from Aliases, focus = %d, want Tags", m.editFocus)
+	}
+	m = smKey(t, m, keyDown)
+	if m.editFocus != editFieldName {
+		t.Fatalf("after Down from Tags, focus = %d, want Name (wrap)", m.editFocus)
+	}
+}
+
+func TestSM_UpMovesBetweenFieldsBackwards(t *testing.T) {
+	// ↑ is an alias for Shift+Tab: Name -> Tags -> Aliases -> Name.
+	m := smModel(&smProjectEditor{}, &smAliasEditor{}, nil, nil)
+
+	m = smKey(t, m, keyUp)
+	if m.editFocus != editFieldTags {
+		t.Fatalf("after Up from Name, focus = %d, want Tags (wrap back)", m.editFocus)
+	}
+	m = smKey(t, m, keyUp)
+	if m.editFocus != editFieldAliases {
+		t.Fatalf("after Up, focus = %d, want Aliases", m.editFocus)
+	}
+	m = smKey(t, m, keyUp)
+	if m.editFocus != editFieldName {
+		t.Fatalf("after Up, focus = %d, want Name", m.editFocus)
+	}
+}
+
+func TestSM_DownEnteringChipFieldLandsOnAddSlot(t *testing.T) {
+	// ↓ into a chip field lands on the trailing + add slot, mirroring Tab.
+	m := smModel(&smProjectEditor{}, &smAliasEditor{}, []string{"a", "b"}, nil)
+	m.editAliasCursor = 0 // dirty value reset on entry
+
+	m = smKey(t, m, keyDown) // Name -> Aliases
+	if m.editFocus != editFieldAliases {
+		t.Fatalf("focus = %d, want Aliases", m.editFocus)
+	}
+	if m.editAliasCursor != len(m.editAliases) {
+		t.Errorf("alias element index = %d, want %d (+ add slot)", m.editAliasCursor, len(m.editAliases))
+	}
+}
+
+func TestSM_UpDownIgnoredInEditMode(t *testing.T) {
+	// In edit mode (one element live) ↑/↓ are ignored — focus and buffer untouched.
+	m := smModel(&smProjectEditor{}, &smAliasEditor{}, nil, nil)
+	m.editFocus = editFieldTags
+	m.editTagCursor = len(m.editTags)
+	m = smKey(t, m, keyEnter)
+	m = typeRunes(t, m, "ab")
+
+	m = smKey(t, m, keyDown)
+	m = smKey(t, m, keyUp)
+
+	if m.editMode != editModeEdit {
+		t.Errorf("editMode = %d, want editModeEdit (↑/↓ must not exit edit)", m.editMode)
+	}
+	if m.editFocus != editFieldTags {
+		t.Errorf("editFocus = %d, want Tags (↑/↓ must not move fields in edit)", m.editFocus)
+	}
+	if m.editBuffer != "ab" {
+		t.Errorf("editBuffer = %q, want %q (↑/↓ must not alter the buffer)", m.editBuffer, "ab")
+	}
+}
+
 // === Navigate mode: element movement within a chip field =============
 
 func TestSM_LeftRightMovesAcrossChipsAndAddSlot(t *testing.T) {
@@ -315,6 +387,37 @@ func TestSM_EnterOnNameEntersEditMode(t *testing.T) {
 
 	if m.editMode != editModeEdit {
 		t.Errorf("editMode = %d, want editModeEdit after Enter on Name", m.editMode)
+	}
+}
+
+func TestSM_EOnNameEntersEditMode(t *testing.T) {
+	// `e` on the NAME field enters edit mode (mirroring Enter) — matching the
+	// `⏎/e edit` footer hint. Regression guard: `e` was previously wired only for
+	// chips, leaving the Name field reachable by Enter alone.
+	m := smModel(&smProjectEditor{}, &smAliasEditor{}, nil, nil)
+	m.editFocus = editFieldName
+
+	m = smKey(t, m, runeKey("e"))
+
+	if m.editMode != editModeEdit {
+		t.Errorf("editMode = %d, want editModeEdit after e on Name", m.editMode)
+	}
+	if m.editBuffer != "proj" {
+		t.Errorf("editBuffer = %q, want %q (seeded from the name)", m.editBuffer, "proj")
+	}
+}
+
+func TestSM_EOnNameInEditModeIsLiteralChar(t *testing.T) {
+	// Once editing the Name, `e` is a literal character (the navigate-mode `e`
+	// shortcut must not fire), so it lands in the buffer at the cursor.
+	m := smModel(&smProjectEditor{}, &smAliasEditor{}, nil, nil)
+	m.editFocus = editFieldName
+	m = smKey(t, m, keyEnter) // enter edit on Name (buffer="proj")
+
+	m = typeRunes(t, m, "e") // -> "proje"
+
+	if m.editBuffer != "proje" {
+		t.Errorf("editBuffer = %q, want %q (e is a literal char while editing the name)", m.editBuffer, "proje")
 	}
 }
 

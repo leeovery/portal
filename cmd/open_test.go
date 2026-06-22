@@ -900,7 +900,7 @@ func TestBuildTUIModel(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		view := model.View().Content
-		if !strings.Contains(view, "Edit:") {
+		if !strings.Contains(view, "Edit Project") {
 			t.Errorf("expected edit modal to open when editors are wired, got view:\n%s", view)
 		}
 	})

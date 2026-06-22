@@ -21,8 +21,10 @@ type Fixture struct {
 	// Lister is exported so tests can assert the deterministic session set.
 	Lister *fakeLister
 
-	projectStore *fakeProjectStore
-	initialMode  prefs.SessionListMode
+	projectStore  *fakeProjectStore
+	projectEditor tui.ProjectEditor
+	aliasEditor   tui.AliasEditor
+	initialMode   prefs.SessionListMode
 }
 
 // Deps maps the fixture onto the shared tui.Deps seam set. Every tmux seam is a
@@ -31,13 +33,15 @@ type Fixture struct {
 // bespoke render path that could drift from reality.
 func (f *Fixture) Deps() tui.Deps {
 	return tui.Deps{
-		Lister:       f.Lister,
-		Killer:       fakeKiller{},
-		Renamer:      fakeRenamer{},
-		Creator:      fakeCreator{},
-		ProjectStore: f.projectStore,
-		Enumerator:   fakeEnumerator{},
-		Reader:       fakeScrollbackReader{},
+		Lister:        f.Lister,
+		Killer:        fakeKiller{},
+		Renamer:       fakeRenamer{},
+		Creator:       fakeCreator{},
+		ProjectStore:  f.projectStore,
+		ProjectEditor: f.projectEditor,
+		AliasEditor:   f.aliasEditor,
+		Enumerator:    fakeEnumerator{},
+		Reader:        fakeScrollbackReader{},
 		// DirReader/DirRunner are deliberately left nil: the fixture sessions are
 		// pre-stamped (Session.Dir set), so the lazy pane-read fallback never
 		// fires — and the harness has no tmux server to read panes from anyway.
@@ -271,8 +275,11 @@ func projectsFixture() *Fixture {
 	}
 
 	// 14 projects with real-looking absolute paths (matches the reference count).
+	// flow-v1-api carries the reference Tags [Fabric, api] so the edit-project modal
+	// capture (opened on it via the edit-modal tapes) renders the seeded chips.
+	flowPath := "/Users/leeovery/Code/fabric/flowv1/flow-v1-api"
 	projects := []project.Project{
-		{Name: "flow-v1-api", Path: "/Users/leeovery/Code/fabric/flowv1/flow-v1-api"},
+		{Name: "flow-v1-api", Path: flowPath, Tags: []string{"Fabric", "api"}},
 		{Name: "portal", Path: "/Users/leeovery/Code/portal"},
 		{Name: "mint", Path: "/Users/leeovery/Code/mint"},
 		{Name: "agntc", Path: "/Users/leeovery/Code/agntc"},
@@ -292,6 +299,16 @@ func projectsFixture() *Fixture {
 		name:         "projects",
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: projects},
-		initialMode:  prefs.ModeFlat,
+		// Wire the edit-project modal editors so the `e` key opens the modal in the
+		// harness (handleEditProjectKey nil-guards when either is nil). The aliases
+		// map seeds flow-v1-api's reference alias chips [fapi, v1] (keyed to the same
+		// path the project record carries, so the modal's per-project alias lookup
+		// matches). All mutations are in-memory no-ops.
+		projectEditor: fakeProjectEditor{},
+		aliasEditor: fakeAliasEditor{aliases: map[string]string{
+			"fapi": flowPath,
+			"v1":   flowPath,
+		}},
+		initialMode: prefs.ModeFlat,
 	}
 }

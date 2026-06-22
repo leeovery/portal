@@ -119,3 +119,17 @@ func renderRenameModalOnClearedCanvas(input textinput.Model, oldName string, wid
 	panel := renderRenameModalContent(input, oldName, mode, colourless)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }
+
+// renderEditModalOnClearedCanvas composes the §8.2/§13.1 two-mode edit-project modal
+// panel and centres it on the cleared owned canvas, exactly like
+// renderRenameModalOnClearedCanvas but with the edit modal's own hand-drawn
+// single-tone joined panel (renderEditProjectContent — the SAME frame the
+// help/kill/rename modals use, three compartments: header / body / footer). It
+// BYPASSES the shared modalBorderStyle's Padding(1,2) box (which would wrap the
+// already-framed joined panel in a redundant second border); the not-yet-reskinned
+// modals keep that box. The edit-modal LOGIC (updateEditProjectModal) is unchanged —
+// only the rendering is reskinned.
+func renderEditModalOnClearedCanvas(m Model, width, height int, mode theme.Mode, colourless bool) string {
+	panel := m.renderEditProjectContent()
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+}

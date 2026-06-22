@@ -61,6 +61,39 @@ func (f *fakeProjectStore) CleanStale() ([]project.Project, error) { return nil,
 
 func (f *fakeProjectStore) Remove(string, string) error { return nil }
 
+// fakeProjectEditor satisfies tui.ProjectEditor for the edit-project modal capture.
+// Every mutation is an in-memory no-op (the harness never touches projects.json);
+// the capture only needs the modal to OPEN and render its seeded state, so the
+// edit-key nil-guard (model.go handleEditProjectKey) is satisfied without any real
+// persistence side effect.
+type fakeProjectEditor struct{}
+
+func (fakeProjectEditor) Rename(string, string, string) error { return nil }
+
+func (fakeProjectEditor) AddTag(string, string) error { return nil }
+
+func (fakeProjectEditor) RemoveTag(string, string) error { return nil }
+
+// fakeAliasEditor satisfies tui.AliasEditor for the edit-project modal capture. It
+// holds a canned alias→path map so Load() returns the seeded aliases that render as
+// chips for the matching project; the mutating SetAndSave/DeleteAndSave are
+// in-memory no-ops (the harness never touches the aliases file).
+type fakeAliasEditor struct {
+	aliases map[string]string
+}
+
+func (f fakeAliasEditor) Load() (map[string]string, error) {
+	out := make(map[string]string, len(f.aliases))
+	for k, v := range f.aliases {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (fakeAliasEditor) SetAndSave(string, string, string) error { return nil }
+
+func (fakeAliasEditor) DeleteAndSave(string, string) (bool, error) { return true, nil }
+
 // fakeEnumerator returns canned window/pane structure for the preview page so a
 // capture can drive into Preview without a tmux server.
 type fakeEnumerator struct{}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -2272,7 +2273,11 @@ func (m Model) handleEditProjectKey() (tea.Model, tea.Cmd) {
 	// returns nil, so a back-compat record with no tags seeds an empty buffer.
 	m.editTags = slices.Clone(pi.Project.Tags)
 
-	// Load aliases matching this project's directory.
+	// Load aliases matching this project's directory. The matches are sorted into a
+	// stable (alphabetical) order: Load() returns a map, so the raw iteration order
+	// is non-deterministic — sorting gives the alias chips a fixed render order
+	// (matching the deterministic capture fixture) and a predictable left-to-right
+	// chip layout for the user. Order of an unordered set is cosmetic only.
 	allAliases, err := m.aliasEditor.Load()
 	if err != nil {
 		m.editAliases = nil
@@ -2283,6 +2288,7 @@ func (m Model) handleEditProjectKey() (tea.Model, tea.Cmd) {
 				matching = append(matching, name)
 			}
 		}
+		sort.Strings(matching)
 		m.editAliases = matching
 	}
 
@@ -2308,10 +2314,11 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.updateNavigateModeKey(keyMsg)
 }
 
-// updateNavigateModeKey handles a key in §8.2 navigate mode: Tab/Shift+Tab move
-// between fields, ←/→ move across a chip field's chips + trailing + add slot,
-// Enter/e/+ enter edit mode, x deletes a focused chip immediately, and Esc
-// closes the modal (refreshing the cached projects if anything persisted).
+// updateNavigateModeKey handles a key in §8.2 navigate mode: Tab/Shift+Tab (and
+// ↓/↑, their aliases) move between fields, ←/→ move across a chip field's chips +
+// trailing + add slot, Enter/e/+ enter edit mode, x deletes a focused chip
+// immediately, and Esc closes the modal (refreshing the cached projects if
+// anything persisted).
 func (m Model) updateNavigateModeKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch keyMsg.Code {
 	case tea.KeyEscape:
@@ -2323,6 +2330,17 @@ func (m Model) updateNavigateModeKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd
 		} else {
 			m.focusField(m.nextField())
 		}
+		return m, nil
+
+	case tea.KeyDown:
+		// ↓ is an alias for Tab (next field), mirroring nextField including
+		// wrap-around and landing a chip field on its trailing + add slot.
+		m.focusField(m.nextField())
+		return m, nil
+
+	case tea.KeyUp:
+		// ↑ is an alias for Shift+Tab (previous field).
+		m.focusField(m.prevField())
 		return m, nil
 
 	case tea.KeyLeft:
@@ -2347,7 +2365,11 @@ func (m Model) updateNavigateModeKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd
 		case "x":
 			return m.deleteFocusedChip()
 		case "e":
-			if m.focusedOnChip() {
+			// `e` enters edit mode on the NAME field (mirroring Enter) and on a
+			// focused chip — matching the `⏎/e edit` footer hint. The + add slot
+			// uses `+`/Enter, not `e`. In edit mode `e` is a literal char (handled
+			// by updateEditModeKey, never reaching here).
+			if m.editFocus == editFieldName || m.focusedOnChip() {
 				return m.enterEditFromNavigate()
 			}
 			return m, nil
@@ -3677,7 +3699,12 @@ func (m Model) viewProjectList() string {
 		// unchanged (updateDeleteProjectModal); only the rendering is reskinned.
 		return renderDeleteModalOnClearedCanvas(m.pendingDeleteName, m.pendingDeletePath, m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalEditProject:
-		return renderModalOnClearedCanvas(m.renderEditProjectContent(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
+		// §8.2/§13.1: the MV two-mode edit-project modal is its OWN hand-drawn
+		// single-tone joined panel (renderEditProjectContent), placed directly on the
+		// cleared canvas — it MUST NOT route through renderModalOnClearedCanvas (whose
+		// modalBorderStyle Padding(1,2) box would wrap the already-framed panel in a
+		// redundant second border).
+		return renderEditModalOnClearedCanvas(m, m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalHelp:
 		// §8.5 per-page help: the Projects keymap descriptor, descriptor-driven, in
 		// the help modal's own zero-h-padding panel (FIX 4).
@@ -3774,81 +3801,6 @@ func (m Model) renderProjectsFooterForFilterState() string {
 	default:
 		return renderProjectsFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	}
-}
-
-// renderEditProjectContent builds the content string for the edit project modal.
-//
-// NOTE: this is the legacy interim render — the §8.2 MV chip/footer render is
-// task 3-9. It only needs to display the modal coherently against the new
-// two-mode state machine: it reads editBuffer for the live element so an
-// in-progress edit shows, and the displayed Name / chips otherwise come straight
-// from the persisted state.
-func (m Model) renderEditProjectContent() string {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "Edit: %s\n\n", m.editProject.Name)
-
-	nameIndicator := "  "
-	if m.editFocus == editFieldName {
-		nameIndicator = "> "
-	}
-	nameValue := m.editName
-	if m.editFocus == editFieldName && m.editMode == editModeEdit {
-		nameValue = m.editBuffer
-	}
-	fmt.Fprintf(&b, "%sName: %s\n", nameIndicator, nameValue)
-
-	b.WriteString("\n")
-	m.renderEditChipField(&b, "Aliases", editFieldAliases, m.editAliases, m.editAliasCursor)
-
-	b.WriteString("\n")
-	m.renderEditChipField(&b, "Tags", editFieldTags, m.editTags, m.editTagCursor)
-
-	b.WriteString("\n  [Enter] edit/save  [Esc] back  [Tab] next field")
-
-	return b.String()
-}
-
-// renderEditChipField renders one chip field (Aliases or Tags) of the edit
-// modal: a focus-indicated heading, the chips (each "[x] <chip>", or "(none)"
-// when empty), and a trailing "Add:" slot. While the focused element is being
-// edited, its row shows the live editBuffer; a brand-new chip's text shows in
-// the Add slot. The legacy render is interim (task 3-9 ships the MV chips).
-func (m Model) renderEditChipField(b *strings.Builder, label string, field editField, chips []string, cursor int) {
-	focused := m.editFocus == field
-	editing := focused && m.editMode == editModeEdit
-
-	indicator := "  "
-	if focused {
-		indicator = "> "
-	}
-	b.WriteString(indicator + label + ":\n")
-
-	if len(chips) == 0 {
-		b.WriteString("    (none)\n")
-	} else {
-		for i, chip := range chips {
-			marker := "    "
-			if focused && cursor == i {
-				marker = "  > "
-			}
-			value := chip
-			if editing && cursor == i {
-				value = m.editBuffer
-			}
-			fmt.Fprintf(b, "%s[x] %s\n", marker, value)
-		}
-	}
-
-	addMarker := "    "
-	if focused && cursor == len(chips) {
-		addMarker = "  > "
-	}
-	addInput := ""
-	if editing && m.editIsNewChip {
-		addInput = m.editBuffer
-	}
-	fmt.Fprintf(b, "%sAdd: %s\n", addMarker, addInput)
 }
 
 // viewSessionList renders the session list using bubbles/list, composes the

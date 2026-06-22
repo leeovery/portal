@@ -9,10 +9,33 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
+
+// editFieldFocused reports whether the edit-modal field label renders with the
+// §13.1 focused colour (accent.violet) in the given view — the MV focus signal that
+// replaced the legacy `> ` indicator. The probe builds the violet foreground SGR
+// core (mode-default Dark, the harness canvas) and asserts the label line carries
+// it. label is the uppercase field label (NAME / ALIASES / TAGS).
+func editFieldFocused(view, label string) bool {
+	probe := lipgloss.NewStyle().Foreground(theme.MV.AccentViolet.ColorFor(theme.Dark)).Render("x")
+	start := strings.IndexByte(probe, '[')
+	end := strings.IndexByte(probe, 'm')
+	if start < 0 || end <= start {
+		return false
+	}
+	violetCore := probe[start+1 : end]
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, label) && strings.Contains(line, violetCore) {
+			return true
+		}
+	}
+	return false
+}
 
 // flattenInitMsgs executes an Init (or any) cmd and returns every leaf message
 // it produces, recursively draining tea.BatchMsg. Init now batches the OSC 11
@@ -2336,7 +2359,7 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		view := model.View().Content
-		if strings.Contains(view, "Edit:") {
+		if strings.Contains(view, "Edit Project") {
 			t.Errorf("pressing e in command-pending mode should not open edit modal, got:\n%s", view)
 		}
 	})
@@ -4564,14 +4587,14 @@ func TestEditProject(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		view := model.View().Content
-		if !strings.Contains(view, "Name:") {
-			t.Errorf("edit modal should contain 'Name:' field, got:\n%s", view)
+		if !strings.Contains(view, "NAME") {
+			t.Errorf("edit modal should contain 'NAME' field, got:\n%s", view)
 		}
 		if !strings.Contains(view, "portal") {
 			t.Errorf("edit modal should show current project name 'portal', got:\n%s", view)
 		}
-		if !strings.Contains(view, "Aliases:") {
-			t.Errorf("edit modal should contain 'Aliases:' section, got:\n%s", view)
+		if !strings.Contains(view, "ALIASES") {
+			t.Errorf("edit modal should contain 'ALIASES' section, got:\n%s", view)
 		}
 		if !strings.Contains(view, "p") {
 			t.Errorf("edit modal should show alias 'p', got:\n%s", view)
@@ -4593,22 +4616,22 @@ func TestEditProject(t *testing.T) {
 
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
-		// Open lands on Name in navigate mode — the focus indicator (> ) sits on
-		// the Name heading.
-		if !strings.Contains(model.View().Content, "> Name:") {
+		// Open lands on Name in navigate mode — the §13.1 focus signal is the NAME
+		// label rendered in accent.violet (the legacy `> ` indicator is gone).
+		if !editFieldFocused(model.View().Content, "NAME") {
 			t.Fatalf("open should focus Name, got:\n%s", model.View().Content)
 		}
 
 		// Tab moves focus to Aliases.
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-		if !strings.Contains(model.View().Content, "> Aliases:") {
+		if !editFieldFocused(model.View().Content, "ALIASES") {
 			t.Errorf("after Tab focus should be Aliases, got:\n%s", model.View().Content)
 		}
 
 		// Two more Tabs wrap Aliases → Tags → Name.
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Aliases → Tags
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Tags → Name
-		if !strings.Contains(model.View().Content, "> Name:") {
+		if !editFieldFocused(model.View().Content, "NAME") {
 			t.Errorf("after three Tabs focus should wrap to Name, got:\n%s", model.View().Content)
 		}
 	})
@@ -4640,7 +4663,7 @@ func TestEditProject(t *testing.T) {
 			t.Errorf("expected Rename via=cli, got %q", editor.renamedVia)
 		}
 		// Commit returns to navigate, modal stays open.
-		if !strings.Contains(model.View().Content, "Name:") {
+		if !strings.Contains(model.View().Content, "NAME") {
 			t.Errorf("modal should stay open after a Name commit (navigate mode), got:\n%s", model.View().Content)
 		}
 	})
@@ -4675,7 +4698,7 @@ func TestEditProject(t *testing.T) {
 			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
 		}
 		view := model.View().Content
-		if strings.Contains(view, "Name:") {
+		if strings.Contains(view, "NAME") {
 			t.Errorf("edit modal should be dismissed after Esc, got:\n%s", view)
 		}
 	})
@@ -4700,7 +4723,7 @@ func TestEditProject(t *testing.T) {
 			t.Errorf("Esc with no edits should return nil command, got non-nil")
 		}
 		view := model.View().Content
-		if strings.Contains(view, "Name:") {
+		if strings.Contains(view, "NAME") {
 			t.Errorf("edit modal should be dismissed after Esc, got:\n%s", view)
 		}
 	})
@@ -4792,7 +4815,7 @@ func TestEditProject(t *testing.T) {
 			t.Error("expected Save on immediate alias delete")
 		}
 		view := model.View().Content
-		if !strings.Contains(view, "Name:") {
+		if !strings.Contains(view, "NAME") {
 			t.Errorf("modal should stay open after removing an alias, got:\n%s", view)
 		}
 	})
@@ -4827,7 +4850,7 @@ func TestEditProject(t *testing.T) {
 			t.Errorf("expected SetAndSave via=cli, got %q", aliases.setCalls[0].via)
 		}
 		// Commit returns to navigate; the modal stays open.
-		if !strings.Contains(model.View().Content, "Name:") {
+		if !strings.Contains(model.View().Content, "NAME") {
 			t.Errorf("modal should stay open after committing a new alias")
 		}
 	})
@@ -4846,7 +4869,7 @@ func TestEditProject(t *testing.T) {
 			t.Errorf("e with no editor should return nil command, got non-nil")
 		}
 		view := model.View().Content
-		if strings.Contains(view, "Name:") {
+		if strings.Contains(view, "NAME") {
 			t.Errorf("edit modal should not open without editor, got:\n%s", view)
 		}
 	})
@@ -4865,7 +4888,7 @@ func TestEditProject(t *testing.T) {
 			t.Errorf("e on empty list should return nil command, got non-nil")
 		}
 		view := model.View().Content
-		if strings.Contains(view, "Name:") {
+		if strings.Contains(view, "NAME") {
 			t.Errorf("edit modal should not open on empty list, got:\n%s", view)
 		}
 	})
@@ -4950,7 +4973,7 @@ func TestEditProjectTagPersistence(t *testing.T) {
 			t.Errorf("expected no AddTag calls, got %+v", editor.addedTags)
 		}
 		// The removed tag is gone from the modal but the modal stays open.
-		if !strings.Contains(model.View().Content, "Name:") {
+		if !strings.Contains(model.View().Content, "NAME") {
 			t.Errorf("modal should stay open after an immediate tag removal")
 		}
 	})
@@ -6339,7 +6362,7 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 
 		// Verify modal is open by checking view contains edit content
 		view := model.(tui.Model).View().Content
-		if !strings.Contains(view, "Edit:") {
+		if !strings.Contains(view, "Edit Project") {
 			t.Fatalf("precondition: expected edit modal open, got:\n%s", view)
 		}
 
@@ -6354,7 +6377,7 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 
 		// Modal should be dismissed — view should not contain Edit modal
 		view = model.(tui.Model).View().Content
-		if strings.Contains(view, "Edit:") {
+		if strings.Contains(view, "Edit Project") {
 			t.Errorf("modal should be dismissed after Esc, got:\n%s", view)
 		}
 	})
