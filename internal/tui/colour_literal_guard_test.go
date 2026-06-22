@@ -29,6 +29,7 @@ var centralisedColourSites = []string{
 	"filtering_no_matches.go",
 	"help_modal.go",
 	"edit_modal.go",
+	"rename_modal.go",
 }
 
 // TestNoRawColourLiteralAtCentralisedSites parses each re-pointed file and fails

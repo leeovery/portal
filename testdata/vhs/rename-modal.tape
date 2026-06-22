@@ -9,10 +9,11 @@
 # or touches ~/.config/portal.
 #
 # The capture verifies the §8.4 reskin: the hand-drawn single-tone joined panel
-# (Rename session header / NEW NAME label + violet-outlined input box with a violet
-# block cursor + was: <old name> body / ⏎ rename · esc cancel footer), all in
-# border.separator with joined ├───┤ dividers, centred on the cleared owned canvas.
-# Compare against testdata/vhs/reference/rename-modal-mv.png.
+# (Rename session header + right-aligned `◉ EDIT MODE` badge / NEW NAME label +
+# orange-outlined input box with an orange block cursor (the shared renderInputBox
+# always-editing state) + was: <old name> body / ⏎ rename · esc cancel footer), all
+# in border.separator with joined ├───┤ dividers, centred on the cleared owned
+# canvas. Compare against testdata/vhs/reference/rename-modal-mv.png.
 #
 # Run it (sandbox MUST be disabled — vhs needs loopback networking for ttyd;
 # see testdata/vhs/README.md):
@@ -56,7 +57,7 @@ Type "r"
 Sleep 500ms
 
 # Clear the pre-filled name and type the reference value `aviva-proxy` so the input
-# box + violet block cursor render exactly like the Paper frame.
+# box + orange block cursor render exactly like the Paper frame.
 Ctrl+U
 Type "aviva-proxy"
 Sleep 1s

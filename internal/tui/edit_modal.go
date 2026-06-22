@@ -265,21 +265,31 @@ func (m Model) editModalHeaderRow(mode theme.Mode, colourless bool) string {
 	prefix := headerStyle(theme.MV.TextPrimary, mode, colourless).Bold(true).Render(editHeaderPrefix)
 	name := headerStyle(theme.MV.TextDetail, mode, colourless).Render(m.editProject.Name)
 	left := lipgloss.JoinHorizontal(lipgloss.Top, prefix, name)
-	leftWidth := lipgloss.Width(left)
+	return renderHeaderWithBadge(left, m.editPanelContentWidth(), m.editMode == editModeEdit, mode, colourless)
+}
 
-	width := m.editPanelContentWidth()
+// renderHeaderWithBadge lays out a modal header as a FIXED full-content-width row:
+// the pre-rendered left title segment left-aligned, a flexible canvas spacer, then
+// the `◉ EDIT MODE` badge (accent.orange, bold) RIGHT-aligned in the far corner.
+// When showBadge is false the badge's slot is rendered as a same-width blank, so the
+// header (and therefore the whole panel) is byte-for-byte the SAME width whether the
+// badge shows or not. Shared by the edit modal (badge gated on edit mode) and the
+// rename modal (always editing → badge always shown). The right-align is the §13.1
+// fixed-content-width row + flexible-spacer technique.
+func renderHeaderWithBadge(left string, contentWidth int, showBadge bool, mode theme.Mode, colourless bool) string {
+	leftWidth := lipgloss.Width(left)
 	badgeWidth := lipgloss.Width(editModeIndicator)
-	spacerWidth := width - leftWidth - badgeWidth
+	spacerWidth := contentWidth - leftWidth - badgeWidth
 	if spacerWidth < 0 {
 		spacerWidth = 0
 	}
 	spacer := headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", spacerWidth))
 
 	var badge string
-	if m.editMode == editModeEdit {
+	if showBadge {
 		badge = headerStyle(theme.MV.AccentOrange, mode, colourless).Bold(true).Render(editModeIndicator)
 	} else {
-		// Reserve the badge's slot as blank so the navigate header is the same width.
+		// Reserve the badge's slot as blank so the header is the same width either way.
 		badge = headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", badgeWidth))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, badge)
