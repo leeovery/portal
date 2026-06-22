@@ -77,29 +77,35 @@ func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 	}
 }
 
-func TestSessionsView_FlashRow_AppearsBetweenTitleAndList(t *testing.T) {
+// TestSessionsView_FlashRow_AppearsAboveSectionHeader asserts the §11 placement
+// convention: the transient flash band sits directly under the title separator,
+// ABOVE the section header (`Sessions`) — the section header + list shift down.
+// (Pre-§11 the flash inserted BELOW the title row; §11 moved it above the section
+// header as the shared notice-slot convention.)
+func TestSessionsView_FlashRow_AppearsAboveSectionHeader(t *testing.T) {
 	m := flashModelWithSessions("alpha-row")
 	const flash = "session \"alpha\" no longer exists"
 	m.setFlash(flash)
 
 	lines := renderedSessionLines(t, m)
-	titleIdx := lineIndexContaining(lines, "Sessions")
-	if titleIdx < 0 {
-		t.Fatalf("title %q not found in render:\n%s", "Sessions", strings.Join(lines, "\n"))
-	}
 	flashIdx := lineIndexContaining(lines, flash)
 	if flashIdx < 0 {
 		t.Fatalf("flash text %q not found in render:\n%s", flash, strings.Join(lines, "\n"))
+	}
+	titleIdx := lineIndexContaining(lines, "Sessions")
+	if titleIdx < 0 {
+		t.Fatalf("title %q not found in render:\n%s", "Sessions", strings.Join(lines, "\n"))
 	}
 	rowIdx := lineIndexContaining(lines, "alpha-row")
 	if rowIdx < 0 {
 		t.Fatalf("session row not found in render:\n%s", strings.Join(lines, "\n"))
 	}
-	if flashIdx <= titleIdx {
-		t.Errorf("flash index %d must be > title index %d", flashIdx, titleIdx)
+	// §11: band ABOVE the section header, which is above the list rows.
+	if flashIdx >= titleIdx {
+		t.Errorf("flash index %d must be < section-header index %d (band above the section header)", flashIdx, titleIdx)
 	}
-	if rowIdx <= flashIdx {
-		t.Errorf("session row index %d should be > flash index %d", rowIdx, flashIdx)
+	if rowIdx <= titleIdx {
+		t.Errorf("session row index %d should be > section-header index %d", rowIdx, titleIdx)
 	}
 }
 

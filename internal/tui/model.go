@@ -1280,16 +1280,22 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 	return m
 }
 
-// applyListSize sets the given list's dimensions, subtracting the rendered
-// manual keymap footer height (computed from the supplied bindings) from
-// the available height so the list does not overflow under the footer.
-// Width passes through unchanged because the manual footer wraps inside
-// the same width as the list view. Shared sizing core consumed by the
-// per-page wrappers (applySessionListSize / applyProjectListSize), which
-// own the list+bindings pairing invariant — callers should invoke a
-// wrapper, not this core directly.
-func (m *Model) applyListSize(l *list.Model, bindings []key.Binding, width, height int) {
-	l.SetSize(width, height-lipgloss.Height(renderKeymapFooter(l, bindings)))
+// applyListSize is the shared sizing core for the per-page wrappers
+// (applySessionListSize / applyProjectListSize): it sizes the given list to
+// width × (height − reserved) and re-centres the §3.5 paginator dot row across
+// the new list width (the centred PaginationStyle pins an explicit Width, so it
+// must track every resize), painted on the owned canvas or bare under the
+// NO_COLOR carve-out. The wrappers own the reserved-height computation (header +
+// footer + the §11 notice band) so call sites cannot drift; this core owns the
+// SetSize + paginator-recentre pairing both share. Callers invoke a wrapper, not
+// this core directly.
+func (m *Model) applyListSize(l *list.Model, width, height, reserved int) {
+	l.SetSize(width, height-reserved)
+	if m.colourless {
+		centrePaginationRow(l, lipgloss.NewStyle())
+		return
+	}
+	centrePaginationRow(l, lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(m.canvasMode)))
 }
 
 // applySessionListSize is the per-page wrapper that owns the §3.4 Sessions
@@ -1306,25 +1312,19 @@ func (m *Model) applyListSize(l *list.Model, bindings []key.Binding, width, heig
 // / §4.1) holds and the frame never overflows the viewport.
 func (m *Model) applySessionListSize(width, height int) {
 	// Fold the §3.1 header block height AND the §3.4 condensed footer height out of
-	// the budget (in addition to the notice bands) so bubbles/list paginates against
-	// the reduced height: both the header and the footer are part of the height
-	// budget, NOT uncounted bands (§3.5). Each is resolved against the SAME width
-	// this size-apply was called with, so the budget and the viewSessionList render
-	// agree at every call site (WindowSizeMsg, rebuildSessionList, the 80x24
+	// the budget (in addition to the §11 notice band) so bubbles/list paginates
+	// against the reduced height: both the header and the footer are part of the
+	// height budget, NOT uncounted bands (§3.5). Each is resolved against the SAME
+	// width this size-apply was called with, so the budget and the viewSessionList
+	// render agree at every call site (WindowSizeMsg, rebuildSessionList, the 80x24
 	// construction seed). The Sessions footer no longer routes through the manual
-	// three-column path (renderKeymapFooter); only the condensed footer height is
-	// reserved, so applyListSize is called with a zero-binding footer and the
-	// condensed height pre-subtracted.
+	// three-column path (renderKeymapFooter); the header, condensed-footer, and §11
+	// single-slot notice-band heights are reserved directly here and handed to the
+	// shared applyListSize core. sessionBandHeight is the §11.2 F10 hook: it is one
+	// row while a band owns the slot, zero when it clears, so the list reserves /
+	// releases exactly one row as the band appears / clears.
 	reserved := m.sessionBandHeight() + m.headerHeight(width) + m.sessionFooterHeight(width)
-	m.sessionList.SetSize(width, height-reserved)
-	// Re-centre the §3.5 paginator dot row across the NEW list width: SetSize
-	// changed Width(), and the centred PaginationStyle pins an explicit Width, so it
-	// must track the resize. Mirror the colourless/canvas split of applyCanvasMode.
-	if m.colourless {
-		centrePaginationRow(&m.sessionList, lipgloss.NewStyle())
-	} else {
-		centrePaginationRow(&m.sessionList, lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(m.canvasMode)))
-	}
+	m.applyListSize(&m.sessionList, width, height, reserved)
 }
 
 // sessionFooterHeight is the rendered height of the §3.4 condensed Sessions footer
@@ -1339,21 +1339,21 @@ func (m Model) sessionFooterHeight(width int) int {
 	return lipgloss.Height(renderSessionsFooter(width, m.canvasMode, m.colourless))
 }
 
-// sessionBandHeight returns the total rendered height of the notice bands
-// viewSessionList inserts beneath the title — the persistent By-Tag signpost and
-// the transient inline flash. It is the amount applySessionListSize reserves out
-// of the list's height budget so the bands never push the composed view past
-// termH. Both are at most one row each in v1, but the height is measured (not
-// hardcoded) so a future multi-line band stays correct.
+// sessionBandHeight returns the rendered height of the SINGLE arbitrated notice
+// band viewSessionList inserts beneath the title (§11 single-slot rule) — the
+// amount applySessionListSize reserves out of the list's height budget so the
+// band never pushes the composed view past termH. At most one band is ever active
+// (the §11 arbiter), so the reserve is the one active band's height — released to
+// zero when the slot empties. This is the §11.2 F10 recompute: a band appearing
+// reserves one fewer list row, clearing releases it, and the outer canvas fill
+// re-pads to termH so the one-row-per-delegate pagination invariant holds. The
+// height is measured (not hardcoded) so a future multi-line band stays correct.
 func (m *Model) sessionBandHeight() int {
-	h := 0
-	if m.byTagSignpost {
-		h += lipgloss.Height(renderByTagSignpostRow())
+	band := m.renderActiveNoticeBand()
+	if band == "" {
+		return 0
 	}
-	if m.flashText != "" {
-		h += lipgloss.Height(m.renderFlashRow())
-	}
-	return h
+	return lipgloss.Height(band)
 }
 
 // applyProjectListSize is the per-page wrapper that owns the §6 Projects height
@@ -1368,15 +1368,7 @@ func (m *Model) sessionBandHeight() int {
 // directly here.
 func (m *Model) applyProjectListSize(width, height int) {
 	reserved := m.headerHeight(width) + m.projectFooterHeight(width) + m.projectBandHeight()
-	m.projectList.SetSize(width, height-reserved)
-	// Re-centre the §3.5 paginator dot row across the NEW list width (mirrors
-	// applySessionListSize): SetSize changed Width(), and the centred PaginationStyle
-	// pins an explicit Width, so it must track the resize.
-	if m.colourless {
-		centrePaginationRow(&m.projectList, lipgloss.NewStyle())
-	} else {
-		centrePaginationRow(&m.projectList, lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(m.canvasMode)))
-	}
+	m.applyListSize(&m.projectList, width, height, reserved)
 }
 
 // projectFooterHeight is the rendered height of the §6.3 condensed Projects footer
@@ -3860,22 +3852,6 @@ func (m Model) viewSessionList() string {
 	if m.sessionListNoMatches() {
 		listView = m.replaceListBodyWithNoMatches(listView)
 	}
-	if m.byTagSignpost {
-		// Persistent "No tags yet" signpost (spec § Empty states → By Tag
-		// with zero tags). Inserted additively beneath the title/filter row
-		// — mirroring the flash-row insertion below — so the title, list,
-		// and footer chrome are unchanged aside from the one inserted row.
-		// Gated on byTagSignpost (persistent), NOT flashText (transient).
-		listView = insertRowBelowTitle(listView, renderByTagSignpostRow())
-	}
-	if m.flashText != "" {
-		// Split off the first line (title / filter input row) and insert
-		// the flash row between it and the remainder. Using a manual split
-		// keeps the existing list view byte-identical aside from the
-		// inserted row, satisfying "no existing chrome replaced or
-		// overlaid".
-		listView = insertRowBelowTitle(listView, m.renderFlashRow())
-	}
 	// §3.4 condensed footer: a single row of the Core keymap keys (sourced from the
 	// task 2-1 descriptor) over a 1px border.footer rule, replacing the manual
 	// three-column footer for Sessions. Its height is folded out of the list's budget
@@ -3894,6 +3870,21 @@ func (m Model) viewSessionList() string {
 	// applySessionListSize (m.headerHeight), so the composed view stays within
 	// termH and the one-row-per-delegate pagination invariant (§3.5) holds.
 	header := m.renderHeader()
+	// §11 single-slot notice band: the slot holds AT MOST ONE band, resolved by the
+	// arbiter (renderActiveNoticeBand) — the transient flash wins over the
+	// persistent By-Tag signpost while shown, the signpost returns once the flash
+	// clears, so the two never render at once. The band sits DIRECTLY under the
+	// title separator (the header block's bottom rule), ABOVE the section header
+	// (line 0 of listView), full-width — so the section header + list shift down by
+	// one row. Its one-row height is reserved out of the list's budget by
+	// applySessionListSize (sessionBandHeight), so the composed view re-pads to
+	// termH and the §3.5 / §4.1 one-row-per-delegate pagination invariant (the
+	// §11.2 F10 recompute) holds. Composing it between the header and the list (not
+	// inside the list, where the former dual insertRowBelowTitle calls placed it)
+	// is what lands it ABOVE the section header per the §11 placement rule.
+	if band := m.renderActiveNoticeBand(); band != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, header, band, listView, footer)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, listView, footer)
 }
 
@@ -4044,37 +4035,12 @@ func (m Model) replaceListBodyWithNoMatches(listView string) string {
 	return listView[:idx+1] + body
 }
 
-// byTagSignpostStyle is the dimmed style for the persistent By-Tag "No tags
-// yet" signpost row. Kept SEPARATE from flashRowStyle (the transient flash):
-// the two rows have distinct lifecycles and the signpost must remain visually
-// distinct from a transient flash. Package-level + immutable (lipgloss value
-// semantics prevent mutation bleed across renders).
-var byTagSignpostStyle = lipgloss.NewStyle().Foreground(theme.MV.TextStrong.Color()).Italic(true)
-
 // byTagSignpostText is the exact, persistent signpost wording rendered in By
 // Tag mode when no project carries any tag (spec § Empty states → By Tag with
 // zero tags). It states the empty condition ("No tags yet") and points the
-// user at where to add tags (the projects page). Placement: a dimmed row
-// inserted directly beneath the title/filter row, above the (plain flat)
-// session list.
+// user at where to add tags (the projects page). Placement: the §11 single-slot
+// info notice band inserted directly beneath the title separator, above the
+// section header (the §11 arbiter funnels it through renderNoticeBand). The
+// per-band tint / on-band text token / left-bar colour are owned by the band
+// primitive, NOT a per-row ad-hoc style.
 const byTagSignpostText = "No tags yet — add tags on the projects page"
-
-// renderByTagSignpostRow returns the styled persistent signpost row.
-func renderByTagSignpostRow() string {
-	return byTagSignpostStyle.Render(byTagSignpostText)
-}
-
-// flashRowStyle is a package-level immutable lipgloss style; lipgloss
-// value semantics prevent mutation bleed across renders. The inline-flash
-// message uses the warning-flash message token (text.on-warning) per §2.9 /
-// §11.2 — colour source only here; the band's bg.warning tint, ▌ left-bar, and
-// ⚠/✓ glyph are the Phase 2 structural restyle.
-var flashRowStyle = lipgloss.NewStyle().Foreground(theme.MV.TextOnWarning.Color())
-
-// renderFlashRow returns the styled flash row for the Sessions page.
-// flashText is rendered verbatim (no truncation, no transformation); the
-// caller is responsible for the message wording (spec pins it as
-// `session "<name>" no longer exists` at the call site).
-func (m Model) renderFlashRow() string {
-	return flashRowStyle.Render(m.flashText)
-}
