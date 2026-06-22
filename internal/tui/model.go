@@ -121,6 +121,18 @@ const (
 	editFieldTags
 )
 
+// editMode is the §8.2 two-mode state of the edit-project modal. Navigate is the
+// default: Tab/Shift+Tab move between fields and ←/→ move across a chip field's
+// chips + trailing + add slot; x deletes a focused chip; Esc closes. Edit puts
+// ONE element live (Name or a single chip): typing edits the value, ←/→ move the
+// text cursor, Enter commits & persists, Esc discards the in-progress edit.
+type editMode int
+
+const (
+	editModeNavigate editMode = iota
+	editModeEdit
+)
+
 // SessionsMsg carries the result of fetching tmux sessions.
 type SessionsMsg struct {
 	Sessions []tmux.Session
@@ -332,21 +344,32 @@ type Model struct {
 	projectsLoaded       bool
 	defaultPageEvaluated bool
 
-	// Edit project modal state
-	editProject     project.Project
-	editName        string
-	editAliases     []string
-	editRemoved     []string
-	editNewAlias    string
-	editFocus       editField
+	// Edit project modal state — the §8.2 two-mode (navigate/edit),
+	// immediate-persist state machine. There is NO batch buffer and NO dirty
+	// state: every element persists on exit-edit (Enter) or, for chip deletes,
+	// immediately on x; the modal only tracks the live in-progress edit and the
+	// focused element.
+	editProject project.Project
+	editMode    editMode  // navigate (default) vs edit (one element live)
+	editFocus   editField // which field (Name / Aliases / Tags) is focused
+	editName    string    // the (persisted) project name; also the displayed Name value
+	editAliases []string  // alias chips for this project (persisted on each edit)
+	editTags    []string  // tag chips for this project (persisted on each edit)
+	// editAliasCursor / editTagCursor are the focused-ELEMENT index within a chip
+	// field: chips occupy [0, len-1] and the trailing + add slot is at index len.
+	// Only the currently focused field's index is meaningful.
 	editAliasCursor int
-	editError       string
+	editTagCursor   int
+	// editChanged records that AT LEAST ONE field persisted live this session, so
+	// closing on Esc refreshes the cached project records + grouping index. It is
+	// NOT a dirty/unsaved flag — everything is already on disk — only a
+	// refresh-needed signal (extended to Name + Aliases + Tags, not just tags).
+	editChanged bool
 
-	// Tag-buffer modal state, parallel to the alias-buffer fields above.
-	editTags        []string // working copy of the project's tags (persisted live)
-	editTagsMutated bool     // a tag was added/removed this session (triggers a projects reload on modal close)
-	editNewTag      string   // in-progress Add-input text (parallel to editNewAlias)
-	editTagCursor   int      // highlighted row within the Tags block
+	// Live-edit buffer (only meaningful while editMode == editModeEdit).
+	editBuffer    string // the in-progress text of the live element
+	editCursor    int    // text-cursor position (rune index) within editBuffer
+	editIsNewChip bool   // the live chip is brand-new (vanishes on Esc-discard)
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -2237,21 +2260,19 @@ func (m Model) handleEditProjectKey() (tea.Model, tea.Cmd) {
 	m.modal = modalEditProject
 	m.editProject = pi.Project
 	m.editName = pi.Project.Name
+	m.editMode = editModeNavigate
 	m.editFocus = editFieldName
-	m.editNewAlias = ""
-	m.editError = ""
-	m.editRemoved = nil
+	m.editChanged = false
 	m.editAliasCursor = 0
+	m.editTagCursor = 0
+	m.resetEditBuffer()
 
 	// Seed the tag buffer from a copy of the project's tags so mutating the
 	// buffer never aliases the stored project slice. slices.Clone(nil)
 	// returns nil, so a back-compat record with no tags seeds an empty buffer.
 	m.editTags = slices.Clone(pi.Project.Tags)
-	m.editTagsMutated = false
-	m.editNewTag = ""
-	m.editTagCursor = 0
 
-	// Load aliases matching this project's directory
+	// Load aliases matching this project's directory.
 	allAliases, err := m.aliasEditor.Load()
 	if err != nil {
 		m.editAliases = nil
@@ -2268,231 +2289,504 @@ func (m Model) handleEditProjectKey() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// resetEditBuffer clears the live-edit buffer back to its navigate-mode resting
+// state (no in-progress text, cursor at 0, not a brand-new chip).
+func (m *Model) resetEditBuffer() {
+	m.editBuffer = ""
+	m.editCursor = 0
+	m.editIsNewChip = false
+}
+
 func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
+	if m.editMode == editModeEdit {
+		return m.updateEditModeKey(keyMsg)
+	}
+	return m.updateNavigateModeKey(keyMsg)
+}
 
+// updateNavigateModeKey handles a key in §8.2 navigate mode: Tab/Shift+Tab move
+// between fields, ←/→ move across a chip field's chips + trailing + add slot,
+// Enter/e/+ enter edit mode, x deletes a focused chip immediately, and Esc
+// closes the modal (refreshing the cached projects if anything persisted).
+func (m Model) updateNavigateModeKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch keyMsg.Code {
 	case tea.KeyEscape:
-		m.modal = modalNone
-		m.editError = ""
-		// Tags are persisted live (Enter adds, x removes), so closing with Esc
-		// keeps them — unlike name/aliases, which are batched and discarded
-		// here. Reload projects so the cached records + grouping index pick up
-		// any live tag change before the By-Tag view is shown.
-		if m.editTagsMutated {
-			m.editTagsMutated = false
-			return m, m.loadProjects()
+		return m.closeEditModal()
+
+	case tea.KeyTab:
+		if keyMsg.Mod&tea.ModShift != 0 {
+			m.focusField(m.prevField())
+		} else {
+			m.focusField(m.nextField())
 		}
 		return m, nil
 
-	case tea.KeyTab:
-		// Three-way forward cycle: Name → Aliases → Tags → wrap to Name.
-		switch m.editFocus {
-		case editFieldName:
-			m.editFocus = editFieldAliases
-		case editFieldAliases:
-			m.editFocus = editFieldTags
-			// Reset the tag cursor to the Add-input row on entry so the
-			// highlight starts in a defined, in-bounds position (index 0 is
-			// always valid, even with zero tags).
-			m.editTagCursor = 0
-		default:
-			m.editFocus = editFieldName
-		}
+	case tea.KeyLeft:
+		m.moveElement(-1)
+		return m, nil
+
+	case tea.KeyRight:
+		m.moveElement(+1)
 		return m, nil
 
 	case tea.KeyEnter:
-		// Tags field: Enter is field-scoped — it adds the typed tag and
-		// persists it immediately (project.AddTag), so the visible "[x] tag"
-		// reflects what is on disk and Esc never discards it. A
-		// blank/whitespace-only or duplicate-after-normalisation input is a
-		// no-op (and never confirms). Name/Aliases fall through to the batched
-		// confirm path unchanged.
-		if m.editFocus == editFieldTags {
-			tag, ok := project.NormaliseTag(m.editNewTag)
-			if !ok {
-				// Blank/whitespace-only: no append, no confirm.
-				return m, nil
-			}
-			if slices.Contains(m.editTags, tag) {
-				// Duplicate after normalisation: no append, no confirm.
-				m.editNewTag = ""
-				return m, nil
-			}
-			if m.projectEditor != nil {
-				if err := m.projectEditor.AddTag(m.editProject.Path, tag); err != nil {
-					m.editError = "Failed to save tag"
-					return m, nil
-				}
-			}
-			m.editTags = append(m.editTags, tag)
-			m.editNewTag = ""
-			m.editError = ""
-			m.editTagsMutated = true
-			return m, nil
-		}
-		return m.handleEditProjectConfirm()
-
-	case tea.KeyBackspace:
-		if m.editFocus == editFieldName {
-			if len(m.editName) > 0 {
-				m.editName = m.editName[:len(m.editName)-1]
-			}
-		} else if m.editFocus == editFieldTags && m.editTagCursor == len(m.editTags) {
-			// Tags Add input: trim only the in-progress new-tag text.
-			if len(m.editNewTag) > 0 {
-				m.editNewTag = m.editNewTag[:len(m.editNewTag)-1]
-			}
-		} else if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
-			// On Add input
-			if len(m.editNewAlias) > 0 {
-				m.editNewAlias = m.editNewAlias[:len(m.editNewAlias)-1]
-			}
-		}
-		return m, nil
-
-	case tea.KeyDown:
-		if m.editFocus == editFieldAliases && m.editAliasCursor < len(m.editAliases) {
-			m.editAliasCursor++
-		}
-		if m.editFocus == editFieldTags && m.editTagCursor < len(m.editTags) {
-			m.editTagCursor++
-		}
-		return m, nil
-
-	case tea.KeyUp:
-		if m.editFocus == editFieldAliases && m.editAliasCursor > 0 {
-			m.editAliasCursor--
-		}
-		if m.editFocus == editFieldTags && m.editTagCursor > 0 {
-			m.editTagCursor--
-		}
-		return m, nil
+		return m.enterEditFromNavigate()
 
 	default:
-		// Printable-rune key press. In v1 this was the tea.KeyRunes case; in
-		// v2 a printable key carries its rune in Code (so it falls through the
-		// named-key cases to default) and the characters in Text. Guard on a
-		// non-empty Text with no modifiers so only real printable input lands
-		// here — the exact v1 `string(msg.Runes)` semantics.
+		// Printable-rune key press: a single character lands in Text with no
+		// modifiers. x deletes a focused chip; e/Enter edit it; + on the add
+		// slot spawns a new chip.
 		if keyMsg.Mod != 0 || keyMsg.Text == "" {
 			return m, nil
 		}
-		text := keyMsg.Text
-		// In alias area, on an existing alias entry: x removes it
-		if m.editFocus == editFieldAliases && text == "x" && m.editAliasCursor < len(m.editAliases) {
-			removed := m.editAliases[m.editAliasCursor]
-			m.editRemoved = append(m.editRemoved, removed)
-			m.editAliases = append(m.editAliases[:m.editAliasCursor], m.editAliases[m.editAliasCursor+1:]...)
-			if m.editAliasCursor > len(m.editAliases) {
-				m.editAliasCursor = len(m.editAliases)
+		switch keyMsg.Text {
+		case "x":
+			return m.deleteFocusedChip()
+		case "e":
+			if m.focusedOnChip() {
+				return m.enterEditFromNavigate()
+			}
+			return m, nil
+		case "+":
+			if m.focusedOnAddSlot() {
+				return m.enterEditFromNavigate()
 			}
 			return m, nil
 		}
-		// In alias area, on Add input: type into new alias
-		if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
-			m.editNewAlias += text
-			m.editError = ""
-			return m, nil
-		}
-		// In tags area, on an existing tag entry: x removes it and persists the
-		// removal immediately (project.RemoveTag), mirroring the live Enter-add.
-		if m.editFocus == editFieldTags && text == "x" && m.editTagCursor < len(m.editTags) {
-			removed := m.editTags[m.editTagCursor]
-			if m.projectEditor != nil {
-				if err := m.projectEditor.RemoveTag(m.editProject.Path, removed); err != nil {
-					m.editError = "Failed to remove tag"
-					return m, nil
-				}
-			}
-			m.editTags = append(m.editTags[:m.editTagCursor], m.editTags[m.editTagCursor+1:]...)
-			if m.editTagCursor > len(m.editTags) {
-				m.editTagCursor = len(m.editTags)
-			}
-			m.editError = ""
-			m.editTagsMutated = true
-			return m, nil
-		}
-		// In tags area, on Add input: type into new tag
-		if m.editFocus == editFieldTags && m.editTagCursor == len(m.editTags) {
-			m.editNewTag += text
-			m.editError = ""
-			return m, nil
-		}
-		if m.editFocus == editFieldName {
-			m.editName += text
-		}
-		m.editError = ""
 		return m, nil
 	}
 }
 
-func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
-	name := strings.TrimSpace(m.editName)
-	if name == "" {
-		m.editError = "Project name cannot be empty"
+// updateEditModeKey handles a key in §8.2 edit mode (one element live): typing
+// edits the value at the text cursor, ←/→ move the text cursor, Enter commits &
+// persists (returning to navigate), and Esc discards the in-progress edit (a
+// brand-new chip vanishes), also returning to navigate.
+func (m Model) updateEditModeKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch keyMsg.Code {
+	case tea.KeyEscape:
+		return m.discardEdit()
+
+	case tea.KeyEnter:
+		return m.commitEdit()
+
+	case tea.KeyLeft:
+		if m.editCursor > 0 {
+			m.editCursor--
+		}
+		return m, nil
+
+	case tea.KeyRight:
+		if m.editCursor < len([]rune(m.editBuffer)) {
+			m.editCursor++
+		}
+		return m, nil
+
+	case tea.KeyBackspace:
+		m.backspaceEditBuffer()
+		return m, nil
+
+	default:
+		// Printable-rune key press: insert the literal character at the cursor.
+		// In edit mode x is a literal char, not a delete.
+		if keyMsg.Mod != 0 || keyMsg.Text == "" {
+			return m, nil
+		}
+		m.insertEditRunes(keyMsg.Text)
 		return m, nil
 	}
+}
 
-	// Save project name if changed
-	if name != m.editProject.Name {
-		// via=cli: the TUI rename is a user-facing mutation.
-		if err := m.projectEditor.Rename(m.editProject.Path, name, "cli"); err != nil {
-			m.editError = "Failed to save project name"
-			return m, nil
-		}
+// --- Navigate-mode helpers -------------------------------------------------
+
+func (m Model) nextField() editField {
+	switch m.editFocus {
+	case editFieldName:
+		return editFieldAliases
+	case editFieldAliases:
+		return editFieldTags
+	default:
+		return editFieldName
 	}
+}
 
-	// Alias mutations now flow through the audited combined store-seam methods
-	// (SetAndSave / DeleteAndSave), each of which persists immediately. This
-	// changes the TUI from ONE batched Save to per-op Saves. That is acceptable
-	// because (1) the set-noop skip-persist requirement is only expressible by a
-	// combined method (a separate Save cannot selectively skip), (2) a TUI alias
-	// edit is tiny (0-1 removals plus 0-1 additions), and (3) routing every
-	// mutation through the combined methods makes all alias edits — CLI and TUI
-	// alike — uniformly audited under the aliases component. via=cli: the TUI
-	// edit is a user-facing mutation.
-
-	// Handle alias removals.
-	for _, removed := range m.editRemoved {
-		if _, err := m.aliasEditor.DeleteAndSave(removed, "cli"); err != nil {
-			m.editError = "Failed to save aliases"
-			return m, nil
-		}
+func (m Model) prevField() editField {
+	switch m.editFocus {
+	case editFieldName:
+		return editFieldTags
+	case editFieldTags:
+		return editFieldAliases
+	default:
+		return editFieldName
 	}
+}
 
-	// Handle new alias addition.
-	newAlias := strings.TrimSpace(m.editNewAlias)
-	if newAlias != "" {
-		// Check for collision before mutating.
-		allAliases, err := m.aliasEditor.Load()
-		if err == nil {
-			if existingPath, ok := allAliases[newAlias]; ok && existingPath != m.editProject.Path {
-				m.editError = fmt.Sprintf("Alias '%s' already exists", newAlias)
+// focusField moves focus to field, landing a chip field on its trailing + add
+// slot (the common-action default — ← then reaches the existing chips).
+func (m *Model) focusField(field editField) {
+	m.editFocus = field
+	switch field {
+	case editFieldAliases:
+		m.editAliasCursor = len(m.editAliases)
+	case editFieldTags:
+		m.editTagCursor = len(m.editTags)
+	}
+}
+
+// moveElement shifts the focused chip field's element index by delta, bounded to
+// [0, len] (len being the + add slot). Name has no elements, so it is a no-op.
+func (m *Model) moveElement(delta int) {
+	switch m.editFocus {
+	case editFieldAliases:
+		m.editAliasCursor = clampInt(m.editAliasCursor+delta, 0, len(m.editAliases))
+	case editFieldTags:
+		m.editTagCursor = clampInt(m.editTagCursor+delta, 0, len(m.editTags))
+	}
+}
+
+// focusedChips returns the chip slice and element index for the focused chip
+// field, plus ok==true only when a CHIP field is focused.
+func (m Model) focusedChips() (chips []string, idx int, ok bool) {
+	switch m.editFocus {
+	case editFieldAliases:
+		return m.editAliases, m.editAliasCursor, true
+	case editFieldTags:
+		return m.editTags, m.editTagCursor, true
+	default:
+		return nil, 0, false
+	}
+}
+
+// focusedOnChip reports whether the focus is on an existing chip (not the + add
+// slot, and not the Name field).
+func (m Model) focusedOnChip() bool {
+	chips, idx, ok := m.focusedChips()
+	return ok && idx < len(chips)
+}
+
+// focusedOnAddSlot reports whether the focus is on a chip field's trailing
+// + add slot.
+func (m Model) focusedOnAddSlot() bool {
+	chips, idx, ok := m.focusedChips()
+	return ok && idx == len(chips)
+}
+
+// deleteFocusedChip removes the focused chip immediately, persisting the delete
+// (alias via DeleteAndSave, tag via RemoveTag). x on the + add slot or Name is a
+// no-op.
+func (m Model) deleteFocusedChip() (tea.Model, tea.Cmd) {
+	if !m.focusedOnChip() {
+		return m, nil
+	}
+	switch m.editFocus {
+	case editFieldAliases:
+		removed := m.editAliases[m.editAliasCursor]
+		if m.aliasEditor != nil {
+			if _, err := m.aliasEditor.DeleteAndSave(removed, "cli"); err != nil {
 				return m, nil
 			}
 		}
-		if err := m.aliasEditor.SetAndSave(newAlias, m.editProject.Path, "cli"); err != nil {
-			m.editError = "Failed to save aliases"
-			return m, nil
+		m.editAliases = slices.Delete(m.editAliases, m.editAliasCursor, m.editAliasCursor+1)
+		m.editAliasCursor = clampInt(m.editAliasCursor, 0, len(m.editAliases))
+	case editFieldTags:
+		removed := m.editTags[m.editTagCursor]
+		if m.projectEditor != nil {
+			if err := m.projectEditor.RemoveTag(m.editProject.Path, removed); err != nil {
+				return m, nil
+			}
+		}
+		m.editTags = slices.Delete(m.editTags, m.editTagCursor, m.editTagCursor+1)
+		m.editTagCursor = clampInt(m.editTagCursor, 0, len(m.editTags))
+	}
+	m.editChanged = true
+	return m, nil
+}
+
+// enterEditFromNavigate transitions to edit mode for the focused element. On a
+// chip the buffer seeds from the chip's value; on the + add slot a brand-new
+// empty chip is spawned (editIsNewChip); on Name the buffer seeds from the
+// current name.
+func (m Model) enterEditFromNavigate() (tea.Model, tea.Cmd) {
+	m.editMode = editModeEdit
+	switch m.editFocus {
+	case editFieldName:
+		m.editBuffer = m.editName
+		m.editIsNewChip = false
+	default:
+		chips, idx, _ := m.focusedChips()
+		if idx < len(chips) {
+			m.editBuffer = chips[idx]
+			m.editIsNewChip = false
+		} else {
+			m.editBuffer = ""
+			m.editIsNewChip = true
+		}
+	}
+	m.editCursor = len([]rune(m.editBuffer))
+	return m, nil
+}
+
+// closeEditModal closes the modal (navigate-mode Esc). All work is already
+// persisted, so this never discards; it only refreshes the cached project
+// records + grouping index when something changed this session.
+func (m Model) closeEditModal() (tea.Model, tea.Cmd) {
+	m.modal = modalNone
+	if m.editChanged {
+		m.editChanged = false
+		return m, m.loadProjects()
+	}
+	return m, nil
+}
+
+// --- Edit-mode helpers -----------------------------------------------------
+
+func (m *Model) insertEditRunes(text string) {
+	runes := []rune(m.editBuffer)
+	pos := clampInt(m.editCursor, 0, len(runes))
+	inserted := []rune(text)
+	out := make([]rune, 0, len(runes)+len(inserted))
+	out = append(out, runes[:pos]...)
+	out = append(out, inserted...)
+	out = append(out, runes[pos:]...)
+	m.editBuffer = string(out)
+	m.editCursor = pos + len(inserted)
+}
+
+func (m *Model) backspaceEditBuffer() {
+	if m.editCursor == 0 {
+		return
+	}
+	runes := []rune(m.editBuffer)
+	pos := clampInt(m.editCursor, 0, len(runes))
+	m.editBuffer = string(runes[:pos-1]) + string(runes[pos:])
+	m.editCursor = pos - 1
+}
+
+// discardEdit backs out the in-progress edit (Esc in edit mode): a brand-new
+// chip vanishes, an existing chip/Name keeps its prior value. Nothing persists.
+func (m Model) discardEdit() (tea.Model, tea.Cmd) {
+	m.editMode = editModeNavigate
+	m.resetEditBuffer()
+	// An existing chip or Name simply retains its prior value (the buffer was
+	// never written through). A brand-new chip was never added to the slice, so
+	// it also needs no slice mutation — it just vanishes. Re-clamp the element
+	// index so the focus stays in bounds (the add slot for a vanished chip).
+	switch m.editFocus {
+	case editFieldAliases:
+		m.editAliasCursor = clampInt(m.editAliasCursor, 0, len(m.editAliases))
+	case editFieldTags:
+		m.editTagCursor = clampInt(m.editTagCursor, 0, len(m.editTags))
+	}
+	return m, nil
+}
+
+// commitEdit persists the live element and returns to navigate mode, applying
+// the §8.2 falling-out rules (empty-on-commit = delete; empty Name reverts;
+// duplicate-on-commit = silent dedupe; cross-project alias collision = silent
+// revert). It always exits edit mode — there is no blocking error modal.
+func (m Model) commitEdit() (tea.Model, tea.Cmd) {
+	value := strings.TrimSpace(m.editBuffer)
+	field := m.editFocus
+	m.editMode = editModeNavigate
+
+	switch field {
+	case editFieldName:
+		m.commitName(value)
+	case editFieldAliases:
+		m.commitAlias(value)
+	case editFieldTags:
+		m.commitTag(value)
+	}
+
+	m.resetEditBuffer()
+	return m, nil
+}
+
+// commitName persists a Name change via Rename. An empty Name can't persist and
+// reverts to the prior value (no Rename call, no error).
+func (m *Model) commitName(value string) {
+	if value == "" {
+		// Empty Name reverts to prior — editName is untouched.
+		return
+	}
+	if value == m.editName {
+		return
+	}
+	if m.projectEditor != nil {
+		if err := m.projectEditor.Rename(m.editProject.Path, value, "cli"); err != nil {
+			return
+		}
+	}
+	m.editName = value
+	m.editChanged = true
+}
+
+// commitAlias persists an alias chip edit. Empty-on-commit deletes the chip;
+// a duplicate (already present in this field) dedupes silently; a cross-project
+// collision (the alias maps to a DIFFERENT project) is a silent revert.
+func (m *Model) commitAlias(value string) {
+	idx := m.editAliasCursor
+	existing := idx < len(m.editAliases)
+
+	if value == "" {
+		m.deleteAliasAt(idx)
+		return
+	}
+
+	// Duplicate within this field: silent no-op (the existing chip remains).
+	for i, a := range m.editAliases {
+		if a == value && i != idx {
+			if existing {
+				// The user renamed an existing chip onto a duplicate: drop the
+				// edited chip, leave the original.
+				m.deleteAliasAt(idx)
+			}
+			return
 		}
 	}
 
-	// Tag mutations are NOT handled here: tags persist live as the user edits
-	// them (Enter adds via AddTag, x removes via RemoveTag in
-	// updateEditProjectModal), so by the time the batched name/alias confirm
-	// runs the projects.json tag set is already current. The trailing
-	// loadProjects() refreshes the cached records + grouping index for both
-	// the name/alias changes and any live tag edits.
+	// Cross-project collision pre-check: reject if the alias maps to a different
+	// project path. Silent revert (no error modal) — consistent with the
+	// duplicate rule (see Edge Cases in the task / §8.2).
+	if m.aliasEditor != nil {
+		if all, err := m.aliasEditor.Load(); err == nil {
+			if path, ok := all[value]; ok && path != m.editProject.Path {
+				if !existing {
+					m.dropNewChip()
+				}
+				return
+			}
+		}
+		if err := m.aliasEditor.SetAndSave(value, m.editProject.Path, "cli"); err != nil {
+			if !existing {
+				m.dropNewChip()
+			}
+			return
+		}
+	}
 
-	m.modal = modalNone
-	m.editError = ""
-	m.editTagsMutated = false
+	if existing {
+		// An existing chip was renamed: delete the old alias name and set the new.
+		old := m.editAliases[idx]
+		if old != value && m.aliasEditor != nil {
+			_, _ = m.aliasEditor.DeleteAndSave(old, "cli")
+		}
+		m.editAliases[idx] = value
+	} else {
+		m.editAliases = append(m.editAliases, value)
+		m.editAliasCursor = len(m.editAliases)
+	}
+	m.editChanged = true
+}
 
-	return m, m.loadProjects()
+// commitTag persists a tag chip edit. Empty-on-commit deletes; a duplicate
+// (case-sensitive via NormaliseTag) dedupes silently.
+func (m *Model) commitTag(value string) {
+	idx := m.editTagCursor
+	existing := idx < len(m.editTags)
+
+	if value == "" {
+		m.deleteTagAt(idx)
+		return
+	}
+
+	tag, ok := project.NormaliseTag(value)
+	if !ok {
+		if existing {
+			m.deleteTagAt(idx)
+		} else {
+			m.dropNewChip()
+		}
+		return
+	}
+
+	// Duplicate within this field (case-sensitive): silent no-op.
+	for i, existingTag := range m.editTags {
+		if existingTag == tag && i != idx {
+			if existing {
+				m.deleteTagAt(idx)
+			} else {
+				m.dropNewChip()
+			}
+			return
+		}
+	}
+
+	if existing {
+		old := m.editTags[idx]
+		if old != tag && m.projectEditor != nil {
+			_ = m.projectEditor.RemoveTag(m.editProject.Path, old)
+		}
+		if m.projectEditor != nil {
+			if err := m.projectEditor.AddTag(m.editProject.Path, tag); err != nil {
+				return
+			}
+		}
+		m.editTags[idx] = tag
+	} else {
+		if m.projectEditor != nil {
+			if err := m.projectEditor.AddTag(m.editProject.Path, tag); err != nil {
+				m.dropNewChip()
+				return
+			}
+		}
+		m.editTags = append(m.editTags, tag)
+		m.editTagCursor = len(m.editTags)
+	}
+	m.editChanged = true
+}
+
+// deleteAliasAt removes the alias chip at idx (persisting the delete) when idx
+// addresses an existing chip; a non-existent index (the just-spawned new chip)
+// simply vanishes. The element index is re-clamped to the + add slot.
+func (m *Model) deleteAliasAt(idx int) {
+	if idx < len(m.editAliases) {
+		removed := m.editAliases[idx]
+		if m.aliasEditor != nil {
+			_, _ = m.aliasEditor.DeleteAndSave(removed, "cli")
+		}
+		m.editAliases = slices.Delete(m.editAliases, idx, idx+1)
+		m.editChanged = true
+	}
+	m.editAliasCursor = len(m.editAliases)
+}
+
+func (m *Model) deleteTagAt(idx int) {
+	if idx < len(m.editTags) {
+		removed := m.editTags[idx]
+		if m.projectEditor != nil {
+			_ = m.projectEditor.RemoveTag(m.editProject.Path, removed)
+		}
+		m.editTags = slices.Delete(m.editTags, idx, idx+1)
+		m.editChanged = true
+	}
+	m.editTagCursor = len(m.editTags)
+}
+
+// dropNewChip re-clamps the element index to the + add slot after a brand-new
+// chip fails to commit (collision, blank, persist error) and so never enters
+// the slice.
+func (m *Model) dropNewChip() {
+	switch m.editFocus {
+	case editFieldAliases:
+		m.editAliasCursor = len(m.editAliases)
+	case editFieldTags:
+		m.editTagCursor = len(m.editTags)
+	}
+}
+
+// clampInt returns v bounded to [lo, hi].
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // selectedSessionItem returns the currently selected SessionItem from the list, if any.
@@ -3483,6 +3777,12 @@ func (m Model) renderProjectsFooterForFilterState() string {
 }
 
 // renderEditProjectContent builds the content string for the edit project modal.
+//
+// NOTE: this is the legacy interim render — the §8.2 MV chip/footer render is
+// task 3-9. It only needs to display the modal coherently against the new
+// two-mode state machine: it reads editBuffer for the live element so an
+// in-progress edit shows, and the displayed Name / chips otherwise come straight
+// from the persisted state.
 func (m Model) renderEditProjectContent() string {
 	var b strings.Builder
 
@@ -3492,51 +3792,61 @@ func (m Model) renderEditProjectContent() string {
 	if m.editFocus == editFieldName {
 		nameIndicator = "> "
 	}
-	fmt.Fprintf(&b, "%sName: %s\n", nameIndicator, m.editName)
-
-	b.WriteString("\n")
-	renderEditListField(&b, "Aliases", m.editFocus == editFieldAliases, m.editAliases, m.editAliasCursor, m.editNewAlias)
-
-	b.WriteString("\n")
-	renderEditListField(&b, "Tags", m.editFocus == editFieldTags, m.editTags, m.editTagCursor, m.editNewTag)
-
-	if m.editError != "" {
-		fmt.Fprintf(&b, "\n  Error: %s\n", m.editError)
+	nameValue := m.editName
+	if m.editFocus == editFieldName && m.editMode == editModeEdit {
+		nameValue = m.editBuffer
 	}
+	fmt.Fprintf(&b, "%sName: %s\n", nameIndicator, nameValue)
 
-	b.WriteString("\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field")
+	b.WriteString("\n")
+	m.renderEditChipField(&b, "Aliases", editFieldAliases, m.editAliases, m.editAliasCursor)
+
+	b.WriteString("\n")
+	m.renderEditChipField(&b, "Tags", editFieldTags, m.editTags, m.editTagCursor)
+
+	b.WriteString("\n  [Enter] edit/save  [Esc] back  [Tab] next field")
 
 	return b.String()
 }
 
-// renderEditListField renders one editable list field (Aliases or Tags) of the
-// edit-project modal into b: a focus-indicated "<label>:" heading, the entries
-// (each a removable "[x] <entry>" row, or a "(none)" empty state), and a trailing
-// "Add: <addInput>" row. The focus indicator and per-row cursor markers are driven
-// by focused (whether the field currently has focus) combined with cursor (which
-// selects an entry, or the Add row when it equals len(entries)).
-func renderEditListField(b *strings.Builder, label string, focused bool, entries []string, cursor int, addInput string) {
+// renderEditChipField renders one chip field (Aliases or Tags) of the edit
+// modal: a focus-indicated heading, the chips (each "[x] <chip>", or "(none)"
+// when empty), and a trailing "Add:" slot. While the focused element is being
+// edited, its row shows the live editBuffer; a brand-new chip's text shows in
+// the Add slot. The legacy render is interim (task 3-9 ships the MV chips).
+func (m Model) renderEditChipField(b *strings.Builder, label string, field editField, chips []string, cursor int) {
+	focused := m.editFocus == field
+	editing := focused && m.editMode == editModeEdit
+
 	indicator := "  "
 	if focused {
 		indicator = "> "
 	}
 	b.WriteString(indicator + label + ":\n")
 
-	if len(entries) == 0 {
+	if len(chips) == 0 {
 		b.WriteString("    (none)\n")
 	} else {
-		for i, entry := range entries {
+		for i, chip := range chips {
 			marker := "    "
 			if focused && cursor == i {
 				marker = "  > "
 			}
-			fmt.Fprintf(b, "%s[x] %s\n", marker, entry)
+			value := chip
+			if editing && cursor == i {
+				value = m.editBuffer
+			}
+			fmt.Fprintf(b, "%s[x] %s\n", marker, value)
 		}
 	}
 
 	addMarker := "    "
-	if focused && cursor == len(entries) {
+	if focused && cursor == len(chips) {
 		addMarker = "  > "
+	}
+	addInput := ""
+	if editing && m.editIsNewChip {
+		addInput = m.editBuffer
 	}
 	fmt.Fprintf(b, "%sAdd: %s\n", addMarker, addInput)
 }

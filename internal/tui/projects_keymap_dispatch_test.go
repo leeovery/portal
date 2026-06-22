@@ -21,6 +21,21 @@ func (projectsParityStore) List() ([]project.Project, error)       { return nil,
 func (projectsParityStore) CleanStale() ([]project.Project, error) { return nil, nil }
 func (projectsParityStore) Remove(string, string) error            { return nil }
 
+// stubTagsAliasEditor / stubTagsProjectEditor are no-op editors satisfying the
+// non-nil dependency guards in handleEditProjectKey / the projects dispatch, so
+// e/d/Enter route to their handlers without depending on real storage.
+type stubTagsAliasEditor struct{}
+
+func (stubTagsAliasEditor) Load() (map[string]string, error)        { return map[string]string{}, nil }
+func (stubTagsAliasEditor) SetAndSave(_, _, _ string) error         { return nil }
+func (stubTagsAliasEditor) DeleteAndSave(_, _ string) (bool, error) { return false, nil }
+
+type stubTagsProjectEditor struct{}
+
+func (stubTagsProjectEditor) Rename(_, _, _ string) error { return nil }
+func (stubTagsProjectEditor) AddTag(_, _ string) error    { return nil }
+func (stubTagsProjectEditor) RemoveTag(_, _ string) error { return nil }
+
 // projectsDispatchModel builds a Projects-page Model seeded with one project row
 // and the editor/creator/store stubs the project handlers guard on, for
 // exercising the updateProjectsPage rune/key dispatch directly.

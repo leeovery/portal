@@ -6,81 +6,68 @@ import (
 	"github.com/leeovery/portal/internal/project"
 )
 
-// TestRenderEditProjectContent_ByteExact is the byte-identical regression oracle
-// for the renderEditListField extraction: it pins the full rendered output of the
-// edit-project modal across every relevant state (Name/Aliases/Tags focus, empty
-// "(none)" state, populated with cursor on an entry, cursor on the Add row, and
-// the error footer). The expected strings were captured from the pre-refactor
-// inline implementation; the helper must reproduce them exactly.
+// TestRenderEditProjectContent_ByteExact pins the full rendered output of the
+// edit-project modal's interim (pre-3-9) render across the navigate-mode focus
+// states (Name/Aliases/Tags focus, empty "(none)" state, populated with the
+// element index on a chip, the index on the + add slot) plus one edit-mode state
+// (a brand-new chip showing its live buffer in the Add slot). The §8.2 MV chip
+// render is task 3-9; this oracle guards the interim render against the new
+// two-mode state model.
 func TestRenderEditProjectContent_ByteExact(t *testing.T) {
 	tests := []struct {
 		name      string
+		mode      editMode
 		focus     editField
 		aliases   []string
 		aliasCur  int
-		newAlias  string
 		tags      []string
 		tagCur    int
-		newTag    string
-		editError string
+		buffer    string
+		isNewChip bool
 		want      string
 	}{
 		{
 			name:  "name-focus-empty",
 			focus: editFieldName,
-			want:  "Edit: Portal\n\n> Name: MyName\n\n  Aliases:\n    (none)\n    Add: \n\n  Tags:\n    (none)\n    Add: \n\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field",
+			want:  "Edit: Portal\n\n> Name: MyName\n\n  Aliases:\n    (none)\n    Add: \n\n  Tags:\n    (none)\n    Add: \n\n  [Enter] edit/save  [Esc] back  [Tab] next field",
 		},
 		{
-			name:     "aliases-focus-empty-add",
+			name:     "aliases-focus-addslot",
 			focus:    editFieldAliases,
-			newAlias: "draftA",
-			want:     "Edit: Portal\n\n  Name: MyName\n\n> Aliases:\n    (none)\n  > Add: draftA\n\n  Tags:\n    (none)\n    Add: \n\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field",
+			aliasCur: 0,
+			want:     "Edit: Portal\n\n  Name: MyName\n\n> Aliases:\n    (none)\n  > Add: \n\n  Tags:\n    (none)\n    Add: \n\n  [Enter] edit/save  [Esc] back  [Tab] next field",
 		},
 		{
-			name:     "aliases-focus-entry",
+			name:     "aliases-focus-chip",
 			focus:    editFieldAliases,
 			aliases:  []string{"a1", "a2"},
 			aliasCur: 1,
-			newAlias: "na",
-			want:     "Edit: Portal\n\n  Name: MyName\n\n> Aliases:\n    [x] a1\n  > [x] a2\n    Add: na\n\n  Tags:\n    (none)\n    Add: \n\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field",
+			want:     "Edit: Portal\n\n  Name: MyName\n\n> Aliases:\n    [x] a1\n  > [x] a2\n    Add: \n\n  Tags:\n    (none)\n    Add: \n\n  [Enter] edit/save  [Esc] back  [Tab] next field",
 		},
 		{
-			name:     "aliases-focus-addrow",
+			name:     "aliases-focus-addslot-with-chip",
 			focus:    editFieldAliases,
 			aliases:  []string{"a1"},
 			aliasCur: 1,
-			newAlias: "newone",
-			want:     "Edit: Portal\n\n  Name: MyName\n\n> Aliases:\n    [x] a1\n  > Add: newone\n\n  Tags:\n    (none)\n    Add: \n\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field",
+			want:     "Edit: Portal\n\n  Name: MyName\n\n> Aliases:\n    [x] a1\n  > Add: \n\n  Tags:\n    (none)\n    Add: \n\n  [Enter] edit/save  [Esc] back  [Tab] next field",
 		},
 		{
-			name:   "tags-focus-empty",
-			focus:  editFieldTags,
-			newTag: "tg",
-			want:   "Edit: Portal\n\n  Name: MyName\n\n  Aliases:\n    (none)\n    Add: \n\n> Tags:\n    (none)\n  > Add: tg\n\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field",
-		},
-		{
-			name:   "tags-focus-entry",
+			name:   "tags-focus-chip",
 			focus:  editFieldTags,
 			tags:   []string{"t1", "t2"},
 			tagCur: 0,
-			want:   "Edit: Portal\n\n  Name: MyName\n\n  Aliases:\n    (none)\n    Add: \n\n> Tags:\n  > [x] t1\n    [x] t2\n    Add: \n\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field",
+			want:   "Edit: Portal\n\n  Name: MyName\n\n  Aliases:\n    (none)\n    Add: \n\n> Tags:\n  > [x] t1\n    [x] t2\n    Add: \n\n  [Enter] edit/save  [Esc] back  [Tab] next field",
 		},
 		{
-			name:    "tags-focus-addrow",
-			focus:   editFieldTags,
-			aliases: []string{"a1"},
-			tags:    []string{"t1"},
-			tagCur:  1,
-			newTag:  "addtag",
-			want:    "Edit: Portal\n\n  Name: MyName\n\n  Aliases:\n    [x] a1\n    Add: \n\n> Tags:\n    [x] t1\n  > Add: addtag\n\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field",
-		},
-		{
-			name:      "with-error",
-			focus:     editFieldAliases,
+			name:      "tags-edit-new-chip-shows-buffer",
+			mode:      editModeEdit,
+			focus:     editFieldTags,
 			aliases:   []string{"a1"},
 			tags:      []string{"t1"},
-			editError: "boom",
-			want:      "Edit: Portal\n\n  Name: MyName\n\n> Aliases:\n  > [x] a1\n    Add: \n\n  Tags:\n    [x] t1\n    Add: \n\n  Error: boom\n\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field",
+			tagCur:    1,
+			buffer:    "addtag",
+			isNewChip: true,
+			want:      "Edit: Portal\n\n  Name: MyName\n\n  Aliases:\n    [x] a1\n    Add: \n\n> Tags:\n    [x] t1\n  > Add: addtag\n\n  [Enter] edit/save  [Esc] back  [Tab] next field",
 		},
 	}
 
@@ -89,15 +76,15 @@ func TestRenderEditProjectContent_ByteExact(t *testing.T) {
 			m := Model{
 				modal:           modalEditProject,
 				editProject:     project.Project{Name: "Portal"},
+				editMode:        tc.mode,
 				editFocus:       tc.focus,
 				editName:        "MyName",
 				editAliases:     tc.aliases,
 				editAliasCursor: tc.aliasCur,
-				editNewAlias:    tc.newAlias,
 				editTags:        tc.tags,
 				editTagCursor:   tc.tagCur,
-				editNewTag:      tc.newTag,
-				editError:       tc.editError,
+				editBuffer:      tc.buffer,
+				editIsNewChip:   tc.isNewChip,
 			}
 			got := m.renderEditProjectContent()
 			if got != tc.want {

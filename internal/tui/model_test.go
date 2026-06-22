@@ -1,7 +1,6 @@
 package tui_test
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -4561,7 +4560,7 @@ func TestEditProject(t *testing.T) {
 		}
 		model := setupEditModel(store, editor, aliases)
 
-		// Press e on first project
+		// Press e on first project.
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		view := model.View().Content
@@ -4574,203 +4573,172 @@ func TestEditProject(t *testing.T) {
 		if !strings.Contains(view, "Aliases:") {
 			t.Errorf("edit modal should contain 'Aliases:' section, got:\n%s", view)
 		}
-		// Should show alias 'p' which maps to /code/portal
 		if !strings.Contains(view, "p") {
 			t.Errorf("edit modal should show alias 'p', got:\n%s", view)
 		}
-		// Should have border styling (modal overlay)
 		if !strings.ContainsAny(view, "─│╭╮╰╯") {
 			t.Errorf("edit modal should have border styling, got:\n%s", view)
 		}
 	})
 
-	t.Run("Tab switches focus between name and aliases", func(t *testing.T) {
+	t.Run("Tab moves between Name and Aliases in navigate mode", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
 			},
 		}
 		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{
-			aliases: map[string]string{},
-		}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		// Open edit modal
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
-		// Initially focus is on name field — typing goes to name
-		// Type a character
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
-		view := model.View().Content
-		if !strings.Contains(view, "portalZ") {
-			t.Errorf("typing should append to name field, got:\n%s", view)
+		// Open lands on Name in navigate mode — the focus indicator (> ) sits on
+		// the Name heading.
+		if !strings.Contains(model.View().Content, "> Name:") {
+			t.Fatalf("open should focus Name, got:\n%s", model.View().Content)
 		}
 
-		// Press Tab to switch to aliases
+		// Tab moves focus to Aliases.
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-
-		// Now typing should go to alias "Add:" input, not name
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-		view = model.View().Content
-		if !strings.Contains(view, "Add:") {
-			t.Errorf("after Tab, view should show 'Add:' section, got:\n%s", view)
-		}
-		if !strings.Contains(view, "portalZ") {
-			t.Errorf("name should still be 'portalZ' (not modified by alias typing), got:\n%s", view)
+		if !strings.Contains(model.View().Content, "> Aliases:") {
+			t.Errorf("after Tab focus should be Aliases, got:\n%s", model.View().Content)
 		}
 
-		// Tab is now a three-way cycle: Name → Aliases → Tags → Name.
-		// From Aliases, two more Tabs (Tags, then wrap) return focus to Name,
-		// where typing again appends to the name field.
+		// Two more Tabs wrap Aliases → Tags → Name.
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Aliases → Tags
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Tags → Name
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'Y', Text: "Y"})
-		view = model.View().Content
-		if !strings.Contains(view, "portalZY") {
-			t.Errorf("after wrapping back to name, typing should append to name, got:\n%s", view)
+		if !strings.Contains(model.View().Content, "> Name:") {
+			t.Errorf("after three Tabs focus should wrap to Name, got:\n%s", model.View().Content)
 		}
 	})
 
-	t.Run("Enter saves name change and refreshes list", func(t *testing.T) {
+	t.Run("Enter on Name commits and persists via Rename", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
 			},
 		}
 		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{
-			aliases: map[string]string{},
-		}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		// Open edit modal
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
-		// Change name
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
+		// Enter edit mode on Name, append a char, commit.
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // navigate → edit
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'X', Text: "X"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // commit
 
-		// Press Enter to save
-		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		if cmd == nil {
-			t.Fatal("Enter should return a command for refresh, got nil")
-		}
-
-		// Verify editor.Rename was called
 		if editor.renamedPath != "/code/portal" {
 			t.Errorf("expected Rename path '/code/portal', got %q", editor.renamedPath)
 		}
-		if editor.renamedName != "new" {
-			t.Errorf("expected Rename name 'new', got %q", editor.renamedName)
+		if editor.renamedName != "portalX" {
+			t.Errorf("expected Rename name 'portalX', got %q", editor.renamedName)
 		}
-		// The TUI rename is a user-facing mutation, so the breadcrumb must
-		// record via=cli.
 		if editor.renamedVia != "cli" {
 			t.Errorf("expected Rename via=cli, got %q", editor.renamedVia)
 		}
-
-		// Execute command — should refresh projects
-		msg := cmd()
-		loadedMsg, ok := msg.(tui.ProjectsLoadedMsg)
-		if !ok {
-			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
-		}
-		if loadedMsg.Err != nil {
-			t.Fatalf("unexpected error: %v", loadedMsg.Err)
+		// Commit returns to navigate, modal stays open.
+		if !strings.Contains(model.View().Content, "Name:") {
+			t.Errorf("modal should stay open after a Name commit (navigate mode), got:\n%s", model.View().Content)
 		}
 	})
 
-	t.Run("Esc cancels edit without saving", func(t *testing.T) {
+	t.Run("Esc in navigate closes and refreshes after a live edit", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
 			},
 		}
 		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{
-			aliases: map[string]string{},
-		}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		// Open edit modal
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+		// Commit a Name change (persists live).
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'Y', Text: "Y"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-		// Change name
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'X', Text: "X"})
-
-		// Press Esc to cancel
+		// Esc in navigate closes; the saved work survives and a refresh fires.
 		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
-		// Should not have called Rename
-		if editor.renamedPath != "" {
-			t.Error("Esc should not call Rename")
+		if editor.renamedName != "portalY" {
+			t.Errorf("saved name should survive Esc; Rename name = %q", editor.renamedName)
 		}
-		// Should not return a command (no refresh)
-		if cmd != nil {
-			t.Errorf("Esc should return nil command, got non-nil")
+		if cmd == nil {
+			t.Fatal("Esc after a live edit should return a refresh command, got nil")
 		}
-		// Modal should be dismissed — view shows project list
+		msg := cmd()
+		if _, ok := msg.(tui.ProjectsLoadedMsg); !ok {
+			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
+		}
 		view := model.View().Content
 		if strings.Contains(view, "Name:") {
 			t.Errorf("edit modal should be dismissed after Esc, got:\n%s", view)
 		}
-		// Original name should be visible (unchanged)
-		if !strings.Contains(view, "portal") {
-			t.Errorf("original project name should still be in list, got:\n%s", view)
-		}
 	})
 
-	t.Run("empty name rejected with error on Enter", func(t *testing.T) {
+	t.Run("Esc in navigate with no edits closes without refresh", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
 			},
 		}
 		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{
-			aliases: map[string]string{},
-		}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		// Open edit modal
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
-		// Clear name completely
-		for range len("portal") {
-			model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		}
-
-		// Press Enter with empty name
-		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		// Should show error
-		view := model.View().Content
-		if !strings.Contains(view, "cannot be empty") {
-			t.Errorf("expected empty name error, got:\n%s", view)
-		}
-		// Should NOT dismiss modal
-		if !strings.Contains(view, "Name:") {
-			t.Errorf("modal should still be open after validation error, got:\n%s", view)
-		}
-		// Should not have called Rename
 		if editor.renamedPath != "" {
-			t.Error("should not call Rename with empty name")
+			t.Error("Esc with no edits should not call Rename")
 		}
 		if cmd != nil {
-			t.Errorf("should not return command on validation error, got non-nil")
+			t.Errorf("Esc with no edits should return nil command, got non-nil")
+		}
+		view := model.View().Content
+		if strings.Contains(view, "Name:") {
+			t.Errorf("edit modal should be dismissed after Esc, got:\n%s", view)
 		}
 	})
 
-	t.Run("alias collision shows error message", func(t *testing.T) {
+	t.Run("empty Name commit reverts to prior without persisting or blocking", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // edit Name
+		for range len("portal") {
+			model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		}
+		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // commit empty
+
+		// No Rename, no blocking modal — silently reverts.
+		if editor.renamedPath != "" {
+			t.Error("empty Name must not call Rename")
+		}
+		if cmd != nil {
+			t.Errorf("empty-Name commit should not produce a command, got non-nil")
+		}
+		view := model.View().Content
+		if strings.Contains(view, "cannot be empty") {
+			t.Errorf("empty Name must NOT pop a blocking error, got:\n%s", view)
+		}
+		if !strings.Contains(view, "portal") {
+			t.Errorf("Name should revert to prior 'portal', got:\n%s", view)
+		}
+	})
+
+	t.Run("cross-project alias collision is a silent revert", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -4778,39 +4746,25 @@ func TestEditProject(t *testing.T) {
 			},
 		}
 		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{
-			aliases: map[string]string{
-				"w": "/code/webapp",
-			},
-		}
+		aliases := &mockAliasEditor{aliases: map[string]string{"w": "/code/webapp"}}
 		model := setupEditModel(store, editor, aliases)
 
-		// Open edit modal on portal (first project)
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
-
-		// Switch to alias section
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-
-		// Type 'w' as new alias (which already exists for /code/webapp)
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})   // → Aliases (add slot)
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // spawn new chip
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // commit → collision
 
-		// Press Enter to save
-		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
+		if len(aliases.setCalls) != 0 {
+			t.Errorf("collision must not SetAndSave; setCalls = %+v", aliases.setCalls)
+		}
 		view := model.View().Content
-		if !strings.Contains(view, "already exists") {
-			t.Errorf("expected alias collision error, got:\n%s", view)
-		}
-		// Modal should still be open
-		if !strings.Contains(view, "Name:") {
-			t.Errorf("modal should still be open after alias collision, got:\n%s", view)
-		}
-		if cmd != nil {
-			t.Errorf("should not return command on alias collision, got non-nil")
+		if strings.Contains(view, "already exists") {
+			t.Errorf("collision must NOT pop a blocking error (silent revert), got:\n%s", view)
 		}
 	})
 
-	t.Run("x removes alias from list in edit mode", func(t *testing.T) {
+	t.Run("x removes a focused alias chip immediately", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -4825,56 +4779,41 @@ func TestEditProject(t *testing.T) {
 		}
 		model := setupEditModel(store, editor, aliases)
 
-		// Open edit modal
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
-
-		// Switch to alias section
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-
-		// Press x to remove the first alias
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})  // → Aliases (add slot)
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyLeft}) // onto last chip
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
-		view := model.View().Content
-		// The modal should still be open
-		if !strings.Contains(view, "Name:") {
-			t.Errorf("modal should still be open after removing alias, got:\n%s", view)
+		// Immediate persist via DeleteAndSave (1 chip removed).
+		if len(aliases.deleted) != 1 {
+			t.Fatalf("x should DeleteAndSave immediately, got %d deletes", len(aliases.deleted))
 		}
-		// At least one alias should remain visible
-		if !strings.Contains(view, "Aliases:") {
-			t.Errorf("aliases section should still be visible, got:\n%s", view)
+		if !aliases.saveCalled {
+			t.Error("expected Save on immediate alias delete")
+		}
+		view := model.View().Content
+		if !strings.Contains(view, "Name:") {
+			t.Errorf("modal should stay open after removing an alias, got:\n%s", view)
 		}
 	})
 
-	t.Run("new alias is added on save", func(t *testing.T) {
+	t.Run("a new alias is committed via SetAndSave on Enter", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
 			},
 		}
 		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{
-			aliases: map[string]string{},
-		}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		// Open edit modal
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
-
-		// Switch to alias section (cursor starts on Add input since no existing aliases)
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-
-		// Type new alias
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})   // → Aliases (add slot)
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // spawn new chip
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // commit
 
-		// Press Enter to save
-		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		if cmd == nil {
-			t.Fatal("Enter should return a command for refresh, got nil")
-		}
-
-		// Verify alias was set
 		if len(aliases.setCalls) != 1 {
 			t.Fatalf("expected 1 Set call, got %d", len(aliases.setCalls))
 		}
@@ -4884,55 +4823,12 @@ func TestEditProject(t *testing.T) {
 		if aliases.setCalls[0].path != "/code/portal" {
 			t.Errorf("expected alias path '/code/portal', got %q", aliases.setCalls[0].path)
 		}
-		// The TUI alias edit is a user-facing mutation, so the breadcrumb must
-		// record via=cli.
 		if aliases.setCalls[0].via != "cli" {
 			t.Errorf("expected SetAndSave via=cli, got %q", aliases.setCalls[0].via)
 		}
-		if !aliases.saveCalled {
-			t.Error("expected Save to be called")
-		}
-	})
-
-	t.Run("alias removal is committed on save", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/portal", Name: "portal"},
-			},
-		}
-		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{
-			aliases: map[string]string{
-				"p": "/code/portal",
-			},
-		}
-		model := setupEditModel(store, editor, aliases)
-
-		// Open edit modal
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
-
-		// Switch to alias section
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-
-		// Press x to remove alias
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-
-		// Press Enter to save
-		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		if cmd == nil {
-			t.Fatal("Enter should return a command for refresh, got nil")
-		}
-
-		// Verify Delete was called for the removed alias
-		if len(aliases.deleted) != 1 {
-			t.Fatalf("expected 1 Delete call, got %d", len(aliases.deleted))
-		}
-		if aliases.deleted[0] != "p" {
-			t.Errorf("expected Delete('p'), got Delete(%q)", aliases.deleted[0])
-		}
-		if !aliases.saveCalled {
-			t.Error("expected Save to be called")
+		// Commit returns to navigate; the modal stays open.
+		if !strings.Contains(model.View().Content, "Name:") {
+			t.Errorf("modal should stay open after committing a new alias")
 		}
 	})
 
@@ -4942,10 +4838,8 @@ func TestEditProject(t *testing.T) {
 				{Path: "/code/portal", Name: "portal"},
 			},
 		}
-		// No editor or alias editor provided
 		model := setupEditModel(store, nil, nil)
 
-		// Press e
 		model, cmd := model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		if cmd != nil {
@@ -4962,12 +4856,9 @@ func TestEditProject(t *testing.T) {
 			projects: []project.Project{},
 		}
 		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{
-			aliases: map[string]string{},
-		}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		// Press e on empty list
 		model, cmd := model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 
 		if cmd != nil {
@@ -4980,36 +4871,28 @@ func TestEditProject(t *testing.T) {
 	})
 }
 
-// openTagsModal opens the edit modal for the (single) project and moves focus to
-// the Tags field, leaving the cursor on the Add-input row.
-func openTagsModal(model tea.Model) tea.Model {
+// openTagsAddSlot opens the edit modal for the (single) project and Tabs focus to
+// the Tags field, landing on the trailing + add slot (navigate mode).
+func openTagsAddSlot(model tea.Model) tea.Model {
 	model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
-	// Tab cycle: Name → Aliases → Tags.
-	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Name → Aliases
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Aliases → Tags
 	return model
 }
 
-// typeTagAndAdd types the given tag runes into the Tags Add input and presses
-// Enter to commit it to the working buffer.
-func typeTagAndAdd(model tea.Model, tag string) tea.Model {
+// addTagLive spawns a new tag chip from the + add slot, types the tag, and
+// commits with Enter — persisting it live via AddTag.
+func addTagLive(model tea.Model, tag string) tea.Model {
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // spawn new chip
 	for _, r := range tag {
 		model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
-	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // commit
 	return model
 }
 
-// confirmFromTagsField moves focus off the Tags field back to Name (a single Tab
-// wraps Tags → Name) and presses Enter to confirm. Enter while the Tags field is
-// focused is field-scoped (add), so confirm must originate from the Name field.
-func confirmFromTagsField(model tea.Model) (tea.Model, tea.Cmd) {
-	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Tags → Name
-	return model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-}
-
 func TestEditProjectTagPersistence(t *testing.T) {
-	t.Run("persists an added tag via AddTag on confirm", func(t *testing.T) {
+	t.Run("persists an added tag via AddTag on commit", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -5019,10 +4902,8 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		model = openTagsModal(model)
-		model = typeTagAndAdd(model, "work")
-
-		_, cmd := confirmFromTagsField(model)
+		model = openTagsAddSlot(model)
+		model = addTagLive(model, "work")
 
 		if len(editor.addedTags) != 1 {
 			t.Fatalf("expected 1 AddTag call, got %d: %+v", len(editor.addedTags), editor.addedTags)
@@ -5036,12 +4917,13 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		if len(editor.removedTags) != 0 {
 			t.Errorf("expected no RemoveTag calls, got %+v", editor.removedTags)
 		}
-		if cmd == nil {
-			t.Error("expected refresh command on successful confirm, got nil")
+		// Commit returns to navigate; the modal stays open and the chip shows.
+		if !strings.Contains(model.View().Content, "work") {
+			t.Errorf("committed tag 'work' should be visible in the modal")
 		}
 	})
 
-	t.Run("persists a removed tag via RemoveTag on confirm", func(t *testing.T) {
+	t.Run("persists a removed tag via RemoveTag on x", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
@@ -5051,12 +4933,9 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		model = openTagsModal(model)
-		// Move cursor up from the Add-input row onto the existing tag, then x.
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+		model = openTagsAddSlot(model)
+		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyLeft}) // onto the existing tag
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-
-		_, cmd := confirmFromTagsField(model)
 
 		if len(editor.removedTags) != 1 {
 			t.Fatalf("expected 1 RemoveTag call, got %d: %+v", len(editor.removedTags), editor.removedTags)
@@ -5070,42 +4949,35 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		if len(editor.addedTags) != 0 {
 			t.Errorf("expected no AddTag calls, got %+v", editor.addedTags)
 		}
-		if cmd == nil {
-			t.Error("expected refresh command on successful confirm, got nil")
+		// The removed tag is gone from the modal but the modal stays open.
+		if !strings.Contains(model.View().Content, "Name:") {
+			t.Errorf("modal should stay open after an immediate tag removal")
 		}
 	})
 
-	t.Run("persists both an addition and a removal in one confirm", func(t *testing.T) {
+	t.Run("Esc in navigate after a live tag edit refreshes projects", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
-				{Path: "/code/portal", Name: "portal", Tags: []string{"old"}},
+				{Path: "/code/portal", Name: "portal"},
 			},
 		}
 		editor := &mockProjectEditor{}
 		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		model = openTagsModal(model)
-		// Remove the existing "old" tag (cursor at Add row index 1 → up to 0).
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-		// After removal the buffer is empty; cursor lands on the Add row. Add "new".
-		model = typeTagAndAdd(model, "new")
+		model = openTagsAddSlot(model)
+		model = addTagLive(model, "work")
 
-		_, cmd := confirmFromTagsField(model)
-
-		if len(editor.removedTags) != 1 || editor.removedTags[0].rawTag != "old" {
-			t.Fatalf("expected 1 RemoveTag(old), got %+v", editor.removedTags)
-		}
-		if len(editor.addedTags) != 1 || editor.addedTags[0].rawTag != "new" {
-			t.Fatalf("expected 1 AddTag(new), got %+v", editor.addedTags)
-		}
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 		if cmd == nil {
-			t.Error("expected refresh command on successful confirm, got nil")
+			t.Fatal("Esc after a live tag add should refresh projects, got nil")
+		}
+		if _, ok := cmd().(tui.ProjectsLoadedMsg); !ok {
+			t.Errorf("expected ProjectsLoadedMsg from the refresh cmd")
 		}
 	})
 
-	t.Run("makes no tag persistence calls when the tag set is unchanged", func(t *testing.T) {
+	t.Run("a duplicate tag commit is a silent no-op", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
@@ -5115,80 +4987,19 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		// Open and confirm without touching tags.
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
-		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		model = openTagsAddSlot(model)
+		model = addTagLive(model, "work") // duplicate of the existing tag
 
 		if len(editor.addedTags) != 0 {
-			t.Errorf("expected no AddTag calls, got %+v", editor.addedTags)
+			t.Errorf("duplicate tag must not AddTag, got %+v", editor.addedTags)
 		}
-		if len(editor.removedTags) != 0 {
-			t.Errorf("expected no RemoveTag calls, got %+v", editor.removedTags)
-		}
-		if cmd == nil {
-			t.Error("expected refresh command on confirm, got nil")
+		// The single existing "work" chip remains; no duplicate is shown.
+		if strings.Count(model.View().Content, "work") != 1 {
+			t.Errorf("duplicate commit should leave exactly one 'work' chip, got:\n%s", model.View().Content)
 		}
 	})
 
-	t.Run("sets editError and keeps the modal open when a live AddTag fails", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/portal", Name: "portal"},
-			},
-		}
-		editor := &mockProjectEditor{tagErr: errors.New("boom")}
-		aliases := &mockAliasEditor{aliases: map[string]string{}}
-		model := setupEditModel(store, editor, aliases)
-
-		model = openTagsModal(model)
-		// Tags persist live: the Enter that commits the add is where AddTag runs
-		// and fails — surfacing the error immediately, not at confirm.
-		for _, r := range "work" {
-			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		}
-		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		if cmd != nil {
-			t.Error("expected nil command on AddTag failure, got non-nil")
-		}
-		view := model.View().Content
-		if !strings.Contains(view, "Error:") {
-			t.Errorf("expected an error message, got:\n%s", view)
-		}
-		// Modal stays open — the Name/Tags fields are still rendered.
-		if !strings.Contains(view, "Name:") {
-			t.Errorf("modal should stay open after AddTag failure, got:\n%s", view)
-		}
-	})
-
-	t.Run("sets editError and keeps the modal open when a live RemoveTag fails", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
-			},
-		}
-		editor := &mockProjectEditor{tagErr: errors.New("boom")}
-		aliases := &mockAliasEditor{aliases: map[string]string{}}
-		model := setupEditModel(store, editor, aliases)
-
-		model = openTagsModal(model)
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp}) // onto the existing tag
-		// x is where RemoveTag runs and fails (live), surfacing the error now.
-		model, cmd := model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-
-		if cmd != nil {
-			t.Error("expected nil command on RemoveTag failure, got non-nil")
-		}
-		view := model.View().Content
-		if !strings.Contains(view, "Error:") {
-			t.Errorf("expected an error message, got:\n%s", view)
-		}
-		if !strings.Contains(view, "Name:") {
-			t.Errorf("modal should stay open after RemoveTag failure, got:\n%s", view)
-		}
-	})
-
-	t.Run("passes the raw tag to the store without re-normalising in the modal", func(t *testing.T) {
+	t.Run("passes the raw tag to the store (NormaliseTag in the store)", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -5198,13 +5009,8 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		aliases := &mockAliasEditor{aliases: map[string]string{}}
 		model := setupEditModel(store, editor, aliases)
 
-		model = openTagsModal(model)
-		// The buffer value is already canonical (NormaliseTag ran at add time in
-		// 4-3). The modal must pass exactly that value to AddTag — no second
-		// normalisation pass.
-		model = typeTagAndAdd(model, "work")
-
-		_, _ = confirmFromTagsField(model)
+		model = openTagsAddSlot(model)
+		model = addTagLive(model, "work")
 
 		if len(editor.addedTags) != 1 {
 			t.Fatalf("expected 1 AddTag call, got %+v", editor.addedTags)
@@ -5212,38 +5018,8 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		if editor.addedTags[0].rawTag != "work" {
 			t.Errorf("expected raw tag 'work' passed verbatim, got %q", editor.addedTags[0].rawTag)
 		}
-	})
-
-	t.Run("a removed-then-re-added tag fires both live mutations and survives", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
-			},
-		}
-		editor := &mockProjectEditor{}
-		aliases := &mockAliasEditor{aliases: map[string]string{}}
-		model := setupEditModel(store, editor, aliases)
-
-		model = openTagsModal(model)
-		// Remove the existing "work" tag (cursor at Add row index 1 → up to 0, x).
-		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-		// Re-add the same tag via the Add input.
-		model = typeTagAndAdd(model, "work")
-
-		_, cmd := confirmFromTagsField(model)
-
-		// Tags persist live, so each keystroke fires its own store call: the x
-		// removed "work" and the re-add added it back. There is no batched
-		// reconciliation anymore — the store dedups, so the tag ends up present.
-		if len(editor.removedTags) != 1 || editor.removedTags[0].rawTag != "work" {
-			t.Errorf("expected 1 live RemoveTag(work), got %+v", editor.removedTags)
-		}
-		if len(editor.addedTags) != 1 || editor.addedTags[0].rawTag != "work" {
-			t.Errorf("expected 1 live AddTag(work), got %+v", editor.addedTags)
-		}
-		if cmd == nil {
-			t.Error("expected refresh command on successful confirm, got nil")
+		if !strings.Contains(model.View().Content, "work") {
+			t.Errorf("committed tag should be visible in the modal")
 		}
 	})
 }

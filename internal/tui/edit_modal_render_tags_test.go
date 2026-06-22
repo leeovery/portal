@@ -8,20 +8,22 @@ import (
 )
 
 // renderTagsModel builds a minimal Model with the edit modal state seeded for
-// exercising renderEditProjectContent's Tags block directly.
-func renderTagsModel(focus editField, tags []string, tagCursor int, newTag string) Model {
+// exercising renderEditProjectContent's Tags block directly. The modal is in
+// navigate mode (no live edit buffer) with the given focus, tags, and element
+// index.
+func renderTagsModel(focus editField, tags []string, tagCursor int) Model {
 	return Model{
 		modal:         modalEditProject,
+		editMode:      editModeNavigate,
 		editProject:   project.Project{Name: "Portal"},
 		editFocus:     focus,
 		editTags:      tags,
 		editTagCursor: tagCursor,
-		editNewTag:    newTag,
 	}
 }
 
 func TestRenderEditProjectContent_TagsBlockAfterAliases(t *testing.T) {
-	m := renderTagsModel(editFieldTags, []string{"work"}, 0, "")
+	m := renderTagsModel(editFieldTags, []string{"work"}, 0)
 	out := m.renderEditProjectContent()
 
 	tagsIdx := strings.Index(out, "Tags:")
@@ -38,7 +40,7 @@ func TestRenderEditProjectContent_TagsBlockAfterAliases(t *testing.T) {
 }
 
 func TestRenderEditProjectContent_EachTagHasRemovalMarker(t *testing.T) {
-	m := renderTagsModel(editFieldTags, []string{"work", "personal"}, 0, "")
+	m := renderTagsModel(editFieldTags, []string{"work", "personal"}, 0)
 	out := m.renderEditProjectContent()
 
 	if !strings.Contains(out, "[x] work") {
@@ -50,7 +52,7 @@ func TestRenderEditProjectContent_EachTagHasRemovalMarker(t *testing.T) {
 }
 
 func TestRenderEditProjectContent_HighlightOnFocusedTag(t *testing.T) {
-	m := renderTagsModel(editFieldTags, []string{"work", "personal"}, 1, "")
+	m := renderTagsModel(editFieldTags, []string{"work", "personal"}, 1)
 	out := m.renderEditProjectContent()
 
 	if !strings.Contains(out, "  > [x] personal") {
@@ -63,7 +65,7 @@ func TestRenderEditProjectContent_HighlightOnFocusedTag(t *testing.T) {
 }
 
 func TestRenderEditProjectContent_EmptyTagsShowsNoneState(t *testing.T) {
-	m := renderTagsModel(editFieldTags, nil, 0, "")
+	m := renderTagsModel(editFieldTags, nil, 0)
 	out := m.renderEditProjectContent()
 
 	tagsIdx := strings.Index(out, "Tags:")
@@ -79,25 +81,37 @@ func TestRenderEditProjectContent_EmptyTagsShowsNoneState(t *testing.T) {
 }
 
 func TestRenderEditProjectContent_AddRowAlwaysRendered(t *testing.T) {
-	// With zero tags.
-	emptyOut := renderTagsModel(editFieldTags, nil, 0, "newtag").renderEditProjectContent()
-	if !strings.Contains(emptyOut, "Add: newtag") {
+	// The Add slot always renders, both with zero tags and with existing tags.
+	emptyOut := renderTagsModel(editFieldTags, nil, 0).renderEditProjectContent()
+	if !strings.Contains(emptyOut, "Add:") {
 		t.Errorf("Add-input row should render with zero tags\n%s", emptyOut)
 	}
 
-	// With existing tags.
-	fullOut := renderTagsModel(editFieldTags, []string{"work"}, 0, "draft").renderEditProjectContent()
+	fullOut := renderTagsModel(editFieldTags, []string{"work"}, 0).renderEditProjectContent()
 	tagsIdx := strings.Index(fullOut, "Tags:")
-	addAfterTags := strings.Index(fullOut[tagsIdx:], "Add: draft")
+	addAfterTags := strings.Index(fullOut[tagsIdx:], "Add:")
 	if addAfterTags == -1 {
 		t.Errorf("Add-input row should render after Tags: with existing tags\n%s", fullOut)
+	}
+}
+
+func TestRenderEditProjectContent_AddSlotShowsLiveBufferForNewChip(t *testing.T) {
+	// A brand-new chip being edited shows its in-progress text in the Add slot.
+	m := renderTagsModel(editFieldTags, []string{"work"}, 1) // cursor on add slot
+	m.editMode = editModeEdit
+	m.editIsNewChip = true
+	m.editBuffer = "draft"
+
+	out := m.renderEditProjectContent()
+	if !strings.Contains(out, "Add: draft") {
+		t.Errorf("Add slot should show the live new-chip buffer\n%s", out)
 	}
 }
 
 func TestRenderEditProjectContent_TagsHeadingFocusScoped(t *testing.T) {
 	// Name focused: Tags heading must show the unfocused indicator, Name the
 	// focused one.
-	m := renderTagsModel(editFieldName, []string{"work"}, 0, "")
+	m := renderTagsModel(editFieldName, []string{"work"}, 0)
 	out := m.renderEditProjectContent()
 
 	if !strings.Contains(out, "> Name:") {
@@ -111,7 +125,7 @@ func TestRenderEditProjectContent_TagsHeadingFocusScoped(t *testing.T) {
 	}
 
 	// Tags focused: heading shows focus indicator.
-	tagsFocused := renderTagsModel(editFieldTags, []string{"work"}, 0, "").renderEditProjectContent()
+	tagsFocused := renderTagsModel(editFieldTags, []string{"work"}, 0).renderEditProjectContent()
 	if !strings.Contains(tagsFocused, "> Tags:") {
 		t.Errorf("Tags heading should show focus indicator when Tags is focused\n%s", tagsFocused)
 	}
