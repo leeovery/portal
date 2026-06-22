@@ -296,6 +296,68 @@ func TestFixtureNamesIncludesPaged(t *testing.T) {
 	}
 }
 
+// TestSessionsInlineFlashFixture verifies the §11.2 inline-flash fixture: a small
+// Flat-mode session set with the warning flash seeded so the band renders on the
+// first frame (mirroring testdata/vhs/reference/sessions-inline-flash-mv.png). The
+// session set matches the reference exactly and the flash message + ⚠ glyph appear
+// in the rendered View.
+func TestSessionsInlineFlashFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-inline-flash")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-inline-flash): %v", err)
+	}
+
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	wantNames := []string{
+		"fab-flowx-explore",
+		"agentic-workflows-codify",
+		"flowx-7UKPZH",
+		"aviva-proxy-qNyfEO",
+	}
+	if len(sessions) != len(wantNames) {
+		t.Fatalf("sessions-inline-flash has %d sessions, want %d (reference set)", len(sessions), len(wantNames))
+	}
+	for i, want := range wantNames {
+		if sessions[i].Name != want {
+			t.Errorf("session[%d] = %q, want %q (reference order)", i, sessions[i].Name, want)
+		}
+	}
+
+	// The §11.2 warning flash is seeded into the Deps seam (the only way to render
+	// the otherwise-transient band in the inert harness). The render assertion (band
+	// styling, ⚠ glyph, bg.warning tint) lives in internal/tui; here we pin that the
+	// fixture wires the message through to Build.
+	const msg = "folio-Jiz4el closed externally — list updated"
+	if got := fx.Deps().InitialFlash; got != msg {
+		t.Errorf("Deps().InitialFlash = %q, want %q (seeded warning flash)", got, msg)
+	}
+
+	m := tui.Build(fx.Deps())
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if got, want := m.SessionListTitle(), "Sessions"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (fixture opens in Flat mode)", got, want)
+	}
+}
+
+// TestFixtureNamesIncludesInlineFlash pins the inline-flash fixture into the
+// discoverable name list (the --fixture help + FixtureByName error share this source).
+func TestFixtureNamesIncludesInlineFlash(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "sessions-inline-flash" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include sessions-inline-flash", capture.FixtureNames())
+	}
+}
+
 // TestProjectsFixture verifies the §6 Projects-page fixture: it opens on the
 // Sessions page (the production default; the tape types `x` to reach Projects) and
 // carries a rich project store (14 projects with real-looking absolute paths) so the

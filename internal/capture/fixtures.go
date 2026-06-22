@@ -25,6 +25,10 @@ type Fixture struct {
 	projectEditor tui.ProjectEditor
 	aliasEditor   tui.AliasEditor
 	initialMode   prefs.SessionListMode
+	// initialFlash seeds the §11.2 inline WARNING flash band on the first frame
+	// (empty for every fixture that does not capture the flash). It is the only way
+	// to render the otherwise-transient flash in the inert capture harness.
+	initialFlash string
 }
 
 // Deps maps the fixture onto the shared tui.Deps seam set. Every tmux seam is a
@@ -46,8 +50,9 @@ func (f *Fixture) Deps() tui.Deps {
 		// pre-stamped (Session.Dir set), so the lazy pane-read fallback never
 		// fires — and the harness has no tmux server to read panes from anyway.
 		// ModePersister is nil so an `s`-toggle during a capture writes nowhere.
-		InitialMode: f.initialMode,
-		CWD:         "/home/user",
+		InitialMode:  f.initialMode,
+		InitialFlash: f.initialFlash,
+		CWD:          "/home/user",
 	}
 }
 
@@ -67,6 +72,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return sessionsByTagFixture(), nil
 	case "sessions-paged":
 		return sessionsPagedFixture(), nil
+	case "sessions-inline-flash":
+		return sessionsInlineFlashFixture(), nil
 	case "projects":
 		return projectsFixture(), nil
 	default:
@@ -80,7 +87,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", "projects", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "projects", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -247,6 +254,36 @@ func sessionsPagedFixture() *Fixture {
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: nil},
 		initialMode:  prefs.ModeFlat,
+	}
+}
+
+// sessionsInlineFlashFixture builds the deterministic "sessions-inline-flash"
+// fixture: a small Flat-mode session set with the §11.2 inline WARNING flash band
+// seeded on the first frame, mirroring testdata/vhs/reference/sessions-inline-flash-mv.png.
+// The flash band (orange ▌ left-bar + ⚠ + "folio-Jiz4el closed externally — list
+// updated" on the bg.warning tint, text.on-warning message) sits directly under
+// the title separator, above the `Sessions 4` section header.
+//
+// The flash is otherwise transient (production sets it only on the preview-bail
+// path), so it is seeded via Deps.InitialFlash — the only way to render it in the
+// inert harness. The session set matches the reference exactly: fab-flowx-explore
+// (attached, 3 windows), agentic-workflows-codify (1), flowx-7UKPZH (2),
+// aviva-proxy-qNyfEO (1). Every session carries a stamped Dir for honesty even
+// though Flat ignores it (no project store, no grouping).
+func sessionsInlineFlashFixture() *Fixture {
+	sessions := []tmux.Session{
+		{Name: "fab-flowx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/fab"},
+		{Name: "agentic-workflows-codify", Windows: 1, Attached: false, Dir: "/home/user/code/agentic-workflows"},
+		{Name: "flowx-7UKPZH", Windows: 2, Attached: false, Dir: "/home/user/code/flowx"},
+		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
+	}
+
+	return &Fixture{
+		name:         "sessions-inline-flash",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: nil},
+		initialMode:  prefs.ModeFlat,
+		initialFlash: "folio-Jiz4el closed externally — list updated",
 	}
 }
 

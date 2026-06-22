@@ -109,7 +109,10 @@ func TestSessionsView_FlashRow_AppearsAboveSectionHeader(t *testing.T) {
 	}
 }
 
-func TestSessionsView_FlashActivation_ShiftsListDownByOne(t *testing.T) {
+// TestSessionsView_FlashActivation_ShiftsListDownByTwo asserts the band slot
+// consumes TWO rows on activation — the band PLUS its blank breathing row beneath
+// it — so the list shifts down by two.
+func TestSessionsView_FlashActivation_ShiftsListDownByTwo(t *testing.T) {
 	m := flashModelWithSessions("alpha-row")
 
 	beforeLines := renderedSessionLines(t, m)
@@ -125,13 +128,15 @@ func TestSessionsView_FlashActivation_ShiftsListDownByOne(t *testing.T) {
 		t.Fatalf("session row missing in flash render")
 	}
 
-	if afterIdx-beforeIdx != 1 {
-		t.Errorf("activation row shift: want +1, got %d (before=%d after=%d)",
+	if afterIdx-beforeIdx != 2 {
+		t.Errorf("activation row shift: want +2 (band + blank), got %d (before=%d after=%d)",
 			afterIdx-beforeIdx, beforeIdx, afterIdx)
 	}
 }
 
-func TestSessionsView_FlashDeactivation_ShiftsListUpByOne(t *testing.T) {
+// TestSessionsView_FlashDeactivation_ShiftsListUpByTwo asserts the band slot
+// releases both rows (band + blank) on clear, so the list shifts back up by two.
+func TestSessionsView_FlashDeactivation_ShiftsListUpByTwo(t *testing.T) {
 	m := flashModelWithSessions("alpha-row")
 	m.setFlash("transient")
 
@@ -148,8 +153,8 @@ func TestSessionsView_FlashDeactivation_ShiftsListUpByOne(t *testing.T) {
 		t.Fatalf("session row missing in cleared render")
 	}
 
-	if withFlashIdx-clearedIdx != 1 {
-		t.Errorf("deactivation row shift: want -1 (i.e. cleared idx + 1 == flash idx), got delta %d (flash=%d cleared=%d)",
+	if withFlashIdx-clearedIdx != 2 {
+		t.Errorf("deactivation row shift: want -2 (i.e. cleared idx + 2 == flash idx), got delta %d (flash=%d cleared=%d)",
 			withFlashIdx-clearedIdx, withFlashIdx, clearedIdx)
 	}
 }

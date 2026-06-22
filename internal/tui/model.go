@@ -328,6 +328,14 @@ type Model struct {
 	// successive bails).
 	flashText string
 	flashGen  uint64
+	// flashKind selects the §11.2 MV styling of the active inline flash (spec §11.2
+	// inline flash → warning / success variants). flashWarning is the zero value, so
+	// the externally-killed bail (which calls setFlash) stays a warning band without
+	// the caller passing a kind; setSuccessFlash flips it to the green ✓ success
+	// variant. The arbiter (activeNoticeBand) maps it to the band role so the shared
+	// notice-band primitive paints the matching bar colour + glyph. It is reset to
+	// flashWarning by every setFlash and is irrelevant once flashText is empty.
+	flashKind flashKind
 
 	// byTagSignpost is the persistent "No tags yet" signpost flag (spec §
 	// Mode Persistence & Empty States → Empty states → By Tag with zero
@@ -746,6 +754,24 @@ func WithDirResolver(reader session.PaneCurrentPathReader, runner resolver.Comma
 	return func(m *Model) {
 		m.dirReader = reader
 		m.dirRunner = runner
+	}
+}
+
+// WithInitialFlash seeds the §11.2 inline WARNING flash on the model at
+// construction — the orange left-bar + ⚠ + message on the bg.warning tint. It is
+// the capture-harness entry point for the otherwise-transient flash (production's
+// only flash source is the preview-bail path). It sets the state fields directly
+// (no flashGen bump, no layout resync — dimensions are still zero at construction;
+// the first WindowSizeMsg resyncs the layout, which reserves the band's row). An
+// empty string is a no-op so omitting the option leaves no flash. Only the warning
+// variant is seedable — the success variant is not separately captured.
+func WithInitialFlash(text string) Option {
+	return func(m *Model) {
+		if text == "" {
+			return
+		}
+		m.flashText = text
+		m.flashKind = flashWarning
 	}
 }
 
@@ -1340,20 +1366,25 @@ func (m Model) sessionFooterHeight(width int) int {
 }
 
 // sessionBandHeight returns the rendered height of the SINGLE arbitrated notice
-// band viewSessionList inserts beneath the title (§11 single-slot rule) — the
-// amount applySessionListSize reserves out of the list's height budget so the
-// band never pushes the composed view past termH. At most one band is ever active
-// (the §11 arbiter), so the reserve is the one active band's height — released to
-// zero when the slot empties. This is the §11.2 F10 recompute: a band appearing
-// reserves one fewer list row, clearing releases it, and the outer canvas fill
-// re-pads to termH so the one-row-per-delegate pagination invariant holds. The
-// height is measured (not hardcoded) so a future multi-line band stays correct.
+// SLOT viewSessionList inserts beneath the title (§11 single-slot rule) — the
+// amount applySessionListSize reserves out of the list's height budget so the slot
+// never pushes the composed view past termH. The slot is the active band PLUS the
+// canvas-painted blank row beneath it (the band→section-header breathing gap), so
+// the reserve is two rows when a band owns the slot — released to zero when the
+// slot empties. This is the §11.2 F10 recompute: a band appearing reserves two
+// fewer list rows (band + blank), clearing releases both, and the outer canvas
+// fill re-pads to termH so the one-row-per-delegate pagination invariant holds.
+//
+// It is measured off renderSessionBandSlot — the SAME block viewSessionList
+// composes — so the reserved row count is, by construction, exactly what is
+// inserted and the two can never drift (a future multi-line band stays correct
+// automatically).
 func (m *Model) sessionBandHeight() int {
-	band := m.renderActiveNoticeBand()
-	if band == "" {
+	slot := m.renderSessionBandSlot()
+	if slot == "" {
 		return 0
 	}
-	return lipgloss.Height(band)
+	return lipgloss.Height(slot)
 }
 
 // applyProjectListSize is the per-page wrapper that owns the §6 Projects height
@@ -1739,6 +1770,24 @@ func (m *Model) reanchorSessionCursor(name string) {
 func (m *Model) setFlash(text string) {
 	m.flashGen++
 	m.flashText = text
+	// Default kind: warning (§11.2). The externally-killed bail calls setFlash, so
+	// the unparameterised path stays the orange ⚠ warning band; setSuccessFlash is
+	// the explicit opt-in to the green ✓ success variant. Resetting here means a
+	// success flash followed by a plain setFlash reverts to warning.
+	m.flashKind = flashWarning
+	m.resyncSessionLayout()
+}
+
+// setSuccessFlash records an inline flash styled as the §11.2 SUCCESS variant —
+// a state.green left-bar + ✓ glyph (glyph-distinct from the warning ⚠, never
+// colour-only, §2.2). It shares the warning flash's lifecycle exactly: it bumps
+// flashGen, assigns flashText, and re-syncs the layout — the only difference is
+// the kind, so the auto-clear tick + generation guard + actionable-key clear all
+// apply unchanged. The verbatim message is the caller's (no wording owned here).
+func (m *Model) setSuccessFlash(text string) {
+	m.flashGen++
+	m.flashText = text
+	m.flashKind = flashSuccess
 	m.resyncSessionLayout()
 }
 
@@ -3875,15 +3924,20 @@ func (m Model) viewSessionList() string {
 	// persistent By-Tag signpost while shown, the signpost returns once the flash
 	// clears, so the two never render at once. The band sits DIRECTLY under the
 	// title separator (the header block's bottom rule), ABOVE the section header
-	// (line 0 of listView), full-width — so the section header + list shift down by
-	// one row. Its one-row height is reserved out of the list's budget by
-	// applySessionListSize (sessionBandHeight), so the composed view re-pads to
-	// termH and the §3.5 / §4.1 one-row-per-delegate pagination invariant (the
-	// §11.2 F10 recompute) holds. Composing it between the header and the list (not
-	// inside the list, where the former dual insertRowBelowTitle calls placed it)
-	// is what lands it ABOVE the section header per the §11 placement rule.
-	if band := m.renderActiveNoticeBand(); band != "" {
-		return lipgloss.JoinVertical(lipgloss.Left, header, band, listView, footer)
+	// (line 0 of listView), full-width. The slot (renderSessionBandSlot) is the band
+	// PLUS one canvas-painted blank row beneath it (a breathing gap so the band does
+	// not render flush against the section header) — so the slot composes as
+	// band → blank → listView and the section header + list shift down by TWO rows.
+	// The slot's two-row height is reserved out of the list's budget by
+	// applySessionListSize (sessionBandHeight, measured off the SAME slot), so the
+	// composed view re-pads to termH and the §3.5 / §4.1 one-row-per-delegate
+	// pagination invariant (the §11.2 F10 recompute) holds. Composing it between the
+	// header and the list (not inside the list, where the former dual
+	// insertRowBelowTitle calls placed it) is what lands it ABOVE the section header
+	// per the §11 placement rule. The blank is below ONLY — the band stays flush
+	// under the title separator.
+	if slot := m.renderSessionBandSlot(); slot != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, header, slot, listView, footer)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, listView, footer)
 }

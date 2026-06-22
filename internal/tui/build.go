@@ -54,8 +54,15 @@ type Deps struct {
 	// canvas by PINNING Appearance to light/dark (the pin path), so its frames are
 	// un-gated and byte-stable. There is no separate injected CanvasMode — the
 	// former temporary 1-6 seam is gone now that detection resolves the mode.
-	Appearance     prefs.Appearance
-	InitialFilter  string
+	Appearance    prefs.Appearance
+	InitialFilter string
+	// InitialFlash seeds the §11.2 inline WARNING flash on the first frame (the
+	// orange ▌ bar + ⚠ + message on the bg.warning tint). It exists for the offline
+	// capture harness: the flash is otherwise transient (set only by the
+	// preview-bail path), so the fixture seeds the band directly to screenshot it.
+	// Empty (the production default) leaves no flash. Only the warning variant is
+	// seedable — the success variant is not separately captured.
+	InitialFlash   string
 	Command        []string
 	ServerStarted  bool
 	InsideTmux     bool
@@ -125,6 +132,11 @@ func Build(deps Deps) Model {
 	if deps.ModePersister != nil {
 		opts = append(opts, WithModePersister(deps.ModePersister))
 	}
+
+	// Seed the §11.2 inline warning flash for the capture harness (no-op when empty,
+	// the production default). Applied as an Option so it is set before the
+	// armAppearanceDetection / first WindowSizeMsg resync reserves the band row.
+	opts = append(opts, WithInitialFlash(deps.InitialFlash))
 
 	m := New(deps.Lister, opts...)
 	if len(deps.Command) > 0 {

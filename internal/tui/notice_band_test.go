@@ -193,8 +193,9 @@ func TestNoticeSlot_NeverBothBandsSimultaneously(t *testing.T) {
 }
 
 // TestNoticeBand_PlacedUnderSeparatorAboveSectionHeader asserts the band sits
-// directly under the title separator, above the section header, and shifts the
-// section header + list down by one row.
+// directly under the title separator, with ONE blank breathing row between the
+// band and the section header (band → blank → section header), shifting the
+// section header + list down by TWO rows.
 func TestNoticeBand_PlacedUnderSeparatorAboveSectionHeader(t *testing.T) {
 	m := noticeBandModel("alpha-row")
 	const flash = "__PLACEMENT_FLASH__"
@@ -230,20 +231,32 @@ func TestNoticeBand_PlacedUnderSeparatorAboveSectionHeader(t *testing.T) {
 	if sectionIdx <= bandIdx {
 		t.Errorf("section header index %d must be > band index %d (band above the section header)", sectionIdx, bandIdx)
 	}
-	// Section header + list shifted down by one row.
-	if sectionIdx-beforeSection != 1 {
-		t.Errorf("section header shift = %d, want +1 (band pushes it down one row)", sectionIdx-beforeSection)
+	// One blank breathing row BETWEEN the band and the section header: the section
+	// header is exactly two rows below the band (band → blank → section header), and
+	// the intervening row carries neither the flash text nor "Sessions".
+	if sectionIdx-bandIdx != 2 {
+		t.Errorf("section header is %d rows below the band, want 2 (band → blank → section header)", sectionIdx-bandIdx)
 	}
-	if rowIdx-beforeRow != 1 {
-		t.Errorf("session row shift = %d, want +1 (band pushes it down one row)", rowIdx-beforeRow)
+	blankIdx := bandIdx + 1
+	blank := ansi.Strip(afterLines[blankIdx])
+	if strings.TrimSpace(blank) != "" {
+		t.Errorf("row between the band and section header must be blank, got %q", blank)
+	}
+	// Section header + list shifted down by TWO rows (band + blank).
+	if sectionIdx-beforeSection != 2 {
+		t.Errorf("section header shift = %d, want +2 (band + blank push it down two rows)", sectionIdx-beforeSection)
+	}
+	if rowIdx-beforeRow != 2 {
+		t.Errorf("session row shift = %d, want +2 (band + blank push it down two rows)", rowIdx-beforeRow)
 	}
 }
 
 // TestNoticeBand_RecomputesViewportHeight asserts the list viewport height is
-// recomputed when the band appears (one row consumed) and when it clears (one
-// row released) — the §11.2 F10 contract. The composed frame height stays
-// constant (the band is absorbed under the outer canvas fill), and the list
-// reserves exactly one fewer row while the band is active.
+// recomputed when the band appears (TWO rows consumed — the band PLUS its blank
+// breathing row) and when it clears (both rows released) — the §11.2 F10 contract.
+// The composed frame height stays constant (the slot is absorbed under the outer
+// canvas fill), and the list reserves exactly two fewer rows while the band is
+// active.
 func TestNoticeBand_RecomputesViewportHeight(t *testing.T) {
 	m := noticeBandModel("alpha-row")
 
@@ -251,14 +264,14 @@ func TestNoticeBand_RecomputesViewportHeight(t *testing.T) {
 
 	m.setFlash("__HEIGHT_FLASH__")
 	_, withBandHeight := m.SessionListSize()
-	if withBandHeight != baseHeight-1 {
-		t.Errorf("list height with band = %d, want %d (one row consumed)", withBandHeight, baseHeight-1)
+	if withBandHeight != baseHeight-2 {
+		t.Errorf("list height with band = %d, want %d (band + blank, two rows consumed)", withBandHeight, baseHeight-2)
 	}
 
 	m.clearFlash()
 	_, clearedHeight := m.SessionListSize()
 	if clearedHeight != baseHeight {
-		t.Errorf("list height after clear = %d, want %d (one row released)", clearedHeight, baseHeight)
+		t.Errorf("list height after clear = %d, want %d (both rows released)", clearedHeight, baseHeight)
 	}
 }
 

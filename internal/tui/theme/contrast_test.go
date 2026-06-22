@@ -261,6 +261,32 @@ func TestBgWarningPairRule(t *testing.T) {
 	}
 }
 
+// TestInlineFlashWarningPairClearsFloor is the §11.2 inline-flash band's
+// co-tuned-pair gate: the warning/success flash renders its message in
+// text.on-warning ON the bg.warning tint, so that exact foreground-on-tint pair
+// must clear the §2.3 normal-text floor (4.5:1) in BOTH modes, each against its
+// own mode-tint. The flash bands reuse the single co-tuned text.on-warning /
+// bg.warning pairing (§2.9 — no invented success-specific pairing), so this is
+// the same numeric floor the band relies on at render time. It is asserted here
+// distinctly (not just via the general pair rule) so a regression that breaks the
+// inline-flash band specifically fails with a §11.2-scoped message.
+func TestInlineFlashWarningPairClearsFloor(t *testing.T) {
+	for _, m := range []struct {
+		name         string
+		onTint, tint string
+	}{
+		{"dark", theme.MV.TextOnWarning.Dark, theme.MV.BgWarning.Dark},
+		{"light", theme.MV.TextOnWarning.Light, theme.MV.BgWarning.Light},
+	} {
+		t.Run(m.name, func(t *testing.T) {
+			if got := contrastRatio(t, m.onTint, m.tint); got < floorNormal {
+				t.Errorf("§11.2 inline-flash message text.on-warning %s vs bg.warning %s = %.2f, want >= %.2f (co-tuned pair floor)",
+					m.onTint, m.tint, got, floorNormal)
+			}
+		})
+	}
+}
+
 // TestEveryTokenHasLightVariant proves the §2.9 light column is fully populated:
 // every token in the closed vocabulary carries a non-empty Light hex. (The DARK
 // column is pinned by TestMVDarkVariantsPinned in theme_test.go.) This is the

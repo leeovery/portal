@@ -28,6 +28,21 @@ import (
 // No caller schedules a tick in this task (2-3) — tasks 2-5 and 2-6
 // wire the scheduling at bail and replacement-bail moments.
 
+// flashKind is the §11.2 MV styling variant of an active inline flash. The zero
+// value is flashWarning so the externally-killed bail (which calls the
+// unparameterised setFlash) stays the orange ⚠ warning band; flashSuccess is the
+// explicit green ✓ success variant. The arbiter (activeNoticeBand) maps it to the
+// shared notice-band role (bandWarning / bandSuccess), which selects the bar
+// colour + glyph; the kind itself never changes the flash lifecycle.
+type flashKind int
+
+const (
+	// flashWarning is the default warning flash variant — accent.orange bar + ⚠.
+	flashWarning flashKind = iota
+	// flashSuccess is the success flash variant — state.green bar + ✓.
+	flashSuccess
+)
+
 // flashAutoClearDuration is how long an inline flash lingers before the
 // tick-based auto-clear fires. Spec § Inline flash > Clear conditions
 // notes "~3s as a reasonable default" — long enough to read, short
