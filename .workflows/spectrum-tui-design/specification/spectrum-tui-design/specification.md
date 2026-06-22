@@ -1,5 +1,11 @@
 # Specification: Spectrum TUI Design
 
+> **⚠ Corrigendum — 2026-06-22 (spectrum-tui-design implementation, tasks 3-9 / 3-10).**
+> The focus/edit **visual grammar** in §8.2, §8.4 and §13.1 was revised during implementation after confirming on a real terminal that (a) a glyph-drawn thin border **cannot coexist with a background fill** (the fill overlaps the border glyphs or leaves a gap), so **nothing fills** — not inputs, not chips; and (b) a single violet treatment can't distinguish *focused* from *editing* on a chip (a field holds many chips you navigate among before editing one).
+> - **Superseded:** §13.1 — "outline = focused, fill = editing" and "the Name field in edit mode also turns violet-filled"; §8.2 chip states — focused = "`accent.violet` outline + a violet `✕`", editing = "`accent.violet` fill + cursor", indicator "`◉ EDIT MODE` (`accent.violet`)"; §8.4 rename input "violet `▌` cursor".
+> - **Current:** state is carried by **border colour, never a fill** — **grey** (`border.separator`, unfocused/normal) → **`accent.violet`** (focused) → **`accent.orange`** (editing, + live cursor); the **`◉ EDIT MODE`** header indicator is **`accent.orange`**, shown only while editing. **Inputs render rounded corners, chips render square** (the element-type differentiator). Chips drop the inline `✕` (removal is `x` on a focused chip; the footer carries `x remove`). The rename modal's single always-editing input is therefore **`accent.orange`** with the `◉ EDIT MODE` badge (§8.4 / task 3-10). See the revised §8.2 and §13.1.
+> Bodies below were edited in place to match; this block is the only annotation. Original wording is recoverable via `git log -p`.
+
 ## Specification
 
 > **⚠ Verification mandate — applies to every task (read before planning).**
@@ -122,12 +128,12 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 
 | Token | Role | Dark | Light | Floor |
 |---|---|---|---|---|
-| `accent.violet` | cursor, selector `▌`, active dot, `?` key, focused field label, EDIT MODE, mode bar, loading bar | `#BB9AF7` · 9.1 | `#8A3FD1` · 5.7 | 3.0 |
+| `accent.violet` | selector `▌`, active dot, `?` key, focused field outline + label, mode bar, loading bar | `#BB9AF7` · 9.1 | `#8A3FD1` · 5.7 | 3.0 |
 | `accent.blue` | footer / modal **key-hint glyphs** | `#7AA2F7` · 8.3 | `#2E5FD0` · 5.7 | 4.5 |
 | `accent.cyan` | Sessions header, Preview chrome, active tick `◐` | `#7DCFFF` · 12.2 | `#0E7490` · 5.4 | 4.5 |
 | `state.green` | `● attached`, Sessions count, Projects label, `✓` done, success flash | `#9ECE6A` · 11.5 | `#4C7A1F` · 5.1 | 4.5 |
 | `state.red` | kill/delete emphasis, `▲` | `#F7768E` · 7.9 | `#C32647` · 5.7 | 4.5 |
-| `accent.orange` | filter query / `/` / `type`, warning flash `⚠` | `#FF9E64` · 10.3 | `#9A5200` · 5.9 | 4.5 |
+| `accent.orange` | filter query / `/` / `type`, editing border + text cursor + `◉ EDIT MODE`, warning flash `⚠` | `#FF9E64` · 10.3 | `#9A5200` · 5.9 | 4.5 |
 
 **Surfaces (tints / borders — light values finalised at validation)**
 
@@ -319,12 +325,12 @@ A bordered panel with labelled fields **NAME / ALIASES / TAGS** and a header (`E
 - **`Esc` backs out one level:** edit mode → discard the element's edit; navigate mode → close (all already saved).
 
 **Visual states (the focus-vs-edit grammar, §13):**
-- **Chips** (aliases AND tags) are **one neutral style** — `text.primary` on a subtle tint; **never green** (green is attached-only). Three states: **normal** (subtle, no `✕`) · **focused** (`accent.violet` outline + a violet `✕` showing it's actionable — `x` removes it) · **editing** (`accent.violet` fill + cursor, no `✕`).
+- **Chips** (aliases AND tags) are a **bordered box, never filled** (a glyph border can't coexist with a fill) with **square corners** (the input's rounded corners are the differentiator); text is `text.primary`, **never green** (green is attached-only). Three states **by border colour**: **normal** (`border.separator` grey, no `✕`) · **focused** (`accent.violet` border, no `✕` — `x` removes it; the footer carries `x remove`) · **editing** (`accent.orange` border + live cursor, no `✕`).
 - **Field labels:** the **focused field's** label is `accent.violet`; the others are `text.detail`.
-- **`+ add`** is an inline input slot (not a button/popup) in `text.faint`; the **mode indicator** reads `◉ EDIT MODE` (`accent.violet`) in edit mode, dim in navigate.
+- **`+ add`** is an inline input slot (not a button/popup) in `text.faint`; the **mode indicator** reads `◉ EDIT MODE` (`accent.orange`) while editing, absent in navigate.
 
 **Contextual footer** (matches focus/mode):
-- Name focused (navigate): `↵ edit · ⇥ next field · esc close`.
+- Name focused (navigate): `↵/e edit · ⇥ next field · esc close`.
 - Chip focused (navigate): `↵/e edit · x remove · ←→ move · ⇥ next field · esc close`.
 - Editing in place: `↵ save · esc discard · ←→ cursor · empty on save = delete`.
 
@@ -338,7 +344,7 @@ A centred panel with a **`state.red` header** `▲ Kill session?`, the **session
 ### 8.4 Rename modal
 > **Logic preserved; rendering changed.** The rename flow is unchanged (parity); it inherits the new blank-screen rendering (§8.1) and the MV restyle.
 
-A header `Rename session` (`text.primary`), a labelled `NEW NAME` input (focused label `accent.violet`, value `text.primary` + violet `▌` cursor), a `was: <old name>` context line (`text.detail`), footer `↵ rename · esc cancel`. Keys: `Enter`/`Esc`.
+A header `Rename session` (`text.primary`), a labelled `NEW NAME` input. The input is a single **always-focused, always-editing** field, so it renders an **`accent.orange` border + `▌` cursor** (per the §13.1 grammar) with an **`accent.orange` `◉ EDIT MODE`** badge in the header right-corner; the focused label is `accent.violet`, the value `text.primary`. A `was: <old name>` context line (`text.detail`), footer `↵ rename · esc cancel`. Keys: `Enter`/`Esc`. *(The orange always-editing treatment is applied by task 3-10, which routes the rename input through the shared §13.1 input-box helper.)*
 
 ### 8.5 `?` help modal (new) — per-page
 > **New behaviour.** There is **no `?` binding today** (`?` is actively swallowed so `bubbles/list` doesn't toggle its own help). This adds: **bind `?`** on every page + a help-modal type + **per-page content**.
@@ -476,12 +482,18 @@ Confirm `Ctrl+↑`/`Ctrl+↓` isn't swallowed by the terminal/tmux during in-ter
 
 These conventions apply across surfaces; per-surface detail lives in the referenced sections.
 
-### 13.1 Focus vs edit — unified visual grammar
-Two states, identical grammar everywhere (the Name field, chips, any editable element):
-- **Focused** (navigate): **outline only, by colour** — an editable field's outline is `border.separator` (grey, matching the modal frame) when **unfocused** and **`accent.violet`** when **focused** (the field's label follows: `text.detail` → `accent.violet`); **never a fill change**. A single-input modal (e.g. rename) has one always-focused input, so it always shows the `accent.violet` outline.
-- **Editing** (cursor live): **`accent.violet` fill + cursor**, plus a `◉ EDIT MODE` indicator in the modal header (the Name field in edit mode also turns violet-filled — same treatment as chips).
-- **So: outline = focused, fill = editing** — unambiguous everywhere.
-- **Chips** (aliases AND tags) are **one neutral style**; **green is reserved for `attached` only, never chips** (detail in §8.2).
+### 13.1 Focus vs edit — visual grammar
+**Nothing fills.** A glyph-drawn thin border can't coexist with a background fill (the fill overlaps the border glyphs or leaves a gap), so every editable element — inputs and chips alike — is a **bordered box** whose **state is carried by border colour**, never a fill:
+- **Unfocused / normal:** `border.separator` grey (matches the modal frame).
+- **Focused** (navigate): **`accent.violet`** border; the field's label follows `text.detail` → `accent.violet`. No cursor.
+- **Editing** (cursor live): **`accent.orange`** border + a live cursor, plus an **`accent.orange` `◉ EDIT MODE`** indicator in the modal header.
+- **So: grey = idle, violet = focused, orange = editing** — one rule for inputs and chips.
+
+**Corners are the element-type differentiator:** **inputs render rounded**, **chips render square** (same box construction otherwise). *(The Paper frames draw both square; the rounded input is a code convention — a documented design-vs-terminal divergence.)*
+
+**Single-input modals** (e.g. **rename**) have one always-focused, always-editing input, so it shows the **`accent.orange`** border + `◉ EDIT MODE` badge (§8.4).
+
+**Chips** (aliases AND tags) carry no inline `✕` (removal is `x` on a focused chip; the footer carries `x remove`); **green is reserved for `attached` only, never chips** (detail in §8.2).
 
 ### 13.2 Page model — views vs pages
 - **Sessions is ONE page with three grouping *views*** (Flat / by Project / by Tag), cycled by `s` — the same data pivoted, not separate pages (§4–§5).
