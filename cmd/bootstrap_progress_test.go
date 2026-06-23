@@ -184,6 +184,42 @@ func TestBootstrapProgressPipe_ClosesChannelOnFatal(t *testing.T) {
 	}
 }
 
+// TestBootstrapProgressPipe_CarriesWarningsOnTerminalEvent asserts the task-5-7
+// carry-forward: soft warnings the orchestrator accumulated ride the terminal
+// channel EVENT onto tui.BootstrapCompleteMsg.Warnings (value copies read off the
+// event), not the pipe's struct fields — so the receiver never races the
+// goroutine's writes. Multiple warnings preserve orchestrator-observation order.
+func TestBootstrapProgressPipe_CarriesWarningsOnTerminalEvent(t *testing.T) {
+	warnings := []bootstrap.Warning{
+		{Lines: []string{"saver is down", "restart to recover"}},
+		{Lines: []string{"sessions.json corrupt"}},
+	}
+	runner := &emittingRunner{steps: 1, started: true, warnings: warnings}
+	pipe := newBootstrapProgressPipe()
+	pipe.start(context.Background(), runner)
+
+	msgs := drainPipe(t, pipe.receiver())
+
+	var complete *tui.BootstrapCompleteMsg
+	for _, m := range msgs {
+		if bc, ok := m.(tui.BootstrapCompleteMsg); ok {
+			complete = &bc
+		}
+	}
+	if complete == nil {
+		t.Fatal("never received terminal BootstrapCompleteMsg")
+	}
+	if len(complete.Warnings) != 2 {
+		t.Fatalf("BootstrapCompleteMsg.Warnings len = %d, want 2", len(complete.Warnings))
+	}
+	if len(complete.Warnings[0].Lines) != 2 || complete.Warnings[0].Lines[0] != "saver is down" {
+		t.Errorf("first warning off the event = %#v", complete.Warnings[0])
+	}
+	if len(complete.Warnings[1].Lines) != 1 || complete.Warnings[1].Lines[0] != "sessions.json corrupt" {
+		t.Errorf("second warning off the event = %#v", complete.Warnings[1])
+	}
+}
+
 func TestBootstrapProgressPipe_ReceiverStopsReIssuingOnClose(t *testing.T) {
 	runner := &emittingRunner{steps: 3, started: true}
 	pipe := newBootstrapProgressPipe()

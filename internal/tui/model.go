@@ -2030,7 +2030,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.bootstrapComplete && m.activePage == PageLoading {
 			m.transitionFromLoading()
-			return m, m.flushBufferedWarningsCmd()
+			return m, m.surfaceBufferedWarnings()
 		}
 		return m, nil
 	case BootstrapProgressMsg:
@@ -2067,7 +2067,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.minElapsed && m.activePage == PageLoading {
 			m.transitionFromLoading()
-			return m, m.flushBufferedWarningsCmd()
+			return m, m.surfaceBufferedWarnings()
 		}
 		return m, nil
 	case BootstrapFatalMsg:
