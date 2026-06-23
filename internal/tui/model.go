@@ -1848,6 +1848,41 @@ func (m Model) loadProjects() tea.Cmd {
 	}
 }
 
+// fetchSessionsCmd returns the tea.Cmd that enumerates live tmux sessions and
+// wraps the result in a SessionsMsg. It is the single source of the session
+// enumeration so the Init frame-one fetch and the §10.2 post-restore re-fetch
+// (see refetchSessionsAfterRestore) issue byte-identical commands. A pure read —
+// it never mutates tmux or state.
+func (m Model) fetchSessionsCmd() tea.Cmd {
+	return func() tea.Msg {
+		sessions, err := m.sessionLister.ListSessions()
+		return SessionsMsg{Sessions: sessions, Err: err}
+	}
+}
+
+// refetchSessionsAfterRestore is the §10.2 Part-B carry-forward fix. On the
+// concurrent cold-boot route (progressReceiver != nil) the orchestrator runs in
+// a goroutine, so Init's frame-one fetchSessions enumerated tmux BEFORE Restore
+// (bootstrap step 6) created the saved skeleton sessions — that Init snapshot is
+// stale/empty. When the loading page dismisses (both gates closed) the picker
+// would otherwise render that stale snapshot — the prior-incident
+// "empty-previews / slow-open" surface. So on this route ONLY, re-enumerate
+// sessions at the transition so the Sessions page reflects post-restore tmux
+// state. The resulting SessionsMsg lands on PageSessions and re-renders the list
+// via applySessions/rebuildSessionList.
+//
+// The warm/synchronous route (progressReceiver == nil) returns nil: there
+// PersistentPreRunE ran the orchestrator synchronously BEFORE the model was
+// built, so Init's snapshot is already post-restore — a re-fetch would be a
+// wasted enumeration and a behaviour change. Keeping the warm path's enumeration
+// unchanged is the §10.1 zero-new-risk contract.
+func (m Model) refetchSessionsAfterRestore() tea.Cmd {
+	if m.progressReceiver == nil {
+		return nil
+	}
+	return m.fetchSessionsCmd()
+}
+
 // transitionFromLoading moves from the loading page to the normal sessions page.
 // It marks sessions as loaded so evaluateDefaultPage can determine the correct
 // landing page when projects also finish loading.
@@ -1908,10 +1943,10 @@ func (m Model) Init() tea.Cmd {
 	if m.commandPending {
 		return tea.Batch(requestBg, detectTimeout, m.loadProjects())
 	}
-	fetchSessions := func() tea.Msg {
-		sessions, err := m.sessionLister.ListSessions()
-		return SessionsMsg{Sessions: sessions, Err: err}
-	}
+	// fetchSessionsCmd is the single session-enumeration command; the §10.2
+	// post-restore re-fetch (refetchSessionsAfterRestore) issues the identical
+	// command at loading-page dismissal on the concurrent route.
+	fetchSessions := m.fetchSessionsCmd()
 	loadProjects := m.loadProjects()
 
 	if m.activePage == PageLoading {
@@ -2030,7 +2065,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.bootstrapComplete && m.activePage == PageLoading {
 			m.transitionFromLoading()
-			return m, m.surfaceBufferedWarnings()
+			// §10.2 Part-B: re-enumerate sessions on the concurrent cold-boot
+			// route so the picker reflects post-restore tmux state, not the
+			// stale Init snapshot (no-op on the warm route). Batched with the
+			// warnings-surface cmd so neither is dropped.
+			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore())
 		}
 		return m, nil
 	case BootstrapProgressMsg:
@@ -2067,7 +2106,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.minElapsed && m.activePage == PageLoading {
 			m.transitionFromLoading()
-			return m, m.surfaceBufferedWarnings()
+			// §10.2 Part-B: see the LoadingMinElapsedMsg arm — re-fetch sessions
+			// on the concurrent route so the post-transition picker reflects
+			// post-restore tmux state (no-op on the warm route).
+			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore())
 		}
 		return m, nil
 	case BootstrapFatalMsg:

@@ -13,6 +13,56 @@ package cmd
 // The synchronous warm/CLI route never constructs a pipe: it keeps the
 // serverStartedKey context delivery and the sync.Once memo untouched. Only the
 // cold/TUI route routes serverStarted + progress over this channel (§10.2).
+//
+// ── §10.2 RESTORE/DAEMON RACE REVIEW (task spectrum-tui-design-5-8, Part A) ──
+//
+// This file is the site where Orchestrator.Run executes IN A GOROUTINE
+// concurrently with a LIVE Bubble Tea event loop (start() below). The prior
+// incident the spec flags — slow-open / empty-previews / zombie-session — was a
+// restore/daemon interaction against a live loop, so the four ordering
+// invariants the SYNCHRONOUS bootstrap guaranteed were traced against this
+// concurrent route. FINDING: all four HOLD, because every one of them is
+// internal to Orchestrator.Run's single goroutine — none depended on the TUI
+// being ABSENT; they depend only on the in-Run step ORDER, which is unchanged
+// (the orchestrator body is byte-for-byte identical on both routes — see
+// cmd/bootstrap/bootstrap.go). The containing property is that the TUI is INERT
+// during loading (no tmux/state mutation until the terminal complete event — see
+// internal/tui's loading-page key arm and TestInertDuringLoading_*), so there is
+// no concurrent tmux writer to interleave with Run's steps.
+//
+//  1. @portal-restoring suppression window (Set step 3 BEFORE Sweep/Saver/Restore;
+//     Clear step 8 BEFORE cleanup steps 9-11). HOLDS. Set and Clear are
+//     sequential statements inside Run on the orchestrator goroutine; the live
+//     loop never reads or writes the marker. The only concurrent reader of
+//     @portal-restoring is the SAVER-PANE DAEMON (spawned by step 5), and its
+//     per-tick IsRestoringSet check is exactly what the window is FOR — its
+//     concurrency with Run is identical on the synchronous route. The window's
+//     correctness has never depended on the TUI's presence/absence.
+//  2. Sweep-before-Saver (step 4 before step 5) so the new saver-pane daemon's
+//     first tick is uncontested. HOLDS. Both are sequential statements inside
+//     Run; goroutine-hosting Run does not reorder its body. The TUI issues no
+//     daemon/pgrep/sweep calls at all (loading or otherwise), so it cannot
+//     interleave a daemon between the sweep and the saver bootstrap.
+//  3. daemon.lock flock singleton + Component C daemon.pid pre-check
+//     (state.AcquireDaemonLock). HOLDS. The singleton is enforced at the OS
+//     (advisory flock) and filesystem (daemon.pid identity) layers by the daemon
+//     PROCESS, wholly independent of the TUI. The concurrent route changes WHEN
+//     EnsureSaver runs (in a goroutine) but not the daemon's own acquire
+//     ceremony. Two daemons still cannot both hold the lock regardless of who
+//     launched the saver.
+//  4. Daemon self-supervision hysteresis (3-tick eject; cmd/state_daemon.go).
+//     HOLDS. The hysteresis counter lives in the daemon process's tick loop and
+//     observes only tmux saver-pane membership — never the picker. The TUI is not
+//     a participant; a live loop during loading does not perturb the daemon's
+//     view of the saver pane.
+//
+// No genuine race was found, so nothing was fixed under Part A. The one REAL fix
+// in scope (Part B) is the cold-boot session-list STALENESS — orthogonal to the
+// daemon/marker ordering invariants above — handled in internal/tui
+// (refetchSessionsAfterRestore: a post-complete session re-enumeration so the
+// picker reflects post-restore tmux state, not the empty Init snapshot). Part D
+// pins the invariants end-to-end with concurrent-boot integration tests
+// (cmd/concurrent_coldboot_integration_test.go).
 
 import (
 	"context"
