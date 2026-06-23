@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"charm.land/bubbles/v2/list"
-	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/tui/theme"
 )
 
@@ -59,22 +58,12 @@ func (m Model) sessionListNoMatches() bool {
 
 // renderNoMatchesBody renders the §7.3 centred empty state into a width×height
 // block: the null-set glyph (text.faint) over the query-interpolated message
-// (text.primary) over the widen/clear hint (text.detail), centred both ways via
-// lipgloss.Place. Every run carries the owned canvas Background (headerStyle), and
-// the surrounding placed gap is canvas-painted (headerCanvasBg) so no terminal-bg
-// island bleeds through. Under the NO_COLOR carve-out the hues and the canvas drop.
+// (text.primary) over the widen/clear hint (text.detail). It routes through the
+// SHARED renderEmptyStateBody centred-empty-state helper (the SAME centring +
+// sizing + token treatment the §11.1 empty states use), so the no-matches and
+// empty surfaces can never drift in layout while staying DISTINCT in content.
 func renderNoMatchesBody(query string, width, height int, mode theme.Mode, colourless bool) string {
-	w := headerWidthOrFallback(width)
-	glyph := headerStyle(theme.MV.TextFaint, mode, colourless).Render(noMatchesGlyph)
-	message := headerStyle(theme.MV.TextPrimary, mode, colourless).Bold(true).Render(formatNoMatchesMessage(query))
-	hint := headerStyle(theme.MV.TextDetail, mode, colourless).Render(noMatchesHint)
-	stack := lipgloss.JoinVertical(lipgloss.Center, glyph, "", message, hint)
-	return lipgloss.Place(
-		w, height,
-		lipgloss.Center, lipgloss.Center,
-		stack,
-		lipgloss.WithWhitespaceStyle(headerCanvasBg(mode, colourless)),
-	)
+	return renderEmptyStateBody(noMatchesGlyph, formatNoMatchesMessage(query), noMatchesHint, width, height, mode, colourless)
 }
 
 // noMatchesFooterEntries returns the §7.3 footer entries: the input-active footer

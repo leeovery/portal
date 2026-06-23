@@ -3122,8 +3122,10 @@ func TestPageSwitching(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		view := model.View().Content
-		if !strings.Contains(view, "No saved projects") {
-			t.Errorf("expected 'No saved projects' on empty projects page, got:\n%s", view)
+		// §11.1 reskin: the pre-reskin "No saved projects" copy is replaced by the
+		// spec-exact "No projects yet".
+		if !strings.Contains(view, "No projects yet") {
+			t.Errorf("expected 'No projects yet' on empty projects page, got:\n%s", view)
 		}
 	})
 }
@@ -3405,8 +3407,9 @@ func TestProjectsPage(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
 		view := model.View().Content
-		if !strings.Contains(view, "No saved projects") {
-			t.Errorf("expected 'No saved projects' on empty projects page, got:\n%s", view)
+		// §11.1 reskin: "No saved projects" → spec-exact "No projects yet".
+		if !strings.Contains(view, "No projects yet") {
+			t.Errorf("expected 'No projects yet' on empty projects page, got:\n%s", view)
 		}
 	})
 
@@ -3877,7 +3880,8 @@ func TestDeleteProject(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		view := model.View().Content
-		if !strings.Contains(view, "No saved projects") {
+		// §11.1 reskin: "No saved projects" → spec-exact "No projects yet".
+		if !strings.Contains(view, "No projects yet") {
 			t.Errorf("expected empty state after deleting last project, got:\n%s", view)
 		}
 	})
@@ -4018,11 +4022,13 @@ func TestDeleteProject(t *testing.T) {
 }
 
 func TestSessionsPageEmptyText(t *testing.T) {
-	t.Run("empty sessions page shows no sessions running", func(t *testing.T) {
+	t.Run("empty sessions page shows the §11.1 empty-sessions message", func(t *testing.T) {
 		m := tui.NewModelWithSessions(nil)
 		view := m.View().Content
-		if !strings.Contains(view, "No sessions running") {
-			t.Errorf("expected 'No sessions running' on empty sessions page, got:\n%s", view)
+		// §11.1 reskin: the pre-reskin "No sessions running" copy is replaced by the
+		// spec-exact "No sessions yet" + the new hint.
+		if !strings.Contains(view, "No sessions yet") {
+			t.Errorf("expected 'No sessions yet' on empty sessions page, got:\n%s", view)
 		}
 	})
 }

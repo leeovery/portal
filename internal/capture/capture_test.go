@@ -85,6 +85,48 @@ func TestFixtureByName(t *testing.T) {
 	})
 }
 
+// TestSessionsEmptyFixture verifies the §11.1 empty-sessions fixture: ZERO sessions
+// (an empty Lister) opened in Flat mode, so the empty-sessions state renders. The
+// render assertion (glyph / message / hint / replaced footer styling) lives in
+// internal/tui; here the gate is that the fixture wires ZERO sessions through to the
+// production Sessions model (the precondition the empty state needs).
+func TestSessionsEmptyFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-empty")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-empty): %v", err)
+	}
+
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions-empty must have ZERO sessions, got %d (the empty state would not render)", len(sessions))
+	}
+
+	m := tui.Build(fx.Deps())
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if got, want := m.SessionListTitle(), "Sessions"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (fixture opens in Flat mode)", got, want)
+	}
+}
+
+// TestFixtureNamesIncludesSessionsEmpty pins the empty-sessions fixture into the
+// discoverable name list (the --fixture help + FixtureByName error share this source).
+func TestFixtureNamesIncludesSessionsEmpty(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "sessions-empty" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include sessions-empty", capture.FixtureNames())
+	}
+}
+
 // TestSessionsByProjectFixture verifies the grouped (by-project) fixture: it
 // opens in ModeByProject and carries projects whose paths match most session dirs,
 // plus exactly one session whose directory matches NO project so it lands in the

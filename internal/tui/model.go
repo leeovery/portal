@@ -3680,6 +3680,16 @@ func (m Model) viewProjectList() string {
 	// invariant exact. While the filter input is active the title row IS that input —
 	// leave it untouched so the user sees what they type.
 	listView = m.applyProjectsSectionHeader(listView)
+	// §11.1 empty-projects state: the project list is GENUINELY empty (zero items AND
+	// no active filter — projectListEmpty REQUIRES the Unfiltered state). Replace the
+	// (empty) list body BELOW the title row with the centred block glyph `▌ ▌ ▌` +
+	// `No projects yet` + the open-a-directory hint, mirroring the empty-sessions
+	// state. Suppressed while a command is pending — the §11.4 command-pending banner
+	// + footer own that case (the user is being asked to pick a project to run), so
+	// the empty-state guidance would be wrong there.
+	if m.projectListEmpty() && !m.commandPending {
+		listView = m.replaceListBodyWithEmptyState(listView, m.projectList.Height(), emptyProjectsGlyph, emptyProjectsMessage, emptyProjectsHint)
+	}
 	// §6.3 condensed footer: the §6.3 Projects keymap copy over the shared 1px
 	// border.footer rule (or the §11.4 command-pending footer while a command is
 	// pending — renderProjectsFooterForFilterState arbitrates). Its height is reserved
@@ -3805,6 +3815,14 @@ func (m Model) renderProjectsFooterForFilterState() string {
 		if m.commandPending {
 			return renderCommandPendingFooter(m.contentWidth(), m.canvasMode, m.colourless)
 		}
+		// §11.1 empty-projects state: the standard footer is FULLY REPLACED by the
+		// projects-relevant keys (`n new in cwd · x sessions · / filter · ? help`),
+		// drawn from the Projects keymap descriptor. Two-row footer over the SAME
+		// border.footer rule, so the swap is height-neutral against the reserved
+		// budget. Gated AFTER command-pending so the command-pending footer wins.
+		if m.projectListEmpty() {
+			return renderEmptyProjectsFooter(m.contentWidth(), m.canvasMode, m.colourless)
+		}
 		return renderProjectsFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	}
 }
@@ -3866,6 +3884,17 @@ func (m Model) viewSessionList() string {
 	if m.sessionListNoMatches() {
 		listView = m.replaceListBodyWithNoMatches(listView)
 	}
+	// §11.1 empty-sessions state: the session list is GENUINELY empty (zero items
+	// AND no active filter — sessionListEmpty REQUIRES the Unfiltered state). Replace
+	// the (empty) list body BELOW the title row with the centred block glyph
+	// `▌ ▌ ▌` + `No sessions yet` + the hint. This is DISTINCT from the §7.3
+	// no-matches state above (items exist, an active query filters to zero) — the two
+	// predicates are mutually exclusive (no-matches needs an active query, empty needs
+	// Unfiltered), so they never both fire. The replacement keeps the SAME body height
+	// (Height()−1 rows), so the §3.5 one-row-per-delegate pagination invariant holds.
+	if m.sessionListEmpty() {
+		listView = m.replaceListBodyWithEmptyState(listView, m.sessionList.Height(), emptySessionsGlyph, emptySessionsMessage, emptySessionsHint)
+	}
 	// §3.4 condensed footer: a single row of the Core keymap keys (sourced from the
 	// task 2-1 descriptor) over a 1px border.footer rule, replacing the manual
 	// three-column footer for Sessions. Its height is folded out of the list's budget
@@ -3921,6 +3950,15 @@ func (m Model) renderSessionsFooterForFilterState() string {
 	// so the reduced entry set renders whenever the active query matches zero.
 	if m.sessionListNoMatches() {
 		return renderNoMatchesFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	}
+	// §11.1 empty-sessions state: the standard footer is FULLY REPLACED by the keys
+	// relevant with no sessions (`n new in cwd · x projects · / filter · ? help`),
+	// drawn from the Sessions keymap descriptor. It is a two-row footer over the SAME
+	// border.footer rule, so the swap is height-neutral against the reserved
+	// sessionFooterHeight budget. The empty state is Unfiltered, so this guard sits
+	// before the filter-state switch (which only handles Filtering/FilterApplied).
+	if m.sessionListEmpty() {
+		return renderEmptySessionsFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	}
 	switch m.sessionList.FilterState() {
 	case list.Filtering:

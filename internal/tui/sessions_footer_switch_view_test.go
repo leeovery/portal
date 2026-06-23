@@ -42,21 +42,27 @@ func TestSessionsFooter_ShowsSwitchViewHint(t *testing.T) {
 }
 
 func TestSessionsFooter_ShowsSwitchViewHintAtZeroSessions(t *testing.T) {
-	// Footer is rendered independent of item count (viewSessionList composes
-	// renderSessionsFooter regardless of session count), so the hint must be
-	// present even with an empty list.
+	// The STANDARD condensed footer renderer always carries the hint (it is item-count
+	// independent), so renderSessionsFooter must contain it at any count.
 	m := NewModelWithSessions(nil)
 	m.termWidth = 120
 	m.termHeight = 24
 
 	footer := sessionsFooterString(m)
 	if !strings.Contains(footer, "switch view") {
-		t.Errorf("sessions footer at zero sessions must contain %q, got:\n%s", "switch view", footer)
+		t.Errorf("standard sessions footer must contain %q, got:\n%s", "switch view", footer)
 	}
 
+	// But §11.1: with ZERO sessions the rendered View() FULLY REPLACES the footer with
+	// the empty-sessions footer (`n new in cwd · x projects · / filter · ? help`), so
+	// `switch view` is intentionally ABSENT from the rendered empty-state View — the
+	// empty-state footer is its own surface, not the standard footer with items hidden.
 	view := m.View().Content
-	if !strings.Contains(view, "switch view") {
-		t.Errorf("rendered sessions View() at zero sessions must contain %q, got:\n%s", "switch view", view)
+	if strings.Contains(view, "switch view") {
+		t.Errorf("rendered empty-sessions View() must REPLACE the footer (no %q), got:\n%s", "switch view", view)
+	}
+	if !strings.Contains(view, "new in cwd") {
+		t.Errorf("rendered empty-sessions View() must show the replaced empty-state footer, got:\n%s", view)
 	}
 }
 

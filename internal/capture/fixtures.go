@@ -71,6 +71,8 @@ func FixtureByName(name string) (*Fixture, error) {
 	switch name {
 	case "sessions-flat":
 		return sessionsFlatFixture(), nil
+	case "sessions-empty":
+		return sessionsEmptyFixture(), nil
 	case "sessions-by-project":
 		return sessionsByProjectFixture(), nil
 	case "sessions-by-tag":
@@ -96,7 +98,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -129,6 +131,25 @@ func sessionsFlatFixture() *Fixture {
 	return &Fixture{
 		name:         "sessions-flat",
 		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: nil},
+		initialMode:  prefs.ModeFlat,
+	}
+}
+
+// sessionsEmptyFixture builds the deterministic "sessions-empty" fixture: ZERO
+// sessions (an empty Lister) opened in Flat mode, so the §11.1 empty-sessions state
+// renders — the centred `▌ ▌ ▌` block glyph (text.faint) + `No sessions yet`
+// (text.primary) + the hint (text.detail), with the FULLY-REPLACED footer
+// (`n new in cwd · x projects · / filter · ? help`). It drives the empty-sessions
+// reskin capture (mirrors testdata/vhs/reference/sessions-empty-mv.png).
+//
+// The project store is empty and no DirReader/DirRunner is wired (the empty-state
+// path performs no pane reads). Like the other fixtures it NEVER opens a tmux server
+// or touches ~/.config/portal: the Lister returns nil deterministically.
+func sessionsEmptyFixture() *Fixture {
+	return &Fixture{
+		name:         "sessions-empty",
+		Lister:       &fakeLister{sessions: nil},
 		projectStore: &fakeProjectStore{projects: nil},
 		initialMode:  prefs.ModeFlat,
 	}
