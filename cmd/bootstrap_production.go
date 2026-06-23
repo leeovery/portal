@@ -155,6 +155,14 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 		cleaner = bootstrap.NoOpStaleCleaner{}
 	}
 
+	// restoreInner.Progress is intentionally left nil here. The §10.4 per-session
+	// N/M progress callback is installed at Run time by bootstrap step 6 via the
+	// RestoreProgressSink seam (RestoreAdapter.SetProgress) — but ONLY on the
+	// concurrent cold-boot route, where a progress emitter is wired through the
+	// context. On the synchronous warm/CLI route no emitter exists, SetProgress is
+	// never called, Progress stays nil, and the restore loop is byte-for-byte
+	// unchanged. task 5-4 maps the forwarded RestoreN/M onto the friendly
+	// "Restoring sessions (N/M)" loading-screen label.
 	restoreInner := &restore.Orchestrator{
 		Client:   client,
 		StateDir: stateDir,

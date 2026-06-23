@@ -93,9 +93,18 @@ func newBootstrapProgressPipe() *bootstrapProgressPipe {
 // a close and never leaks a blocked receive.
 func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runner) {
 	emitCtx := bootstrap.WithProgressEmitter(ctx, func(ev bootstrap.StepEvent) {
-		// task 5-3 maps a restore per-session StepEvent onto RestoreN/M; task 5-4
-		// maps Index→friendly Label. Today each step rides as a raw step event.
-		p.ch <- bootstrapProgress{Step: ev}
+		// task 5-3: a restore per-session StepEvent carries RestoreN/M (Index 6 /
+		// "Restore"); other step events leave them zero. task 5-4 maps Index→
+		// friendly Label. The send is ctx-guarded (carry-forward from 5-2): with
+		// the per-session restore events 5-3 adds, a restore of >bufferSize
+		// sessions against a TUI that stopped draining (early Quit) would block
+		// the orchestrator goroutine forever on a naked send. The select makes the
+		// send abandon on cancellation so the goroutine always returns.
+		p.send(ctx, bootstrapProgress{
+			Step:     ev,
+			RestoreN: ev.RestoreN,
+			RestoreM: ev.RestoreM,
+		})
 	})
 
 	go func() {
@@ -104,13 +113,27 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 		p.serverStarted = started
 		p.warnings = warnings
 		p.err = err
-		p.ch <- bootstrapProgress{
+		p.send(ctx, bootstrapProgress{
 			Done:          true,
 			ServerStarted: started,
 			Warnings:      warnings,
 			Fatal:         err,
-		}
+		})
 	}()
+}
+
+// send delivers one progress event, abandoning the send if ctx is cancelled.
+// The ctx-guarded select (carry-forward from task 5-2) keeps both the per-step
+// emit and the per-session restore emit (task 5-3) non-blocking on cancellation:
+// if the TUI stopped draining (early Quit cancels the program's context), a
+// burst of >bootstrapProgressBufferSize restore events would otherwise wedge the
+// orchestrator goroutine on a full channel forever. On cancellation the event is
+// dropped — the receiver is no longer consuming, so the drop is benign.
+func (p *bootstrapProgressPipe) send(ctx context.Context, ev bootstrapProgress) {
+	select {
+	case p.ch <- ev:
+	case <-ctx.Done():
+	}
 }
 
 // receiver returns the tea.Cmd the loading-page model blocks on. It performs a

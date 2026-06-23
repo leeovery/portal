@@ -115,6 +115,16 @@ type RestoreAdapter struct {
 // contract.
 func (a *RestoreAdapter) Restore() (bool, error) { return a.Inner.Restore() }
 
+// SetProgress installs the §10.4 per-session progress callback onto the wrapped
+// restore.Orchestrator. It satisfies the optional bootstrap.RestoreProgressSink
+// seam: bootstrap step 6 installs a ctx-emitter-forwarding callback ONLY on the
+// cold/TUI concurrent route (where a progress emitter is wired); the synchronous
+// warm/CLI route never calls this, so the inner Orchestrator's Progress stays
+// nil and its restore loop is byte-for-byte unchanged. Keeping this off the
+// Restorer interface preserves the Restore() (bool, error) contract — this is a
+// purely additive instrumentation seam.
+func (a *RestoreAdapter) SetProgress(fn func(n, m int)) { a.Inner.Progress = fn }
+
 // NewRestoreAdapter constructs a *RestoreAdapter wrapping a freshly-built
 // inner *restore.Orchestrator. It is the single canonical constructor for
 // integration-test sites that previously open-coded the

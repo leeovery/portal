@@ -23,9 +23,19 @@ import "context"
 // StepName for that step (the step* consts — the same identifier the
 // step-complete log line carries). The cmd layer maps these onto the
 // loading-page channel event (friendly-label grouping is task 5-4).
+//
+// RestoreN / RestoreM carry the §10.4 "Restoring sessions (N/M)" per-session
+// counter on the restore-progress flavour of the event (Index 6 / Name
+// "Restore"): the restore per-session loop is the one real per-item progress
+// source in the whole bootstrap (task 5-3). They are zero on every step-complete
+// event; a restore-progress event sets RestoreM > 0 (M = len(idx.Sessions)) and
+// RestoreN in 1..M. The cmd layer forwards them onto the loading-page channel
+// (task 5-4 maps them to the suppressible (N/M) display).
 type StepEvent struct {
-	Index int
-	Name  string
+	Index    int
+	Name     string
+	RestoreN int
+	RestoreM int
 }
 
 // ProgressEmitter is invoked once per completed bootstrap step on the

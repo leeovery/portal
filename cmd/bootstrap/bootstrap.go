@@ -135,6 +135,21 @@ type Restorer interface {
 	Restore() (corrupt bool, err error)
 }
 
+// RestoreProgressSink is the optional §10.4 per-session progress seam a Restorer
+// MAY also satisfy. When the concurrent cold-boot route wires a progress emitter
+// (WithProgressEmitter), step 6 installs a ctx-emitter-forwarding callback via
+// SetProgress so the restore per-session loop streams its "Restoring sessions
+// (N/M)" counter — the one real per-item progress source in the whole bootstrap
+// (task 5-3). It is kept OFF the Restorer interface so the Restore() (bool, error)
+// contract is unchanged and the synchronous warm/CLI route (no emitter → no
+// SetProgress call) leaves the restore loop byte-for-byte unchanged.
+//
+// *bootstrapadapter.RestoreAdapter is the production implementation; a Restorer
+// that does not satisfy this seam simply emits no per-session restore events.
+type RestoreProgressSink interface {
+	SetProgress(fn func(n, m int))
+}
+
 // EagerHydrateSignaler writes the hydrate signal byte to every freshly-armed
 // `@portal-skeleton-*` pane's FIFO so every helper proceeds to scrollback
 // replay rather than waiting on the per-pane client-attached hook (which only
@@ -350,6 +365,20 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// escalating to a PersistentPreRunE abort.
 	o.Logger.Debug("step entering", "step", stepRestore)
 	stepStart = time.Now()
+	// §10.4 N/M progress: on the concurrent cold-boot route (emit != nil) install
+	// a per-session callback that forwards each (n, m) onto the SAME ctx emitter
+	// the step events ride, flavoured as a restore-progress StepEvent (Index 6 /
+	// stepRestore, RestoreN/RestoreM populated). The synchronous warm/CLI route
+	// has no emitter, so this is skipped and the restore loop's Progress stays nil
+	// — byte-for-byte unchanged. Only a Restorer that also satisfies the optional
+	// RestoreProgressSink seam participates (the production RestoreAdapter does).
+	if emit != nil {
+		if sink, ok := o.Restore.(RestoreProgressSink); ok {
+			sink.SetProgress(func(n, m int) {
+				emit(StepEvent{Index: 6, Name: stepRestore, RestoreN: n, RestoreM: m})
+			})
+		}
+	}
 	corrupt, restoreErr := o.Restore.Restore()
 	switch {
 	case corrupt:
@@ -363,8 +392,11 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step returned non-corrupt error (treated as soft per Restorer contract)", "step", stepRestore, "error", restoreErr)
 	}
 	o.Logger.Info("step complete", "step", stepRestore, log.Took(stepStart))
-	// task 5-3 wires the real per-session N/M restore counter; today the
-	// restore step emits a single terminal step event like every other step.
+	// The per-session N/M counter rode the ctx emitter from inside the loop above
+	// (task 5-3, the SetProgress forwarder — zero events when M=0). This trailing
+	// emit is the restore STEP's own bar tick (zero RestoreN/M), fired like every
+	// other step's step-complete event. task 5-4 maps Index 6→the "Restoring
+	// sessions" friendly label and treats the zero-N/M event as the step tick.
 	emitStep(6, stepRestore)
 
 	// Step 7 — EagerSignalHydrate (best-effort). Runs while

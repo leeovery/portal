@@ -33,6 +33,22 @@ type Orchestrator struct {
 	Client   *tmux.Client
 	StateDir string
 	Logger   *slog.Logger
+
+	// Progress is an optional per-session progress callback for the §10.4
+	// "Restoring sessions (N/M)" loading-screen label — the one real per-item
+	// progress source in the whole bootstrap. It is invoked once per loop
+	// iteration with (n, m) where m = len(idx.Sessions) (fixed) and n advances
+	// 1..m. The callback fires for EVERY session in the loop — including
+	// live-skips, underscore-prefixed names, invalid topologies, and a
+	// swallowed per-session restore failure — so the counter always reaches
+	// m/m even when sessions are skipped (§10.4). M=0 (the early-return paths)
+	// fires zero callbacks.
+	//
+	// Nil-tolerant: the synchronous warm/CLI path passes no callback, so the
+	// loop guards on Progress != nil and behaves byte-for-byte as before. Only
+	// the cold/TUI route (cmd/bootstrap_production.go) wires a non-nil closure
+	// forwarding (n, m) onto the §10.2 progress channel.
+	Progress func(n, m int)
 }
 
 // Restore is the bootstrap entry point. Returns (false, nil) on the happy
@@ -68,8 +84,17 @@ func (o *Orchestrator) Restore() (bool, error) {
 	// phase B's concern). One INFO summary fires after the loop per the spec's
 	// cycle-level summary cadence.
 	start := time.Now()
+	m := len(idx.Sessions)
 	var restoredSessions, restoredWindows, restoredPanes int
-	for _, sess := range idx.Sessions {
+	for i, sess := range idx.Sessions {
+		// §10.4 N/M progress: fire BEFORE restoreOne so N advances regardless of
+		// the per-session outcome — a live-skip, underscore-prefix, invalid
+		// topology, or a swallowed restore failure all still tick N against the
+		// fixed m, so the loading-screen counter always reaches m/m. Nil-tolerant:
+		// the synchronous warm/CLI path leaves Progress nil and this is a no-op.
+		if o.Progress != nil {
+			o.Progress(i+1, m)
+		}
 		if !o.restoreOne(sr, sess, liveSet) {
 			continue
 		}
