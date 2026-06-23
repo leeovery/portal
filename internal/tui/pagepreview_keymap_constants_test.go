@@ -1,58 +1,75 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
 
-// These tests pin the exact byte content of the package-level keymap constants
-// and the hex codes of the preview-frame border colour variants per
-// specification.md § Keymap glyphs > Constants, § Border colour, and
-// § Style sourcing. Drift is caught loudly — the spec is the source of truth
-// and any change to these literals must be a deliberate spec update.
+// These tests pin the §9.1 peek-mode marker, the §9.3 footer nav-hint content
+// (derived from the previewKeymap descriptor), and the role token the preview
+// chrome resolves. Drift is caught loudly — the spec is the source of truth and
+// any change to these literals must be a deliberate spec update.
 
-func TestVerboseKeymapExactByteContent(t *testing.T) {
-	want := "] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back"
-	if verboseKeymap != want {
-		t.Errorf("verboseKeymap = %q, want %q", verboseKeymap, want)
+// TestPreviewFooterCanonicalByteContent pins the §9.1 footer's exact stripped
+// content: `←→ window  ⇥ pane  ⏎ attach  ␣ back` — glyphs + labels,
+// space-separated (no middots), in descriptor order.
+func TestPreviewFooterCanonicalByteContent(t *testing.T) {
+	const want = "←→ window  ⇥ pane  ⏎ attach  ␣ back"
+	got := stripANSI(composePreviewFooterRow(200, theme.Dark, false))
+	if got != want {
+		t.Errorf("preview footer = %q, want %q", got, want)
 	}
 }
 
-func TestCompactKeymapExactByteContent(t *testing.T) {
-	want := "] [ ⇥ ⏎ ⎋"
-	if compactKeymap != want {
-		t.Errorf("compactKeymap = %q, want %q", compactKeymap, want)
+// TestPreviewFooterNoMiddots pins the shared footer convention: the §9.1 footer
+// is SPACE-separated, never middot-separated (the verbose-bar middots were
+// dropped in the §9 restructure).
+func TestPreviewFooterNoMiddots(t *testing.T) {
+	got := stripANSI(composePreviewFooterRow(200, theme.Dark, false))
+	if strings.ContainsRune(got, '·') {
+		t.Errorf("preview footer contains a middot U+00B7; want space-separated only: %q", got)
 	}
 }
 
-func TestCompactKeymapSingleSpaceSeparatedNoInterpuncts(t *testing.T) {
-	// Per spec § Compact form: single-space separators (no interpunct).
-	// Display-cell width is 9 cells. Asserting absence of the U+00B7
-	// interpunct (the verbose form's separator) prevents accidental
-	// reintroduction of the verbose separator into the compact form.
-	for _, r := range compactKeymap {
-		if r == '·' {
-			t.Errorf("compactKeymap contains interpunct U+00B7; want single-space separators only: %q", compactKeymap)
+// TestPreviewFooterCompactGlyphsOnly pins the narrow-width cascade: when the
+// labelled form does not fit, the footer compacts to accent.blue glyphs only,
+// dropping the labels but keeping every nav-hint glyph present.
+func TestPreviewFooterCompactGlyphsOnly(t *testing.T) {
+	// A content width too narrow for the labelled form (~38 cells) but wide
+	// enough for the full compact glyph form (13 cells) forces the compact path.
+	got := stripANSI(composePreviewFooterRow(20, theme.Dark, false))
+	const want = "←→  ⇥  ⏎  ␣"
+	if got != want {
+		t.Errorf("compact preview footer = %q, want %q", got, want)
+	}
+	for _, label := range []string{"window", "pane", "attach", "back"} {
+		if strings.Contains(got, label) {
+			t.Errorf("compact preview footer must drop labels; found %q in %q", label, got)
 		}
 	}
 }
 
-func TestPreviewBorderColorHexCodes(t *testing.T) {
-	// Lipgloss v2 removed AdaptiveColor (spec § 14.5); the light/dark variants
-	// are now explicit named constants. Pin both exact hexes — unchanged from
-	// the v1 AdaptiveColor{Light, Dark} — so the migration stays parity-only.
-	if previewBorderColorLight != "#3B5577" {
-		t.Errorf("previewBorderColorLight = %q, want %q", previewBorderColorLight, "#3B5577")
+func TestPreviewMarkerExactByteContent(t *testing.T) {
+	want := "◉ preview"
+	if previewMarker != want {
+		t.Errorf("previewMarker = %q, want %q", previewMarker, want)
 	}
-	if previewBorderColorDark != "#7B95BD" {
-		t.Errorf("previewBorderColorDark = %q, want %q", previewBorderColorDark, "#7B95BD")
+}
+
+// TestPreviewBorderColorPointsAtAccentCyanToken pins that the §9.1 preview
+// chrome border resolves the accent.cyan §2.9 role token — NOT a raw light/dark
+// hex pair. The former explicit previewBorderColorDark `#7B95BD` is retired in
+// favour of the token (§2.9), so the cyan "peek mode" hue is owned by the single
+// token layer.
+func TestPreviewBorderColorPointsAtAccentCyanToken(t *testing.T) {
+	if previewBorderColorToken != theme.MV.AccentCyan {
+		t.Errorf("previewBorderColorToken = %#v, want theme.MV.AccentCyan %#v", previewBorderColorToken, theme.MV.AccentCyan)
 	}
-	// The resolved previewBorderColor must equal the DARK variant — the
-	// dark-default resolution that v1's AdaptiveColor produced in the absence
-	// of a detected light terminal background (OSC 11 light/dark detection is
-	// wired by task 1-7). lipgloss.Color of the dark hex is the expected value.
-	if want := lipgloss.Color(previewBorderColorDark); previewBorderColor != want {
-		t.Errorf("previewBorderColor = %#v, want dark variant %#v", previewBorderColor, want)
+	// And the token's dark variant must NOT be the retired explicit hex — a
+	// regression back to #7B95BD would mean the re-target was reverted.
+	if previewBorderColorToken.Dark == "#7B95BD" {
+		t.Errorf("previewBorderColorToken.Dark = %q; the retired explicit border hex must not survive", previewBorderColorToken.Dark)
 	}
 }

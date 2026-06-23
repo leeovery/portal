@@ -72,7 +72,7 @@ func renderRenameModalContent(input textinput.Model, oldName string, mode theme.
 	header := []string{renameModalHeaderRow(mode, colourless)}
 	body := renameModalBodyRows(input, oldName, mode, colourless)
 	footer := []string{renameModalFooterRow(mode, colourless)}
-	return renderJoinedPanel([][]string{header, body, footer}, mode, colourless)
+	return renderJoinedPanel([][]string{header, body, footer}, theme.MV.BorderSeparator, mode, colourless)
 }
 
 // renameModalHeaderRow renders `Rename session` (text.primary, the non-destructive

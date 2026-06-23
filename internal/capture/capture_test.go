@@ -544,6 +544,79 @@ func TestFixtureNamesIncludesProjects(t *testing.T) {
 	}
 }
 
+// TestPreviewScreenFixture verifies the §9 preview-screen fixture: a Flat-mode
+// session list whose FIRST (default-selected) session is aviva-proxy-qNyfEO, so
+// pressing Space opens the §9 preview overlay onto a single-window single-pane
+// session (Window 1/1 · Pane 1/1) seeded with generic canned scrollback. The
+// render assertion (the §9.1 cyan peek-mode chrome) lives in internal/tui; here
+// the gate is that the fixture wires the right session order, the single-pane
+// enumerator shape, and the generic (tool-agnostic) scrollback through Deps.
+func TestPreviewScreenFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("preview-screen")
+	if err != nil {
+		t.Fatalf("FixtureByName(preview-screen): %v", err)
+	}
+
+	// It builds the production Sessions model opened in Flat mode (the tape
+	// presses Space to reach the preview overlay).
+	m := tui.Build(fx.Deps())
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions (the tape presses Space to reach the preview)", m.ActivePage())
+	}
+	if got, want := m.SessionListTitle(), "Sessions"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (fixture opens in Flat mode)", got, want)
+	}
+
+	// The default-selected (first) session must be aviva-proxy-qNyfEO so Space
+	// opens the preview onto the reference session.
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) == 0 || sessions[0].Name != "aviva-proxy-qNyfEO" {
+		t.Fatalf("first session = %+v, want first to be aviva-proxy-qNyfEO", sessions)
+	}
+
+	// The enumerator must be a single 1/1 window/pane so the §9.1 counters read
+	// "Window 1/1 · Pane 1/1" (matching the reference frame).
+	groups, err := fx.Deps().Enumerator.ListWindowsAndPanesInSession("aviva-proxy-qNyfEO")
+	if err != nil {
+		t.Fatalf("Enumerator: %v", err)
+	}
+	if len(groups) != 1 || len(groups[0].PaneIndices) != 1 {
+		t.Errorf("enumerator groups = %+v, want a single window with a single pane (Window 1/1 · Pane 1/1)", groups)
+	}
+
+	// The scrollback is non-empty generic example output — and must NOT
+	// reference any specific tool/model (Portal's preview is tool-agnostic).
+	body, err := fx.Deps().Reader.Tail("any-pane-key")
+	if err != nil {
+		t.Fatalf("Reader.Tail: %v", err)
+	}
+	if len(body) == 0 {
+		t.Error("preview-screen scrollback is empty; the overlay would render the (no saved content) placeholder")
+	}
+	for _, banned := range []string{"Claude", "Fable", "Brewed"} {
+		if strings.Contains(string(body), banned) {
+			t.Errorf("preview-screen scrollback references %q; the captured content must be generic, tool-agnostic example output", banned)
+		}
+	}
+}
+
+// TestFixtureNamesIncludesPreviewScreen pins the preview-screen fixture into the
+// discoverable name list (the --fixture help + FixtureByName error share this source).
+func TestFixtureNamesIncludesPreviewScreen(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "preview-screen" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include preview-screen", capture.FixtureNames())
+	}
+}
+
 // TestFakeSeamsAreInert verifies the mutating fakes are no-ops (the harness must
 // never mutate any tmux/server/config state) and the read seams return canned
 // data without touching a real tmux server.

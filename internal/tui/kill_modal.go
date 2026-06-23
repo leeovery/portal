@@ -63,7 +63,7 @@ func renderKillModalContent(name string, windows int, mode theme.Mode, colourles
 	header := []string{killModalHeaderRow(mode, colourless)}
 	body := killModalBodyRows(name, windows, mode, colourless)
 	footer := []string{killModalFooterRow(mode, colourless)}
-	return renderJoinedPanel([][]string{header, body, footer}, mode, colourless)
+	return renderJoinedPanel([][]string{header, body, footer}, theme.MV.BorderSeparator, mode, colourless)
 }
 
 // killModalHeaderRow renders `▲ Kill session?` — the ▲ glyph and the title text

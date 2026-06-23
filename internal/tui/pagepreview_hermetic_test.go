@@ -36,7 +36,7 @@ import (
 
 // hermeticEnumerator is a recording TmuxEnumerator returning a 2-window x
 // 2-pane shape. The 2x2 shape ensures every keypress in the lifecycle
-// sequence (Tab, Tab, ], Tab, Tab, [) is non-degenerate — i.e. each one
+// sequence (Tab, Tab, →, Tab, Tab, ←) is non-degenerate — i.e. each one
 // triggers a read. Degenerate (1x1, 1xN, Nx1) shapes would silently
 // no-op some keypresses and the per-focus read budget would not match.
 type hermeticEnumerator struct {
@@ -66,7 +66,7 @@ func (r *hermeticReader) Tail(paneKey string) ([]byte, error) {
 }
 
 func TestPreviewHermetic_FullLifecycleProducesOnlyOpenEnumerationAndPerFocusReads(t *testing.T) {
-	// Lifecycle: construct → Tab, Tab, ], Tab, Tab, [, Esc → dismiss.
+	// Lifecycle: construct → Tab, Tab, →, Tab, Tab, ←, Esc → dismiss.
 	// Across a 2-window x 2-pane fixture every cycle keypress moves focus
 	// (no degenerate no-ops), so each one triggers exactly one Tail call.
 	// Esc emits previewDismissedMsg and triggers no read.
@@ -79,12 +79,12 @@ func TestPreviewHermetic_FullLifecycleProducesOnlyOpenEnumerationAndPerFocusRead
 	}
 
 	keys := []tea.KeyPressMsg{
-		{Code: tea.KeyTab},     // (0,0) → (0,1)
-		{Code: tea.KeyTab},     // (0,1) → (0,0) wrap
-		{Code: ']', Text: "]"}, // → (1,0)
-		{Code: tea.KeyTab},     // (1,0) → (1,1)
-		{Code: tea.KeyTab},     // (1,1) → (1,0) wrap
-		{Code: '[', Text: "["}, // → (0,0)
+		nextPaneKey,   // (0,0) → (0,1)
+		nextPaneKey,   // (0,1) → (0,0) wrap
+		nextWindowKey, // → (1,0)
+		nextPaneKey,   // (1,0) → (1,1)
+		nextPaneKey,   // (1,1) → (1,0) wrap
+		prevWindowKey, // → (0,0)
 	}
 	for _, k := range keys {
 		m, _ = m.Update(k)

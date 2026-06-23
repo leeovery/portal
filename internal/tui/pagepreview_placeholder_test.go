@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -47,14 +46,14 @@ func TestPreviewPlaceholder_RendersAtInitialOpenWhenTailReturnsNilNil(t *testing
 	}
 }
 
-func TestPreviewPlaceholder_RendersAfterTabCycleWhenTailReturnsNilNil(t *testing.T) {
+func TestPreviewPlaceholder_RendersAfterPaneNavCycleWhenTailReturnsNilNil(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
 	}
 	reader := &nilNilReader{}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	updated, _ := m.Update(nextPaneKey)
 
 	if updated.paneIdx != 1 {
 		t.Fatalf("setup: expected paneIdx=1 after Tab, got %d", updated.paneIdx)
@@ -73,14 +72,14 @@ func TestPreviewPlaceholder_RendersAfterNextWindowCycleWhenTailReturnsNilNil(t *
 	reader := &nilNilReader{}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	updated, _ := m.Update(nextWindowKey)
 
 	if updated.windowIdx != 1 {
-		t.Fatalf("setup: expected windowIdx=1 after ], got %d", updated.windowIdx)
+		t.Fatalf("setup: expected windowIdx=1 after →, got %d", updated.windowIdx)
 	}
 	got := stripTrailingBlanks(updated.viewport.View())
 	if got != previewPlaceholder {
-		t.Errorf("viewport content after ] = %q; want %q", got, previewPlaceholder)
+		t.Errorf("viewport content after → = %q; want %q", got, previewPlaceholder)
 	}
 }
 
@@ -106,15 +105,16 @@ func TestPreviewPlaceholder_ChromeCountsRemainCorrectWhenPlaceholderShown(t *tes
 	if chrome != expected {
 		t.Errorf("chromeLine() under placeholder = %q; want %q (identical to non-placeholder shape)", chrome, expected)
 	}
-	// Sanity: the placeholder shape still surfaces correct counters.
-	if !strings.Contains(chrome, "Window 1 of 2") {
-		t.Errorf("chromeLine() = %q; want substring %q", chrome, "Window 1 of 2")
+	// Sanity: the placeholder shape still surfaces correct counters and the
+	// §9.1 session name + peek-mode marker.
+	if !strings.Contains(chrome, "Window 1/2") {
+		t.Errorf("chromeLine() = %q; want substring %q", chrome, "Window 1/2")
 	}
-	if !strings.Contains(chrome, "Pane 1 of 2") {
-		t.Errorf("chromeLine() = %q; want substring %q", chrome, "Pane 1 of 2")
+	if !strings.Contains(chrome, "Pane 1/2") {
+		t.Errorf("chromeLine() = %q; want substring %q", chrome, "Pane 1/2")
 	}
-	if !strings.Contains(chrome, "main") {
-		t.Errorf("chromeLine() = %q; want window name %q", chrome, "main")
+	if !strings.Contains(chrome, "◉ preview work") {
+		t.Errorf("chromeLine() = %q; want marker + session %q", chrome, "◉ preview work")
 	}
 }
 

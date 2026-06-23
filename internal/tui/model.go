@@ -2839,6 +2839,11 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
+			// Propagate the resolved canvas mode + NO_COLOR carve-out so the
+			// §9.1 cyan peek-mode chrome resolves the right token variant (and
+			// drops hue under NO_COLOR, §9.2).
+			pmodel.mode = m.canvasMode
+			pmodel.colourless = m.colourless
 			m.preview = pmodel
 			m.activePage = pagePreview
 			return m, nil

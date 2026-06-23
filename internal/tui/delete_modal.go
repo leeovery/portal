@@ -70,7 +70,7 @@ func renderDeleteModalContent(name, path string, mode theme.Mode, colourless boo
 	header := []string{deleteModalHeaderRow(mode, colourless)}
 	body := deleteModalBodyRows(name, path, mode, colourless)
 	footer := []string{deleteModalFooterRow(mode, colourless)}
-	return renderJoinedPanel([][]string{header, body, footer}, mode, colourless)
+	return renderJoinedPanel([][]string{header, body, footer}, theme.MV.BorderSeparator, mode, colourless)
 }
 
 // deleteModalHeaderRow renders `▲ Delete project?` — the ▲ glyph and the title text

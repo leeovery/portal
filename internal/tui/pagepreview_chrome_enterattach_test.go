@@ -9,13 +9,12 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// TestPreviewChromeLine_EnterAttachTokenByteIdenticalAcrossViewportStates pins
-// spec § Discoverability > Token wording is unconditional: chromeLine() must
-// produce a byte-identical string regardless of whether the viewport rendered
-// real bytes, the (nil, nil) "(no saved content)" placeholder, or the (nil,
-// err) error string. Chrome is a pure function of cached groups + windowIdx +
-// paneIdx and must not branch on viewport content state.
-func TestPreviewChromeLine_EnterAttachTokenByteIdenticalAcrossViewportStates(t *testing.T) {
+// TestPreviewFooter_ByteIdenticalAcrossViewportStates pins spec § Discoverability
+// > Token wording is unconditional: the §9.1 footer must produce a byte-identical
+// string regardless of whether the viewport rendered real bytes, the (nil, nil)
+// "(no saved content)" placeholder, or the (nil, err) error string. The footer is
+// a pure function of the descriptor and must not branch on viewport content state.
+func TestPreviewFooter_ByteIdenticalAcrossViewportStates(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
 		{WindowIndex: 1, WindowName: "logs", PaneIndices: []int{0}},
@@ -39,10 +38,10 @@ func TestPreviewChromeLine_EnterAttachTokenByteIdenticalAcrossViewportStates(t *
 			if !ok {
 				t.Fatalf("expected ok=true on construction, got false")
 			}
-			got := stripANSI(chromeLineForTest(m))
+			got := stripANSI(footerLineForTest(m))
 
-			if !strings.Contains(got, "· ⇥ next pane · ⏎ attach · ⎋ back") {
-				t.Errorf("chromeLine() = %q; missing canonical enter-attach segment", got)
+			if !strings.Contains(got, "⏎ attach  ␣ back") {
+				t.Errorf("footer = %q; missing canonical attach/back segment", got)
 			}
 
 			if i == 0 {
@@ -50,7 +49,7 @@ func TestPreviewChromeLine_EnterAttachTokenByteIdenticalAcrossViewportStates(t *
 				return
 			}
 			if got != first {
-				t.Errorf("chromeLine() under %q = %q; want byte-identical to first case %q", tc.name, got, first)
+				t.Errorf("footer under %q = %q; want byte-identical to first case %q", tc.name, got, first)
 			}
 		})
 	}
@@ -58,13 +57,14 @@ func TestPreviewChromeLine_EnterAttachTokenByteIdenticalAcrossViewportStates(t *
 
 // TestSessionsPageView_DoesNotContainPreviewChrome pins spec § Discoverability
 // > Sessions-page help bar: the preview chrome must not propagate to or
-// duplicate on the Sessions page. The preview chrome renders glyph-keyed,
-// dot-separated tokens (`] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋
-// back`) that are preview-specific and must never appear on the Sessions page.
+// duplicate on the Sessions page. The §9.1 preview footer renders glyph-keyed,
+// space-separated nav-hint tokens (`←→ window  ⇥ pane  ⏎ attach  ␣ back`)
+// plus the `◉ preview` marker that are preview-specific and must never appear
+// on the Sessions page.
 //
 // Note: the §3.4 condensed Sessions footer independently advertises `enter
 // attach` as one of its Core keys (text-keyed: "enter attach"), which is
-// unrelated to and distinct from the preview chrome's glyph-keyed `⏎ attach`
+// unrelated to and distinct from the preview footer's glyph-keyed `⏎ attach`
 // token. This guard targets the preview chrome's own tokens, not the Sessions
 // footer's legitimate `enter attach` entry.
 func TestSessionsPageView_DoesNotContainPreviewChrome(t *testing.T) {
@@ -78,7 +78,7 @@ func TestSessionsPageView_DoesNotContainPreviewChrome(t *testing.T) {
 
 	// The preview chrome's preview-specific glyph-keyed tokens must never appear
 	// on the Sessions page.
-	for _, forbidden := range []string{"next win", "prev win", "next pane", "⏎ attach", "⎋ back"} {
+	for _, forbidden := range []string{"◉ preview", "←→ window", "⇥ pane", "⏎ attach", "␣ back"} {
 		if strings.Contains(got, forbidden) {
 			t.Errorf("Sessions-page View() contains forbidden preview-chrome token %q; got %q", forbidden, got)
 		}

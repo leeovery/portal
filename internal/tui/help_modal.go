@@ -111,43 +111,44 @@ func renderHelpModalContent(entries []keymapEntry, mode theme.Mode, colourless b
 	// the shared single-tone joined panel (the SAME frame the kill modal uses): one
 	// joined ├───┤ divider between them, FLUSH vertical spacing, single-tone
 	// border.separator throughout.
-	return renderJoinedPanel([][]string{{title}, bodyRows}, mode, colourless)
+	return renderJoinedPanel([][]string{{title}, bodyRows}, theme.MV.BorderSeparator, mode, colourless)
 }
 
-// helpFrameStyle returns the single-tone frame paint: border.separator foreground
+// helpFrameStyle returns the single-tone frame paint: the borderToken foreground
 // for the mode, or a bare style (native fg) under the NO_COLOR carve-out — so the
 // frame glyphs survive colourless but carry no hue. NO background is set (the frame
-// glyphs sit on whatever the placed canvas supplies).
-func helpFrameStyle(mode theme.Mode, colourless bool) lipgloss.Style {
+// glyphs sit on whatever the placed canvas supplies). The modals pass
+// theme.MV.BorderSeparator; the §9.1 preview passes theme.MV.AccentCyan.
+func helpFrameStyle(borderToken theme.Token, mode theme.Mode, colourless bool) lipgloss.Style {
 	if colourless {
 		return lipgloss.NewStyle()
 	}
-	return lipgloss.NewStyle().Foreground(theme.MV.BorderSeparator.ColorFor(mode))
+	return lipgloss.NewStyle().Foreground(borderToken.ColorFor(mode))
 }
 
-// helpFrameTop renders the top border line: `╭` + `─`×w + `╮`, all border.separator.
-func helpFrameTop(w int, mode theme.Mode, colourless bool) string {
+// helpFrameTop renders the top border line: `╭` + `─`×w + `╮`, all in borderToken.
+func helpFrameTop(w int, borderToken theme.Token, mode theme.Mode, colourless bool) string {
 	line := helpFrameTopLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameTopRight
-	return helpFrameStyle(mode, colourless).Render(line)
+	return helpFrameStyle(borderToken, mode, colourless).Render(line)
 }
 
 // helpFrameBottom renders the bottom border line: `╰` + `─`×w + `╯`.
-func helpFrameBottom(w int, mode theme.Mode, colourless bool) string {
+func helpFrameBottom(w int, borderToken theme.Token, mode theme.Mode, colourless bool) string {
 	line := helpFrameBottomLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameBottomRight
-	return helpFrameStyle(mode, colourless).Render(line)
+	return helpFrameStyle(borderToken, mode, colourless).Render(line)
 }
 
-// helpFrameDivider renders the joined header divider: `├` + `─`×w + `┤`, all
-// border.separator (single-tone). The `├`/`┤` tees visibly join the side borders.
-func helpFrameDivider(w int, mode theme.Mode, colourless bool) string {
+// helpFrameDivider renders the joined compartment divider: `├` + `─`×w + `┤`, all
+// in borderToken (single-tone). The `├`/`┤` tees visibly join the side borders.
+func helpFrameDivider(w int, borderToken theme.Token, mode theme.Mode, colourless bool) string {
 	line := helpFrameTeeLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameTeeRight
-	return helpFrameStyle(mode, colourless).Render(line)
+	return helpFrameStyle(borderToken, mode, colourless).Render(line)
 }
 
 // helpFrameContentLine wraps a content row (already exactly w cells wide) with the
-// left/right `│` side borders (border.separator), yielding a w+2 cell frame line.
-func helpFrameContentLine(row string, mode theme.Mode, colourless bool) string {
-	side := helpFrameStyle(mode, colourless).Render(helpFrameSide)
+// left/right `│` side borders (in borderToken), yielding a w+2 cell frame line.
+func helpFrameContentLine(row string, borderToken theme.Token, mode theme.Mode, colourless bool) string {
+	side := helpFrameStyle(borderToken, mode, colourless).Render(helpFrameSide)
 	return lipgloss.JoinHorizontal(lipgloss.Top, side, row, side)
 }
 

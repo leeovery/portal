@@ -14,7 +14,7 @@ import (
 // This file pins the invariant from § Multi-pane Rendering Shape > Chrome Floor
 // (Chrome data source) and § Cross-cutting Seams > Externally-Killed Session
 // During Preview: window/pane counts and names are captured at preview-open and
-// reused mid-preview without re-querying tmux. ] / [ / Tab cycle the captured
+// reused mid-preview without re-querying tmux. ←/→ window + Tab pane cycle the captured
 // shape; if a future refactor introduces a re-enumeration call into any cycle
 // handler, the assertions below fail with a clear "called N times, expected 1"
 // message.
@@ -63,18 +63,18 @@ func newChromeStabilityFixture() *chromeStabilityEnumerator {
 	}
 }
 
-// driveCycleSequence drives ], ], [, [, Tab, Tab, Tab over the supplied model.
+// driveCycleSequence drives →, →, ←, ←, Tab, Tab, Tab over the supplied model.
 // Across a 2-window x 3-pane fixture this exercises forward window with wrap,
 // backward window with wrap, and pane cycling within a window (1->2->0).
 func driveCycleSequence(m previewModel) []previewModel {
 	keys := []tea.KeyPressMsg{
-		{Code: ']', Text: "]"},
-		{Code: ']', Text: "]"},
-		{Code: '[', Text: "["},
-		{Code: '[', Text: "["},
-		{Code: tea.KeyTab},
-		{Code: tea.KeyTab},
-		{Code: tea.KeyTab},
+		nextWindowKey,
+		nextWindowKey,
+		prevWindowKey,
+		prevWindowKey,
+		nextPaneKey,
+		nextPaneKey,
+		nextPaneKey,
 	}
 	out := make([]previewModel, 0, len(keys))
 	for _, k := range keys {
@@ -111,51 +111,47 @@ func TestPreviewChromeStability_ChromeLineAfterEachCycleReflectsOpenTimeCachedGr
 
 	models := driveCycleSequence(m)
 
-	// After each keypress, chromeLine() must reflect the open-time cached
-	// shape: window names "first-window" / "second-window", 2 windows total,
-	// 3 panes per window. The post-open shape ("REENUMERATED" / 1x1) must
-	// never appear.
+	// After each keypress, the §9.1 chrome must reflect the open-time cached
+	// shape: 2 windows total, 3 panes per window. The post-open re-enumerated
+	// shape (1x1, raw index 9/42) must never surface — a re-enumeration would
+	// collapse the totals to "/1" and leak the raw indices.
 	for i, mm := range models {
-		line := chromeLineForTest(mm)
-		if strings.Contains(line, "REENUMERATED") {
-			t.Errorf("step %d: chromeLine() leaked post-open enumerator state: %q", i, line)
-		}
-		// Both window names from the open-time shape must remain reachable
-		// across the cycle sequence — every step must show one of them.
-		if !strings.Contains(line, "first-window") && !strings.Contains(line, "second-window") {
-			t.Errorf("step %d: chromeLine() lost open-time window names, got %q", i, line)
-		}
+		line := stripANSI(chromeLineForTest(mm))
 		// Counters must reflect the open-time totals: 2 windows, 3 panes per
-		// window. A re-enumeration to the 1x1 shape would surface "of 1".
-		if !strings.Contains(line, "of 2") {
-			t.Errorf("step %d: chromeLine() lost open-time window total (expected 'of 2'), got %q", i, line)
+		// window. A re-enumeration to the 1x1 shape would surface "/1".
+		if !strings.Contains(line, "/2 ·") {
+			t.Errorf("step %d: header lost open-time window total (expected 'Window x/2'), got %q", i, line)
 		}
-		if !strings.Contains(line, "of 3") {
-			t.Errorf("step %d: chromeLine() lost open-time pane total (expected 'of 3'), got %q", i, line)
+		if !strings.Contains(line, "/3") {
+			t.Errorf("step %d: header lost open-time pane total (expected 'Pane y/3'), got %q", i, line)
+		}
+		// The re-enumerated raw indices (9, 42) must never leak into the chrome.
+		if strings.Contains(line, "/9") || strings.Contains(line, "42") {
+			t.Errorf("step %d: header leaked post-open re-enumerated indices: %q", i, line)
 		}
 	}
 
-	// Spot-check the per-step focused window name across the sequence:
-	//   start              : window 0 ("first-window")
-	//   ]      -> window 1 ("second-window")
-	//   ]      -> window 0 ("first-window") (wrap)
-	//   [      -> window 1 ("second-window") (wrap back)
-	//   [      -> window 0 ("first-window")
-	//   Tab    -> window 0, pane 1 ("first-window")
-	//   Tab    -> window 0, pane 2 ("first-window")
-	//   Tab    -> window 0, pane 0 ("first-window") (wrap)
-	wantFocusedName := []string{
-		"second-window", // after ] #1
-		"first-window",  // after ] #2 (wrap)
-		"second-window", // after [ #1 (wrap back)
-		"first-window",  // after [ #2
-		"first-window",  // after Tab #1 (window unchanged)
-		"first-window",  // after Tab #2
-		"first-window",  // after Tab #3 (wrap)
+	// Spot-check the per-step focused window ordinal across the sequence:
+	//   start              : window 0 → Window 1/2
+	//   →      -> window 1 → Window 2/2
+	//   →      -> window 0 → Window 1/2 (wrap)
+	//   ←      -> window 1 → Window 2/2 (wrap back)
+	//   ←      -> window 0 → Window 1/2
+	//   Tab     -> window 0, pane 1 → Window 1/2 · Pane 2/3
+	//   Tab     -> window 0, pane 2 → Window 1/2 · Pane 3/3
+	//   Tab     -> window 0, pane 0 → Window 1/2 · Pane 1/3 (wrap)
+	wantFocusedWindow := []string{
+		"Window 2/2", // after → #1
+		"Window 1/2", // after → #2 (wrap)
+		"Window 2/2", // after ← #1 (wrap back)
+		"Window 1/2", // after ← #2
+		"Window 1/2", // after Tab #1 (window unchanged)
+		"Window 1/2", // after Tab #2
+		"Window 1/2", // after Tab #3 (wrap)
 	}
-	for i, want := range wantFocusedName {
-		if !strings.Contains(chromeLineForTest(models[i]), want) {
-			t.Errorf("step %d: expected focused window name %q in chromeLine(), got %q", i, want, chromeLineForTest(models[i]))
+	for i, want := range wantFocusedWindow {
+		if !strings.Contains(stripANSI(chromeLineForTest(models[i])), want) {
+			t.Errorf("step %d: expected focused window ordinal %q in header, got %q", i, want, stripANSI(chromeLineForTest(models[i])))
 		}
 	}
 }
@@ -182,9 +178,11 @@ func TestPreviewChromeStability_ChromeLineNeverReflectsPostOpenEnumeratorStateCh
 		t.Errorf("expected ListWindowsAndPanesInSession called exactly 1 time even with armed second-call error, got %d", enum.callCount)
 	}
 	for i, mm := range models {
-		line := chromeLineForTest(mm)
-		if strings.Contains(line, "REENUMERATED") {
-			t.Errorf("step %d: chromeLine() leaked post-open enumerator state: %q", i, line)
+		line := stripANSI(chromeLineForTest(mm))
+		// A re-enumeration would collapse the open-time 2x3 totals to the 1x1
+		// second-shape; the open-time totals (/2, /3) must survive every step.
+		if !strings.Contains(line, "/2 ·") || !strings.Contains(line, "/3") {
+			t.Errorf("step %d: header lost open-time totals (leaked re-enumerated shape?): %q", i, line)
 		}
 	}
 }

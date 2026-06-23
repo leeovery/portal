@@ -28,23 +28,30 @@ func newPreviewModelForHelpers(session string, groups []tmux.WindowGroup, window
 	}
 }
 
-// chromeLineForTest is the test-only shim that replaced the deleted
-// chromeLine() method on previewModel. Tests asserting on chrome content
-// call this against a model; the helper feeds the model's structural
-// fields into composeChromeLine at a fixed inner width of 200, well above
-// the cascade tier-1 threshold so the full verbose chrome (counters +
-// "win: {name}" segment + verbose keymap) renders for any reasonable
-// window-name length. Substring assertions across pre-existing tests
-// ("Window M of N", "Pane X of Y", window name, keymap action words via
-// the verbose form) all hit at this width. Tests that need to probe other
-// cascade tiers call composeChromeLine directly with a tier-specific width.
+// chromeLineForTest is the test-only shim that composes the §9.1 header
+// compartment content (styled) for a model. Tests asserting on header content
+// call this against a model; the helper feeds the model's structural fields into
+// composePreviewHeaderRow at a fixed content width of 200, well above the tier-1
+// threshold so the full header (marker + session + slash counters) renders for
+// any reasonable session-name length. The session name is the §9.1 header
+// content (the window name is no longer surfaced). The footer's nav hints live in
+// a separate compartment now (composePreviewFooterRow); tests asserting on the
+// footer use footerLineForTest. Tests that need to probe other header cascade
+// tiers call composePreviewHeaderRow directly with a tier-specific width.
 func chromeLineForTest(m previewModel) string {
-	return composeChromeLine(200, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
+	return composePreviewHeaderRow(200, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.session, m.mode, m.colourless)
+}
+
+// footerLineForTest composes the §9.1 footer compartment (styled) at a fixed wide
+// content width of 200 so the full labelled nav hints render. Peer of
+// chromeLineForTest for footer-content assertions.
+func footerLineForTest(m previewModel) string {
+	return composePreviewFooterRow(200, m.mode, m.colourless)
 }
 
 // firstLine returns the first '\n'-terminated line of s, or all of s if no
 // newline is present. Used by frame/routing/cascade tests to extract the
-// top row from a rendered View() before asserting on its width or content.
+// top border row from a rendered View() before asserting on its width.
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		return s[:i]
@@ -52,14 +59,40 @@ func firstLine(s string) string {
 	return s
 }
 
-// chromeLineAtModelWidth composes the chrome line at the model's actual
-// inner width (m.width − previewFrameOverhead), matching how View()
-// renders chrome at runtime. Use this when asserting against View()
-// output, where the rendered cascade tier depends on the model's actual
-// width — chromeLineForTest's fixed inner width of 200 would compose a
-// different tier and the comparison would fail.
+// headerLine returns the raw (styled) line of the §9.1 joined-panel View that
+// carries the `◉ preview` header marker — line 1, directly under the top border.
+// Returns "" if no header line is found. Used by chrome tests that assert on the
+// header compartment's styled content (the View's first line is now the top
+// border, not the header).
+func headerLine(view string) string {
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(stripANSI(line), "◉ preview") {
+			return line
+		}
+	}
+	return ""
+}
+
+// footerLine returns the raw (styled) line of the §9.1 joined-panel View that
+// carries the footer nav hints (the `←→ window` group, or its compact `←→`
+// glyph when labels are dropped). Returns "" if no footer line is found.
+func footerLine(view string) string {
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(stripANSI(line), "←→") {
+			return line
+		}
+	}
+	return ""
+}
+
+// chromeLineAtModelWidth composes the §9.1 header row at the model's actual
+// content width (m.innerWidth() = m.width − previewFrameOverhead), matching how
+// View() renders the header at runtime. Use this when asserting against View()
+// output, where the rendered cascade tier depends on the model's actual content
+// width — chromeLineForTest's fixed width of 200 would compose a different tier
+// and the comparison would fail.
 func chromeLineAtModelWidth(m previewModel) string {
-	return composeChromeLine(m.innerWidth(), m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
+	return composePreviewHeaderRow(m.innerWidth(), m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.session, m.mode, m.colourless)
 }
 
 // newFramePreviewModel constructs a single-window single-pane previewModel

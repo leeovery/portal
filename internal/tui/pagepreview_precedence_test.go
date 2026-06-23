@@ -9,8 +9,8 @@ import (
 )
 
 // This file pins the dispatch precedence inside previewModel.Update as a hard
-// regression contract: preview-owned keys (Esc, Home, End, Tab, ], [) are
-// matched and short-circuited BEFORE the default delegation to
+// regression contract: preview-owned keys (Esc, Home, End, ←/→ window,
+// Tab pane) are matched and short-circuited BEFORE the default delegation to
 // bubbles/viewport.Update. The tests here are intentionally narrow probes —
 // they assert the *interception* itself, separately from the behaviour
 // already covered by pagepreview_tab_test.go and pagepreview_bracket_test.go.
@@ -23,8 +23,8 @@ import (
 
 // newPreviewModelForPrecedence builds a previewModel sized for a 50-line
 // payload (overflows a 10-row viewport) with a multi-pane / multi-window
-// shape so Tab and ] / [ both have non-degenerate target panes. The viewport
-// starts anchored at scroll-tail per NewPreviewModel's contract.
+// shape so Tab (pane) and ←/→ (window) both have non-degenerate targets. The
+// viewport starts anchored at scroll-tail per NewPreviewModel's contract.
 func newPreviewModelForPrecedence(t *testing.T) (previewModel, *recordingReader) {
 	t.Helper()
 	var b strings.Builder
@@ -45,21 +45,21 @@ func newPreviewModelForPrecedence(t *testing.T) (previewModel, *recordingReader)
 	return m, reader
 }
 
-func TestPreviewPrecedence_TabDoesNotAdvanceViewportScrollOffset(t *testing.T) {
+func TestPreviewPrecedence_PaneNavDoesNotAdvanceViewportScrollOffset(t *testing.T) {
 	// If Tab leaked through to bubbles/viewport.Update it might shift YOffset
-	// (current bubbles/viewport@v1.0.0 doesn't bind Tab, but a future version
-	// could — that's exactly the regression this test pins). The Tab branch
-	// itself calls GotoBottom() via readFocusedPaneIntoViewport, so the
-	// post-press YOffset is whatever GotoBottom resolves to. We snapshot
-	// AtBottom() instead of a raw YOffset comparison to keep the assertion
-	// stable across content shapes — interception means the value is the
+	// (the viewport binds Tab nowhere by default, but a leak is still a
+	// double-handling regression). The pane-nav branch itself calls GotoBottom()
+	// via readFocusedPaneIntoViewport, so the post-press YOffset is whatever
+	// GotoBottom resolves to. We snapshot AtBottom() instead of a raw YOffset
+	// comparison to keep the assertion stable across content shapes —
+	// interception means the value is the
 	// post-read tail position, NOT a viewport-scrolled value.
 	m, _ := newPreviewModelForPrecedence(t)
 	if !m.viewport.AtBottom() {
 		t.Fatalf("setup: expected AtBottom after initial-open anchor, got YOffset=%d", m.viewport.YOffset())
 	}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	updated, _ := m.Update(nextPaneKey)
 
 	if !updated.viewport.AtBottom() {
 		t.Errorf("expected AtBottom after Tab (preview-owned: post-read tail anchor), got YOffset=%d — viewport may have seen Tab", updated.viewport.YOffset())
@@ -67,7 +67,7 @@ func TestPreviewPrecedence_TabDoesNotAdvanceViewportScrollOffset(t *testing.T) {
 }
 
 func TestPreviewPrecedence_NextWindowDoesNotAdvanceViewportScrollOffset(t *testing.T) {
-	// `]` is preview-owned. Same logic as Tab: the branch ends in
+	// `→` is preview-owned. Same logic as pane nav: the branch ends in
 	// GotoBottom() via readFocusedPaneIntoViewport, so we assert AtBottom
 	// rather than an unchanged YOffset (initial-open already anchored at
 	// bottom; the new pane's content is the same shape, so AtBottom is the
@@ -77,24 +77,24 @@ func TestPreviewPrecedence_NextWindowDoesNotAdvanceViewportScrollOffset(t *testi
 		t.Fatalf("setup: expected AtBottom after initial-open anchor, got YOffset=%d", m.viewport.YOffset())
 	}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	updated, _ := m.Update(nextWindowKey)
 
 	if !updated.viewport.AtBottom() {
-		t.Errorf("expected AtBottom after ] (preview-owned: post-read tail anchor), got YOffset=%d — viewport may have seen ]", updated.viewport.YOffset())
+		t.Errorf("expected AtBottom after → (preview-owned: post-read tail anchor), got YOffset=%d — viewport may have seen →", updated.viewport.YOffset())
 	}
 }
 
 func TestPreviewPrecedence_PrevWindowDoesNotAdvanceViewportScrollOffset(t *testing.T) {
-	// `[` is preview-owned. Same logic as `]`.
+	// `←` is preview-owned. Same logic as `→`.
 	m, _ := newPreviewModelForPrecedence(t)
 	if !m.viewport.AtBottom() {
 		t.Fatalf("setup: expected AtBottom after initial-open anchor, got YOffset=%d", m.viewport.YOffset())
 	}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: '[', Text: "["})
+	updated, _ := m.Update(prevWindowKey)
 
 	if !updated.viewport.AtBottom() {
-		t.Errorf("expected AtBottom after [ (preview-owned: post-read tail anchor), got YOffset=%d — viewport may have seen [", updated.viewport.YOffset())
+		t.Errorf("expected AtBottom after ← (preview-owned: post-read tail anchor), got YOffset=%d — viewport may have seen ←", updated.viewport.YOffset())
 	}
 }
 
@@ -135,8 +135,8 @@ func TestPreviewPrecedence_PgDnScrollsViewportDownwardPassthroughPreserved(t *te
 func TestPreviewPrecedence_JKVimStylePassthroughPreserved(t *testing.T) {
 	// j (down) and k (up) are vim-style scroll keys bound by
 	// bubbles/viewport's default keymap. They must reach viewport.Update via
-	// the fall-through, NOT be intercepted by the preview's KeyRunes branch
-	// (which only matches `]` and `[`).
+	// the fall-through, NOT be intercepted by the preview's nav keys
+	// (←/→ window, Tab pane).
 	m, _ := newPreviewModelForPrecedence(t)
 	m.viewport.GotoTop()
 	if !m.viewport.AtTop() {
@@ -178,21 +178,21 @@ func TestPreviewPrecedence_WindowSizeMsgStillReachesViewportForReflow(t *testing
 	}
 }
 
-func TestPreviewPrecedence_SingleTabProducesExactlyOneTailCallNoDoubleHandling(t *testing.T) {
+func TestPreviewPrecedence_SinglePaneNavProducesExactlyOneTailCallNoDoubleHandling(t *testing.T) {
 	// The canary for double-handling: if Tab were processed by the preview
 	// branch AND ALSO leaked to viewport.Update, the most likely
 	// observable corruption depends on the bubbles/viewport version, but
-	// the cleanest invariant is the Tail call count. The preview Tab
+	// the cleanest invariant is the Tail call count. The preview pane-nav
 	// branch calls reader.Tail exactly once via readFocusedPaneIntoViewport;
 	// viewport.Update never calls reader.Tail. So observing exactly ONE
-	// Tail call after a single Tab keypress proves the Tab branch fired
+	// Tail call after a single Tab keypress proves the pane-nav branch fired
 	// and the message did not somehow trigger a second read.
 	m, reader := newPreviewModelForPrecedence(t)
 	// Initial-open already made one Tail call; reset the recorder so we
-	// observe ONLY the Tab-driven calls.
+	// observe ONLY the pane-nav-driven calls.
 	reader.calls = nil
 
-	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	_, _ = m.Update(nextPaneKey)
 
 	if len(reader.calls) != 1 {
 		t.Errorf("expected exactly 1 Tail call from a single Tab keypress (no double-handling), got %d", len(reader.calls))

@@ -5,140 +5,76 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
-// End-to-end cascade-tier test driving the full Update → View pipeline.
-// Per specification.md § Tests > Surface 5 and § Test conventions.
+// End-to-end cascade test driving the full Update → View pipeline for the §9.1
+// full-screen joined panel. As the terminal narrows the header degrades
+// gracefully — truncate session → drop counters — and the footer compacts to
+// glyphs only, while the SGR-reset injection on the captured body holds at every
+// width and the composed panel always equals the terminal width.
 //
-// THRESHOLD RATIONALE — adjusted from spec's stated widths.
-// The spec § Tests > Surface 5 enumerates widths {200, 60, 40, 25, 15} mapped
-// to tiers {1-full, 1-truncated, 2, 3, 4}. The spec's prose was based on
-// nominal cell counts (it states the verbose keymap is "82 cells"), but the
-// actual lipgloss.Width(verboseKeymap) is 57 cells. With the test fixture
-// (window name "nvim-editor", 1 window × 1 pane → counters "Window 1 of 1 ·
-// Pane 1 of 1" = 27 cells, separator " · win: " = 8 cells, keymap padding 1
-// cell, verbose keymap 57 cells), the real cascade math is:
-//
-//   - Tier 1 fixed overhead = 4 + 27 + 8 + 1 + 57 = 97 cells.
-//     Needs outer >= 97 + minWindowNameCells(8) = 105.
-//   - Tier 2 = drop "· win: {name}": outer >= 4 + 27 + 1 + 57 = 89.
-//   - Tier 3 = compact keymap (9 cells): outer >= 4 + 27 + 1 + 9 = 41.
-//   - Tier 4 = corners + filler: always fits at outer >= 2.
-//
-// Mapping spec's labels to mathematically-realizable terminal widths:
-//   - Tier 1 full (name fits whole, nameBudget >= 11): outer >= 108. Use 200.
-//   - Tier 1 truncated (name truncated to budget, 8 <= nameBudget < 11):
-//     outer ∈ [105, 107]. Use 105 — nameBudget = 8 → "nvim-ed…".
-//   - Tier 2 (no win: segment, verbose keymap): outer ∈ [89, 104]. Use 95.
-//   - Tier 3 (compact keymap): outer ∈ [41, 88]. Use 50.
-//   - Tier 4 (corners + filler only): outer ∈ [2, 40]. Use 15 — matches the
-//     spec's ASCII pattern "╭" + 13 × "─" + "╮".
-//
-// Picked widths are interior to each tier's interval (not on boundaries) to
-// avoid fragility against incidental future fixed-overhead changes.
-//
-// See pagepreview_compose_chrome_test.go for the unit-level cascade
-// thresholds; this test reuses the same math, applied through View().
+// The session is "work" (fixed by newFramePreviewModelAt).
 
 func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
-	// Fixture: one window, one pane, window name "nvim-editor". The
-	// ScrollbackReader returns body with at least two lines, one containing
-	// an unterminated SGR — guarantees the SGR-reset injection path is
-	// exercised at every tier so the per-row "\x1b[0m" assertion is
-	// meaningful regardless of width.
+	// Fixture: one window, one pane, session "work". The ScrollbackReader
+	// returns body with at least two lines, one containing an unterminated SGR
+	// — guarantees the SGR-reset injection path is exercised at every tier.
 	const windowName = "nvim-editor"
 	body := []byte("\x1b[41mhello\nworld\n")
+
+	counters := "Window 1/1 · Pane 1/1"
+	session := "work"
+	// Header tier-1 content width = marker + space + session + space + counters.
+	// The panel content width is termW − previewFrameOverhead, so the terminal
+	// width that just fits tier 1 is that header width + previewFrameOverhead.
+	headerFullW := lipgloss.Width(previewMarker) + 1 + lipgloss.Width(session) + 1 + lipgloss.Width(counters)
+	tier1Term := headerFullW + previewFrameOverhead
+	// Tier-3 (no counters) content width.
+	headerNoCounters := lipgloss.Width(previewMarker) + 1 + lipgloss.Width(session)
+	tier3Term := headerNoCounters + previewFrameOverhead
 
 	tests := []struct {
 		name   string
 		width  int
-		assert func(t *testing.T, stripped string, raw string)
+		assert func(t *testing.T, stripped string)
 	}{
 		{
-			name:  "tier 1 full at width 200 — full window name and verbose keymap",
-			width: 200,
-			assert: func(t *testing.T, stripped, _ string) {
-				if !strings.Contains(stripped, "nvim-editor") {
-					t.Errorf("tier 1 full: expected full window name %q present; stripped=%q", "nvim-editor", stripped)
+			name:  "tier 1 — marker + full session + counters; full labelled footer",
+			width: tier1Term + 30,
+			assert: func(t *testing.T, stripped string) {
+				if !strings.Contains(stripped, "◉ preview work Window 1/1 · Pane 1/1") {
+					t.Errorf("tier 1: expected full header; stripped=%q", stripped)
 				}
-				if strings.Contains(stripped, "nvim-editor…") {
-					t.Errorf("tier 1 full: expected no ellipsis on full-name tier; stripped=%q", stripped)
-				}
-				if !strings.Contains(stripped, "⇥ next pane") {
-					t.Errorf("tier 1 full: expected verbose keymap token %q present; stripped=%q", "⇥ next pane", stripped)
+				if !strings.Contains(stripped, "←→ window  ⇥ pane  ⏎ attach  ␣ back") {
+					t.Errorf("tier 1: expected full labelled footer; stripped=%q", stripped)
 				}
 			},
 		},
 		{
-			name:  "tier 1 truncated at width 105 — window name truncated with ellipsis",
-			width: 105,
-			assert: func(t *testing.T, stripped, _ string) {
-				// Locate the truncated name token. The window-name segment is
-				// preceded by "win: " and ends at the next space. At width
-				// 105, nameBudget = 8 so "nvim-editor" → "nvim-ed…".
-				idx := strings.Index(stripped, "win: ")
-				if idx < 0 {
-					t.Fatalf("tier 1 truncated: expected 'win: ' prefix present; stripped=%q", stripped)
+			name:  "tier 3 — drops counters, keeps session",
+			width: tier3Term,
+			assert: func(t *testing.T, stripped string) {
+				if strings.Contains(stripped, "Window 1/1") {
+					t.Errorf("tier 3: expected NO counters; stripped=%q", stripped)
 				}
-				after := stripped[idx+len("win: "):]
-				end := strings.IndexByte(after, ' ')
-				if end < 0 {
-					t.Fatalf("tier 1 truncated: could not isolate name token after 'win: '; remainder=%q", after)
-				}
-				nameToken := after[:end]
-				if !strings.HasPrefix(nameToken, "nvim") {
-					t.Errorf("tier 1 truncated: expected name token to start with 'nvim'; got %q", nameToken)
-				}
-				if !strings.HasSuffix(nameToken, "…") {
-					t.Errorf("tier 1 truncated: expected name token to end with '…'; got %q", nameToken)
-				}
-				if !strings.Contains(stripped, "⇥ next pane") {
-					t.Errorf("tier 1 truncated: expected verbose keymap token %q present; stripped=%q", "⇥ next pane", stripped)
+				if !strings.Contains(stripped, "◉ preview work") {
+					t.Errorf("tier 3: expected marker + session; stripped=%q", stripped)
 				}
 			},
 		},
 		{
-			name:  "tier 2 at width 95 — drops win segment, keeps verbose keymap",
-			width: 95,
-			assert: func(t *testing.T, stripped, _ string) {
-				if strings.Contains(stripped, "win:") {
-					t.Errorf("tier 2: expected no 'win:' segment; stripped=%q", stripped)
+			// contentWidth = 25 − previewFrameOverhead(6) = 19 — too narrow for the
+			// labelled footer (~36 cells) but wide enough for the full compact glyph
+			// form (11 cells).
+			name:  "narrow — footer compacts to glyphs only",
+			width: 25,
+			assert: func(t *testing.T, stripped string) {
+				if !strings.Contains(stripped, "←→  ⇥  ⏎  ␣") {
+					t.Errorf("narrow: expected compact glyph-only footer; stripped=%q", stripped)
 				}
-				if !strings.Contains(stripped, "⇥ next pane") {
-					t.Errorf("tier 2: expected verbose keymap token %q present; stripped=%q", "⇥ next pane", stripped)
-				}
-			},
-		},
-		{
-			name:  "tier 3 at width 50 — swaps to compact keymap",
-			width: 50,
-			assert: func(t *testing.T, stripped, _ string) {
-				if strings.Contains(stripped, "win:") {
-					t.Errorf("tier 3: expected no 'win:' segment; stripped=%q", stripped)
-				}
-				if !strings.Contains(stripped, compactKeymap) {
-					t.Errorf("tier 3: expected compactKeymap %q present; stripped=%q", compactKeymap, stripped)
-				}
-				if strings.Contains(stripped, "next pane") {
-					t.Errorf("tier 3: expected verbose token 'next pane' absent; stripped=%q", stripped)
-				}
-			},
-		},
-		{
-			name:  "tier 4 at width 15 — drops chrome, corners and filler only",
-			width: 15,
-			assert: func(t *testing.T, stripped, _ string) {
-				if strings.Contains(stripped, "Window ") {
-					t.Errorf("tier 4: expected no 'Window ' segment; stripped=%q", stripped)
-				}
-				if strings.Contains(stripped, verboseKeymap) || strings.Contains(stripped, compactKeymap) {
-					t.Errorf("tier 4: expected no keymap; stripped=%q", stripped)
-				}
-				// Top-edge ASCII pattern: "╭" + 13 × "─" + "╮".
-				topRow := firstLine(stripped)
-				want := "╭" + strings.Repeat("─", 13) + "╮"
-				if topRow != want {
-					t.Errorf("tier 4: top-edge pattern mismatch; got %q want %q", topRow, want)
+				if strings.Contains(stripped, "window") || strings.Contains(stripped, "attach") {
+					t.Errorf("narrow: expected footer labels dropped; stripped=%q", stripped)
 				}
 			},
 		},
@@ -150,15 +86,16 @@ func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 			m, _ = m.Update(tea.WindowSizeMsg{Width: tc.width, Height: 30})
 
 			raw := m.View()
-			stripped := stripANSI(raw)
+			tc.assert(t, stripANSI(raw))
 
-			tc.assert(t, stripped, raw)
+			// The composed panel always spans the full terminal width.
+			if got := lipgloss.Width(firstLine(raw)); got != tc.width {
+				t.Errorf("width %d: top frame line width = %d, want %d", tc.width, got, tc.width)
+			}
 
-			// Tighter per-row assertion (spec § SGR reset injection): every
-			// viewport content row carrying a fixture token must also carry a
-			// "\x1b[0m" SGR reset in its raw form. A file-global Contains
-			// check would pass even if only one row was wrapped; this guards
-			// the per-row injection guarantee the spec actually requires.
+			// Per-row SGR-reset injection (§ SGR reset injection): every viewport
+			// content row carrying a fixture token must also carry a "\x1b[0m"
+			// reset in its raw form.
 			rawLines := strings.Split(raw, "\n")
 			for _, fixtureToken := range []string{"hello", "world"} {
 				found := false

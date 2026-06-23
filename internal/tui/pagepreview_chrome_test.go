@@ -24,11 +24,11 @@ func TestPreviewChromeLine_Renders1BasedOrdinalsForZeroIndexedGroups(t *testing.
 
 	got := stripANSI(chromeLineForTest(m))
 
-	if !strings.Contains(got, "Window 1 of 2") {
-		t.Errorf("chromeLine() = %q; want substring %q", got, "Window 1 of 2")
+	if !strings.Contains(got, "Window 1/2") {
+		t.Errorf("chromeLine() = %q; want substring %q", got, "Window 1/2")
 	}
-	if !strings.Contains(got, "Pane 1 of 2") {
-		t.Errorf("chromeLine() = %q; want substring %q", got, "Pane 1 of 2")
+	if !strings.Contains(got, "Pane 1/2") {
+		t.Errorf("chromeLine() = %q; want substring %q", got, "Pane 1/2")
 	}
 }
 
@@ -45,9 +45,9 @@ func TestPreviewChromeLine_RendersOneToNCountersWhenWindowIndexValuesAreNonConti
 		windowIdx int
 		want      string
 	}{
-		{0, "Window 1 of 3"},
-		{1, "Window 2 of 3"},
-		{2, "Window 3 of 3"},
+		{0, "Window 1/3"},
+		{1, "Window 2/3"},
+		{2, "Window 3/3"},
 	}
 	for _, tc := range cases {
 		m := newPreviewModelForHelpers("work", groups, tc.windowIdx, 0)
@@ -56,7 +56,7 @@ func TestPreviewChromeLine_RendersOneToNCountersWhenWindowIndexValuesAreNonConti
 			t.Errorf("windowIdx=%d: chromeLine() = %q; want substring %q", tc.windowIdx, got, tc.want)
 		}
 		// Defensively ensure raw window_index (5) never leaks as a counter.
-		if strings.Contains(got, "Window 5 of 3") {
+		if strings.Contains(got, "Window 5/3") {
 			t.Errorf("windowIdx=%d: chromeLine() = %q; raw window_index 5 leaked into chrome", tc.windowIdx, got)
 		}
 	}
@@ -72,8 +72,8 @@ func TestPreviewChromeLine_RendersOneToNCountersWhenPaneIndicesStartAt1(t *testi
 		paneIdx int
 		want    string
 	}{
-		{0, "Pane 1 of 2"},
-		{1, "Pane 2 of 2"},
+		{0, "Pane 1/2"},
+		{1, "Pane 2/2"},
 	}
 	for _, tc := range cases {
 		m := newPreviewModelForHelpers("work", groups, 0, tc.paneIdx)
@@ -84,61 +84,62 @@ func TestPreviewChromeLine_RendersOneToNCountersWhenPaneIndicesStartAt1(t *testi
 	}
 }
 
-func TestPreviewChromeLine_IncludesWindowNameVerbatimIncludingSpaces(t *testing.T) {
+func TestPreviewChromeLine_IncludesSessionNameVerbatimIncludingSpaces(t *testing.T) {
+	// §9.1 surfaces the SESSION name in the top bar (not the window name). It is
+	// rendered verbatim, including embedded spaces.
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "editor window", PaneIndices: []int{0}},
 	}
-	m := newPreviewModelForHelpers("work", groups, 0, 0)
+	m := newPreviewModelForHelpers("evvi webhooks and watchers", groups, 0, 0)
 
 	got := stripANSI(chromeLineForTest(m))
 
-	if !strings.Contains(got, "editor window") {
-		t.Errorf("chromeLine() = %q; want substring %q (verbatim, including space)", got, "editor window")
+	if !strings.Contains(got, "evvi webhooks and watchers") {
+		t.Errorf("chromeLine() = %q; want session substring %q (verbatim, including spaces)", got, "evvi webhooks and watchers")
 	}
 }
 
-func TestPreviewChromeLine_IncludesBracketAndTabAndEscAsVisibleHints(t *testing.T) {
+func TestPreviewFooter_IncludesWindowPaneAttachBackAsVisibleHints(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(chromeLineForTest(m))
+	got := stripANSI(footerLineForTest(m))
 
-	// Keymap glyphs per spec § Keymap glyphs: ] / [ stay ASCII; ⇥ (Tab),
-	// ⏎ (Enter), ⎋ (Esc) replace the verbose word tokens. The chrome line
+	// §9.3 nav-hint glyphs: ←→ window, ⇥ pane, ⏎ attach, ␣ back. The footer
 	// must surface every keypress glyph as a visible hint.
-	for _, token := range []string{"]", "[", "⇥", "⏎", "⎋"} {
+	for _, token := range []string{"←", "→", "⇥", "⏎", "␣"} {
 		if !strings.Contains(got, token) {
-			t.Errorf("chromeLine() = %q; want visible hint token %q", got, token)
+			t.Errorf("footer = %q; want visible hint token %q", got, token)
 		}
 	}
 }
 
-func TestPreviewChromeLine_IncludesEnterAttachTokenBetweenTabAndEsc(t *testing.T) {
+func TestPreviewFooter_OrdersWindowPaneAttachBackLeftToRight(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(chromeLineForTest(m))
+	got := stripANSI(footerLineForTest(m))
 
-	// Spec § Verbose form: action labels follow each glyph, separated by
-	// middle dots. The "⏎ attach" token sits between "⇥ next pane" and
-	// "⎋ back" in left-to-right order.
-	const wantSegment = "· ⇥ next pane · ⏎ attach · ⎋ back"
+	// §9.1 footer: labelled groups, space-separated, in nav order
+	// window → pane → attach → back.
+	const wantSegment = "←→ window  ⇥ pane  ⏎ attach  ␣ back"
 	if !strings.Contains(got, wantSegment) {
-		t.Errorf("chromeLine() = %q; want substring %q", got, wantSegment)
+		t.Errorf("footer = %q; want substring %q", got, wantSegment)
 	}
 
-	tabIdx := strings.Index(got, "⇥ next pane")
-	enterIdx := strings.Index(got, "⏎ attach")
-	escIdx := strings.Index(got, "⎋ back")
-	if tabIdx < 0 || enterIdx < 0 || escIdx < 0 {
-		t.Fatalf("chromeLine() = %q; missing one of: '⇥ next pane', '⏎ attach', '⎋ back'", got)
+	windowIdx := strings.Index(got, "←→ window")
+	paneIdx := strings.Index(got, "⇥ pane")
+	attachIdx := strings.Index(got, "⏎ attach")
+	backIdx := strings.Index(got, "␣ back")
+	if windowIdx < 0 || paneIdx < 0 || attachIdx < 0 || backIdx < 0 {
+		t.Fatalf("footer = %q; missing one of the nav groups", got)
 	}
-	if tabIdx >= enterIdx || enterIdx >= escIdx {
-		t.Errorf("chromeLine() = %q; want order ⇥ next pane (%d) < ⏎ attach (%d) < ⎋ back (%d)", got, tabIdx, enterIdx, escIdx)
+	if windowIdx >= paneIdx || paneIdx >= attachIdx || attachIdx >= backIdx {
+		t.Errorf("footer = %q; want order window (%d) < pane (%d) < attach (%d) < back (%d)", got, windowIdx, paneIdx, attachIdx, backIdx)
 	}
 }
 
@@ -149,15 +150,15 @@ func TestPreviewChromeLine_FullStringEqualityForCanonicalShape(t *testing.T) {
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(chromeLineForTest(m))
-
-	// Substring equality against the unstyled chrome content. The full
-	// chromeLineForTest output includes lipgloss border corners ('╭', '╮')
-	// and filler dashes around the chrome content; the canonical chrome
-	// content itself is the substring asserted here.
-	const wantContent = "Window 1 of 2 · Pane 1 of 2 · win: main ] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back"
-	if !strings.Contains(got, wantContent) {
-		t.Errorf("chromeLine() = %q; want substring %q", got, wantContent)
+	// The §9.1 header carries the marker + session + slash counters; the nav
+	// hints now live in the footer compartment (asserted separately).
+	header := stripANSI(chromeLineForTest(m))
+	if want := "◉ preview work Window 1/2 · Pane 1/2"; !strings.Contains(header, want) {
+		t.Errorf("header = %q; want substring %q", header, want)
+	}
+	footer := stripANSI(footerLineForTest(m))
+	if want := "←→ window  ⇥ pane  ⏎ attach  ␣ back"; !strings.Contains(footer, want) {
+		t.Errorf("footer = %q; want substring %q", footer, want)
 	}
 }
 
@@ -235,22 +236,21 @@ func TestPreviewChromeLine_SingleWindowSinglePaneRendersOneOfOne(t *testing.T) {
 
 	got := stripANSI(chromeLineForTest(m))
 
-	if !strings.Contains(got, "Window 1 of 1") {
-		t.Errorf("chromeLine() = %q; want substring %q for 1x1 case", got, "Window 1 of 1")
+	if !strings.Contains(got, "Window 1/1") {
+		t.Errorf("chromeLine() = %q; want substring %q for 1x1 case", got, "Window 1/1")
 	}
-	if !strings.Contains(got, "Pane 1 of 1") {
-		t.Errorf("chromeLine() = %q; want substring %q for 1x1 case", got, "Pane 1 of 1")
+	if !strings.Contains(got, "Pane 1/1") {
+		t.Errorf("chromeLine() = %q; want substring %q for 1x1 case", got, "Pane 1/1")
 	}
 }
 
-func TestPreviewChromeLine_WindowNameWithPipeRenderedVerbatim(t *testing.T) {
-	// Pipe handling is owned at enumeration time; chrome renders the name
-	// verbatim regardless of contents. Documented as an edge case in the
-	// task so tests pin it.
+func TestPreviewChromeLine_SessionNameWithPipeRenderedVerbatim(t *testing.T) {
+	// The §9.1 top bar renders the session name verbatim regardless of contents
+	// (an embedded pipe is rendered as-is, not stripped or escaped).
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "weird|name with spaces", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
 	}
-	m := newPreviewModelForHelpers("work", groups, 0, 0)
+	m := newPreviewModelForHelpers("weird|name with spaces", groups, 0, 0)
 
 	got := stripANSI(chromeLineForTest(m))
 

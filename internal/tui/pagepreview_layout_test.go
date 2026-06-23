@@ -8,11 +8,12 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// TestPreviewView_RendersChromeLineAboveViewportContent pins the v1 layout
-// orientation: chrome is the first line, viewport content follows. The
-// orientation choice (header on top vs footer on bottom) is fixed in 3-6 to
-// header-on-top per the spec's chrome-line conventions.
-func TestPreviewView_RendersChromeLineAboveViewportContent(t *testing.T) {
+// TestPreviewView_JoinedPanelLayoutHeaderBodyFooter pins the §9.1 full-screen
+// joined panel layout, top to bottom: top border → header (with the `◉ preview`
+// marker + cascaded counters) → body (the captured content) → footer (the nav
+// hints). The header sits on the SECOND line (line 1) directly under the top
+// border (line 0); the footer is the last content line above the bottom border.
+func TestPreviewView_JoinedPanelLayoutHeaderBodyFooter(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
 			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
@@ -27,24 +28,60 @@ func TestPreviewView_RendersChromeLineAboveViewportContent(t *testing.T) {
 
 	out := m.View()
 	lines := strings.Split(out, "\n")
-	if len(lines) < 1 {
-		t.Fatalf("View() returned no lines: %q", out)
+	if len(lines) < 4 {
+		t.Fatalf("View() returned %d lines, want >= 4 (border/header/body/footer): %q", len(lines), out)
 	}
 
-	// View() composes the chrome at the model's actual width (m.width −
-	// previewFrameOverhead inner), not chromeLineForTest's fixed-width 200.
-	// Compose at the same inner width as View() does so the comparison is
-	// against the actually rendered cascade tier.
-	wantChrome := chromeLineAtModelWidth(m)
-	gotFirst := stripANSI(lines[0])
-	if gotFirst != wantChrome {
-		t.Errorf("View() first line = %q; want chrome line %q", gotFirst, wantChrome)
+	// Line 0 is the top border (corners only, no chrome content).
+	top := stripANSI(lines[0])
+	if !strings.HasPrefix(top, "╭") || !strings.HasSuffix(top, "╮") {
+		t.Errorf("View() first line = %q; want the rounded top border ╭…╮", top)
+	}
+	if strings.Contains(top, "◉ preview") {
+		t.Errorf("top border must not carry header content; got %q", top)
 	}
 
-	// Viewport content must appear after the chrome line.
-	rest := strings.Join(lines[1:], "\n")
-	if !strings.Contains(stripANSI(rest), "alpha") {
-		t.Errorf("View() = %q; expected viewport content (containing %q) below chrome", out, "alpha")
+	// Line 1 is the header compartment carrying the marker + counters.
+	header := stripANSI(lines[1])
+	if !strings.Contains(header, "◉ preview work Window 1/2 · Pane 1/2") {
+		t.Errorf("View() second line = %q; want the header compartment with marker + counters", header)
+	}
+
+	// The captured body content appears between header and footer.
+	if !strings.Contains(stripANSI(out), "alpha") {
+		t.Errorf("View() = %q; expected viewport content (containing %q)", out, "alpha")
+	}
+
+	// The footer sits on the last content line (above the bottom border).
+	footer := stripANSI(lines[len(lines)-2])
+	if !strings.Contains(footer, "←→ window") {
+		t.Errorf("View() penultimate line = %q; want the footer nav hints", footer)
+	}
+	bottom := stripANSI(lines[len(lines)-1])
+	if !strings.HasPrefix(bottom, "╰") || !strings.HasSuffix(bottom, "╯") {
+		t.Errorf("View() last line = %q; want the rounded bottom border ╰…╯", bottom)
+	}
+}
+
+// TestPreviewView_FillsFullTerminalHeight pins the §9.1 full-screen contract:
+// the composed panel spans the full terminal height (the body fills, the footer
+// sits flush at the bottom).
+func TestPreviewView_FillsFullTerminalHeight(t *testing.T) {
+	const termH = 24
+	enum := &stubEnumerator{
+		groups: []tmux.WindowGroup{
+			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		},
+	}
+	reader := &recordingReader{bytes: []byte("only-one-line\n")}
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, termH)
+	if !ok {
+		t.Fatalf("setup: expected ok=true, got false")
+	}
+
+	out := m.View()
+	if got := strings.Count(out, "\n") + 1; got != termH {
+		t.Errorf("composed View() height = %d rows, want %d (full terminal height)", got, termH)
 	}
 }
 
@@ -63,7 +100,7 @@ func TestPreviewWindowSizeMsg_SetsViewportHeightToMsgHeightMinusChrome(t *testin
 	}
 }
 
-func TestPreviewView_ChromeRowCountConstantAcrossTabAndBracketCycles(t *testing.T) {
+func TestPreviewView_ChromeRowCountConstantAcrossWindowAndPaneCycles(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
 			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
@@ -83,21 +120,21 @@ func TestPreviewView_ChromeRowCountConstantAcrossTabAndBracketCycles(t *testing.
 	before := chromeLineCount(chromeLineForTest(m))
 
 	// Tab → next pane within current window.
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m, _ = m.Update(nextPaneKey)
 	if got := chromeLineCount(chromeLineForTest(m)); got != before {
-		t.Errorf("chrome line count changed after Tab: before=%d after=%d", before, got)
+		t.Errorf("header row count changed after Tab: before=%d after=%d", before, got)
 	}
 
-	// `]` → next window.
-	m, _ = m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	// → → next window.
+	m, _ = m.Update(nextWindowKey)
 	if got := chromeLineCount(chromeLineForTest(m)); got != before {
-		t.Errorf("chrome line count changed after ]: before=%d after=%d", before, got)
+		t.Errorf("header row count changed after →: before=%d after=%d", before, got)
 	}
 
-	// `[` → previous window.
-	m, _ = m.Update(tea.KeyPressMsg{Code: '[', Text: "["})
+	// ← → previous window.
+	m, _ = m.Update(prevWindowKey)
 	if got := chromeLineCount(chromeLineForTest(m)); got != before {
-		t.Errorf("chrome line count changed after [: before=%d after=%d", before, got)
+		t.Errorf("header row count changed after ←: before=%d after=%d", before, got)
 	}
 }
 

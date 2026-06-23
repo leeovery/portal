@@ -205,7 +205,7 @@ func (m Model) renderEditProjectContent() string {
 	body := m.editModalBodyRows(mode, colourless)
 	footer := []string{m.editModalFooterRow(mode, colourless)}
 
-	return renderJoinedPanel([][]string{header, body, footer}, mode, colourless)
+	return renderJoinedPanel([][]string{header, body, footer}, theme.MV.BorderSeparator, mode, colourless)
 }
 
 // editPanelContentWidth returns the modal's panel content width — the span every

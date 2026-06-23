@@ -27,9 +27,8 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 	}
 	reader := &recordingReader{bytes: []byte("hello-from-preview\n")}
 	m := modelWithSeams(sessions, enum, reader)
-	// Wider terminal so the chrome cascade lands at tier 1 — the assertions
-	// below check for the full "win: editor" segment which only renders when
-	// the full verbose chrome (counters + segment + verbose keymap) fits.
+	// Wider terminal so the §9.1 chrome cascade lands at tier 1 — the full
+	// marker + session + counters + verbose hints render when they all fit.
 	m.termWidth = 120
 
 	updated, _ := m.Update(keySpaceMsg())
@@ -41,16 +40,21 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 		t.Fatalf("expected activePage=pagePreview, got %v", got.activePage)
 	}
 
-	rendered := got.View().Content
+	rendered := stripANSI(got.View().Content)
 
-	if !strings.Contains(rendered, "Window 1 of 1") {
-		t.Errorf("expected rendered output to contain chrome 'Window 1 of 1', got:\n%s", rendered)
+	if !strings.Contains(rendered, "Window 1/1") {
+		t.Errorf("expected rendered output to contain chrome 'Window 1/1', got:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "Pane 1 of 1") {
-		t.Errorf("expected rendered output to contain chrome 'Pane 1 of 1', got:\n%s", rendered)
+	if !strings.Contains(rendered, "Pane 1/1") {
+		t.Errorf("expected rendered output to contain chrome 'Pane 1/1', got:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "editor") {
-		t.Errorf("expected rendered output to contain window name 'editor', got:\n%s", rendered)
+	// §9.1 surfaces the SESSION name in the top bar (the highlighted session,
+	// "alpha"), plus the peek-mode marker.
+	if !strings.Contains(rendered, "◉ preview") {
+		t.Errorf("expected rendered output to contain the '◉ preview' marker, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "alpha") {
+		t.Errorf("expected rendered output to contain session name 'alpha', got:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "hello-from-preview") {
 		t.Errorf("expected rendered output to contain viewport content 'hello-from-preview', got:\n%s", rendered)
@@ -58,16 +62,20 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 
 	// Negative assertion: the rendered output must NOT be the sessions list
 	// title (which would appear if the View() falls through to the default
-	// branch). The default sessions title contains "session" or the list's
-	// own header — assert the chrome line is the FIRST CONTENT row of output
-	// (the global content gutter inserts Vinset blank canvas rows on top), not
-	// a sessions-list header.
+	// branch). The §9.1 joined panel's FIRST CONTENT row (after the Vinset gutter
+	// rows) is the rounded top border; the header (with the counters) is the row
+	// below it. Assert the first content row is the cyan top border, not a
+	// sessions-list header.
 	contentRows := strings.Split(rendered, "\n")
-	if len(contentRows) <= Vinset {
-		t.Fatalf("rendered frame has %d rows, fewer than the top gutter (%d)", len(contentRows), Vinset)
+	if len(contentRows) <= Vinset+1 {
+		t.Fatalf("rendered frame has %d rows, fewer than the top gutter + border", len(contentRows))
 	}
-	topContentRow := contentRows[Vinset]
-	if !strings.Contains(topContentRow, "Window 1 of 1") {
-		t.Errorf("expected first content row to be the preview chrome, got %q", topContentRow)
+	topContentRow := strings.TrimSpace(contentRows[Vinset])
+	if !strings.HasPrefix(topContentRow, "╭") || !strings.HasSuffix(topContentRow, "╮") {
+		t.Errorf("expected first content row to be the preview panel top border ╭…╮, got %q", topContentRow)
+	}
+	headerContentRow := contentRows[Vinset+1]
+	if !strings.Contains(headerContentRow, "Window 1/1") {
+		t.Errorf("expected the header content row to carry the preview chrome counters, got %q", headerContentRow)
 	}
 }

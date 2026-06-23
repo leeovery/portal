@@ -28,7 +28,7 @@ func newPreviewModelForEnter(session string, groups []tmux.WindowGroup, windowId
 }
 
 func TestPreviewEnter_DispatchesWithCapturedRawIndicesWhenNoNavigation(t *testing.T) {
-	// User opened preview on a session; never pressed ] / [ / Tab.
+	// User opened preview on a session; never pressed ← / → / Tab.
 	// Enter must dispatch with the captured-at-open coordinates — the first
 	// WindowGroup's WindowIndex and that group's first PaneIndex.
 	groups := []tmux.WindowGroup{
@@ -54,8 +54,9 @@ func TestPreviewEnter_DispatchesWithCapturedRawIndicesWhenNoNavigation(t *testin
 	}
 }
 
-func TestPreviewEnter_DispatchesWithWalkedIndicesAfterTab(t *testing.T) {
-	// User Tabs to next pane within the same window, then presses Enter.
+func TestPreviewEnter_DispatchesWithWalkedIndicesAfterPaneNav(t *testing.T) {
+	// User cycles to the next pane within the same window via Tab, then
+	// presses Enter.
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
 	}
@@ -64,7 +65,7 @@ func TestPreviewEnter_DispatchesWithWalkedIndicesAfterTab(t *testing.T) {
 	m := newPreviewModelForEnter("work", groups, 0, 0, reader, attacher, 80, 24)
 
 	// Walk forward via Tab.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	updated, _ := m.Update(nextPaneKey)
 	if updated.paneIdx != 1 {
 		t.Fatalf("setup: expected paneIdx=1 after Tab, got %d", updated.paneIdx)
 	}
@@ -77,15 +78,15 @@ func TestPreviewEnter_DispatchesWithWalkedIndicesAfterTab(t *testing.T) {
 	got := attacher.calls[0]
 	want := recordedAttacherCall{session: "work", window: 0, pane: 1}
 	if got != want {
-		t.Errorf("attacher.Run called with %#v; want %#v (post-Tab walked pane)", got, want)
+		t.Errorf("attacher.Run called with %#v; want %#v (post pane-nav walked pane)", got, want)
 	}
 	if cmd == nil {
 		t.Errorf("expected non-nil tea.Cmd, got nil")
 	}
 }
 
-func TestPreviewEnter_DispatchesWithWalkedIndicesAfterBracket(t *testing.T) {
-	// User cycles forward to next window via `]`, then presses Enter.
+func TestPreviewEnter_DispatchesWithWalkedIndicesAfterWindowNav(t *testing.T) {
+	// User cycles forward to the next window via →, then presses Enter.
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
 		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0}},
@@ -95,10 +96,10 @@ func TestPreviewEnter_DispatchesWithWalkedIndicesAfterBracket(t *testing.T) {
 	attacher := &fakePreviewAttacher{}
 	m := newPreviewModelForEnter("work", groups, 0, 0, reader, attacher, 80, 24)
 
-	// `]` advances windowIdx by 1 and resets paneIdx to 0.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	// → advances windowIdx by 1 and resets paneIdx to 0.
+	updated, _ := m.Update(nextWindowKey)
 	if updated.windowIdx != 1 {
-		t.Fatalf("setup: expected windowIdx=1 after `]`, got %d", updated.windowIdx)
+		t.Fatalf("setup: expected windowIdx=1 after →, got %d", updated.windowIdx)
 	}
 
 	_, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -109,7 +110,7 @@ func TestPreviewEnter_DispatchesWithWalkedIndicesAfterBracket(t *testing.T) {
 	got := attacher.calls[0]
 	want := recordedAttacherCall{session: "work", window: 1, pane: 0}
 	if got != want {
-		t.Errorf("attacher.Run called with %#v; want %#v (post-`]` walked window)", got, want)
+		t.Errorf("attacher.Run called with %#v; want %#v (post-`→` walked window)", got, want)
 	}
 }
 

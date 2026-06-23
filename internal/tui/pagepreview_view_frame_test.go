@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tui/theme"
 )
 
 // Lipgloss v2 changed where the colour profile is applied: Style.Render now
@@ -50,63 +51,41 @@ func TestPreviewView_TopRowWidthEqualsOuterTerminalWidth(t *testing.T) {
 	}
 }
 
-// TestPreviewView_ChromeLineContainsWindowPaneIndicatorsAndWindowName pins
-// the chrome content surfaced inside the top border row at a width wide
-// enough for the cascade to land at tier 1 (full chrome with verbose keymap
-// and " · win: {name}" segment present). The verbose keymap alone is ~57
-// cells; combined with the fixed-overhead counters + separator + name it
-// requires an outer width well above 80 to trigger tier 1.
-func TestPreviewView_ChromeLineContainsWindowPaneIndicatorsAndWindowName(t *testing.T) {
+// TestPreviewView_HeaderContainsMarkerSessionCounters_FooterContainsHints pins
+// the §9.1 chrome content surfaced inside the View at a width wide enough for the
+// header cascade to land at tier 1 (marker + full session + counters) and the
+// footer to render the full labelled nav hints.
+func TestPreviewView_HeaderContainsMarkerSessionCounters_FooterContainsHints(t *testing.T) {
 	const wideWidth = 120
 	m := newFramePreviewModelAt(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"), wideWidth, 24)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: wideWidth, Height: 24})
 
 	out := stripANSI(m.View())
 
-	if !strings.Contains(out, "Window 1 of 1 · Pane 1 of 1 · win: nvim-editor") {
-		t.Errorf("View() missing tier-1 chrome content; got:\n%s", out)
+	// Session is fixed to "work" in newFramePreviewModelAt.
+	if !strings.Contains(out, "◉ preview work Window 1/1 · Pane 1/1") {
+		t.Errorf("View() missing tier-1 header content; got:\n%s", out)
+	}
+	if !strings.Contains(out, "←→ window  ⇥ pane  ⏎ attach  ␣ back") {
+		t.Errorf("View() missing footer nav hints; got:\n%s", out)
 	}
 }
 
-// TestPreviewView_ChromeContentRenderedWithNoExplicitForegroundSGR splits
-// the raw top row into (prefix, chromeBytes, suffix) at the chrome plain
-// substring boundaries. Per spec § Top edge composition > Color application,
-// the border parts wrap chrome in BorderForeground but chrome itself inherits
-// terminal default — so chromeBytes must contain no foreground SGR while
-// prefix and suffix must both carry one. Runs at a width that triggers
-// cascade tier 1 so the chrome plain substring is the full verbose form.
-func TestPreviewView_ChromeContentRenderedWithNoExplicitForegroundSGR(t *testing.T) {
+// TestPreviewView_HeaderSegmentsCarryRoleForegrounds pins the §9.1 colour
+// application: the header counters segment is styled text.detail and the session
+// text.primary — the chrome content IS themed (only the captured CONTENT is left
+// untouched, §9.2).
+func TestPreviewView_HeaderSegmentsCarryRoleForegrounds(t *testing.T) {
 	const wideWidth = 120
 	m := newFramePreviewModelAt(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"), wideWidth, 24)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: wideWidth, Height: 24})
 
-	out := m.View()
-	topRow := firstLine(out)
-
-	chromeSubstring := "Window 1 of 1 · Pane 1 of 1 · win: nvim-editor"
-	idx := strings.Index(stripANSI(topRow), chromeSubstring)
-	if idx < 0 {
-		t.Fatalf("could not locate chrome substring in stripped top row: %q", stripANSI(topRow))
+	header := headerLine(m.View())
+	if !segmentCarriesForeground(header, "Window 1/1 · Pane 1/1", theme.MV.TextDetail.ColorFor(theme.Dark)) {
+		t.Errorf("counters segment lacks text.detail foreground SGR; row=%q", header)
 	}
-
-	// Find chromeSubstring directly in raw row (it's plain text, no SGR injected
-	// inside the chrome).
-	rawIdx := strings.Index(topRow, chromeSubstring)
-	if rawIdx < 0 {
-		t.Fatalf("chrome substring not found verbatim in raw top row; chrome carried SGR. row=%q", topRow)
-	}
-	prefix := topRow[:rawIdx]
-	chromeBytes := topRow[rawIdx : rawIdx+len(chromeSubstring)]
-	suffix := topRow[rawIdx+len(chromeSubstring):]
-
-	if !strings.Contains(prefix, "\x1b[38;") {
-		t.Errorf("prefix lacks foreground SGR; prefix=%q", prefix)
-	}
-	if !strings.Contains(suffix, "\x1b[38;") {
-		t.Errorf("suffix lacks foreground SGR; suffix=%q", suffix)
-	}
-	if strings.Contains(chromeBytes, "\x1b[38;") {
-		t.Errorf("chrome bytes carry explicit foreground SGR; chromeBytes=%q", chromeBytes)
+	if !segmentCarriesForeground(header, "work", theme.MV.TextPrimary.ColorFor(theme.Dark)) {
+		t.Errorf("session segment lacks text.primary foreground SGR; row=%q", header)
 	}
 }
 
@@ -234,17 +213,17 @@ func TestPreviewView_RecomputesChromeEveryTickNoCachedField(t *testing.T) {
 	}
 
 	first := stripANSI(m.View())
-	if !strings.Contains(first, "Window 1 of 2") {
-		t.Fatalf("first View() missing 'Window 1 of 2'; got:\n%s", first)
+	if !strings.Contains(first, "Window 1/2") {
+		t.Fatalf("first View() missing 'Window 1/2'; got:\n%s", first)
 	}
 
 	// Bypass cycle handlers (which trigger a Tail read); mutate the
 	// structural index directly and re-render. If chrome were cached on
-	// the model, the second View() would still show "Window 1 of 2".
+	// the model, the second View() would still show "Window 1/2".
 	m.windowIdx = 1
 
 	second := stripANSI(m.View())
-	if !strings.Contains(second, "Window 2 of 2") {
-		t.Errorf("second View() after windowIdx mutation missing 'Window 2 of 2'; chrome may be cached. got:\n%s", second)
+	if !strings.Contains(second, "Window 2/2") {
+		t.Errorf("second View() after windowIdx mutation missing 'Window 2/2'; chrome may be cached. got:\n%s", second)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"syscall"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -149,8 +148,8 @@ func TestPreviewError_RefocusAfterErrorIssuesFreshTailViaTab(t *testing.T) {
 		t.Fatalf("constructor: expected ok=true, got false")
 	}
 	// Tab to pane 1, then Tab back to pane 0.
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m, _ = m.Update(nextPaneKey)
+	m, _ = m.Update(nextPaneKey)
 
 	pane0Calls := 0
 	for _, c := range reader.calls {
@@ -250,8 +249,8 @@ func TestPreviewError_SecondTailCallAfterErrorSeesNewOutcome(t *testing.T) {
 		t.Fatalf("initial open: viewport = %q; want %q", got, previewReadError)
 	}
 
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m, _ = m.Update(nextPaneKey)
+	m, _ = m.Update(nextPaneKey)
 
 	if m.paneIdx != 0 {
 		t.Fatalf("expected paneIdx=0 after Tab cycle, got %d", m.paneIdx)

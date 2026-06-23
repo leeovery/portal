@@ -95,10 +95,17 @@ func (fakeAliasEditor) SetAndSave(string, string, string) error { return nil }
 func (fakeAliasEditor) DeleteAndSave(string, string) (bool, error) { return true, nil }
 
 // fakeEnumerator returns canned window/pane structure for the preview page so a
-// capture can drive into Preview without a tmux server.
-type fakeEnumerator struct{}
+// capture can drive into Preview without a tmux server. `groups`, when set,
+// overrides the default multi-window shape so a fixture can pin a specific
+// Window/Pane counter shape (e.g. the single 1/1 preview-screen capture).
+type fakeEnumerator struct {
+	groups []tmux.WindowGroup
+}
 
-func (fakeEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
+func (e fakeEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
+	if e.groups != nil {
+		return e.groups, nil
+	}
 	return []tmux.WindowGroup{
 		{WindowIndex: 1, WindowName: "editor", PaneIndices: []int{1, 2}},
 		{WindowIndex: 2, WindowName: "server", PaneIndices: []int{1}},
@@ -107,8 +114,17 @@ func (fakeEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, 
 
 // fakeScrollbackReader returns a fixed scrollback snippet for the preview page.
 // The three-shape Tail contract is honoured: this always returns canned bytes.
-type fakeScrollbackReader struct{}
+// `content`, when non-empty, overrides the default snippet so a fixture can seed
+// realistic scrollback (e.g. the preview-screen capture). The seeded content is
+// GENERIC example terminal output — Portal's preview is tool-agnostic, so no
+// fixture references any specific tool/model.
+type fakeScrollbackReader struct {
+	content string
+}
 
-func (fakeScrollbackReader) Tail(string) ([]byte, error) {
+func (r fakeScrollbackReader) Tail(string) ([]byte, error) {
+	if r.content != "" {
+		return []byte(r.content), nil
+	}
 	return []byte("$ portal open\n(canned preview scrollback)\n"), nil
 }

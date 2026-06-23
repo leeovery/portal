@@ -9,15 +9,15 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// nextWindowKey and prevWindowKey are the bubbletea KeyMsg shapes for `]` and
-// `[`. The codebase represents printable runes with Type=KeyRunes, so the
-// bracket bindings follow the same shape.
+// nextWindowKey and prevWindowKey are the §9.3 window-nav key shapes: `→` next
+// window, `←` prev window (REPLACING the former `]`/`[`). They are the plain
+// (un-modified) arrows — `Tab` drives pane nav instead.
 var (
-	nextWindowKey = tea.KeyPressMsg{Code: ']', Text: "]"}
-	prevWindowKey = tea.KeyPressMsg{Code: '[', Text: "["}
+	nextWindowKey = tea.KeyPressMsg{Code: tea.KeyRight}
+	prevWindowKey = tea.KeyPressMsg{Code: tea.KeyLeft}
 )
 
-func TestPreviewBracket_NextAdvancesWindowIdxByOneAndResetsPaneIdx(t *testing.T) {
+func TestPreviewWindowNav_NextAdvancesWindowIdxByOneAndResetsPaneIdx(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
 		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1, 2}},
@@ -29,20 +29,20 @@ func TestPreviewBracket_NextAdvancesWindowIdxByOneAndResetsPaneIdx(t *testing.T)
 	updated, cmd := m.Update(nextWindowKey)
 
 	if updated.windowIdx != 1 {
-		t.Errorf("expected windowIdx=1 after ], got %d", updated.windowIdx)
+		t.Errorf("expected windowIdx=1 after →, got %d", updated.windowIdx)
 	}
 	if updated.paneIdx != 0 {
-		t.Errorf("expected paneIdx=0 after ], got %d", updated.paneIdx)
+		t.Errorf("expected paneIdx=0 after →, got %d", updated.paneIdx)
 	}
 	if cmd != nil {
-		t.Errorf("expected nil cmd after ] (synchronous read), got non-nil")
+		t.Errorf("expected nil cmd after → (synchronous read), got non-nil")
 	}
 	if len(reader.calls) != 1 {
-		t.Errorf("expected exactly 1 Tail call after ], got %d", len(reader.calls))
+		t.Errorf("expected exactly 1 Tail call after →, got %d", len(reader.calls))
 	}
 }
 
-func TestPreviewBracket_NextWrapsFromLastWindowToZero(t *testing.T) {
+func TestPreviewWindowNav_NextWrapsFromLastWindowToZero(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
 		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
@@ -54,14 +54,14 @@ func TestPreviewBracket_NextWrapsFromLastWindowToZero(t *testing.T) {
 	updated, _ := m.Update(nextWindowKey)
 
 	if updated.windowIdx != 0 {
-		t.Errorf("expected windowIdx=0 after ] wrap, got %d", updated.windowIdx)
+		t.Errorf("expected windowIdx=0 after → wrap, got %d", updated.windowIdx)
 	}
 	if updated.paneIdx != 0 {
-		t.Errorf("expected paneIdx=0 after ] wrap, got %d", updated.paneIdx)
+		t.Errorf("expected paneIdx=0 after → wrap, got %d", updated.paneIdx)
 	}
 }
 
-func TestPreviewBracket_PrevRewindsWindowIdxByOneAndResetsPaneIdx(t *testing.T) {
+func TestPreviewWindowNav_PrevRewindsWindowIdxByOneAndResetsPaneIdx(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
 		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1, 2}},
@@ -73,20 +73,20 @@ func TestPreviewBracket_PrevRewindsWindowIdxByOneAndResetsPaneIdx(t *testing.T) 
 	updated, cmd := m.Update(prevWindowKey)
 
 	if updated.windowIdx != 1 {
-		t.Errorf("expected windowIdx=1 after [, got %d", updated.windowIdx)
+		t.Errorf("expected windowIdx=1 after ←, got %d", updated.windowIdx)
 	}
 	if updated.paneIdx != 0 {
-		t.Errorf("expected paneIdx=0 after [, got %d", updated.paneIdx)
+		t.Errorf("expected paneIdx=0 after ←, got %d", updated.paneIdx)
 	}
 	if cmd != nil {
-		t.Errorf("expected nil cmd after [ (synchronous read), got non-nil")
+		t.Errorf("expected nil cmd after ← (synchronous read), got non-nil")
 	}
 	if len(reader.calls) != 1 {
-		t.Errorf("expected exactly 1 Tail call after [, got %d", len(reader.calls))
+		t.Errorf("expected exactly 1 Tail call after ←, got %d", len(reader.calls))
 	}
 }
 
-func TestPreviewBracket_PrevFromWindowZeroWrapsToLastWindow(t *testing.T) {
+func TestPreviewWindowNav_PrevFromWindowZeroWrapsToLastWindow(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
 		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
@@ -98,14 +98,14 @@ func TestPreviewBracket_PrevFromWindowZeroWrapsToLastWindow(t *testing.T) {
 	updated, _ := m.Update(prevWindowKey)
 
 	if updated.windowIdx != 2 {
-		t.Errorf("expected windowIdx=2 after [ wrap from 0, got %d", updated.windowIdx)
+		t.Errorf("expected windowIdx=2 after ← wrap from 0, got %d", updated.windowIdx)
 	}
 	if updated.paneIdx != 0 {
-		t.Errorf("expected paneIdx=0 after [ wrap, got %d", updated.paneIdx)
+		t.Errorf("expected paneIdx=0 after ← wrap, got %d", updated.paneIdx)
 	}
 }
 
-func TestPreviewBracket_NextSingleWindowMultiPaneSessionIsSilentNoOp(t *testing.T) {
+func TestPreviewWindowNav_NextSingleWindowMultiPaneSessionIsSilentNoOp(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
 	}
@@ -128,7 +128,7 @@ func TestPreviewBracket_NextSingleWindowMultiPaneSessionIsSilentNoOp(t *testing.
 	}
 }
 
-func TestPreviewBracket_PrevSingleWindowMultiPaneSessionIsSilentNoOp(t *testing.T) {
+func TestPreviewWindowNav_PrevSingleWindowMultiPaneSessionIsSilentNoOp(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
 	}
@@ -151,7 +151,7 @@ func TestPreviewBracket_PrevSingleWindowMultiPaneSessionIsSilentNoOp(t *testing.
 	}
 }
 
-func TestPreviewBracket_WindowCycleResetsPaneIdxToZeroEvenWhenNonZero(t *testing.T) {
+func TestPreviewWindowNav_WindowCycleResetsPaneIdxToZeroEvenWhenNonZero(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1, 2}},
 		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1, 2, 3}},
@@ -162,18 +162,18 @@ func TestPreviewBracket_WindowCycleResetsPaneIdxToZeroEvenWhenNonZero(t *testing
 
 	updated, _ := m.Update(nextWindowKey)
 	if updated.paneIdx != 0 {
-		t.Errorf("expected paneIdx=0 after ] from non-zero paneIdx, got %d", updated.paneIdx)
+		t.Errorf("expected paneIdx=0 after → from non-zero paneIdx, got %d", updated.paneIdx)
 	}
 
 	// And in the reverse direction.
 	m2 := newPreviewModelForTab("work", groups, 1, 3, reader, 80, 24)
 	updated2, _ := m2.Update(prevWindowKey)
 	if updated2.paneIdx != 0 {
-		t.Errorf("expected paneIdx=0 after [ from non-zero paneIdx, got %d", updated2.paneIdx)
+		t.Errorf("expected paneIdx=0 after ← from non-zero paneIdx, got %d", updated2.paneIdx)
 	}
 }
 
-func TestPreviewBracket_WindowCycleTriggersExactlyOneTailCallWithPaneZeroOfNewWindow(t *testing.T) {
+func TestPreviewWindowNav_WindowCycleTriggersExactlyOneTailCallWithPaneZeroOfNewWindow(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
 		{WindowIndex: 2, WindowName: "second", PaneIndices: []int{4, 7, 9}},
@@ -184,7 +184,7 @@ func TestPreviewBracket_WindowCycleTriggersExactlyOneTailCallWithPaneZeroOfNewWi
 	_, _ = m.Update(nextWindowKey)
 
 	if len(reader.calls) != 1 {
-		t.Fatalf("expected exactly 1 Tail call after ], got %d", len(reader.calls))
+		t.Fatalf("expected exactly 1 Tail call after →, got %d", len(reader.calls))
 	}
 	want := state.SanitizePaneKey("work", 2, 4)
 	if reader.calls[0] != want {
@@ -192,7 +192,7 @@ func TestPreviewBracket_WindowCycleTriggersExactlyOneTailCallWithPaneZeroOfNewWi
 	}
 }
 
-func TestPreviewBracket_WindowCycleResetsViewportScrollPositionToTail(t *testing.T) {
+func TestPreviewWindowNav_WindowCycleResetsViewportScrollPositionToTail(t *testing.T) {
 	// Build content larger than the viewport so AtBottom is non-trivial.
 	var b strings.Builder
 	for i := 0; i < 50; i++ {
@@ -204,17 +204,44 @@ func TestPreviewBracket_WindowCycleResetsViewportScrollPositionToTail(t *testing
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 10)
-	// Pre-load some content and scroll to top so a successful ] must
+	// Pre-load some content and scroll to top so a successful → must
 	// explicitly call GotoBottom to satisfy AtBottom().
 	m.viewport.SetContent("stale\nstale\nstale\n")
 	m.viewport.GotoTop()
 	if !m.viewport.AtTop() {
-		t.Fatalf("setup: expected AtTop before ], got YOffset=%d", m.viewport.YOffset())
+		t.Fatalf("setup: expected AtTop before →, got YOffset=%d", m.viewport.YOffset())
 	}
 
 	updated, _ := m.Update(nextWindowKey)
 
 	if !updated.viewport.AtBottom() {
-		t.Errorf("expected viewport.AtBottom()=true after ] cycle, got YOffset=%d", updated.viewport.YOffset())
+		t.Errorf("expected viewport.AtBottom()=true after → cycle, got YOffset=%d", updated.viewport.YOffset())
+	}
+}
+
+// TestPreviewWindowNav_InterceptedBeforeViewportHorizontalScroll pins the §9.3
+// validation caveat: bubbles/viewport binds plain `←`/`→` for horizontal scroll,
+// so the preview MUST intercept them for window nav BEFORE delegating. A
+// single-window session would otherwise let the arrow leak through to the
+// viewport's horizontal scroll; here the multi-window fixture proves window nav
+// won (windowIdx advanced, exactly one Tail).
+func TestPreviewWindowNav_InterceptedBeforeViewportHorizontalScroll(t *testing.T) {
+	groups := []tmux.WindowGroup{
+		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
+		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0}},
+	}
+	reader := &recordingReader{bytes: []byte("content")}
+	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
+
+	updated, cmd := m.Update(nextWindowKey)
+
+	if updated.windowIdx != 1 {
+		t.Errorf("expected windowIdx=1 (→ intercepted for window nav), got %d", updated.windowIdx)
+	}
+	if cmd != nil {
+		t.Errorf("expected nil cmd (synchronous read, intercepted before viewport), got non-nil")
+	}
+	if len(reader.calls) != 1 {
+		t.Errorf("expected exactly 1 Tail call from window nav, got %d", len(reader.calls))
 	}
 }

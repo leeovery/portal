@@ -22,7 +22,7 @@ import (
 //   - As .bin files are progressively cleaned by the daemon, ScrollbackReader
 //     returns (nil, nil) for affected panes; the viewport renders the
 //     placeholder for those panes and bytes for the unaffected ones.
-//   - Cycle keys (Tab, ], [) continue to traverse every captured structural
+//   - Cycle keys (←/→ window, Tab pane) continue to traverse every captured structural
 //     entry — no skip, no panic — even when every pane has degraded to
 //     placeholder.
 //   - Esc still emits previewDismissedMsg cleanly from a fully-degraded
@@ -91,29 +91,29 @@ func (r *progressivePlaceholderReader) Tail(paneKey string) ([]byte, error) {
 }
 
 // killedSessionSequence is the cycle sequence pinned by the task body:
-// Tab, ], Tab, Tab, [, ], Tab, Tab. Combined with the 2x2 fixture this is
+// Tab, →, Tab, Tab, ←, →, Tab, Tab. Combined with the 2x2 fixture this is
 // the resulting (windowIdx, paneIdx) trajectory:
 //
 //	open : (0, 0)
-//	Tab  : (0, 1)
-//	]    : (1, 0)
-//	Tab  : (1, 1)
-//	Tab  : (1, 0)   (intra-window wrap)
-//	[    : (0, 0)   (window wrap back)
-//	]    : (1, 0)
-//	Tab  : (1, 1)
-//	Tab  : (1, 0)   (intra-window wrap)
+//	Tab   : (0, 1)
+//	→    : (1, 0)
+//	Tab   : (1, 1)
+//	Tab   : (1, 0)   (intra-window wrap)
+//	←    : (0, 0)   (window wrap back)
+//	→    : (1, 0)
+//	Tab   : (1, 1)
+//	Tab   : (1, 0)   (intra-window wrap)
 //
 // 8 keypresses + 1 open-time read = 9 Tail calls.
 var killedSessionSequence = []tea.KeyPressMsg{
-	{Code: tea.KeyTab},     // (0,1)
-	{Code: ']', Text: "]"}, // (1,0)
-	{Code: tea.KeyTab},     // (1,1)
-	{Code: tea.KeyTab},     // (1,0)
-	{Code: '[', Text: "["}, // (0,0)
-	{Code: ']', Text: "]"}, // (1,0)
-	{Code: tea.KeyTab},     // (1,1)
-	{Code: tea.KeyTab},     // (1,0)
+	nextPaneKey,   // (0,1)
+	nextWindowKey, // (1,0)
+	nextPaneKey,   // (1,1)
+	nextPaneKey,   // (1,0)
+	prevWindowKey, // (0,0)
+	nextWindowKey, // (1,0)
+	nextPaneKey,   // (1,1)
+	nextPaneKey,   // (1,0)
 }
 
 // killedSessionExpectedCoords is the post-step (windowIdx, paneIdx)
@@ -132,7 +132,7 @@ var killedSessionExpectedCoords = [][2]int{
 
 // progressivePlaceholderFixture wires a 2x2 enumerator + a stateful reader
 // with three phases tuned so that:
-//   - reads 1..3 are all bytes (open + first Tab + first ]),
+//   - reads 1..3 are all bytes (open + first Tab + first →),
 //   - reads 4..6 are mixed (w1p1 returns (nil,nil); others bytes),
 //   - reads 7..9 are all placeholder.
 //
@@ -177,11 +177,11 @@ func driveKilledSessionSequence(m previewModel) []previewModel {
 }
 
 func TestPreviewExternalKill_ChromeStableWhenBinFilesDisappearMidPreview(t *testing.T) {
-	// Chrome counts and window names must stay anchored to the open-time
-	// enumeration across every step of the cycle sequence — even as the
-	// reader degrades from bytes → mixed → all placeholder. The only
-	// post-open enumerator shape uses WindowName "REENUMERATED" / 1x1, so
-	// any leak via mid-preview re-enumeration would be observable.
+	// Chrome counts must stay anchored to the open-time enumeration across
+	// every step of the cycle sequence — even as the reader degrades from
+	// bytes → mixed → all placeholder. The only post-open enumerator shape is
+	// 1x1 with raw index 9/42, so any leak via mid-preview re-enumeration would
+	// collapse the totals to "/1" and surface those raw indices.
 	enum, reader, _ := progressivePlaceholderFixture(t)
 
 	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
@@ -193,36 +193,34 @@ func TestPreviewExternalKill_ChromeStableWhenBinFilesDisappearMidPreview(t *test
 
 	// Initial chrome — open-time enumeration shape.
 	initialChrome := stripANSI(chromeLineForTest(m))
-	if !strings.Contains(initialChrome, "Window 1 of 2") || !strings.Contains(initialChrome, "Pane 1 of 2") {
+	if !strings.Contains(initialChrome, "Window 1/2") || !strings.Contains(initialChrome, "Pane 1/2") {
 		t.Errorf("initial chrome lost open-time totals: %q", initialChrome)
 	}
 
-	// Per-step chrome — never reflect the post-open shape.
+	// Per-step chrome — never reflect the post-open shape. The §9.1 chrome
+	// surfaces the SESSION name (constant "work"); a re-enumeration to the 1x1
+	// second-shape would collapse the totals to "/1" and leak raw index 9/42.
 	for i, mm := range models {
 		chrome := stripANSI(chromeLineForTest(mm))
-		if strings.Contains(chrome, "REENUMERATED") {
-			t.Errorf("step %d: chromeLine() leaked post-open enumerator state: %q", i, chrome)
+		if !strings.Contains(chrome, "/2 ") {
+			// "Window M/2" and "Pane X/2" totals must both survive.
+			t.Errorf("step %d: chromeLine() lost open-time totals (expected '/2'): %q", i, chrome)
 		}
-		if !strings.Contains(chrome, "of 2") {
-			// "Window M of 2" and "Pane X of 2" are both present.
-			t.Errorf("step %d: chromeLine() lost open-time totals (expected 'of 2'): %q", i, chrome)
-		}
-		// Every focused window must be one of the open-time names.
-		if !strings.Contains(chrome, "first") && !strings.Contains(chrome, "second") {
-			t.Errorf("step %d: chromeLine() lost open-time window names: %q", i, chrome)
+		if strings.Contains(chrome, "/9") || strings.Contains(chrome, "42") {
+			t.Errorf("step %d: chromeLine() leaked post-open re-enumerated indices: %q", i, chrome)
 		}
 	}
 
 	// Final chrome shape preserved — same totals as initial. The cycle sequence
 	// lands us on (windowIdx=1, paneIdx=0), so chrome should read
-	// "Window 2 of 2" / "Pane 1 of 2" with the "of N" totals unchanged from
-	// the at-open enumeration.
+	// "Window 2/2" / "Pane 1/2" with the totals unchanged from the at-open
+	// enumeration.
 	finalChrome := stripANSI(chromeLineForTest(models[len(models)-1]))
-	if !strings.Contains(finalChrome, "Window 2 of 2") {
-		t.Errorf("final chrome must show ordinal Window 2 (from windowIdx=1) with preserved 'of 2' total; got: %q", finalChrome)
+	if !strings.Contains(finalChrome, "Window 2/2") {
+		t.Errorf("final chrome must show ordinal Window 2 (from windowIdx=1) with preserved '/2' total; got: %q", finalChrome)
 	}
-	if !strings.Contains(finalChrome, "Pane 1 of 2") {
-		t.Errorf("final chrome must show ordinal Pane 1 (from paneIdx=0) with preserved 'of 2' total; got: %q", finalChrome)
+	if !strings.Contains(finalChrome, "Pane 1/2") {
+		t.Errorf("final chrome must show ordinal Pane 1 (from paneIdx=0) with preserved '/2' total; got: %q", finalChrome)
 	}
 }
 
@@ -380,14 +378,13 @@ func TestPreviewExternalKill_NoPanicWhenAllPanesReturnNilNilMidPreview(t *testin
 
 	// Exercise View() at every step — the chrome+viewport composition path
 	// is the most likely panic surface if the model has lost a structural
-	// invariant under degradation. View() composes chromeLine at the model's
-	// actual width (m.width − previewFrameOverhead inner); compare against
-	// the same cascade tier the renderer used, not chromeLineForTest's
-	// fixed-width 200 (a different cascade tier).
+	// invariant under degradation. View() composes the header at the model's
+	// actual content width (m.innerWidth()); compare the stripped header against
+	// the same cascade tier the renderer used.
 	for i, mm := range models {
-		want := chromeLineAtModelWidth(mm)
+		want := stripANSI(chromeLineAtModelWidth(mm))
 		if !strings.Contains(stripANSI(mm.View()), want) {
-			t.Errorf("step %d: View() did not contain chrome line — composition broken", i)
+			t.Errorf("step %d: View() did not contain header line — composition broken", i)
 		}
 	}
 }

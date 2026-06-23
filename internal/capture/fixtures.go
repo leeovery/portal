@@ -33,6 +33,14 @@ type Fixture struct {
 	// not the command-pending capture). When non-empty, tui.Build applies WithCommand
 	// so the model opens on the Projects page with the command-pending banner shown.
 	command []string
+	// scrollback seeds the §9 preview overlay's canned scrollback content (empty
+	// for every fixture that does not open the preview). The seeded content is
+	// GENERIC example terminal output — the preview mechanism is tool-agnostic.
+	scrollback string
+	// enumeratorGroups pins the preview's window/pane structure (empty → the
+	// default multi-window fake). Used by the preview-screen fixture to render a
+	// single Window 1/1 · Pane 1/1 counter shape matching the reference frame.
+	enumeratorGroups []tmux.WindowGroup
 }
 
 // Deps maps the fixture onto the shared tui.Deps seam set. Every tmux seam is a
@@ -48,8 +56,8 @@ func (f *Fixture) Deps() tui.Deps {
 		ProjectStore:  f.projectStore,
 		ProjectEditor: f.projectEditor,
 		AliasEditor:   f.aliasEditor,
-		Enumerator:    fakeEnumerator{},
-		Reader:        fakeScrollbackReader{},
+		Enumerator:    fakeEnumerator{groups: f.enumeratorGroups},
+		Reader:        fakeScrollbackReader{content: f.scrollback},
 		// DirReader/DirRunner are deliberately left nil: the fixture sessions are
 		// pre-stamped (Session.Dir set), so the lazy pane-read fallback never
 		// fires — and the harness has no tmux server to read panes from anyway.
@@ -87,6 +95,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return projectsFixture(), nil
 	case "projects-command-pending":
 		return projectsCommandPendingFixture(), nil
+	case "preview-screen":
+		return previewScreenFixture(), nil
 	default:
 		return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 	}
@@ -98,7 +108,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -442,4 +452,45 @@ func projectsCommandPendingFixture() *Fixture {
 	fx.name = "projects-command-pending"
 	fx.command = []string{"npm", "run", "dev"}
 	return fx
+}
+
+// previewScreenFixture builds the deterministic "preview-screen" fixture: a Flat
+// session list whose FIRST (default-selected) session is aviva-proxy-qNyfEO, so
+// pressing Space on it opens the §9 preview overlay onto a single-window
+// single-pane session (Window 1/1 · Pane 1/1) seeded with generic canned
+// scrollback. This drives the §9.1 cyan peek-mode chrome reskin capture — the
+// accent.cyan top bar (◉ preview marker + session + counters + right-aligned nav
+// hints) framing the untouched captured ANSI content — mirroring
+// testdata/vhs/reference/preview-screen-mv.png.
+//
+// The scrollback is GENERIC example terminal output (a kubectl rollout + build
+// lines) — Portal's preview mechanism is tool-agnostic, so the captured content
+// references no specific tool/model (§9.2: the content is whatever the pane
+// printed, rendered as untouched real ANSI). The enumerator is pinned to a
+// single 1/1 window/pane so the counters match the reference. Like the other
+// fixtures it NEVER opens a tmux server or touches ~/.config/portal.
+func previewScreenFixture() *Fixture {
+	sessions := []tmux.Session{
+		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
+		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
+		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
+		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
+	}
+
+	scrollback := "$ kubectl rollout status deploy/aviva-proxy\n" +
+		"deployment \"aviva-proxy\" successfully rolled out\n" +
+		"$ make build\n" +
+		"go build -o bin/aviva-proxy ./cmd/aviva-proxy\n" +
+		"build complete in 4.2s\n" +
+		"$ ./bin/aviva-proxy --check\n" +
+		"config ok · 3 routes · listening on :8080\n"
+
+	return &Fixture{
+		name:             "preview-screen",
+		Lister:           &fakeLister{sessions: sessions},
+		projectStore:     &fakeProjectStore{projects: nil},
+		initialMode:      prefs.ModeFlat,
+		scrollback:       scrollback,
+		enumeratorGroups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}},
+	}
 }

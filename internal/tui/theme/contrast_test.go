@@ -287,6 +287,42 @@ func TestInlineFlashWarningPairClearsFloor(t *testing.T) {
 	}
 }
 
+// TestPreviewPeekChromeClearsFloorAgainstCanvas is the §9.1 / §9.2 peek-mode
+// chrome's contrast gate: the cyan frame + `◉ preview` marker (accent.cyan),
+// the session name (text.primary), and the counters + right-aligned nav hints
+// (text.detail) all render directly on the owned canvas (the captured CONTENT
+// is out-of-theme real ANSI and exempt — §9.2). Each chrome token must clear
+// the §2.3 normal-text floor (4.5:1) against its OWN mode-canvas, independently
+// (§2.9). It is asserted here distinctly (not only via the general per-token
+// gate) so a regression that specifically breaks the preview chrome's
+// legibility fails with a §9.1-scoped message — and so the accent.cyan re-target
+// of the preview border (replacing the former explicit #7B95BD) is pinned to
+// the floor at the surface it renders on.
+func TestPreviewPeekChromeClearsFloorAgainstCanvas(t *testing.T) {
+	tokens := []struct {
+		role  string
+		token theme.Token
+	}{
+		{"frame + marker (accent.cyan)", theme.MV.AccentCyan},
+		{"session (text.primary)", theme.MV.TextPrimary},
+		{"counters + hints (text.detail)", theme.MV.TextDetail},
+	}
+	for _, tk := range tokens {
+		t.Run(tk.role+"/dark", func(t *testing.T) {
+			if got := contrastRatio(t, tk.token.Dark, canvasDark); got < floorNormal {
+				t.Errorf("§9.1 preview chrome %s dark %s vs canvas %s = %.2f, want >= %.2f",
+					tk.role, tk.token.Dark, canvasDark, got, floorNormal)
+			}
+		})
+		t.Run(tk.role+"/light", func(t *testing.T) {
+			if got := contrastRatio(t, tk.token.Light, canvasLight); got < floorNormal {
+				t.Errorf("§9.1 preview chrome %s light %s vs canvas %s = %.2f, want >= %.2f",
+					tk.role, tk.token.Light, canvasLight, got, floorNormal)
+			}
+		})
+	}
+}
+
 // TestEveryTokenHasLightVariant proves the §2.9 light column is fully populated:
 // every token in the closed vocabulary carries a non-empty Light hex. (The DARK
 // column is pinned by TestMVDarkVariantsPinned in theme_test.go.) This is the
