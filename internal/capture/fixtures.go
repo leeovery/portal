@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
@@ -41,6 +42,17 @@ type Fixture struct {
 	// default multi-window fake). Used by the preview-screen fixture to render a
 	// single Window 1/1 · Pane 1/1 counter shape matching the reference frame.
 	enumeratorGroups []tmux.WindowGroup
+	// serverStarted parks the model on PageLoading (the §10 cold-boot loading
+	// screen) — only the loading-screen fixture sets it.
+	serverStarted bool
+	// loadingEvents seeds the §10.3 loading screen's live progress: the sequence of
+	// BootstrapProgressMsg events folded through the model's loadingProgress
+	// accumulator (the real Update path) to reach the captured mid-restore state.
+	// Streamed via a receiver that blocks after the last event (never emitting the
+	// terminal BootstrapCompleteMsg), so the loading page never dismisses and the
+	// capture stays deterministically on PageLoading. Empty for every non-loading
+	// fixture.
+	loadingEvents []tui.BootstrapProgressMsg
 }
 
 // Deps maps the fixture onto the shared tui.Deps seam set. Every tmux seam is a
@@ -62,11 +74,26 @@ func (f *Fixture) Deps() tui.Deps {
 		// pre-stamped (Session.Dir set), so the lazy pane-read fallback never
 		// fires — and the harness has no tmux server to read panes from anyway.
 		// ModePersister is nil so an `s`-toggle during a capture writes nowhere.
-		InitialMode:  f.initialMode,
-		InitialFlash: f.initialFlash,
-		Command:      f.command,
-		CWD:          "/home/user",
+		InitialMode:   f.initialMode,
+		InitialFlash:  f.initialFlash,
+		Command:       f.command,
+		CWD:           "/home/user",
+		ServerStarted: f.serverStarted,
+		// Wire the loading-screen progress receiver only when the fixture seeds
+		// events — it streams the seeded mid-restore sequence then blocks so the
+		// loading page never dismisses (no terminal BootstrapCompleteMsg).
+		ProgressReceiver: loadingReceiverOrNil(f.loadingEvents),
 	}
+}
+
+// loadingReceiverOrNil returns the streaming-then-blocking loading-progress
+// receiver for the seeded events, or nil when there are none (so non-loading
+// fixtures leave ProgressReceiver unwired and keep the synchronous path).
+func loadingReceiverOrNil(events []tui.BootstrapProgressMsg) tea.Cmd {
+	if len(events) == 0 {
+		return nil
+	}
+	return loadingProgressReceiver(events)
 }
 
 // Name returns the fixture's registered name.
@@ -97,6 +124,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return projectsCommandPendingFixture(), nil
 	case "preview-screen":
 		return previewScreenFixture(), nil
+	case "loading-screen":
+		return loadingScreenFixture(), nil
 	default:
 		return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 	}
@@ -108,7 +137,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -492,5 +521,44 @@ func previewScreenFixture() *Fixture {
 		initialMode:      prefs.ModeFlat,
 		scrollback:       scrollback,
 		enumeratorGroups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}},
+	}
+}
+
+// loadingScreenFixture builds the deterministic "loading-screen" fixture: the §10
+// cold-boot loading page (serverStarted) seeded with the reference mid-restore
+// progress — steps 1–2 done (✓ Started tmux server, ✓ Registered hooks),
+// "Restoring sessions" ACTIVE with the 8 / 12 counter, "Replaying scrollback" and
+// "Running resume commands" pending, the bar partially filled. It mirrors
+// testdata/vhs/reference/loading-mv.png (`Loading 6 — Combined (thick bar)`).
+//
+// The mid-restore state is reached by folding a real BootstrapProgressMsg
+// sequence through the model's loadingProgress accumulator (the same §10.4 path
+// the live channel drives): steps 1–5 complete, then a step-6 skeleton event with
+// RestoreN=8 / RestoreM=12 (which sets the active "Restoring sessions" counter
+// without marking restore done — so the bar sits at 5/11 with that label active).
+// The receiver streams these events then BLOCKS (never emits the terminal
+// BootstrapCompleteMsg), so the dual-gate never dismisses the loading page and the
+// capture stays deterministically parked on it.
+//
+// The session list is empty — it is never shown (the page never transitions). Like
+// the other fixtures it NEVER opens a tmux server or touches ~/.config/portal.
+func loadingScreenFixture() *Fixture {
+	events := []tui.BootstrapProgressMsg{
+		{Index: 1, Name: "EnsureServer"},
+		{Index: 2, Name: "RegisterPortalHooks"},
+		{Index: 3, Name: "SetRestoring"},
+		{Index: 4, Name: "SweepOrphanDaemons"},
+		{Index: 5, Name: "EnsureSaver"},
+		// Step-6 skeleton event: sets the active "Restoring sessions" 8/12 counter
+		// without completing restore, so the page sits mid-restore.
+		{Index: 6, Name: "Restore", RestoreN: 8, RestoreM: 12},
+	}
+	return &Fixture{
+		name:          "loading-screen",
+		Lister:        &fakeLister{sessions: nil},
+		projectStore:  &fakeProjectStore{projects: nil},
+		initialMode:   prefs.ModeFlat,
+		serverStarted: true,
+		loadingEvents: events,
 	}
 }

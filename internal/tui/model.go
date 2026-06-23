@@ -288,9 +288,17 @@ type Model struct {
 	progressReceiver tea.Cmd
 
 	// latestProgress is the most recent per-step event ingested from the channel.
-	// task 5-5 renders the loading screen (tick-list + bar) from this; today it is
-	// stored so the Update arm has somewhere to land the event.
+	// Kept for any consumer that reads the raw last event; the loading screen
+	// renders from loadingProgress (the folded accumulator) below.
 	latestProgress BootstrapProgressMsg
+
+	// loadingProgress is the task-5-4 §10.4 accumulator: every BootstrapProgressMsg
+	// is folded into it (in the BootstrapProgressMsg Update arm), and viewLoading
+	// reads loadingProgress.View() for the §10.3 bar fraction + the ordered five
+	// friendly labels with their done/active/pending states + counters. The zero
+	// value is ready to use (bar at 0, every label pending), so an un-streamed
+	// model renders the all-pending loading screen.
+	loadingProgress LoadingProgress
 
 	// Bootstrap warnings: pending is set by openTUI before tea.NewProgram
 	// runs Init; Init folds it into the BootstrapCompleteMsg payload so
@@ -1986,6 +1994,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (defensive: a stray progress msg with no receiver wired) stops the
 		// loop rather than re-issuing nil.
 		m.latestProgress = msg
+		// Fold the event into the §10.4 accumulator so viewLoading (§10.3) renders
+		// the live bar fraction + tick-list states + counter from it. Apply returns
+		// a new value (no receiver mutation), so the accumulator stays the single
+		// source of the loading-screen render.
+		m.loadingProgress = m.loadingProgress.Apply(msg)
 		return m, m.progressReceiver
 	case BootstrapCompleteMsg:
 		m.bootstrapComplete = true
@@ -3173,12 +3186,13 @@ func (m Model) View() tea.View {
 	// A pinned appearance constructs the gate already resolved, so this branch is
 	// never taken for light/dark pins — they paint from frame one.
 	//
-	// Scope: the gate holds the owned-canvas pages (the foundation Sessions
-	// screen and the views composed over fillCanvas). The cold-path loading page
-	// (§10) keeps its current un-gated render here — Phase 5 reworks it to gate on
-	// this same mechanism (the reusable appearanceGate). Excluding it now keeps
-	// the loading-page behaviour unchanged while the gate is wired into Sessions.
-	if !m.modeResolved() && m.activePage != PageLoading {
+	// Scope: the gate holds EVERY owned-canvas surface, including the §10 cold-path
+	// loading page (§10.2 canvas-flip avoidance) — it paints the resolved (or
+	// dark-fallback) canvas from frame one, never a paint-then-flip. Init arms the
+	// detect-or-timeout window on the loading path too (the loadingPadTick batch
+	// includes detectTimeout), so the gate resolves under the same race; the
+	// tens-of-ms wait is invisible against the multi-hundred-ms bootstrap.
+	if !m.modeResolved() {
 		v := tea.NewView(m.blankFrame())
 		v.AltScreen = true
 		return v
@@ -3703,13 +3717,22 @@ func (m Model) viewString() string {
 	}
 }
 
-// viewLoading renders the loading interstitial with centered text. It composes
-// into the INSET content region (contentW × contentH) so fillCanvas places it
-// inside the global gutter like every other page; the loading text centres within
-// the inset region rather than the full terminal.
+// viewLoading renders the §10.3 honest loading interstitial: the locked block
+// PORTAL wordmark + violet caret bar, a thick violet progress bar on the bg.track
+// track, and a real 5-row tick-list, all driven live from the §10.4
+// loadingProgress accumulator (folded per BootstrapProgressMsg). It composes into
+// the INSET content region (contentW × contentH) so View()→fillCanvas paints the
+// owned canvas around it, and centres the block via lipgloss.Place exactly like
+// every other page. The render degrades on a narrow/short terminal (§2.7) and
+// drops the canvas + hues under the NO_COLOR carve-out (§2.5).
 func (m Model) viewLoading() string {
-	text := "Restoring sessions…"
-	return lipgloss.Place(m.contentWidth(), m.contentHeight(), lipgloss.Center, lipgloss.Center, text)
+	return renderLoadingScreen(
+		m.loadingProgress.View(),
+		m.contentWidth(),
+		m.contentHeight(),
+		m.canvasMode,
+		m.colourless,
+	)
 }
 
 // viewProjectList renders the §6 Modern Vivid Projects page: the §3.1 shared PORTAL

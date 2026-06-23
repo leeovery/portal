@@ -6917,14 +6917,22 @@ func TestLoadingPage(t *testing.T) {
 		}
 	})
 
-	t.Run("loading view shows Restoring sessions text", func(t *testing.T) {
+	t.Run("loading view shows the honest §10.3 screen (wordmark + step-list)", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		view := model.View().Content
-		if !strings.Contains(view, "Restoring sessions…") {
-			t.Errorf("expected loading text 'Restoring sessions…', got:\n%s", view)
+		view := ansi.Strip(model.View().Content)
+		// The honest loading screen renders the friendly step labels (a real list),
+		// including "Restoring sessions" — no longer the old "…" placeholder.
+		if !strings.Contains(view, "Restoring sessions") {
+			t.Errorf("expected the 'Restoring sessions' step label, got:\n%s", view)
+		}
+		if strings.Contains(view, "Restoring sessions…") {
+			t.Errorf("old placeholder 'Restoring sessions…' should be gone, got:\n%s", view)
+		}
+		if !strings.Contains(view, "Started tmux server") {
+			t.Errorf("expected the full step-list (a real list), got:\n%s", view)
 		}
 	})
 
@@ -6939,34 +6947,31 @@ func TestLoadingPage(t *testing.T) {
 		}
 	})
 
-	t.Run("loading view centers text in terminal", func(t *testing.T) {
+	t.Run("loading view centers the block in terminal", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		view := model.View().Content
-		lines := strings.Split(view, "\n")
-		// Text should not be on the first line — it should be roughly centered vertically
+		lines := strings.Split(ansi.Strip(model.View().Content), "\n")
+		// The block should not be on the first line — it is roughly centered.
 		if len(lines) < 2 {
 			t.Fatal("expected multiple lines for centered layout")
 		}
-		if strings.Contains(lines[0], "Restoring sessions…") {
-			t.Error("text should not be on the first line when centered in 24-row terminal")
-		}
-		// Find which line has the text
+		// Find which line carries the active "Restoring sessions" step.
 		textLine := -1
 		for i, line := range lines {
-			if strings.Contains(line, "Restoring sessions…") {
+			if strings.Contains(line, "Restoring sessions") {
 				textLine = i
 				break
 			}
 		}
 		if textLine < 0 {
-			t.Fatal("loading text not found in view")
+			t.Fatal("step-list label not found in view")
 		}
-		// Should be roughly in the middle (allowing some variance)
-		if textLine < 8 || textLine > 16 {
-			t.Errorf("expected text near vertical center (row 8-16 of 24), got row %d", textLine)
+		// The step-list sits in the lower-middle band of the centred block — it must
+		// not be at the very top or bottom of a 24-row terminal.
+		if textLine < 6 || textLine > 20 {
+			t.Errorf("expected the step row near vertical center (row 6-20 of 24), got row %d", textLine)
 		}
 	})
 
@@ -6985,9 +6990,9 @@ func TestLoadingPage(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		// Do NOT send WindowSizeMsg
-		view := m.View().Content
-		if !strings.Contains(view, "Restoring sessions…") {
-			t.Errorf("expected loading text with fallback dimensions, got:\n%s", view)
+		view := ansi.Strip(m.View().Content)
+		if !strings.Contains(view, "Restoring sessions") {
+			t.Errorf("expected the loading step-list with fallback dimensions, got:\n%s", view)
 		}
 		// Should have multiple lines (80x24 fallback centering)
 		lines := strings.Split(view, "\n")

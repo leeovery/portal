@@ -127,6 +127,41 @@ func TestFixtureNamesIncludesSessionsEmpty(t *testing.T) {
 	}
 }
 
+// TestLoadingScreenFixture verifies the §10 loading-screen fixture: it parks the
+// production model on PageLoading (serverStarted) and is registered in the
+// discoverable name list. The render assertions (block banner / bar / step-list /
+// tokens / counter) live in internal/tui; here the gate is that the fixture wires
+// the loading page through to the production model so the capture can screenshot
+// it.
+func TestLoadingScreenFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("loading-screen")
+	if err != nil {
+		t.Fatalf("FixtureByName(loading-screen): %v", err)
+	}
+
+	m := tui.Build(fx.Deps())
+	if m.ActivePage() != tui.PageLoading {
+		t.Errorf("ActivePage() = %d, want PageLoading (the loading-screen fixture must park on the loading page)", m.ActivePage())
+	}
+
+	// The progress receiver is wired (the seeded mid-restore events stream through
+	// the real Update path), so Build does NOT synthesize the terminal complete
+	// event — the page stays on PageLoading for the capture.
+	if !m.ServerStarted() {
+		t.Error("loading-screen fixture must set ServerStarted so the cold-boot loading page shows")
+	}
+
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "loading-screen" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include loading-screen", capture.FixtureNames())
+	}
+}
+
 // TestSessionsByProjectFixture verifies the grouped (by-project) fixture: it
 // opens in ModeByProject and carries projects whose paths match most session dirs,
 // plus exactly one session whose directory matches NO project so it lands in the

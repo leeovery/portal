@@ -11,9 +11,32 @@
 package capture
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tui"
 )
+
+// loadingProgressReceiver builds a §10.2 progress-channel receiver tea.Cmd that
+// streams a fixed sequence of BootstrapProgressMsg events into the loading page
+// then BLOCKS forever — it never emits the terminal BootstrapCompleteMsg. The
+// model folds each event into its loadingProgress accumulator (the real Update
+// path), so the loading-screen capture renders the seeded mid-restore state, and
+// because the terminal event never arrives the dual-gate never dismisses the
+// page — the capture stays deterministically parked on PageLoading.
+//
+// Each invocation pops one event off the buffered channel (the standard single-
+// blocking-receive-re-issued pattern); once the seeded events are drained the
+// receive blocks, freezing the loading page for the screenshot.
+func loadingProgressReceiver(events []tui.BootstrapProgressMsg) tea.Cmd {
+	ch := make(chan tui.BootstrapProgressMsg, len(events))
+	for _, e := range events {
+		ch <- e
+	}
+	return func() tea.Msg {
+		return <-ch
+	}
+}
 
 // fakeLister is the canned SessionLister seam — it returns a fixed session set
 // with no tmux server contact.
