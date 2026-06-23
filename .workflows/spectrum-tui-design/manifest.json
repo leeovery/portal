@@ -136,7 +136,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 5,
-          "current_task": "spectrum-tui-design-5-1",
+          "current_task": "spectrum-tui-design-5-2",
           "completed_tasks": [
             "spectrum-tui-design-1-1",
             "spectrum-tui-design-1-2",
@@ -164,7 +164,8 @@
             "spectrum-tui-design-4-4",
             "spectrum-tui-design-4-5",
             "spectrum-tui-design-4-6",
-            "spectrum-tui-design-4-7"
+            "spectrum-tui-design-4-7",
+            "spectrum-tui-design-5-1"
           ],
           "completed_phases": [
             1,

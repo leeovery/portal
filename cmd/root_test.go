@@ -22,6 +22,17 @@ func resetRootCmd() {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
+	// Reset any context PersistentPreRunE stashed on the root or a subcommand in
+	// a prior Execute(). Cobra reuses a child's existing ctx when non-nil
+	// (command.go: "if cmd.ctx == nil { cmd.ctx = c.ctx }"), so a stale context
+	// (e.g. a §10.2 deferredBootstrapKey set on `open`) would otherwise leak
+	// across tests. Setting a fresh background context on both root and children
+	// clears the stale value without the prior run's keys. The production binary
+	// starts a fresh process each run, so this is a test-harness concern only.
+	rootCmd.SetContext(context.Background())
+	for _, c := range rootCmd.Commands() {
+		c.SetContext(context.Background())
+	}
 	_ = initCmd.Flags().Set("cmd", "x")       // reset to default; value is always valid
 	_ = listCmd.Flags().Set("short", "false") // reset list flags
 	_ = listCmd.Flags().Set("long", "false")

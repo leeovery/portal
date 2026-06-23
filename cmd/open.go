@@ -349,6 +349,11 @@ type tuiConfig struct {
 	insideTmux      bool
 	currentSession  string
 	serverStarted   bool
+	// progressReceiver is the §10.2 concurrent cold-boot route's channel-receive
+	// tea.Cmd. Set only on the cold + TUI path (where bootstrap was deferred to a
+	// goroutine); nil on every synchronous path, leaving the model's today
+	// behaviour intact.
+	progressReceiver tea.Cmd
 	// noColor is the NO_COLOR carve-out decision (§2.5), read ONCE here in the cmd
 	// layer (os.Getenv) so internal/tui stays env-free. It is the single inheritable
 	// colourless flag passed into tui.Deps.NoColor.
@@ -374,28 +379,29 @@ func noColorEnabled() bool {
 // the harness assemble the identical model.
 func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Model {
 	return tui.Build(tui.Deps{
-		Lister:          cfg.lister,
-		Killer:          cfg.killer,
-		Renamer:         cfg.renamer,
-		Creator:         cfg.sessionCreator,
-		ProjectStore:    cfg.projectStore,
-		ProjectEditor:   cfg.projectEditor,
-		AliasEditor:     cfg.aliasEditor,
-		Enumerator:      cfg.enumerator,
-		Reader:          cfg.reader,
-		PreviewAttacher: cfg.previewAttacher,
-		DirReader:       cfg.dirReader,
-		DirRunner:       cfg.dirRunner,
-		ModePersister:   cfg.modePersister,
-		CWD:             cfg.cwd,
-		InitialMode:     cfg.initialMode,
-		Appearance:      cfg.appearance,
-		InitialFilter:   initialFilter,
-		Command:         command,
-		ServerStarted:   cfg.serverStarted,
-		InsideTmux:      cfg.insideTmux,
-		CurrentSession:  cfg.currentSession,
-		NoColor:         cfg.noColor,
+		Lister:           cfg.lister,
+		Killer:           cfg.killer,
+		Renamer:          cfg.renamer,
+		Creator:          cfg.sessionCreator,
+		ProjectStore:     cfg.projectStore,
+		ProjectEditor:    cfg.projectEditor,
+		AliasEditor:      cfg.aliasEditor,
+		Enumerator:       cfg.enumerator,
+		Reader:           cfg.reader,
+		PreviewAttacher:  cfg.previewAttacher,
+		DirReader:        cfg.dirReader,
+		DirRunner:        cfg.dirRunner,
+		ModePersister:    cfg.modePersister,
+		CWD:              cfg.cwd,
+		InitialMode:      cfg.initialMode,
+		Appearance:       cfg.appearance,
+		InitialFilter:    initialFilter,
+		Command:          command,
+		ServerStarted:    cfg.serverStarted,
+		InsideTmux:       cfg.insideTmux,
+		CurrentSession:   cfg.currentSession,
+		NoColor:          cfg.noColor,
+		ProgressReceiver: cfg.progressReceiver,
 	})
 }
 
@@ -415,6 +421,23 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	client := tmuxClient(cmd)
 	gitResolver := &resolverAdapter{}
 	gen := session.NewNanoIDGenerator()
+
+	// §10.2 concurrent cold-boot route: PersistentPreRunE deferred the
+	// orchestrator on the cold + TUI path. Build the progress pipe, launch the
+	// orchestrator in a goroutine, and stream live per-step progress to the
+	// loading page over the channel. The model renders the loading page from
+	// frame one (serverStarted=true on this route is definitional — the server
+	// was not running, so EnsureServer will start it). On every synchronous path
+	// pipe is nil and openTUI keeps today's behaviour (serverStarted carried via
+	// the serverStartedKey context that the caller already read).
+	var pipe *bootstrapProgressPipe
+	if deferred := deferredBootstrapFromContext(cmd); deferred != nil {
+		pipe = newBootstrapProgressPipe()
+		pipe.start(cmd.Context(), deferred.runner)
+		// Cold by construction: the loading page must show, so force serverStarted
+		// regardless of the caller's (false, deferred) flag.
+		serverStarted = true
+	}
 
 	store, err := loadProjectStore()
 	if err != nil {
@@ -517,6 +540,12 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		// tui.Deps.NoColor and is inherited by every canvas-dependent surface.
 		noColor: noColorEnabled(),
 	}
+	// §10.2 concurrent cold-boot route: wire the channel-receive tea.Cmd so the
+	// loading-page model streams live per-step progress and the channel owns the
+	// terminal BootstrapCompleteMsg (Init does NOT synthesize it on this route).
+	if pipe != nil {
+		cfg.progressReceiver = pipe.receiver()
+	}
 	// Guard the persister assignment: a typed-nil *prefs.Store boxed into the
 	// tui.ModePersister interface would be non-nil, defeating buildTUIModel's nil
 	// check. Only wire the persister when the store actually loaded.
@@ -539,11 +568,16 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	// stderr (with alt-screen toggle) only after the loading page has been
 	// dismissed — direct writes during loading would corrupt the rendered UI.
 	stageBootstrapWarningsOnModel(&m)
-	// Bootstrap-before-TUI ordering: PersistentPreRunE has already run the
-	// orchestrator synchronously by the time openTUI is reached. The TUI's
-	// Init emits BootstrapCompleteMsg from its first event-loop tick, paired
-	// with a 1.2s LoadingMinElapsedMsg tea.Tick. Loading-page dismissal is
-	// gated on receipt of both — see internal/tui/model.go transitionFromLoading.
+	// Bootstrap ordering differs by route (§10.2):
+	//   - Synchronous (warm/CLI): PersistentPreRunE already ran the orchestrator,
+	//     so the model's Init emits BootstrapCompleteMsg from its first event-loop
+	//     tick (carrying staged warnings), paired with the 1.2s LoadingMinElapsedMsg
+	//     tick. Dismissal gates on both.
+	//   - Concurrent (cold/TUI): the orchestrator runs in the pipe's goroutine; the
+	//     channel streams BootstrapProgressMsg per step and the terminal
+	//     BootstrapCompleteMsg, so Init wires the receiver instead of synthesizing
+	//     the terminal event. Dismissal still gates on the 1.2s tick + the terminal
+	//     channel event.
 	// Bubble Tea v2 removed the tea.WithAltScreen() program option — the
 	// alternate screen is now declared via the tea.View.AltScreen field, set
 	// in tui.Model.View(). The launch is otherwise unchanged.

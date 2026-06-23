@@ -164,6 +164,25 @@ type BootstrapCompleteMsg struct {
 	Warnings []BootstrapWarning
 }
 
+// BootstrapProgressMsg is a single live per-step progress event streamed from
+// the bootstrap orchestrator over the §10.2 progress channel on the concurrent
+// cold-boot route. It is NON-terminal: its Update arm re-issues the progress
+// receiver so the next channel event is pulled, and never drives the
+// loading-page transition (only the terminal BootstrapCompleteMsg does).
+//
+// Index is the 1-based canonical bootstrap step number (1..11); Name is the
+// closed StepName. Label is the friendly-group placeholder (task 5-4 maps the
+// 11 raw steps onto the 5 friendly labels). RestoreN / RestoreM are the restore
+// per-session counter placeholders (task 5-3 wires the real values); both zero
+// today means "no per-item counter".
+type BootstrapProgressMsg struct {
+	Index    int
+	Name     string
+	Label    string // task 5-4 — friendly-label group
+	RestoreN int    // task 5-3 — restore per-session counter (current)
+	RestoreM int    // task 5-3 — restore per-session counter (total)
+}
+
 // SessionCreatedMsg is emitted when a session has been successfully created.
 type SessionCreatedMsg struct {
 	SessionName string
@@ -257,6 +276,21 @@ type Model struct {
 	serverStarted     bool
 	minElapsed        bool
 	bootstrapComplete bool
+
+	// progressReceiver is the §10.2 concurrent cold-boot route's channel-receive
+	// tea.Cmd: it blocks on a single channel receive and is re-issued by the
+	// BootstrapProgressMsg Update arm (the standard Bubble Tea external-channel
+	// pattern — a single blocking receive re-issued preserves exact event order
+	// even under command batching). When set, Init streams live per-step progress
+	// from the channel and does NOT synthesize the terminal BootstrapCompleteMsg —
+	// the channel owns it. When nil (the synchronous warm/CLI route), Init keeps
+	// synthesizing BootstrapCompleteMsg from its first tick exactly as today.
+	progressReceiver tea.Cmd
+
+	// latestProgress is the most recent per-step event ingested from the channel.
+	// task 5-5 renders the loading screen (tick-list + bar) from this; today it is
+	// stored so the Update arm has somewhere to land the event.
+	latestProgress BootstrapProgressMsg
 
 	// Bootstrap warnings: pending is set by openTUI before tea.NewProgram
 	// runs Init; Init folds it into the BootstrapCompleteMsg payload so
@@ -707,6 +741,21 @@ func WithServerStarted(started bool) Option {
 		if started {
 			m.activePage = PageLoading
 		}
+	}
+}
+
+// WithProgressReceiver wires the §10.2 concurrent cold-boot route's
+// channel-receive tea.Cmd. When set, Init streams live per-step bootstrap
+// progress from the channel (a BootstrapProgressMsg per step, the terminal
+// BootstrapCompleteMsg over the same channel) and does NOT synthesize
+// BootstrapCompleteMsg from its first tick — the channel owns the terminal
+// event. Production (cmd/open.go) wires this only on the cold + TUI path; the
+// synchronous warm/CLI route omits it, leaving the receiver nil and Init's
+// today-behaviour intact. A nil receiver is a no-op so omitting the option keeps
+// the synchronous path byte-for-byte unchanged.
+func WithProgressReceiver(receiver tea.Cmd) Option {
+	return func(m *Model) {
+		m.progressReceiver = receiver
 	}
 }
 
@@ -1817,17 +1866,26 @@ func (m Model) Init() tea.Cmd {
 		loadingPadTick := tea.Tick(LoadingMinDuration, func(time.Time) tea.Msg {
 			return LoadingMinElapsedMsg{}
 		})
-		// Bubble Tea launches AFTER PersistentPreRunE has finished synchronously,
-		// so the bootstrap orchestrator has already returned by the time Init
-		// runs. Emit BootstrapCompleteMsg from the first event-loop tick to
-		// satisfy the bootstrapComplete gate, carrying any pending warnings
-		// drained from the package-level sink by openTUI. Loading dismissal
-		// still requires the LoadingMinElapsedMsg tick (1.2s minimum-display
-		// floor); warnings are flushed to stderr at that moment via
-		// flushBufferedWarningsCmd.
-		pending := m.pendingBootstrapWarnings
-		bootstrapCompleteCmd := func() tea.Msg { return BootstrapCompleteMsg{Warnings: pending} }
-		cmds := []tea.Cmd{requestBg, detectTimeout, fetchSessions, loadingPadTick, bootstrapCompleteCmd}
+		cmds := []tea.Cmd{requestBg, detectTimeout, fetchSessions, loadingPadTick}
+		if m.progressReceiver != nil {
+			// §10.2 concurrent cold-boot route: the orchestrator runs in a
+			// goroutine and streams progress over a channel. Wire the receiver so
+			// channel events flow into Update as BootstrapProgressMsg / the
+			// terminal BootstrapCompleteMsg. Do NOT synthesize BootstrapCompleteMsg
+			// here — the channel owns the terminal event, so synthesizing it would
+			// dismiss the loading page before the orchestrator finished.
+			cmds = append(cmds, m.progressReceiver)
+		} else {
+			// Synchronous warm/CLI route: PersistentPreRunE has already run the
+			// orchestrator before this Init, so emit BootstrapCompleteMsg from the
+			// first event-loop tick to satisfy the bootstrapComplete gate, carrying
+			// any pending warnings drained from the package-level sink by openTUI.
+			// Loading dismissal still requires the LoadingMinElapsedMsg tick (1.2s
+			// minimum-display floor); warnings are flushed to stderr at that moment
+			// via flushBufferedWarningsCmd.
+			pending := m.pendingBootstrapWarnings
+			cmds = append(cmds, func() tea.Msg { return BootstrapCompleteMsg{Warnings: pending} })
+		}
 		if loadProjects != nil {
 			cmds = append(cmds, loadProjects)
 		}
@@ -1917,6 +1975,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.flushBufferedWarningsCmd()
 		}
 		return m, nil
+	case BootstrapProgressMsg:
+		// §10.2 concurrent cold-boot route: a live per-step progress event from
+		// the channel. Non-terminal — record it for the loading-screen render
+		// (task 5-5) and re-issue the receiver so the NEXT channel event is
+		// pulled. A single blocking receive re-issued preserves exact event
+		// order even though Bubble Tea batches commands. Never drives the
+		// transition: only the terminal BootstrapCompleteMsg does, which keeps
+		// the TUI inert during loading (§10.2 race containment). A nil receiver
+		// (defensive: a stray progress msg with no receiver wired) stops the
+		// loop rather than re-issuing nil.
+		m.latestProgress = msg
+		return m, m.progressReceiver
 	case BootstrapCompleteMsg:
 		m.bootstrapComplete = true
 		// Only buffer warnings when still on the loading page; warnings

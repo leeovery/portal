@@ -257,7 +257,18 @@ type Orchestrator struct {
 //   - Step 10 (Sweep) returns non-nil → logged via Warn and swallowed.
 //   - Step 11 (CleanStale) returns non-nil → logged via Warn and swallowed.
 func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
-	_ = ctx // reserved for Phase 6 timeout/cancel
+	// Resolve the §10.2 progress emitter once. On the synchronous warm/CLI
+	// route no emitter is wired, so emit is nil and emitStep is a no-op — the
+	// synchronous path is byte-for-byte unchanged. The concurrent cold-boot
+	// route (cmd/open.go) wires a non-nil emitter via WithProgressEmitter, and
+	// each step emits its StepEvent at the same site it logs "step complete",
+	// in step order. (ctx remains reserved for Phase 6 timeout/cancel.)
+	emit := progressEmitterFromContext(ctx)
+	emitStep := func(index int, name string) {
+		if emit != nil {
+			emit(StepEvent{Index: index, Name: name})
+		}
+	}
 
 	// Substitute a discard Logger when none was injected so step sites can
 	// call o.Logger.Warn / o.Logger.Error unconditionally. Tests that pass
@@ -281,6 +292,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		return false, nil, o.fatalf("start tmux server", err)
 	}
 	o.Logger.Info("step complete", "step", stepEnsureServer, log.Took(stepStart))
+	emitStep(1, stepEnsureServer)
 
 	// Step 2 — RegisterPortalHooks (fatal on failure).
 	o.Logger.Debug("step entering", "step", stepRegisterHooks)
@@ -289,6 +301,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		return serverStarted, nil, o.fatalf("register tmux hooks", err)
 	}
 	o.Logger.Info("step complete", "step", stepRegisterHooks, log.Took(stepStart))
+	emitStep(2, stepRegisterHooks)
 
 	// Step 3 — Set @portal-restoring (MUST precede steps 4 and 5; fatal on failure).
 	o.Logger.Debug("step entering", "step", stepSetRestoring)
@@ -297,6 +310,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		return serverStarted, nil, o.fatalf("set @portal-restoring marker", err)
 	}
 	o.Logger.Info("step complete", "step", stepSetRestoring, log.Took(stepStart))
+	emitStep(3, stepSetRestoring)
 
 	// Step 4 — SweepOrphanDaemons (best-effort). Enumerates every live
 	// `portal state daemon` process via pgrep, builds the legitimate set
@@ -314,6 +328,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec — best-effort sweep, next bootstrap retries.
 	}
 	o.Logger.Info("step complete", "step", stepSweepOrphanDaemons, log.Took(stepStart))
+	emitStep(4, stepSweepOrphanDaemons)
 
 	// Step 5 — EnsureSaver (best-effort).
 	o.Logger.Debug("step entering", "step", stepEnsureSaver)
@@ -324,6 +339,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec — saves paused, user not blocked.
 	}
 	o.Logger.Info("step complete", "step", stepEnsureSaver, log.Took(stepStart))
+	emitStep(5, stepEnsureSaver)
 
 	// Step 6 — Restore. The Restorer contract returns (corrupt, err) so
 	// the orchestrator can branch on a typed signal rather than walking
@@ -347,6 +363,9 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step returned non-corrupt error (treated as soft per Restorer contract)", "step", stepRestore, "error", restoreErr)
 	}
 	o.Logger.Info("step complete", "step", stepRestore, log.Took(stepStart))
+	// task 5-3 wires the real per-session N/M restore counter; today the
+	// restore step emits a single terminal step event like every other step.
+	emitStep(6, stepRestore)
 
 	// Step 7 — EagerSignalHydrate (best-effort). Runs while
 	// @portal-restoring is still set so daemon captureAndCommit
@@ -362,6 +381,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec.
 	}
 	o.Logger.Info("step complete", "step", stepEagerSignalHydrate, log.Took(stepStart))
+	emitStep(7, stepEagerSignalHydrate)
 
 	// Step 8 — Clear @portal-restoring (fatal on failure).
 	o.Logger.Debug("step entering", "step", stepClearRestoring)
@@ -370,6 +390,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		return serverStarted, warnings, o.fatalf("clear @portal-restoring marker", err)
 	}
 	o.Logger.Info("step complete", "step", stepClearRestoring, log.Took(stepStart))
+	emitStep(8, stepClearRestoring)
 
 	// Step 9 — CleanStaleMarkers (best-effort). Runs strictly after Clear
 	// (step 8) so it observes the post-restore tmux state, and strictly
@@ -384,6 +405,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec.
 	}
 	o.Logger.Info("step complete", "step", stepCleanStaleMarkers, log.Took(stepStart))
+	emitStep(9, stepCleanStaleMarkers)
 
 	// Step 10 — SweepOrphanFIFOs (best-effort). Runs after Clear so the
 	// daemon's suppression window has closed and after CleanStaleMarkers
@@ -399,6 +421,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec.
 	}
 	o.Logger.Info("step complete", "step", stepSweepOrphanFIFOs, log.Took(stepStart))
+	emitStep(10, stepSweepOrphanFIFOs)
 
 	// Step 11 — CleanStale (best-effort).
 	o.Logger.Debug("step entering", "step", stepCleanStale)
@@ -408,6 +431,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec.
 	}
 	o.Logger.Info("step complete", "step", stepCleanStale, log.Took(stepStart))
+	emitStep(11, stepCleanStale)
 
 	// Return — post-step boundary (not numbered). Step 6 never produces a
 	// fatal error; warnings already carry the user-facing surface. The

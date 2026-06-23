@@ -1,6 +1,7 @@
 package tui
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
@@ -67,6 +68,12 @@ type Deps struct {
 	ServerStarted  bool
 	InsideTmux     bool
 	CurrentSession string
+	// ProgressReceiver is the §10.2 concurrent cold-boot route's channel-receive
+	// tea.Cmd. cmd/open.go sets it only on the cold + TUI path (bootstrap deferred
+	// to a goroutine); nil on every synchronous path. When set, Build wires
+	// WithProgressReceiver so Init streams live per-step progress from the channel
+	// and the channel owns the terminal BootstrapCompleteMsg.
+	ProgressReceiver tea.Cmd
 	// NoColor is the NO_COLOR carve-out decision (§2.5). The cmd layer reads
 	// os.Getenv("NO_COLOR") (present and non-empty, the no-color.org convention)
 	// and injects the boolean here so internal/tui stays env-free. Build sets ONE
@@ -97,6 +104,9 @@ func Build(deps Deps) Model {
 	}
 	if deps.ServerStarted {
 		opts = append(opts, WithServerStarted(true))
+	}
+	if deps.ProgressReceiver != nil {
+		opts = append(opts, WithProgressReceiver(deps.ProgressReceiver))
 	}
 	if deps.ProjectEditor != nil {
 		opts = append(opts, WithProjectEditor(deps.ProjectEditor))
