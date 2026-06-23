@@ -130,23 +130,31 @@ func projectsKeymap() []keymapEntry {
 
 // previewKeymap returns the ordered §9.3 Preview keymap descriptor — the single
 // source of truth that drives the §9.1 full-screen overlay footer (the four nav
-// hints) and the per-page ? help reference. The bindings follow the §9 spatial
-// model (post the §9 chrome restructure, task 4-6/4-7): window is `←`/`→`, pane is
-// `Tab` (REPLACING the former `]`/`[` window + `Ctrl+←`/`Ctrl+→` pane — `Ctrl+←/→`
-// is hijacked by macOS Mission Control Spaces switching, so pane reverts to the
-// pre-rebuild `Tab` forward-cycle). The footer renders only the Core entries (the
-// four nav hints, space-separated); scroll keys are help-only (the footer has no
-// room and scroll is the obvious arrow default).
+// hints) and the per-page ? help reference (§8.5). The descriptor lists the
+// COMPLETE Preview keymap (§12.1): the help shows EVERY entry, the footer filters
+// to the Core entries. The bindings follow the §9 spatial model (post the §9
+// chrome restructure, task 4-6/4-7): window is `←`/`→`, pane is `Tab` (REPLACING
+// the former `]`/`[` window + `Ctrl+←`/`Ctrl+→` pane — `Ctrl+←/→` is hijacked by
+// macOS Mission Control Spaces switching, so pane reverts to the pre-rebuild `Tab`
+// forward-cycle). The footer renders only the Core entries (the four nav hints,
+// space-separated); the scroll/page/top/bottom keys are help-only (the footer has
+// no room and scrolling is the obvious arrow default).
+//
+// The top/bottom jumps (`Home`/`End`) are preview-owned (Update's handlePreviewKey
+// binds them) so they appear in the help reference even though the §12.2 nav
+// revision dropped Home/End from the LIST pages — the preview is a scrollback
+// viewport, not a list, and keeps the explicit top/bottom jumps.
 //
 // Glyphs follow the project key-glyph convention: `←→` (left+right arrows) for the
 // window pair, `⇥` (U+21E5 rightwards-arrow-to-bar / Tab) for the pane forward
-// cycle, `⏎` (U+23CE) for attach, `␣` (U+2423) for the space-back. The footer
-// reads Key directly; no HelpKey override is needed since the Key forms are
-// already glyphs.
+// cycle, `⏎` (U+23CE) for attach, `␣` (U+2423) for the space-back, and the literal
+// `Home`/`End` words for the top/bottom jumps. The footer reads Key directly; no
+// HelpKey override is needed since the Core Key forms are already glyphs.
 func previewKeymap() []keymapEntry {
 	return []keymapEntry{
 		{Key: "↑/↓", Action: "scroll", HelpAction: "Scroll up / down"},
 		{Key: "^↑/↓", Action: "page", HelpAction: "Page up / down"},
+		{Key: "Home/End", Action: "top/bottom", HelpAction: "Jump to top / bottom"},
 		{Key: "←→", Action: "window", HelpAction: "Prev / next window", Core: true},
 		{Key: "⇥", Action: "pane", HelpAction: "Next pane", Core: true},
 		{Key: "⏎", Action: "attach", HelpAction: "Attach this pane", Core: true},

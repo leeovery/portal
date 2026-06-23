@@ -354,6 +354,12 @@ type previewModel struct {
 	// model. When set the chrome drops its hue (no foreground SGR) but keeps
 	// the structure — marker, session, counters, hints, frame glyphs (§9.2).
 	colourless bool
+	// helpOpen tracks whether the §8.5 per-page `?` help is overlaid on the
+	// preview. While set the help panel is composited OVER the live preview View
+	// (the preview stays visible behind it — §9, NOT the §8.1 blank-screen path)
+	// and the preview is key-exclusive: `?` toggles it closed, `Esc` dismisses it
+	// (without backing out of the preview), and every other preview key is inert.
+	helpOpen bool
 }
 
 // NewPreviewModel performs the initial-open ordering inline:
@@ -584,7 +590,25 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 // delegation — so the arrows win over the viewport's plain-arrow horizontal
 // scroll and Tab is never swallowed by the viewport.
 func (m previewModel) handlePreviewKey(msg tea.KeyPressMsg) (handled bool, next previewModel, cmd tea.Cmd) {
+	// §8.5/§9.3: while the `?` help overlay is open the preview is key-exclusive.
+	// `?` toggles it closed, `Esc` dismisses it (WITHOUT falling through to the
+	// preview-back path), and every other key is consumed inert. Handled first so
+	// no other binding can leak while the overlay is up.
+	if m.helpOpen {
+		switch {
+		case isRuneKey(msg, "?"), keyIsCode(msg, tea.KeyEscape):
+			m.helpOpen = false
+			return true, m, nil
+		}
+		return true, m, nil
+	}
+
 	switch {
+	// `?` — open the §8.5 per-page help overlay. Bound before the back keys so it
+	// wins over any future `?`-bearing binding; consumes the key (no cmd).
+	case isRuneKey(msg, "?"):
+		m.helpOpen = true
+		return true, m, nil
 	// Esc / Space — back to the Sessions list.
 	case keyIsCode(msg, tea.KeyEscape), keyIsCode(msg, tea.KeySpace):
 		return true, m, func() tea.Msg { return previewDismissedMsg{} }
@@ -694,9 +718,46 @@ func (m previewModel) View() string {
 	// terminates every non-empty line so no SGR bleeds past it into the cyan border.
 	body := strings.Split(injectSGRResets(m.viewport.View()), "\n")
 
-	return renderJoinedPanel(
+	preview := renderJoinedPanel(
 		[][]string{{header}, body, {footer}},
 		previewBorderColorToken,
 		m.mode, m.colourless,
 	)
+
+	// §8.5/§9.3: the `?` help OVERLAYS the preview without blanking it — the
+	// composed preview stays the background and the descriptor-driven generic help
+	// panel is composited centred ON TOP (NOT the §8.1 cleared-canvas path the
+	// Sessions/Projects help uses). Skipped on the common closed path.
+	if m.helpOpen {
+		return overlayHelpOnPreview(preview, previewKeymap(), m.mode, m.colourless)
+	}
+	return preview
+}
+
+// overlayHelpOnPreview composites the §8.5 generic help panel centred OVER the
+// already-composed preview string, so the preview content stays visible behind it
+// (§9 — the Preview `?` help overlays, it does NOT blank). The full-screen preview
+// is the Z=0 background layer at (0,0); the help panel is the Z=1 foreground layer
+// centred over it. The lipgloss Compositor honours each layer's X/Y/Z and draws the
+// panel cells over the background, leaving every cell outside the panel showing the
+// preview underneath. The panel is the SAME descriptor-driven renderHelpModalContent
+// the Sessions/Projects help modals use, so the three help surfaces never drift.
+// Colourless flows through unchanged — the panel is composited verbatim over the
+// colourless preview with no new hue.
+func overlayHelpOnPreview(preview string, entries []keymapEntry, mode theme.Mode, colourless bool) string {
+	panel := renderHelpModalContent(entries, mode, colourless)
+
+	bgW := lipgloss.Width(preview)
+	bgH := lipgloss.Height(preview)
+	panelW := lipgloss.Width(panel)
+	panelH := lipgloss.Height(panel)
+
+	// Centre the panel over the preview, clamped so a panel wider/taller than the
+	// preview still lands at the top-left corner rather than a negative offset.
+	x := max(0, (bgW-panelW)/2)
+	y := max(0, (bgH-panelH)/2)
+
+	background := lipgloss.NewLayer(preview).X(0).Y(0).Z(0)
+	foreground := lipgloss.NewLayer(panel).X(x).Y(y).Z(1)
+	return lipgloss.NewCompositor(background, foreground).Render()
 }
