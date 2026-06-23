@@ -183,6 +183,26 @@ type BootstrapProgressMsg struct {
 	RestoreM int    // task 5-3 — restore per-session counter (total)
 }
 
+// BootstrapFatalMsg is the §10.5 terminal FATAL event streamed over the §10.2
+// progress channel on the concurrent cold/TUI route when a fatal bootstrap step
+// (EnsureServer, RegisterPortalHooks, SetRestoring, ClearRestoring) aborts the
+// boot. It is terminal — like BootstrapCompleteMsg it is NOT re-issued — but
+// instead of dismissing the loading page it drives the in-TUI error state: the
+// failed step's row gets a state.red ✗ marker, the one-line Message renders
+// beneath the step-list, and the model awaits a q/Esc quit (never transitioning
+// to the picker).
+//
+// FailedStep is the 1-based canonical index of the aborting step (1, 2, 3, or 8).
+// Message is the FatalError.UserMessage (the single user-facing line). Err carries
+// the underlying *bootstrap.FatalError as an error interface so internal/tui stays
+// decoupled from cmd/bootstrap; openTUI extracts it post-program (via errors.As)
+// and returns it so main.classify yields the code-1 exit with no double-print.
+type BootstrapFatalMsg struct {
+	FailedStep int
+	Message    string
+	Err        error
+}
+
 // SessionCreatedMsg is emitted when a session has been successfully created.
 type SessionCreatedMsg struct {
 	SessionName string
@@ -276,6 +296,19 @@ type Model struct {
 	serverStarted     bool
 	minElapsed        bool
 	bootstrapComplete bool
+
+	// §10.5 fatal cold-boot error state. fatalActive flips true on a
+	// BootstrapFatalMsg; once set the model stays on the loading page rendering
+	// the error frame (failed step ✗ in state.red + the one-line fatalMessage),
+	// stops gating on BootstrapCompleteMsg (it will never arrive), and binds
+	// q/Esc → tea.Quit. fatalStep is the 1-based aborting step index (drives the
+	// failed-label overlay), and fatalErr is the underlying *bootstrap.FatalError
+	// (carried as an error so openTUI can errors.As it post-program and return it
+	// for the non-zero exit classification).
+	fatalActive  bool
+	fatalStep    int
+	fatalMessage string
+	fatalErr     error
 
 	// progressReceiver is the §10.2 concurrent cold-boot route's channel-receive
 	// tea.Cmd: it blocks on a single channel receive and is re-issued by the
@@ -519,6 +552,17 @@ func (m Model) MinElapsed() bool {
 // BootstrapComplete reports whether BootstrapCompleteMsg has been received, for testing.
 func (m Model) BootstrapComplete() bool {
 	return m.bootstrapComplete
+}
+
+// FatalError returns the §10.5 fatal cold-boot error carried after a
+// BootstrapFatalMsg, or nil when no fatal occurred. openTUI reads it after the
+// Bubble Tea program returns and returns it so Execute/main.classify map the
+// underlying *bootstrap.FatalError to the code-1 exit (single stderr line, no
+// double-print). The error is the underlying cause (an interface so internal/tui
+// stays decoupled from cmd/bootstrap); callers recover the concrete type via
+// errors.As.
+func (m Model) FatalError() error {
+	return m.fatalErr
 }
 
 // BufferedWarnings returns the warnings buffered between
@@ -1978,6 +2022,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case LoadingMinElapsedMsg:
 		m.minElapsed = true
+		// §10.5: once a fatal aborted the boot the model is parked in the error
+		// state — never dismiss the loading page into the picker, even if the
+		// min-elapsed gate fires after the fatal.
+		if m.fatalActive {
+			return m, nil
+		}
 		if m.bootstrapComplete && m.activePage == PageLoading {
 			m.transitionFromLoading()
 			return m, m.flushBufferedWarningsCmd()
@@ -2001,6 +2051,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loadingProgress = m.loadingProgress.Apply(msg)
 		return m, m.progressReceiver
 	case BootstrapCompleteMsg:
+		// §10.5: a fatal already parked the model in the error state. The
+		// concurrent route never sends BOTH a fatal and a complete (the pipe maps
+		// the terminal channel event to one or the other), but guard defensively so
+		// a stray complete can never dismiss the error frame into a picker.
+		if m.fatalActive {
+			return m, nil
+		}
 		m.bootstrapComplete = true
 		// Only buffer warnings when still on the loading page; warnings
 		// that arrive after dismissal (orphaned BootstrapCompleteMsg) are
@@ -2012,6 +2069,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.transitionFromLoading()
 			return m, m.flushBufferedWarningsCmd()
 		}
+		return m, nil
+	case BootstrapFatalMsg:
+		// §10.5 fatal cold-boot abort: a fatal step returned over the §10.2
+		// channel. Enter the in-TUI error state — record the failed step + the
+		// one-line message + the underlying error, and STOP gating on
+		// BootstrapCompleteMsg (it will never arrive on this route). The model
+		// stays on PageLoading: it must NEVER flip to PageSessions on a fatal (no
+		// half-restored picker, ever). viewLoading renders the error frame and the
+		// PageLoading key arm binds q/Esc → tea.Quit from here. Do NOT re-issue the
+		// receiver — this is a terminal event.
+		m.fatalActive = true
+		m.fatalStep = msg.FailedStep
+		m.fatalMessage = msg.Message
+		m.fatalErr = msg.Err
 		return m, nil
 	case ProjectsLoadedMsg:
 		var setItemsCmd tea.Cmd
@@ -2142,7 +2213,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Delegate to the active view
 	switch m.activePage {
 	case PageLoading:
-		if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyIsCtrlC(keyMsg) {
+		keyMsg, isKey := msg.(tea.KeyPressMsg)
+		if isKey && keyIsCtrlC(keyMsg) {
+			return m, tea.Quit
+		}
+		// §10.5 error state: q AND Esc both quit (non-zero — openTUI returns the
+		// carried *bootstrap.FatalError). Outside the error state the loading page
+		// stays inert (animation only, §10.2 race containment), so these keys only
+		// quit once the fatal is active.
+		if m.fatalActive && isKey && (isRuneKey(keyMsg, "q") || keyIsCode(keyMsg, tea.KeyEscape)) {
 			return m, tea.Quit
 		}
 		return m, nil
@@ -3726,8 +3805,16 @@ func (m Model) viewString() string {
 // every other page. The render degrades on a narrow/short terminal (§2.7) and
 // drops the canvas + hues under the NO_COLOR carve-out (§2.5).
 func (m Model) viewLoading() string {
+	view := m.loadingProgress.View()
+	if m.fatalActive {
+		// §10.5 error frame: the failed step's row flips to a state.red ✗, the bar
+		// freezes at the fraction reached at fatal time, and the one-line message +
+		// quit hint render beneath the step-list (renderLoadingScreen folds Message
+		// in). No page transition — the model stays on PageLoading awaiting q/Esc.
+		view = m.loadingProgress.FailedView(m.fatalStep, m.fatalMessage)
+	}
 	return renderLoadingScreen(
-		m.loadingProgress.View(),
+		view,
 		m.contentWidth(),
 		m.contentHeight(),
 		m.canvasMode,

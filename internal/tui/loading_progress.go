@@ -52,6 +52,11 @@ const (
 	LabelActive
 	// LabelDone: every constituent step of this label has completed.
 	LabelDone
+	// LabelFailed: a fatal bootstrap step in this label's group aborted the
+	// boot (§10.5). It renders the state.red ✗ marker. Only ever set on the
+	// error-frame view (FailedView), never reached by the normal accumulator
+	// projection (View).
+	LabelFailed
 )
 
 // labelOrder is the stable top-to-bottom render order of the five labels.
@@ -120,9 +125,15 @@ type LoadingLabel struct {
 // LoadingProgressView is the render input task 5-5 consumes: the bar fraction
 // (0.0..1.0) and the ordered five labels with their states + counter. Pure data
 // — no styling, no glyphs.
+//
+// Message is the §10.5 fatal one-line message: empty on the normal loading view,
+// populated by FailedView when a fatal cold-boot step aborts the boot. When set,
+// exactly one label carries LabelFailed (the failed step's friendly group) and
+// the render layer draws the message line + a quit hint beneath the step-list.
 type LoadingProgressView struct {
 	BarFraction float64
 	Labels      []LoadingLabel
+	Message     string
 }
 
 // LoadingProgress is the pure accumulator for the §10.4 mapping. Fold each
@@ -212,6 +223,48 @@ func (p LoadingProgress) View() LoadingProgressView {
 		})
 	}
 	return v
+}
+
+// FailedView projects the §10.5 fatal error-frame render input from the
+// accumulated state: every step that completed before the fatal stays done (✓),
+// the failed step's friendly label (mapped from failedStep via the §10.4 table)
+// flips to LabelFailed (✗), and every label after it stays pending (·) — those
+// steps never ran. The bar is frozen at the fraction reached at fatal time (the
+// completed-step count), NOT advanced past it. message is the
+// FatalError.UserMessage rendered beneath the step-list.
+//
+// failedStep is the 1-based canonical index of the aborting step (1, 2, 3, or 8 —
+// the four fatal steps). An out-of-range index leaves no label failed (defensive:
+// the render still shows a frozen bar + message), but production always passes a
+// valid fatal-step index.
+func (p LoadingProgress) FailedView(failedStep int, message string) LoadingProgressView {
+	failedLabel := LabelForStepIndex(failedStep)
+	v := LoadingProgressView{
+		BarFraction: float64(len(p.completedSteps)) / float64(totalBootstrapSteps),
+		Labels:      make([]LoadingLabel, 0, len(labelOrder)),
+		Message:     message,
+	}
+	for _, text := range labelOrder {
+		state := p.labelState(text)
+		if text == failedLabel {
+			state = LabelFailed
+		}
+		v.Labels = append(v.Labels, LoadingLabel{
+			Text:    text,
+			State:   state,
+			Counter: p.counterFor(text),
+		})
+	}
+	return v
+}
+
+// LabelForStepIndex maps a 1-based canonical step index to its §10.4 friendly
+// label via the static step→label table. It is the index-only sibling of
+// LabelForStep (which discriminates the dual-mapped restore step on RestoreM);
+// the fatal steps (1, 2, 3, 8) are never the dual-mapped restore step, so the
+// static table mapping is exact. An out-of-range index returns "".
+func LabelForStepIndex(index int) string {
+	return stepLabelTable[index]
 }
 
 // labelState computes a label's done/active/pending state. The streamed events

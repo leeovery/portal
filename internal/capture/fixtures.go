@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,12 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
+
+// errFixtureFatal is the canned underlying cause for the loading-error fixture's
+// mocked fatal. The capture only renders the FatalError.UserMessage (set on the
+// BootstrapFatalMsg directly), so this is a placeholder cause for the error
+// interface — the harness never exits, so the value is never classified.
+var errFixtureFatal = errors.New("permission denied")
 
 // Fixture is a named, fully in-memory seam set for the capture harness. It
 // bundles the canned read seams (lister, project store) so a test can assert
@@ -53,6 +60,12 @@ type Fixture struct {
 	// capture stays deterministically on PageLoading. Empty for every non-loading
 	// fixture.
 	loadingEvents []tui.BootstrapProgressMsg
+	// fatalEvent seeds the §10.5 fatal cold-boot error frame: after the
+	// loadingEvents stream, the receiver emits this terminal BootstrapFatalMsg so
+	// the model enters the error state (failed step ✗ + one-line message). Set ONLY
+	// by the loading-error fixture; its zero value (FailedStep==0) means "no fatal"
+	// and the receiver streams progress-then-blocks as usual.
+	fatalEvent tui.BootstrapFatalMsg
 }
 
 // Deps maps the fixture onto the shared tui.Deps seam set. Every tmux seam is a
@@ -81,15 +94,23 @@ func (f *Fixture) Deps() tui.Deps {
 		ServerStarted: f.serverStarted,
 		// Wire the loading-screen progress receiver only when the fixture seeds
 		// events — it streams the seeded mid-restore sequence then blocks so the
-		// loading page never dismisses (no terminal BootstrapCompleteMsg).
-		ProgressReceiver: loadingReceiverOrNil(f.loadingEvents),
+		// loading page never dismisses (no terminal BootstrapCompleteMsg). The
+		// loading-error fixture additionally seeds a terminal fatal so the receiver
+		// streams progress then emits the §10.5 BootstrapFatalMsg.
+		ProgressReceiver: loadingReceiverOrNil(f.loadingEvents, f.fatalEvent),
 	}
 }
 
-// loadingReceiverOrNil returns the streaming-then-blocking loading-progress
-// receiver for the seeded events, or nil when there are none (so non-loading
-// fixtures leave ProgressReceiver unwired and keep the synchronous path).
-func loadingReceiverOrNil(events []tui.BootstrapProgressMsg) tea.Cmd {
+// loadingReceiverOrNil returns the loading-progress receiver for the seeded
+// events, or nil when there are none (so non-loading fixtures leave
+// ProgressReceiver unwired and keep the synchronous path). When a fatal is seeded
+// (FailedStep > 0) it returns the §10.5 fatal receiver (streams progress then
+// emits the terminal BootstrapFatalMsg); otherwise the mid-restore
+// streaming-then-blocking loading receiver.
+func loadingReceiverOrNil(events []tui.BootstrapProgressMsg, fatal tui.BootstrapFatalMsg) tea.Cmd {
+	if fatal.FailedStep > 0 {
+		return loadingFatalReceiver(events, fatal)
+	}
 	if len(events) == 0 {
 		return nil
 	}
@@ -126,6 +147,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return previewScreenFixture(), nil
 	case "loading-screen":
 		return loadingScreenFixture(), nil
+	case "loading-error":
+		return loadingErrorFixture(), nil
 	default:
 		return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 	}
@@ -137,7 +160,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", "loading-error", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -560,5 +583,41 @@ func loadingScreenFixture() *Fixture {
 		initialMode:   prefs.ModeFlat,
 		serverStarted: true,
 		loadingEvents: events,
+	}
+}
+
+// loadingErrorFixture builds the deterministic "loading-error" fixture: the §10.5
+// fatal cold-boot error frame, MOCKED at implementation (there is no §15.1 Paper
+// oracle — the capture IS the mock). Steps 1–2 complete (✓ Started tmux server,
+// ✓ Registered hooks), then a fatal aborts at step 3 (SetRestoring) — so that
+// step's row carries the state.red ✗ marker, the trailing labels stay pending (·,
+// they never ran), the one-line FatalError.UserMessage renders beneath the
+// step-list in state.red, and a `q quit · esc quit` hint sits at the bottom. The
+// bar freezes at the fraction reached at fatal time (2/11) — not completed.
+//
+// The mid-then-fatal state is reached by folding a real BootstrapProgressMsg
+// sequence (steps 1–2) through the model's accumulator, then a terminal
+// BootstrapFatalMsg (FailedStep 3 → the "Registered hooks" group label) — the
+// same §10.2 path the live channel drives. The receiver streams these then BLOCKS,
+// so the page parks on the error frame and NEVER transitions to the picker. The
+// session list is empty (never shown). Like every fixture it NEVER opens a tmux
+// server or touches ~/.config/portal.
+func loadingErrorFixture() *Fixture {
+	events := []tui.BootstrapProgressMsg{
+		{Index: 1, Name: "EnsureServer"},
+		{Index: 2, Name: "RegisterPortalHooks"},
+	}
+	return &Fixture{
+		name:          "loading-error",
+		Lister:        &fakeLister{sessions: nil},
+		projectStore:  &fakeProjectStore{projects: nil},
+		initialMode:   prefs.ModeFlat,
+		serverStarted: true,
+		loadingEvents: events,
+		fatalEvent: tui.BootstrapFatalMsg{
+			FailedStep: 3,
+			Message:    "Portal failed to set @portal-restoring marker: permission denied",
+			Err:        errFixtureFatal,
+		},
 	}
 }

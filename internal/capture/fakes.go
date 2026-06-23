@@ -38,6 +38,28 @@ func loadingProgressReceiver(events []tui.BootstrapProgressMsg) tea.Cmd {
 	}
 }
 
+// loadingFatalReceiver builds the §10.5 fatal-frame receiver: it streams the
+// seeded progress events (the steps that completed before the abort) then emits
+// the terminal tui.BootstrapFatalMsg (the failed step + one-line message) and
+// BLOCKS forever. The model folds each progress event into its accumulator (the
+// real Update path) then enters the error state on the fatal — so the
+// loading-error capture renders the §10.5 frame (failed step ✗ in state.red +
+// message + quit hint) deterministically, never transitioning to the picker.
+//
+// Each invocation pops one queued tea.Msg; once drained the receive blocks,
+// freezing the error frame for the screenshot. The fatal is mocked here (§10.5 —
+// there is no Paper oracle), so the capture IS the implementation mock.
+func loadingFatalReceiver(events []tui.BootstrapProgressMsg, fatal tui.BootstrapFatalMsg) tea.Cmd {
+	ch := make(chan tea.Msg, len(events)+1)
+	for _, e := range events {
+		ch <- e
+	}
+	ch <- fatal
+	return func() tea.Msg {
+		return <-ch
+	}
+}
+
 // fakeLister is the canned SessionLister seam — it returns a fixed session set
 // with no tmux server contact.
 type fakeLister struct {

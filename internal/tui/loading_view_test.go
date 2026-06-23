@@ -84,6 +84,307 @@ func TestLoadingScreen_RendersBlockBannerCaretBarAndList(t *testing.T) {
 	}
 }
 
+// blockLeadingPad returns the count of leading spaces on a rendered line after
+// ANSI stripping — the left offset of the line's first visible cell within the
+// JoinVertical block. Used to assert element centring (a narrower element is
+// padded with leading spaces by JoinVertical(Center)).
+func blockLeadingPad(line string) int {
+	stripped := ansi.Strip(line)
+	return len(stripped) - len(strings.TrimLeft(stripped, " "))
+}
+
+// firstLineContaining returns the first block line whose stripped form contains
+// sub, or "" if none. Used to pick out an element's row from the composed block.
+func firstLineContaining(lines []string, sub string) string {
+	for _, line := range lines {
+		if strings.Contains(ansi.Strip(line), sub) {
+			return line
+		}
+	}
+	return ""
+}
+
+// firstBarLine returns the first block line that is the thick progress bar — a
+// contiguous run of block glyphs (filled + track, both █) with no internal
+// spaces, distinct from the wordmark's spaced █ letterforms.
+func firstBarLine(lines []string) string {
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(ansi.Strip(line))
+		if trimmed == "" {
+			continue
+		}
+		allBlock := true
+		for _, r := range trimmed {
+			if string(r) != loadingBarFilledGlyph {
+				allBlock = false
+				break
+			}
+		}
+		if allBlock {
+			return line
+		}
+	}
+	return ""
+}
+
+// TestLoadingScreen_BarWidthEqualsWordmarkWidth pins the layout-correction
+// invariant: the thick progress bar spans the FULL width of the rendered block
+// wordmark (no longer a fixed 30 that hangs off the wide wordmark's left edge).
+// The bar's rendered width must equal the block wordmark's rendered width so the
+// bar reads as the logo's full-length underline.
+func TestLoadingScreen_BarWidthEqualsWordmarkWidth(t *testing.T) {
+	wordmark := renderBlockWordmark(theme.Dark, false)
+	wordmarkW := lipgloss.Width(wordmark)
+
+	bar := renderLoadingBar(midRestoreProgress().View().BarFraction, 80, wordmarkW, theme.Dark, false)
+	barW := lipgloss.Width(bar)
+
+	if barW != wordmarkW {
+		t.Errorf("bar width = %d, want %d (the bar must span the full block-wordmark width)", barW, wordmarkW)
+	}
+}
+
+// TestLoadingScreen_BlockColumnIsCentered pins the §10.3 centring: the wordmark,
+// bar, and tick-list block are centred as a COLUMN relative to each other (each
+// element's horizontal centre aligns), not left-flushed to the widest element.
+// The wordmark and bar are the widest (equal width) so they sit flush at the
+// block's left edge; the narrower tick-list is padded with leading spaces by
+// JoinVertical(Center) so its centre aligns with theirs — i.e. it is NOT
+// left-flush.
+func TestLoadingScreen_BlockColumnIsCentered(t *testing.T) {
+	block := composeLoadingBlock(midRestoreProgress().View(), 80, 24, theme.Dark, false)
+	lines := strings.Split(block, "\n")
+	blockWidth := lipgloss.Width(block)
+
+	wordmarkLine := firstLineContaining(lines, strings.TrimRight(loadingWordmark[0], " "))
+	barLine := firstBarLine(lines)
+	listLine := firstLineContaining(lines, LabelStartedTmuxServer)
+	if wordmarkLine == "" || barLine == "" || listLine == "" {
+		t.Fatalf("could not locate all three elements in the block:\n%s", ansi.Strip(block))
+	}
+
+	// The wordmark and bar are the widest elements (equal width) → flush left.
+	if pad := blockLeadingPad(wordmarkLine); pad != 0 {
+		t.Errorf("wordmark line is not flush at the block left edge: leading pad = %d", pad)
+	}
+	if pad := blockLeadingPad(barLine); pad != 0 {
+		t.Errorf("bar line is not flush at the block left edge: leading pad = %d", pad)
+	}
+
+	// The list is narrower → JoinVertical(Center) pads it with leading spaces so
+	// its centre aligns with the wordmark/bar centre. Assert it is centred (left
+	// pad ≈ (blockWidth - listWidth)/2), NOT left-flush (pad 0 would be the old
+	// Left-join bug).
+	listWidth := lipgloss.Width(ansi.Strip(strings.TrimRight(listLine, " ")))
+	wantPad := (blockWidth - listWidth) / 2
+	gotPad := blockLeadingPad(listLine)
+	if gotPad == 0 {
+		t.Errorf("list row is left-flush (pad 0) — the block is left-aligned, not centred (regression)")
+	}
+	if gotPad < wantPad-1 || gotPad > wantPad+1 {
+		t.Errorf("list row not centred: leading pad = %d, want ≈ %d (block width %d, list width %d)", gotPad, wantPad, blockWidth, listWidth)
+	}
+}
+
+// TestLoadingScreen_SectionGapsAreTwoRows pins the §10.3 2-row section gaps: at a
+// height with room to spare there are exactly two blank rows between the wordmark
+// and the bar, and two between the bar and the list (the design's ~34px gap ≈ 2
+// terminal rows, up from the former 1-row gap).
+func TestLoadingScreen_SectionGapsAreTwoRows(t *testing.T) {
+	block := composeLoadingBlock(midRestoreProgress().View(), 80, 24, theme.Dark, false)
+	lines := strings.Split(block, "\n")
+
+	// The bar is the unique row that is a CONTIGUOUS run of block glyphs (filled +
+	// track, both █) with no internal spaces — distinct from the wordmark rows,
+	// which are █ letterforms separated by single-space gaps. isBarRow detects it.
+	isBarRow := func(line string) bool {
+		trimmed := strings.TrimSpace(ansi.Strip(line))
+		if trimmed == "" {
+			return false
+		}
+		for _, r := range trimmed {
+			if string(r) != loadingBarFilledGlyph {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Locate the last wordmark row, the bar row, and the first list row by index.
+	barIdx, listIdx := -1, -1
+	lastWordmarkIdx := -1
+	for i, line := range lines {
+		stripped := ansi.Strip(line)
+		if strings.Contains(stripped, strings.TrimRight(loadingWordmark[len(loadingWordmark)-1], " ")) {
+			lastWordmarkIdx = i
+		}
+		if barIdx == -1 && isBarRow(line) {
+			barIdx = i
+		}
+		if listIdx == -1 && strings.Contains(stripped, LabelStartedTmuxServer) {
+			listIdx = i
+		}
+	}
+	if lastWordmarkIdx == -1 || barIdx == -1 || listIdx == -1 {
+		t.Fatalf("could not locate wordmark/bar/list rows in block:\n%s", ansi.Strip(block))
+	}
+
+	// Two blank rows between the wordmark's last row and the bar.
+	if gap := barIdx - lastWordmarkIdx - 1; gap != 2 {
+		t.Errorf("wordmark→bar gap = %d rows, want 2", gap)
+	}
+	// Two blank rows between the bar and the first list row.
+	if gap := listIdx - barIdx - 1; gap != 2 {
+		t.Errorf("bar→list gap = %d rows, want 2", gap)
+	}
+}
+
+// TestLoadingScreen_TickRowsLeftAlignedWithinList pins that the tick-list rows
+// stay LEFT-aligned within the (centred) list block: the ✓/◐/·/✗ glyph slots line
+// up down a common left column. Measured on the list element alone (renderTickList)
+// so it is independent of the outer centring.
+func TestLoadingScreen_TickRowsLeftAlignedWithinList(t *testing.T) {
+	view := midRestoreProgress().View()
+	list := renderTickList(view.Labels, 80, theme.Dark, false)
+	for i, line := range strings.Split(list, "\n") {
+		if pad := blockLeadingPad(line); pad != 0 {
+			t.Errorf("tick row %d is not left-flush within the list block: leading pad = %d (icons must share a column)", i, pad)
+		}
+	}
+}
+
+// errorFrameView builds the §10.5 fatal error-frame view: step 1 done, a fatal at
+// step 3 (Registered hooks → ✗), the wide one-line message, the trailing labels
+// pending.
+func errorFrameView() LoadingProgressView {
+	var p LoadingProgress
+	p = p.Apply(BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
+	return p.FailedView(3, "Portal failed to set @portal-restoring marker: permission denied")
+}
+
+// TestLoadingScreen_ErrorFrameCentredComposition pins the §10.5 layout fix: the
+// message + hint are SEPARATE centred elements (not folded into the left-joined
+// list), so the wide message becomes a centred caption and the compact steps-block
+// stays centred — no element sticks out asymmetrically. With the message as the
+// widest element, the wordmark/bar/steps-list all centre relative to it; the
+// steps-list rows are therefore NOT left-flush (they were yanked left by the long
+// message in the pre-fix Left join).
+func TestLoadingScreen_ErrorFrameCentredComposition(t *testing.T) {
+	view := errorFrameView()
+	block := composeLoadingBlock(view, 80, 24, theme.Dark, false)
+	lines := strings.Split(block, "\n")
+	blockWidth := lipgloss.Width(block)
+
+	// The message is the widest element → flush at the block left edge (pad 0).
+	msgLine := firstLineContaining(lines, "Portal failed to set")
+	if msgLine == "" {
+		t.Fatalf("error block missing the fatal message:\n%s", ansi.Strip(block))
+	}
+	if pad := blockLeadingPad(msgLine); pad != 0 {
+		t.Errorf("message caption is not flush at the block left edge: leading pad = %d", pad)
+	}
+
+	// The steps-list rows are centred (padded), NOT left-flush against the message.
+	listLine := firstLineContaining(lines, LabelStartedTmuxServer)
+	if listLine == "" {
+		t.Fatalf("error block missing the step-list:\n%s", ansi.Strip(block))
+	}
+	if pad := blockLeadingPad(listLine); pad == 0 {
+		t.Error("step-list row is left-flush in the error frame — the long message yanked it left (regression)")
+	}
+
+	// The quit hint is centred beneath the message: its leading and trailing pad
+	// within the block width are equal (±1), and it is not flush at col 0.
+	hintLine := firstLineContaining(lines, "q quit")
+	if hintLine == "" {
+		t.Fatalf("error block missing the quit hint:\n%s", ansi.Strip(block))
+	}
+	hintStripped := ansi.Strip(hintLine)
+	leadPad := lipgloss.Width(hintStripped) - lipgloss.Width(strings.TrimLeft(hintStripped, " "))
+	trailPad := blockWidth - lipgloss.Width(strings.TrimRight(hintStripped, " "))
+	if leadPad == 0 {
+		t.Error("quit hint is left-flush (pad 0) — not centred in the error frame")
+	}
+	if diff := leadPad - trailPad; diff < -1 || diff > 1 {
+		t.Errorf("quit hint not centred: leading pad %d vs trailing pad %d (block width %d)", leadPad, trailPad, blockWidth)
+	}
+}
+
+// TestLoadingScreen_ErrorFrameNeverOverflowsHeight pins that the error frame —
+// with its extra message + hint + spacer rows — still never overflows the content
+// height across the short-terminal range (the footer is budget-shed first).
+func TestLoadingScreen_ErrorFrameNeverOverflowsHeight(t *testing.T) {
+	view := errorFrameView()
+	for _, h := range []int{24, 14, 12, 9, 7, 6} {
+		out := renderLoadingScreen(view, 80, h, theme.Dark, false)
+		if got := lipgloss.Height(out); got > h {
+			t.Errorf("height %d: error frame is %d rows tall (overflow)", h, got)
+		}
+	}
+}
+
+// TestLoadingScreen_CentredPaddingCarriesCanvasNoIslands pins the §1 owned-canvas
+// invariant after the centring change: JoinVertical(Center) pads narrower
+// elements (the tick-list, the quit hint) with bare spaces on BOTH sides, and
+// those padding cells must carry the canvas background once the production
+// fillCanvas pipeline (backfill + trailing pad) runs — no terminal-bg island sits
+// beside the bar/list. Checked in LIGHT mode where an unpainted island would be
+// glaring against the light canvas. Walks every content row and asserts no
+// printable cell is rendered with the background dropped to the terminal default.
+func TestLoadingScreen_CentredPaddingCarriesCanvasNoIslands(t *testing.T) {
+	for _, frame := range []struct {
+		name string
+		view LoadingProgressView
+	}{
+		{"normal", midRestoreProgress().View()},
+		{"error", errorFrameView()},
+	} {
+		t.Run(frame.name, func(t *testing.T) {
+			mode := theme.Light
+			placed := lipgloss.Place(80, 24, lipgloss.Center, lipgloss.Center,
+				composeLoadingBlock(frame.view, 80, 24, mode, false))
+
+			canvasBg := canvasBgParams(theme.MV.Canvas.ColorFor(mode))
+			parser := ansi.NewParser()
+			canvas := lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(mode))
+
+			for i, raw := range strings.Split(placed, "\n") {
+				// Mirror the production fillCanvas per-line treatment.
+				bf := backfillCanvasBackground(raw, canvasBg, parser)
+				padded := padLineToCanvasWidth(bf, 80, canvas)
+				if island := bareCanvasRun(padded); island != "" {
+					t.Errorf("row %d has a canvas island (unpainted cell %q) — centring padding leaked the terminal bg", i, island)
+				}
+			}
+		})
+	}
+}
+
+// bareCanvasRun decodes a rendered line and returns the first printable run
+// rendered with NO background SGR active (a terminal-bg island), or "" if every
+// printable cell carries a background.
+func bareCanvasRun(line string) string {
+	parser := ansi.NewParser()
+	src := []byte(line)
+	state := byte(0)
+	bgActive := false
+	var run []byte
+	for len(src) > 0 {
+		seq, width, n, newState := ansi.DecodeSequence(src, state, parser)
+		if n == 0 {
+			break
+		}
+		if ansi.HasCsiPrefix(seq) && seq[len(seq)-1] == 'm' {
+			bgActive = sgrBackgroundActive(bgActive, sgrParamsList(string(seq)))
+		} else if width > 0 && !bgActive {
+			run = append(run, seq...)
+		}
+		src = src[n:]
+		state = newState
+	}
+	return string(run)
+}
+
 // TestLoadingScreen_CaretIsFlushAcrossBannerRows pins the review-fix invariant:
 // the violet caret is a single FLUSH 5-row vertical bar, not a per-row appended
 // glyph that jogs on the ragged-width bottom row (the broken-comma regression).
@@ -362,9 +663,10 @@ func TestLoadingScreen_DegradesNarrowWithoutOverflow(t *testing.T) {
 // TestLoadingScreen_ShortNoOverflow asserts a short terminal never overflows its
 // height — the composed block fits within the content height. The bar (1 row) +
 // the 5-row tick-list is the irreducible floor (6 rows); below that the terminal
-// is below minimum support. The height degrade drops the inter-section gaps, then
-// the (now taller, 5-row) block banner — collapsing it to the single-row form and
-// finally dropping the wordmark entirely — so the step-list never overflows.
+// is below minimum support. The height degrade drops the two 2-row inter-section
+// gaps first (saving 2×2 rows), then the (taller, 5-row) block banner — collapsing
+// it to the single-row form and finally dropping the wordmark entirely — so the
+// step-list never overflows.
 func TestLoadingScreen_ShortNoOverflow(t *testing.T) {
 	view := midRestoreProgress().View()
 	for _, h := range []int{24, 13, 12, 8, 6} {

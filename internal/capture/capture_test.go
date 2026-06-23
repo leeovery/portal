@@ -1,10 +1,14 @@
 package capture_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/capture"
+	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -159,6 +163,72 @@ func TestLoadingScreenFixture(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("FixtureNames() %v does not include loading-screen", capture.FixtureNames())
+	}
+}
+
+// TestLoadingErrorFixture verifies the §10.5 fatal cold-boot error fixture
+// (MOCKED — no §15.1 Paper oracle): it parks the production model on PageLoading
+// (serverStarted), and driving its seeded receiver events (steps 1–2 done, then a
+// terminal fatal at step 3) through the real Update path enters the in-TUI error
+// state — the failed step's row renders the state.red ✗, the one-line message + a
+// quit hint render beneath the step-list, and the page never transitions to the
+// picker. It is registered in the discoverable name list.
+func TestLoadingErrorFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("loading-error")
+	if err != nil {
+		t.Fatalf("FixtureByName(loading-error): %v", err)
+	}
+
+	// Pin the dark appearance (as the capturetool does for --appearance dark) so the
+	// detect-or-timeout first-paint gate is already resolved and View() paints the
+	// real frame rather than the neutral held blank.
+	deps := fx.Deps()
+	deps.Appearance = prefs.AppearanceDark
+	m := tui.Build(deps)
+	if m.ActivePage() != tui.PageLoading {
+		t.Errorf("ActivePage() = %d, want PageLoading (the loading-error fixture must park on the loading page)", m.ActivePage())
+	}
+
+	// Drive the seeded receiver events through the real Update path: steps 1–2
+	// (progress) then the terminal fatal. The fixture wires loadingFatalReceiver,
+	// so each pull yields the next seeded msg in order.
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"})
+	model, _ = model.Update(tui.BootstrapFatalMsg{
+		FailedStep: 3,
+		Message:    "Portal failed to set @portal-restoring marker: permission denied",
+		Err:        errors.New("permission denied"),
+	})
+
+	got := model.(tui.Model)
+	if got.ActivePage() != tui.PageLoading {
+		t.Errorf("ActivePage() = %d, want PageLoading (fatal must never transition to the picker)", got.ActivePage())
+	}
+	if got.FatalError() == nil {
+		t.Error("FatalError() is nil after the seeded fatal; the error state was not entered")
+	}
+
+	visible := ansi.Strip(got.View().Content)
+	if !strings.Contains(visible, "✗") {
+		t.Errorf("loading-error frame missing the ✗ failure glyph:\n%s", visible)
+	}
+	if !strings.Contains(visible, "Portal failed to set @portal-restoring marker") {
+		t.Errorf("loading-error frame missing the one-line fatal message:\n%s", visible)
+	}
+	if !strings.Contains(visible, "quit") {
+		t.Errorf("loading-error frame missing the quit hint:\n%s", visible)
+	}
+
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "loading-error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include loading-error", capture.FixtureNames())
 	}
 }
 

@@ -406,9 +406,21 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 }
 
 // processTUIResult handles the result of a TUI run.
-// If the user selected a session, it connects via the given connector.
-// If the user quit without selecting, it returns nil.
+//
+// §10.5 fatal cold-boot: if the model carries a fatal (a fatal bootstrap step
+// aborted the boot on the concurrent cold/TUI route, and q/Esc quit the error
+// frame), return that fatal — the underlying *bootstrap.FatalError — BEFORE any
+// connect. Execute writes its single UserMessage line and main.classify maps it
+// to code 1 with no double-print, exactly as the synchronous warm/CLI path does;
+// returning the SAME *bootstrap.FatalError instance keeps the exit byte-for-byte
+// identical. A fatal model has no selection, so this also guarantees no connect.
+//
+// Otherwise: if the user selected a session, connect via the given connector; if
+// the user quit without selecting, return nil (unchanged).
 func processTUIResult(model tui.Model, connector SessionConnector) error {
+	if fatal := model.FatalError(); fatal != nil {
+		return fatal
+	}
 	selected := model.Selected()
 	if selected == "" {
 		return nil

@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -52,6 +53,15 @@ type bootstrapProgress struct {
 	ServerStarted bool
 	Warnings      []bootstrap.Warning
 	Fatal         error // task 5-6 — fatal cold-boot step error
+
+	// FailedStep is the 1-based index of the aborting fatal step (task 5-6),
+	// carried on the terminal event alongside Fatal. It is the last emitted step
+	// index + 1: a fatal step (1, 2, 3, or 8) emits no step-complete event for
+	// itself and nothing after, so the next un-emitted index is the one that
+	// failed. Zero on a successful run. Carried on the EVENT (a value copy) so the
+	// receiver reads it without touching the goroutine's struct fields — the 5-2
+	// carry-forward race-avoidance contract.
+	FailedStep int
 }
 
 // bootstrapChannelClosedMsg is returned by the receiver tea.Cmd once the
@@ -92,6 +102,13 @@ func newBootstrapProgressPipe() *bootstrapProgressPipe {
 // and closes the channel — on success OR fatal — so the receiver always observes
 // a close and never leaks a blocked receive.
 func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runner) {
+	// lastStep tracks the highest step index emitted so far. A fatal step (1, 2,
+	// 3, or 8) emits no step-complete event for itself and nothing after, so on a
+	// fatal abort lastStep+1 is the index of the step that failed (task 5-6). It
+	// is written and read on the single orchestrator goroutine (the emitter runs
+	// synchronously inside Run, and the terminal-event read happens after Run
+	// returns on the same goroutine), so no synchronisation is required.
+	lastStep := 0
 	emitCtx := bootstrap.WithProgressEmitter(ctx, func(ev bootstrap.StepEvent) {
 		// task 5-3: a restore per-session StepEvent carries RestoreN/M (Index 6 /
 		// "Restore"); other step events leave them zero. task 5-4 maps Index→
@@ -100,6 +117,9 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 		// sessions against a TUI that stopped draining (early Quit) would block
 		// the orchestrator goroutine forever on a naked send. The select makes the
 		// send abandon on cancellation so the goroutine always returns.
+		if ev.Index > lastStep {
+			lastStep = ev.Index
+		}
 		p.send(ctx, bootstrapProgress{
 			Step:     ev,
 			RestoreN: ev.RestoreN,
@@ -113,11 +133,20 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 		p.serverStarted = started
 		p.warnings = warnings
 		p.err = err
+		// On a fatal abort, the failed step is the first un-emitted index
+		// (lastStep+1). Carried on the EVENT so the receiver reads a value copy,
+		// never the goroutine's struct fields (the 5-2 carry-forward race-avoidance
+		// contract). Zero on success (err == nil).
+		failedStep := 0
+		if err != nil {
+			failedStep = lastStep + 1
+		}
 		p.send(ctx, bootstrapProgress{
 			Done:          true,
 			ServerStarted: started,
 			Warnings:      warnings,
 			Fatal:         err,
+			FailedStep:    failedStep,
 		})
 	}()
 }
@@ -151,12 +180,18 @@ func (p *bootstrapProgressPipe) receiver() tea.Cmd {
 			return bootstrapChannelClosedMsg{}
 		}
 		if ev.Done {
-			// task 5-6 maps ev.Fatal onto a loading-page error msg; task 5-7 rides
-			// soft warnings onto the terminal event. Today the terminal event is the
-			// plain complete marker that drives the gated transition.
-			//
-			// bootstrap.Warning and tui.BootstrapWarning are both aliases of
-			// warning.Warning, so the slice passes straight through with no copy.
+			// task 5-6 (§10.5): a fatal terminal event maps onto a
+			// tui.BootstrapFatalMsg so the loading-page model enters the error state
+			// (failed step ✗ + one-line message) and openTUI extracts ev.Fatal for
+			// the non-zero exit — NOT a BootstrapCompleteMsg (which would dismiss the
+			// page into the picker). The failed step + message ride the EVENT (value
+			// copies), not the pipe's struct fields, per the 5-2 carry-forward.
+			if ev.Fatal != nil {
+				return fatalMsgFromEvent(ev)
+			}
+			// task 5-7 rides soft warnings onto the terminal event. bootstrap.Warning
+			// and tui.BootstrapWarning are both aliases of warning.Warning, so the
+			// slice passes straight through with no copy.
 			return tui.BootstrapCompleteMsg{Warnings: ev.Warnings}
 		}
 		return tui.BootstrapProgressMsg{
@@ -166,6 +201,26 @@ func (p *bootstrapProgressPipe) receiver() tea.Cmd {
 			RestoreN: ev.RestoreN,
 			RestoreM: ev.RestoreM,
 		}
+	}
+}
+
+// fatalMsgFromEvent builds the §10.5 loading-page fatal message from a terminal
+// fatal event. The one-line message is the FatalError.UserMessage (the single
+// user-facing line the spec mandates); on the off-chance ev.Fatal is not a
+// *bootstrap.FatalError (the orchestrator always wraps fatals, so this is
+// defensive), it falls back to err.Error(). The underlying error rides through on
+// Err so openTUI can errors.As it back to *bootstrap.FatalError for the code-1
+// exit classification.
+func fatalMsgFromEvent(ev bootstrapProgress) tui.BootstrapFatalMsg {
+	message := ev.Fatal.Error()
+	var fatal *bootstrap.FatalError
+	if errors.As(ev.Fatal, &fatal) {
+		message = fatal.UserMessage
+	}
+	return tui.BootstrapFatalMsg{
+		FailedStep: ev.FailedStep,
+		Message:    message,
+		Err:        ev.Fatal,
 	}
 }
 
