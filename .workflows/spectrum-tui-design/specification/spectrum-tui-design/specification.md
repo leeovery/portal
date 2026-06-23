@@ -5,6 +5,7 @@
 > - **Superseded:** §13.1 — "outline = focused, fill = editing" and "the Name field in edit mode also turns violet-filled"; §8.2 chip states — focused = "`accent.violet` outline + a violet `✕`", editing = "`accent.violet` fill + cursor", indicator "`◉ EDIT MODE` (`accent.violet`)"; §8.4 rename input "violet `▌` cursor".
 > - **Current:** state is carried by **border colour, never a fill** — **grey** (`border.separator`, unfocused/normal) → **`accent.violet`** (focused) → **`accent.orange`** (editing, + live cursor); the **`◉ EDIT MODE`** header indicator is **`accent.orange`**, shown only while editing. **Inputs render rounded corners, chips render square** (the element-type differentiator). Chips drop the inline `✕` (removal is `x` on a focused chip; the footer carries `x remove`). The rename modal's single always-editing input is therefore **`accent.orange`** with the `◉ EDIT MODE` badge (§8.4 / task 3-10). See the revised §8.2 and §13.1.
 > - **Also added this session:** `↑`/`↓` as field-navigation aliases in the edit modal (§8.2 navigate mode) — a convenience requested during implementation; and the editing-in-place footer right-aligns the `empty on save = delete` consequence note (matches the §8.2 reference frame).
+> - **§9 preview chrome restructure (design refinement, task 4-6):** the preview is now a **full-screen joined panel** (the modal `renderJoinedPanel` shape, single-tone `accent.cyan`, rounded, no fill) with **header / body / footer** compartments — the nav hints moved from the header into a **footer** (`accent.blue` glyphs + `text.detail` labels, space-separated). The window/pane **bindings changed** to a spatial model: window is `←`/`→` and pane is `Ctrl+←`/`Ctrl+→` (was `]`/`[` and `Tab`); the marker is `◉` (was `⊙`). Footer reads `←→ window  ⌃←→ pane  ⏎ attach  ␣ back`. (Supersedes the earlier `⇥ pane` glyph note.)
 > Bodies below were edited in place to match; this block is the only annotation. Original wording is recoverable via `git log -p`.
 
 ## Specification
@@ -368,14 +369,16 @@ A centred panel mirroring the kill modal's destructive treatment: a **`state.red
 A **full-screen overlay** (not a modal — the blank-screen rule of §8.1 does not apply), reached by `Space` on a session. Its chrome is **`accent.cyan`-framed** to signal **"peek mode"** — deliberately distinct from the violet main UI, preserving the `preview-visual-distinction` mode-signal in the MV palette.
 
 ### 9.1 Chrome
-- **Top bar:** `⊙ preview` (`accent.cyan`) + `<session>` (`text.primary`) + `Window x/y · Pane x/y` (`text.detail`), with right-aligned nav hints `[ ] window · ↹ pane · ⏎ attach · ␣ back` (`text.detail`).
-- A **cyan border** (`accent.cyan`) frames the read-only content area.
+The preview is a **full-screen joined panel** — the same hand-drawn rounded panel shape as the modals (`renderJoinedPanel`), but **single-tone `accent.cyan`**: the border AND the header/footer dividers all render in `accent.cyan`, joined to the sides via `├`/`┤`, rounded corners, **no fill** in any compartment (a glyph border can't carry a fill — §13.1). Three compartments:
+- **Header:** `◉ preview` (`accent.cyan`) + `<session>` (`text.primary`) + `Window x/y · Pane x/y` (`text.detail`).
+- **Body:** the read-only captured content (§9.2), inset from the border.
+- **Footer:** the nav hints — key glyph in `accent.blue` + label in `text.detail`, **space-separated** (the shared footer convention, no middots): `←→ window  ⌃←→ pane  ⏎ attach  ␣ back`.
 
 ### 9.2 Captured content (out-of-theme)
 The pane content is the **real captured ANSI output**, rendered read-only — **not** theme tokens (the documented palette exception, §2.9/§15.1). Only the chrome is themed; the content is whatever the pane actually printed. On the owned canvas, the `canvas` colour paints the preview **chrome** (cyan frame + top bar) and surrounding margins; the **content area is left as the untouched real ANSI** — a captured pane with no background of its own shows the canvas behind it, one with its own ANSI background shows that. The cyan chrome's contrast against the canvas is covered by the §2.9 re-verification pass.
 
 ### 9.3 Keys & overlays
-Scroll `↑↓` + `Ctrl+↑/↓`; `Tab` next pane; `]`/`[` window; `⏎` attach (this pane); `Space`/`Esc` back (§12). A `?` help opened here **overlays** the preview (doesn't blank it — §8.1).
+Scroll `↑↓` + `Ctrl+↑/↓`; **`←`/`→` window** (prev/next); **`Ctrl+←`/`Ctrl+→` pane** (prev/next); `⏎` attach (this pane); `Space`/`Esc` back (§12). A `?` help opened here **overlays** the preview (doesn't blank it — §8.1).
 
 ---
 
