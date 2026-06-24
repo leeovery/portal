@@ -115,26 +115,13 @@ type SessionItem struct {
 	CatchAll bool
 }
 
-// FilterValue returns the session name for filtering.
+// FilterValue returns the session name for filtering. It is the only method
+// bubbles/list consumes off the item (list.Item); the session name, window
+// count, and attached marker are produced solely by the delegate's live render
+// path (SessionDelegate.renderSessionRow), where the marker text flows from the
+// single attachedMarker const.
 func (i SessionItem) FilterValue() string {
 	return i.Session.Name
-}
-
-// Title returns the session name for display.
-func (i SessionItem) Title() string {
-	return i.Session.Name
-}
-
-// Description returns the window count with correct pluralization
-// and the attached badge if the session is attached.
-func (i SessionItem) Description() string {
-	label := windowLabel(i.Session.Windows)
-
-	if i.Session.Attached {
-		return label + "  ● attached"
-	}
-
-	return label
 }
 
 // HeaderItem is a group heading rendered as a real, non-selectable list row in

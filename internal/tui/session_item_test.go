@@ -26,56 +26,12 @@ func TestSessionItem(t *testing.T) {
 		var _ list.Item = tui.SessionItem{}
 	})
 
-	t.Run("Title returns session name", func(t *testing.T) {
-		item := tui.SessionItem{Session: tmux.Session{Name: "myproject", Windows: 2, Attached: false}}
-
-		got := item.Title()
-
-		if got != "myproject" {
-			t.Errorf("Title() = %q, want %q", got, "myproject")
-		}
-	})
-
-	t.Run("Description returns window count and attached badge", func(t *testing.T) {
-		tests := []struct {
-			name    string
-			session tmux.Session
-			want    string
-		}{
-			{
-				name:    "plural windows without attached",
-				session: tmux.Session{Name: "dev", Windows: 3, Attached: false},
-				want:    "3 windows",
-			},
-			{
-				name:    "singular window",
-				session: tmux.Session{Name: "dev", Windows: 1, Attached: false},
-				want:    "1 window",
-			},
-			{
-				name:    "plural windows with attached",
-				session: tmux.Session{Name: "dev", Windows: 5, Attached: true},
-				want:    "5 windows  ● attached",
-			},
-			{
-				name:    "singular window with attached",
-				session: tmux.Session{Name: "dev", Windows: 1, Attached: true},
-				want:    "1 window  ● attached",
-			},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				item := tui.SessionItem{Session: tt.session}
-
-				got := item.Description()
-
-				if got != tt.want {
-					t.Errorf("Description() = %q, want %q", got, tt.want)
-				}
-			})
-		}
-	})
+	// The session name, window-count label, and attached badge are produced
+	// solely by the live render path (SessionDelegate.Render → renderSessionRow);
+	// the former SessionItem.Title()/Description() projection methods were dead
+	// (no production caller, list.Item needs only FilterValue) and are gone. Their
+	// vocabulary is asserted against the live render in TestSessionDelegate (name,
+	// "N window(s)", and the "● attached" marker sourced from attachedMarker).
 }
 
 func TestSessionItemGroupMetadata(t *testing.T) {
@@ -106,16 +62,24 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 		}
 	})
 
-	t.Run("returns the session name from Title regardless of group fields", func(t *testing.T) {
+	t.Run("the live render emits the session name regardless of group fields", func(t *testing.T) {
+		// Group metadata is build-layer only; the live render path
+		// (SessionDelegate.Render) draws the session name irrespective of
+		// GroupKey/GroupHeading/CatchAll.
 		item := tui.SessionItem{
 			Session:      tmux.Session{Name: "dev", Windows: 3, Attached: true},
 			GroupKey:     "/home/me/project",
 			GroupHeading: "project",
 			CatchAll:     true,
 		}
+		d := tui.SessionDelegate{}
+		m := list.New([]list.Item{item}, d, 80, 10)
 
-		if got := item.Title(); got != "dev" {
-			t.Errorf("Title() = %q, want %q", got, "dev")
+		var buf bytes.Buffer
+		d.Render(&buf, m, 0, item)
+
+		if got := ansi.Strip(buf.String()); !strings.Contains(got, "dev") {
+			t.Errorf("render output missing session name 'dev': %q", got)
 		}
 	})
 

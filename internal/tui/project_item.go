@@ -25,19 +25,12 @@ type ProjectItem struct {
 	Project project.Project
 }
 
-// FilterValue returns the project name for filtering.
+// FilterValue returns the project name for filtering. It is the only method
+// bubbles/list consumes off the item (list.Item); the project name and path are
+// produced solely by the delegate's live render path
+// (ProjectDelegate.renderRowLine).
 func (i ProjectItem) FilterValue() string {
 	return i.Project.Name
-}
-
-// Title returns the project name for display.
-func (i ProjectItem) Title() string {
-	return i.Project.Name
-}
-
-// Description returns the project path for display.
-func (i ProjectItem) Description() string {
-	return i.Project.Path
 }
 
 // ProjectDelegate implements list.ItemDelegate for rendering project items.

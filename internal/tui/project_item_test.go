@@ -25,25 +25,12 @@ func TestProjectItem(t *testing.T) {
 		}
 	})
 
-	t.Run("Title returns project name", func(t *testing.T) {
-		item := tui.ProjectItem{Project: project.Project{Name: "myapp", Path: "/home/user/myapp"}}
-
-		got := item.Title()
-
-		if got != "myapp" {
-			t.Errorf("Title() = %q, want %q", got, "myapp")
-		}
-	})
-
-	t.Run("Description returns project path", func(t *testing.T) {
-		item := tui.ProjectItem{Project: project.Project{Name: "portal", Path: "/home/user/code/portal"}}
-
-		got := item.Description()
-
-		if got != "/home/user/code/portal" {
-			t.Errorf("Description() = %q, want %q", got, "/home/user/code/portal")
-		}
-	})
+	// The project name (line 1) and path (line 2) are produced solely by the live
+	// render path (ProjectDelegate.Render → renderRowLine); the former
+	// ProjectItem.Title()/Description() projection methods were dead (no
+	// production caller, list.Item needs only FilterValue) and are gone. Their
+	// vocabulary is asserted against the live render in TestProjectDelegate
+	// ("renders project name and path").
 }
 
 func TestProjectDelegate(t *testing.T) {
