@@ -21,8 +21,8 @@ import (
 // step 3 (Registered hooks)" and marks that label failed for the error frame.
 func failedAtRegisteredHooks() LoadingProgressView {
 	var p LoadingProgress
-	p = p.Apply(BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
-	p = p.Apply(BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"})
+	p = p.Apply(BootstrapProgressMsg{Index: 1})
+	p = p.Apply(BootstrapProgressMsg{Index: 2})
 	return p.FailedView(3, "Portal failed to set @portal-restoring marker: permission denied")
 }
 

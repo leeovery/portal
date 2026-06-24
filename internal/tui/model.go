@@ -170,17 +170,17 @@ type BootstrapCompleteMsg struct {
 // receiver so the next channel event is pulled, and never drives the
 // loading-page transition (only the terminal BootstrapCompleteMsg does).
 //
-// Index is the 1-based canonical bootstrap step number (1..11); Name is the
-// closed StepName. Label is the friendly-group placeholder (task 5-4 maps the
-// 11 raw steps onto the 5 friendly labels). RestoreN / RestoreM are the restore
-// per-session counter placeholders (task 5-3 wires the real values); both zero
-// today means "no per-item counter".
+// Index is the 1-based canonical bootstrap step number (1..11) — the stable key
+// the consumer maps to a §10.4 friendly label. The mapping lives in exactly one
+// place (loading_progress.go's stepLabelTable / LabelForStep), so the wire
+// message deliberately carries NO friendly label and NO raw StepName: a copy of
+// either here would be a second, drift-prone encoding of the same §10.4 mapping.
+// RestoreN / RestoreM are the restore per-session counter (current / total);
+// both zero means "no per-item counter".
 type BootstrapProgressMsg struct {
 	Index    int
-	Name     string
-	Label    string // task 5-4 — friendly-label group
-	RestoreN int    // task 5-3 — restore per-session counter (current)
-	RestoreM int    // task 5-3 — restore per-session counter (total)
+	RestoreN int // restore per-session counter (current)
+	RestoreM int // restore per-session counter (total)
 }
 
 // BootstrapFatalMsg is the §10.5 terminal FATAL event streamed over the §10.2

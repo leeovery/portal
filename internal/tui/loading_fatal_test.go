@@ -40,7 +40,7 @@ var errFatalSentinel = errors.New("fatal cold-boot abort sentinel")
 func fatalModelOnLoading(t *testing.T) tea.Model {
 	t.Helper()
 	lister := &mockSessionLister{sessions: []tmux.Session{}}
-	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"} })
+	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -54,8 +54,8 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 	model := fatalModelOnLoading(t)
 
 	// Stream steps 1–2 (done), then a fatal at step 3 (SetRestoring).
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2})
 	model, _ = model.Update(tui.BootstrapFatalMsg{
 		FailedStep: 3,
 		Message:    "Portal failed to set @portal-restoring marker: permission denied",
@@ -97,7 +97,7 @@ func TestFatalMsg_StaysOnLoadingPage(t *testing.T) {
 	model := fatalModelOnLoading(t)
 
 	model, _ = model.Update(tui.LoadingMinElapsedMsg{})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
 	model, _ = model.Update(tui.BootstrapFatalMsg{FailedStep: 1, Message: "boom", Err: errFatalSentinel})
 
 	if model.(tui.Model).ActivePage() != tui.PageLoading {
@@ -105,7 +105,7 @@ func TestFatalMsg_StaysOnLoadingPage(t *testing.T) {
 	}
 
 	// A late terminal complete or further progress must not rescue it into the picker.
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2})
 	model, _ = model.Update(tui.BootstrapCompleteMsg{})
 	if model.(tui.Model).ActivePage() != tui.PageLoading {
 		t.Errorf("model left PageLoading after a fatal; got %d", model.(tui.Model).ActivePage())
@@ -150,7 +150,7 @@ func TestFatalMsg_CarriesFatalForOpenTUI(t *testing.T) {
 // nil FatalError — the synchronous/normal complete path must not look fatal.
 func TestNoFatal_FatalErrorNil(t *testing.T) {
 	model := fatalModelOnLoading(t)
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
 	model, _ = model.Update(tui.BootstrapCompleteMsg{})
 	if got := model.(tui.Model).FatalError(); got != nil {
 		t.Errorf("FatalError() non-nil on a non-fatal run; got %v", got)

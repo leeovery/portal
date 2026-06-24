@@ -10,6 +10,7 @@ package tui_test
 
 import (
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/leeovery/portal/internal/tui"
@@ -48,18 +49,18 @@ func TestStepMapsToFriendlyLabel(t *testing.T) {
 		event     tui.BootstrapProgressMsg
 		wantLabel string
 	}{
-		{"step 1 EnsureServer", tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"}, tui.LabelStartedTmuxServer},
-		{"step 2 RegisterPortalHooks", tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"}, tui.LabelRegisteredHooks},
-		{"step 3 SetRestoring", tui.BootstrapProgressMsg{Index: 3, Name: "SetRestoring"}, tui.LabelRegisteredHooks},
-		{"step 4 SweepOrphanDaemons", tui.BootstrapProgressMsg{Index: 4, Name: "SweepOrphanDaemons"}, tui.LabelRegisteredHooks},
-		{"step 5 EnsureSaver", tui.BootstrapProgressMsg{Index: 5, Name: "EnsureSaver"}, tui.LabelRegisteredHooks},
-		{"step 6 Restore skeleton (M>0)", tui.BootstrapProgressMsg{Index: 6, Name: "Restore", RestoreN: 1, RestoreM: 3}, tui.LabelRestoringSessions},
-		{"step 6 Restore complete (M==0)", tui.BootstrapProgressMsg{Index: 6, Name: "Restore"}, tui.LabelReplayingScrollback},
-		{"step 7 EagerSignalHydrate", tui.BootstrapProgressMsg{Index: 7, Name: "EagerSignalHydrate"}, tui.LabelReplayingScrollback},
-		{"step 8 ClearRestoring", tui.BootstrapProgressMsg{Index: 8, Name: "ClearRestoring"}, tui.LabelRunningResumeCommands},
-		{"step 9 CleanStaleMarkers", tui.BootstrapProgressMsg{Index: 9, Name: "CleanStaleMarkers"}, tui.LabelRunningResumeCommands},
-		{"step 10 SweepOrphanFIFOs", tui.BootstrapProgressMsg{Index: 10, Name: "SweepOrphanFIFOs"}, tui.LabelRunningResumeCommands},
-		{"step 11 CleanStale", tui.BootstrapProgressMsg{Index: 11, Name: "CleanStale"}, tui.LabelRunningResumeCommands},
+		{"step 1 EnsureServer", tui.BootstrapProgressMsg{Index: 1}, tui.LabelStartedTmuxServer},
+		{"step 2 RegisterPortalHooks", tui.BootstrapProgressMsg{Index: 2}, tui.LabelRegisteredHooks},
+		{"step 3 SetRestoring", tui.BootstrapProgressMsg{Index: 3}, tui.LabelRegisteredHooks},
+		{"step 4 SweepOrphanDaemons", tui.BootstrapProgressMsg{Index: 4}, tui.LabelRegisteredHooks},
+		{"step 5 EnsureSaver", tui.BootstrapProgressMsg{Index: 5}, tui.LabelRegisteredHooks},
+		{"step 6 Restore skeleton (M>0)", tui.BootstrapProgressMsg{Index: 6, RestoreN: 1, RestoreM: 3}, tui.LabelRestoringSessions},
+		{"step 6 Restore complete (M==0)", tui.BootstrapProgressMsg{Index: 6}, tui.LabelReplayingScrollback},
+		{"step 7 EagerSignalHydrate", tui.BootstrapProgressMsg{Index: 7}, tui.LabelReplayingScrollback},
+		{"step 8 ClearRestoring", tui.BootstrapProgressMsg{Index: 8}, tui.LabelRunningResumeCommands},
+		{"step 9 CleanStaleMarkers", tui.BootstrapProgressMsg{Index: 9}, tui.LabelRunningResumeCommands},
+		{"step 10 SweepOrphanFIFOs", tui.BootstrapProgressMsg{Index: 10}, tui.LabelRunningResumeCommands},
+		{"step 11 CleanStale", tui.BootstrapProgressMsg{Index: 11}, tui.LabelRunningResumeCommands},
 	}
 
 	for _, tc := range cases {
@@ -80,7 +81,7 @@ func TestBarAdvancesEveryStep(t *testing.T) {
 		t.Fatalf("initial bar fraction = %v; want 0", f)
 	}
 	for step := 1; step <= 11; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step, Name: "step"})
+		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
 		want := float64(step) / 11.0
 		got := acc.View().BarFraction
 		if math.Abs(got-want) > floatEps {
@@ -112,7 +113,7 @@ func TestLabelStateTransitions(t *testing.T) {
 
 	// After step 1 COMPLETES: "Started tmux server" done; the frontier advances
 	// to the now-executing "Registered hooks" group (active); rest pending.
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
+	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 1})
 	assertStates(t, acc.View(), map[string]tui.LabelState{
 		tui.LabelStartedTmuxServer:     tui.LabelDone,
 		tui.LabelRegisteredHooks:       tui.LabelActive,
@@ -124,7 +125,7 @@ func TestLabelStateTransitions(t *testing.T) {
 	// After steps 2-5 complete: "Registered hooks" done; frontier at
 	// "Restoring sessions" (step 6 not yet complete).
 	for step := 2; step <= 5; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step, Name: "step"})
+		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
 	}
 	assertStates(t, acc.View(), map[string]tui.LabelState{
 		tui.LabelStartedTmuxServer:     tui.LabelDone,
@@ -136,7 +137,7 @@ func TestLabelStateTransitions(t *testing.T) {
 
 	// After step 11 (the last real step): every label is done; no active frontier.
 	for step := 6; step <= 11; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step, Name: "step"})
+		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
 	}
 	assertStates(t, acc.View(), map[string]tui.LabelState{
 		tui.LabelStartedTmuxServer:     tui.LabelDone,
@@ -155,10 +156,10 @@ func TestLabelStateTransitions(t *testing.T) {
 // step (5) completes — at step 4 it is still active, not yet done.
 func TestMultiStepLabelStaysActiveUntilLastStep(t *testing.T) {
 	acc := feed(tui.LoadingProgress{},
-		tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"},
-		tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"},
-		tui.BootstrapProgressMsg{Index: 3, Name: "SetRestoring"},
-		tui.BootstrapProgressMsg{Index: 4, Name: "SweepOrphanDaemons"},
+		tui.BootstrapProgressMsg{Index: 1},
+		tui.BootstrapProgressMsg{Index: 2},
+		tui.BootstrapProgressMsg{Index: 3},
+		tui.BootstrapProgressMsg{Index: 4},
 	)
 	// Through step 4 (steps 2-4 of the 2-5 group done), "Registered hooks" is
 	// still active because step 5 has not completed.
@@ -166,7 +167,7 @@ func TestMultiStepLabelStaysActiveUntilLastStep(t *testing.T) {
 		t.Errorf("Registered hooks state after step 4 = %v; want active (last step 5 not done)", got)
 	}
 
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 5, Name: "EnsureSaver"})
+	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 5})
 	if got := labelState(acc.View(), tui.LabelRegisteredHooks); got != tui.LabelDone {
 		t.Errorf("Registered hooks state after step 5 = %v; want done", got)
 	}
@@ -177,12 +178,12 @@ func TestMultiStepLabelStaysActiveUntilLastStep(t *testing.T) {
 // events; no other label carries a counter.
 func TestRestoringSessionsCounter(t *testing.T) {
 	acc := feed(tui.LoadingProgress{},
-		tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"},
-		tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"},
-		tui.BootstrapProgressMsg{Index: 3, Name: "SetRestoring"},
-		tui.BootstrapProgressMsg{Index: 4, Name: "SweepOrphanDaemons"},
-		tui.BootstrapProgressMsg{Index: 5, Name: "EnsureSaver"},
-		tui.BootstrapProgressMsg{Index: 6, Name: "Restore", RestoreN: 1, RestoreM: 3},
+		tui.BootstrapProgressMsg{Index: 1},
+		tui.BootstrapProgressMsg{Index: 2},
+		tui.BootstrapProgressMsg{Index: 3},
+		tui.BootstrapProgressMsg{Index: 4},
+		tui.BootstrapProgressMsg{Index: 5},
+		tui.BootstrapProgressMsg{Index: 6, RestoreN: 1, RestoreM: 3},
 	)
 	v := acc.View()
 	if got := counterText(v, tui.LabelRestoringSessions); got != "1/3" {
@@ -212,7 +213,7 @@ func TestRestoringSessionsCounter(t *testing.T) {
 	}
 
 	// N advances against M as later skeleton events arrive.
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 6, Name: "Restore", RestoreN: 3, RestoreM: 3})
+	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 6, RestoreN: 3, RestoreM: 3})
 	if got := counterText(acc.View(), tui.LabelRestoringSessions); got != "3/3" {
 		t.Errorf("Restoring sessions counter after N=3 = %q; want %q", got, "3/3")
 	}
@@ -220,7 +221,7 @@ func TestRestoringSessionsCounter(t *testing.T) {
 	// The trailing completion tick (RestoreM==0) is what marks step 6 done:
 	// "Restoring sessions" flips to done and the bar advances to 6/11. The
 	// counter stays sticky at the last N/M.
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 6, Name: "Restore"})
+	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 6})
 	done := acc.View()
 	if got := labelState(done, tui.LabelRestoringSessions); got != tui.LabelDone {
 		t.Errorf("after completion tick Restoring sessions state = %v; want done", got)
@@ -239,13 +240,13 @@ func TestRestoringSessionsCounter(t *testing.T) {
 // while the bar still advances through step 6.
 func TestEmptyRestoreSuppressesCounterAndTicksDone(t *testing.T) {
 	acc := feed(tui.LoadingProgress{},
-		tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"},
-		tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"},
-		tui.BootstrapProgressMsg{Index: 3, Name: "SetRestoring"},
-		tui.BootstrapProgressMsg{Index: 4, Name: "SweepOrphanDaemons"},
-		tui.BootstrapProgressMsg{Index: 5, Name: "EnsureSaver"},
+		tui.BootstrapProgressMsg{Index: 1},
+		tui.BootstrapProgressMsg{Index: 2},
+		tui.BootstrapProgressMsg{Index: 3},
+		tui.BootstrapProgressMsg{Index: 4},
+		tui.BootstrapProgressMsg{Index: 5},
 		// Restore completes immediately, no per-session events: RestoreM==0.
-		tui.BootstrapProgressMsg{Index: 6, Name: "Restore"},
+		tui.BootstrapProgressMsg{Index: 6},
 	)
 	v := acc.View()
 
@@ -269,7 +270,7 @@ func TestRunningResumeCommandsTicksDoneWithNoItems(t *testing.T) {
 	var acc tui.LoadingProgress
 	// Before step 6 even completes, "Running resume commands" is pending.
 	for step := 1; step <= 5; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step, Name: "step"})
+		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
 	}
 	if got := labelState(acc.View(), tui.LabelRunningResumeCommands); got != tui.LabelPending {
 		t.Fatalf("Running resume commands before its group = %v; want pending", got)
@@ -278,13 +279,13 @@ func TestRunningResumeCommandsTicksDoneWithNoItems(t *testing.T) {
 	// pending), "Running resume commands" is the frontier — active, no per-item
 	// counter, not stalled.
 	for step := 6; step <= 10; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step, Name: "step"})
+		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
 	}
 	if got := labelState(acc.View(), tui.LabelRunningResumeCommands); got != tui.LabelActive {
 		t.Errorf("Running resume commands at step 10 = %v; want active (last step 11 not done)", got)
 	}
 	// Step 11: done. No counter ever.
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 11, Name: "CleanStale"})
+	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 11})
 	v := acc.View()
 	if got := labelState(v, tui.LabelRunningResumeCommands); got != tui.LabelDone {
 		t.Errorf("Running resume commands at step 11 = %v; want done (no per-item work)", got)
@@ -299,9 +300,9 @@ func TestRunningResumeCommandsTicksDoneWithNoItems(t *testing.T) {
 func TestIdempotentPerStepIndex(t *testing.T) {
 	// Duplicates: step 1 three times advances the bar to exactly 1/11.
 	acc := feed(tui.LoadingProgress{},
-		tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"},
-		tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"},
-		tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"},
+		tui.BootstrapProgressMsg{Index: 1},
+		tui.BootstrapProgressMsg{Index: 1},
+		tui.BootstrapProgressMsg{Index: 1},
 	)
 	if got := acc.View().BarFraction; math.Abs(got-1.0/11.0) > floatEps {
 		t.Errorf("3× step 1: bar = %v; want %v (no double-advance)", got, 1.0/11.0)
@@ -310,8 +311,8 @@ func TestIdempotentPerStepIndex(t *testing.T) {
 	// Out-of-order: receiving step 3 then step 2 advances by exactly 2 distinct
 	// indices (2/11), never 3/11.
 	acc = feed(tui.LoadingProgress{},
-		tui.BootstrapProgressMsg{Index: 3, Name: "SetRestoring"},
-		tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"},
+		tui.BootstrapProgressMsg{Index: 3},
+		tui.BootstrapProgressMsg{Index: 2},
 	)
 	if got := acc.View().BarFraction; math.Abs(got-2.0/11.0) > floatEps {
 		t.Errorf("steps 3,2 out of order: bar = %v; want %v", got, 2.0/11.0)
@@ -332,7 +333,7 @@ func TestMappingCoversAllElevenStepsNoGaps(t *testing.T) {
 	}
 	for step := 1; step <= 11; step++ {
 		// Every step index must map to a valid §10.4 label (no gap).
-		got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: step, Name: "step"})
+		got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: step})
 		if got == "" {
 			t.Errorf("step %d resolved to no label (gap in the §10.4 mapping)", step)
 			continue
@@ -344,10 +345,10 @@ func TestMappingCoversAllElevenStepsNoGaps(t *testing.T) {
 	// Out-of-range indices must not map and must not advance the bar (defensive —
 	// no phantom steps).
 	for _, bad := range []int{0, 12, 99} {
-		if got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: bad, Name: "x"}); got != "" {
+		if got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: bad}); got != "" {
 			t.Errorf("out-of-range step %d mapped to label %q; want none", bad, got)
 		}
-		v := feed(tui.LoadingProgress{}, tui.BootstrapProgressMsg{Index: bad, Name: "x"}).View()
+		v := feed(tui.LoadingProgress{}, tui.BootstrapProgressMsg{Index: bad}).View()
 		if f := v.BarFraction; f != 0 {
 			t.Errorf("out-of-range step %d advanced the bar to %v; want 0", bad, f)
 		}
@@ -368,6 +369,32 @@ func TestMappingCoversAllElevenStepsNoGaps(t *testing.T) {
 	for i, want := range wantOrder {
 		if v.Labels[i].Text != want {
 			t.Errorf("label[%d] = %q; want %q", i, v.Labels[i].Text, want)
+		}
+	}
+}
+
+// TestBootstrapProgressMsgCarriesOnlyConsumedFields is the single-authority
+// guard for the §10.4 mapping: the wire message must carry ONLY the fields the
+// consumer (LoadingProgress.Apply / LabelForStep) actually reads — the stable
+// Index key plus the restore N/M counter. It must NOT carry a friendly Label or
+// a raw Name StepName: those would be a second, drift-prone encoding of the
+// §10.4 step→label mapping (the authority lives ONCE in loading_progress.go).
+// This pins the dead-field removal in the type itself, not just behaviourally.
+func TestBootstrapProgressMsgCarriesOnlyConsumedFields(t *testing.T) {
+	want := map[string]bool{"Index": true, "RestoreN": true, "RestoreM": true}
+	tp := reflect.TypeOf(tui.BootstrapProgressMsg{})
+	got := map[string]bool{}
+	for i := 0; i < tp.NumField(); i++ {
+		got[tp.Field(i).Name] = true
+	}
+	for name := range got {
+		if !want[name] {
+			t.Errorf("BootstrapProgressMsg carries field %q — only Index/RestoreN/RestoreM may ride the wire (the §10.4 label mapping is loading_progress.go's sole authority)", name)
+		}
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("BootstrapProgressMsg is missing the consumed field %q", name)
 		}
 	}
 }

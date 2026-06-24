@@ -29,7 +29,7 @@ func TestProcessTUIResult_ReturnsFatalError(t *testing.T) {
 	fatal := bootstrap.NewFatal("Portal failed to set @portal-restoring marker: permission denied", errors.New("permission denied"))
 
 	lister := &mockSessionLister{}
-	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"} })
+	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

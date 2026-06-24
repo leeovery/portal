@@ -29,12 +29,12 @@ import (
 // same path the live channel does.
 func midRestoreProgress() LoadingProgress {
 	var p LoadingProgress
-	p = p.Apply(BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
-	p = p.Apply(BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"})
-	p = p.Apply(BootstrapProgressMsg{Index: 3, Name: "SetRestoring"})
-	p = p.Apply(BootstrapProgressMsg{Index: 4, Name: "SweepOrphanDaemons"})
-	p = p.Apply(BootstrapProgressMsg{Index: 5, Name: "EnsureSaver"})
-	p = p.Apply(BootstrapProgressMsg{Index: restoreStep, Name: "Restore", RestoreN: 8, RestoreM: 12})
+	p = p.Apply(BootstrapProgressMsg{Index: 1})
+	p = p.Apply(BootstrapProgressMsg{Index: 2})
+	p = p.Apply(BootstrapProgressMsg{Index: 3})
+	p = p.Apply(BootstrapProgressMsg{Index: 4})
+	p = p.Apply(BootstrapProgressMsg{Index: 5})
+	p = p.Apply(BootstrapProgressMsg{Index: restoreStep, RestoreN: 8, RestoreM: 12})
 	return p
 }
 
@@ -258,7 +258,7 @@ func TestLoadingScreen_TickRowsLeftAlignedWithinList(t *testing.T) {
 // pending.
 func errorFrameView() LoadingProgressView {
 	var p LoadingProgress
-	p = p.Apply(BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
+	p = p.Apply(BootstrapProgressMsg{Index: 1})
 	return p.FailedView(3, "Portal failed to set @portal-restoring marker: permission denied")
 }
 
@@ -506,7 +506,7 @@ func TestLoadingScreen_SuppressesCounterWhenM0(t *testing.T) {
 	var p LoadingProgress
 	for i := 1; i <= totalBootstrapSteps; i++ {
 		// Step 6 completes with RestoreM==0 (no per-session events) — empty restore.
-		p = p.Apply(BootstrapProgressMsg{Index: i, Name: "step"})
+		p = p.Apply(BootstrapProgressMsg{Index: i})
 	}
 	out := renderLoadingScreen(p.View(), 80, 24, theme.Dark, false)
 	visible := ansi.Strip(out)

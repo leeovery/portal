@@ -30,13 +30,13 @@ func TestBootstrapProgressMsg_ReIssuesReceiver(t *testing.T) {
 		case reissued <- struct{}{}:
 		default:
 		}
-		return tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"}
+		return tui.BootstrapProgressMsg{Index: 2}
 	})
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	model, cmd := model.Update(tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
+	model, cmd := model.Update(tui.BootstrapProgressMsg{Index: 1})
 	updated := model.(tui.Model)
 
 	if updated.ActivePage() != tui.PageLoading {
@@ -61,7 +61,7 @@ func TestBootstrapProgressMsg_ReIssuesReceiver(t *testing.T) {
 // with LoadingMinElapsedMsg) — progress events alone never transition.
 func TestBootstrapComplete_TransitionGatedOnTerminalEvent(t *testing.T) {
 	lister := &mockSessionLister{sessions: []tmux.Session{}}
-	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"} })
+	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -69,7 +69,7 @@ func TestBootstrapComplete_TransitionGatedOnTerminalEvent(t *testing.T) {
 	// Min elapsed, plus several progress events — still on loading.
 	model, _ = model.Update(tui.LoadingMinElapsedMsg{})
 	for i := 1; i <= 11; i++ {
-		model, _ = model.Update(tui.BootstrapProgressMsg{Index: i, Name: "step"})
+		model, _ = model.Update(tui.BootstrapProgressMsg{Index: i})
 	}
 	if model.(tui.Model).ActivePage() != tui.PageLoading {
 		t.Fatalf("transitioned before terminal event; got %d", model.(tui.Model).ActivePage())
@@ -87,7 +87,7 @@ func TestBootstrapComplete_TransitionGatedOnTerminalEvent(t *testing.T) {
 // BootstrapCompleteMsg — the terminal event must come over the channel instead.
 func TestConcurrentInit_DoesNotSynthesizeBootstrapComplete(t *testing.T) {
 	lister := &mockSessionLister{sessions: []tmux.Session{}}
-	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"} })
+	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	cmd := m.Init()
 	if cmd == nil {
@@ -122,7 +122,7 @@ func TestConcurrentInit_IncludesProgressReceiver(t *testing.T) {
 	hit := make(chan struct{}, 1)
 	receiver := tea.Cmd(func() tea.Msg {
 		hit <- struct{}{}
-		return tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"}
+		return tui.BootstrapProgressMsg{Index: 1}
 	})
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	cmd := m.Init()
@@ -163,7 +163,7 @@ func TestConcurrentInit_IncludesProgressReceiver(t *testing.T) {
 // after a SessionsMsg arrives — until the terminal complete event transitions.
 func TestLoadingInert_NoEnumerationBeforeComplete(t *testing.T) {
 	lister := &mockSessionLister{sessions: []tmux.Session{{Name: "a"}}}
-	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"} })
+	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -171,7 +171,7 @@ func TestLoadingInert_NoEnumerationBeforeComplete(t *testing.T) {
 	// A session list arrives during loading; it must be ingested but NOT drive
 	// a transition (sessionsLoaded stays false; page stays PageLoading).
 	model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{{Name: "a"}}})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
 	if model.(tui.Model).ActivePage() != tui.PageLoading {
 		t.Error("model left PageLoading before terminal complete (not inert)")
 	}

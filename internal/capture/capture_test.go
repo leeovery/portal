@@ -194,8 +194,8 @@ func TestLoadingErrorFixture(t *testing.T) {
 	// so each pull yields the next seeded msg in order.
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1, Name: "EnsureServer"})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2, Name: "RegisterPortalHooks"})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
+	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2})
 	model, _ = model.Update(tui.BootstrapFatalMsg{
 		FailedStep: 3,
 		Message:    "Portal failed to set @portal-restoring marker: permission denied",

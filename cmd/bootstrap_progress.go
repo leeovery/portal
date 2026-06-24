@@ -84,15 +84,12 @@ const bootstrapProgressBufferSize = 64
 // one terminal event (Done) is sent, last, before the channel closes.
 type bootstrapProgress struct {
 	// Step is the per-step progress event (Index 1..11, Name the closed
-	// StepName). Zero on the terminal event.
+	// StepName). Only Index reaches the wire message; the friendly §10.4 label is
+	// derived consumer-side (internal/tui/loading_progress.go), so no label is
+	// carried here. Zero on the terminal event.
 	Step bootstrap.StepEvent
 
-	// Label is the friendly-label group placeholder (task 5-4 maps the 11 raw
-	// steps onto the 5 friendly labels). Empty today.
-	Label string
-
-	// RestoreN / RestoreM are the restore per-session counter placeholders
-	// (task 5-3 wires the real values). Zero today.
+	// RestoreN / RestoreM are the restore per-session counter (current / total).
 	RestoreN int
 	RestoreM int
 
@@ -161,8 +158,9 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 	lastStep := 0
 	emitCtx := bootstrap.WithProgressEmitter(ctx, func(ev bootstrap.StepEvent) {
 		// task 5-3: a restore per-session StepEvent carries RestoreN/M (Index 6 /
-		// "Restore"); other step events leave them zero. task 5-4 maps Index→
-		// friendly Label. The send is ctx-guarded (carry-forward from 5-2): with
+		// "Restore"); other step events leave them zero. The friendly §10.4 label
+		// is derived consumer-side from Index (loading_progress.go), not here. The
+		// send is ctx-guarded (carry-forward from 5-2): with
 		// the per-session restore events 5-3 adds, a restore of >bufferSize
 		// sessions against a TUI that stopped draining (early Quit) would block
 		// the orchestrator goroutine forever on a naked send. The select makes the
@@ -244,10 +242,12 @@ func (p *bootstrapProgressPipe) receiver() tea.Cmd {
 			// slice passes straight through with no copy.
 			return tui.BootstrapCompleteMsg{Warnings: ev.Warnings}
 		}
+		// Only Index (the stable §10.4 key the consumer maps) and the restore N/M
+		// counter ride the wire. The friendly label is derived consumer-side in
+		// loading_progress.go — the sole authority for the 11→5 mapping — so no
+		// label or raw StepName is copied here.
 		return tui.BootstrapProgressMsg{
 			Index:    ev.Step.Index,
-			Name:     ev.Step.Name,
-			Label:    ev.Label,
 			RestoreN: ev.RestoreN,
 			RestoreM: ev.RestoreM,
 		}

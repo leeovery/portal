@@ -567,14 +567,14 @@ func previewScreenFixture() *Fixture {
 // the other fixtures it NEVER opens a tmux server or touches ~/.config/portal.
 func loadingScreenFixture() *Fixture {
 	events := []tui.BootstrapProgressMsg{
-		{Index: 1, Name: "EnsureServer"},
-		{Index: 2, Name: "RegisterPortalHooks"},
-		{Index: 3, Name: "SetRestoring"},
-		{Index: 4, Name: "SweepOrphanDaemons"},
-		{Index: 5, Name: "EnsureSaver"},
+		{Index: 1},
+		{Index: 2},
+		{Index: 3},
+		{Index: 4},
+		{Index: 5},
 		// Step-6 skeleton event: sets the active "Restoring sessions" 8/12 counter
 		// without completing restore, so the page sits mid-restore.
-		{Index: 6, Name: "Restore", RestoreN: 8, RestoreM: 12},
+		{Index: 6, RestoreN: 8, RestoreM: 12},
 	}
 	return &Fixture{
 		name:          "loading-screen",
@@ -604,8 +604,8 @@ func loadingScreenFixture() *Fixture {
 // server or touches ~/.config/portal.
 func loadingErrorFixture() *Fixture {
 	events := []tui.BootstrapProgressMsg{
-		{Index: 1, Name: "EnsureServer"},
-		{Index: 2, Name: "RegisterPortalHooks"},
+		{Index: 1},
+		{Index: 2},
 	}
 	return &Fixture{
 		name:          "loading-error",
