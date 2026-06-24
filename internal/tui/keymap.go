@@ -6,11 +6,19 @@ package tui
 // §8.5), and a RightAligned flag for the trailing entry the footer pins to the
 // right (the ? help hint).
 //
-// The descriptor is the single source of truth driving BOTH the condensed
-// footer (task 2-4) and the per-page ? help modal (Phase 3, §8.5/§14.4): the
-// help modal lists every entry, the footer renders only the Core entries. It is
-// pure data — no rendering lives here; consumers map the glyphs to display
-// forms and lay them out.
+// The descriptor is the single source of truth for the footer + help DISPLAY —
+// it drives BOTH the condensed footer (task 2-4) and the per-page ? help modal
+// (Phase 3, §8.5/§14.4): the help modal lists every entry, the footer renders
+// only the Core entries. It is pure data — no rendering lives here; consumers
+// map the glyphs to display forms and lay them out.
+//
+// SCOPE (important): the descriptor governs the two DISPLAY surfaces ONLY. It
+// does NOT govern key DISPATCH — the live per-page Update switch
+// (updateSessionList / updateProjectsPage / handlePreviewKey) is a separate
+// hand-coded match over tea key codes with no compiler-enforced link back here.
+// So a binding change must be made in BOTH places; the descriptor↔dispatch
+// correspondence is held instead by the guard tests in
+// keymap_dispatch_guard_test.go, which fail if the two silently diverge.
 type keymapEntry struct {
 	// Key is the key glyph as it appears to the user (e.g. "↑/↓", "enter",
 	// "ctrl+↑/↓"). It is a display token, not a tea key code — the live dispatch
@@ -24,8 +32,8 @@ type keymapEntry struct {
 	// and Sessions space→"␣" (footer keeps the word "space"). When empty the help
 	// modal falls back to Key. The footer NEVER reads this field. It mirrors
 	// HelpAction's footer-vs-help split, keeping both forms on the ONE descriptor so
-	// the single-source-of-truth contract holds: a binding change updates the footer
-	// and the help together.
+	// the single-source-of-truth-for-DISPLAY contract holds: a binding change updates
+	// the footer and the help together. (Dispatch is out of scope — see the type doc.)
 	HelpKey string
 	// Action is the action label shown beside the glyph (e.g. "attach",
 	// "switch view"). It is the TERSE footer form — the condensed §3.4 footer is
@@ -36,8 +44,9 @@ type keymapEntry struct {
 	// session" vs the footer's "attach"). When empty the help modal falls back to
 	// Action, so an entry that needs no longer form sets it once. The footer NEVER
 	// reads this field. Keeping both forms on the ONE descriptor preserves the
-	// single-source-of-truth contract (§8.5): a binding change updates the footer
-	// and the help together, neither hand-authored as a second list.
+	// single-source-of-truth-for-DISPLAY contract (§8.5): a binding change updates
+	// the footer and the help together, neither hand-authored as a second list.
+	// (Dispatch is out of scope — see the type doc.)
 	HelpAction string
 	// Core marks an entry as a §3.4 footer-core key. Core entries appear in the
 	// condensed footer; non-Core entries are help-only (the ? help modal lists

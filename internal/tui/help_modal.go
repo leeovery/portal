@@ -9,10 +9,12 @@ import (
 
 // The §8.5 per-page `?` help modal — a NEW modal type (§14.4): a generic
 // two-column renderer over the per-page keymap descriptor (the single source of
-// truth that also drives the footer + §12.1), NOT hand-authored content per page.
-// It lists the page's COMPLETE keymap (every descriptor entry, footer-core AND
-// help-only — the full reference, not just the footer's overflow), so a binding
-// change updates the footer and the help together.
+// truth for the footer + help DISPLAY, §12.1), NOT hand-authored content per
+// page. It lists the page's COMPLETE keymap (every descriptor entry, footer-core
+// AND help-only — the full reference, not just the footer's overflow), so a
+// binding change updates the footer and the help DISPLAY together. (The
+// descriptor does NOT govern key dispatch — that is the live per-page Update
+// switch, kept in sync via keymap_dispatch_guard_test.go; see keymap.go.)
 //
 // It is the documented §8.1 exception to the contextual-footer rule: the dismiss
 // hint lives in the HEADER right-corner (`esc close`), and the body IS the keymap
