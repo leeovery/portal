@@ -70,19 +70,12 @@ func renderNoMatchesBody(query string, width, height int, mode theme.Mode, colou
 // (task 2-8) WITHOUT the `browse results` entry — there are no results to browse, so
 // the no-matches footer reads `type to filter · esc clear`. It REUSES the
 // input-active footer machinery (filteringFooterEntries) and drops the
-// browse-results entry, so the per-glyph colours (the accent.orange `type` action
-// word, the text.detail `esc` key + labels) stay byte-consistent with the
-// input-active footer.
+// browse-results entry STRUCTURALLY via dropBrowseResults (the BrowseResults flag,
+// not the display copy — so rewording that label cannot silently re-admit it), so
+// the per-glyph colours (the accent.orange `type` action word, the text.detail `esc`
+// key + labels) stay byte-consistent with the input-active footer.
 func noMatchesFooterEntries() []filterFooterEntry {
-	src := filteringFooterEntries()
-	entries := make([]filterFooterEntry, 0, len(src))
-	for _, e := range src {
-		if e.Label == "browse results" {
-			continue
-		}
-		entries = append(entries, e)
-	}
-	return entries
+	return dropBrowseResults(filteringFooterEntries())
 }
 
 // renderNoMatchesFooter renders the §7.3 reduced input-active footer for the given

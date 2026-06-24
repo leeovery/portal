@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -185,6 +186,85 @@ func TestNoMatches_OnlyRendersWithActiveNonEmptyQueryAndZeroItems(t *testing.T) 
 	empty.applySessions(nil)
 	if empty.sessionListNoMatches() {
 		t.Errorf("expected sessionListNoMatches()=false without an active query (empty-sessions, not no-matches)")
+	}
+}
+
+// TestNoMatchesFooterEntries_ExcludesBrowseResultsStructurally asserts §7.3: the
+// no-matches footer entries are EXACTLY the input-active footer entries minus the
+// one that is structurally tagged as browse-results — derived WITHOUT depending on
+// that entry's display copy. The test itself never references the "browse results"
+// literal, so rewording that label cannot make this test pass or fail: it pins the
+// structural membership model, not the display string.
+func TestNoMatchesFooterEntries_ExcludesBrowseResultsStructurally(t *testing.T) {
+	got := noMatchesFooterEntries()
+
+	// The no-matches footer must contain NO entry that is tagged as the
+	// browse-results entry — identified by the structural flag, never by label text.
+	for _, e := range got {
+		if e.BrowseResults {
+			t.Errorf("no-matches footer must exclude the browse-results entry (structurally tagged), found: %+v", e)
+		}
+	}
+
+	// And it must equal the input-active set with exactly the browse-results entry
+	// dropped — proving it is composed from the shared entries, not an independent copy.
+	src := filteringFooterEntries()
+	want := make([]filterFooterEntry, 0, len(src))
+	for _, e := range src {
+		if e.BrowseResults {
+			continue
+		}
+		want = append(want, e)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("no-matches footer entry count = %d, want %d (input-active minus browse-results)", len(got), len(want))
+	}
+	for i := range want {
+		if !reflect.DeepEqual(got[i], want[i]) {
+			t.Errorf("no-matches footer entry %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestNoMatchesFooterEntries_DecoupledFromBrowseResultsCopy proves the membership
+// is decoupled from the display text: if the browse-results label is reworded, the
+// no-matches footer still drops exactly that entry. It mutates a COPY of the
+// input-active entries' browse-results label and confirms the structural filter
+// (the BrowseResults flag) still identifies and removes it — a label-string filter
+// would silently regain the entry under this rewording.
+func TestNoMatchesFooterEntries_DecoupledFromBrowseResultsCopy(t *testing.T) {
+	src := filteringFooterEntries()
+
+	// Precondition: exactly one entry is structurally tagged browse-results.
+	tagged := 0
+	for _, e := range src {
+		if e.BrowseResults {
+			tagged++
+		}
+	}
+	if tagged != 1 {
+		t.Fatalf("expected exactly one browse-results-tagged entry, got %d", tagged)
+	}
+
+	// Reword the browse-results label (simulating a future copy change). A
+	// label-string filter would no longer match; the structural flag still does.
+	reworded := append([]filterFooterEntry(nil), src...)
+	for i := range reworded {
+		if reworded[i].BrowseResults {
+			reworded[i].Label = "view the matches"
+		}
+	}
+	dropped := dropBrowseResults(reworded)
+	for _, e := range dropped {
+		if e.BrowseResults {
+			t.Errorf("reworded browse-results entry survived the structural filter: %+v", e)
+		}
+		if e.Label == "view the matches" {
+			t.Errorf("reworded browse-results entry leaked into no-matches footer by label: %+v", e)
+		}
+	}
+	if got, want := len(dropped), len(reworded)-1; got != want {
+		t.Errorf("dropBrowseResults returned %d entries, want %d (one dropped)", got, want)
 	}
 }
 

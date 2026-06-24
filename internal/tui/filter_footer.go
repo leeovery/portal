@@ -43,9 +43,16 @@ type keyGlyph struct {
 // colour (the accent.orange action word, the accent.blue nav glyphs, the quiet
 // text.detail `/` separator), which the descriptor-driven sessionsKeymap path does
 // not need.
+//
+// BrowseResults structurally tags the input-active footer's `browse results` entry
+// (mirroring the sessionsKeymap descriptor's Core-flag membership model). The §7.3
+// no-matches footer drops this entry — there are no results to browse — via the
+// flag (dropBrowseResults), NOT by matching its display copy, so rewording the
+// `browse results` label can never silently re-admit it.
 type filterFooterEntry struct {
-	Key   []keyGlyph
-	Label string
+	Key           []keyGlyph
+	Label         string
+	BrowseResults bool
 }
 
 // filteringFooterEntries returns the §7.1 input-active footer entries:
@@ -60,9 +67,26 @@ func filteringFooterEntries() []filterFooterEntry {
 			{"↵", theme.MV.AccentBlue},
 			{" / ", theme.MV.TextDetail},
 			{"↓", theme.MV.AccentBlue},
-		}, Label: "browse results"},
+		}, Label: "browse results", BrowseResults: true},
 		{Key: []keyGlyph{{"esc", theme.MV.TextDetail}}, Label: "clear"},
 	}
+}
+
+// dropBrowseResults returns the given entries with the structurally-tagged
+// browse-results entry removed (BrowseResults flag), preserving order. Membership is
+// decided by the flag — never the display copy — so rewording the `browse results`
+// label cannot change what this drops. The §7.3 no-matches footer composes through
+// this so its reduced entry set stays derived from (not a hand-kept copy of) the
+// input-active footer.
+func dropBrowseResults(src []filterFooterEntry) []filterFooterEntry {
+	entries := make([]filterFooterEntry, 0, len(src))
+	for _, e := range src {
+		if e.BrowseResults {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	return entries
 }
 
 // filterAppliedFooterEntries returns the §7.1 list-active footer entries:
