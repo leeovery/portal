@@ -227,8 +227,8 @@ func TestHelpModalContent(t *testing.T) {
 		if !strings.Contains(view, "Preview scrollback") {
 			t.Errorf("Sessions help must include the footer-core space/preview key; missing in:\n%s", view)
 		}
-		// The help body shows the ␣ glyph (HelpKey override) for the preview key; the
-		// footer keeps the word "space" (Key).
+		// The help body shows the ␣ glyph for the preview key (HelpKey), matching the
+		// footer Key (now also ␣ per §3.4 — task 8-2).
 		if !strings.Contains(view, "␣") {
 			t.Errorf("Sessions help must show the ␣ glyph for the footer-core preview key; missing in:\n%s", view)
 		}
@@ -268,9 +268,9 @@ func TestHelpModalContent(t *testing.T) {
 }
 
 // TestHelpModalGlyphs asserts the "all symbols, caret for ctrl" final glyph set
-// in the help body: page → `^↑/↓`, space → `␣`, enter → `⏎`, nav → `↑/↓`. The
-// footer is unaffected (it always reads Key): footer forms stay `space` / `enter`
-// / `↑/↓` and never show the page `^↑/↓` (help-only).
+// in the help body: page → `^↑/↓`, space → `␣`, enter → `⏎`, nav → `↑/↓` (the
+// slashed help-only forms via HelpKey). The footer reads the §3.4 glyph Key forms
+// `␣` / `⏎` / `↑↓` (no slash) and never shows the page `^↑/↓` (help-only).
 func TestHelpModalGlyphs(t *testing.T) {
 	body := helpModalBody(sessionsKeymap(), theme.Dark, false)
 	for _, glyph := range []string{"^↑/↓", "␣", "⏎", "↑/↓"} {
@@ -278,20 +278,20 @@ func TestHelpModalGlyphs(t *testing.T) {
 			t.Errorf("help body must show glyph %q; missing in:\n%s", glyph, body)
 		}
 	}
-	// The help body must NOT regress to the literal words the footer uses for the
-	// overridden keys.
+	// The help body must NOT regress to the literal words the footer used to use
+	// for the overridden keys.
 	if strings.Contains(body, "ctrl+") {
 		t.Errorf("help body must use the caret form (^↑/↓), not ctrl+; got:\n%s", body)
 	}
 
-	// Footer still reads Key: the Core forms are space/enter/↑/↓ (the word "space"),
-	// and the help-only page key (^↑/↓) is never in the footer.
+	// Footer reads Key: per §3.4 the Core forms are the glyphs ␣ / ⏎ / ↑↓ (no
+	// slash), and the help-only page key (^↑/↓) is never in the footer.
 	entries := sessionsKeymap()
 	keyByGlyph := map[string]bool{}
 	for _, e := range entries {
 		keyByGlyph[e.Key] = true
 	}
-	for _, footerKey := range []string{"space", "enter", "↑/↓"} {
+	for _, footerKey := range []string{"␣", "⏎", "↑↓"} {
 		if !keyByGlyph[footerKey] {
 			t.Errorf("footer Key form %q must remain in the descriptor", footerKey)
 		}

@@ -96,9 +96,9 @@ func assertDescriptorDispatchParity(t *testing.T, page string, entries []keymapE
 // and the live updateSessionList dispatch stay in lockstep.
 func TestSessionsDescriptorDispatchParity(t *testing.T) {
 	probes := map[string]dispatchProbe{
-		// ↑/↓ navigate — the arrows move the list cursor (dispatch delegates to
+		// ↑↓ navigate — the arrows move the list cursor (dispatch delegates to
 		// the list, but the binding is owned by this page's Update path).
-		"↑/↓": {press: tea.KeyPressMsg{Code: tea.KeyDown}, honour: func(t *testing.T) bool {
+		"↑↓": {press: tea.KeyPressMsg{Code: tea.KeyDown}, honour: func(t *testing.T) bool {
 			m := sessionsGuardModel(t)
 			start := m.sessionList.Index()
 			m = pressSession(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
@@ -110,10 +110,10 @@ func TestSessionsDescriptorDispatchParity(t *testing.T) {
 			return len(m.sessionList.KeyMap.NextPage.Keys()) > 0 &&
 				len(m.sessionList.KeyMap.PrevPage.Keys()) > 0
 		}},
-		// enter attach — routes to handleSessionListEnter, which selects the
+		// ⏎ attach — routes to handleSessionListEnter, which selects the
 		// highlighted row and quits (the attach handoff). The quit cmd is the
 		// bound effect: removing the Enter arm makes this fail.
-		"enter": {press: tea.KeyPressMsg{Code: tea.KeyEnter}, honour: func(t *testing.T) bool {
+		"⏎": {press: tea.KeyPressMsg{Code: tea.KeyEnter}, honour: func(t *testing.T) bool {
 			m := sessionsGuardModel(t)
 			updated, cmd := m.updateSessionList(tea.KeyPressMsg{Code: tea.KeyEnter})
 			return isQuitCmd(cmd) && updated.(Model).selected == "alpha"
@@ -124,8 +124,8 @@ func TestSessionsDescriptorDispatchParity(t *testing.T) {
 			m = pressSession(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
 			return m.sessionList.SettingFilter()
 		}},
-		// space preview — opens the scrollback preview page.
-		"space": {press: tea.KeyPressMsg{Code: tea.KeySpace}, honour: func(t *testing.T) bool {
+		// ␣ preview — opens the scrollback preview page.
+		"␣": {press: tea.KeyPressMsg{Code: tea.KeySpace}, honour: func(t *testing.T) bool {
 			m := sessionsGuardModel(t)
 			m.enumerator = keymapParityEnumerator{}
 			m.reader = keymapParityReader{}
@@ -182,8 +182,8 @@ func TestSessionsDescriptorDispatchParity(t *testing.T) {
 // and the live updateProjectsPage dispatch stay in lockstep.
 func TestProjectsDescriptorDispatchParity(t *testing.T) {
 	probes := map[string]dispatchProbe{
-		// ↑/↓ navigate — the arrows move the project list cursor.
-		"↑/↓": {press: tea.KeyPressMsg{Code: tea.KeyDown}, honour: func(t *testing.T) bool {
+		// ↑↓ navigate — the arrows move the project list cursor.
+		"↑↓": {press: tea.KeyPressMsg{Code: tea.KeyDown}, honour: func(t *testing.T) bool {
 			m := projectsNavModel(t)
 			start := m.projectList.Index()
 			m, _ = pressProject(t, m, tea.KeyPressMsg{Code: tea.KeyDown})

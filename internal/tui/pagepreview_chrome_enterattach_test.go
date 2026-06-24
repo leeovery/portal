@@ -62,11 +62,11 @@ func TestPreviewFooter_ByteIdenticalAcrossViewportStates(t *testing.T) {
 // plus the `◉ preview` marker that are preview-specific and must never appear
 // on the Sessions page.
 //
-// Note: the §3.4 condensed Sessions footer independently advertises `enter
-// attach` as one of its Core keys (text-keyed: "enter attach"), which is
-// unrelated to and distinct from the preview footer's glyph-keyed `⏎ attach`
-// token. This guard targets the preview chrome's own tokens, not the Sessions
-// footer's legitimate `enter attach` entry.
+// Note: post the §3.4 footer-glyph switch the condensed Sessions footer reads
+// `⏎ attach` and `␣ preview` (glyph-keyed), so `⏎ attach` is no longer a
+// preview-exclusive token and is NOT guarded here. The preview-exclusive tokens
+// that remain (`◉ preview`, `←→ window`, `⇥ pane`, and `␣ back` — distinct from
+// the Sessions footer's `␣ preview`) still must never leak onto the Sessions page.
 func TestSessionsPageView_DoesNotContainPreviewChrome(t *testing.T) {
 	sessions := []tmux.Session{
 		{Name: "alpha"},
@@ -78,7 +78,7 @@ func TestSessionsPageView_DoesNotContainPreviewChrome(t *testing.T) {
 
 	// The preview chrome's preview-specific glyph-keyed tokens must never appear
 	// on the Sessions page.
-	for _, forbidden := range []string{"◉ preview", "←→ window", "⇥ pane", "⏎ attach", "␣ back"} {
+	for _, forbidden := range []string{"◉ preview", "←→ window", "⇥ pane", "␣ back"} {
 		if strings.Contains(got, forbidden) {
 			t.Errorf("Sessions-page View() contains forbidden preview-chrome token %q; got %q", forbidden, got)
 		}

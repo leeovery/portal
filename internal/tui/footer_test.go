@@ -37,8 +37,10 @@ func TestSessionsFooter_SingleRowCoreKeysWithRightAlignedHelp(t *testing.T) {
 	keyRow := footerVisible(lines[1])
 
 	// Every Core label + glyph appears, in descriptor order, on the single key row.
+	// Per §3.4 the footer reads the glyph Key forms: ↑↓ (no slash) for nav, ⏎ for
+	// attach, ␣ for preview (matching the committed reference frames).
 	for _, want := range []string{
-		"↑/↓ navigate", "enter attach", "/ filter", "space preview",
+		"↑↓ navigate", "⏎ attach", "/ filter", "␣ preview",
 		"s switch view", "x projects", "? help",
 	} {
 		if !strings.Contains(keyRow, want) {
@@ -191,7 +193,7 @@ func TestSessionsFooter_ColourlessDropsHueAndCanvas(t *testing.T) {
 
 	// Structure preserved: every Core entry + the ? help still print.
 	vis := footerVisible(footer)
-	for _, want := range []string{"↑/↓ navigate", "s switch view", "x projects", "? help"} {
+	for _, want := range []string{"↑↓ navigate", "s switch view", "x projects", "? help"} {
 		if !strings.Contains(vis, want) {
 			t.Errorf("colourless footer missing %q:\n%s", want, vis)
 		}
@@ -259,7 +261,7 @@ func TestSessionsFooter_NarrowTruncationNoWrap(t *testing.T) {
 func TestSessionsFooter_NarrowTruncationKeepsHighestPriority(t *testing.T) {
 	// A width that fits a few leading entries + the ? help but not the full cluster.
 	footer := footerVisible(renderSessionsFooter(60, theme.Dark, false))
-	if !strings.Contains(footer, "↑/↓ navigate") {
+	if !strings.Contains(footer, "↑↓ navigate") {
 		t.Errorf("highest-priority entry 'navigate' must survive truncation:\n%s", footer)
 	}
 	if !strings.Contains(footer, "…") {

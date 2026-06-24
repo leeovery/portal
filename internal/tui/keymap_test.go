@@ -14,16 +14,16 @@ func TestSessionsKeymap(t *testing.T) {
 	t.Run("it enumerates exactly the §12.1 Sessions bindings in the reference help order", func(t *testing.T) {
 		// Reference help order (testdata/vhs/reference/sessions-help-modal-mv.png):
 		// ↑/↓ → ^↑/↓ (page) → ⏎ → / → ␣ → s → n → r → k → q → x, then ? last.
-		// Per the "all symbols, caret for ctrl" decision the help body reads Key
-		// directly for nav and page; the HelpKey overrides are enter→"⏎" and
-		// space→"␣". The footer always reads Key, so its Core relative order
-		// (↑/↓ · enter · / · space · s · x · ?) is preserved.
+		// Post the §3.4 footer-glyph switch the footer reads the glyph Key forms
+		// (nav "↑↓", attach "⏎", preview "␣"); the help body keeps the slashed nav
+		// via the HelpKey override "↑/↓" while page reads its Key "^↑/↓" directly.
+		// The Core relative order (↑↓ · ⏎ · / · ␣ · s · x · ?) is preserved.
 		want := []keymapEntry{
-			{Key: "↑/↓", Action: "navigate", HelpAction: "Move selection", Core: true},
+			{Key: "↑↓", HelpKey: "↑/↓", Action: "navigate", HelpAction: "Move selection", Core: true},
 			{Key: "^↑/↓", Action: "page", HelpAction: "Next / prev page"},
-			{Key: "enter", HelpKey: "⏎", Action: "attach", HelpAction: "Open / attach session", Core: true},
+			{Key: "⏎", HelpKey: "⏎", Action: "attach", HelpAction: "Open / attach session", Core: true},
 			{Key: "/", Action: "filter", HelpAction: "Filter sessions", Core: true},
-			{Key: "space", HelpKey: "␣", Action: "preview", HelpAction: "Preview scrollback", Core: true},
+			{Key: "␣", HelpKey: "␣", Action: "preview", HelpAction: "Preview scrollback", Core: true},
 			{Key: "s", Action: "switch view", HelpAction: "Switch view — flat / project / tag", Core: true},
 			{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
 			{Key: "r", Action: "rename", HelpAction: "Rename session"},
@@ -47,7 +47,7 @@ func TestSessionsKeymap(t *testing.T) {
 		for _, e := range entries {
 			core[e.Key] = e.Core
 		}
-		wantCore := []string{"↑/↓", "enter", "/", "space", "s", "x", "?"}
+		wantCore := []string{"↑↓", "⏎", "/", "␣", "s", "x", "?"}
 		for _, k := range wantCore {
 			if !core[k] {
 				t.Errorf("key %q should be Core (footer), got Core=false", k)
@@ -71,16 +71,16 @@ func TestSessionsKeymap(t *testing.T) {
 	})
 
 	t.Run("it preserves the Core relative order the footer reads (footer unchanged)", func(t *testing.T) {
-		// FIX 1 invariant: the help reorder MUST NOT change the footer. The footer
-		// renders only Core entries in descriptor order, so the relative order of the
-		// Core keys must stay exactly ↑/↓ · enter · / · space · s · x · ?.
+		// FIX 1 invariant: the help reorder MUST NOT change the footer order. The
+		// footer renders only Core entries in descriptor order, so the relative order
+		// of the Core keys must stay exactly ↑↓ · ⏎ · / · ␣ · s · x · ?.
 		var coreKeys []string
 		for _, e := range entries {
 			if e.Core {
 				coreKeys = append(coreKeys, e.Key)
 			}
 		}
-		wantCoreOrder := []string{"↑/↓", "enter", "/", "space", "s", "x", "?"}
+		wantCoreOrder := []string{"↑↓", "⏎", "/", "␣", "s", "x", "?"}
 		if len(coreKeys) != len(wantCoreOrder) {
 			t.Fatalf("Core entries = %v, want %v", coreKeys, wantCoreOrder)
 		}
@@ -91,22 +91,23 @@ func TestSessionsKeymap(t *testing.T) {
 		}
 	})
 
-	t.Run("the HelpKey overrides are enter→⏎ and space→␣; every other entry falls back to Key", func(t *testing.T) {
-		// Post the "all symbols, caret for ctrl" decision the help body reads Key
-		// directly for nav ("↑/↓") and page ("^↑/↓"). The HelpKey overrides are the
-		// Sessions enter→"⏎" (footer keeps Key "enter") and space→"␣" (footer keeps
-		// Key "space"). Every other entry must have an empty HelpKey so the help
-		// modal falls back to its Key form.
-		wantOverride := map[string]string{"enter": "⏎", "space": "␣"}
+	t.Run("the help body keeps the slashed nav via HelpKey while page reads Key directly", func(t *testing.T) {
+		// Post the §3.4 footer-glyph switch the footer Key forms are glyphs. The
+		// help body diverges only on nav, where its reference frame shows the slashed
+		// "↑/↓" — so nav carries a HelpKey override (footer "↑↓" vs help "↑/↓").
+		// The attach/preview entries keep a HelpKey too, but it now coincides with
+		// their glyph Key ("⏎"/"␣"). Page reads its Key "^↑/↓" directly, and every
+		// remaining entry has an empty HelpKey so the help modal falls back to Key.
+		wantHelpKey := map[string]string{"↑↓": "↑/↓", "⏎": "⏎", "␣": "␣"}
 		for _, e := range entries {
-			if want, ok := wantOverride[e.Key]; ok {
+			if want, ok := wantHelpKey[e.Key]; ok {
 				if e.HelpKey != want {
 					t.Errorf("%s HelpKey = %q, want %q", e.Key, e.HelpKey, want)
 				}
 				continue
 			}
 			if e.HelpKey != "" {
-				t.Errorf("key %q must have NO HelpKey override (got %q); only enter and space override", e.Key, e.HelpKey)
+				t.Errorf("key %q must have NO HelpKey override (got %q)", e.Key, e.HelpKey)
 			}
 		}
 	})

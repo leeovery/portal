@@ -8,7 +8,7 @@ import (
 )
 
 // The §3.4 condensed Sessions footer: a SINGLE row of the Core keymap keys on
-// the left (↑/↓ navigate · enter attach · / filter · space preview · s switch
+// the left (↑↓ navigate · ⏎ attach · / filter · ␣ preview · s switch
 // view · x projects) with a right-aligned `? help` hint pinned to the content
 // width, over a 1px border.footer top rule. It replaces the former manual
 // three-column keymap footer for Sessions; the help-only keys
@@ -34,7 +34,7 @@ const (
 	// DISTINCT token from border.separator (2px, the header rule) — not to be conflated.
 	footerRuleGlyph = "▔"
 	// footerKeyLabelGap is the single space between a key glyph and its label
-	// (e.g. "↑/↓ navigate"). Canvas-painted so the gap is not a terminal-bg island.
+	// (e.g. "↑↓ navigate"). Canvas-painted so the gap is not a terminal-bg island.
 	// Used by renderFilterCluster (whose multi-glyph key cluster is a distinct shape
 	// from the single-key renderKeyHint helper). renderKeyHint paints the same single
 	// canvas space inline.

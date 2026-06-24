@@ -16,12 +16,13 @@ func TestProjectsKeymap(t *testing.T) {
 	t.Run("it enumerates exactly the §12.1 Projects bindings nav-first", func(t *testing.T) {
 		// Nav-first ordering mirrors the Sessions help reorder (FIX 2 internal
 		// consistency): the navigation/paging entries lead. The Core relative order the
-		// footer reads (⏎ · x · e · / · ?) is preserved, so the Projects footer is
-		// unchanged. Per the "all symbols, caret for ctrl" decision the help body reads
-		// Key directly for nav ("↑/↓") and page ("^↑/↓"); the ⏎ Key is already a glyph.
-		// Projects carries NO HelpKey override.
+		// footer reads (⏎ · x · e · / · ?) is preserved, so the Projects footer matches
+		// the §6.3 reference frame. As on Sessions the nav entry carries a HelpKey
+		// override so the footer/help-only nav reads the glyph "↑↓" while the help body
+		// keeps the slashed "↑/↓"; page reads its Key "^↑/↓" directly and the ⏎ Key is
+		// already a glyph.
 		want := []keymapEntry{
-			{Key: "↑/↓", Action: "navigate", HelpAction: "Move selection"},
+			{Key: "↑↓", HelpKey: "↑/↓", Action: "navigate", HelpAction: "Move selection"},
 			{Key: "^↑/↓", Action: "page", HelpAction: "Next / prev page"},
 			{Key: "⏎", Action: "new session", HelpAction: "New session from project", Core: true},
 			{Key: "x", Action: "sessions", HelpAction: "Switch to Sessions", Core: true},
@@ -59,7 +60,7 @@ func TestProjectsKeymap(t *testing.T) {
 				t.Errorf("key %q should be Core (footer), got Core=false", k)
 			}
 		}
-		wantHelpOnly := []string{"d", "n", "↑/↓", "^↑/↓", "q", "esc"}
+		wantHelpOnly := []string{"d", "n", "↑↓", "^↑/↓", "q", "esc"}
 		for _, k := range wantHelpOnly {
 			if !seen[k] {
 				t.Errorf("descriptor missing help-only key %q", k)
@@ -92,7 +93,7 @@ func TestProjectsKeymap(t *testing.T) {
 		wantHelp := map[string]string{
 			"d":    "delete",
 			"n":    "new in cwd",
-			"↑/↓":  "navigate",
+			"↑↓":   "navigate",
 			"^↑/↓": "page",
 			"q":    "quit",
 			"esc":  "back",

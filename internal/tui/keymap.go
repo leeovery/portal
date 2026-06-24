@@ -20,17 +20,18 @@ package tui
 // correspondence is held instead by the guard tests in
 // keymap_dispatch_guard_test.go, which fail if the two silently diverge.
 type keymapEntry struct {
-	// Key is the key glyph as it appears to the user (e.g. "↑/↓", "enter",
-	// "ctrl+↑/↓"). It is a display token, not a tea key code — the live dispatch
-	// in updateSessionList owns the actual key matching. This is the TERSE footer
+	// Key is the key glyph as it appears to the user (e.g. "↑↓", "⏎", "^↑/↓"). It
+	// is a display token, not a tea key code — the live dispatch in
+	// updateSessionList owns the actual key matching. This is the TERSE footer
 	// form: the condensed §3.4 footer ALWAYS reads Key (never HelpKey).
 	Key string
 	// HelpKey is the longer, glyph-rich key form the ? help modal (§8.5) renders
-	// where it diverges from the footer Key form. Post the "all symbols, caret for
-	// ctrl" decision the help body reads Key directly for nav ("↑/↓") and page
-	// ("^↑/↓"); the HelpKey overrides are Sessions enter→"⏎" (footer keeps "enter")
-	// and Sessions space→"␣" (footer keeps the word "space"). When empty the help
-	// modal falls back to Key. The footer NEVER reads this field. It mirrors
+	// where it diverges from the footer Key form. Post the §3.4 footer-glyph switch
+	// the footer Key forms are themselves glyphs (nav "↑↓", attach "⏎", preview
+	// "␣"); the surviving HelpKey override is nav→"↑/↓" (footer "↑↓" vs help's
+	// slashed "↑/↓") and page keeps "^↑/↓". enter/space's HelpKey now coincides
+	// with their glyph Key. When empty the help modal falls back to Key. The footer
+	// NEVER reads this field. It mirrors
 	// HelpAction's footer-vs-help split, keeping both forms on the ONE descriptor so
 	// the single-source-of-truth-for-DISPLAY contract holds: a binding change updates
 	// the footer and the help together. (Dispatch is out of scope — see the type doc.)
@@ -68,14 +69,15 @@ type keymapEntry struct {
 //
 // The footer is UNAFFECTED by this order: it renders only the Core entries in
 // descriptor order, and the Core relative order is preserved here as
-// ↑/↓ · enter · / · space · s · x · ?, so the condensed footer left cluster
-// (↑/↓ navigate · enter attach · / filter · space preview · s switch view ·
-// x projects) plus the right-aligned ? help is byte-identical to before.
+// ↑↓ · ⏎ · / · ␣ · s · x · ?, so the condensed footer left cluster
+// (↑↓ navigate · ⏎ attach · / filter · ␣ preview · s switch view ·
+// x projects) plus the right-aligned ? help matches the §3.4 reference frame.
 //
-// Per the "all symbols, caret for ctrl" key-glyph decision the help body reads
-// Key directly for nav ("↑/↓") and page ("^↑/↓"); the HelpKey overrides are
-// enter→"⏎" and space→"␣" (the footer keeps "enter" / "space"). The footer
-// always reads Key.
+// The footer reads the GLYPH Key forms (§3.4): nav "↑↓" (no slash), attach "⏎",
+// preview "␣". The help body diverges where its reference frame
+// (sessions-help-modal-mv.png) shows the slashed nav/page forms — so nav carries
+// a HelpKey override "↑/↓" (footer "↑↓" vs help "↑/↓") and page keeps "^↑/↓".
+// enter/space keep their HelpKey "⏎"/"␣", now coinciding with the glyph Key.
 //
 // Per §12.2 the descriptor carries no vim aliases (h/j/k-nav/l/g/G), no
 // PgUp/PgDn/Home/End, and no uppercase bindings; nav is ↑/↓ and paging is
@@ -83,11 +85,11 @@ type keymapEntry struct {
 // does not bind it (Phase 3 binds the key).
 func sessionsKeymap() []keymapEntry {
 	return []keymapEntry{
-		{Key: "↑/↓", Action: "navigate", HelpAction: "Move selection", Core: true},
+		{Key: "↑↓", HelpKey: "↑/↓", Action: "navigate", HelpAction: "Move selection", Core: true},
 		{Key: "^↑/↓", Action: "page", HelpAction: "Next / prev page"},
-		{Key: "enter", HelpKey: "⏎", Action: "attach", HelpAction: "Open / attach session", Core: true},
+		{Key: "⏎", HelpKey: "⏎", Action: "attach", HelpAction: "Open / attach session", Core: true},
 		{Key: "/", Action: "filter", HelpAction: "Filter sessions", Core: true},
-		{Key: "space", HelpKey: "␣", Action: "preview", HelpAction: "Preview scrollback", Core: true},
+		{Key: "␣", HelpKey: "␣", Action: "preview", HelpAction: "Preview scrollback", Core: true},
 		{Key: "s", Action: "switch view", HelpAction: "Switch view — flat / project / tag", Core: true},
 		{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
 		{Key: "r", Action: "rename", HelpAction: "Rename session"},
@@ -111,10 +113,10 @@ func sessionsKeymap() []keymapEntry {
 // internal consistency; there is no Projects help reference frame): the
 // navigation/paging entries lead, then the page actions, then the right-aligned
 // ? help last. The Core relative order the footer reads (⏎ · x · e · / · ?) is
-// preserved, so the Projects footer is byte-identical to before. Per the "all
-// symbols, caret for ctrl" key-glyph decision the help body reads Key directly
-// for nav ("↑/↓") and page ("^↑/↓"); the ⏎ Key is already a glyph. Projects
-// carries NO HelpKey override.
+// preserved, matching the §6.3 reference frame (projects-mv.png). The ⏎ Key is
+// already a glyph. As on Sessions the nav entry carries a HelpKey override so the
+// footer/help-only nav reads the glyph "↑↓" while the help body keeps the slashed
+// "↑/↓" (page stays "^↑/↓").
 //
 // Per §12.2 the descriptor carries NO Projects-side s→Sessions alias (x is the
 // sole both-directions page toggle), no vim aliases, no PgUp/PgDn/Home/End, and
@@ -123,7 +125,7 @@ func sessionsKeymap() []keymapEntry {
 // (Phase 3 binds it).
 func projectsKeymap() []keymapEntry {
 	return []keymapEntry{
-		{Key: "↑/↓", Action: "navigate", HelpAction: "Move selection"},
+		{Key: "↑↓", HelpKey: "↑/↓", Action: "navigate", HelpAction: "Move selection"},
 		{Key: "^↑/↓", Action: "page", HelpAction: "Next / prev page"},
 		{Key: "⏎", Action: "new session", HelpAction: "New session from project", Core: true},
 		{Key: "x", Action: "sessions", HelpAction: "Switch to Sessions", Core: true},

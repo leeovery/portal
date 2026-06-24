@@ -252,11 +252,11 @@ func helpActionLabel(e keymapEntry) string {
 }
 
 // helpKeyGlyph returns the key glyph the help modal renders for an entry: the
-// glyph-rich HelpKey when set (the overrides are Sessions enter→"⏎" and
-// space→"␣"), else the terse footer Key. Post the "all symbols, caret for ctrl"
-// decision the help body reads the Key forms directly for nav ("↑/↓") and page
-// ("^↑/↓"); only enter and space diverge (footer "enter"/"space" vs help "⏎"/"␣").
-// The footer NEVER calls this — it always reads Key directly.
+// glyph-rich HelpKey when set, else the terse footer Key. Post the §3.4
+// footer-glyph switch the footer Key forms are glyphs themselves; the surviving
+// HelpKey override is nav (footer "↑↓" vs the help body's slashed "↑/↓"), with
+// page reading its Key "^↑/↓" directly and enter/space's HelpKey now coinciding
+// with their glyph Key. The footer NEVER calls this — it always reads Key directly.
 func helpKeyGlyph(e keymapEntry) string {
 	if e.HelpKey != "" {
 		return e.HelpKey
