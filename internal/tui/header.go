@@ -217,14 +217,24 @@ func headerBand(w int, mode theme.Mode, colourless bool) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, subtitle)
 }
 
-// headerPadRight pads seg (whose rendered width is segWidth) with canvas-painted
-// spaces out to exactly w cells, so the band carries the canvas on every cell
-// without an edge-bleed island. A segment already at/over w is returned unchanged
-// (the band is clamped to w by construction at the call sites).
-func headerPadRight(seg string, segWidth, w int, mode theme.Mode, colourless bool) string {
+// padRightWithStyle is the shared right-pad geometry: it returns seg (whose
+// rendered width is segWidth) unchanged when it already fills/overflows w, else it
+// joins seg with a fill-styled pad of exactly w-segWidth spaces so every cell out
+// to w carries the supplied fill (no terminal-bg island). headerPadRight and
+// noticeBandPadRight are thin wrappers that bind their respective fill style.
+func padRightWithStyle(seg string, segWidth, w int, fill lipgloss.Style) string {
 	if segWidth >= w {
 		return seg
 	}
-	pad := headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", w-segWidth))
+	pad := fill.Render(strings.Repeat(" ", w-segWidth))
 	return lipgloss.JoinHorizontal(lipgloss.Top, seg, pad)
+}
+
+// headerPadRight pads seg (whose rendered width is segWidth) with canvas-painted
+// spaces out to exactly w cells, so the band carries the canvas on every cell
+// without an edge-bleed island. A segment already at/over w is returned unchanged
+// (the band is clamped to w by construction at the call sites). It binds the canvas
+// fill and delegates the pad geometry to padRightWithStyle.
+func headerPadRight(seg string, segWidth, w int, mode theme.Mode, colourless bool) string {
+	return padRightWithStyle(seg, segWidth, w, headerCanvasBg(mode, colourless))
 }

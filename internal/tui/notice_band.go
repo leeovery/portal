@@ -324,14 +324,11 @@ func renderCommandChip(command string, mode theme.Mode, colourless bool) string 
 // noticeBandPadRight pads the assembled band row out to exactly w cells with
 // tint-painted spaces, so the band carries its tint on every cell to the right
 // edge with no terminal-bg island. A row already at/over w is returned unchanged
-// (the band is clamped to w by construction at the call site). It mirrors
-// headerPadRight but pads with the band's tint instead of the canvas.
+// (the band is clamped to w by construction at the call site). It binds the band's
+// tint fill and delegates the pad geometry to the shared padRightWithStyle (the
+// same core headerPadRight routes through, which pads with the canvas instead).
 func noticeBandPadRight(seg string, segWidth, w int, tint theme.Token, mode theme.Mode, colourless bool) string {
-	if segWidth >= w {
-		return seg
-	}
-	pad := noticeBandTintStyle(tint, mode, colourless).Render(strings.Repeat(" ", w-segWidth))
-	return lipgloss.JoinHorizontal(lipgloss.Top, seg, pad)
+	return padRightWithStyle(seg, segWidth, w, noticeBandTintStyle(tint, mode, colourless))
 }
 
 // activeNoticeBand is the §11 single-slot arbiter for the Sessions page: it
