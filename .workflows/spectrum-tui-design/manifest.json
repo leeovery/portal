@@ -107,7 +107,12 @@
             "spectrum-tui-design-8-4": "tick-741e43",
             "spectrum-tui-design-8-5": "tick-469269",
             "spectrum-tui-design-8-6": "tick-886561",
-            "spectrum-tui-design-8-7": "tick-7f5ebb"
+            "spectrum-tui-design-8-7": "tick-7f5ebb",
+            "spectrum-tui-design-9": "tick-e793cf",
+            "spectrum-tui-design-9-1": "tick-b5c9b5",
+            "spectrum-tui-design-9-2": "tick-4efae6",
+            "spectrum-tui-design-9-3": "tick-49c387",
+            "spectrum-tui-design-9-4": "tick-413af4"
           },
           "external_id": "tick-7331a6"
         }
@@ -119,7 +124,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 4,
           "analysis_cycle_session": 4,

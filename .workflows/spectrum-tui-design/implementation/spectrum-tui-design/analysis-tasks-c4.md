@@ -6,7 +6,7 @@ total_proposed: 4
 # Analysis Tasks: Spectrum TUI Design (Cycle 4)
 
 ## Task 1: Delete dead modal-box scaffolding and scrub misleading "not-yet-reskinned" comments
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -36,7 +36,7 @@ sources: architecture
 - `go build -o portal .` succeeds — confirms no dangling references to the deleted symbols and no orphaned imports.
 
 ## Task 2: Remove the unconsumed bubbles/list help-styling layer and correct its stale doc comment
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -67,7 +67,7 @@ sources: architecture
 - `go build -o portal .` succeeds with no unused-symbol/unused-import/unused-method errors — confirms the `Token.Color()` retirement (if applied) and the removed writes leave no dangling references.
 
 ## Task 3: Make SessionDelegate.canvasBg / tokenStyle delegate to the canonical header leaf-style helpers
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -95,7 +95,7 @@ sources: duplication
 - `go build -o portal .` succeeds — confirms the delegations compile against the existing `headerCanvasBg`/`headerStyle` signatures.
 
 ## Task 4: Move and rename the shared joined-panel frame primitives off the use-site `help*` prefix
-status: pending
+status: approved
 severity: low
 sources: architecture
 
