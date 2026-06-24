@@ -46,9 +46,6 @@ const (
 	deleteLabelConfirm = "delete"
 	deleteKeyCancel    = "esc"
 	deleteLabelCancel  = "cancel"
-	// deleteFooterGap is the gap between the two footer key/label groups (matches the
-	// reference's `y delete   esc cancel` spacing — mirrors kill).
-	deleteFooterGap = "   "
 )
 
 // renderDeleteModalContent composes the §8.6 delete-project confirm modal body for
@@ -130,20 +127,14 @@ func deleteModalConsequenceRows(mode theme.Mode, colourless bool) []string {
 
 // deleteModalFooterRow renders `y delete   esc cancel` — the y/esc key glyphs in
 // accent.blue, the delete/cancel labels in text.detail (§8.6). The dismiss key
-// lives in the footer (§8.1) as `esc cancel`. Mirrors killModalFooterRow.
+// lives in the footer (§8.1) as `esc cancel`. Routes through the shared
+// renderConfirmCancelFooter (mirrors killModalFooterRow).
 func deleteModalFooterRow(mode theme.Mode, colourless bool) string {
-	confirm := deleteModalKeyHint(deleteKeyConfirm, deleteLabelConfirm, mode, colourless)
-	gap := headerCanvasBg(mode, colourless).Render(deleteFooterGap)
-	cancel := deleteModalKeyHint(deleteKeyCancel, deleteLabelCancel, mode, colourless)
-	return lipgloss.JoinHorizontal(lipgloss.Top, confirm, gap, cancel)
+	return renderConfirmCancelFooter(deleteKeyConfirm, deleteLabelConfirm, deleteKeyCancel, deleteLabelCancel, mode, colourless)
 }
 
-// deleteModalKeyHint renders one `<key> <label>` footer group: the key glyph in
-// accent.blue, a single canvas spacer, then the label in text.detail. Mirrors
-// killModalKeyHint.
+// deleteModalKeyHint renders one `<key> <label>` footer group via the shared
+// renderKeyHint helper (key glyph accent.blue, single canvas spacer, label text.detail).
 func deleteModalKeyHint(key, label string, mode theme.Mode, colourless bool) string {
-	keySeg := headerStyle(theme.MV.AccentBlue, mode, colourless).Render(key)
-	gap := headerCanvasBg(mode, colourless).Render(" ")
-	labelSeg := headerStyle(theme.MV.TextDetail, mode, colourless).Render(label)
-	return lipgloss.JoinHorizontal(lipgloss.Top, keySeg, gap, labelSeg)
+	return renderKeyHint(key, label, theme.MV.AccentBlue, mode, colourless)
 }

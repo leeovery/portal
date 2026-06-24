@@ -465,7 +465,7 @@ func (m Model) editModalFooterRow(mode theme.Mode, colourless bool) string {
 // group) RIGHT-aligned in the far corner — the SAME spacer technique as
 // editModalHeaderRow, using the same editPanelContentWidth() so the footer pins the
 // note to the panel's right edge without changing the panel width.
-func (m Model) editModalEditingFooterRow(groups []footerGroup, mode theme.Mode, colourless bool) string {
+func (m Model) editModalEditingFooterRow(groups []footerHintGroup, mode theme.Mode, colourless bool) string {
 	left, right := splitConsequenceGroup(groups)
 
 	leftSeg := joinFooterGroups(left, mode, colourless)
@@ -485,7 +485,7 @@ func (m Model) editModalEditingFooterRow(groups []footerGroup, mode theme.Mode, 
 // consequence note is the sole right-aligned group; everything before it stays in the
 // left-packed group. A footer with no trailing key-less group returns an empty right
 // partition (the left-packed render is unchanged).
-func splitConsequenceGroup(groups []footerGroup) (left, right []footerGroup) {
+func splitConsequenceGroup(groups []footerHintGroup) (left, right []footerHintGroup) {
 	if n := len(groups); n > 0 && groups[n-1].key == "" {
 		return groups[:n-1], groups[n-1:]
 	}
@@ -495,7 +495,7 @@ func splitConsequenceGroup(groups []footerGroup) (left, right []footerGroup) {
 // joinFooterGroups renders the given footer hint groups left-packed, ` · `-joined —
 // the standard footer layout shared by every footer variant (and the left/right
 // partitions of the editing footer).
-func joinFooterGroups(groups []footerGroup, mode theme.Mode, colourless bool) string {
+func joinFooterGroups(groups []footerHintGroup, mode theme.Mode, colourless bool) string {
 	if len(groups) == 0 {
 		return ""
 	}
@@ -514,12 +514,6 @@ func joinFooterGroups(groups []footerGroup, mode theme.Mode, colourless bool) st
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-// footerGroup is one `<key> <label>` footer hint pair.
-type footerGroup struct {
-	key   string
-	label string
-}
-
 // editFooterGroups resolves the contextual footer hint groups for the current
 // mode/focus (§13.1):
 //
@@ -529,9 +523,9 @@ type footerGroup struct {
 //
 // The + add slot (a chip field but not a removable chip) uses the name-focused
 // variant — there is nothing to remove or move.
-func (m Model) editFooterGroups() []footerGroup {
+func (m Model) editFooterGroups() []footerHintGroup {
 	if m.editMode == editModeEdit {
-		return []footerGroup{
+		return []footerHintGroup{
 			{"⏎", "save"},
 			{"esc", "discard"},
 			{"←→", "cursor"},
@@ -539,7 +533,7 @@ func (m Model) editFooterGroups() []footerGroup {
 		}
 	}
 	if m.focusedOnChip() {
-		return []footerGroup{
+		return []footerHintGroup{
 			{"⏎/e", "edit"},
 			{"x", "remove"},
 			{"←→", "move"},
@@ -547,23 +541,16 @@ func (m Model) editFooterGroups() []footerGroup {
 			{"esc", "close"},
 		}
 	}
-	return []footerGroup{
+	return []footerHintGroup{
 		{"⏎/e", "edit"},
 		{"⇥", "next field"},
 		{"esc", "close"},
 	}
 }
 
-// editFooterGroup renders one `<key> <label>` footer hint: the key glyph in
-// accent.blue, a single canvas spacer, then the label in text.detail. A group with
-// an empty key (the `empty on save = delete` hint) renders the label alone in
-// text.detail (no glyph).
+// editFooterGroup renders one `<key> <label>` footer hint via the shared renderKeyHint
+// helper (key glyph accent.blue, single canvas spacer, label text.detail). A group with
+// an empty key (the `empty on save = delete` hint) takes renderKeyHint's label-only path.
 func editFooterGroup(key, label string, mode theme.Mode, colourless bool) string {
-	labelSeg := headerStyle(theme.MV.TextDetail, mode, colourless).Render(label)
-	if key == "" {
-		return labelSeg
-	}
-	keySeg := headerStyle(theme.MV.AccentBlue, mode, colourless).Render(key)
-	gap := headerCanvasBg(mode, colourless).Render(" ")
-	return lipgloss.JoinHorizontal(lipgloss.Top, keySeg, gap, labelSeg)
+	return renderKeyHint(key, label, theme.MV.AccentBlue, mode, colourless)
 }

@@ -236,25 +236,19 @@ func composePreviewHeaderRow(contentWidth, windowIdx, windowCount, paneIdx, pane
 	return row
 }
 
-// previewFooterGroup is one `<glyph> <label>` nav-hint pair in the §9.1 footer.
-type previewFooterGroup struct {
-	glyph string
-	label string
-}
-
 // previewFooterGroups derives the §9.1 footer nav-hint groups from the Core
 // entries of the shared previewKeymap descriptor (§12.1) — the single source of
 // truth that also feeds the ? help. Each Core entry's glyph is the descriptor
 // Key (already a glyph form) and the label is its terse Action. The descriptor
 // order (window, pane, attach, back) is the footer's left-to-right order,
-// matching the Preview Screen (MV) reference frame.
-func previewFooterGroups() []previewFooterGroup {
-	groups := make([]previewFooterGroup, 0, 4)
+// matching the Preview Screen (MV) reference frame. Uses the shared footerHintGroup.
+func previewFooterGroups() []footerHintGroup {
+	groups := make([]footerHintGroup, 0, 4)
 	for _, e := range previewKeymap() {
 		if !e.Core {
 			continue
 		}
-		groups = append(groups, previewFooterGroup{glyph: e.Key, label: e.Action})
+		groups = append(groups, footerHintGroup{key: e.Key, label: e.Action})
 	}
 	return groups
 }
@@ -292,34 +286,30 @@ func composePreviewFooterRow(contentWidth int, mode theme.Mode, colourless bool)
 	}
 	// Degenerate widths: even a single glyph overflows — clip the first glyph to
 	// contentWidth (cells) so the footer row never exceeds the body width.
-	clipped := truncateToCells(groups[0].glyph, contentWidth)
+	clipped := truncateToCells(groups[0].key, contentWidth)
 	return headerStyle(theme.MV.AccentBlue, mode, colourless).Render(clipped)
 }
 
 // previewFooterFromGroups renders the footer groups joined by previewFooterGap.
 // When labelled is true each group is `<glyph accent.blue> <label text.detail>`;
 // when false only the accent.blue glyph renders (the compact cascade form).
-func previewFooterFromGroups(groups []previewFooterGroup, labelled bool, mode theme.Mode, colourless bool) string {
+func previewFooterFromGroups(groups []footerHintGroup, labelled bool, mode theme.Mode, colourless bool) string {
 	gap := headerCanvasBg(mode, colourless).Render(previewFooterGap)
 	rendered := make([]string, 0, len(groups))
 	for _, g := range groups {
 		if labelled {
-			rendered = append(rendered, previewFooterHint(g.glyph, g.label, mode, colourless))
+			rendered = append(rendered, previewFooterHint(g.key, g.label, mode, colourless))
 		} else {
-			rendered = append(rendered, headerStyle(theme.MV.AccentBlue, mode, colourless).Render(g.glyph))
+			rendered = append(rendered, headerStyle(theme.MV.AccentBlue, mode, colourless).Render(g.key))
 		}
 	}
 	return strings.Join(rendered, gap)
 }
 
-// previewFooterHint renders one `<glyph> <label>` footer group: the glyph in
-// accent.blue, a single canvas spacer, then the label in text.detail — the
-// shared footer key-hint shape (mirrors killModalKeyHint).
+// previewFooterHint renders one `<glyph> <label>` footer group via the shared
+// renderKeyHint helper (glyph accent.blue, single canvas spacer, label text.detail).
 func previewFooterHint(glyph, label string, mode theme.Mode, colourless bool) string {
-	glyphSeg := headerStyle(theme.MV.AccentBlue, mode, colourless).Render(glyph)
-	gap := headerCanvasBg(mode, colourless).Render(" ")
-	labelSeg := headerStyle(theme.MV.TextDetail, mode, colourless).Render(label)
-	return lipgloss.JoinHorizontal(lipgloss.Top, glyphSeg, gap, labelSeg)
+	return renderKeyHint(glyph, label, theme.MV.AccentBlue, mode, colourless)
 }
 
 // previewModel renders a single tmux pane's saved scrollback inside a

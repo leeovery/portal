@@ -41,9 +41,6 @@ const (
 	killLabelConfirm = "kill"
 	killKeyCancel    = "esc"
 	killLabelCancel  = "cancel"
-	// killFooterGap is the gap between the two footer key/label groups (matches the
-	// reference's `y kill   esc cancel` spacing).
-	killFooterGap = "   "
 )
 
 // renderKillModalContent composes the §8.3 kill-confirm modal body for the given
@@ -125,19 +122,14 @@ func killModalConsequenceRows(mode theme.Mode, colourless bool) []string {
 
 // killModalFooterRow renders `y kill   esc cancel` — the y/esc key glyphs in
 // accent.blue, the kill/cancel labels in text.detail (§8.3). The dismiss key lives
-// in the footer (§8.1) as `esc cancel`.
+// in the footer (§8.1) as `esc cancel`. Routes through the shared
+// renderConfirmCancelFooter so the confirm/cancel shape lives in one place.
 func killModalFooterRow(mode theme.Mode, colourless bool) string {
-	confirm := killModalKeyHint(killKeyConfirm, killLabelConfirm, mode, colourless)
-	gap := headerCanvasBg(mode, colourless).Render(killFooterGap)
-	cancel := killModalKeyHint(killKeyCancel, killLabelCancel, mode, colourless)
-	return lipgloss.JoinHorizontal(lipgloss.Top, confirm, gap, cancel)
+	return renderConfirmCancelFooter(killKeyConfirm, killLabelConfirm, killKeyCancel, killLabelCancel, mode, colourless)
 }
 
-// killModalKeyHint renders one `<key> <label>` footer group: the key glyph in
-// accent.blue, a single canvas spacer, then the label in text.detail.
+// killModalKeyHint renders one `<key> <label>` footer group via the shared
+// renderKeyHint helper (key glyph accent.blue, single canvas spacer, label text.detail).
 func killModalKeyHint(key, label string, mode theme.Mode, colourless bool) string {
-	keySeg := headerStyle(theme.MV.AccentBlue, mode, colourless).Render(key)
-	gap := headerCanvasBg(mode, colourless).Render(" ")
-	labelSeg := headerStyle(theme.MV.TextDetail, mode, colourless).Render(label)
-	return lipgloss.JoinHorizontal(lipgloss.Top, keySeg, gap, labelSeg)
+	return renderKeyHint(key, label, theme.MV.AccentBlue, mode, colourless)
 }

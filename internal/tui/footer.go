@@ -35,6 +35,9 @@ const (
 	footerRuleGlyph = "▔"
 	// footerKeyLabelGap is the single space between a key glyph and its label
 	// (e.g. "↑/↓ navigate"). Canvas-painted so the gap is not a terminal-bg island.
+	// Used by renderFilterCluster (whose multi-glyph key cluster is a distinct shape
+	// from the single-key renderKeyHint helper). renderKeyHint paints the same single
+	// canvas space inline.
 	footerKeyLabelGap = " "
 	// footerEntrySeparator is the " · " dot separator between footer entries in the
 	// left cluster (the §3.4 dot-separated condensed row). Rendered in text.detail
@@ -258,12 +261,11 @@ func renderFooterCluster(entries []keymapEntry, mode theme.Mode, colourless bool
 
 // renderFooterEntry renders one keymap entry as "<key> <label>" with the key glyph
 // in keyTok (accent.blue for left-cluster entries, accent.violet for the ? help
-// hint) and the label in text.detail, with a canvas-painted gap between them.
+// hint) and the label in text.detail, with a single canvas-painted gap between
+// them. It routes through the shared renderKeyHint helper (the single canvas space
+// renderKeyHint paints matches footerKeyLabelGap, so the output is byte-identical).
 func renderFooterEntry(e keymapEntry, keyTok theme.Token, mode theme.Mode, colourless bool) string {
-	key := headerStyle(keyTok, mode, colourless).Render(e.Key)
-	gap := headerCanvasBg(mode, colourless).Render(footerKeyLabelGap)
-	label := headerStyle(theme.MV.TextDetail, mode, colourless).Render(e.Action)
-	return lipgloss.JoinHorizontal(lipgloss.Top, key, gap, label)
+	return renderKeyHint(e.Key, e.Action, keyTok, mode, colourless)
 }
 
 // renderFooterDetail renders a chrome run (a separator or the ellipsis marker) in
