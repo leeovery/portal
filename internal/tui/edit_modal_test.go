@@ -625,7 +625,7 @@ func TestEditModal_NoColorStateViaBorderAndCursor(t *testing.T) {
 }
 
 // TestEditModal_SinglePanelOnClearedCanvas asserts the placed modal renders as ONE
-// hand-drawn joined panel (no redundant outer modalBorderStyle box wrapping it). The
+// hand-drawn joined panel (no redundant outer border box wrapping it). The
 // single-panel render has exactly two rounded top-corners — the joined panel's own
 // ╭───╮ top and the NAME input box's ╭───╮ — so a nested outer box (a third ╭) is a
 // regression. The chip boxes use SQUARE corners (┌), so they never add a ╭.

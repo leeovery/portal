@@ -3868,7 +3868,7 @@ func (m Model) viewProjectList() string {
 	// inset content region and let the View()→fillCanvas outer wrap paint the
 	// cleared backdrop (NO_COLOR suppression + the 80×24 fallback inherited from
 	// that Phase 1 path). The chrome is NOT composed while a modal is up.
-	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
+	// §14.6 ADAPT decision recorded on placeModalOnClearedCanvas.
 	switch m.modal {
 	case modalDeleteProject:
 		// §8.6 delete-project confirm modal: the MV hand-drawn single-tone joined panel
@@ -3879,9 +3879,9 @@ func (m Model) viewProjectList() string {
 	case modalEditProject:
 		// §8.2/§13.1: the MV two-mode edit-project modal is its OWN hand-drawn
 		// single-tone joined panel (renderEditProjectContent), placed directly on the
-		// cleared canvas — it MUST NOT route through renderModalOnClearedCanvas (whose
-		// modalBorderStyle Padding(1,2) box would wrap the already-framed panel in a
-		// redundant second border).
+		// cleared canvas via renderEditModalOnClearedCanvas — the already-framed panel
+		// is placed without any lipgloss auto-border wrap that would add a redundant
+		// second border.
 		return renderEditModalOnClearedCanvas(m, m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalHelp:
 		// §8.5 per-page help: the Projects keymap descriptor, descriptor-driven, in
@@ -4060,7 +4060,7 @@ func (m Model) viewSessionList() string {
 	// The list/header/footer chrome below is NOT composed while a modal is up, so
 	// no list rows (and no §11.2 flash band) leak into the cleared view; on dismissal
 	// the list renders normally again, leaving the pagination invariant untouched.
-	// §14.6 ADAPT decision recorded on renderModalOnClearedCanvas.
+	// §14.6 ADAPT decision recorded on placeModalOnClearedCanvas.
 	switch m.modal {
 	case modalKillConfirm:
 		// §8.3 kill-confirm modal: the MV hand-drawn single-tone joined panel (the

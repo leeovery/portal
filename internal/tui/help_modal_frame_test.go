@@ -18,40 +18,6 @@ func borderFgSeq(t *testing.T, tok theme.Token, m theme.Mode) string {
 	return tokenFgSeq(t, tok, m)
 }
 
-// TestModalPanelBorderColour asserts FIX 3: the shared modal panel frame is drawn
-// in border.separator (NOT the terminal-default white), mode-aware. Verified on a
-// non-help modal (the kill confirm) so it covers the shared modalStyle path.
-func TestModalPanelBorderColour(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mode theme.Mode
-	}{
-		{"dark", theme.Dark},
-		{"light", theme.Light},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			panel := renderModalOnClearedCanvas("Kill alpha? (y/n)", 80, 24, tc.mode, false)
-			if seq := borderFgSeq(t, theme.MV.BorderSeparator, tc.mode); !strings.Contains(panel, seq) {
-				t.Errorf("modal panel border must be border.separator SGR core %q (not white); missing in:\n%s", seq, panel)
-			}
-		})
-	}
-}
-
-// TestModalPanelBorderColourless asserts FIX 3 under NO_COLOR: the panel keeps the
-// rounded border GLYPHS but sets no border foreground (native terminal fg).
-func TestModalPanelBorderColourless(t *testing.T) {
-	panel := renderModalOnClearedCanvas("Kill alpha? (y/n)", 80, 24, theme.Dark, true)
-	// The rounded border glyphs survive.
-	if !strings.ContainsAny(panel, "╭╮╰╯") {
-		t.Errorf("colourless modal panel must keep the rounded border glyphs; missing in:\n%s", panel)
-	}
-	// No border.separator foreground hue is painted.
-	if seq := borderFgSeq(t, theme.MV.BorderSeparator, theme.Dark); strings.Contains(panel, seq) {
-		t.Errorf("colourless modal panel must NOT paint the border.separator hue %q", seq)
-	}
-}
-
 // TestHelpModalPanelBorderColour asserts FIX 3 for the help modal specifically:
 // its own panel frame is drawn in border.separator (not white), dark + light.
 func TestHelpModalPanelBorderColour(t *testing.T) {
@@ -254,31 +220,5 @@ func TestHelpModalBodyContiguousRows(t *testing.T) {
 	}
 	if nextIdx-moveIdx != 1 {
 		t.Errorf("body rows must be contiguous (1-row rhythm); 'Move selection' at %d, 'Next / prev page' at %d (gap %d)", moveIdx, nextIdx, nextIdx-moveIdx)
-	}
-}
-
-// TestRenderModalOnClearedCanvasKeepsPaddingForOtherModals is a guard that the
-// shared (non-help) modal path keeps its Padding(1,2) spacing while gaining the
-// border colour — the other modals are reskinned later but must not lose their
-// current spacing. The kill-confirm content sits inset from the border by the
-// padding (a space between │ and the content's first glyph).
-func TestRenderModalOnClearedCanvasKeepsPaddingForOtherModals(t *testing.T) {
-	panel := renderModalOnClearedCanvas("Kill alpha? (y/n)", 80, 24, theme.Dark, false)
-	var contentRow string
-	for _, raw := range strings.Split(panel, "\n") {
-		line := ansi.Strip(raw)
-		if strings.Contains(line, "Kill alpha") {
-			contentRow = strings.TrimRight(line, " ")
-			break
-		}
-	}
-	if contentRow == "" {
-		t.Fatalf("kill content row not found; panel:\n%s", panel)
-	}
-	l := strings.IndexRune(contentRow, '│')
-	interior := contentRow[l+len("│"):]
-	// Padding(1,2) → at least two spaces of left padding inside the border.
-	if !strings.HasPrefix(interior, "  ") {
-		t.Errorf("non-help modal must keep its Padding(1,2) L inset; interior = %q", interior)
 	}
 }
