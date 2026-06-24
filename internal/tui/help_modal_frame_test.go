@@ -64,7 +64,7 @@ func TestHelpModalDividerJoined(t *testing.T) {
 		// lipgloss.Place centres the panel, so trim BOTH the leading centring pad and
 		// the trailing fill before inspecting the frame line.
 		line := strings.TrimSpace(ansi.Strip(raw))
-		if strings.HasPrefix(line, helpFrameTeeLeft) && strings.HasSuffix(line, helpFrameTeeRight) {
+		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerRow = line
 			break
 		}
@@ -72,8 +72,8 @@ func TestHelpModalDividerJoined(t *testing.T) {
 	if dividerRow == "" {
 		t.Fatalf("no joined divider row (├ … ┤) found; panel:\n%s", panel)
 	}
-	interior := strings.TrimSuffix(strings.TrimPrefix(dividerRow, helpFrameTeeLeft), helpFrameTeeRight)
-	if interior == "" || strings.Trim(interior, helpRuleGlyph) != "" {
+	interior := strings.TrimSuffix(strings.TrimPrefix(dividerRow, panelFrameTeeLeft), panelFrameTeeRight)
+	if interior == "" || strings.Trim(interior, panelRuleGlyph) != "" {
 		t.Errorf("divider interior between ├ and ┤ must be all rule glyphs; got %q", interior)
 	}
 }
@@ -89,7 +89,7 @@ func TestHelpModalDividerConnectsToBorders(t *testing.T) {
 	var dividerRow string
 	for _, raw := range strings.Split(panel, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
-		if strings.HasPrefix(line, helpFrameTeeLeft) && strings.HasSuffix(line, helpFrameTeeRight) {
+		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerRow = line
 			break
 		}
@@ -99,7 +99,7 @@ func TestHelpModalDividerConnectsToBorders(t *testing.T) {
 	}
 	// The divider interior must contain NO leading/trailing space (flush to the
 	// junctions), proving it reaches both sides.
-	interior := strings.TrimSuffix(strings.TrimPrefix(dividerRow, helpFrameTeeLeft), helpFrameTeeRight)
+	interior := strings.TrimSuffix(strings.TrimPrefix(dividerRow, panelFrameTeeLeft), panelFrameTeeRight)
 	if strings.HasPrefix(interior, " ") || strings.HasSuffix(interior, " ") {
 		t.Errorf("divider must run flush junction-to-junction (no inset gap); interior = %q", interior)
 	}
@@ -140,13 +140,13 @@ func TestHelpModalFlushVerticalSpacing(t *testing.T) {
 		// lipgloss.Place centres the panel; trim the centring pad before matching frame
 		// edges by prefix/suffix.
 		line := strings.TrimSpace(ansi.Strip(raw))
-		if topIdx < 0 && strings.HasPrefix(line, helpFrameTopLeft) && strings.HasSuffix(line, helpFrameTopRight) {
+		if topIdx < 0 && strings.HasPrefix(line, panelFrameTopLeft) && strings.HasSuffix(line, panelFrameTopRight) {
 			topIdx = i
 		}
 		if titleIdx < 0 && strings.Contains(line, "Keybindings") {
 			titleIdx = i
 		}
-		if dividerIdx < 0 && strings.HasPrefix(line, helpFrameTeeLeft) && strings.HasSuffix(line, helpFrameTeeRight) {
+		if dividerIdx < 0 && strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerIdx = i
 		}
 	}

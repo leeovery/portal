@@ -260,10 +260,10 @@ func TestRenameModal_SingleToneJoinedPanel(t *testing.T) {
 	dividerCount := 0
 	for _, raw := range strings.Split(content, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
-		if strings.HasPrefix(line, helpFrameTeeLeft) && strings.HasSuffix(line, helpFrameTeeRight) {
+		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerCount++
-			interior := strings.TrimSuffix(strings.TrimPrefix(line, helpFrameTeeLeft), helpFrameTeeRight)
-			if interior == "" || strings.Trim(interior, helpRuleGlyph) != "" {
+			interior := strings.TrimSuffix(strings.TrimPrefix(line, panelFrameTeeLeft), panelFrameTeeRight)
+			if interior == "" || strings.Trim(interior, panelRuleGlyph) != "" {
 				t.Errorf("divider interior must be all rule glyphs; got %q", interior)
 			}
 		}
@@ -354,7 +354,7 @@ func TestRenameModal_LongOldNameTruncates(t *testing.T) {
 	var frameWidth int
 	for _, raw := range lines {
 		line := ansi.Strip(raw)
-		if frameWidth == 0 && strings.HasPrefix(strings.TrimSpace(line), helpFrameTopLeft) {
+		if frameWidth == 0 && strings.HasPrefix(strings.TrimSpace(line), panelFrameTopLeft) {
 			frameWidth = len([]rune(strings.TrimSpace(line)))
 		}
 		if strings.Contains(line, "was:") {

@@ -26,7 +26,7 @@ import (
 // spacing is FLUSH (zero blank rows). The whole frame — corners, sides, divider,
 // and every `─` run — is SINGLE-TONE border.separator (the 2-tone footer leg was
 // dropped). The header text + body rows carry their own per-row inset
-// (helpRowInset).
+// (panelRowInset).
 //
 // NOTE (Phase 4, deferred): the Preview `?` help OVERLAYS the preview without
 // blanking it (§8.5/§9.3), and the Preview keymap descriptor + help-from-Preview
@@ -55,26 +55,6 @@ const (
 	// (fixed-width slot, the §3.4 alignment convention). Sized for the widest glyph
 	// ("^↑/↓").
 	helpKeyColumnWidth = 10
-	// helpRuleGlyph is the horizontal box-drawing glyph for the divider AND every
-	// frame edge run (top / bottom border + the divider). Single-tone: it renders in
-	// border.separator everywhere (the 2-tone footer leg was dropped).
-	helpRuleGlyph = "─"
-	// helpRowInset is the per-row L/R inset (in cells) the header text and body rows
-	// carry inside the hand-drawn frame. It matches the reference's ~22px
-	// paddingInline. The divider does NOT carry this inset — it runs the full inner
-	// width (W) so its `├`/`┤` junctions meet both side borders.
-	helpRowInset = 2
-
-	// The hand-drawn frame glyphs (a rounded box with real header-divider junctions).
-	// EVERY one renders in border.separator (single-tone). The top/bottom corners and
-	// the divider tees join the side `│` runs into one continuous frame.
-	helpFrameTopLeft     = "╭"
-	helpFrameTopRight    = "╮"
-	helpFrameBottomLeft  = "╰"
-	helpFrameBottomRight = "╯"
-	helpFrameSide        = "│"
-	helpFrameTeeLeft     = "├"
-	helpFrameTeeRight    = "┤"
 )
 
 // renderHelpModalContent composes the §8.5 help modal as a fully HAND-DRAWN
@@ -88,10 +68,10 @@ const (
 // title, the body rows directly under the divider, the last body row directly
 // above the bottom border — no blank rows between any of them (the terminal-native
 // flush convention, deliberately diverging from the Paper reference's px title
-// padding). The header text + body rows carry a per-row L/R inset (helpRowInset);
+// padding). The header text + body rows carry a per-row L/R inset (panelRowInset);
 // the divider spans the full inner width W so its `├`/`┤` junctions meet both side
 // borders. Every assembled line is exactly W+2 cells wide (W = contentWidth +
-// 2·helpRowInset), so the frame columns align. Generated entirely from the
+// 2·panelRowInset), so the frame columns align. Generated entirely from the
 // descriptor — no hand-authored copy.
 func renderHelpModalContent(entries []keymapEntry, mode theme.Mode, colourless bool) string {
 	bodyRows := helpModalBodyRows(entries, mode, colourless)
@@ -114,55 +94,6 @@ func renderHelpModalContent(entries []keymapEntry, mode theme.Mode, colourless b
 	// joined ├───┤ divider between them, FLUSH vertical spacing, single-tone
 	// border.separator throughout.
 	return renderJoinedPanel([][]string{{title}, bodyRows}, theme.MV.BorderSeparator, mode, colourless)
-}
-
-// helpFrameStyle returns the single-tone frame paint: the borderToken foreground
-// for the mode, or a bare style (native fg) under the NO_COLOR carve-out — so the
-// frame glyphs survive colourless but carry no hue. NO background is set (the frame
-// glyphs sit on whatever the placed canvas supplies). The modals pass
-// theme.MV.BorderSeparator; the §9.1 preview passes theme.MV.AccentCyan.
-func helpFrameStyle(borderToken theme.Token, mode theme.Mode, colourless bool) lipgloss.Style {
-	if colourless {
-		return lipgloss.NewStyle()
-	}
-	return lipgloss.NewStyle().Foreground(borderToken.ColorFor(mode))
-}
-
-// helpFrameTop renders the top border line: `╭` + `─`×w + `╮`, all in borderToken.
-func helpFrameTop(w int, borderToken theme.Token, mode theme.Mode, colourless bool) string {
-	line := helpFrameTopLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameTopRight
-	return helpFrameStyle(borderToken, mode, colourless).Render(line)
-}
-
-// helpFrameBottom renders the bottom border line: `╰` + `─`×w + `╯`.
-func helpFrameBottom(w int, borderToken theme.Token, mode theme.Mode, colourless bool) string {
-	line := helpFrameBottomLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameBottomRight
-	return helpFrameStyle(borderToken, mode, colourless).Render(line)
-}
-
-// helpFrameDivider renders the joined compartment divider: `├` + `─`×w + `┤`, all
-// in borderToken (single-tone). The `├`/`┤` tees visibly join the side borders.
-func helpFrameDivider(w int, borderToken theme.Token, mode theme.Mode, colourless bool) string {
-	line := helpFrameTeeLeft + strings.Repeat(helpRuleGlyph, w) + helpFrameTeeRight
-	return helpFrameStyle(borderToken, mode, colourless).Render(line)
-}
-
-// helpFrameContentLine wraps a content row (already exactly w cells wide) with the
-// left/right `│` side borders (in borderToken), yielding a w+2 cell frame line.
-func helpFrameContentLine(row string, borderToken theme.Token, mode theme.Mode, colourless bool) string {
-	side := helpFrameStyle(borderToken, mode, colourless).Render(helpFrameSide)
-	return lipgloss.JoinHorizontal(lipgloss.Top, side, row, side)
-}
-
-// helpInsetRow wraps a content row (whose natural width is at most contentWidth)
-// with the per-row L/R canvas inset (helpRowInset cells each side) and pads the
-// content out to contentWidth, so every header/body row is exactly innerWidth cells
-// (contentWidth + 2·inset) — the divider's width. The inset and pad are canvas-
-// painted so the row carries the owned canvas with no terminal-bg island.
-func helpInsetRow(row string, contentWidth int, mode theme.Mode, colourless bool) string {
-	inset := headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", helpRowInset))
-	padded := headerPadRight(row, lipgloss.Width(row), contentWidth, mode, colourless)
-	return lipgloss.JoinHorizontal(lipgloss.Top, inset, padded, inset)
 }
 
 // helpModalHeader renders the header row: `? Keybindings` on the LEFT (the `?`

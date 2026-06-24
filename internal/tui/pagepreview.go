@@ -40,7 +40,7 @@ var previewBorderColorToken = theme.MV.AccentCyan
 //   - Rows: top border + header + header-divider + footer-divider + footer +
 //     bottom border = 6 chrome rows wrapping the body.
 //   - Columns: the two side borders (2) + the per-row L/R inset
-//     (2·helpRowInset = 4) = 6 chrome columns wrapping the body.
+//     (2·panelRowInset = 4) = 6 chrome columns wrapping the body.
 //
 // Both dimensions sum to 6, so the body viewport is sized to
 // (termW − previewFrameOverhead) × (termH − previewFrameOverhead) and the
@@ -208,7 +208,7 @@ func selectPreviewHeaderTier(width int, session string, windowIdx, windowCount, 
 // spaces. Under the NO_COLOR carve-out (§2.5 / §9.2) every segment renders
 // colourless (no foreground SGR) but the structure stays present. The row's
 // natural width is <= contentWidth (the cascade fits it); renderJoinedPanel's
-// helpInsetRow pads it to the uniform frame width.
+// panelInsetRow pads it to the uniform frame width.
 func composePreviewHeaderRow(contentWidth, windowIdx, windowCount, paneIdx, paneCount int, session string, mode theme.Mode, colourless bool) string {
 	// Degenerate widths: the marker itself (9 cells) exceeds the body width — clip
 	// the marker to contentWidth (cells) and render that alone so the panel still
@@ -437,7 +437,7 @@ func (m previewModel) degenerate() bool {
 
 // innerWidth returns the body width available inside the §9.1 joined panel —
 // the model's total width minus previewFrameOverhead (2 side borders + the
-// 2·helpRowInset per-row inset), clamped to ≥ 0. It is the joined panel's
+// 2·panelRowInset per-row inset), clamped to ≥ 0. It is the joined panel's
 // contentWidth: the viewport, the header cascade target, and the footer fit
 // target all key off it so the composed panel fills the full terminal width.
 func (m previewModel) innerWidth() int {

@@ -297,7 +297,7 @@ func renderHeaderWithBadge(left string, contentWidth int, showBadge bool, mode t
 // blank spacer row (the body's vertical rhythm). Every appended element is a SINGLE
 // line — the multi-row boxes are split into their constituent rows so the joined
 // panel's per-row inset + side borders wrap each line exactly (a multi-line content
-// "row" would defeat helpInsetRow's single-line padding and let the box overrun the
+// "row" would defeat panelInsetRow's single-line padding and let the box overrun the
 // panel frame).
 func (m Model) editModalBodyRows(mode theme.Mode, colourless bool) []string {
 	var rows []string

@@ -87,10 +87,10 @@ func TestJoinedPanel_DividersJoinSideBorders(t *testing.T) {
 	dividerCount := 0
 	for _, raw := range strings.Split(panel, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
-		if strings.HasPrefix(line, helpFrameTeeLeft) && strings.HasSuffix(line, helpFrameTeeRight) {
+		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerCount++
-			interior := strings.TrimSuffix(strings.TrimPrefix(line, helpFrameTeeLeft), helpFrameTeeRight)
-			if interior == "" || strings.Trim(interior, helpRuleGlyph) != "" {
+			interior := strings.TrimSuffix(strings.TrimPrefix(line, panelFrameTeeLeft), panelFrameTeeRight)
+			if interior == "" || strings.Trim(interior, panelRuleGlyph) != "" {
 				t.Errorf("divider interior between ├ and ┤ must be all rule glyphs; got %q", interior)
 			}
 			if strings.HasPrefix(interior, " ") || strings.HasSuffix(interior, " ") {
@@ -123,7 +123,7 @@ func TestJoinedPanel_UniformWidth(t *testing.T) {
 }
 
 // TestJoinedPanel_RowsAreInsetDividersAreNot asserts content rows carry the L/R
-// inset (helpRowInset) inside the side borders while the dividers run flush — the
+// inset (panelRowInset) inside the side borders while the dividers run flush — the
 // same inset contract the help modal uses.
 func TestJoinedPanel_RowsAreInsetDividersAreNot(t *testing.T) {
 	compartments := [][]string{
@@ -145,8 +145,8 @@ func TestJoinedPanel_RowsAreInsetDividersAreNot(t *testing.T) {
 	}
 	l := strings.IndexRune(contentRow, '│')
 	interior := contentRow[l+len("│"):]
-	if !strings.HasPrefix(interior, strings.Repeat(" ", helpRowInset)) {
-		t.Errorf("content row must carry the helpRowInset L inset inside the border; interior = %q", interior)
+	if !strings.HasPrefix(interior, strings.Repeat(" ", panelRowInset)) {
+		t.Errorf("content row must carry the panelRowInset L inset inside the border; interior = %q", interior)
 	}
 }
 
