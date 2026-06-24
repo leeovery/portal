@@ -243,25 +243,21 @@ func renderSectionGap(mode theme.Mode, colourless bool) string {
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
-// loadingStyle is the leaf style for the loading screen: a role-token FOREGROUND
-// over the owned canvas Background for the mode. Under NO_COLOR it returns a bare
-// style (no hue, no canvas) so the run renders on the terminal's native fg/bg.
+// loadingStyle is the leaf canvas-paint style for the loading screen — a
+// Background(canvas) style for the mode, bare under NO_COLOR. It delegates to the
+// shared header.go source (headerCanvasBg) rather than re-implementing the rule,
+// so the leaf canvas-paint carve-out lives in exactly one place (mirroring how
+// SessionDelegate.rowBg delegates to the shared rowBgStyle free function).
 func loadingStyle(mode theme.Mode, colourless bool) lipgloss.Style {
-	if colourless {
-		return lipgloss.NewStyle()
-	}
-	return lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(mode))
+	return headerCanvasBg(mode, colourless)
 }
 
-// loadingFg returns the leaf style carrying the token foreground over the canvas
-// (bare under NO_COLOR).
+// loadingFg is the leaf token-foreground-over-canvas style for the loading screen
+// (bare under NO_COLOR). It delegates to the shared header.go source (headerStyle)
+// rather than re-implementing the rule (mirroring SessionDelegate.rowToken's
+// delegation to the shared rowTokenStyle free function).
 func loadingFg(fg theme.Token, mode theme.Mode, colourless bool) lipgloss.Style {
-	if colourless {
-		return lipgloss.NewStyle()
-	}
-	return lipgloss.NewStyle().
-		Foreground(fg.ColorFor(mode)).
-		Background(theme.MV.Canvas.ColorFor(mode))
+	return headerStyle(fg, mode, colourless)
 }
 
 // renderLoadingWordmark renders the hero wordmark for the laid-out width and the

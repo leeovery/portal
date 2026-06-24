@@ -117,7 +117,7 @@
       "items": {
         "spectrum-tui-design": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
@@ -154,7 +154,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 8,
-          "current_task": "spectrum-tui-design-8-4",
+          "current_task": "spectrum-tui-design-8-5",
           "completed_tasks": [
             "spectrum-tui-design-1-1",
             "spectrum-tui-design-1-2",
@@ -201,7 +201,8 @@
             "spectrum-tui-design-7-4",
             "spectrum-tui-design-8-1",
             "spectrum-tui-design-8-2",
-            "spectrum-tui-design-8-3"
+            "spectrum-tui-design-8-3",
+            "spectrum-tui-design-8-4"
           ],
           "completed_phases": [
             1,
