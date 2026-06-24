@@ -66,6 +66,21 @@ func modalBorderStyle(mode theme.Mode, colourless bool) lipgloss.Style {
 // is applied by the caller via termDims so the region is never zero-sized).
 func renderModalOnClearedCanvas(content string, width, height int, mode theme.Mode, colourless bool) string {
 	panel := modalBorderStyle(mode, colourless).Render(content)
+	return placeModalOnClearedCanvas(panel, width, height)
+}
+
+// placeModalOnClearedCanvas is the SINGLE home of the §8.1/§13.5 cleared-canvas
+// modal centring: it dead-centres an already-built panel string in the inset
+// content region (width × height) via lipgloss.Place, both axes Center. Every
+// render*ModalOnClearedCanvas wrapper supplies only its own panel (its content
+// builder differs; the placement maths does not) and routes the final placement
+// through here, so the centring expression — and any future change to it, e.g. a
+// non-centred placement — lives in exactly one place rather than the five verbatim
+// copies that had accreted across the 3-4…3-9 modal reskin tasks. The outer
+// fillCanvas wrap in View() then paints the owned mode-matched canvas into every
+// surrounding cell (NO_COLOR suppression + the 80×24 fallback inherited from that
+// Phase 1 path), so this layer only centres — it never paints the backdrop.
+func placeModalOnClearedCanvas(panel string, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }
 
@@ -80,7 +95,7 @@ func renderModalOnClearedCanvas(content string, width, height int, mode theme.Mo
 // for the OTHER modals. The same lipgloss.Place centres it on the inset region.
 func renderHelpModalOnClearedCanvas(entries []keymapEntry, width, height int, mode theme.Mode, colourless bool) string {
 	panel := renderHelpModalContent(entries, mode, colourless)
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+	return placeModalOnClearedCanvas(panel, width, height)
 }
 
 // renderKillModalOnClearedCanvas composes the §8.3 kill-confirm modal panel and
@@ -91,7 +106,7 @@ func renderHelpModalOnClearedCanvas(entries []keymapEntry, width, height int, mo
 // OTHER (not-yet-reskinned) modals; this path bypasses it.
 func renderKillModalOnClearedCanvas(name string, windows int, width, height int, mode theme.Mode, colourless bool) string {
 	panel := renderKillModalContent(name, windows, mode, colourless)
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+	return placeModalOnClearedCanvas(panel, width, height)
 }
 
 // renderDeleteModalOnClearedCanvas composes the §8.6 delete-project confirm modal
@@ -104,7 +119,7 @@ func renderKillModalOnClearedCanvas(name string, windows int, width, height int,
 // bypasses it.
 func renderDeleteModalOnClearedCanvas(name, path string, width, height int, mode theme.Mode, colourless bool) string {
 	panel := renderDeleteModalContent(name, path, mode, colourless)
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+	return placeModalOnClearedCanvas(panel, width, height)
 }
 
 // renderRenameModalOnClearedCanvas composes the §8.4 rename-session modal panel and
@@ -117,7 +132,7 @@ func renderDeleteModalOnClearedCanvas(name, path string, width, height int, mode
 // renameAndRefresh) is unchanged — only the rendering is reskinned.
 func renderRenameModalOnClearedCanvas(input textinput.Model, oldName string, width, height int, mode theme.Mode, colourless bool) string {
 	panel := renderRenameModalContent(input, oldName, mode, colourless)
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+	return placeModalOnClearedCanvas(panel, width, height)
 }
 
 // renderEditModalOnClearedCanvas composes the §8.2/§13.1 two-mode edit-project modal
@@ -131,5 +146,5 @@ func renderRenameModalOnClearedCanvas(input textinput.Model, oldName string, wid
 // only the rendering is reskinned.
 func renderEditModalOnClearedCanvas(m Model, width, height int, mode theme.Mode, colourless bool) string {
 	panel := m.renderEditProjectContent()
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
+	return placeModalOnClearedCanvas(panel, width, height)
 }
