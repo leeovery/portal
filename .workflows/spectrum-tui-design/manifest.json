@@ -145,8 +145,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 6,
-          "current_task": "spectrum-tui-design-6-4",
+          "current_phase": 7,
+          "current_task": "spectrum-tui-design-7-1",
           "completed_tasks": [
             "spectrum-tui-design-1-1",
             "spectrum-tui-design-1-2",

@@ -1087,6 +1087,7 @@ func newProjectList() list.Model {
 	l.SetShowHelp(false)
 	l.KeyMap.ShowFullHelp.Unbind()
 	l.KeyMap.CloseFullHelp.Unbind()
+	pinArrowOnlyNav(&l.KeyMap)
 	l.InfiniteScrolling = true
 	brightenHelpStyles(&l)
 	return l

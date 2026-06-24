@@ -64,6 +64,29 @@ func pressProject(t *testing.T, m Model, msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	return updated.(Model), cmd
 }
 
+// projectsNavModel builds a Projects-page Model seeded with several project rows
+// and a real list size, so the cursor/page index can actually move — the fixture
+// for the §12.2 arrow-only-nav dispatch assertions (a single-row InfiniteScrolling
+// list pins the cursor at 0 and would mask a leaked nav binding).
+func projectsNavModel(t *testing.T) Model {
+	t.Helper()
+	projects := []project.Project{
+		{Path: "/p/one", Name: "one"},
+		{Path: "/p/two", Name: "two"},
+		{Path: "/p/three", Name: "three"},
+		{Path: "/p/four", Name: "four"},
+	}
+	m := Model{
+		projects:    projects,
+		projectList: newProjectList(),
+		activePage:  PageProjects,
+	}
+	m.projectList.SetItems(ProjectsToListItems(projects))
+	m.projectList.Select(0)
+	m.applyProjectListSize(m.contentWidth(), m.contentHeight())
+	return m
+}
+
 // TestProjectsKeymapRevision locks the §12.2 Projects-side keymap revision in the
 // live updateProjectsPage dispatch: the s→Sessions alias is gone (x is the sole
 // both-directions Sessions↔Projects toggle), and no uppercase binding is
@@ -117,6 +140,75 @@ func TestProjectsKeymapRevision(t *testing.T) {
 			if m.activePage != PageProjects {
 				t.Errorf("uppercase key %+v must not toggle the page (§12.2: no uppercase); active page = %d", k, m.activePage)
 			}
+		}
+	})
+
+	// §12.2: navigation on the Projects page is arrows only — the vim aliases
+	// (h/j/k/l, g/G), the uppercase G, and the PgUp/PgDn/Home/End/b/u/f page-jump
+	// keys must NOT reach the list's own Update. This drives the LIVE bubbles/list
+	// dispatch (sending each key through updateProjectsPage and asserting the
+	// cursor index is unchanged), mirroring the Sessions arrow-only coverage — the
+	// descriptor-layer projects_keymap_test only proves the display copy and gave
+	// false assurance while these keys still moved the cursor.
+	t.Run("it does not navigate via vim/uppercase/page-jump aliases on Projects", func(t *testing.T) {
+		bannedNav := []tea.KeyPressMsg{
+			{Code: 'j', Text: "j"},
+			{Code: 'k', Text: "k"},
+			{Code: 'h', Text: "h"},
+			{Code: 'l', Text: "l"},
+			{Code: 'g', Text: "g"},
+			{Code: 'G', Text: "G"},
+			{Code: 'b', Text: "b"},
+			{Code: 'u', Text: "u"},
+			{Code: 'f', Text: "f"},
+			{Code: tea.KeyPgUp},
+			{Code: tea.KeyPgDown},
+			{Code: tea.KeyHome},
+			{Code: tea.KeyEnd},
+		}
+		for _, k := range bannedNav {
+			m := projectsNavModel(t)
+			start := m.projectList.Index()
+			m, _ = pressProject(t, m, k)
+			if m.projectList.Index() != start {
+				t.Errorf("key %+v must not move the Projects cursor (§12.2: arrows only); index %d → %d", k, start, m.projectList.Index())
+			}
+			if m.activePage != PageProjects {
+				t.Errorf("key %+v must not change the page; got %d", k, m.activePage)
+			}
+			if m.modal != modalNone {
+				t.Errorf("key %+v must not open a modal; modal = %v", k, m.modal)
+			}
+		}
+	})
+
+	t.Run("it moves the cursor with ↑/↓ only and pages with Ctrl+↑/↓", func(t *testing.T) {
+		m := projectsNavModel(t)
+		start := m.projectList.Index()
+		m, _ = pressProject(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+		if m.projectList.Index() != start+1 {
+			t.Errorf("↓ must move the Projects cursor down one; index %d → %d", start, m.projectList.Index())
+		}
+		m, _ = pressProject(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+		if m.projectList.Index() != start {
+			t.Errorf("↑ must move the Projects cursor back up one; index %d", m.projectList.Index())
+		}
+
+		// Ctrl+↑/↓ page: the binding must still route to PrevPage/NextPage. Confirm
+		// the bindings are non-empty so a page key is dispatchable (the cursor index
+		// moves only when there is more than one page; the binding presence is the
+		// §12.2 invariant under test).
+		if len(m.projectList.KeyMap.NextPage.Keys()) == 0 {
+			t.Errorf("Ctrl+↓ paging must stay bound on Projects; NextPage keys are empty")
+		}
+		if len(m.projectList.KeyMap.PrevPage.Keys()) == 0 {
+			t.Errorf("Ctrl+↑ paging must stay bound on Projects; PrevPage keys are empty")
+		}
+		if got := m.projectList.KeyMap.NextPage.Keys(); len(got) != 1 || got[0] != "ctrl+down" {
+			t.Errorf("NextPage must be Ctrl+↓ only; keys = %v", got)
+		}
+		if got := m.projectList.KeyMap.PrevPage.Keys(); len(got) != 1 || got[0] != "ctrl+up" {
+			t.Errorf("PrevPage must be Ctrl+↑ only; keys = %v", got)
 		}
 	})
 }
