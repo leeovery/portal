@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"strings"
-
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/tui/theme"
 )
@@ -164,15 +162,9 @@ func filterFooterRow(entries []filterFooterEntry, w int, mode theme.Mode, colour
 		rightWidth = lipgloss.Width(rightSeg)
 	}
 
-	// No room for the ? help beside the left cluster (or no right entry): pad the
-	// left cluster to width and return (mirrors footerKeyRow's degrade).
-	if rightSeg == "" || leftWidth+1+rightWidth > w {
-		return headerPadRight(left, leftWidth, w, mode, colourless)
-	}
-
-	spacerWidth := w - leftWidth - rightWidth
-	spacer := headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", spacerWidth))
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, rightSeg)
+	// Hand the fit test, the narrow-degrade, and the flex-spacer join to the shared
+	// assembler — the SAME right-anchor geometry as the standard footer (footerKeyRow).
+	return assembleRightAnchoredRow(left, leftWidth, rightSeg, rightWidth, w, mode, colourless)
 }
 
 // renderFilterCluster renders the given filter-footer entries joined by the §3.4

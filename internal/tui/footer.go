@@ -152,9 +152,23 @@ func footerKeyRow(entries []keymapEntry, w int, mode theme.Mode, colourless bool
 
 	left, leftWidth := fitLeftCluster(core, w, rightWidth, mode, colourless)
 
-	// No room for the ? help beside the (possibly truncated) left cluster, or no
-	// right entry: pad the left cluster to width and return (the ? help would
-	// overflow). The fitLeftCluster contract guarantees leftWidth ≤ w.
+	// The fitLeftCluster contract guarantees leftWidth ≤ w; the shared assembler
+	// owns the fit test, the narrow-degrade, and the flex-spacer join.
+	return assembleRightAnchoredRow(left, leftWidth, rightSeg, rightWidth, w, mode, colourless)
+}
+
+// assembleRightAnchoredRow lays out a right-anchored footer row of exactly w
+// cells: a left cluster (already rendered, leftWidth cells) and a right anchor
+// segment (rightSeg, rightWidth cells) pinned to the row's right edge with a
+// canvas-painted flex spacer between them. When the right anchor does not fit
+// beside the left cluster (leftWidth+1+rightWidth > w — at least one spacer cell)
+// or there is no right anchor (rightSeg == ""), the anchor is dropped and the left
+// cluster is padded to width via headerPadRight (the §2.7 narrow-degrade). It is
+// the single owner of this right-anchor geometry, shared by the standard condensed
+// footer (footerKeyRow) and the contextual filter footers (filterFooterRow) so a
+// change to the degrade rule is made once. Callers render their OWN left cluster
+// (the footer-specific fitLeftCluster ellipsis logic stays out of here).
+func assembleRightAnchoredRow(left string, leftWidth int, rightSeg string, rightWidth, w int, mode theme.Mode, colourless bool) string {
 	if rightSeg == "" || leftWidth+1+rightWidth > w {
 		return headerPadRight(left, leftWidth, w, mode, colourless)
 	}
