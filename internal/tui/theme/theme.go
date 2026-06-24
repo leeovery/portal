@@ -53,14 +53,6 @@ func (t Token) ColorFor(m Mode) color.Color {
 	return lipgloss.Color(t.Dark)
 }
 
-// Color is a dark-pinned convenience that always resolves the DARK variant. It
-// is retained only for the not-yet-mode-resolved call sites; the live renderers
-// resolve per mode via ColorFor(mode) off the model's canvasMode, so they do NOT
-// route through here.
-func (t Token) Color() color.Color {
-	return t.ColorFor(Dark)
-}
-
 // Theme is the closed set of named MV role tokens. One built-in instance (MV)
 // is exported; a user-overridable theme system is deferred to its own
 // initiative (§2.8 / §16).

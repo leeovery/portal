@@ -875,66 +875,23 @@ func WithInitialFlash(text string) Option {
 	}
 }
 
-// brightenHelpStyles re-points the footer keymap colours onto the §2.9 role
-// tokens (colour source only — the structural footer restyle is Phase 2):
-// key glyphs use the footer key-hint role (accent.blue), labels the detail
-// role (text.detail), and the inter-entry separator / ellipsis is decorative
-// chrome (text.faint — decorative-only, never functional text).
-func brightenHelpStyles(l *list.Model) {
-	keyColor := theme.MV.AccentBlue.Color()
-	descColor := theme.MV.TextDetail.Color()
-	sepColor := theme.MV.TextFaint.Color()
-	l.Help.Styles.ShortKey = lipgloss.NewStyle().Foreground(keyColor)
-	l.Help.Styles.ShortDesc = lipgloss.NewStyle().Foreground(descColor)
-	l.Help.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(sepColor)
-	l.Help.Styles.FullKey = lipgloss.NewStyle().Foreground(keyColor)
-	l.Help.Styles.FullDesc = lipgloss.NewStyle().Foreground(descColor)
-	l.Help.Styles.FullSeparator = lipgloss.NewStyle().Foreground(sepColor)
-	l.Help.Styles.Ellipsis = lipgloss.NewStyle().Foreground(sepColor)
-}
-
-// canvasHelpStyles re-points the footer keymap help styles onto the §2.9 role
-// tokens AND paints each through Background(canvas) for the resolved mode, so the
-// footer (a leaf surface of the foundation Sessions screen, §1) renders on the
-// owned canvas. It mirrors brightenHelpStyles' colour roles exactly — only the
-// canvas background and the mode-resolved foregrounds differ — and additionally
-// backgrounds the HelpStyle wrapper so the footer's own padding cells are canvas
-// too. The outer fill in View() pads the line-ends; this fills the cells behind
-// the footer glyphs and their inter-glyph spacers.
+// canvasHelpStyles backgrounds the bubbles/list HelpStyle wrapper through
+// Background(canvas) for the resolved mode, so the footer (a leaf surface of the
+// foundation Sessions screen, §1) renders on the owned canvas. The footer glyphs
+// and labels themselves are rendered by the descriptor-driven renderCondensedFooter
+// path (see footer.go), which paints its own canvas; this only ensures the
+// HelpStyle wrapper around the footer area carries the canvas background too.
 func canvasHelpStyles(l *list.Model, mode theme.Mode) {
 	canvas := theme.MV.Canvas.ColorFor(mode)
-	keyColor := theme.MV.AccentBlue.ColorFor(mode)
-	descColor := theme.MV.TextDetail.ColorFor(mode)
-	sepColor := theme.MV.TextFaint.ColorFor(mode)
-	onCanvas := func(fg color.Color) lipgloss.Style {
-		return lipgloss.NewStyle().Foreground(fg).Background(canvas)
-	}
-	l.Help.Styles.ShortKey = onCanvas(keyColor)
-	l.Help.Styles.ShortDesc = onCanvas(descColor)
-	l.Help.Styles.ShortSeparator = onCanvas(sepColor)
-	l.Help.Styles.FullKey = onCanvas(keyColor)
-	l.Help.Styles.FullDesc = onCanvas(descColor)
-	l.Help.Styles.FullSeparator = onCanvas(sepColor)
-	l.Help.Styles.Ellipsis = onCanvas(sepColor)
 	l.Styles.HelpStyle = l.Styles.HelpStyle.Background(canvas)
 }
 
-// colourlessHelpStyles strips the footer keymap help styles to bare styles for
-// the NO_COLOR carve-out (§2.5): no canvas background and no foreground hue, so
-// the footer renders on the terminal's native fg/bg. The footer keys stay
-// glyph-legible by construction (§2.2 — the key glyphs and labels are the text
-// itself, not colour-only state). Foreground hue would be stripped by the writer
-// layer anyway; setting bare styles also drops the canvas background lipgloss
-// would otherwise still emit.
+// colourlessHelpStyles strips the bubbles/list HelpStyle wrapper background for
+// the NO_COLOR carve-out (§2.5): no canvas background, so the footer area renders
+// on the terminal's native bg. The footer glyphs/labels are rendered by the
+// descriptor-driven renderCondensedFooter path, which drops its own hue under
+// NO_COLOR; this only drops the canvas background the wrapper would otherwise emit.
 func colourlessHelpStyles(l *list.Model) {
-	bare := lipgloss.NewStyle()
-	l.Help.Styles.ShortKey = bare
-	l.Help.Styles.ShortDesc = bare
-	l.Help.Styles.ShortSeparator = bare
-	l.Help.Styles.FullKey = bare
-	l.Help.Styles.FullDesc = bare
-	l.Help.Styles.FullSeparator = bare
-	l.Help.Styles.Ellipsis = bare
 	l.Styles.HelpStyle = l.Styles.HelpStyle.UnsetBackground()
 }
 
@@ -1022,11 +979,10 @@ func sessionListTitleForMode(mode prefs.SessionListMode, insideTmux bool, curren
 
 // newSessionList creates and configures a new bubbles/list.Model for sessions.
 // The bubbles/list built-in help renderer is disabled via SetShowHelp(false)
-// because the sessions/projects keymap footer is rendered manually as three
-// fixed columns by viewSessionList / viewProjectList via the list's own
-// help.Model.FullHelpView (see keymapFooter helpers below). brightenHelpStyles
-// still populates l.Help.Styles.* so the manual render keeps the same colour
-// and separator palette as the previous bubbles/list-driven bar.
+// because the §3.4 condensed keymap footer is rendered manually by
+// renderCondensedFooter over the §12.1 keymapEntry descriptors (see footer.go),
+// which sources its own §2.9 role tokens — nothing in the render path consumes
+// the list's own help.Model, so l.Help.Styles.* is never populated.
 func newSessionList(items []list.Item) list.Model {
 	l := list.New(items, SessionDelegate{}, 0, 0)
 	l.Title = "Sessions"
@@ -1039,7 +995,6 @@ func newSessionList(items []list.Item) list.Model {
 	l.KeyMap.CloseFullHelp.Unbind()
 	pinArrowOnlyNav(&l.KeyMap)
 	l.InfiniteScrolling = true
-	brightenHelpStyles(&l)
 	return l
 }
 
@@ -1063,8 +1018,9 @@ func pinArrowOnlyNav(km *list.KeyMap) {
 }
 
 // newProjectList creates and configures a bubbles/list.Model for projects.
-// See newSessionList for the rationale behind SetShowHelp(false) and the
-// retained brightenHelpStyles call.
+// See newSessionList for the rationale behind SetShowHelp(false): the keymap
+// footer is rendered manually by renderCondensedFooter over the keymapEntry
+// descriptors, not via the list's own help.Model.
 func newProjectList() list.Model {
 	l := list.New(nil, ProjectDelegate{}, 0, 0)
 	l.Title = "Projects"
@@ -1077,7 +1033,6 @@ func newProjectList() list.Model {
 	l.KeyMap.CloseFullHelp.Unbind()
 	pinArrowOnlyNav(&l.KeyMap)
 	l.InfiniteScrolling = true
-	brightenHelpStyles(&l)
 	return l
 }
 

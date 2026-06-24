@@ -62,17 +62,6 @@ func TestMVTokenCount(t *testing.T) {
 	}
 }
 
-// TestTokenColorResolvesToDark proves the resolver returns the DARK variant for
-// now, mirroring the dark-default the 1-2 AdaptiveColor migration produced in
-// the absence of OSC 11 light/dark detection (detection lands in 1-7). The
-// rendered hue must equal lipgloss.Color(token.Dark).
-func TestTokenColorResolvesToDark(t *testing.T) {
-	tok := theme.MV.AccentViolet
-	if got, want := tok.Color(), lipgloss.Color(tok.Dark); got != want {
-		t.Errorf("Token.Color() = %v, want dark variant %v", got, want)
-	}
-}
-
 // TestEachTokenCarriesLightVariant proves the token representation already holds
 // a settable Light slot so task 1-4 can fill the light values WITHOUT
 // re-pointing any call site. Light is a placeholder for now (1-4 owns the real
