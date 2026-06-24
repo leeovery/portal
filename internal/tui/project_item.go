@@ -76,33 +76,22 @@ func (d ProjectDelegate) Spacing() int { return 0 }
 // Update returns nil; no item-level keybinding handling is needed.
 func (d ProjectDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
-// rowBg is the structural-cell style for a project row: the bg.selection tint on
-// the selected row, otherwise the owned canvas (or a bare style under the NO_COLOR
-// carve-out, so the cells render on the terminal's native bg). Mirrors
-// SessionDelegate.rowBg.
+// rowBg delegates to the shared rowBgStyle free function (session_item.go),
+// binding the delegate's Mode and Colourless — the structural-cell style for a
+// project row: the bg.selection tint on the selected row, otherwise the owned
+// canvas (or a bare style under the NO_COLOR carve-out). Shared with
+// SessionDelegate so the selection-vs-canvas colour role lives in one place.
 func (d ProjectDelegate) rowBg(selected bool) lipgloss.Style {
-	if d.Colourless {
-		return lipgloss.NewStyle()
-	}
-	if selected {
-		return lipgloss.NewStyle().Background(theme.MV.BgSelection.ColorFor(d.Mode))
-	}
-	return lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(d.Mode))
+	return rowBgStyle(d.Mode, selected, d.Colourless)
 }
 
-// rowToken returns base with the role token's mode-resolved FOREGROUND over the
-// row's background (bg.selection on the selected row, canvas otherwise). Under the
-// NO_COLOR carve-out it returns base unchanged (no hue, no background) so base's
-// non-colour attributes (Bold) still carry. Mirrors SessionDelegate.rowToken.
+// rowToken delegates to the shared rowTokenStyle free function (session_item.go),
+// binding the delegate's Mode and Colourless — base with the role token's
+// mode-resolved FOREGROUND over the row's background (bg.selection on the
+// selected row, canvas otherwise; base unchanged under the NO_COLOR carve-out).
+// Shared with SessionDelegate.
 func (d ProjectDelegate) rowToken(base lipgloss.Style, fg theme.Token, selected bool) lipgloss.Style {
-	if d.Colourless {
-		return base
-	}
-	styled := base.Foreground(fg.ColorFor(d.Mode))
-	if selected {
-		return styled.Background(theme.MV.BgSelection.ColorFor(d.Mode))
-	}
-	return styled.Background(theme.MV.Canvas.ColorFor(d.Mode))
+	return rowTokenStyle(base, fg, d.Mode, selected, d.Colourless)
 }
 
 // Render renders a project item as two lines: the name (text.primary, heavy) on
@@ -154,12 +143,9 @@ func (d ProjectDelegate) renderRowLine(m list.Model, selected bool, textStyle li
 
 	// Left-bar column (§3.3 / §6.2): the violet ▌ + a trailing cell on the selected
 	// row, two blank cells otherwise — a fixed 2-cell column keeping the text at the
-	// same left edge whether or not the row is selected.
-	bar := bg.Render(padTo("", leftBarColumnWidth))
-	if selected {
-		bar = d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true).Render(selectorBar) +
-			bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(selectorBar)))
-	}
+	// same left edge whether or not the row is selected. Shared with the Session
+	// delegate via renderLeftBarColumn.
+	bar := renderLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true), selected)
 
 	// Flex text column. When the list has not been sized yet (Width() == 0, a
 	// directly-constructed model that renders before its first WindowSizeMsg) there

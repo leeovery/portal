@@ -293,37 +293,75 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	_, _ = fmt.Fprint(w, row)
 }
 
-// rowBg is the structural-cell style for a session row: the bg.selection tint
-// on the selected row, otherwise the owned canvas (or a bare style under the
-// NO_COLOR carve-out, so the cells render on the terminal's native bg).
+// rowBgStyle is the SHARED structural-cell style for a list row (Session and
+// Project delegates both route through it): the bg.selection tint on the
+// selected row, otherwise the owned canvas (or a bare style under the NO_COLOR
+// carve-out, so the cells render on the terminal's native bg). Homed here as a
+// free function so the §2.9 selection-vs-canvas colour-role decision lives in
+// exactly one place — a future change to the selection background role is a
+// single edit shared by both delegates.
 //
 // Padding (slot fills, the name-flex tail, the gap) is rendered through this
 // style so every structural cell carries an explicit background — no
 // terminal-bg island opens up inside a selected row's tint or the canvas.
-func (d SessionDelegate) rowBg(selected bool) lipgloss.Style {
-	if d.Colourless {
+func rowBgStyle(mode theme.Mode, selected, colourless bool) lipgloss.Style {
+	if colourless {
 		return lipgloss.NewStyle()
 	}
 	if selected {
-		return lipgloss.NewStyle().Background(theme.MV.BgSelection.ColorFor(d.Mode))
+		return lipgloss.NewStyle().Background(theme.MV.BgSelection.ColorFor(mode))
 	}
-	return lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(d.Mode))
+	return lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(mode))
 }
 
-// rowToken returns base with the role token's mode-resolved FOREGROUND over the
-// row's background (bg.selection on the selected row, canvas otherwise) — the
-// selected-row counterpart of tokenStyle. Under the NO_COLOR carve-out it
-// returns base unchanged (no hue, no background), so base's non-colour
-// attributes (Bold/Faint) still carry state glyph-distinctly (§2.2).
-func (d SessionDelegate) rowToken(base lipgloss.Style, fg theme.Token, selected bool) lipgloss.Style {
-	if d.Colourless {
+// rowTokenStyle is the SHARED selected-row token style (both delegates route
+// through it): base with the role token's mode-resolved FOREGROUND over the
+// row's background (bg.selection on the selected row, canvas otherwise). Under
+// the NO_COLOR carve-out it returns base unchanged (no hue, no background), so
+// base's non-colour attributes (Bold/Faint) still carry state glyph-distinctly
+// (§2.2). Homed here as a free function so the colour-role composition lives in
+// one place for both the Session and Project delegates.
+func rowTokenStyle(base lipgloss.Style, fg theme.Token, mode theme.Mode, selected, colourless bool) lipgloss.Style {
+	if colourless {
 		return base
 	}
-	styled := base.Foreground(fg.ColorFor(d.Mode))
+	styled := base.Foreground(fg.ColorFor(mode))
 	if selected {
-		return styled.Background(theme.MV.BgSelection.ColorFor(d.Mode))
+		return styled.Background(theme.MV.BgSelection.ColorFor(mode))
 	}
-	return styled.Background(theme.MV.Canvas.ColorFor(d.Mode))
+	return styled.Background(theme.MV.Canvas.ColorFor(mode))
+}
+
+// renderLeftBarColumn renders the SHARED §3.3 left-bar selector column (both
+// renderSessionRow and renderRowLine route through it): the violet ▌ + a
+// trailing cell on the selected row, leftBarColumnWidth blank cells otherwise —
+// a fixed 2-cell column keeping the row text at the same left edge whether or
+// not the row is selected. bg is the caller's rowBgStyle result (so the blank
+// cells carry the row's canvas / selection tint); selectorStyle is the caller's
+// rowTokenStyle(lipgloss.Style{}, AccentViolet, true, …) result (so the bar
+// renders in accent.violet over the selection tint). Homed here so the 2-cell
+// selector-column width and the selected/unselected grammar live in one place
+// for both delegates.
+func renderLeftBarColumn(bg, selectorStyle lipgloss.Style, selected bool) string {
+	if selected {
+		return selectorStyle.Render(selectorBar) +
+			bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(selectorBar)))
+	}
+	return bg.Render(padTo("", leftBarColumnWidth))
+}
+
+// rowBg delegates to the shared rowBgStyle free function, binding the
+// delegate's Mode and Colourless. Retained so the existing call sites keep their
+// terse d.rowBg(selected) form.
+func (d SessionDelegate) rowBg(selected bool) lipgloss.Style {
+	return rowBgStyle(d.Mode, selected, d.Colourless)
+}
+
+// rowToken delegates to the shared rowTokenStyle free function, binding the
+// delegate's Mode and Colourless. Retained so the existing call sites keep their
+// terse d.rowToken(...) form.
+func (d SessionDelegate) rowToken(base lipgloss.Style, fg theme.Token, selected bool) lipgloss.Style {
+	return rowTokenStyle(base, fg, d.Mode, selected, d.Colourless)
 }
 
 // renderSessionRow renders the §4.1 flat-row anatomy on the owned canvas:
@@ -366,12 +404,9 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 
 	// Left-bar column (§3.3): the violet ▌ + a trailing cell on the selected row,
 	// two blank cells otherwise — a fixed 2-cell column that keeps the name at the
-	// same left edge whether or not the row is selected.
-	bar := bg.Render(padTo("", leftBarColumnWidth))
-	if selected {
-		bar = d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true).Render(selectorBar) +
-			bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(selectorBar)))
-	}
+	// same left edge whether or not the row is selected. Shared with the Project
+	// delegate via renderLeftBarColumn.
+	bar := renderLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true), selected)
 
 	// Name — text.primary (selected: text.on-selection), bold (§4.1).
 	nameTok := theme.MV.TextPrimary
