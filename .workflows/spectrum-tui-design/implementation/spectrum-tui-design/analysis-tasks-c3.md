@@ -6,7 +6,7 @@ total_proposed: 7
 # Analysis Tasks: spectrum-tui-design (Cycle 3)
 
 ## Task 1: Collapse BootstrapProgressMsg's duplicate friendly-label computation to a single authority
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -35,10 +35,12 @@ sources: architecture
 - A grep/compile-level check (or existing guard) confirms no remaining reference to the removed field(s).
 - If `BootstrapProgressMsg` construction appears in tests, those compile and pass against the reduced field set.
 
-## Task 2: Surface for ratification — Sessions/Projects footer renders "enter"/"space" words vs §3.4 ⏎/␣ glyphs
-status: pending
+## Task 2: Switch Sessions/Projects footer to §3.4 ⏎/␣ glyphs (spec-owner ratified path b)
+status: approved
 severity: low
 sources: standards
+
+**DECISION (spec owner, ratified): PATH (b) — switch to glyphs.** Change the Sessions/Projects footer `Key` forms to `⏎`/`␣` and the nav key to `↑↓` (no slash) so the footer matches §3.4 verbatim AND the Preview footer convention. Update the keymap descriptor (`internal/tui/keymap.go`), `footer.go` if it special-cases the words, and the byte-exact `footer_test.go` assertion to the glyph form. This is a VISUAL change — RE-CAPTURE every affected fixture (all pages rendering the footer: sessions-flat / by-project / by-tag / empty / no-tags-signpost, projects, projects-command-pending, filtering-* + light/nocolor variants) and verify each against its committed reference frame (which per §3.4 should already show the glyphs). Do NOT touch the Preview footer (already glyphs). Path (a) — amending §3.4 to words — was NOT chosen; ignore it below.
 
 **Problem**: §3.4 specifies the condensed Sessions footer "exactly" as `↑↓ navigate · ⏎ attach · / filter · ␣ preview · s switch view · x projects` plus right-aligned `? help`. The keymap descriptor stores the footer `Key` forms as the literal words "enter" and "space" (the help-modal `HelpKey` overrides them to ⏎/␣), and the footer renders `Key` directly — so the live footer reads `enter attach` and `space preview`, not the spec's `⏎ attach` / `␣ preview`. The footer's nav key is also rendered as `↑/↓` (with a slash) vs the spec's `↑↓`. The divergence is documented in-code as a deliberate descriptor decision ("the footer keeps 'enter'/'space'"), and the byte-exact footer test (`footer_test.go:41`) enshrines the word form, so this was a conscious choice rather than an oversight. It is nonetheless a literal divergence from §3.4's verbatim footer copy and from the Preview footer convention, which DOES use glyphs (`⏎ attach`, `␣ back` in §9.1 / `previewKeymap`). **This finding recurred in prior cycles and was previously discarded as a visual-gate decision; per the orchestrator it is surfaced this cycle for the spec owner to ratify (word-vs-glyph footer choice + §3.4 wording) rather than silently discarded.** Low severity: cosmetic, fully legible, internally consistent across Sessions/Projects.
 
@@ -62,7 +64,7 @@ sources: standards
 - If path (b), a render-level test confirms the Sessions/Projects footer shows ⏎/␣ glyphs (and `↑↓` nav) matching §3.4.
 
 ## Task 3: Model the no-matches footer membership structurally instead of by magic label string
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -88,7 +90,7 @@ sources: architecture
 - Existing filtering-footer render tests continue to pass with byte-identical output.
 
 ## Task 4: Remove dead SessionItem/ProjectItem Title()/Description() (or derive the attached marker from the const)
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -116,7 +118,7 @@ sources: architecture
 - The session/project row render tests continue to pass with unchanged output.
 
 ## Task 5: Point loading_view.go at the shared header.go leaf canvas-style helpers
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -142,7 +144,7 @@ sources: duplication
 - If aliases are kept, a test (or compile-level check) confirms they delegate to the header helpers rather than re-implementing.
 
 ## Task 6: Extract a single cleared-canvas modal placement helper
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -168,7 +170,7 @@ sources: duplication
 - A test (or shared assertion) confirms the modals route through the single placement helper.
 
 ## Task 7: Extract the right-anchored footer row assembler shared by footer.go and filter_footer.go
-status: pending
+status: approved
 severity: low
 sources: duplication
 
