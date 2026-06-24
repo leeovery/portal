@@ -193,12 +193,13 @@ type SessionDelegate struct {
 
 // canvasBg is the structural-spacer style: the Background(canvas) for the
 // delegate's mode normally, or a bare style under the NO_COLOR carve-out (§2.5)
-// so the spacers render on the terminal's native bg with no canvas paint.
+// so the spacers render on the terminal's native bg with no canvas paint. It
+// delegates to the shared header.go source (headerCanvasBg) rather than
+// re-implementing the rule, so the leaf canvas-paint carve-out lives in exactly
+// one place (mirroring how rowBg delegates to the shared rowBgStyle free
+// function and loadingStyle delegates to headerCanvasBg).
 func (d SessionDelegate) canvasBg() lipgloss.Style {
-	if d.Colourless {
-		return lipgloss.NewStyle()
-	}
-	return lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(d.Mode))
+	return headerCanvasBg(d.Mode, d.Colourless)
 }
 
 // tokenStyle returns base with the role token's mode-resolved FOREGROUND and the
@@ -211,13 +212,16 @@ func (d SessionDelegate) canvasBg() lipgloss.Style {
 // hue and no canvas background — so the run renders on the terminal's native
 // fg/bg, keeping base's non-colour attributes (Bold/dim) which carry state
 // glyph-distinctly (§2.2) without colour.
+//
+// It delegates the leaf colour pair to the shared header.go source (headerStyle)
+// and composites the caller-supplied base via Inherit, so the colour pair carries
+// (it is set on the header style and wins) while base's non-colour attributes are
+// inherited where the header style leaves them unset. Under NO_COLOR headerStyle
+// returns a bare style, so the result is base with no colour applied. This keeps
+// the leaf token-over-canvas carve-out in exactly one place (mirroring how
+// rowToken delegates to rowTokenStyle and loadingFg delegates to headerStyle).
 func (d SessionDelegate) tokenStyle(base lipgloss.Style, fg theme.Token) lipgloss.Style {
-	if d.Colourless {
-		return base
-	}
-	return base.
-		Foreground(fg.ColorFor(d.Mode)).
-		Background(theme.MV.Canvas.ColorFor(d.Mode))
+	return headerStyle(fg, d.Mode, d.Colourless).Inherit(base)
 }
 
 // Height returns 1, matching the single-line item display. Both SessionItem and
