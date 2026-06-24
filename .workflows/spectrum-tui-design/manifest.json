@@ -123,7 +123,7 @@
     "implementation": {
       "items": {
         "spectrum-tui-design": {
-          "status": "in-progress",
+          "status": "completed",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "auto",
