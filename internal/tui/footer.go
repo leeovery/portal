@@ -79,31 +79,30 @@ func renderProjectsFooter(width int, mode theme.Mode, colourless bool) string {
 // renderCommandPendingFooter renders the §11.4 command-pending Projects footer:
 // `⏎ run here · n run in cwd · esc cancel` (left cluster) + the right-aligned
 // `? help` anchor, over the shared 1px border.footer top rule. The left cluster
-// entries are derived from commandPendingHelpKeys() — the single binding source
-// (§11.4) — mapped to MV chrome (key glyphs accent.blue, labels text.detail, the
-// `enter` binding shown as the `⏎` glyph). It routes through the shared
-// renderFilterFooter machinery so the `? help` anchor + the two-row structure stay
-// byte-consistent with the standard / filter footers; only the entries differ.
+// entries are derived from the commandPendingKeymap() descriptor — the single binding
+// source (§11.4) — mapped to MV chrome (key glyphs accent.blue, labels text.detail,
+// the `enter` binding shown as its declarative HelpKey `⏎` glyph). It routes through
+// the shared renderFilterFooter machinery so the `? help` anchor + the two-row
+// structure stay byte-consistent with the standard / filter footers; only the entries
+// differ.
 func renderCommandPendingFooter(width int, mode theme.Mode, colourless bool) string {
 	return renderFilterFooter(commandPendingFooterEntries(), width, mode, colourless)
 }
 
-// commandPendingFooterEntries maps the §11.4 binding source (commandPendingHelpKeys)
-// to the filter-footer entry shape: each binding's help Desc becomes the label and
-// its help Key becomes the glyph, with the `enter` key shown as the `⏎` glyph (the
-// terse footer form, matching the modal footers). Every key glyph is accent.blue per
-// the MV footer convention (§3.4 / §8.4); labels render in text.detail.
+// commandPendingFooterEntries maps the §11.4 descriptor (commandPendingKeymap) to the
+// filter-footer entry shape: each entry's Action becomes the label and its glyph comes
+// from helpKeyGlyph (the declarative HelpKey when set — `enter`'s `⏎` — else the terse
+// Key), the SAME glyph resolution the descriptor-driven help path uses. This retires
+// the former inline `enter→⏎` rewrite, folding the command-pending footer into the
+// shared descriptor/entry vocabulary. Every key glyph is accent.blue per the MV footer
+// convention (§3.4 / §8.4); labels render in text.detail.
 func commandPendingFooterEntries() []filterFooterEntry {
-	entries := make([]filterFooterEntry, 0, len(commandPendingHelpKeys()))
-	for _, b := range commandPendingHelpKeys() {
-		h := b.Help()
-		glyph := h.Key
-		if glyph == "enter" {
-			glyph = "⏎"
-		}
+	descriptor := commandPendingKeymap()
+	entries := make([]filterFooterEntry, 0, len(descriptor))
+	for _, e := range descriptor {
 		entries = append(entries, filterFooterEntry{
-			Key:   []keyGlyph{{glyph, theme.MV.AccentBlue}},
-			Label: h.Desc,
+			Key:   []keyGlyph{{helpKeyGlyph(e), theme.MV.AccentBlue}},
+			Label: e.Action,
 		})
 	}
 	return entries

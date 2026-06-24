@@ -331,22 +331,56 @@ func TestCommandPending_DispatchParity(t *testing.T) {
 	})
 }
 
-// TestCommandPendingHelpKeys_Copy asserts commandPendingHelpKeys is the §11.4
-// binding source for the swapped footer: enter run here · n run in cwd · esc cancel.
-func TestCommandPendingHelpKeys_Copy(t *testing.T) {
-	bindings := commandPendingHelpKeys()
-	want := []struct{ key, help string }{
-		{"enter", "run here"},
-		{"n", "run in cwd"},
-		{"esc", "cancel"},
+// TestCommandPendingKeymap_Copy asserts the §11.4 command-pending footer descriptor
+// is the binding source for the swapped footer: enter run here · n run in cwd · esc
+// cancel. It is now a keymapEntry descriptor (the shared footer/help vocabulary), so
+// the `enter` glyph is encoded declaratively via HelpKey ("⏎") rather than the former
+// inline enter→⏎ rewrite — the footer Key stays the terse "enter" word.
+func TestCommandPendingKeymap_Copy(t *testing.T) {
+	entries := commandPendingKeymap()
+	want := []struct{ key, helpKey, action string }{
+		{"enter", "⏎", "run here"},
+		{"n", "", "run in cwd"},
+		{"esc", "", "cancel"},
 	}
-	if len(bindings) != len(want) {
-		t.Fatalf("commandPendingHelpKeys returned %d bindings, want %d", len(bindings), len(want))
+	if len(entries) != len(want) {
+		t.Fatalf("commandPendingKeymap returned %d entries, want %d", len(entries), len(want))
 	}
 	for i, w := range want {
-		h := bindings[i].Help()
-		if h.Key != w.key || h.Desc != w.help {
-			t.Errorf("binding %d = (%q, %q), want (%q, %q)", i, h.Key, h.Desc, w.key, w.help)
+		e := entries[i]
+		if e.Key != w.key || e.HelpKey != w.helpKey || e.Action != w.action {
+			t.Errorf("entry %d = (Key=%q, HelpKey=%q, Action=%q), want (Key=%q, HelpKey=%q, Action=%q)",
+				i, e.Key, e.HelpKey, e.Action, w.key, w.helpKey, w.action)
 		}
+	}
+}
+
+// TestCommandPendingFooter_ByteExact pins the full-ANSI rendered output of the §11.4
+// command-pending footer across Dark / Light / NO_COLOR so the descriptor-vocabulary
+// refactor (sourcing the footer from commandPendingKeymap via helpKeyGlyph instead of
+// the inline enter→⏎ rewrite) is proven byte-identical to the former []key.Binding
+// path. A single byte drift in any cell — glyph, colour, separator, spacer — fails.
+func TestCommandPendingFooter_ByteExact(t *testing.T) {
+	const wantDark = "\x1b[38;2;32;35;46;48;2;11;12;20m▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\x1b[m\n\x1b[38;2;122;162;247;48;2;11;12;20m⏎\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mrun here\x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m · \x1b[m\x1b[38;2;122;162;247;48;2;11;12;20mn\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mrun in cwd\x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m · \x1b[m\x1b[38;2;122;162;247;48;2;11;12;20mesc\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mcancel\x1b[m\x1b[48;2;11;12;20m                                                                                                                    \x1b[m\x1b[38;2;187;154;247;48;2;11;12;20m?\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mhelp\x1b[m"
+	const wantLight = "\x1b[38;2;201;205;219;48;2;225;226;231m▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\x1b[m\n\x1b[38;2;45;92;202;48;2;225;226;231m⏎\x1b[m\x1b[48;2;225;226;231m \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231mrun here\x1b[m\x1b[38;2;88;96;147;48;2;225;226;231m · \x1b[m\x1b[38;2;45;92;202;48;2;225;226;231mn\x1b[m\x1b[48;2;225;226;231m \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231mrun in cwd\x1b[m\x1b[38;2;88;96;147;48;2;225;226;231m · \x1b[m\x1b[38;2;45;92;202;48;2;225;226;231mesc\x1b[m\x1b[48;2;225;226;231m \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231mcancel\x1b[m\x1b[48;2;225;226;231m                                                                                                                    \x1b[m\x1b[38;2;138;63;209;48;2;225;226;231m?\x1b[m\x1b[48;2;225;226;231m \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231mhelp\x1b[m"
+	const wantNoColour = "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n⏎ run here · n run in cwd · esc cancel                                                                                                                    ? help"
+
+	tests := []struct {
+		name       string
+		mode       theme.Mode
+		colourless bool
+		want       string
+	}{
+		{"dark", theme.Dark, false, wantDark},
+		{"light", theme.Light, false, wantLight},
+		{"no-colour", theme.Dark, true, wantNoColour},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderCommandPendingFooter(160, tc.mode, tc.colourless)
+			if got != tc.want {
+				t.Errorf("command-pending footer byte mismatch\n got: %q\nwant: %q", got, tc.want)
+			}
+		})
 	}
 }

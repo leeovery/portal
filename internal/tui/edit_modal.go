@@ -60,9 +60,6 @@ const (
 	// editFieldGap is the blank spacer row between the field blocks (label + control)
 	// — the body's vertical rhythm.
 	editFieldGap = ""
-
-	// editFooterSep is the ` · ` separator between footer key/label groups.
-	editFooterSep = " · "
 )
 
 // inputBoxState is the border-colour state of an editable bordered box (§13.1): the
@@ -247,7 +244,7 @@ func editHeaderNaturalWidth(name string) int {
 func editFooterWidestWidth() int {
 	return lipgloss.Width(strings.Join([]string{
 		"⏎ save", "esc discard", "←→ cursor", "empty on save = delete",
-	}, editFooterSep))
+	}, footerEntrySeparator))
 }
 
 // editHeaderBadgeGap is the minimum gap (cells) between the title and the
@@ -503,7 +500,7 @@ func joinFooterGroups(groups []footerHintGroup, mode theme.Mode, colourless bool
 	for _, g := range groups {
 		rendered = append(rendered, renderBlueKeyHint(g.key, g.label, mode, colourless))
 	}
-	sep := headerStyle(theme.MV.TextDetail, mode, colourless).Render(editFooterSep)
+	sep := headerStyle(theme.MV.TextDetail, mode, colourless).Render(footerEntrySeparator)
 	parts := make([]string, 0, len(rendered)*2-1)
 	for i, r := range rendered {
 		if i > 0 {

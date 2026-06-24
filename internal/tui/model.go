@@ -633,7 +633,7 @@ func (m Model) WithInitialFilter(filter string) Model {
 // the session list is skipped and the projects page is shown directly,
 // the §11.4 command-pending banner renders over the full Projects chrome,
 // and the Projects footer swaps to the §11.4 copy (renderCommandPendingFooter,
-// sourced from commandPendingHelpKeys).
+// sourced from the commandPendingKeymap descriptor).
 func (m Model) WithCommand(command []string) Model {
 	m.command = command
 	if len(command) > 0 {
@@ -1060,18 +1060,6 @@ func pinArrowOnlyNav(km *list.KeyMap) {
 	km.NextPage.SetKeys("ctrl+down")
 	km.GoToStart.SetKeys()
 	km.GoToEnd.SetKeys()
-}
-
-// commandPendingHelpKeys returns the §11.4 command-pending footer binding source:
-// `enter run here · n run in cwd · esc cancel`. It is the single source of truth for
-// the swapped footer copy (renderCommandPendingFooter renders these in MV chrome).
-// q quit is deferred to the ? help modal; s/x/e/d are suppressed in command-pending.
-func commandPendingHelpKeys() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run here")),
-		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "run in cwd")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
-	}
 }
 
 // newProjectList creates and configures a bubbles/list.Model for projects.

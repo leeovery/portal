@@ -467,9 +467,9 @@ func TestEditModal_EditingFooterConsequenceRightAligned(t *testing.T) {
 		// left-packed last group. Measured in display cells (the body between the two
 		// fixed substrings, trimmed).
 		body := footerBetween(t, footerLine, leftGroup, consequence)
-		if gap := lipgloss.Width(body); gap <= lipgloss.Width(editFooterSep) {
+		if gap := lipgloss.Width(body); gap <= lipgloss.Width(footerEntrySeparator) {
 			t.Errorf("[%v] spacer between left group and consequence note (%d cells) must exceed the inline separator (%d cells) — note must be right-aligned; got:\n%q",
-				mode, gap, lipgloss.Width(editFooterSep), footerLine)
+				mode, gap, lipgloss.Width(footerEntrySeparator), footerLine)
 		}
 	}
 }
@@ -707,6 +707,35 @@ func assertNoCross(t *testing.T, content string) {
 func assertNoGreen(t *testing.T, content string, mode theme.Mode) {
 	t.Helper()
 	assertNoGreenLabelled(t, content, mode, 0)
+}
+
+// TestEditModalFooterRow_ByteExact pins the full-ANSI rendered output of the edit
+// modal footer for the navigate-name and editing-in-place states so the separator-
+// constant consolidation (editFooterSep → the shared footerEntrySeparator) is proven
+// byte-identical: both constants are the same " · " value rendered in text.detail, so
+// the footer must render byte-for-byte unchanged. The ANSI-stripped layout is already
+// pinned by TestRenderEditProjectContent_ByteExact; this oracle additionally locks the
+// colour bytes around the shared separator.
+func TestEditModalFooterRow_ByteExact(t *testing.T) {
+	const wantNavDark = "\x1b[38;2;122;162;247;48;2;11;12;20m⏎/e\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20medit\x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m · \x1b[m\x1b[38;2;122;162;247;48;2;11;12;20m⇥\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mnext field\x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m · \x1b[m\x1b[38;2;122;162;247;48;2;11;12;20mesc\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mclose\x1b[m"
+	const wantEditDark = "\x1b[38;2;122;162;247;48;2;11;12;20m⏎\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20msave\x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m · \x1b[m\x1b[38;2;122;162;247;48;2;11;12;20mesc\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mdiscard\x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m · \x1b[m\x1b[38;2;122;162;247;48;2;11;12;20m←→\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mcursor\x1b[m\x1b[48;2;11;12;20m    \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mempty on save = delete\x1b[m"
+
+	t.Run("navigate-name-focused dark", func(t *testing.T) {
+		m := editModalModel(editFieldName, 0, 0)
+		if got := m.editModalFooterRow(theme.Dark, false); got != wantNavDark {
+			t.Errorf("navigate footer byte mismatch\n got: %q\nwant: %q", got, wantNavDark)
+		}
+	})
+
+	t.Run("editing-in-place dark", func(t *testing.T) {
+		m := editModalModel(editFieldTags, 0, 0)
+		m.editMode = editModeEdit
+		m.editBuffer = "Fabric"
+		m.editCursor = len([]rune("Fabric"))
+		if got := m.editModalFooterRow(theme.Dark, false); got != wantEditDark {
+			t.Errorf("editing footer byte mismatch\n got: %q\nwant: %q", got, wantEditDark)
+		}
+	})
 }
 
 func assertNoGreenLabelled(t *testing.T, content string, mode theme.Mode, idx int) {

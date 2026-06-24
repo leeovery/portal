@@ -137,6 +137,25 @@ func projectsKeymap() []keymapEntry {
 	}
 }
 
+// commandPendingKeymap returns the §11.4 command-pending footer descriptor:
+// `enter run here · n run in cwd · esc cancel`. It is the single binding source for
+// the swapped Projects footer (renderCommandPendingFooter renders these in MV
+// chrome). Authoring it as a keymapEntry slice folds the command-pending footer into
+// the SAME descriptor/entry vocabulary as every other footer — the `enter` glyph is
+// encoded declaratively via HelpKey ("⏎", resolved by helpKeyGlyph), retiring the
+// former inline enter→⏎ string rewrite that was the one footer source outside the
+// vocabulary. The footer Key stays the terse "enter" word (the descriptor convention,
+// mirroring sessionsKeymap's enter binding). q quit is deferred to the ? help modal;
+// s/x/e/d are suppressed in command-pending, so the descriptor lists only these three
+// (it is a footer-copy source, not a help reference, so no Core/RightAligned flags).
+func commandPendingKeymap() []keymapEntry {
+	return []keymapEntry{
+		{Key: "enter", HelpKey: "⏎", Action: "run here"},
+		{Key: "n", Action: "run in cwd"},
+		{Key: "esc", Action: "cancel"},
+	}
+}
+
 // previewKeymap returns the ordered §9.3 Preview keymap descriptor — the single
 // source of truth that drives the §9.1 full-screen overlay footer (the four nav
 // hints) and the per-page ? help reference (§8.5). The descriptor lists the

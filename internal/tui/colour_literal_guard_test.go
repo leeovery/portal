@@ -10,34 +10,46 @@ import (
 	"testing"
 )
 
-// centralisedColourSites are the production files re-pointed onto the §2.9
-// role-token layer in task 1-3. After re-pointing, none may construct a colour
-// from a raw hex / ANSI-index literal — every colour flows from a theme token.
-// This is the §2.8 "closed vocabulary, no literal hex at call sites" rule made
-// executable, modelled on internal/log's single-owner discard guard.
+// centralisedColourSites enumerates every NON-test production .go file in the
+// internal/tui package (the package directory only — the theme/ subpackage, the
+// sole sanctioned home for raw colour values, is excluded by globbing the package
+// dir rather than recursing). It is the §2.8 "closed vocabulary, no literal hex at
+// call sites" rule made executable: after the §2.9 role-token migration none of
+// these render files may construct a colour from a raw hex / ANSI-index literal —
+// every colour must flow from a theme token.
 //
-// As later phases re-point more renderers onto the token layer, add their files
-// here so the guard's coverage grows with the migration.
-var centralisedColourSites = []string{
-	"session_item.go",
-	"project_item.go",
-	"model.go",
-	"header.go",
-	"section_header.go",
-	"footer.go",
-	"filter_footer.go",
-	"filtering_no_matches.go",
-	"help_modal.go",
-	"edit_modal.go",
-	"rename_modal.go",
+// It is a GLOB (not a hand-maintained list) so no render file can be silently
+// omitted from coverage as later phases add renderers — the guard's coverage grows
+// with the package automatically, closing the Phase 3-5 blind spot the former 11-file
+// allowlist left open.
+func centralisedColourSites(t *testing.T) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(".", "*.go"))
+	if err != nil {
+		t.Fatalf("glob internal/tui package files: %v", err)
+	}
+	files := make([]string, 0, len(matches))
+	for _, m := range matches {
+		name := filepath.Base(m)
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		files = append(files, name)
+	}
+	if len(files) == 0 {
+		t.Fatal("centralisedColourSites glob matched no production .go files in internal/tui")
+	}
+	return files
 }
 
-// TestNoRawColourLiteralAtCentralisedSites parses each re-pointed file and fails
-// if any lipgloss.Color(...) call is passed a raw string/int literal (a hex like
-// "#777777" or an ANSI index like "212"/76). The only sanctioned home for raw
-// colour values is internal/tui/theme — call sites must reference a token.
+// TestNoRawColourLiteralAtCentralisedSites parses every production render file in
+// internal/tui (via the centralisedColourSites glob) and fails if any
+// lipgloss.Color(...) call is passed a raw string/int literal (a hex like "#777777"
+// or an ANSI index like "212"/76). The only sanctioned home for raw colour values is
+// internal/tui/theme (excluded — it is a subpackage, not in the package-dir glob) —
+// every call site must reference a token.
 func TestNoRawColourLiteralAtCentralisedSites(t *testing.T) {
-	for _, name := range centralisedColourSites {
+	for _, name := range centralisedColourSites(t) {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			fset := token.NewFileSet()
