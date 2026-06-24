@@ -6,7 +6,7 @@ total_proposed: 4
 # Analysis Tasks: spectrum-tui-design (Cycle 1)
 
 ## Task 1: Extract one shared footer key-hint helper and collapse the parallel footer-group types
-status: pending
+status: approved
 severity: high
 sources: duplication, architecture, standards
 
@@ -39,7 +39,7 @@ sources: duplication, architecture, standards
 - Regression: assert each refactored modal/footer render function's output is byte-identical to a captured golden of the pre-refactor output for representative inputs.
 
 ## Task 2: Consolidate the kill / delete-project destructive-confirm modals behind one parameterised builder
-status: pending
+status: approved
 severity: high
 sources: duplication, architecture
 
@@ -72,7 +72,7 @@ sources: duplication, architecture
 - A test asserting the consequence word-wrap at body-width 52 matches the prior `killModalConsequenceRows`/`deleteModalConsequenceRows` line-splitting for a multi-line consequence string.
 
 ## Task 3: Extract shared row-style and left-bar-column helpers for the Session/Project list delegates
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -101,7 +101,7 @@ sources: duplication
 - Regression: assert `renderSessionRow` and `renderRowLine` outputs are byte-identical to captured goldens of the pre-refactor render for a selected and an unselected row.
 
 ## Task 4: Remove the stale post-detection documentation and the dead dark-pinned cursorStyle var
-status: pending
+status: approved
 severity: low
 sources: standards
 

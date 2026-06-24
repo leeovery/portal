@@ -156,3 +156,16 @@ approved_at: 2026-06-18
 | spectrum-tui-design-5-6 | Fatal cold-boot error contract — in-TUI error state on the loading page (`state.red` marker + one-line message) + fatal-error-as-`tea.Quit` with non-zero exit; error frame mocked at implementation | fatal-error-as-`tea.Quit` (was `PersistentPreRunE` error return), `q`/`Esc` → non-zero exit, failed step `state.red` marker + one-line message, no drop into half-restored picker, only the fatal steps abort (best-effort steps warn-and-continue), error frame mocked at implementation (§10.5) |
 | spectrum-tui-design-5-7 | Soft warnings ride the progress channel → post-load notice after the picker appears (reworks `bootstrapWarnings` package-sink delivery on the cold/TUI path) | warnings surface only after picker appears (not over loading page / alt-screen), reworks package-memo delivery on cold/TUI path only, warm/CLI warning delivery unchanged, zero-warnings produces no notice, reuses Phase 4 notice-band primitive |
 | spectrum-tui-design-5-8 | Restore/daemon race review against the live event loop + startup-ordering integration-test updates (prior-incident surface) | prior-incident surface (slow-open / zombie-session) reviewed against live event loop, daemon spawned under `IsolateStateForTest` discipline (no leaked test daemon), startup-ordering integration tests updated for concurrent boot, warm-path synchronous ordering parity asserted, no `t.Parallel()` (cmd mutable mock state) |
+
+### Phase 6: Analysis (Cycle 1)
+
+Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| spectrum-tui-design-6-1 | Extract one shared footer key-hint helper and collapse the parallel footer-group types | byte-identical footer/modal-footer output across all five-to-six call sites, empty-key label-only fast path preserved (editFooterGroup), `footerGroup`/`previewFooterGroup` unified into one type, confirm/cancel footer-row helper routes the three modal footer rows, light/dark + colourless/NO_COLOR carve-out unchanged |
+| spectrum-tui-design-6-2 | Consolidate the kill / delete-project destructive-confirm modals behind one parameterised builder | shared `renderDestructiveConfirm`/spec owns the destructive panel once, delete's project-path extra body row passed as data not a forked path, body-width 52 / `▲` glyph / state.red / text.detail / `y verb · esc cancel` each defined once, update/state logic untouched, byte-identical render in both modes + colourless |
+| spectrum-tui-design-6-3 | Extract shared row-style and left-bar-column helpers for the Session/Project list delegates | `rowBg`/`rowToken` style logic in one place (both delegates route through it), §3.3 left-bar selector-column (selected + unselected) in one place, both `renderSessionRow`/`renderRowLine` call it, byte-identical selected/unselected rows in both modes + colourless |
+| spectrum-tui-design-6-4 | Remove the stale post-detection documentation and the dead dark-pinned cursorStyle var | theme.go package doc + `Token.Color()` comment no longer claim detection "lands in 1-7"/hard-pins dark (describe `canvasMode → ColorFor(mode)`), package-level `cursorStyle` var removed, edit_modal.go:170 shadowing local untouched, no behavioural change, build + `internal/tui` tests pass |
