@@ -298,18 +298,12 @@ func previewFooterFromGroups(groups []footerHintGroup, labelled bool, mode theme
 	rendered := make([]string, 0, len(groups))
 	for _, g := range groups {
 		if labelled {
-			rendered = append(rendered, previewFooterHint(g.key, g.label, mode, colourless))
+			rendered = append(rendered, renderBlueKeyHint(g.key, g.label, mode, colourless))
 		} else {
 			rendered = append(rendered, headerStyle(theme.MV.AccentBlue, mode, colourless).Render(g.key))
 		}
 	}
 	return strings.Join(rendered, gap)
-}
-
-// previewFooterHint renders one `<glyph> <label>` footer group via the shared
-// renderKeyHint helper (glyph accent.blue, single canvas spacer, label text.detail).
-func previewFooterHint(glyph, label string, mode theme.Mode, colourless bool) string {
-	return renderKeyHint(glyph, label, theme.MV.AccentBlue, mode, colourless)
 }
 
 // previewModel renders a single tmux pane's saved scrollback inside a

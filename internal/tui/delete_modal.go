@@ -24,12 +24,10 @@ const (
 	// panel body width.
 	deleteConsequence = "Removes this project from Portal (name, aliases, tags). Your sessions and files are untouched."
 
-	// Footer copy. The y/esc key glyphs render in accent.blue, the delete/cancel labels
-	// in text.detail (§8.6).
+	// Footer confirm copy. The y key glyph renders in accent.blue, the delete label in
+	// text.detail (§8.6). The cancel hint (`esc cancel`) is owned by destructive_confirm.go.
 	deleteKeyConfirm   = "y"
 	deleteLabelConfirm = "delete"
-	deleteKeyCancel    = "esc"
-	deleteLabelCancel  = "cancel"
 )
 
 // renderDeleteModalContent composes the §8.6 delete-project confirm modal body for
@@ -62,17 +60,4 @@ func renderDeleteModalContent(name, path string, mode theme.Mode, colourless boo
 func deleteModalPathRow(path string, mode theme.Mode, colourless bool) string {
 	visible := ansi.Truncate(path, destructiveBodyWidth, "…")
 	return headerStyle(theme.MV.TextDetail, mode, colourless).Render(visible)
-}
-
-// deleteModalFooterRow renders `y delete   esc cancel` — the y/esc key glyphs in
-// accent.blue, the delete/cancel labels in text.detail (§8.6). Routes through the
-// shared renderConfirmCancelFooter (mirrors killModalFooterRow).
-func deleteModalFooterRow(mode theme.Mode, colourless bool) string {
-	return renderConfirmCancelFooter(deleteKeyConfirm, deleteLabelConfirm, deleteKeyCancel, deleteLabelCancel, mode, colourless)
-}
-
-// deleteModalKeyHint renders one `<key> <label>` footer group via the shared
-// renderKeyHint helper (key glyph accent.blue, single canvas spacer, label text.detail).
-func deleteModalKeyHint(key, label string, mode theme.Mode, colourless bool) string {
-	return renderKeyHint(key, label, theme.MV.AccentBlue, mode, colourless)
 }

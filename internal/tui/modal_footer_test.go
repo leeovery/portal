@@ -6,13 +6,14 @@ import (
 	"github.com/leeovery/portal/internal/tui/theme"
 )
 
-// The golden strings below were CAPTURED from the PRE-refactor render functions
-// (killModalKeyHint / editFooterGroup / *ModalFooterRow / previewFooterHint) before
-// the shared renderKeyHint / renderConfirmCancelFooter helpers existed. They pin the
-// exact rendered bytes — SGR colour runs (accent.blue key, text.detail label), the
-// owned canvas background on every cell, and the canvas-painted gaps — so the
-// refactor is proven byte-identical in both modes AND under the colourless carve-out.
-// Do NOT regenerate these to match new behaviour: they ARE the regression contract.
+// The golden strings below were CAPTURED from the PRE-refactor render functions (the
+// per-modal key-hint / footer-row clones and the edit/preview footer hints) before the
+// shared renderKeyHint / renderBlueKeyHint / renderConfirmCancelFooter helpers existed.
+// They pin the exact rendered bytes — SGR colour runs (accent.blue key, text.detail
+// label), the owned canvas background on every cell, and the canvas-painted gaps — so
+// the consolidation is proven byte-identical in both modes AND under the colourless
+// carve-out. Do NOT regenerate these to match new behaviour: they ARE the regression
+// contract.
 
 // renderKeyHint(key=y, label=kill, AccentBlue): the canonical single footer hint.
 const (
@@ -29,9 +30,9 @@ const (
 	goldenKeyHintEmptyNoCol = "empty on save = delete"
 )
 
-// renderConfirmCancelFooter golden rows captured from killModalFooterRow (y/kill,
-// esc/cancel), deleteModalFooterRow (y/delete, esc/cancel) and renameModalFooterRow
-// (⏎/rename, esc/cancel) — the fixed-gap "   " spacer between the two hints.
+// renderConfirmCancelFooter golden rows for the three destructive/rename footer shapes:
+// kill (y/kill, esc/cancel), delete (y/delete, esc/cancel) and rename (⏎/rename,
+// esc/cancel) — the fixed-gap "   " spacer between the two hints.
 const (
 	goldenKillFooterDark  = "\x1b[38;2;122;162;247;48;2;11;12;20my\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mkill\x1b[m\x1b[48;2;11;12;20m   \x1b[m\x1b[38;2;122;162;247;48;2;11;12;20mesc\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mcancel\x1b[m"
 	goldenKillFooterLight = "\x1b[38;2;45;92;202;48;2;225;226;231my\x1b[m\x1b[48;2;225;226;231m \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231mkill\x1b[m\x1b[48;2;225;226;231m   \x1b[m\x1b[38;2;45;92;202;48;2;225;226;231mesc\x1b[m\x1b[48;2;225;226;231m \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231mcancel\x1b[m"
@@ -95,6 +96,43 @@ func TestRenderKeyHint(t *testing.T) {
 	}
 }
 
+// TestRenderBlueKeyHint asserts the shared accent.blue key-hint seam pins
+// theme.MV.AccentBlue: it must render byte-identically to renderKeyHint with an explicit
+// AccentBlue keyTok AND match the captured golden bytes across both modes and the
+// colourless carve-out. This is the SINGLE canonical blue-key-hint path the edit and
+// preview footers route through (replacing the five removed per-modal wrappers).
+func TestRenderBlueKeyHint(t *testing.T) {
+	cases := []struct {
+		name       string
+		key, label string
+		mode       theme.Mode
+		colourless bool
+		want       string
+	}{
+		{"yKill/dark/colour", "y", "kill", theme.Dark, false, goldenKeyHintYKillDark},
+		{"yKill/light/colour", "y", "kill", theme.Light, false, goldenKeyHintYKillLight},
+		{"yKill/dark/colourless", "y", "kill", theme.Dark, true, goldenKeyHintYKillNoCol},
+		{"yKill/light/colourless", "y", "kill", theme.Light, true, goldenKeyHintYKillNoCol},
+
+		{"empty/dark/colour", "", "empty on save = delete", theme.Dark, false, goldenKeyHintEmptyDark},
+		{"empty/light/colour", "", "empty on save = delete", theme.Light, false, goldenKeyHintEmptyLight},
+		{"empty/dark/colourless", "", "empty on save = delete", theme.Dark, true, goldenKeyHintEmptyNoCol},
+		{"empty/light/colourless", "", "empty on save = delete", theme.Light, true, goldenKeyHintEmptyNoCol},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderBlueKeyHint(tc.key, tc.label, tc.mode, tc.colourless)
+			if got != tc.want {
+				t.Errorf("renderBlueKeyHint(%q,%q) golden mismatch\n got: %q\nwant: %q", tc.key, tc.label, got, tc.want)
+			}
+			// Pins AccentBlue: identical to the explicit-token renderKeyHint path.
+			if pinned := renderKeyHint(tc.key, tc.label, theme.MV.AccentBlue, tc.mode, tc.colourless); got != pinned {
+				t.Errorf("renderBlueKeyHint(%q,%q) does not pin AccentBlue\n got: %q\nwant: %q", tc.key, tc.label, got, pinned)
+			}
+		})
+	}
+}
+
 // TestRenderConfirmCancelFooter asserts the shared confirm/cancel row helper matches
 // the prior hand-assembled output for the kill (y/esc), delete (y/esc) and rename
 // (⏎/esc) constant sets — confirm hint + the fixed "   " canvas gap + cancel hint.
@@ -140,69 +178,16 @@ func TestFooterHintCallSitesByteIdentical(t *testing.T) {
 		m    theme.Mode
 	}{{"dark", theme.Dark}, {"light", theme.Light}}
 
-	type golden struct{ colour, noColour string }
-
-	t.Run("killModalKeyHint", func(t *testing.T) {
-		want := map[string]golden{
-			"dark":  {goldenKeyHintYKillDark, goldenKeyHintYKillNoCol},
-			"light": {goldenKeyHintYKillLight, goldenKeyHintYKillNoCol},
-		}
-		for _, md := range modes {
-			for _, cl := range []bool{false, true} {
-				got := killModalKeyHint("y", "kill", md.m, cl)
-				exp := want[md.name].colour
-				if cl {
-					exp = want[md.name].noColour
-				}
-				if got != exp {
-					t.Errorf("killModalKeyHint %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
-				}
-			}
-		}
-	})
-
-	t.Run("deleteModalKeyHint", func(t *testing.T) {
-		// Reuse the y/kill golden shape via y/delete by asserting the footer row golden
-		// instead — the per-hint helper is identical, so assert the row here.
-		for _, md := range modes {
-			for _, cl := range []bool{false, true} {
-				got := deleteModalKeyHint("y", "kill", md.m, cl)
-				exp := goldenKeyHintYKillDark
-				if md.name == "light" {
-					exp = goldenKeyHintYKillLight
-				}
-				if cl {
-					exp = goldenKeyHintYKillNoCol
-				}
-				if got != exp {
-					t.Errorf("deleteModalKeyHint %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
-				}
-			}
-		}
-	})
-
-	t.Run("renameModalKeyHint", func(t *testing.T) {
-		for _, md := range modes {
-			for _, cl := range []bool{false, true} {
-				got := renameModalKeyHint("y", "kill", md.m, cl)
-				exp := goldenKeyHintYKillDark
-				if md.name == "light" {
-					exp = goldenKeyHintYKillLight
-				}
-				if cl {
-					exp = goldenKeyHintYKillNoCol
-				}
-				if got != exp {
-					t.Errorf("renameModalKeyHint %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
-				}
-			}
-		}
-	})
-
+	// previewFooterHint and editFooterGroup were deleted in favour of routing the
+	// Preview nav footer and the contextual edit footer through the shared
+	// renderBlueKeyHint seam. These two sub-tests pin those LIVE shapes (the ←→/window
+	// preview glyph and the ⏎/e edit key, plus the empty-key consequence note) against
+	// the same PRE-refactor goldens, asserted through renderBlueKeyHint — proving the
+	// reroute is byte-identical.
 	t.Run("previewFooterHint", func(t *testing.T) {
 		for _, md := range modes {
 			for _, cl := range []bool{false, true} {
-				got := previewFooterHint("←→", "window", md.m, cl)
+				got := renderBlueKeyHint("←→", "window", md.m, cl)
 				exp := goldenPreviewHintDark
 				if md.name == "light" {
 					exp = goldenPreviewHintLight
@@ -211,7 +196,7 @@ func TestFooterHintCallSitesByteIdentical(t *testing.T) {
 					exp = goldenPreviewHintNoCol
 				}
 				if got != exp {
-					t.Errorf("previewFooterHint %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
+					t.Errorf("preview footer hint %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
 				}
 			}
 		}
@@ -220,7 +205,7 @@ func TestFooterHintCallSitesByteIdentical(t *testing.T) {
 	t.Run("editFooterGroup/normal", func(t *testing.T) {
 		for _, md := range modes {
 			for _, cl := range []bool{false, true} {
-				got := editFooterGroup("⏎/e", "edit", md.m, cl)
+				got := renderBlueKeyHint("⏎/e", "edit", md.m, cl)
 				exp := goldenEditEditDark
 				if md.name == "light" {
 					exp = goldenEditEditLight
@@ -229,7 +214,7 @@ func TestFooterHintCallSitesByteIdentical(t *testing.T) {
 					exp = goldenEditEditNoCol
 				}
 				if got != exp {
-					t.Errorf("editFooterGroup(normal) %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
+					t.Errorf("edit footer group(normal) %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
 				}
 			}
 		}
@@ -238,7 +223,7 @@ func TestFooterHintCallSitesByteIdentical(t *testing.T) {
 	t.Run("editFooterGroup/empty", func(t *testing.T) {
 		for _, md := range modes {
 			for _, cl := range []bool{false, true} {
-				got := editFooterGroup("", "empty on save = delete", md.m, cl)
+				got := renderBlueKeyHint("", "empty on save = delete", md.m, cl)
 				exp := goldenKeyHintEmptyDark
 				if md.name == "light" {
 					exp = goldenKeyHintEmptyLight
@@ -247,43 +232,7 @@ func TestFooterHintCallSitesByteIdentical(t *testing.T) {
 					exp = goldenKeyHintEmptyNoCol
 				}
 				if got != exp {
-					t.Errorf("editFooterGroup(empty) %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
-				}
-			}
-		}
-	})
-
-	t.Run("killModalFooterRow", func(t *testing.T) {
-		for _, md := range modes {
-			for _, cl := range []bool{false, true} {
-				got := killModalFooterRow(md.m, cl)
-				exp := goldenKillFooterDark
-				if md.name == "light" {
-					exp = goldenKillFooterLight
-				}
-				if cl {
-					exp = goldenKillFooterNoCol
-				}
-				if got != exp {
-					t.Errorf("killModalFooterRow %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
-				}
-			}
-		}
-	})
-
-	t.Run("deleteModalFooterRow", func(t *testing.T) {
-		for _, md := range modes {
-			for _, cl := range []bool{false, true} {
-				got := deleteModalFooterRow(md.m, cl)
-				exp := goldenDeleteFooterDark
-				if md.name == "light" {
-					exp = goldenDeleteFooterLight
-				}
-				if cl {
-					exp = goldenDeleteFooterNoCol
-				}
-				if got != exp {
-					t.Errorf("deleteModalFooterRow %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
+					t.Errorf("edit footer group(empty) %s colourless=%v drift\n got: %q\nwant: %q", md.name, cl, got, exp)
 				}
 			}
 		}

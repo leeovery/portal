@@ -9,12 +9,15 @@ import (
 // shape and the confirm/cancel footer row — the §3.4 / §8.x footer contract. Before
 // this file the `<key/glyph> <label>` primitive (key glyph in accent.blue, a one-cell
 // canvas-painted gap, label in text.detail, joined horizontally) was independently
-// re-authored across killModalKeyHint, deleteModalKeyHint, renameModalKeyHint,
-// previewFooterHint, editFooterGroup and renderFooterEntry; the three modal footer
-// rows each hand-assembled confirm-hint + fixed gap + cancel-hint. They now all route
-// through renderKeyHint / renderConfirmCancelFooter so the convention (key-glyph colour
-// role, gap width) lives in exactly one place and the modals can never silently drift
-// from the footer.
+// re-authored across the kill/delete/rename modals, the Preview nav footer and the
+// contextual edit footer; the three modal footer rows each hand-assembled confirm-hint +
+// fixed gap + cancel-hint. They now all route through renderKeyHint /
+// renderConfirmCancelFooter so the convention (key-glyph colour role, gap width) lives in
+// exactly one place and the modals can never silently drift from the footer.
+//
+// renderBlueKeyHint is the named accent.blue pin every contextual footer hint (the edit
+// footer + the Preview nav footer) shares — the ONE canonical blue-key-hint path, after
+// the five superseded per-modal wrappers were removed.
 
 // footerHintGroup is one `<key/glyph> <label>` footer-hint pair — the single shape
 // modelling the {Key/Glyph, Label} concept across the contextual edit footer and the
@@ -40,6 +43,15 @@ func renderKeyHint(key, label string, keyTok theme.Token, mode theme.Mode, colou
 	keySeg := headerStyle(keyTok, mode, colourless).Render(key)
 	gap := headerCanvasBg(mode, colourless).Render(" ")
 	return lipgloss.JoinHorizontal(lipgloss.Top, keySeg, gap, labelSeg)
+}
+
+// renderBlueKeyHint renders one `<key> <label>` footer hint with the key glyph pinned
+// to accent.blue — the SINGLE canonical accent.blue key-hint path. It is a thin pin over
+// renderKeyHint that fixes keyTok to theme.MV.AccentBlue so the contextual edit footer
+// and the Preview nav footer (the two live accent.blue call sites) share one seam rather
+// than each re-authoring the token. An empty key takes renderKeyHint's label-only path.
+func renderBlueKeyHint(key, label string, mode theme.Mode, colourless bool) string {
+	return renderKeyHint(key, label, theme.MV.AccentBlue, mode, colourless)
 }
 
 // renderConfirmCancelFooter renders the two-hint modal footer row: the confirm hint,

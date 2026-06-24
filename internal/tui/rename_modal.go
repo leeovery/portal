@@ -171,9 +171,3 @@ func renameModalWasRow(oldName string, mode theme.Mode, colourless bool) string 
 func renameModalFooterRow(mode theme.Mode, colourless bool) string {
 	return renderConfirmCancelFooter(renameKeyConfirm, renameLabelConfirm, renameKeyCancel, renameLabelCancel, mode, colourless)
 }
-
-// renameModalKeyHint renders one `<key> <label>` footer group via the shared
-// renderKeyHint helper (key glyph accent.blue, single canvas spacer, label text.detail).
-func renameModalKeyHint(key, label string, mode theme.Mode, colourless bool) string {
-	return renderKeyHint(key, label, theme.MV.AccentBlue, mode, colourless)
-}

@@ -21,12 +21,10 @@ const (
 	// rendered in text.detail and word-wrapped within the panel body width.
 	killConsequence = "Ends the tmux session and all its panes. Can't be undone."
 
-	// Footer copy. The y/esc key glyphs render in accent.blue, the kill/cancel labels
-	// in text.detail (§8.3).
+	// Footer confirm copy. The y key glyph renders in accent.blue, the kill label in
+	// text.detail (§8.3). The cancel hint (`esc cancel`) is owned by destructive_confirm.go.
 	killKeyConfirm   = "y"
 	killLabelConfirm = "kill"
-	killKeyCancel    = "esc"
-	killLabelCancel  = "cancel"
 )
 
 // renderKillModalContent composes the §8.3 kill-confirm modal body for the given
@@ -59,17 +57,4 @@ func killWindowCount(windows int) string {
 		unit = "window"
 	}
 	return fmt.Sprintf("· %d %s", windows, unit)
-}
-
-// killModalFooterRow renders `y kill   esc cancel` — the y/esc key glyphs in
-// accent.blue, the kill/cancel labels in text.detail (§8.3). Routes through the shared
-// renderConfirmCancelFooter so the confirm/cancel shape lives in one place.
-func killModalFooterRow(mode theme.Mode, colourless bool) string {
-	return renderConfirmCancelFooter(killKeyConfirm, killLabelConfirm, killKeyCancel, killLabelCancel, mode, colourless)
-}
-
-// killModalKeyHint renders one `<key> <label>` footer group via the shared
-// renderKeyHint helper (key glyph accent.blue, single canvas spacer, label text.detail).
-func killModalKeyHint(key, label string, mode theme.Mode, colourless bool) string {
-	return renderKeyHint(key, label, theme.MV.AccentBlue, mode, colourless)
 }

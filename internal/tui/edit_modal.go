@@ -501,7 +501,7 @@ func joinFooterGroups(groups []footerHintGroup, mode theme.Mode, colourless bool
 	}
 	rendered := make([]string, 0, len(groups))
 	for _, g := range groups {
-		rendered = append(rendered, editFooterGroup(g.key, g.label, mode, colourless))
+		rendered = append(rendered, renderBlueKeyHint(g.key, g.label, mode, colourless))
 	}
 	sep := headerStyle(theme.MV.TextDetail, mode, colourless).Render(editFooterSep)
 	parts := make([]string, 0, len(rendered)*2-1)
@@ -546,11 +546,4 @@ func (m Model) editFooterGroups() []footerHintGroup {
 		{"⇥", "next field"},
 		{"esc", "close"},
 	}
-}
-
-// editFooterGroup renders one `<key> <label>` footer hint via the shared renderKeyHint
-// helper (key glyph accent.blue, single canvas spacer, label text.detail). A group with
-// an empty key (the `empty on save = delete` hint) takes renderKeyHint's label-only path.
-func editFooterGroup(key, label string, mode theme.Mode, colourless bool) string {
-	return renderKeyHint(key, label, theme.MV.AccentBlue, mode, colourless)
 }
