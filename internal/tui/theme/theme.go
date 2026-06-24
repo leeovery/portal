@@ -4,12 +4,11 @@
 // renderer references a token here; no raw hex / ANSI-index colour literal
 // survives at a call site (the rule that makes §2.8 theme-readiness work).
 //
-// Each token carries BOTH a Light and a Dark variant so the light-variant task
-// (1-4) can fill the Light values without re-pointing any call site. Resolution
-// currently defaults to the DARK variant — mirroring the dark-default the 1-2
-// AdaptiveColor migration produced in the absence of OSC 11 light/dark
-// detection. Detection (§2.6) lands in 1-7; until then ColorFor(Dark) is what
-// every Color() call resolves to.
+// Each token carries BOTH a Light and a Dark variant. The resolved appearance
+// flows from the §2.6 appearance gate into the model's canvasMode, which the
+// delegates carry as their Mode; renderers resolve each token per mode via
+// ColorFor(mode). The dark-pinned Color() convenience survives only for the
+// handful of not-yet-mode-resolved call sites.
 package theme
 
 import (
@@ -54,11 +53,10 @@ func (t Token) ColorFor(m Mode) color.Color {
 	return lipgloss.Color(t.Dark)
 }
 
-// Color resolves the token to its current default appearance. Until light/dark
-// detection lands (1-7) this is always the DARK variant — the parity-preserving
-// dark-default the 1-2 AdaptiveColor migration established. Renderers call this;
-// when detection ships, this single resolver flips and every call site follows
-// with no edit.
+// Color is a dark-pinned convenience that always resolves the DARK variant. It
+// is retained only for the not-yet-mode-resolved call sites; the live renderers
+// resolve per mode via ColorFor(mode) off the model's canvasMode, so they do NOT
+// route through here.
 func (t Token) Color() color.Color {
 	return t.ColorFor(Dark)
 }

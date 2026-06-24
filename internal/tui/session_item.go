@@ -13,12 +13,6 @@ import (
 )
 
 var (
-	// cursorStyle marks the cursor/selection — the primary accent role
-	// (accent.violet); the former pink ANSI 212 was a scattered literal. Retained
-	// for the projects page (project_item.go), which still resolves the dark
-	// default until its own canvas restyle lands in a later phase; the sessions
-	// delegate resolves accent.violet per mode inline (see Render).
-	cursorStyle = lipgloss.NewStyle().Foreground(theme.MV.AccentViolet.Color())
 	// nameBase carries the session name's NON-colour attribute (bold); the
 	// delegate layers text.primary + Background(canvas) for the resolved mode
 	// (SessionDelegate.tokenStyle) so the colour pair is mode-matched.
