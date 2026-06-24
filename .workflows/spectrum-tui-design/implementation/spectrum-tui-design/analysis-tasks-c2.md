@@ -6,7 +6,7 @@ total_proposed: 4
 # Analysis Tasks: Spectrum TUI Design (Cycle 2)
 
 ## Task 1: Projects list must drop vim/uppercase/page-jump keys (§12.2 arrow-only nav)
-status: pending
+status: approved
 severity: high
 sources: standards
 
@@ -27,7 +27,7 @@ sources: standards
 - Add an arrow-key positive test confirming `↑/↓` still move and `Ctrl+↑/↓` still page on Projects.
 
 ## Task 2: Remove dead per-modal footer/key-hint wrappers and consolidate the accent.blue key-hint path
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -52,7 +52,7 @@ sources: duplication, architecture
 - Verify (golden snapshot or string assertion) that the edit modal footer and preview footer outputs are unchanged.
 
 ## Task 3: Scope the keymap descriptor "single source of truth" framing to display and guard descriptor↔dispatch drift
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -73,7 +73,7 @@ sources: architecture
 - Confirm existing footer/help display tests still pass after the comment rescoping.
 
 ## Task 4: Close residual enforcement and DRY gaps in the reskin (colour guard, command-pending footer, separator constants)
-status: pending
+status: approved
 severity: low
 sources: standards, architecture, duplication
 
