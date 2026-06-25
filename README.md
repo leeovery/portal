@@ -14,7 +14,7 @@ Fast, fuzzy session management from a bare shell, with project memory,
 
 <br>
 
-<img src="art/sessions.webp" alt="Portal, the interactive tmux session picker" width="840">
+<video src="https://github.com/leeovery/portal/raw/main/art/portal-cold.mp4" poster="https://github.com/leeovery/portal/raw/main/art/sessions.webp" width="840" autoplay loop muted playsinline></video>
 
 </div>
 
@@ -64,6 +64,12 @@ go install github.com/leeovery/portal@latest
 ```
 
 ## Screenshots
+
+<div align="center">
+<video src="https://github.com/leeovery/portal/raw/main/art/portal-tour.mp4" width="840" autoplay loop muted playsinline></video>
+</div>
+
+The full tour: grouping, fuzzy filter, scrollback preview, attach. Stills below.
 
 |  |  |
 |:---:|:---:|
