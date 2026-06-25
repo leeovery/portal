@@ -137,13 +137,23 @@ On the cold concurrent-bootstrap route, the default-page decision (`evaluateDefa
 
 The landing-page decision must be evaluated against the **post-restore** session list on the cold route, not the stale Init snapshot. The fix is fundamentally about *ordering / latch timing*: defer (or re-open) the page decision until the corrected session count is in hand.
 
-### Options Explored (high-level)
+### Chosen Approach
 
-- **A — Don't latch the decision in `transitionFromLoading` on the concurrent route; let the post-restore refetch drive it.** On the cold route, `transitionFromLoading` would flip to the loading-exit state but NOT call `evaluateDefaultPage`; the refetched `SessionsMsg` (which already calls `evaluateDefaultPage` when not on PageLoading) would make the landing decision against the correct, post-restore list. Warm route unchanged (no refetch, decision still made synchronously as today).
-- **B — Allow exactly one re-evaluation after the post-restore refetch.** Keep `transitionFromLoading` as-is but let the refetch's `SessionsMsg` re-open the latch once (e.g. the concurrent route clears/bypasses `defaultPageEvaluated` for the single post-restore refetch) so the page is re-decided on the corrected count.
-- **C — Gate the cold-route transition on the refetch completing first.** Restructure so the refetch lands *before* `transitionFromLoading` evaluates the page, making the decision against fresh data in one shot.
+**Option A — Defer the landing decision to the post-restore refetch.** On the concurrent cold route, `transitionFromLoading` must NOT call `evaluateDefaultPage` (the premature, stale-list decision); instead the post-restore refetch's `SessionsMsg` makes the landing decision — it already calls `evaluateDefaultPage` when not on PageLoading, now against the correct post-restore list. A sane interim `activePage` (PageSessions) is kept for the brief window between transition and refetch so no undefined page flashes. Warm/CLI paths are byte-identical (no refetch, decision still made synchronously as today).
 
-**Leaning:** Option A — it removes the premature decision rather than patching the latch, keeps the warm path byte-identical (the §10.1 zero-new-risk contract), and reuses the existing post-refetch `evaluateDefaultPage` call site. To be finalised in specification.
+**Deciding factor:** removes the premature decision at its source (the ordering bug) rather than patching the `defaultPageEvaluated` latch; reuses an existing call site; lowest blast radius and keeps the load-bearing warm-path startup ordering untouched (the §10.1 zero-new-risk contract).
+
+### Options Explored
+
+- **A — Defer the decision to the refetch (CHOSEN).** See above.
+- **B — Allow exactly one re-evaluation after the post-restore refetch.** Keep `transitionFromLoading` as-is but let the refetch's `SessionsMsg` re-open the latch once (clear/bypass `defaultPageEvaluated` for the single post-restore refetch). *Not chosen:* patches the symptom (the latch) rather than the ordering; introduces two decision passes and more mutable latch state to reason about.
+- **C — Gate the cold-route transition on the refetch completing first.** Restructure so the refetch lands *before* `transitionFromLoading` evaluates the page — one decision against fresh data. *Not chosen:* the largest restructure of the load-bearing startup ordering, with the most regression risk on a prior-incident surface.
+
+### Discussion
+
+Findings confirmed by an independent synthesis agent (high confidence, all 7 load-bearing claims verified) and accepted by the user without correction. Fix-direction discussion was short — the ordering nature of the bug made Option A the obvious minimal-blast-radius fix, and the user agreed on first pass. Two synthesis-surfaced items shaped the scope:
+- The **`initialFilter` co-defect** was elevated from "worth checking" to a confirmed in-scope requirement — the fix must route a cold-boot filter to the Sessions list (it currently lands on, and is zeroed against, the Projects list).
+- The **test blind spot** (current cold-boot test omits the project store, so the latch never fires and the bug is invisible) became an explicit regression-test requirement: the harness must deliver `ProjectsLoadedMsg`, and must also cover empty-restore so the fix doesn't over-correct to always-Sessions.
 
 **Synthesis risk flags for Option A (spec phase):**
 - `evaluateDefaultPage` early-returns unless **both** `sessionsLoaded && projectsLoaded` (`model.go:1623`); on the refetch path `sessionsLoaded` is set just before the call (`model.go:1994`) and `projectsLoaded` is already true (ProjectsLoadedMsg landed during loading), so deferring the decision to the refetch is viable — but the fix must leave a **valid interim `activePage`** between transition and refetch so no undefined page flashes (today `model.go:1829` tentatively sets PageSessions).
