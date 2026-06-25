@@ -1,7 +1,7 @@
 {
   "name": "spectrum-tui-design",
   "work_type": "feature",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-06-17",
   "description": "Redesign the TUI with a ZX Spectrum-inspired visual identity: rainbow primaries on black, block-character logo, chunky borders, spaced uppercase headers, cycling block cursor, and a Manic Miner-style status bar",
   "phases": {
@@ -313,5 +313,6 @@
       "source": "inbox:idea",
       "seeded_at": "2026-06-17T08:09:55Z"
     }
-  ]
+  ],
+  "completed_at": "2026-06-25"
 }
