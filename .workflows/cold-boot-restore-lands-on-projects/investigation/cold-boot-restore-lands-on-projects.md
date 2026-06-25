@@ -117,6 +117,7 @@ On the cold concurrent-bootstrap route, the default-page decision (`evaluateDefa
 - **Cold route is the once-per-reboot path.** Startup-ordering tests (`cmd/concurrent_*_test.go`) cover warm/cold parity and step ordering, but the landing-page assertion on a *pre-restore-empty* cold fetch (Init sees 0 sessions, restore then creates N) appears not to be exercised.
 - **The refetch's own test likely asserts list contents, not the active page.** `refetchSessionsAfterRestore` was validated by "the list is populated after dismissal," which passes here — the list *is* correct; only the page is wrong.
 - **Low severity masks it.** UX-only (one extra keypress), no crash or data loss, so it didn't surface through error tracking — it was only noticed building the demo harness.
+- **The existing cold-boot test passes for the wrong reason** (confirmed by synthesis validation). `internal/tui/coldboot_session_refetch_test.go` (`driveColdBootToSessions`, `TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions`) builds the model with **no project store** and never delivers `ProjectsLoadedMsg`, so `projectsLoaded` stays false → `evaluateDefaultPage` early-returns on the `!projectsLoaded` guard (`model.go:1623`) **without latching**, leaving `activePage = PageSessions` from the unconditional tentative set in `transitionFromLoading` (`model.go:1829`). The assertion `ActivePage() == PageSessions` therefore passes despite an empty stale snapshot. In production `loadProjects` *does* emit `ProjectsLoadedMsg`, so `projectsLoaded` becomes true and the latch fires → Projects. **A regression test MUST deliver `ProjectsLoadedMsg` before the transition to reproduce the defect.**
 
 ### Blast Radius
 
@@ -125,7 +126,7 @@ On the cold concurrent-bootstrap route, the default-page decision (`evaluateDefa
 
 **Potentially affected (to weigh during fix):**
 - Any future consumer of `evaluateDefaultPage` / `defaultPageEvaluated` that assumes the decision reflects post-restore state.
-- The `initialFilter` application inside `evaluateDefaultPage` (`model.go:1635-1646`) also keys off `activePage == PageSessions` — a cold-boot launch *with* a filter would likewise apply the filter to the wrong list. Same root cause; worth confirming the fix covers it.
+- **The `initialFilter` application is a confirmed co-defect** (synthesis-validated, not just "worth checking"). It lives inside `evaluateDefaultPage` (`model.go:1635-1646`), gated on `activePage == PageSessions && !commandPending` (`:1639`). On the bug path the latched page is Projects, so the `else` branch (`:1643-1644`) applies the filter to the **project** list, and `m.initialFilter` is zeroed in the same one-shot call (`:1646`) — so even after the refetch repairs the session list, the filter is **never (re)applied to Sessions**. A cold-boot launch with a resolution-chain filter (`initialFilter` flows `cmd/open.go` → `WithInitialFilter` `model.go:619-622`) lands on a *filtered Projects* page. Same root cause, one layer deeper; **the fix must cover it** and it should be an explicit test target.
 - Warm path and CLI/direct-path: **not** affected (decision runs on a post-restore snapshot there).
 
 ---
@@ -144,9 +145,13 @@ The landing-page decision must be evaluated against the **post-restore** session
 
 **Leaning:** Option A — it removes the premature decision rather than patching the latch, keeps the warm path byte-identical (the §10.1 zero-new-risk contract), and reuses the existing post-refetch `evaluateDefaultPage` call site. To be finalised in specification.
 
+**Synthesis risk flags for Option A (spec phase):**
+- `evaluateDefaultPage` early-returns unless **both** `sessionsLoaded && projectsLoaded` (`model.go:1623`); on the refetch path `sessionsLoaded` is set just before the call (`model.go:1994`) and `projectsLoaded` is already true (ProjectsLoadedMsg landed during loading), so deferring the decision to the refetch is viable — but the fix must leave a **valid interim `activePage`** between transition and refetch so no undefined page flashes (today `model.go:1829` tentatively sets PageSessions).
+- The fix must **not over-correct**: a cold boot that genuinely restores zero sessions must still land on Projects (the deferred decision runs the same `len(Items()) > 0` test).
+
 ### Testing Recommendations
 
-- Add a cold-route test asserting the **active page is Sessions** when Init's `ListSessions` returns empty and the post-restore refetch returns N>0 sessions (the exact ordering of this bug). Distinct from existing "list is populated" assertions.
+- Add a cold-route test asserting the **active page is Sessions** when Init's `ListSessions` returns empty and the post-restore refetch returns N>0 sessions (the exact ordering of this bug). Distinct from existing "list is populated" assertions. **The harness MUST deliver `ProjectsLoadedMsg`** — without it `projectsLoaded` stays false and the latch never fires, so the test would pass without exercising the bug (the current cold-boot test's blind spot).
 - Confirm warm-route parity test still lands on Sessions and that `refetchSessionsAfterRestore` stays `nil` on warm.
 - Cover the empty-restore case: cold boot with genuinely zero sessions restored must still land on Projects (don't over-correct to always-Sessions).
 - Confirm `initialFilter` on a cold-boot launch applies to the Sessions list (same `evaluateDefaultPage` code path).
