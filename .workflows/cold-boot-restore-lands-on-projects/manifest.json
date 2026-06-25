@@ -11,6 +11,22 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "cold-boot-restore-lands-on-projects": {
+          "status": "in-progress",
+          "sources": {
+            "cold-boot-restore-lands-on-projects": {
+              "status": "pending"
+            }
+          },
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "construction_gate_mode": "gated",
+          "date": "2026-06-25"
+        }
+      }
     }
   },
   "seeds": [
