@@ -18,7 +18,7 @@
           "status": "in-progress",
           "sources": {
             "cold-boot-restore-lands-on-projects": {
-              "status": "pending"
+              "status": "incorporated"
             }
           },
           "review_cycle": 0,

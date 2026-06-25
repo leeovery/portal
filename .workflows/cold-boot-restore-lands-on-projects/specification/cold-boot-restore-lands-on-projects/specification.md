@@ -79,6 +79,15 @@ Required test cases:
 
 Each test asserts the **active page**, not just list contents — the old blind spot.
 
+### Out of Scope
+
+- **Warm path, CLI / direct-path, and inside-tmux landing behaviour** — already correct; explicitly must not change.
+- **The bootstrap orchestrator, restore engine, scrollback replay, and tmux enumeration** — restore is fully correct; this defect is purely the TUI landing decision.
+- **Refactoring `evaluateDefaultPage`'s decision logic or the `defaultPageEvaluated` latch** — only the timing of the call moves on the cold route; the logic and latch stay as-is.
+- **Eliminating the one-frame interim render on the cold route** — an interim **Sessions** page (briefly empty before the refetch populates it, or flipping to Projects in the rare empty-restore case) is the accepted, lowest-risk behaviour and not a target for further polish.
+- **The `_portal-saver` `_`-prefix filter in `ListSessions`** — correct as designed; the saver should never count toward the landing decision.
+- **Severity / release handling** — UX-only, no data or correctness impact; ships via the regular release, no hotfix.
+
 ---
 
 ## Working Notes
