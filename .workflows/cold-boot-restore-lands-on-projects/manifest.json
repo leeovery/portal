@@ -4,7 +4,15 @@
   "status": "in-progress",
   "created": "2026-06-25",
   "description": "Cold-boot TUI restore lands on the Projects page instead of Sessions despite N sessions being restored",
-  "phases": {},
+  "phases": {
+    "investigation": {
+      "items": {
+        "cold-boot-restore-lands-on-projects": {
+          "status": "in-progress"
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-06-25-cold-boot-restore-lands-on-projects.md",

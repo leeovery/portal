@@ -134,6 +134,9 @@
     },
     "spectrum-tui-design": {
       "work_type": "feature"
+    },
+    "cold-boot-restore-lands-on-projects": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
