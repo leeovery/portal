@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-26
 cycle: 2
 phase: Gap Analysis
@@ -54,10 +54,10 @@ in the interim). Without this, AC7 and test case 5 only assert the *page identit
 during the interim, leaving input behaviour to implementer discretion.
 
 **Proposed Addition**:
-{leave blank until discussed}
+New invariant "Interim-window input is accepted as-is" — interim is bounded by one tmux enumeration after the ≥1.2s loading screen; not special-cased; deferred evaluateDefaultPage takes precedence over a mid-interim user `x` toggle; preserving a mid-interim toggle is out of scope.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolved as accepted-as-is (proportionate for a UX-only bug; sub-enumeration window). Added invariant to Constraints & Invariants. Auto-mode.
 
 ---
 
@@ -94,9 +94,9 @@ is guaranteed to be taken by whichever of (post-restore `SessionsMsg`,
 and the latch is still unset — so no path strands the picker on the interim page.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Reword the "Decision always resolves" invariant so resolution is attributed to whichever of the post-restore SessionsMsg / ProjectsLoadedMsg lands second (both handlers call evaluateDefaultPage; latch unset until then), aligning it with the ordering contract and test case 6.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Reworded the invariant to name both handlers and the second-to-land decision point. Auto-mode.
 
 ---
