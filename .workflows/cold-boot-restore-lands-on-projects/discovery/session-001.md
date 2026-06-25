@@ -37,4 +37,4 @@ Shape settled quickly: a concrete reproducible symptom, a clear violated expecta
 
 ## Conclusion
 
-(none)
+Routed to investigation.
