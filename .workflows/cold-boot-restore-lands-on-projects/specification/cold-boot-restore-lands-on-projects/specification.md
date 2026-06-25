@@ -16,6 +16,17 @@ Both are **UX-only** (low severity): restore itself is fully correct — only th
 
 The cold concurrent-bootstrap route only — a fresh tmux server *and* the TUI picker, where the orchestrator runs in a goroutine (`progressReceiver != nil`). The warm path, the CLI / direct-path, and inside-tmux paths are correct and must remain unaffected.
 
+#### Reproduction
+
+Repeatable in the `demo/` sandboxed Linux container via `demo/portal-cold.tape`, with a baked restore seed of **12 sessions** and **10 projects**:
+
+1. Cold container, no tmux server, `sessions.json` + scrollback present.
+2. `portal open` (the TUI picker) → loading screen shows `✓ Restoring sessions 12/12 · ✓ Replaying scrollback · ✓ Running resume commands`.
+3. Picker opens on **Projects** (10 projects), footer shows `x sessions`.
+4. Press `x` → **Sessions** page lists all 12 restored sessions with correct names and scrollback intact.
+
+This demo harness is the end-to-end manual-verification path that complements the programmatic regression tests below.
+
 #### Root cause
 
 `evaluateDefaultPage()` chooses the landing page from the live session count: it lands on Sessions only when `len(m.sessionList.Items()) > 0`, otherwise Projects. It is **one-shot latched** by `defaultPageEvaluated` — set `true` on the first call where both `sessionsLoaded && projectsLoaded` hold, and never reset.
@@ -66,7 +77,7 @@ These criteria are the observable contract; the fix is correct only if every row
 
 ### Testing Requirements
 
-The existing cold-boot test (`internal/tui/coldboot_session_refetch_test.go`) passes for the **wrong reason**: it builds the model with no project store and never delivers `ProjectsLoadedMsg`, so `projectsLoaded` stays false, `evaluateDefaultPage()` early-returns without latching, and `activePage` keeps the tentative `PageSessions` set in `transitionFromLoading()`. The assertion passes despite the empty stale snapshot. In production `loadProjects` *does* emit `ProjectsLoadedMsg`, so the latch fires and the bug surfaces. Therefore:
+The existing cold-boot test (`internal/tui/coldboot_session_refetch_test.go` — the `TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions` test and its `driveColdBootToSessions` driver) passes for the **wrong reason**: it builds the model with no project store and never delivers `ProjectsLoadedMsg`, so `projectsLoaded` stays false, `evaluateDefaultPage()` early-returns without latching, and `activePage` keeps the tentative `PageSessions` set in `transitionFromLoading()`. The assertion passes despite the empty stale snapshot. In production `loadProjects` *does* emit `ProjectsLoadedMsg`, so the latch fires and the bug surfaces. Therefore:
 
 - **A regression test MUST deliver `ProjectsLoadedMsg` before the loading-page transition.** Without it, `projectsLoaded` stays false, the latch never fires, and the test passes without exercising the defect. This is mandatory for every cold-route landing-page test below.
 

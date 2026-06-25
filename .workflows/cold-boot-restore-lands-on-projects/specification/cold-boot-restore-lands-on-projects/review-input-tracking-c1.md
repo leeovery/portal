@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-25
 cycle: 1
 phase: Input Review
@@ -25,10 +25,10 @@ The spec describes the defect abstractly ("N sessions restored") but contains no
 The spec's "Context: Defect & Root Cause" section describes symptoms abstractly (specification.md lines 7-17) and has no reproduction sub-section. The "Testing Requirements" section (lines 67-80) covers only the unit/regression tests in `internal/tui/`, with no mention of manual/demo-harness verification.
 
 **Proposed Addition**:
-{leave blank until discussed}
+New "Reproduction" sub-section under Context: Defect & Root Cause (after "Affected path", before "Root cause") with the `demo/portal-cold.tape` recipe, 12-session/10-project seed, the exact `✓ Restoring sessions 12/12 …` loading signature, and the 4-step repro.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added verbatim via finding auto-mode. Placed after "Affected path".
 
 ---
 
@@ -45,9 +45,9 @@ The spec correctly identifies that `internal/tui/coldboot_session_refetch_test.g
 "The existing cold-boot test (`internal/tui/coldboot_session_refetch_test.go`) passes for the **wrong reason**: it builds the model with no project store and never delivers `ProjectsLoadedMsg`, so `projectsLoaded` stays false, `evaluateDefaultPage()` early-returns without latching, and `activePage` keeps the tentative `PageSessions` set in `transitionFromLoading()`. The assertion passes despite the empty stale snapshot." (specification.md line 69)
 
 **Proposed Addition**:
-{leave blank until discussed}
+Amend the Testing Requirements opening sentence to name the symbols: `internal/tui/coldboot_session_refetch_test.go` — the `TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions` test and its `driveColdBootToSessions` driver.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added verbatim via finding auto-mode (diff applied to the opening sentence).
 
 ---
