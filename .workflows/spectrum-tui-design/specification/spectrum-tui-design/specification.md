@@ -8,6 +8,12 @@
 > - **§9 preview chrome restructure (design refinement, task 4-6):** the preview is now a **full-screen joined panel** (the modal `renderJoinedPanel` shape, single-tone `accent.cyan`, rounded, no fill) with **header / body / footer** compartments — the nav hints moved from the header into a **footer** (`accent.blue` glyphs + `text.detail` labels, space-separated). The window **binding changed** to `←`/`→` (was `]`/`[`); **pane stays `Tab`** (`Ctrl+←/→` was considered but rejected — it collides with macOS Mission Control Spaces switching); the marker is `◉` (was `⊙`). Footer reads `←→ window  ⇥ pane  ⏎ attach  ␣ back`.
 > Bodies below were edited in place to match; this block is the only annotation. Original wording is recoverable via `git log -p`.
 
+> **⚠ Corrigendum — 2026-06-25 (spectrum-tui-design review).**
+> The §2.9 MV token-table **light column** and the §7.3 **no-matches glyph** were reconciled to the as-built implementation (the spec lagged the build-time §1-4 / §1-9 validation).
+> - **§2.9 light variants & ratios.** The original light *ratio* column was computed against pure white `#FFFFFF`; §2.3 / §2.9 mandate measuring each light variant against the **owned light canvas `#e1e2e7`**. During validation, seven light foreground hexes were darkened (hue-preserved) to clear the floor against the real canvas, and `state.green`'s light value was folded to a single `#3B5E18` that clears **both** the canvas and the `bg.selection` tint (retiring the former light-only on-selection override). **Superseded → current:** `text.muted-bright` `#515A80`→`#4C5478`; `text.detail` `#5A6296`→`#586093`; `text.dim` `#7C84AA`→`#767DA2`; `accent.blue` `#2E5FD0`→`#2D5CCA`; `accent.cyan` `#0E7490`→`#0D6C87`; `state.green` `#4C7A1F`→`#3B5E18`; `state.red` `#C32647`→`#BD2545`. The light **ratio** column now reads vs `#e1e2e7` (on-tint tokens — `text.on-selection`, `text.on-warning` — measured against their tint). The two light surface tints that were `(§15)` placeholders are pinned: `bg.warning` `#E8D6A8`, `bg.track` `#D2D4DE`. Every light value is numerically re-verified in `internal/tui/theme/contrast_test.go`.
+> - **§7.3 no-matches glyph.** Superseded: `⌀` (U+2300 DIAMETER SIGN). Current: **`∅`** (U+2205 EMPTY SET) — chosen at build time for wider terminal-font support and a more apt "no results" semantics.
+> Bodies above (§2.9, §7.3) were edited in place to match; this block is the only annotation. Original wording is recoverable via `git log -p`.
+
 ## Specification
 
 > **⚠ Verification mandate — applies to every task (read before planning).**
@@ -116,11 +122,11 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 
 | Token | Role | Dark (on `#0b0c14`) | Light (on `#e1e2e7`) | Floor |
 |---|---|---|---|---|
-| `text.primary` | names, wordmark, active labels, modal titles, chip text | `#C0CAF5` · 13.0 | `#2E3C64` · 10.8 | 4.5 |
-| `text.strong` | selected-row meta, help actions, banner/signpost | `#A9B1D6` · 9.9 | `#3F4760` · 9.2 | 4.5 |
-| `text.muted-bright` | done-tick labels, selected-row path | `#828BB8` · 6.3 | `#515A80` · 6.7 | 4.5 |
-| `text.detail` | paths, counts, footer labels, subtitles, group headings | `#737AA2` · 5.0 | `#5A6296` · 5.8 | 4.5 |
-| `text.dim` | group `··· N` counts, pending loading steps | `#535C86` · 3.2 | `#7C84AA` · 3.7 | 3.0¹ |
+| `text.primary` | names, wordmark, active labels, modal titles, chip text | `#C0CAF5` · 13.0 | `#2E3C64` · 8.3 | 4.5 |
+| `text.strong` | selected-row meta, help actions, banner/signpost | `#A9B1D6` · 9.9 | `#3F4760` · 7.1 | 4.5 |
+| `text.muted-bright` | done-tick labels, selected-row path | `#828BB8` · 6.3 | `#4C5478` · 5.7 | 4.5 |
+| `text.detail` | paths, counts, footer labels, subtitles, group headings | `#737AA2` · 5.0 | `#586093` · 4.6 | 4.5 |
+| `text.dim` | group `··· N` counts, pending loading steps | `#535C86` · 3.2 | `#767DA2` · 3.1 | 3.0¹ |
 | `text.faint` | decorative only — inactive dots, `+ add`, mode indicator, hints | `#3B4261` | `#AEB2C6` | exempt² |
 | `text.on-selection` | name on the selected row | `#FFFFFF` | `#1A1B2E` | 4.5 |
 
@@ -130,12 +136,12 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 
 | Token | Role | Dark | Light | Floor |
 |---|---|---|---|---|
-| `accent.violet` | selector `▌`, active dot, `?` key, focused field outline + label, mode bar, loading bar | `#BB9AF7` · 9.1 | `#8A3FD1` · 5.7 | 3.0 |
-| `accent.blue` | footer / modal **key-hint glyphs** | `#7AA2F7` · 8.3 | `#2E5FD0` · 5.7 | 4.5 |
-| `accent.cyan` | Sessions header, Preview chrome, active tick `◐` | `#7DCFFF` · 12.2 | `#0E7490` · 5.4 | 4.5 |
-| `state.green` | `● attached`, Sessions count, Projects label, `✓` done, success flash | `#9ECE6A` · 11.5 | `#4C7A1F` · 5.1 | 4.5 |
-| `state.red` | kill/delete emphasis, `▲` | `#F7768E` · 7.9 | `#C32647` · 5.7 | 4.5 |
-| `accent.orange` | filter query / `/` / `type`, editing border + text cursor + `◉ EDIT MODE`, warning flash `⚠` | `#FF9E64` · 10.3 | `#9A5200` · 5.9 | 4.5 |
+| `accent.violet` | selector `▌`, active dot, `?` key, focused field outline + label, mode bar, loading bar | `#BB9AF7` · 9.1 | `#8A3FD1` · 4.4 | 3.0 |
+| `accent.blue` | footer / modal **key-hint glyphs** | `#7AA2F7` · 8.3 | `#2D5CCA` · 4.6 | 4.5 |
+| `accent.cyan` | Sessions header, Preview chrome, active tick `◐` | `#7DCFFF` · 12.2 | `#0D6C87` · 4.6 | 4.5 |
+| `state.green` | `● attached`, Sessions count, Projects label, `✓` done, success flash | `#9ECE6A` · 11.5 | `#3B5E18` · 5.8 | 4.5 |
+| `state.red` | kill/delete emphasis, `▲` | `#F7768E` · 7.9 | `#BD2545` · 4.6 | 4.5 |
+| `accent.orange` | filter query / `/` / `type`, editing border + text cursor + `◉ EDIT MODE`, warning flash `⚠` | `#FF9E64` · 10.3 | `#9A5200` · 4.5 | 4.5 |
 
 **Surfaces (tints / borders — light values finalised at validation)**
 
@@ -143,11 +149,11 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 |---|---|---|---|
 | `canvas` | owned mode-matched canvas (painted on every cell) | `#0b0c14` | `#e1e2e7` |
 | `bg.selection` | selected-row tint | `#28243a` | `#D0C6F0` |
-| `bg.warning` | warning-flash band | `#241B10` | light amber (§15) |
-| `bg.track` | loading-bar empty track | `#26283A` | light grey (§15) |
+| `bg.warning` | warning-flash band | `#241B10` | `#E8D6A8` |
+| `bg.track` | loading-bar empty track | `#26283A` | `#D2D4DE` |
 | `border.separator` | title rule (2px) | `#292E42` | `#C9CDDB` |
 | `border.footer` | footer rule (1px) | `#20232E` | `#C9CDDB` |
-| `text.on-warning` | warning-flash message | `#E8C9A0` · 13.3 | `#7A4B12` · 7.4 |
+| `text.on-warning` | warning-flash message | `#E8C9A0` · 13.3 | `#7A4B12` · 5.1 |
 
 **Rules**
 - **Closed vocabulary** — every rendered colour is one of these tokens; no literal hex outside the token layer (enforces §2.8 theme-readiness).
@@ -156,7 +162,7 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 - **Contrast re-verification (the canvas pass).** Every foreground token, every per-element tint/band, and every foreground-on-tint pairing is verified against the **exact canvas** — dark variants vs `#0b0c14`, light variants vs `#e1e2e7`. The two variants resolve **independently** (each only against its own mode-canvas; no single value need hold on both). Remedy when one dips under floor: **adjust toward more contrast** — *brighten* a dark variant on `#0b0c14`, *darken / saturate* a light variant on `#e1e2e7` — never drop the floor.
 - **Text-carrying tints are co-tuned with their on-band text token.** A tint that carries text (the selection band, notice bands) is pinned by **two** ratios — tint-vs-canvas (≥3:1 UI floor) and text-vs-tint (≥4.5/3:1 text floor) — and **both must clear simultaneously**. There are two knobs (the tint *and* its on-band text token); when no single tint value satisfies both, the text token moves too. The spec measures the **pair**, not the tint alone.
 - **No stray hex.** The mockups' ad-hoc values collapse to tokens: `#15131F` → `bg.selection`, `#2B3050` → `border.separator`. No raw hex survives outside this table.
-- **Light surface tints finalised at §15.** `bg.selection` (`#D0C6F0`), `bg.warning`, `bg.track`, and the light borders (`#C9CDDB`) are **pinned and eyeballed** against `#e1e2e7` at the validation gate, each **derived from its dark anchor + the surface it renders** — not invented. A numeric pass alone is insufficient; the light-tint-on-light-canvas case is the recurring risk.
+- **Light surface tints finalised at §15.** `bg.selection` (`#D0C6F0`), `bg.warning` (`#E8D6A8`), `bg.track` (`#D2D4DE`), and the light borders (`#C9CDDB`) are **pinned and eyeballed** against `#e1e2e7` at the validation gate, each **derived from its dark anchor + the surface it renders** — not invented. A numeric pass alone is insufficient; the light-tint-on-light-canvas case is the recurring risk.
 - All values are a **hypothesis until prototyped in a real terminal (§15)**; the table is the build target, validation is the lock.
 
 ---
@@ -293,7 +299,7 @@ Filtering is **never both at once** — there is never an active input cursor *a
 - **`Esc`** clears the filter from either mode (returns to the unfiltered list).
 
 ### 7.3 Over-filtered (no matches)
-When the query matches nothing: a centred empty state — a dim `⌀` glyph (`text.faint`), `No sessions match "<query>"` (`text.primary`), hint `⌫ to widen the search · esc to clear the filter` (`text.detail`). Footer stays in input-active form.
+When the query matches nothing: a centred empty state — a dim `∅` glyph (`text.faint`), `No sessions match "<query>"` (`text.primary`), hint `⌫ to widen the search · esc to clear the filter` (`text.detail`). Footer stays in input-active form.
 
 ---
 
