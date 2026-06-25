@@ -1,11 +1,11 @@
 # Implementation Review: Spectrum TUI Design (Modern Vivid reskin + concurrent cold-boot flip)
 
 **Plan**: spectrum-tui-design
-**QA Verdict**: Request Changes
+**QA Verdict**: Approve *(was Request Changes — the single blocking gap was closed during the review; see Resolved below)*
 
 ## Summary
 
-This is a large, exceptionally well-executed implementation. All **64 leaf tasks** across the 10 phases (5 feature phases + 5 analysis cycles) are implemented and marked `done`; `go build`, `go vet ./internal/tui/...`, and the full `go test ./...` suite are all green. Per-task verification found the work faithful to the specification (including the 2026-06-22 corrigendum) and to project Go conventions: the closed ~20-token colour layer is enforced by a self-maintaining colour-literal guard, the owned-canvas paint preserves the one-row-per-delegate pagination invariant everywhere, the concurrent cold-boot flip is correctly scoped to the cold+TUI path with race-safe channel discipline (sole-sender-closes, ctx-guarded sends, no goroutine leak), the keymap revision is locked by a descriptor↔dispatch drift guard, and the five analysis cycles genuinely converged duplication and dead code with byte-identical-render golden tests proving no behaviour drift. The verdict is **Request Changes** for a single reason: one explicit acceptance deliverable — the §15.6 light-mode `vhs` captures for the three edit-modal states — is absent (the code renders correctly in light mode and is unit-tested; only the committed visual-eyeball artifact is missing). Everything else is non-blocking: a handful of spec-conformance decisions to record, a cluster of latent narrow-width overflow edges, and a long tail of stale doc comments left behind by the later refactor cycles.
+This is a large, exceptionally well-executed implementation. All **64 leaf tasks** across the 10 phases (5 feature phases + 5 analysis cycles) are implemented and marked `done`; `go build`, `go vet ./internal/tui/...`, and the full `go test ./...` suite are all green. Per-task verification found the work faithful to the specification (including the 2026-06-22 corrigendum) and to project Go conventions: the closed ~20-token colour layer is enforced by a self-maintaining colour-literal guard, the owned-canvas paint preserves the one-row-per-delegate pagination invariant everywhere, the concurrent cold-boot flip is correctly scoped to the cold+TUI path with race-safe channel discipline (sole-sender-closes, ctx-guarded sends, no goroutine leak), the keymap revision is locked by a descriptor↔dispatch drift guard, and the five analysis cycles genuinely converged duplication and dead code with byte-identical-render golden tests proving no behaviour drift. The one blocking gap found — the §15.6 light-mode `vhs` captures for the three edit-modal states were absent (the code rendered correctly in light mode and was unit-tested; only the committed visual-eyeball artifact was missing) — was **produced and eyeballed during this review**: the grey→violet→orange focus/edit grammar reads cleanly on the light `#e1e2e7` canvas across all three states, closing the item. The verdict is therefore **Approve**. Everything else is non-blocking: a handful of spec-conformance decisions to record, a cluster of latent narrow-width overflow edges, and a long tail of stale doc comments left behind by the later refactor cycles (the zero-risk doc cluster was applied during the review's do-now pass).
 
 ## QA Verification
 
@@ -21,8 +21,8 @@ The §3.4 footer-glyph divergence and the Projects arrow-only-nav defect flagged
 
 ### Plan Completion
 
-- [x] Phase 1–10 acceptance criteria met — **except** the §15.6 light-mode edit-modal capture deliverable (see Required Changes).
-- [x] All 64 tasks completed (62 fully complete; 3-9, 4-3, 9-2 returned "Issues Found" — only 3-9 carries a blocking deliverable gap).
+- [x] Phase 1–10 acceptance criteria met (the §15.6 light-mode edit-modal captures, the lone gap, were produced during this review — see Resolved).
+- [x] All 64 tasks completed (62 fully complete; 4-3 and 9-2 returned "Issues Found" with non-blocking notes; 3-9's blocking deliverable gap is now closed).
 - [x] No scope creep. Two tasks beyond the original 1-1…5-8 plan (2-10 global content gutter; 3-10 rename shared-input-box) are legitimate UX/DRY refinements tracked in the plan, not unplanned additions; phases 6–10 are the planned analysis cycles.
 
 **Process note (non-blocking):** the implementation manifest's `completed_tasks` list has drifted — it is missing `2-3…2-9` and `3-1/3-2` and lists renumbered IDs. Git history and the tick tree both show every task implemented and `done`, so this is a manifest-bookkeeping discrepancy, not a real coverage gap. Worth reconciling so future continue/review runs read the true set.
@@ -35,9 +35,9 @@ No blocking code-quality issues. Highlights: small-interface DI and the seam pat
 
 Tests adequately verify requirements and are notably disciplined: byte-exact SGR oracles for render surfaces, dispatch-layer (not descriptor-layer) tests for keymap behaviour, a non-vacuous descriptor↔dispatch guard, contrast floors re-derived numerically, daemon-spawning tests under `IsolateStateForTest`, and no `t.Parallel()` in `cmd`. Minor gaps (under Quick-fixes): no narrow-width/long-command band test, no projects-side empty-state one-row test, no direct drop-`n` dispatch test for the kill/delete modals, and a couple of vacuous/over-slow probes (COLORFGBG never-read; a ~100ms real sleep in the appearance timeout tests). One pre-existing daemon integration test isolates via raw `PORTAL_STATE_DIR` rather than the mandated helper (under Bugs).
 
-### Required Changes
+### Required Changes — RESOLVED during review
 
-1. **Produce the §15.6 light-mode `vhs` captures for the three edit-modal states.** `testdata/vhs/` ships `edit-modal-{navigate-name,chip-focused,edit-in-place}.{tape,png}` in **dark only**; the sibling modals (`rename`/`kill`/`delete`) each ship a `-light.{tape,png}` mirror. §15.6 explicitly lists "the three edit states" among the light-mode eyeball deliverables, and the verification mandate holds a task "not done until its `vhs` capture is produced and checked against its frame". The fix is mechanical: add three `-light` tapes mirroring `testdata/vhs/rename-modal-light.tape` with `--appearance light`, run the captures, and check them against the edit-modal frames. (Report 3-9)
+1. ~~**Produce the §15.6 light-mode `vhs` captures for the three edit-modal states.**~~ **Done.** Added `edit-modal-{navigate-name,chip-focused,edit-in-place}-light.{tape,png}` (mirroring `rename-modal-light.tape` with `--appearance light`), ran the captures, and eyeballed all three against §13.1: the light `#e1e2e7` canvas renders the focus/edit grammar legibly — grey (`border.separator`) idle chips, **violet** (`accent.violet`) focused field label + focused chip border + rounded NAME input, **orange** (`accent.orange`) editing chip border + live cursor + `◉ EDIT MODE` badge, blue (`accent.blue`) footer glyphs. No frame-compare (there is no light Paper reference for the edit modal — §15.6 is a per-token legibility eyeball, and every token used is already light-validated on sibling frames). (Report 3-9)
 
 ## Recommendations
 

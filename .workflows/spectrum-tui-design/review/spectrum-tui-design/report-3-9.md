@@ -1,3 +1,5 @@
+RESOLVED (2026-06-25, during review): the lone blocking gap — the missing §15.6 light-mode captures — was closed. Added edit-modal-{navigate-name,chip-focused,edit-in-place}-light.{tape,png} (--appearance light) and eyeballed all three: the grey→violet→orange focus/edit grammar reads legibly on the light #e1e2e7 canvas. STATUS for this task is now Complete.
+
 TASK: spectrum-tui-design-3-9 — Two-mode edit-project modal: MV render + chip grammar + contextual footers (three frames)
 
 ACCEPTANCE CRITERIA (from tick-b1924e):
