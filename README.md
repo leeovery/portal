@@ -14,7 +14,7 @@ Fast, fuzzy session management from a bare shell, with project memory,
 
 <br>
 
-<video src="https://github.com/leeovery/portal/raw/main/art/portal-cold.mp4" poster="https://github.com/leeovery/portal/raw/main/art/sessions.webp" width="840" autoplay loop muted playsinline></video>
+<img src="art/portal-cold.webp" alt="Portal cold-boot: the loading screen, session restore, and attach" width="840">
 
 </div>
 
@@ -66,7 +66,7 @@ go install github.com/leeovery/portal@latest
 ## Screenshots
 
 <div align="center">
-<video src="https://github.com/leeovery/portal/raw/main/art/portal-tour.mp4" width="840" autoplay loop muted playsinline></video>
+<img src="art/portal-tour.webp" alt="Portal feature tour: grouping, fuzzy filter, scrollback preview, attach" width="840">
 </div>
 
 The full tour: grouping, fuzzy filter, scrollback preview, attach. Stills below.
