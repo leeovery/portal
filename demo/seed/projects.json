@@ -1,0 +1,14 @@
+{
+  "projects": [
+    {"path":"/home/demo/work/portal","name":"portal","last_used":"2026-06-25T15:40:00Z","tags":["oss"]},
+    {"path":"/home/demo/work/api-gateway","name":"api-gateway","last_used":"2026-06-25T14:10:00Z","tags":["work","backend"]},
+    {"path":"/home/demo/work/web-dashboard","name":"web-dashboard","last_used":"2026-06-25T11:05:00Z","tags":["work","frontend"]},
+    {"path":"/home/demo/work/payments-service","name":"payments-service","last_used":"2026-06-24T18:22:00Z","tags":["work","backend"]},
+    {"path":"/home/demo/work/mobile-app","name":"mobile-app","last_used":"2026-06-24T16:40:00Z","tags":["work","frontend"]},
+    {"path":"/home/demo/work/infra-terraform","name":"infra-terraform","last_used":"2026-06-24T09:15:00Z","tags":["work","infra"]},
+    {"path":"/home/demo/work/auth-service","name":"auth-service","last_used":"2026-06-23T20:05:00Z","tags":["work","backend"]},
+    {"path":"/home/demo/work/data-pipeline","name":"data-pipeline","last_used":"2026-06-23T13:50:00Z","tags":["work","data"]},
+    {"path":"/home/demo/work/docs-site","name":"docs-site","last_used":"2026-06-22T17:30:00Z","tags":["oss","frontend"]},
+    {"path":"/home/demo/work/notifications","name":"notifications","last_used":"2026-06-22T10:12:00Z","tags":["work","backend"]}
+  ]
+}

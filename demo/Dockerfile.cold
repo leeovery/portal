@@ -1,0 +1,7 @@
+# Final demo image = base + a baked restore seed (a real captured sessions.json
+# plus scrollback dumps, produced by record-seed.sh). With DEMO_COLD=1 the
+# entrypoint lays this down and starts NO tmux server, so the next `x` runs a
+# genuine cold-boot restore: the loading screen, then the repopulated picker.
+# The warm default ignores the seed entirely.
+FROM portal-demo:base
+COPY --chown=demo:demo .seed-state /home/demo/seed-state

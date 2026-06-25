@@ -15,5 +15,6 @@ diff_exclude = [
     '.tick/**',       # task-tracking state (multi-MB jsonl)
     '**/*_test.go',   # Go tests, incl. large byte-exact golden fixtures (the dominant diff-size contributor); notes describe behaviour, not test scaffolding
     'testdata/**',    # vhs capture tapes + reference/capture PNGs (visual-test fixtures)
-    'art/**',         # README screenshot assets (docs, not source)
+    'art/**',         # README screenshot + demo-clip assets (docs, not source)
+    'demo/**',        # sandboxed demo-recording harness (Dockerfiles, tapes, scripts)
 ]

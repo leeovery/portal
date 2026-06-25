@@ -1,0 +1,6 @@
+# Keep the build context lean — rendered artifacts and tapes never belong in the
+# image. (.seed-state IS needed by Dockerfile.cold, so it is NOT ignored.)
+out/
+*.gif
+*.png
+*.tape
