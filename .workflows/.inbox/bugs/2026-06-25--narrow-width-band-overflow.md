@@ -1,0 +1,15 @@
+# Narrow-width overflow in the section header, command band, and edit-modal panel
+
+Three render paths can overflow their width budget at extreme-narrow terminals or with pathological data, violating the §2.7 "never overflow" invariant. None trigger on normal data, and each has a known one-location fix — but they share a root cause (a row is padded/joined to width without a truncation step), so they're worth fixing together.
+
+1. **`section_header.go:96-97`** — the narrow-degrade branch clamps only the right-side `/ to filter` hint. When the *left* cluster itself exceeds the row width (an extreme-narrow terminal plus a long inside-tmux `(current: <longname>)` decoration), `renderSectionHeaderRow` takes the `leftWidth >= w` branch → `headerPadRight` → `padRightWithStyle` returns the left cluster unchanged (the `segWidth >= w` short-circuit), so it overflows. §2.7's degrade list truncates *names* (row delegates) with `…` but the section-header left cluster has no `…`/clamp step. Fix: `ansi.Truncate` the left cluster to `w` in the `leftWidth >= w` branch before padding.
+
+2. **`notice_band.go:294-304` (`renderCommandBand`, the §11.4 command-pending banner)** — `JoinHorizontal`s bar + caret + text + chip and pads via `noticeBandPadRight`, but never wraps/truncates. When the joined row exceeds `w` (a long pending command at a narrow width), `padRightWithStyle` (`header.go:225-231`) returns the row unchanged; `fillCanvas` (`model.go`) explicitly does NOT truncate over-width lines, so the terminal soft-wraps the band line — corrupting the layout and (since `projectBandHeight` reserves only the un-wrapped 1-line height) potentially pushing the composed view past `termH`. It is parity with the pre-reskin plain status line (which also didn't wrap), and common commands (`npm run dev`, `go test ./...`) fit, so it's non-blocking. Fix: either truncate the chip command with `…` to the available width, or route the banner through the wrapping `renderNoticeBand` path and let `projectBandHeight` pick up the extra row (its comment at `model.go:1378` already anticipates "more if the banner ever wraps").
+
+3. **`edit_modal.go:365` (`editChipFieldRows`) / `panel.go:59` (`renderJoinedPanel`)** — the joined panel auto-sizes `contentWidth` to its widest row, so an extreme chip field (a very long chip value or many chips) grows the panel past the terminal canvas width. The edit-modal edge note asks the primitive to "wrap or truncate so the panel stays within the canvas"; no such clamp exists. Never triggers on the fixed reference data (2 short chips/field). Fix: clamp/elide the chip band to the canvas-bounded content width.
+
+Add a regression test alongside the fix: extend `command_pending_band_test.go` (≈ the existing band-width test block) with a narrow-width / long-command case asserting the band does not exceed `w` — this would lock in whatever overflow behaviour is chosen for #2.
+
+Note these are VISUAL fixes, so the affected fixtures (`projects-command-pending`, and any narrow-width captures) would need re-capturing.
+
+Source: review of spectrum-tui-design/spectrum-tui-design (reports 2-3, 4-1, 4-4, 3-9).
