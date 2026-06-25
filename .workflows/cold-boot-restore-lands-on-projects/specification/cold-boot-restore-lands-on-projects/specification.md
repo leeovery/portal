@@ -40,6 +40,20 @@ Because the `initialFilter` application lives inside `evaluateDefaultPage()`, de
 
 The one-shot `defaultPageEvaluated` latch is left untouched; only the **timing** of the single `evaluateDefaultPage()` call changes on the cold route. This keeps the blast radius minimal and the warm-path startup ordering byte-identical (the zero-new-risk contract from `spectrum-tui-design`).
 
+### Acceptance Criteria
+
+| # | Scenario | Required behaviour |
+|---|----------|--------------------|
+| AC1 | Cold boot, TUI picker, **N>0** sessions restored | Picker opens on **Sessions**, listing all N restored sessions. No `x` keypress required to reach them. |
+| AC2 | Cold boot, TUI picker, **zero** sessions restored | Picker opens on **Projects** (the fix must not over-correct to always-Sessions). |
+| AC3 | Cold boot with an `initialFilter`, **N>0** sessions restored | Picker opens on **Sessions** with the filter applied to the **session** list (and consumed there, not against Projects). |
+| AC4 | Warm path (server already running), N>0 sessions | Picker opens on **Sessions**, byte-identical to today — unchanged. |
+| AC5 | Warm path, zero sessions | Picker opens on **Projects**, byte-identical to today — unchanged. |
+| AC6 | Command-pending launch (`commandPending`) | Lands on **Projects** as today — the `commandPending` branch of the landing decision is independent of session count and must be preserved. |
+| AC7 | Cold route, interim window between loading-page dismissal and the post-restore refetch landing | A valid page is shown (interim **Sessions**); no blank, undefined, or loading page flashes. |
+
+These criteria are the observable contract; the fix is correct only if every row holds.
+
 ---
 
 ## Working Notes
