@@ -24,6 +24,22 @@ On the cold route the bootstrap orchestrator (including Restore, which creates t
 
 The filter co-defect shares this mechanism: the `initialFilter` application lives **inside** `evaluateDefaultPage` and is gated on the chosen page being Sessions. Because the latched decision is Projects, the filter is routed to the project list and `initialFilter` is zeroed in the same one-shot call.
 
+### Fix Approach: Defer the Landing Decision to the Post-Restore Refetch
+
+The fix changes **when** the landing-page decision is made on the cold route, not the decision logic itself. The single `evaluateDefaultPage()` call that today fires prematurely inside `transitionFromLoading()` against the stale empty list is deferred — on the cold route — to the post-restore refetch's `SessionsMsg`, which already calls `evaluateDefaultPage()` and arrives carrying the correct post-restore session list.
+
+Concretely:
+
+- On the **cold concurrent route** (`progressReceiver != nil`), `transitionFromLoading()` sets a valid interim `activePage = PageSessions` and marks `sessionsLoaded = true`, but does **not** call `evaluateDefaultPage()`. The decision is left for the refetch.
+- `refetchSessionsAfterRestore()` is already dispatched at the transition on this route; its post-restore `SessionsMsg` arrives when `activePage != PageLoading`, so the existing `SessionsMsg` handler path runs `evaluateDefaultPage()` — now against the **post-restore** list. With `sessionsLoaded` and `projectsLoaded` both already true and the latch still unset, it decides correctly and latches.
+- On the **warm / CLI route** (`progressReceiver == nil`), `transitionFromLoading()` still calls `evaluateDefaultPage()` synchronously exactly as today. There is no refetch on this route, so the decision must be made at the transition against the already-post-restore `Init` snapshot.
+
+`transitionFromLoading()` is the single chokepoint reached by both the `LoadingMinElapsedMsg` and `BootstrapCompleteMsg` handlers (whichever closes the second gate), so gating the `evaluateDefaultPage()` call there covers every transition trigger without touching either handler.
+
+Because the `initialFilter` application lives inside `evaluateDefaultPage()`, deferring that one call also resolves the filter co-defect with no extra code: on the cold route the filter is applied during the post-restore decision, so when the page resolves to Sessions the filter is routed to — and consumed by — the **session** list.
+
+The one-shot `defaultPageEvaluated` latch is left untouched; only the **timing** of the single `evaluateDefaultPage()` call changes on the cold route. This keeps the blast radius minimal and the warm-path startup ordering byte-identical (the zero-new-risk contract from `spectrum-tui-design`).
+
 ---
 
 ## Working Notes
