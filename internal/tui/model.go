@@ -320,11 +320,6 @@ type Model struct {
 	// synthesizing BootstrapCompleteMsg from its first tick exactly as today.
 	progressReceiver tea.Cmd
 
-	// latestProgress is the most recent per-step event ingested from the channel.
-	// Kept for any consumer that reads the raw last event; the loading screen
-	// renders from loadingProgress (the folded accumulator) below.
-	latestProgress BootstrapProgressMsg
-
 	// loadingProgress is the task-5-4 §10.4 accumulator: every BootstrapProgressMsg
 	// is folded into it (in the BootstrapProgressMsg Update arm), and viewLoading
 	// reads loadingProgress.View() for the §10.3 bar fraction + the ordered five
@@ -2026,7 +2021,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the TUI inert during loading (§10.2 race containment). A nil receiver
 		// (defensive: a stray progress msg with no receiver wired) stops the
 		// loop rather than re-issuing nil.
-		m.latestProgress = msg
+		//
 		// Fold the event into the §10.4 accumulator so viewLoading (§10.3) renders
 		// the live bar fraction + tick-list states + counter from it. Apply returns
 		// a new value (no receiver mutation), so the accumulator stays the single
