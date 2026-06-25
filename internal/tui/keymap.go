@@ -54,6 +54,10 @@ type keymapEntry struct {
 	// RightAligned marks the single trailing entry the footer pins to the right
 	// (the "? help" hint). At most one entry sets this.
 	RightAligned bool
+	// Destructive marks an entry whose key glyph renders in state.red in the ? help
+	// body (§2.9 red is destructive-only — the kill / delete actions). Modelled
+	// structurally so a future non-destructive `d`/`k` binding cannot render red.
+	Destructive bool
 }
 
 // sessionsKeymap returns the ordered Sessions keymap descriptor (§12.1, post
@@ -91,7 +95,7 @@ func sessionsKeymap() []keymapEntry {
 		{Key: "s", Action: "switch view", HelpAction: "Switch view — flat / project / tag", Core: true},
 		{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
 		{Key: "r", Action: "rename", HelpAction: "Rename session"},
-		{Key: "k", Action: "kill", HelpAction: "Kill session"},
+		{Key: "k", Action: "kill", HelpAction: "Kill session", Destructive: true},
 		{Key: "q", Action: "quit", HelpAction: "Quit"},
 		{Key: "x", Action: "projects", HelpAction: "Switch to Projects", Core: true},
 		{Key: "?", Action: "help", HelpAction: "Show this help", Core: true, RightAligned: true},
@@ -129,7 +133,7 @@ func projectsKeymap() []keymapEntry {
 		{Key: "x", Action: "sessions", HelpAction: "Switch to Sessions", Core: true},
 		{Key: "e", Action: "edit", HelpAction: "Edit project", Core: true},
 		{Key: "/", Action: "filter", HelpAction: "Filter projects", Core: true},
-		{Key: "d", Action: "delete", HelpAction: "Delete project"},
+		{Key: "d", Action: "delete", HelpAction: "Delete project", Destructive: true},
 		{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
 		{Key: "q", Action: "quit", HelpAction: "Quit"},
 		{Key: "esc", Action: "back", HelpAction: "Back / quit"},

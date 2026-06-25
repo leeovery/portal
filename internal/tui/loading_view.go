@@ -55,11 +55,17 @@ var loadingWordmark = [5]string{
 
 const (
 	// loadingCaretGlyph is the violet caret block. renderBlockWordmark builds a
-	// 5-row caret column from it and joins it ONCE (one space gap) against the
-	// padded wordmark stack, so the caret is a single flush 5-row-tall accent.violet
-	// bar beside the wordmark — not appended per-row (which jogged on the ragged
-	// bottom row, breaking the caret into a detached comma).
+	// 5-row caret column from it and joins it ONCE (a loadingCaretGap-cell gap)
+	// against the padded wordmark stack, so the caret is a single flush 5-row-tall
+	// accent.violet bar beside the wordmark — not appended per-row (which jogged on
+	// the ragged bottom row, breaking the caret into a detached comma).
 	loadingCaretGlyph = "█"
+
+	// loadingCaretGap is the blank-cell gap between the block wordmark's trailing L
+	// and the violet caret bar. Deliberately wider than the 1-cell inter-letter gap
+	// so the caret reads as a separate cursor, not a 7th letter — at block weight a
+	// 1-cell gap rendered "PORTAL" + caret as a single word "PORTALI".
+	loadingCaretGap = 3
 
 	// loadingGlyphDone / loadingGlyphActive / loadingGlyphPending are the §10.3
 	// tick glyphs. Each occupies a fixed-width slot so the labels align across
@@ -111,8 +117,8 @@ func blockBannerMaxRowWidth() int {
 }
 
 func computeBlockBannerWidth() int {
-	// padded rows (max width) + one space gap + the single-cell caret glyph.
-	return blockBannerMaxRowWidth() + 1 + lipgloss.Width(loadingCaretGlyph)
+	// padded rows (max width) + the caret gap + the single-cell caret glyph.
+	return blockBannerMaxRowWidth() + loadingCaretGap + lipgloss.Width(loadingCaretGlyph)
 }
 
 // loadingFallbackWidth/Height mirror the header/viewLoading zero-size fallback so
@@ -287,8 +293,9 @@ func renderLoadingWordmark(w, h, belowHeight int, mode theme.Mode, colourless bo
 //     rows 0–3 leaves the L's stem flush-left with trailing space, matching row
 //     4's `█████` foot).
 //  3. Build the caret as its OWN 5-row block (one caret glyph per row) and
-//     JoinHorizontal it ONCE — separated by a one-space gap column — against the
-//     padded, JoinVertical'd wordmark stack. Appending the caret per-row (the old
+//     JoinHorizontal it ONCE — separated by a loadingCaretGap-cell gap column —
+//     against the padded, JoinVertical'd wordmark stack. Appending the caret per-row
+//     (the old
 //     path) jogged it on the wider bottom row, breaking it into a detached comma.
 //
 // The letters carry text.primary (bold); the caret carries accent.violet.
@@ -309,7 +316,7 @@ func renderBlockWordmark(mode theme.Mode, colourless bool) string {
 		}
 		letterRows = append(letterRows, lettersStyle.Render(padded))
 		caretRows = append(caretRows, caretStyle.Render(loadingCaretGlyph))
-		gapRows = append(gapRows, pad.Render(" "))
+		gapRows = append(gapRows, pad.Render(strings.Repeat(" ", loadingCaretGap)))
 	}
 
 	wordmark := lipgloss.JoinVertical(lipgloss.Left, letterRows...)

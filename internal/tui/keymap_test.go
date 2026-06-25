@@ -27,7 +27,7 @@ func TestSessionsKeymap(t *testing.T) {
 			{Key: "s", Action: "switch view", HelpAction: "Switch view — flat / project / tag", Core: true},
 			{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
 			{Key: "r", Action: "rename", HelpAction: "Rename session"},
-			{Key: "k", Action: "kill", HelpAction: "Kill session"},
+			{Key: "k", Action: "kill", HelpAction: "Kill session", Destructive: true},
 			{Key: "q", Action: "quit", HelpAction: "Quit"},
 			{Key: "x", Action: "projects", HelpAction: "Switch to Projects", Core: true},
 			{Key: "?", Action: "help", HelpAction: "Show this help", Core: true, RightAligned: true},

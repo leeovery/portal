@@ -197,8 +197,10 @@ func helpKeyGlyph(e keymapEntry) string {
 }
 
 // isDestructiveHelpKey reports whether the entry is a destructive action whose key
-// glyph renders in state.red in the help body (§2.9 red is destructive-only): the
-// Sessions `k` kill key and the Projects `d` delete key.
+// glyph renders in state.red in the help body (§2.9 red is destructive-only). It
+// reads the structural keymapEntry.Destructive flag (set on the Sessions `k` kill
+// and Projects `d` delete entries) rather than matching key glyphs, so a future
+// non-destructive `d`/`k` binding cannot accidentally render red.
 func isDestructiveHelpKey(e keymapEntry) bool {
-	return e.Key == "k" || e.Key == "d"
+	return e.Destructive
 }

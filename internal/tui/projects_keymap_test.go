@@ -28,7 +28,7 @@ func TestProjectsKeymap(t *testing.T) {
 			{Key: "x", Action: "sessions", HelpAction: "Switch to Sessions", Core: true},
 			{Key: "e", Action: "edit", HelpAction: "Edit project", Core: true},
 			{Key: "/", Action: "filter", HelpAction: "Filter projects", Core: true},
-			{Key: "d", Action: "delete", HelpAction: "Delete project"},
+			{Key: "d", Action: "delete", HelpAction: "Delete project", Destructive: true},
 			{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
 			{Key: "q", Action: "quit", HelpAction: "Quit"},
 			{Key: "esc", Action: "back", HelpAction: "Back / quit"},
