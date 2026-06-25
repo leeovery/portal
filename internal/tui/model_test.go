@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func editFieldFocused(view, label string) bool {
 		return false
 	}
 	violetCore := probe[start+1 : end]
-	for _, line := range strings.Split(view, "\n") {
+	for line := range strings.SplitSeq(view, "\n") {
 		if strings.Contains(line, label) && strings.Contains(line, violetCore) {
 			return true
 		}
@@ -415,7 +416,7 @@ func TestKeyboardNavigation(t *testing.T) {
 	t.Run("cursor wraps to first item when going past last", func(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
 		// Move down 3 times: alpha -> bravo -> charlie -> wraps to alpha
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		}
 
@@ -4531,9 +4532,7 @@ func (m *mockAliasEditor) Load() (map[string]string, error) {
 		return nil, m.loadErr
 	}
 	result := make(map[string]string)
-	for k, v := range m.aliases {
-		result[k] = v
-	}
+	maps.Copy(result, m.aliases)
 	return result, nil
 }
 

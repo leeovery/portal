@@ -60,9 +60,9 @@ func TestDefaultExecShell_ExecFailure_MarksTerminationBeforeExit(t *testing.T) {
 	// through and let any post-exit statement run.
 	var linesAtExit []string
 	var exitCode int32 = -1
-	var exitCalls int32
+	var exitCalls atomic.Int32
 	withOsExitFake(t, func(code int) {
-		atomic.AddInt32(&exitCalls, 1)
+		exitCalls.Add(1)
 		atomic.StoreInt32(&exitCode, int32(code))
 		linesAtExit = sink.Lines()
 		panic("osExit invoked")
@@ -75,7 +75,7 @@ func TestDefaultExecShell_ExecFailure_MarksTerminationBeforeExit(t *testing.T) {
 		defaultExecShell("/nonexistent/portal-exec-failure-probe", []string{"sh"})
 	}()
 
-	if got := atomic.LoadInt32(&exitCalls); got != 1 {
+	if got := exitCalls.Load(); got != 1 {
 		t.Fatalf("osExit invoked %d times; want exactly 1", got)
 	}
 	if got := atomic.LoadInt32(&exitCode); got != 1 {

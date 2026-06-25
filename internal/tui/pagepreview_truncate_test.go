@@ -42,7 +42,6 @@ func TestTruncateToCells(t *testing.T) {
 		{name: "boundary budget equals width", input: "hello", budget: 5, want: "hello", truncated: false},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := truncateToCells(tc.input, tc.budget)
 			if got != tc.want {

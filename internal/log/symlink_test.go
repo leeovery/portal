@@ -69,7 +69,7 @@ func TestSwingSymlink_ConcurrentSameTargetConvergesToOneLinkNoOrphan(t *testing.
 	const processes = 8
 	var wg sync.WaitGroup
 	wg.Add(processes)
-	for g := 0; g < processes; g++ {
+	for g := range processes {
 		pid := 9000 + g
 		go func() {
 			defer wg.Done()
@@ -93,7 +93,7 @@ func TestSwingSymlink_ConcurrentSameTargetConvergesToOneLinkNoOrphan(t *testing.
 
 	// No orphaned swing temp left behind for any pid: each pid performs at most
 	// one swing, and its rename consumes its own temp.
-	for g := 0; g < processes; g++ {
+	for g := range processes {
 		tmp := pidSymlinkTmp(dir, 9000+g)
 		if _, err := os.Lstat(tmp); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("pid tmp %q orphaned after concurrent swings (lstat err = %v)", tmp, err)

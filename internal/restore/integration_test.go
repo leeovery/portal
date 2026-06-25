@@ -244,7 +244,7 @@ func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 	if err == nil {
 		// If tmux did auto-start a server it will list at most the reserved
 		// bootstrap session. Anything else means restore created a session.
-		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || line == tmux.PortalBootstrapName {
 				continue

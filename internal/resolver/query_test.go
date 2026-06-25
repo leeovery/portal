@@ -40,16 +40,16 @@ func (m *mockDirValidator) Exists(path string) bool {
 
 func TestQueryResolver_Resolve(t *testing.T) {
 	tests := []struct {
-		name        string
-		query       string
-		aliases     map[string]string
+		name         string
+		query        string
+		aliases      map[string]string
 		zoxideResult string
-		zoxideErr   error
+		zoxideErr    error
 		existingDirs map[string]bool
-		wantPath    string
+		wantPath     string
 		wantFallback bool
-		wantQuery   string
-		wantErr     string
+		wantQuery    string
+		wantErr      string
 	}{
 		{
 			name:         "non-path argument resolved via alias",
@@ -223,14 +223,7 @@ func TestQueryResolver_Resolve_PathLikeArguments(t *testing.T) {
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
 
 		// Change working directory so ./mydir resolves to our temp subdir
-		origDir, err := os.Getwd()
-		if err != nil {
-			t.Fatalf("failed to get working directory: %v", err)
-		}
-		if err := os.Chdir(dir); err != nil {
-			t.Fatalf("failed to chdir: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		t.Chdir(dir)
 
 		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
 		result, err := qr.Resolve(query)
@@ -309,14 +302,7 @@ func TestQueryResolver_Resolve_PathLikeNotSentToAliasOrZoxide(t *testing.T) {
 			t.Fatalf("failed to create subdir: %v", err)
 		}
 
-		origDir, err := os.Getwd()
-		if err != nil {
-			t.Fatalf("failed to get working directory: %v", err)
-		}
-		if err := os.Chdir(dir); err != nil {
-			t.Fatalf("failed to chdir: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chdir(origDir) })
+		t.Chdir(dir)
 
 		aliasLookup := &mockAliasLookup{aliases: map[string]string{"./mydir": "/some/alias/path"}}
 		zoxideCalled := false
@@ -327,7 +313,7 @@ func TestQueryResolver_Resolve_PathLikeNotSentToAliasOrZoxide(t *testing.T) {
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
 
 		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
-		_, err = qr.Resolve("./mydir")
+		_, err := qr.Resolve("./mydir")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

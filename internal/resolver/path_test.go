@@ -85,14 +85,7 @@ func TestResolvePath(t *testing.T) {
 		}
 
 		// Change to dir so "sub" is a relative path
-		origWd, err := os.Getwd()
-		if err != nil {
-			t.Fatalf("failed to get cwd: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chdir(origWd) })
-		if err := os.Chdir(dir); err != nil {
-			t.Fatalf("failed to chdir: %v", err)
-		}
+		t.Chdir(dir)
 
 		got, err := resolver.ResolvePath("sub")
 		if err != nil {

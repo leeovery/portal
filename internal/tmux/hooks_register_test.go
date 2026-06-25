@@ -185,7 +185,7 @@ func assertNoSetHookCalls(t *testing.T, calls [][]string) {
 // lines. The event name is the text before the first '['.
 func parseSeededTableByEvent(table string) map[string]string {
 	byEvent := map[string]string{}
-	for _, line := range strings.Split(table, "\n") {
+	for line := range strings.SplitSeq(table, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -358,7 +358,7 @@ func TestRegisterPortalHooks_IdempotentFastPath(t *testing.T) {
 func TestRegisterPortalHooks_KDeepStackCollapse(t *testing.T) {
 	const k = 5
 	var b strings.Builder
-	for i := 0; i < k; i++ {
+	for i := range k {
 		fmt.Fprintf(&b, "pane-focus-out[%d] => '%s'\n", i, expectedNotifyCommand)
 	}
 	mock := &MockCommander{RunFunc: perEventDispatch(t, b.String(), nil)}

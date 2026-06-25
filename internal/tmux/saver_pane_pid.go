@@ -52,7 +52,7 @@ func saverPanePID(c *Client, sessionName string) (int, error) {
 		return 0, fmt.Errorf("list-panes -t %s: %w", sessionName, wrapped)
 	}
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -85,7 +85,7 @@ func (c *Client) SaverPaneID(sessionName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("list-panes -t %s -F #{pane_id}: %w", sessionName, err)
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			return line, nil
 		}

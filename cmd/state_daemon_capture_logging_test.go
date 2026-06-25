@@ -88,7 +88,7 @@ func TestDaemonTick_CapturePaneFailureErrorAttrIsWrappedError(t *testing.T) {
 	}
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if !rec.found {
 		t.Fatal("no WARN 'capture pane failed' record with an error attr was captured")
@@ -172,7 +172,7 @@ func TestDaemonTick_LogsAnomalousShowEnvironmentFailureUnderComponentDaemon(t *t
 	}
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	log := sink.Body()
 
@@ -236,7 +236,7 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 	}
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	log := sink.Body()
 
@@ -308,7 +308,7 @@ func TestDaemonTick_CapturePaneFailureLogsWarnWithPaneKey(t *testing.T) {
 	}
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	log := sink.Body()
 	if !strings.Contains(log, "WARN") {

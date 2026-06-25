@@ -151,7 +151,7 @@ func TestNewPreviewModel_PositionsViewportAtScrollTailOnInitialOpen(t *testing.T
 	// Build content with more lines than viewport height so that GotoBottom
 	// must explicitly run for AtBottom() to be true.
 	var b strings.Builder
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		b.WriteString("line\n")
 	}
 	enum := &stubEnumerator{

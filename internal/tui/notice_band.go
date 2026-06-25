@@ -234,10 +234,7 @@ func renderNoticeBand(role noticeBandRole, message string, onBandText theme.Toke
 	// hard-breaking only a word longer than the available width (ansi.Wrap breaks a
 	// word that does not fit). A non-positive available width (pathologically narrow
 	// band) degrades to a 1-cell column so the bar still renders.
-	avail := w - prefixWidth
-	if avail < 1 {
-		avail = 1
-	}
+	avail := max(w-prefixWidth, 1)
 	wrapped := strings.Split(ansi.Wrap(message, avail, ""), "\n")
 
 	// Continuation lines lay the bar + gap (2 cells), then pad the REMAINING prefix

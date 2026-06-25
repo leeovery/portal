@@ -93,7 +93,7 @@ func TestViewProjectList_HeaderSectionRowsShareLeftEdge(t *testing.T) {
 	view := m.viewProjectList()
 
 	var wordmarkCol, sectionCol, barCol = -1, -1, -1
-	for _, line := range strings.Split(view, "\n") {
+	for line := range strings.SplitSeq(view, "\n") {
 		stripped := strings.TrimLeft(ansi.Strip(line), " ")
 		switch {
 		case strings.HasPrefix(stripped, "P O R T A L"):

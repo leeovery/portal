@@ -64,7 +64,7 @@ func fileMissingCfg(t *testing.T, fifo, scrollback, hookKey string, stdout io.Wr
 func countLogLines(body, level, msg string) int {
 	prefix := level + " " + msg
 	n := 0
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if line == prefix || strings.HasPrefix(line, prefix+" ") {
 			n++
 		}

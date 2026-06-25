@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ func writeTailFixture(t *testing.T, data []byte) string {
 // for byte-identity assertions against a naive whole-file tail.
 func buildLines(count int) []byte {
 	var buf bytes.Buffer
-	for i := 0; i < count; i++ {
+	for i := range count {
 		fmt.Fprintf(&buf, "line-%d\n", i)
 	}
 	return buf.Bytes()
@@ -46,8 +47,8 @@ func naiveTail(data []byte, n int) []byte {
 	}
 	// Count newlines walking backwards; track the cut point.
 	seen := 0
-	for i := len(data) - 1; i >= 0; i-- {
-		if data[i] != '\n' {
+	for i, v := range slices.Backward(data) {
+		if v != '\n' {
 			continue
 		}
 		// Skip the trailing newline of the file itself first.
@@ -126,7 +127,7 @@ func TestTailScrollback(t *testing.T) {
 		const lineWidth = 2048
 		var buf bytes.Buffer
 		filler := strings.Repeat("x", lineWidth-1) // -1 leaves room for \n
-		for i := 0; i < lineCount; i++ {
+		for i := range lineCount {
 			fmt.Fprintf(&buf, "%05d-%s\n", i, filler[6:]) // keep total = lineWidth
 		}
 		data := buf.Bytes()
@@ -154,10 +155,7 @@ func TestTailScrollback(t *testing.T) {
 			t.Fatalf("TailScrollback: %v", err)
 		}
 		if len(got) == 0 || got[len(got)-1] != '\n' {
-			start := len(got) - 8
-			if start < 0 {
-				start = 0
-			}
+			start := max(len(got)-8, 0)
 			t.Fatalf("expected trailing \\n; got tail ending in %q", string(got[start:]))
 		}
 	})

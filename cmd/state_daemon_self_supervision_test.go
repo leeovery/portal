@@ -76,9 +76,9 @@ func TestDaemonLoop_SelfCheckBypassesShutdownOnEject(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
 	// Probe always returns false → counter climbs every tick.
-	var probeCalls int32
+	var probeCalls atomic.Int32
 	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
-		atomic.AddInt32(&probeCalls, 1)
+		probeCalls.Add(1)
 		return false
 	})
 
@@ -91,9 +91,9 @@ func TestDaemonLoop_SelfCheckBypassesShutdownOnEject(t *testing.T) {
 	})
 
 	// daemonShutdownFunc must not run on the eject path; record if it does.
-	var shutdownCalls int32
+	var shutdownCalls atomic.Int32
 	withDaemonShutdownFuncFake(t, func(_ *daemonDeps) error {
-		atomic.AddInt32(&shutdownCalls, 1)
+		shutdownCalls.Add(1)
 		return nil
 	})
 
@@ -114,10 +114,10 @@ func TestDaemonLoop_SelfCheckBypassesShutdownOnEject(t *testing.T) {
 	if got := atomic.LoadInt32(&exitCode); got != 0 {
 		t.Errorf("osExit code = %d; want 0", got)
 	}
-	if got := atomic.LoadInt32(&shutdownCalls); got != 0 {
+	if got := shutdownCalls.Load(); got != 0 {
 		t.Errorf("daemonShutdownFunc invoked %d times on eject path; want 0", got)
 	}
-	if probe := atomic.LoadInt32(&probeCalls); probe < int32(selfSupervisionHysteresisTicks) {
+	if probe := probeCalls.Load(); probe < int32(selfSupervisionHysteresisTicks) {
 		t.Errorf("probe invoked %d times; want at least %d before eject", probe, selfSupervisionHysteresisTicks)
 	}
 }
@@ -259,9 +259,9 @@ func TestDaemonLoop_SelfCheckResetsCounterOnProbeTrue(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
 	// Sequence: false, false, true, true, true, ... — must NOT eject.
-	var tickIdx int32
+	var tickIdx atomic.Int32
 	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
-		idx := atomic.AddInt32(&tickIdx, 1)
+		idx := tickIdx.Add(1)
 		return idx >= 3 // first two false, then true forever
 	})
 
@@ -292,7 +292,7 @@ func TestDaemonLoop_SelfCheckResetsCounterOnProbeTrue(t *testing.T) {
 	}
 	// Sanity: probe ran enough times to have triggered an eject if the
 	// counter hadn't reset.
-	if got := atomic.LoadInt32(&tickIdx); got < int32(selfSupervisionHysteresisTicks)+2 {
+	if got := tickIdx.Load(); got < int32(selfSupervisionHysteresisTicks)+2 {
 		t.Errorf("probe invoked %d times; want at least %d to make the test meaningful",
 			got, selfSupervisionHysteresisTicks+2)
 	}
@@ -306,9 +306,9 @@ func TestDaemonLoop_SelfCheckEjectsExactlyOnNthFalse(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
-	var probeCalls int32
+	var probeCalls atomic.Int32
 	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
-		atomic.AddInt32(&probeCalls, 1)
+		probeCalls.Add(1)
 		return false
 	})
 
@@ -331,7 +331,7 @@ func TestDaemonLoop_SelfCheckEjectsExactlyOnNthFalse(t *testing.T) {
 	if atomic.LoadInt32(&exitCalls) != 1 {
 		t.Fatalf("osExit invoked %d times; want exactly 1", exitCalls)
 	}
-	if got := atomic.LoadInt32(&probeCalls); got != int32(selfSupervisionHysteresisTicks) {
+	if got := probeCalls.Load(); got != int32(selfSupervisionHysteresisTicks) {
 		t.Errorf("probe invoked %d times before eject; want exactly %d",
 			got, selfSupervisionHysteresisTicks)
 	}
@@ -357,13 +357,13 @@ func TestDaemonLoop_SelfCheckResetOnEachTrue(t *testing.T) {
 		script = append(script, false)
 	}
 	script = append(script, true)
-	for i := 0; i < N; i++ {
+	for range N {
 		script = append(script, false)
 	}
 
-	var probeCalls int32
+	var probeCalls atomic.Int32
 	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
-		idx := atomic.AddInt32(&probeCalls, 1)
+		idx := probeCalls.Add(1)
 		i := int(idx) - 1
 		if i >= len(script) {
 			// After the script, return true so we don't accidentally eject
@@ -395,7 +395,7 @@ func TestDaemonLoop_SelfCheckResetOnEachTrue(t *testing.T) {
 	// Eject should occur on the final consecutive false at script index
 	// 2*N − 1 (1-based: 2*N), so probeCalls should equal len(script) when the
 	// eject fires (modulo the final extra-true tail we never reach).
-	gotProbes := atomic.LoadInt32(&probeCalls)
+	gotProbes := probeCalls.Load()
 	wantProbes := int32(len(script))
 	if gotProbes != wantProbes {
 		t.Errorf("probe invoked %d times; want %d (reset must happen on each true)",
@@ -469,16 +469,16 @@ func TestDaemonLoop_SelfCheckLogsInfoOnEject(t *testing.T) {
 // Tests assert a minimum probe-call count to guarantee the planned pattern was
 // fully exercised; the post-pattern steady-state tail is unbounded.
 func scriptedProbe(script []bool) (probe func(*tmux.Client, int) bool, calls func() int32) {
-	var n int32
+	var n atomic.Int32
 	probe = func(_ *tmux.Client, _ int) bool {
-		idx := atomic.AddInt32(&n, 1)
+		idx := n.Add(1)
 		i := int(idx) - 1
 		if i >= len(script) {
 			return true
 		}
 		return script[i]
 	}
-	calls = func() int32 { return atomic.LoadInt32(&n) }
+	calls = func() int32 { return n.Load() }
 	return probe, calls
 }
 
@@ -568,7 +568,7 @@ func TestSelfSupervisionCounter_BoundaryKEqualsNMinus1(t *testing.T) {
 	// Build (false × N-1, true) × cycles. Post-script the stub returns
 	// true (steady-state) until ctx-cancel.
 	script := make([]bool, 0, cycles*N)
-	for c := 0; c < cycles; c++ {
+	for range cycles {
 		for i := 0; i < N-1; i++ {
 			script = append(script, false)
 		}
@@ -610,7 +610,7 @@ func TestSelfSupervisionCounter_ManyAbsentPresentCycles(t *testing.T) {
 	// `rounds` times. Post-script the stub returns true until ctx-cancel.
 	const rounds = 5
 	script := make([]bool, 0, 64)
-	for r := 0; r < rounds; r++ {
+	for range rounds {
 		for k := 1; k <= N-1; k++ {
 			for i := 0; i < k; i++ {
 				script = append(script, false)
@@ -669,19 +669,19 @@ func TestSelfSupervisionCounter_IncrementsUniformlyOnProbeFalse(t *testing.T) {
 	// would yield a different total probe count.
 	const preludePairs = 3
 	script := make([]bool, 0, 2*preludePairs+N)
-	for p := 0; p < preludePairs; p++ {
+	for range preludePairs {
 		script = append(script, false, true)
 	}
-	for i := 0; i < N; i++ {
+	for range N {
 		script = append(script, false)
 	}
 
 	probe, probeCalls := scriptedProbe(script)
 	withSaverMembershipProbeFake(t, probe)
 
-	var exitCalls int32
+	var exitCalls atomic.Int32
 	withOsExitFake(t, func(_ int) {
-		atomic.AddInt32(&exitCalls, 1)
+		exitCalls.Add(1)
 		panic("osExit invoked")
 	})
 
@@ -696,7 +696,7 @@ func TestSelfSupervisionCounter_IncrementsUniformlyOnProbeFalse(t *testing.T) {
 	done := runDaemonLoopUntilEject(t, deps, ctx)
 	<-done
 
-	if got := atomic.LoadInt32(&exitCalls); got != 1 {
+	if got := exitCalls.Load(); got != 1 {
 		t.Fatalf("osExit invoked %d times; want exactly 1", got)
 	}
 	wantCalls := int32(2*preludePairs + N)

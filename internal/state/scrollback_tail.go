@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 )
 
 // tailChunkSize is the read stride for the reverse scan in TailScrollback.
@@ -83,10 +84,7 @@ func TailScrollback(path string, n int) ([]byte, error) {
 	target := n + 1
 	chunk := make([]byte, tailChunkSize)
 	for cursor > 0 {
-		stride := int64(tailChunkSize)
-		if stride > cursor {
-			stride = cursor
-		}
+		stride := min(int64(tailChunkSize), cursor)
 		readAt := cursor - stride
 		if _, err := f.Seek(readAt, io.SeekStart); err != nil {
 			return nil, fmt.Errorf("tail scrollback %s: %w", path, err)
@@ -131,8 +129,8 @@ func TailScrollback(path string, n int) ([]byte, error) {
 // Caller must guarantee bytes.Count(buf, '\n') >= n.
 func indexOfNthNewlineFromEnd(buf []byte, n int) int {
 	seen := 0
-	for i := len(buf) - 1; i >= 0; i-- {
-		if buf[i] != '\n' {
+	for i, v := range slices.Backward(buf) {
+		if v != '\n' {
 			continue
 		}
 		seen++

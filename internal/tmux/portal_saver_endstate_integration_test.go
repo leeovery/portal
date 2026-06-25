@@ -559,7 +559,7 @@ func parseShowEnvironmentKeys(raw string, keys ...string) map[string]envValue {
 		want[k] = struct{}{}
 	}
 	out := map[string]envValue{}
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			continue
@@ -571,12 +571,12 @@ func parseShowEnvironmentKeys(raw string, keys ...string) map[string]envValue {
 			}
 			continue
 		}
-		eq := strings.IndexByte(line, '=')
-		if eq < 0 {
+		before, after, ok := strings.Cut(line, "=")
+		if !ok {
 			continue
 		}
-		name := line[:eq]
-		val := line[eq+1:]
+		name := before
+		val := after
 		if _, ok := want[name]; ok {
 			out[name] = envValue{value: val}
 		}

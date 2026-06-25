@@ -39,11 +39,11 @@ func renderRow(d SessionDelegate, width int, items []list.Item, index, selIndex 
 // §4.1 invariant (counts + bullets line up regardless of name length).
 func visibleColOf(line, sub string) int {
 	stripped := ansi.Strip(line)
-	byteIdx := strings.Index(stripped, sub)
-	if byteIdx < 0 {
+	before, _, ok := strings.Cut(stripped, sub)
+	if !ok {
 		return -1
 	}
-	return ansi.StringWidth(stripped[:byteIdx])
+	return ansi.StringWidth(before)
 }
 
 // selectionBgParams returns the raw background-parameter form (e.g.

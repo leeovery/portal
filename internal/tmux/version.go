@@ -50,7 +50,7 @@ func ParseTmuxVersion(raw string) (major, minor int, label string, err error) {
 // begins with a decimal digit, or "" if no such token exists. Tokens
 // wrapped in parentheses (e.g. "(OpenBSD)") are skipped.
 func findVersionToken(s string) string {
-	for _, field := range strings.Fields(s) {
+	for field := range strings.FieldsSeq(s) {
 		if field == "" || field[0] < '0' || field[0] > '9' {
 			continue
 		}

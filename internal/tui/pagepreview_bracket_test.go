@@ -195,7 +195,7 @@ func TestPreviewWindowNav_WindowCycleTriggersExactlyOneTailCallWithPaneZeroOfNew
 func TestPreviewWindowNav_WindowCycleResetsViewportScrollPositionToTail(t *testing.T) {
 	// Build content larger than the viewport so AtBottom is non-trivial.
 	var b strings.Builder
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		b.WriteString("line\n")
 	}
 	groups := []tmux.WindowGroup{

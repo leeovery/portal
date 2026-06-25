@@ -2,6 +2,7 @@ package main
 
 import (
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,10 +51,8 @@ func TestPortalBinaryDoesNotImportCapture(t *testing.T) {
 // true because nothing imports the package at all).
 func TestCaptureToolDoesImportCapture(t *testing.T) {
 	const captureToolPkg = "github.com/leeovery/portal/cmd/capturetool"
-	for _, dep := range goListDeps(t, captureToolPkg) {
-		if dep == capturePkg {
-			return
-		}
+	if slices.Contains(goListDeps(t, captureToolPkg), capturePkg) {
+		return
 	}
 	t.Fatalf("capture tool (%s) does NOT import %s — the import guard is vacuous", captureToolPkg, capturePkg)
 }

@@ -151,7 +151,7 @@ func TestPreviewPaneNav_TriggersExactlyOneTailCallWithNewlyFocusedPaneKey(t *tes
 func TestPreviewPaneNav_ResetsViewportScrollPositionToTail(t *testing.T) {
 	// Build content larger than the viewport so AtBottom is non-trivial.
 	var b strings.Builder
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		b.WriteString("line\n")
 	}
 	groups := []tmux.WindowGroup{
@@ -201,7 +201,7 @@ func TestPreviewPaneNav_InterceptedBeforeViewportSeesIt(t *testing.T) {
 	// viewport state matches the post-read GotoBottom contract. Tab must never
 	// be swallowed by the embedded viewport.
 	var b strings.Builder
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		b.WriteString("line\n")
 	}
 	groups := []tmux.WindowGroup{

@@ -149,10 +149,7 @@ func (d ProjectDelegate) renderRowLine(m list.Model, selected bool, textStyle li
 		return bar + textStyle.Render(text)
 	}
 
-	textWidth := total - leftBarColumnWidth
-	if textWidth < 1 {
-		textWidth = 1
-	}
+	textWidth := max(total-leftBarColumnWidth, 1)
 	visible := ansi.Truncate(text, textWidth, "…")
 	body := textStyle.Render(visible)
 	pad := bg.Render(padTo("", textWidth-lipgloss.Width(visible)))

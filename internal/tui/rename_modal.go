@@ -156,10 +156,7 @@ func renameInputView(input textinput.Model, mode theme.Mode, colourless bool) st
 func renameModalWasRow(oldName string, mode theme.Mode, colourless bool) string {
 	// The prefix is fixed-width; the name truncates within the remaining budget so the
 	// whole line fits the box's inner width.
-	nameBudget := renameInputInnerWidth - lipgloss.Width(renameWasPrefix)
-	if nameBudget < 1 {
-		nameBudget = 1
-	}
+	nameBudget := max(renameInputInnerWidth-lipgloss.Width(renameWasPrefix), 1)
 	name := ansi.Truncate(oldName, nameBudget, "…")
 	return headerStyle(theme.MV.TextDetail, mode, colourless).Render(renameWasPrefix + name)
 }

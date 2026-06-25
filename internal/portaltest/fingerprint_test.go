@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,12 +51,7 @@ func writeFile(t *testing.T, path, content string) {
 // canonical message format embeds both fields verbatim.
 func hasDelta(msgs []string, path, deltaType string) bool {
 	want := "portaltest backstop: developer state dir mutated at " + path + ": " + deltaType
-	for _, m := range msgs {
-		if m == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(msgs, want)
 }
 
 // containsAny is a debug helper used by failure messages to
@@ -542,8 +538,8 @@ func (f *fakeBackstopT) Errorf(format string, args ...any) {
 // runCleanups simulates the *testing.T post-test hook, executing
 // every registered cleanup in LIFO order (mirrors real testing.T).
 func (f *fakeBackstopT) runCleanups() {
-	for i := len(f.cleanups) - 1; i >= 0; i-- {
-		f.cleanups[i]()
+	for _, v := range slices.Backward(f.cleanups) {
+		v()
 	}
 }
 

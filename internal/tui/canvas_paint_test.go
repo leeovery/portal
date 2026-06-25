@@ -157,7 +157,7 @@ func TestOuterFill_PaginationInvariantPreserved(t *testing.T) {
 	const w, h = 90, 14 // deliberately short so pagination kicks in
 
 	var sessions []tmux.Session
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.Dark))

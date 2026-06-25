@@ -22,27 +22,27 @@ func markersOption(paneKeys ...string) string {
 	if len(paneKeys) == 0 {
 		return ""
 	}
-	out := ""
+	var out strings.Builder
 	for i, k := range paneKeys {
 		if i > 0 {
-			out += "\n"
+			out.WriteString("\n")
 		}
-		out += "@portal-skeleton-" + k + " 1"
+		out.WriteString("@portal-skeleton-" + k + " 1")
 	}
-	return out
+	return out.String()
 }
 
 // listPanesOutput renders a `list-panes -s -t <s> -F #{window_index}:#{pane_index}`
 // reply for a list of (window, pane) tuples.
 func listPanesOutput(panes [][2]int) string {
-	out := ""
+	var out strings.Builder
 	for i, p := range panes {
 		if i > 0 {
-			out += "\n"
+			out.WriteString("\n")
 		}
-		out += fmt.Sprintf("%d:%d", p[0], p[1])
+		fmt.Fprintf(&out, "%d:%d", p[0], p[1])
 	}
-	return out
+	return out.String()
 }
 
 // signalHydrateClient builds a recordingCommander whose RunFunc replies to the

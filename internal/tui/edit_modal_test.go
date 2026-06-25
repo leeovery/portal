@@ -110,7 +110,7 @@ func TestEditModal_FocusedFieldLabelViolet(t *testing.T) {
 // label's own colour is asserted independent of the rest of the modal.
 func labelSegment(t *testing.T, content, label string) string {
 	t.Helper()
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if strings.Contains(ansi.Strip(line), label) {
 			return line
 		}
@@ -246,7 +246,7 @@ func TestEditModal_AddSlotFaint(t *testing.T) {
 // addSlotSegment returns the SGR run wrapping a `+ add` slot.
 func addSlotSegment(t *testing.T, content string) string {
 	t.Helper()
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if strings.Contains(ansi.Strip(line), "+ add") {
 			return line
 		}
@@ -326,7 +326,7 @@ func TestEditModal_EditModeBadgeRightAligned(t *testing.T) {
 // — the line carrying the `Edit Project` title.
 func headerLineOf(t *testing.T, content string) string {
 	t.Helper()
-	for _, line := range strings.Split(ansi.Strip(content), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(content), "\n") {
 		if strings.Contains(line, "Edit Project") {
 			return line
 		}
@@ -490,7 +490,7 @@ func footerBetween(t *testing.T, line, left, right string) string {
 // — the line carrying the `⏎ save` hint.
 func footerLineOf(t *testing.T, content string) string {
 	t.Helper()
-	for _, line := range strings.Split(ansi.Strip(content), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(content), "\n") {
 		if strings.Contains(line, "⏎ save") {
 			return line
 		}

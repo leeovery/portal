@@ -75,7 +75,7 @@ func AssertLogLevelResolved(t *testing.T, logPath string, pid int, expected stri
 // line exists.
 func findLogLevelResolved(content string, pid int) (resolved, source string, found bool) {
 	wantPID := strconv.Itoa(pid)
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if !isLogLevelResolvedLine(line) {
 			continue
 		}
@@ -103,7 +103,7 @@ func isLogLevelResolvedLine(line string) bool {
 // source) are all single-token, and raw is only ever a single token in practice.
 func parseLogAttrs(line string) map[string]string {
 	attrs := make(map[string]string)
-	for _, tok := range strings.Fields(line) {
+	for tok := range strings.FieldsSeq(line) {
 		k, v, ok := strings.Cut(tok, "=")
 		if !ok {
 			continue

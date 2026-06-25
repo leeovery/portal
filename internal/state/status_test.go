@@ -291,7 +291,7 @@ func TestCollectStatus_DoesNotScanPortalLogOld(t *testing.T) {
 
 	// Old log full of WARN entries within the cutoff window — must be ignored.
 	oldPath := state.PortalLogOld(dir)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		writeRealLogLine(t, oldPath, recent, slog.LevelWarn, "daemon", "old warning")
 	}
 

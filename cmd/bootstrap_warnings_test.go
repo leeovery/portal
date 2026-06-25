@@ -96,10 +96,10 @@ func TestBootstrapWarningsSink_ConcurrentAddAndDrainAreSafe(t *testing.T) {
 
 	// Concurrent Adds.
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < perGoroutine; j++ {
+			for range perGoroutine {
 				s.Add(bootstrap.Warning{Lines: []string{"x"}})
 			}
 		}()
@@ -107,7 +107,7 @@ func TestBootstrapWarningsSink_ConcurrentAddAndDrainAreSafe(t *testing.T) {
 	// Concurrent Drains, racing with Adds.
 	drained := make(chan int, goroutines)
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			drained <- len(s.Drain())

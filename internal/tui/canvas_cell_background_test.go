@@ -111,7 +111,7 @@ func scanCellBackgrounds(line string) []bgState {
 			st = applySGR(st, sgrParams(string(seq)))
 		} else if width > 0 {
 			// A printable rune (or wide cluster). Record its cells.
-			for i := 0; i < width; i++ {
+			for range width {
 				cells = append(cells, st)
 			}
 		}

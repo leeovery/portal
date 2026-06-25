@@ -210,7 +210,7 @@ func TestSwitchViewKey(t *testing.T) {
 		// Enough sessions to span multiple pages so an advanced page is
 		// observable, then assert the switch snaps back to page 0 / first row.
 		var sessions []tmux.Session
-		for i := 0; i < 60; i++ {
+		for i := range 60 {
 			sessions = append(sessions, tmux.Session{Name: fmt.Sprintf("sess-%02d", i)})
 		}
 		persister := &fakeModePersister{}

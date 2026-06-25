@@ -59,7 +59,6 @@ import (
 // so a failing test name in CI output is self-documenting.
 func TestRegisterPortalHooks_NonSessionClosedEventsRouteToNotifyCommand(t *testing.T) {
 	for _, ev := range nonSessionClosedSaveTriggerEvents {
-		ev := ev // pin for closure
 		t.Run(fmt.Sprintf("%s is registered with notifyCommand and not commitNowCommand", ev), func(t *testing.T) {
 			mock := &MockCommander{RunFunc: perEventDispatch(t, "", nil)}
 			client := tmux.NewClient(mock)

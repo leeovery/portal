@@ -382,10 +382,10 @@ func TestMappingCoversAllElevenStepsNoGaps(t *testing.T) {
 // This pins the dead-field removal in the type itself, not just behaviourally.
 func TestBootstrapProgressMsgCarriesOnlyConsumedFields(t *testing.T) {
 	want := map[string]bool{"Index": true, "RestoreN": true, "RestoreM": true}
-	tp := reflect.TypeOf(tui.BootstrapProgressMsg{})
+	tp := reflect.TypeFor[tui.BootstrapProgressMsg]()
 	got := map[string]bool{}
-	for i := 0; i < tp.NumField(); i++ {
-		got[tp.Field(i).Name] = true
+	for field := range tp.Fields() {
+		got[field.Name] = true
 	}
 	for name := range got {
 		if !want[name] {

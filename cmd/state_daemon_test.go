@@ -692,7 +692,7 @@ func TestStateDaemon_ReturnsErrorAndLogsWarnOnNonContentionLockFailure(t *testin
 	}
 	// Exactly one matching line — the fatal path must not be noisy.
 	var matches int
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if strings.Contains(line, "WARN") && strings.Contains(line, "acquire daemon lock") {
 			matches++
 		}

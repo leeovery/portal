@@ -42,7 +42,7 @@ func TestPersistentPreRunE_OrchestratorMemoisedAcrossInvocations(t *testing.T) {
 	}
 	t.Cleanup(func() { listDeps = nil })
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		resetRootCmd()
 		rootCmd.SetArgs([]string{"list"})
 		if err := rootCmd.Execute(); err != nil {

@@ -112,8 +112,8 @@ func TestNonTmuxCommandsWorkWithoutTmux(t *testing.T) {
 			t.Setenv("PATH", "/nonexistent/path")
 
 			for k, v := range tt.env {
-				if strings.HasPrefix(v, "TEMPDIR/") {
-					v = filepath.Join(t.TempDir(), strings.TrimPrefix(v, "TEMPDIR/"))
+				if after, ok := strings.CutPrefix(v, "TEMPDIR/"); ok {
+					v = filepath.Join(t.TempDir(), after)
 				}
 				t.Setenv(k, v)
 			}

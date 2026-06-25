@@ -12,7 +12,7 @@ go test ./internal/tmux/...             # run package tests
 go test -v ./cmd -run TestOpen          # verbose single test
 ```
 
-No linter config exists — use standard Go conventions. No code generation.
+Lint via `golangci-lint run` (config in `.golangci.yml`: the standard set plus the `modernize` linter). Not wired into CI — it's run locally / from the Mint release step. No code generation.
 
 Tests **must not** use `t.Parallel()` — the cmd package injects mocks via package-level mutable state (`bootstrapDeps`, `openDeps`, `attachDeps`, etc.) and cleans up with `t.Cleanup()`.
 

@@ -72,7 +72,7 @@ func ListSkeletonMarkers(c ServerOptionLister) (map[string]struct{}, error) {
 	if out == "" {
 		return set, nil
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

@@ -108,7 +108,7 @@ func TestPreviewHelpReusesGenericRenderer(t *testing.T) {
 	view := stripANSI(m.View())
 	panel := stripANSI(renderHelpModalContent(previewKeymap(), m.mode, m.colourless))
 
-	for _, line := range strings.Split(panel, "\n") {
+	for line := range strings.SplitSeq(panel, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}

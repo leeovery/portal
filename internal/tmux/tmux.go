@@ -608,7 +608,7 @@ func (c *Client) ListPanesInSession(session string) ([]PaneCoord, error) {
 	}
 
 	var coords []PaneCoord
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -688,7 +688,7 @@ func (c *Client) ListWindowsAndPanesInSession(session string) ([]WindowGroup, er
 	// inside the result slice so we don't have to re-scan to append.
 	groups := make([]WindowGroup, 0)
 	byIndex := make(map[int]int)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

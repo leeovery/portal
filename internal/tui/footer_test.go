@@ -283,7 +283,7 @@ func TestSessionsFooter_NarrowTruncationKeepsHighestPriority(t *testing.T) {
 func TestSessionsFooterHeight_SubtractedFromListBudget(t *testing.T) {
 	const w, h = 120, 24
 	var sessions []tmux.Session
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
 	}
 
@@ -314,7 +314,7 @@ func TestSessionsFooterHeight_SubtractedFromListBudget(t *testing.T) {
 func TestSessionsFooterHeight_CountedAtEverySizeApplySite(t *testing.T) {
 	const w, h = 120, 20
 	var sessions []tmux.Session
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
 	}
 

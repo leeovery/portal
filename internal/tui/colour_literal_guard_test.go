@@ -50,7 +50,6 @@ func centralisedColourSites(t *testing.T) []string {
 // every call site must reference a token.
 func TestNoRawColourLiteralAtCentralisedSites(t *testing.T) {
 	for _, name := range centralisedColourSites(t) {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			fset := token.NewFileSet()
 			path := filepath.Join(".", name)

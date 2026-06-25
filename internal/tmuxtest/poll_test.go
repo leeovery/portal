@@ -10,20 +10,20 @@ import (
 // the success path: cond flips to true after a handful of ticks and
 // PollUntil returns true well inside the configured timeout.
 func TestPollUntil_ReturnsTrueWhenCondBecomesTrueBeforeTimeout(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	cond := func() bool {
 		// Flip true on the third invocation so the loop must tick at
 		// least twice before observing success — this rules out a
 		// false positive where the helper happens to short-circuit on
 		// the first iteration.
-		return atomic.AddInt32(&calls, 1) >= 3
+		return calls.Add(1) >= 3
 	}
 	start := time.Now()
 	got := PollUntil(t, 500*time.Millisecond, 10*time.Millisecond, cond)
 	elapsed := time.Since(start)
 	if !got {
 		t.Fatalf("PollUntil returned false; want true (calls=%d, elapsed=%s)",
-			atomic.LoadInt32(&calls), elapsed)
+			calls.Load(), elapsed)
 	}
 	if elapsed >= 500*time.Millisecond {
 		t.Fatalf("PollUntil took %s; want < timeout (500ms)", elapsed)

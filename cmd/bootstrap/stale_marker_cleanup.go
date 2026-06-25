@@ -208,7 +208,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 // attr where available.
 func parseLivePaneSet(raw string, logger *slog.Logger) map[string]struct{} {
 	set := map[string]struct{}{}
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -221,17 +221,17 @@ func parseLivePaneSet(raw string, logger *slog.Logger) map[string]struct{} {
 		}
 		session := line[:colon]
 		rest := line[colon+1:]
-		dot := strings.Index(rest, ".")
-		if dot < 0 {
+		before, after, ok := strings.Cut(rest, ".")
+		if !ok {
 			logger.Warn("stale-marker cleanup: malformed live-pane line (missing dot)")
 			continue
 		}
-		window, err := strconv.Atoi(rest[:dot])
+		window, err := strconv.Atoi(before)
 		if err != nil {
 			logger.Warn("stale-marker cleanup: malformed live-pane line (window not int)", "error", err)
 			continue
 		}
-		pane, err := strconv.Atoi(rest[dot+1:])
+		pane, err := strconv.Atoi(after)
 		if err != nil {
 			logger.Warn("stale-marker cleanup: malformed live-pane line (pane not int)", "error", err)
 			continue

@@ -1,0 +1,24 @@
+# golangci-lint v2 config (run: `golangci-lint run`).
+# Not wired into CI by design — Portal is verified at release time via the
+# Mint tool. This config exists so that lint, run locally or from the release
+# step, enforces a consistent baseline and keeps modernization from drifting.
+version: "2"
+
+linters:
+  # The standard set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    # Flags code that can be rewritten with newer Go stdlib/idioms
+    # (min/max, range-over-int, strings.Cut/SplitSeq, slices/maps, etc.).
+    # The whole reason this config exists; keep it enabled.
+    - modernize
+  exclusions:
+    rules:
+      # TestMain poisons PORTAL_* env vars to force per-test isolation. It must
+      # use os.Setenv (no *testing.T exists in TestMain, so t.Setenv is
+      # unavailable) and the values are compile-time constants, so the error is
+      # a dead branch. See any testmain_isolation_test.go header for rationale.
+      - path: testmain_isolation_test\.go
+        linters:
+          - errcheck
+        source: os\.Setenv

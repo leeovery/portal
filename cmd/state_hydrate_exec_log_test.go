@@ -25,7 +25,7 @@ func execLogLine(t *testing.T, body, level, msg string) string {
 	t.Helper()
 	prefix := level + " " + msg
 	var matches []string
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if line == prefix || strings.HasPrefix(line, prefix+" ") {
 			matches = append(matches, line)
 		}

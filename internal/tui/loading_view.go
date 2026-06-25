@@ -345,10 +345,7 @@ func renderSingleRowWordmark(wordmark string, mode theme.Mode, colourless bool) 
 // the native bg (still a visible determinate bar via the block run, no colour
 // required).
 func renderLoadingBar(fraction float64, w, barWidth int, mode theme.Mode, colourless bool) string {
-	barW := barWidth
-	if barW > w {
-		barW = w
-	}
+	barW := min(barWidth, w)
 	if barW <= 0 {
 		return loadingStyle(mode, colourless).Render("")
 	}
@@ -358,10 +355,7 @@ func renderLoadingBar(fraction float64, w, barWidth int, mode theme.Mode, colour
 	if fraction > 1 {
 		fraction = 1
 	}
-	filled := int(float64(barW)*fraction + 0.5)
-	if filled > barW {
-		filled = barW
-	}
+	filled := min(int(float64(barW)*fraction+0.5), barW)
 
 	if colourless {
 		// No hue/canvas: a solid run for the filled prefix, the track glyph for the

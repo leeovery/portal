@@ -309,7 +309,7 @@ func TestRegisterPortalHooks_SelfHealsKDeepStackLeavingUserHookIntact(t *testing
 	// Seed K stacked identical Portal entries plus ONE co-resident user hook.
 	// Live incident was 139-deep on this event; K=5 traverses the identical
 	// collapse path (see stackDepth).
-	for i := 0; i < stackDepth; i++ {
+	for i := range stackDepth {
 		if err := client.AppendGlobalHook(event, expectedNotifyCommand); err != nil {
 			t.Fatalf("seed Portal entry %d: AppendGlobalHook(%s): %v", i, event, err)
 		}
@@ -406,7 +406,7 @@ func TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact(t 
 
 	// Seed each blind event with a K-deep Portal stack plus one user hook.
 	for _, event := range blindEvents {
-		for i := 0; i < stackDepth; i++ {
+		for i := range stackDepth {
 			if err := client.AppendGlobalHook(event, expectedNotifyCommand); err != nil {
 				t.Fatalf("seed Portal entry %d on %s: AppendGlobalHook: %v", i, event, err)
 			}
@@ -425,7 +425,7 @@ func TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact(t 
 	// commit-now body carries ONLY the `portal state commit-now` fingerprint,
 	// which the pre-fix teardown predicate omitted.
 	const sessionClosedEvent = "session-closed"
-	for i := 0; i < stackDepth; i++ {
+	for i := range stackDepth {
 		if err := client.AppendGlobalHook(sessionClosedEvent, expectedCommitNowCommand); err != nil {
 			t.Fatalf("seed commit-now entry %d on %s: AppendGlobalHook: %v", i, sessionClosedEvent, err)
 		}

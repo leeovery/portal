@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"maps"
 	"reflect"
 	"testing"
 
@@ -78,9 +79,7 @@ func (e *smAliasEditor) Load() (map[string]string, error) {
 		return nil, e.loadErr
 	}
 	out := make(map[string]string, len(e.aliases))
-	for k, v := range e.aliases {
-		out[k] = v
-	}
+	maps.Copy(out, e.aliases)
 	return out, nil
 }
 

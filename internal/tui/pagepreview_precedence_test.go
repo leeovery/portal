@@ -28,7 +28,7 @@ import (
 func newPreviewModelForPrecedence(t *testing.T) (previewModel, *recordingReader) {
 	t.Helper()
 	var b strings.Builder
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		b.WriteString("line\n")
 	}
 	enum := &stubEnumerator{

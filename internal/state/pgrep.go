@@ -87,7 +87,7 @@ func PgrepPortalDaemons() ([]int, error) {
 	}
 
 	var pids []int
-	for _, line := range strings.Split(trimmed, "\n") {
+	for line := range strings.SplitSeq(trimmed, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

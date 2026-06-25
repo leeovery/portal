@@ -93,7 +93,7 @@ func TestRenameModal_EditModeBadgeRightAligned(t *testing.T) {
 	for _, mode := range []theme.Mode{theme.Dark, theme.Light} {
 		content := renderRenameModalContent(newRenameInput("aviva-proxy"), "aviva-proxy-qNyfEO", mode, false)
 		var headerLine string
-		for _, line := range strings.Split(ansi.Strip(content), "\n") {
+		for line := range strings.SplitSeq(ansi.Strip(content), "\n") {
 			if strings.Contains(line, "Rename session") {
 				headerLine = line
 				break
@@ -258,7 +258,7 @@ func TestRenameModal_SingleToneJoinedPanel(t *testing.T) {
 	content := renderRenameModalContent(newRenameInput("aviva-proxy"), "aviva-proxy-qNyfEO", theme.Dark, false)
 
 	dividerCount := 0
-	for _, raw := range strings.Split(content, "\n") {
+	for raw := range strings.SplitSeq(content, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
 		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerCount++

@@ -52,7 +52,7 @@ func TestKillModal_BodyNameAndWindows(t *testing.T) {
 			}
 			// Name + count on the SAME line.
 			var nameLine string
-			for _, raw := range strings.Split(content, "\n") {
+			for raw := range strings.SplitSeq(content, "\n") {
 				line := ansi.Strip(raw)
 				if strings.Contains(line, tc.name) {
 					nameLine = line
@@ -121,7 +121,7 @@ func TestKillModal_SingleToneJoinedPanel(t *testing.T) {
 	content := renderKillModalContent("aviva-proxy-qNyfEO", 1, theme.Dark, false)
 
 	dividerCount := 0
-	for _, raw := range strings.Split(content, "\n") {
+	for raw := range strings.SplitSeq(content, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
 		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerCount++

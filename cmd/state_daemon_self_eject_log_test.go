@@ -188,9 +188,9 @@ func TestDaemonSelfEject_DoesNotEmitShutdownLine(t *testing.T) {
 	withOsExitFake(t, func(_ int) { panic("osExit invoked") })
 
 	// Record whether daemonShutdownFunc runs — it must not on the eject path.
-	var shutdownCalls int32
+	var shutdownCalls atomic.Int32
 	withDaemonShutdownFuncFake(t, func(_ *daemonDeps) error {
-		atomic.AddInt32(&shutdownCalls, 1)
+		shutdownCalls.Add(1)
 		return nil
 	})
 
@@ -207,7 +207,7 @@ func TestDaemonSelfEject_DoesNotEmitShutdownLine(t *testing.T) {
 	done := runDaemonLoopUntilEject(t, deps, ctx)
 	<-done
 
-	if got := atomic.LoadInt32(&shutdownCalls); got != 0 {
+	if got := shutdownCalls.Load(); got != 0 {
 		t.Errorf("daemonShutdownFunc invoked %d times on eject path; want 0", got)
 	}
 	if n := countLines(sink, "shutdown"); n != 0 {
@@ -227,15 +227,15 @@ func TestDaemonSelfEject_BelowThresholdEmitsDebugOnly(t *testing.T) {
 
 	N := selfSupervisionHysteresisTicks
 	// false × (N-1) then true forever — counter climbs to N-1, never trips.
-	var tickIdx int32
+	var tickIdx atomic.Int32
 	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
-		idx := atomic.AddInt32(&tickIdx, 1)
+		idx := tickIdx.Add(1)
 		return int(idx) >= N // first N-1 false, then true forever
 	})
 
-	var exitCalls int32
+	var exitCalls atomic.Int32
 	withOsExitFake(t, func(_ int) {
-		atomic.AddInt32(&exitCalls, 1)
+		exitCalls.Add(1)
 		panic("osExit invoked unexpectedly below threshold")
 	})
 	withDaemonShutdownFuncFake(t, func(_ *daemonDeps) error { return nil })
@@ -254,7 +254,7 @@ func TestDaemonSelfEject_BelowThresholdEmitsDebugOnly(t *testing.T) {
 		t.Fatalf("defaultDaemonRun: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&exitCalls); got != 0 {
+	if got := exitCalls.Load(); got != 0 {
 		t.Fatalf("osExit invoked %d times below threshold; want 0", got)
 	}
 	// At least N-1 DEBUG breadcrumbs must have fired (one per failing tick).
@@ -292,9 +292,9 @@ func TestDaemonSelfEject_PassingProbeResetsCounter(t *testing.T) {
 	probe, probeCalls := scriptedProbe(script)
 	withSaverMembershipProbeFake(t, probe)
 
-	var exitCalls int32
+	var exitCalls atomic.Int32
 	withOsExitFake(t, func(_ int) {
-		atomic.AddInt32(&exitCalls, 1)
+		exitCalls.Add(1)
 		panic("osExit invoked despite reset")
 	})
 	withDaemonShutdownFuncFake(t, func(_ *daemonDeps) error { return nil })
@@ -313,7 +313,7 @@ func TestDaemonSelfEject_PassingProbeResetsCounter(t *testing.T) {
 		t.Fatalf("defaultDaemonRun: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&exitCalls); got != 0 {
+	if got := exitCalls.Load(); got != 0 {
 		t.Fatalf("osExit invoked %d times despite counter reset; want 0", got)
 	}
 	if n := countLines(sink, "INFO", "self-eject"); n != 0 {
@@ -334,11 +334,11 @@ func TestDaemonSelfEject_UsesOsExitSeam(t *testing.T) {
 
 	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool { return false })
 
-	var exitCalls int32
+	var exitCalls atomic.Int32
 	var exitCode int32 = -1
 	withOsExitFake(t, func(code int) {
 		atomic.StoreInt32(&exitCode, int32(code))
-		atomic.AddInt32(&exitCalls, 1)
+		exitCalls.Add(1)
 		panic("osExit invoked")
 	})
 
@@ -352,7 +352,7 @@ func TestDaemonSelfEject_UsesOsExitSeam(t *testing.T) {
 	done := runDaemonLoopUntilEject(t, deps, ctx)
 	<-done
 
-	if got := atomic.LoadInt32(&exitCalls); got != 1 {
+	if got := exitCalls.Load(); got != 1 {
 		t.Fatalf("osExit seam invoked %d times; want exactly 1", got)
 	}
 	if got := atomic.LoadInt32(&exitCode); got != 0 {

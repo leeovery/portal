@@ -60,7 +60,7 @@ func TestHelpModalDividerToken(t *testing.T) {
 func TestHelpModalDividerJoined(t *testing.T) {
 	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), 120, 36, theme.Dark, false)
 	var dividerRow string
-	for _, raw := range strings.Split(panel, "\n") {
+	for raw := range strings.SplitSeq(panel, "\n") {
 		// lipgloss.Place centres the panel, so trim BOTH the leading centring pad and
 		// the trailing fill before inspecting the frame line.
 		line := strings.TrimSpace(ansi.Strip(raw))
@@ -87,7 +87,7 @@ func TestHelpModalDividerConnectsToBorders(t *testing.T) {
 	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), 120, 36, theme.Dark, false)
 	// Find the divider row: starts `├`, ends `┤`, all rule glyphs between.
 	var dividerRow string
-	for _, raw := range strings.Split(panel, "\n") {
+	for raw := range strings.SplitSeq(panel, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
 		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerRow = line
@@ -107,7 +107,7 @@ func TestHelpModalDividerConnectsToBorders(t *testing.T) {
 	// And a body row IS inset (it has leading spaces inside the `│` side borders) —
 	// proving the inset lives on the rows, not the divider.
 	var bodyRow string
-	for _, raw := range strings.Split(panel, "\n") {
+	for raw := range strings.SplitSeq(panel, "\n") {
 		line := ansi.Strip(raw)
 		if strings.Contains(line, "Move selection") {
 			bodyRow = strings.TrimRight(line, " ")
@@ -183,10 +183,7 @@ func TestHelpModalFlushVerticalSpacing(t *testing.T) {
 
 // neighbourhood returns the stripped panel lines bracketing idx for diagnostics.
 func neighbourhood(lines []string, idx int) []string {
-	lo := idx - 3
-	if lo < 0 {
-		lo = 0
-	}
+	lo := max(idx-3, 0)
 	hi := idx + 3
 	if hi >= len(lines) {
 		hi = len(lines) - 1

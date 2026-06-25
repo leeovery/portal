@@ -161,7 +161,7 @@ func TestFiltering_InputActiveNoRowSelected(t *testing.T) {
 		// And no violet selector bar glyph on a SESSION ROW (the §3.3 selection
 		// signal). The header wordmark also uses the ▌ caret, so scope the check to
 		// lines that carry a fab* session name — no such line may lead with the bar.
-		for _, line := range strings.Split(ansi.Strip(view), "\n") {
+		for line := range strings.SplitSeq(ansi.Strip(view), "\n") {
 			if strings.Contains(line, "fab") && strings.Contains(line, selectorBar) {
 				t.Errorf("[%v] input-active session row must NOT render the selector bar %q while typing:\n%s", mode, selectorBar, line)
 			}

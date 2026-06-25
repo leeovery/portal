@@ -309,10 +309,10 @@ func TestRotatingSink_RaceFreeUnderConcurrentWrite(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < perGoroutine; i++ {
+			for i := range perGoroutine {
 				line := "g" + strconv.Itoa(id) + "-" + strconv.Itoa(i) + "\n"
 				if _, err := s.Write([]byte(line)); err != nil {
 					t.Errorf("concurrent Write: %v", err)

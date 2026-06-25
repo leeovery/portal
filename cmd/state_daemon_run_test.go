@@ -279,7 +279,7 @@ func TestDaemonTick_NoOpWhenNeitherDirtyNorGap(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	deps.MaxGap = 30 * time.Second
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
 		t.Errorf("list-sessions invoked when not dirty and not gap: %v", got)
@@ -298,7 +298,7 @@ func TestDaemonTick_FiresWhenDirty(t *testing.T) {
 	deps.LastSaveAt = time.Now() // gap=false
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
 		t.Errorf("list-sessions not invoked when dirty")
@@ -317,7 +317,7 @@ func TestDaemonTick_FiresAfterMaxGap(t *testing.T) {
 	deps.MaxGap = 10 * time.Millisecond
 	deps.LastSaveAt = time.Now().Add(-1 * time.Hour) // very old
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
 		t.Errorf("list-sessions not invoked after max-gap")
@@ -334,7 +334,7 @@ func TestDaemonTick_FiresOnFirstTickWhenLastSaveAtZero(t *testing.T) {
 	deps := makeDeps(t, dir, fc)
 	// Don't set LastSaveAt — leave it as zero.
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
 		t.Errorf("first tick should fire even without dirty flag (LastSaveAt zero)")
@@ -352,7 +352,7 @@ func TestDaemonTick_SkipsEntireTickWhenRestoring(t *testing.T) {
 	deps := makeDeps(t, dir, fc)
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
 		t.Errorf("list-sessions invoked during restore: %v", got)
@@ -368,7 +368,7 @@ func TestDaemonTick_PreservesSaveRequestedWhenRestoring(t *testing.T) {
 	deps := makeDeps(t, dir, fc)
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
 		t.Errorf("save.requested should survive a restore-suppressed tick; stat=%v", err)
@@ -384,7 +384,7 @@ func TestDaemonTick_RemovesSaveRequestedAfterSuccess(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
 		t.Errorf("save.requested should be removed after successful capture; stat=%v", err)
@@ -408,7 +408,7 @@ func TestDaemonTick_PreservesSaveRequestedOnError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
 		t.Errorf("save.requested should survive a failed cycle; stat=%v", err)
@@ -425,7 +425,7 @@ func TestDaemonTick_PicksUpNotifyArrivingBetweenTicks(t *testing.T) {
 
 	// Tick 1: dirty flag set, fires capture, clears flag.
 	touchSaveRequested(t, dir)
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
 		t.Fatalf("save.requested should be cleared after first tick; stat=%v", err)
 	}
@@ -435,7 +435,7 @@ func TestDaemonTick_PicksUpNotifyArrivingBetweenTicks(t *testing.T) {
 	touchSaveRequested(t, dir)
 
 	// Tick 2: dirty flag set again, fires another capture.
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	secondCalls := len(fc.callsContaining("list-sessions"))
 	if secondCalls <= firstCalls {
@@ -476,7 +476,7 @@ func TestDaemonTick_SkipsSkeletonMarkedPanesInScrollback(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	for _, call := range fc.callsContaining("capture-pane") {
 		// args[6] is the -t target.
@@ -504,7 +504,7 @@ func TestDaemonTick_ContinuesOnPerPaneCaptureError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	// commit must still happen.
 	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
@@ -527,7 +527,7 @@ func TestDaemonTick_LogsAndSkipsOnShowOptionsError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	got := sink.Body()
 	if !strings.Contains(got, "tick failed") {
@@ -552,7 +552,7 @@ func TestDaemonTick_LogsAndSkipsOnCaptureStructureError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
 		t.Errorf("sessions.json should not be written on capture-structure error; stat=%v", err)
@@ -575,7 +575,7 @@ func TestDaemonTick_LogsAndSkipsOnCommitErrorWithoutAdvancingLastSaveAt(t *testi
 	}
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	if !deps.LastSaveAt.Equal(originalLastSave) {
 		t.Errorf("LastSaveAt advanced despite commit failure: %v != %v", deps.LastSaveAt, originalLastSave)
@@ -690,7 +690,7 @@ func TestTick_SkipsOnTransportError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(context.Background(), deps)
+	tick(t.Context(), deps)
 
 	t.Run("no_capture", func(t *testing.T) {
 		// capture-pane is invoked inside captureAndCommit, only reached if the

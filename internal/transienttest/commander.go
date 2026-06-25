@@ -2,6 +2,7 @@ package transienttest
 
 import (
 	"fmt"
+	"slices"
 	"sync/atomic"
 
 	"github.com/leeovery/portal/internal/tmux"
@@ -82,12 +83,7 @@ func (c *Commander) shouldIntercept(args []string) bool {
 	if len(args) == 0 || args[0] != "list-panes" {
 		return false
 	}
-	for _, a := range args[1:] {
-		if a == "-a" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(args[1:], "-a")
 }
 
 // applyPolicy applies the per-mode policy AFTER the OneShot gate has

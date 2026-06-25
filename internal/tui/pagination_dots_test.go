@@ -28,7 +28,7 @@ func appearanceForMode(mode theme.Mode) prefs.Appearance {
 func newMultiPageSessionModel(t *testing.T, w, h int, mode theme.Mode, colourless bool) Model {
 	t.Helper()
 	var sessions []tmux.Session
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
 	}
 	m := Build(Deps{Lister: fakeLister{}, Appearance: appearanceForMode(mode), NoColor: colourless})

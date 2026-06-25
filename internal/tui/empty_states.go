@@ -98,10 +98,7 @@ func (m Model) projectListEmpty() bool {
 // rows the empty list would otherwise leave blank. Mirrors
 // replaceListBodyWithNoMatches.
 func (m Model) replaceListBodyWithEmptyState(listView string, listHeight int, glyph, message, hint string) string {
-	bodyHeight := listHeight - 1 // minus the title row
-	if bodyHeight < 1 {
-		bodyHeight = 1
-	}
+	bodyHeight := max(listHeight-1, 1) // minus the title row
 	body := renderEmptyStateBody(glyph, message, hint, m.contentWidth(), bodyHeight, m.canvasMode, m.colourless)
 	idx := strings.IndexByte(listView, '\n')
 	if idx < 0 {

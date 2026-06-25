@@ -421,10 +421,7 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	} else {
 		// Truncate to the flex width with an ellipsis (§2.7), then pad the remainder
 		// so the gap and the fixed slots are right-pinned and column-aligned.
-		nameWidth := total - used
-		if nameWidth < 1 {
-			nameWidth = 1
-		}
+		nameWidth := max(total-used, 1)
 		visibleName := ansi.Truncate(it.Session.Name, nameWidth, "…")
 		name = d.rowToken(nameBase, nameTok, selected).Render(visibleName)
 		namePad = bg.Render(padTo("", nameWidth-lipgloss.Width(visibleName)))

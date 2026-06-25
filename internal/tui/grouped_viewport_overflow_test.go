@@ -25,7 +25,7 @@ func TestGroupedViewDoesNotOverflowViewport(t *testing.T) {
 	// a single page well past the viewport.
 	var sessions []tmux.Session
 	var projects []project.Project
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		dir := t.TempDir()
 		projects = append(projects, project.Project{Name: fmt.Sprintf("proj%02d", i), Path: dir})
 		sessions = append(sessions,

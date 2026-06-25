@@ -153,11 +153,11 @@ func segmentCarriesForeground(row, segment string, c color.Color) bool {
 	// from the fg-only open sequence, leaving "38;2;R;G;B".
 	open := wantSGR[:strings.Index(wantSGR, "X")]
 	core := strings.TrimSuffix(strings.TrimPrefix(open, "\x1b["), "m")
-	idx := strings.Index(row, segment)
-	if idx < 0 {
+	before, _, ok := strings.Cut(row, segment)
+	if !ok {
 		return false
 	}
-	return strings.Contains(row[:idx], core)
+	return strings.Contains(before, core)
 }
 
 // TestPreviewPeekChrome_ContentFramedByAccentCyanBorder pins that the content

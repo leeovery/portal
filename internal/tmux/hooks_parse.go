@@ -42,7 +42,7 @@ var hookLineRegexp = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9-]*)\[(\d+)\](?:\s*
 func ParseShowHooks(raw string) map[string][]HookEntry {
 	out := make(map[string][]HookEntry)
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

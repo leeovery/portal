@@ -3,6 +3,7 @@ package restore_test
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func parseLivePanes(t *testing.T, output string) []tmux.PaneCoord {
 		return nil
 	}
 	var out []tmux.PaneCoord
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -198,10 +199,8 @@ func TestApplySkeletonMarkers_ContinuesWhenOneSetOptionFails(t *testing.T) {
 	mock := &mockCommander{
 		RunFunc: func(args ...string) (string, error) {
 			if len(args) > 0 && args[0] == "set-option" {
-				for _, a := range args {
-					if a == failMarker {
-						return "", errors.New("set-option failure")
-					}
+				if slices.Contains(args, failMarker) {
+					return "", errors.New("set-option failure")
 				}
 			}
 			return "", nil

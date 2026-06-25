@@ -331,7 +331,7 @@ func sessionsPagedFixture() *Fixture {
 		"/home/user/code/flow",
 	}
 	sessions := make([]tmux.Session, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		sessions = append(sessions, tmux.Session{
 			Name: fmt.Sprintf("session-%02d", i),
 			// A deterministic 1–4 window-count cycle so the rows are not all identical.

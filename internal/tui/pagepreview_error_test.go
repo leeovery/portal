@@ -281,9 +281,8 @@ func TestPreviewError_NoPerPaneErrorStateOnPreviewModel(t *testing.T) {
 	// "errByPaneKey" or shaped like map[string]error / per-pane string cache).
 	// This pins the "no per-pane error cache" decision in the type itself
 	// rather than relying solely on behavioural tests.
-	tp := reflect.TypeOf(previewModel{})
-	for i := 0; i < tp.NumField(); i++ {
-		f := tp.Field(i)
+	tp := reflect.TypeFor[previewModel]()
+	for f := range tp.Fields() {
 		name := strings.ToLower(f.Name)
 		if strings.Contains(name, "error") || strings.Contains(name, "errcache") || strings.Contains(name, "errby") {
 			t.Errorf("previewModel has field %q (%s) — per-pane error cache state forbidden by spec", f.Name, f.Type)
@@ -292,7 +291,7 @@ func TestPreviewError_NoPerPaneErrorStateOnPreviewModel(t *testing.T) {
 		// error-by-paneKey cache; flag them.
 		if f.Type.Kind() == reflect.Map && f.Type.Key().Kind() == reflect.String {
 			elem := f.Type.Elem()
-			if elem.Kind() == reflect.String || elem.Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+			if elem.Kind() == reflect.String || elem.Implements(reflect.TypeFor[error]()) {
 				t.Errorf("previewModel has map field %q (%s) — error-by-paneKey cache shape forbidden by spec", f.Name, f.Type)
 			}
 		}

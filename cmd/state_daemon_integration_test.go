@@ -204,7 +204,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 	lines := scrollbackLines
 	var singlePaneWallTime time.Duration
 	var threshold time.Duration
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		// On retry, recreate the server so panes start from scratch
 		// without inherited buffers. The bootstrap helper re-creates
 		// the throwaway session and re-applies history-limit globally
@@ -501,7 +501,7 @@ func populatePanes(t *testing.T, sock *tmuxtest.Socket, lines int) {
 	// gives a deterministic readiness signal that survives shell-output
 	// rate variability across hosts.
 	deadline := time.Now().Add(panePopulationTimeout)
-	for i := 0; i < paneCount; i++ {
+	for i := range paneCount {
 		target := fmt.Sprintf("perf:0.%d", i)
 		for {
 			if time.Now().After(deadline) {

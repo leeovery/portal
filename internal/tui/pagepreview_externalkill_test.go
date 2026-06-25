@@ -75,14 +75,14 @@ func (r *progressivePlaceholderReader) Tail(paneKey string) ([]byte, error) {
 	idx := len(r.calls) // 1-based
 	switch {
 	case idx <= r.bytesUntil:
-		b := []byte(fmt.Sprintf("bytes-%d-%s", idx, paneKey))
+		b := fmt.Appendf(nil, "bytes-%d-%s", idx, paneKey)
 		r.bytesByCallIndex[idx] = b
 		return b, nil
 	case idx <= r.mixedUntil:
 		if r.placeholderKeys[paneKey] {
 			return nil, nil
 		}
-		b := []byte(fmt.Sprintf("bytes-%d-%s", idx, paneKey))
+		b := fmt.Appendf(nil, "bytes-%d-%s", idx, paneKey)
 		r.bytesByCallIndex[idx] = b
 		return b, nil
 	default:

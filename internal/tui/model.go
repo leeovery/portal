@@ -3481,13 +3481,13 @@ func insetCanvasCanvas(contentRows []string, w, h, contentW int, canvas lipgloss
 	}
 
 	out := make([]string, 0, h)
-	for i := 0; i < topPad; i++ {
+	for range topPad {
 		out = append(out, fullBlank)
 	}
 	for _, row := range contentRows {
 		out = append(out, leftCol+row+rightCol)
 	}
-	for i := 0; i < botPad; i++ {
+	for range botPad {
 		out = append(out, fullBlank)
 	}
 	return strings.Join(out, "\n")
@@ -3538,13 +3538,13 @@ func insetColourless(content string, w, h, contentW, contentH int) string {
 	rightCol := strings.Repeat(" ", rightPad)
 
 	out := make([]string, 0, h)
-	for i := 0; i < topPad; i++ {
+	for range topPad {
 		out = append(out, fullBlank)
 	}
-	for _, row := range strings.Split(content, "\n") {
+	for row := range strings.SplitSeq(content, "\n") {
 		out = append(out, leftCol+row+rightCol)
 	}
-	for i := 0; i < botPad; i++ {
+	for range botPad {
 		out = append(out, fullBlank)
 	}
 	return strings.Join(out, "\n")
@@ -4231,10 +4231,9 @@ func (m Model) headerHeight(width int) int {
 // delegate pagination invariant is unaffected — the body is empty here anyway, this
 // just paints guidance into the rows the empty list would otherwise leave blank.
 func (m Model) replaceListBodyWithNoMatches(listView string) string {
-	bodyHeight := m.sessionList.Height() - 1 // minus the title/filter row
-	if bodyHeight < 1 {
-		bodyHeight = 1
-	}
+	bodyHeight := max(
+		// minus the title/filter row
+		m.sessionList.Height()-1, 1)
 	body := renderNoMatchesBody(m.sessionList.FilterValue(), m.contentWidth(), bodyHeight, m.canvasMode, m.colourless)
 	idx := strings.IndexByte(listView, '\n')
 	if idx < 0 {

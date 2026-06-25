@@ -85,7 +85,7 @@ func TestJoinedPanel_DividersJoinSideBorders(t *testing.T) {
 	panel := renderJoinedPanel(compartments, theme.MV.BorderSeparator, theme.Dark, false)
 
 	dividerCount := 0
-	for _, raw := range strings.Split(panel, "\n") {
+	for raw := range strings.SplitSeq(panel, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
 		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerCount++
@@ -133,7 +133,7 @@ func TestJoinedPanel_RowsAreInsetDividersAreNot(t *testing.T) {
 	panel := renderJoinedPanel(compartments, theme.MV.BorderSeparator, theme.Dark, false)
 
 	var contentRow string
-	for _, raw := range strings.Split(panel, "\n") {
+	for raw := range strings.SplitSeq(panel, "\n") {
 		line := ansi.Strip(raw)
 		if strings.Contains(line, "content row") {
 			contentRow = strings.TrimRight(line, " ")

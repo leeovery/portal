@@ -1,0 +1,5 @@
+# Ignored modernization suggestions
+# Format: <date> <category> <description>
+2026-06-25 ci-pipeline No CI in this project by choice; tests run at release via the Mint tool. Do not suggest .github/workflows.
+2026-06-25 pgo PGO skipped — Portal is a short-lived CLI; profile-guided optimization is low value for sub-second processes.
+2026-06-25 t-context Remaining ~14 context.Background() test sites left as-is. root_test.go cobra-context scrubbing needs a never-cancelled root (t.Context auto-cancel is wrong there); DefaultDaemonRun / daemon integration tests carry cancel-at-cleanup semantic risk for purely cosmetic gain. The 20 synchronous tick() sites were migrated.

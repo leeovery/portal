@@ -14,7 +14,7 @@ import (
 func availableCommandNames(help string) map[string]bool {
 	names := make(map[string]bool)
 	inSection := false
-	for _, line := range strings.Split(help, "\n") {
+	for line := range strings.SplitSeq(help, "\n") {
 		switch {
 		case strings.HasPrefix(line, "Available Commands:"):
 			inSection = true

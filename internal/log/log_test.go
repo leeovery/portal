@@ -66,23 +66,19 @@ func TestFor_RaceFreeUnderConcurrentForAndSwap(t *testing.T) {
 	const goroutines = 16
 
 	for range goroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 100 {
 				logger := For("daemon")
 				logger.Info("concurrent")
 			}
-		}()
+		})
 	}
 	for range goroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 100 {
 				setHandler(&recordingHandler{})
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

@@ -237,7 +237,7 @@ func TestRotatingSink_NeverRotatesInSteadyStateBelowCap(t *testing.T) {
 	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if _, err := s.Write([]byte("steady-state line\n")); err != nil {
 			t.Fatalf("Write %d: %v", i, err)
 		}

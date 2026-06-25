@@ -11,6 +11,8 @@
 package capture
 
 import (
+	"maps"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
@@ -129,9 +131,7 @@ type fakeAliasEditor struct {
 
 func (f fakeAliasEditor) Load() (map[string]string, error) {
 	out := make(map[string]string, len(f.aliases))
-	for k, v := range f.aliases {
-		out[k] = v
-	}
+	maps.Copy(out, f.aliases)
 	return out, nil
 }
 

@@ -53,8 +53,8 @@ func footerLineForTest(m previewModel) string {
 // newline is present. Used by frame/routing/cascade tests to extract the
 // top border row from a rendered View() before asserting on its width.
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }
@@ -65,7 +65,7 @@ func firstLine(s string) string {
 // header compartment's styled content (the View's first line is now the top
 // border, not the header).
 func headerLine(view string) string {
-	for _, line := range strings.Split(view, "\n") {
+	for line := range strings.SplitSeq(view, "\n") {
 		if strings.Contains(stripANSI(line), "◉ preview") {
 			return line
 		}
@@ -77,7 +77,7 @@ func headerLine(view string) string {
 // carries the footer nav hints (the `←→ window` group, or its compact `←→`
 // glyph when labels are dropped). Returns "" if no footer line is found.
 func footerLine(view string) string {
-	for _, line := range strings.Split(view, "\n") {
+	for line := range strings.SplitSeq(view, "\n") {
 		if strings.Contains(stripANSI(line), "←→") {
 			return line
 		}

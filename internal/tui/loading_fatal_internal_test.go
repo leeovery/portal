@@ -89,7 +89,7 @@ func TestErrorFrame_NeverOverflowsHeight(t *testing.T) {
 // rowContaining returns the single rendered line containing the needle.
 func rowContaining(t *testing.T, block, needle string) string {
 	t.Helper()
-	for _, line := range strings.Split(block, "\n") {
+	for line := range strings.SplitSeq(block, "\n") {
 		if strings.Contains(line, needle) {
 			return line
 		}

@@ -3,7 +3,7 @@ package state_test
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,7 +34,7 @@ const (
 )
 
 // buildPerfFixture writes a deterministic ~4 MB scrollback fixture to a
-// fresh path inside dir and returns the path. Seeded with rand.NewSource(42)
+// fresh path inside dir and returns the path. Seeded with rand.NewPCG(42, 42)
 // so size and content are reproducible across runs and machines.
 //
 // The fixture mimics real tmux capture-pane -e output: mostly printable
@@ -45,7 +45,7 @@ const (
 // represent the worst-case content the helper must scan.
 func buildPerfFixture(tb testing.TB, dir string) string {
 	tb.Helper()
-	rng := rand.New(rand.NewSource(42))
+	rng := rand.New(rand.NewPCG(42, 42))
 	colours := []string{
 		"\x1b[31m", // red
 		"\x1b[32m", // green
@@ -63,36 +63,30 @@ func buildPerfFixture(tb testing.TB, dir string) string {
 	// nextAnsiAt is the line index at which the next ANSI escape pair will
 	// be injected. Drawing the gap from [3, 6) gives an average sprinkle
 	// interval of ~4 lines, matching the "every 3-5 lines" target.
-	nextAnsiAt := 3 + rng.Intn(3)
+	nextAnsiAt := 3 + rng.IntN(3)
 
-	for i := 0; i < perfFixtureLines; i++ {
+	for i := range perfFixtureLines {
 		// Jitter line width by ±20% of the mean so the reverse-scan must
 		// cope with non-uniform record sizes.
-		jitter := rng.Intn(perfFixtureLineWidth/5*2+1) - (perfFixtureLineWidth / 5)
-		width := perfFixtureLineWidth + jitter
-		if width < 16 {
-			width = 16
-		}
+		jitter := rng.IntN(perfFixtureLineWidth/5*2+1) - (perfFixtureLineWidth / 5)
+		width := max(perfFixtureLineWidth+jitter, 16)
 
 		prefix := fmt.Sprintf("[%05d] ", i)
 		// payload fills the remaining width budget (less the trailing \n).
-		payloadLen := width - len(prefix) - 1
-		if payloadLen < 0 {
-			payloadLen = 0
-		}
+		payloadLen := max(width-len(prefix)-1, 0)
 		// Generate alphanumeric-ish content: cheap, printable, varied.
 		payload := make([]byte, payloadLen)
 		for j := range payload {
-			payload[j] = byte('A' + rng.Intn(26))
+			payload[j] = byte('A' + rng.IntN(26))
 		}
 
 		buf.WriteString(prefix)
 		if i == nextAnsiAt {
-			colour := colours[rng.Intn(len(colours))]
+			colour := colours[rng.IntN(len(colours))]
 			buf.WriteString(colour)
 			buf.Write(payload)
 			buf.WriteString(reset)
-			nextAnsiAt = i + 3 + rng.Intn(3)
+			nextAnsiAt = i + 3 + rng.IntN(3)
 		} else {
 			buf.Write(payload)
 		}
@@ -109,20 +103,17 @@ func buildPerfFixture(tb testing.TB, dir string) string {
 // BenchmarkTailScrollback measures TailScrollback(N=1000) against a
 // representative 4 MB / ~50k-line scrollback fixture with mixed line widths
 // and ANSI escapes. Fixture generation cost is excluded from the measured
-// region via b.ResetTimer() AFTER the fixture is written to disk — see
-// spec § History Depth > Read Pipeline > Performance budget.
+// region because b.Loop() resets the timer on its first call, after the
+// fixture is written to disk — see spec § History Depth > Read Pipeline >
+// Performance budget. b.Loop() also keeps the loop body live, so no manual
+// dead-code-elimination guard on the result is needed.
 func BenchmarkTailScrollback(b *testing.B) {
 	path := buildPerfFixture(b, b.TempDir())
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		got, err := state.TailScrollback(path, 1000)
-		if err != nil {
+	for b.Loop() {
+		if _, err := state.TailScrollback(path, 1000); err != nil {
 			b.Fatalf("TailScrollback: %v", err)
 		}
-		// Consume the result with a side-effect the compiler cannot
-		// elide, preventing dead-code elimination of the call.
-		_ = got
 	}
 }
 

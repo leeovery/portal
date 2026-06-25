@@ -14,7 +14,7 @@ import (
 func newPreviewModelWithLines(t *testing.T, lineCount int) (previewModel, *recordingReader) {
 	t.Helper()
 	var b strings.Builder
-	for i := 0; i < lineCount; i++ {
+	for range lineCount {
 		b.WriteString("line\n")
 	}
 	enum := &stubEnumerator{
@@ -133,7 +133,7 @@ func TestPreviewResizeDoesNotCallTailAcross100Events(t *testing.T) {
 		t.Fatalf("setup: expected 1 Tail call from initial-open, got %d", len(reader.calls))
 	}
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		// Vary dimensions slightly so each resize is a distinct value.
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 80 + i, Height: 24 + (i % 5)})
 	}

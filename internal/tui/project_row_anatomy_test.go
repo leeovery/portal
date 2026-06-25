@@ -176,7 +176,7 @@ func TestProjectRow_UniformTwoLineHeightForPagination(t *testing.T) {
 		project.Project{Name: "a-much-longer-project-name", Path: "/home/user/code/some/much/longer/path/here"},
 	)
 	for _, sel := range []int{0, 1} {
-		for idx := 0; idx < 2; idx++ {
+		for idx := range 2 {
 			out := renderProjectRow(d, 80, items, idx, sel)
 			if got := strings.Count(out, "\n"); got != 1 {
 				t.Errorf("project row [idx=%d sel=%d] has %d newlines, want exactly 1 (two uniform lines): %q", idx, sel, got, out)

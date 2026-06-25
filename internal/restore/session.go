@@ -206,12 +206,9 @@ func (r *SessionRestorer) armPanes(sess state.Session, armInfos []savedPaneArmIn
 		r.logger().Warn("live pane count differs from saved count (pairing up to shorter list)", "session", sess.Name)
 	}
 
-	pairCount := len(armInfos)
-	if len(livePanes) < pairCount {
-		pairCount = len(livePanes)
-	}
+	pairCount := min(len(livePanes), len(armInfos))
 
-	for i := 0; i < pairCount; i++ {
+	for i := range pairCount {
 		live := livePanes[i]
 		info := armInfos[i]
 
@@ -309,10 +306,7 @@ func groupLivePanesBySavedWindow(sess state.Session, livePanes []tmux.PaneCoord)
 	out := make([][]tmux.PaneCoord, len(sess.Windows))
 	cursor := 0
 	for wi, w := range sess.Windows {
-		end := cursor + len(w.Panes)
-		if end > len(livePanes) {
-			end = len(livePanes)
-		}
+		end := min(cursor+len(w.Panes), len(livePanes))
 		if cursor < end {
 			out[wi] = livePanes[cursor:end]
 		}

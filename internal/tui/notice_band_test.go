@@ -30,7 +30,7 @@ import (
 // not whether it spans one line or three at a given width.
 func flattenNoticeBand(band string) string {
 	frags := make([]string, 0, 4)
-	for _, line := range strings.Split(ansi.Strip(band), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(band), "\n") {
 		// Drop the leading `▌` bar then trim the bar gap + continuation indent.
 		body := strings.TrimPrefix(line, noticeBarGlyph)
 		body = strings.TrimLeft(body, " ")
@@ -53,7 +53,7 @@ func viewHasNoticeMessage(t *testing.T, m Model, role noticeBandRole, message st
 	t.Helper()
 	band := renderNoticeBand(role, message, noticeBandOnBandText(role), m.contentWidth(), m.canvasMode, m.colourless)
 	view := ansi.Strip(m.View().Content)
-	for _, line := range strings.Split(ansi.Strip(band), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(band), "\n") {
 		frag := strings.TrimRight(strings.TrimLeft(strings.TrimPrefix(line, noticeBarGlyph), " "), " ")
 		if frag == "" {
 			continue

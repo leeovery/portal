@@ -336,7 +336,7 @@ func parsePaneRows(raw string, keep map[string]struct{}) (map[string][]paneRow, 
 	if raw == "" {
 		return out, nil
 	}
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -458,7 +458,7 @@ func parseShowEnvironment(raw string) map[string]string {
 	if raw == "" {
 		return env
 	}
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -466,11 +466,11 @@ func parseShowEnvironment(raw string) map[string]string {
 		if strings.HasPrefix(line, "-") {
 			continue
 		}
-		eq := strings.IndexByte(line, '=')
-		if eq < 0 {
+		before, after, ok := strings.Cut(line, "=")
+		if !ok {
 			continue
 		}
-		env[line[:eq]] = line[eq+1:]
+		env[before] = after
 	}
 	return env
 }

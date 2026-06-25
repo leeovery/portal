@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -398,13 +399,7 @@ func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testin
 		}
 	}
 	// Set must have been called.
-	found := false
-	for _, c := range r.calls {
-		if c == "Set" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(r.calls, "Set")
 	if !found {
 		t.Errorf("expected Set in calls, got %v", r.calls)
 	}
@@ -921,13 +916,7 @@ func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 	}
 
 	// CleanStale must still run after a sweep failure.
-	cleanRan := false
-	for _, c := range r.calls {
-		if c == "CleanStale" {
-			cleanRan = true
-			break
-		}
-	}
+	cleanRan := slices.Contains(r.calls, "CleanStale")
 	if !cleanRan {
 		t.Errorf("CleanStale must run even when Sweep fails; calls = %v", r.calls)
 	}
@@ -1137,11 +1126,11 @@ func stepCompleteNames(infos []string) []string {
 			continue
 		}
 		const key = "step="
-		idx := strings.Index(line, key)
-		if idx == -1 {
+		_, after, ok := strings.Cut(line, key)
+		if !ok {
 			continue
 		}
-		rest := line[idx+len(key):]
+		rest := after
 		if sp := strings.IndexByte(rest, ' '); sp != -1 {
 			rest = rest[:sp]
 		}
@@ -1357,11 +1346,11 @@ func TestOrchestratorRun_retainsEnteringDebugWithNormalizedNames(t *testing.T) {
 			continue
 		}
 		const key = "step="
-		idx := strings.Index(line, key)
-		if idx == -1 {
+		_, after, ok := strings.Cut(line, key)
+		if !ok {
 			continue
 		}
-		rest := line[idx+len(key):]
+		rest := after
 		if sp := strings.IndexByte(rest, ' '); sp != -1 {
 			rest = rest[:sp]
 		}

@@ -28,11 +28,11 @@ func ResolveHooksFilePathFromEnv(t *testing.T, env []string) string {
 	)
 	var xdg string
 	for _, e := range env {
-		if strings.HasPrefix(e, hooksFileKey) {
-			return strings.TrimPrefix(e, hooksFileKey)
+		if after, ok := strings.CutPrefix(e, hooksFileKey); ok {
+			return after
 		}
-		if strings.HasPrefix(e, xdgKey) {
-			xdg = strings.TrimPrefix(e, xdgKey)
+		if after, ok := strings.CutPrefix(e, xdgKey); ok {
+			xdg = after
 		}
 	}
 	if xdg == "" {

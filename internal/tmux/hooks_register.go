@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 
 	"github.com/leeovery/portal/internal/log"
@@ -116,10 +117,8 @@ func teardownFingerprints() []string {
 	// The legacy migrate-rename substring is not in managedEvents, so the union
 	// must explicitly add it (appended last for a stable order). Guard against a
 	// future managedEvents entry already carrying it so it is never duplicated.
-	for _, fp := range union {
-		if fp == migrateRenameSubstring {
-			return union
-		}
+	if slices.Contains(union, migrateRenameSubstring) {
+		return union
 	}
 	return append(union, migrateRenameSubstring)
 }

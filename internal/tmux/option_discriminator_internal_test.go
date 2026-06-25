@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -37,7 +38,6 @@ func (m *internalMockCommander) RunRaw(args ...string) (string, error) {
 // silently drift away from its test surface.
 func TestGetServerOption_DiscriminatorSet(t *testing.T) {
 	for _, pat := range optionAbsentStderrPatterns {
-		pat := pat // capture
 		t.Run(pat, func(t *testing.T) {
 			stderr := pat + " @foo"
 			mock := &internalMockCommander{Err: &CommandError{
@@ -93,13 +93,7 @@ func TestGetServerOption_DiscriminatorSet(t *testing.T) {
 				len(optionAbsentStderrPatterns), len(want), optionAbsentStderrPatterns)
 		}
 		for _, w := range want {
-			found := false
-			for _, got := range optionAbsentStderrPatterns {
-				if got == w {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(optionAbsentStderrPatterns, w)
 			if !found {
 				t.Errorf("optionAbsentStderrPatterns missing pattern %q (got %v)",
 					w, optionAbsentStderrPatterns)

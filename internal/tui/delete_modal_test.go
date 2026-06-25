@@ -129,7 +129,7 @@ func TestDeleteModal_SingleToneJoinedPanel(t *testing.T) {
 	content := renderDeleteModalContent("flow-v1-api", "/Users/leeovery/Code/fabric", theme.Dark, false)
 
 	dividerCount := 0
-	for _, raw := range strings.Split(content, "\n") {
+	for raw := range strings.SplitSeq(content, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
 		if strings.HasPrefix(line, panelFrameTeeLeft) && strings.HasSuffix(line, panelFrameTeeRight) {
 			dividerCount++

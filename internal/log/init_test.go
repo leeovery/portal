@@ -491,7 +491,7 @@ func singleProcessLineRaw(t *testing.T, raw, msg string) string {
 	t.Helper()
 	prefix := " " + processComponent + ": " + msg + " "
 	var found []string
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		if strings.Contains(line, prefix) {
 			found = append(found, line)
 		}
@@ -506,7 +506,7 @@ func singleProcessLineRaw(t *testing.T, raw, msg string) string {
 func bootstrapWarnLines(t *testing.T, raw, msg string) []logLine {
 	t.Helper()
 	var out []logLine
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		if line == "" {
 			continue
 		}
@@ -546,7 +546,7 @@ type logLine struct {
 func parseProcessLines(t *testing.T, raw string) []logLine {
 	t.Helper()
 	var out []logLine
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		if line == "" {
 			continue
 		}

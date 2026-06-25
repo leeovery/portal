@@ -611,7 +611,7 @@ func liveSessionNames(t *testing.T, sock *tmuxtest.Socket) map[string]struct{} {
 		t.Fatalf("list-sessions on test socket: %v\n%s", err, out)
 	}
 	set := map[string]struct{}{}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

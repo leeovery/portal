@@ -276,10 +276,7 @@ func (m Model) editModalHeaderRow(mode theme.Mode, colourless bool) string {
 func renderHeaderWithBadge(left string, contentWidth int, showBadge bool, mode theme.Mode, colourless bool) string {
 	leftWidth := lipgloss.Width(left)
 	badgeWidth := lipgloss.Width(editModeIndicator)
-	spacerWidth := contentWidth - leftWidth - badgeWidth
-	if spacerWidth < 0 {
-		spacerWidth = 0
-	}
+	spacerWidth := max(contentWidth-leftWidth-badgeWidth, 0)
 	spacer := headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", spacerWidth))
 
 	var badge string
@@ -426,7 +423,7 @@ func joinChipRowBands(segments [][]string, mode theme.Mode, colourless bool) []s
 	}
 	gap := headerCanvasBg(mode, colourless).Render(" ")
 	bands := make([]string, 3)
-	for band := 0; band < 3; band++ {
+	for band := range 3 {
 		parts := make([]string, 0, len(segments)*2-1)
 		for i, seg := range segments {
 			if i > 0 {
@@ -469,10 +466,7 @@ func (m Model) editModalEditingFooterRow(groups []footerHintGroup, mode theme.Mo
 	rightSeg := joinFooterGroups(right, mode, colourless)
 
 	width := m.editPanelContentWidth()
-	spacerWidth := width - lipgloss.Width(leftSeg) - lipgloss.Width(rightSeg)
-	if spacerWidth < 0 {
-		spacerWidth = 0
-	}
+	spacerWidth := max(width-lipgloss.Width(leftSeg)-lipgloss.Width(rightSeg), 0)
 	spacer := headerCanvasBg(mode, colourless).Render(strings.Repeat(" ", spacerWidth))
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftSeg, spacer, rightSeg)
 }

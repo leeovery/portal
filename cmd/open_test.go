@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -716,9 +717,7 @@ type stubAliasEditor struct {
 
 func (s *stubAliasEditor) Load() (map[string]string, error) {
 	result := make(map[string]string)
-	for k, v := range s.aliases {
-		result[k] = v
-	}
+	maps.Copy(result, s.aliases)
 	return result, nil
 }
 func (s *stubAliasEditor) SetAndSave(name, path, _ string) error {

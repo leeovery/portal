@@ -81,7 +81,7 @@ func TestContentInset_AppliedToSessions(t *testing.T) {
 	}
 
 	// Top Vinset rows are blank gutter.
-	for i := 0; i < Vinset; i++ {
+	for i := range Vinset {
 		if !rowIsBlankGutter(t, lines[i]) {
 			t.Errorf("top gutter row %d is not blank: %q", i, stripSGRForTest(lines[i]))
 		}
@@ -207,7 +207,7 @@ func TestContentInset_PaginationInvariantPreserved(t *testing.T) {
 	const w, h = 90, 14
 
 	var sessions []tmux.Session
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.Dark))
@@ -244,7 +244,7 @@ func TestContentInset_GroupedPaginationInvariant(t *testing.T) {
 	const w, h = 90, 16
 
 	var sessions []tmux.Session
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.Dark), WithInitialMode(prefs.ModeByProject))
@@ -299,7 +299,7 @@ func assertFramedAndInset(t *testing.T, view string, w, h int) {
 		}
 	}
 	lines := strings.Split(view, "\n")
-	for i := 0; i < Vinset; i++ {
+	for i := range Vinset {
 		if !rowIsBlankGutter(t, lines[i]) {
 			t.Errorf("top gutter row %d not blank: %q", i, stripSGRForTest(lines[i]))
 		}

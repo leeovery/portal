@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/viewport"
@@ -157,11 +158,11 @@ func TestPreviewEnter_NotForwardedToViewport(t *testing.T) {
 	m := newPreviewModelForEnter("work", groups, 0, 0, reader, attacher, 80, 10)
 	// Fill viewport with content larger than its height so scroll position
 	// is meaningfully observable, then park at top.
-	var lines string
-	for i := 0; i < 50; i++ {
-		lines += "line\n"
+	var lines strings.Builder
+	for range 50 {
+		lines.WriteString("line\n")
 	}
-	m.viewport.SetContent(lines)
+	m.viewport.SetContent(lines.String())
 	m.viewport.GotoTop()
 	if !m.viewport.AtTop() {
 		t.Fatalf("setup: expected viewport.AtTop, got YOffset=%d", m.viewport.YOffset())

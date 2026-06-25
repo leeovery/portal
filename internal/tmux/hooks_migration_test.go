@@ -193,7 +193,7 @@ func TestRegisterPortalHooks_HydrationCollapsesMultipleStaleEntriesOnOneEvent(t 
 
 	// Three stale entries on client-attached. Other hydration event also
 	// gets one stale entry so the migration's per-event loop is exercised.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := client.AppendGlobalHook("client-attached", staleSignalHydrateCommand); err != nil {
 			t.Fatalf("AppendGlobalHook[client-attached][%d]: %v", i, err)
 		}
