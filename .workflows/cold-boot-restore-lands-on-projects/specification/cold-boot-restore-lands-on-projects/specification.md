@@ -54,6 +54,16 @@ The one-shot `defaultPageEvaluated` latch is left untouched; only the **timing**
 
 These criteria are the observable contract; the fix is correct only if every row holds.
 
+### Constraints & Invariants
+
+- **Warm / CLI / direct-path untouched.** The synchronous route (`progressReceiver == nil`) keeps making the landing decision at `transitionFromLoading()` time against its already-post-restore `Init` snapshot. No new enumeration, no behaviour change, no new ordering dependency. This is the zero-new-risk contract — the warm-path startup sequence has prior-incident history (slow-open / zombie-session) and must not be perturbed.
+- **No over-correction.** The deferred decision runs the *same* `len(Items()) > 0` test against the post-restore list, so a genuine zero-session cold boot still lands on Projects (AC2). The fix changes *when* the test runs, never *what* it tests.
+- **Valid interim page.** Between loading-page dismissal and the post-restore refetch landing, the cold route must hold a valid `activePage` (interim **Sessions**). It must never sit on an undefined page, re-enter the loading page, or render a blank frame.
+- **Latch preserved.** The one-shot `defaultPageEvaluated` latch is not modified, removed, or re-opened. The decision is still made exactly once; only its timing moves on the cold route. (Option B — re-opening the latch — was explicitly rejected as patching the symptom rather than the ordering.)
+- **Decision always resolves on the cold route.** `refetchSessionsAfterRestore()` always emits a `SessionsMsg` on the cold route, and the `SessionsMsg` handler re-invokes `evaluateDefaultPage()` whenever `activePage != PageLoading` — so the deferred decision is guaranteed to be taken (no path strands the picker on the interim page). A `SessionsMsg` carrying an error continues to quit, exactly as today.
+- **`commandPending` branch preserved.** The `commandPending → Projects` arm of `evaluateDefaultPage()` is independent of the deferral and must remain correct.
+- **Scope: cold concurrent route only.** The change is confined to the cold concurrent-bootstrap landing-decision ordering in `internal/tui/model.go`. No changes to the bootstrap orchestrator, restore engine, tmux enumeration, or `evaluateDefaultPage`'s decision logic.
+
 ---
 
 ## Working Notes
