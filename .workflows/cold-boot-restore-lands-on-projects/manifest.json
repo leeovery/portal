@@ -1,0 +1,15 @@
+{
+  "name": "cold-boot-restore-lands-on-projects",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-06-25",
+  "description": "Cold-boot TUI restore lands on the Projects page instead of Sessions despite N sessions being restored",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-06-25-cold-boot-restore-lands-on-projects.md",
+      "source": "inbox:bug",
+      "seeded_at": "2026-06-25T21:04:30Z"
+    }
+  ]
+}
