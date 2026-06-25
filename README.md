@@ -12,6 +12,10 @@ A CLI that gives you fast, fuzzy session management from bare shell,
 
 [Install](#install) · [Quick Start](#quick-start) · [Commands](#commands) · [Shell Integration](#shell-integration) · [Configuration](#configuration)
 
+<br>
+
+<img src="art/sessions.png" alt="Portal — the interactive tmux session picker" width="840">
+
 </div>
 
 ---
@@ -30,6 +34,17 @@ After [shell integration](#shell-integration), you interact with Portal through 
 - **Project memory + git roots** — new sessions auto-resolve to the repository root and are remembered for next time.
 - **Reboot-safe sessions** — automatic tmux server bootstrap plus full restoration of session structure, layout, working dirs, and ANSI scrollback after a reboot. Replaces tmux-resurrect/tmux-continuum.
 - **Per-pane resume hooks** — register commands (`npm start`, `claude --resume`, etc.) that fire only when a pane is re-created from saved state.
+
+## Screenshots
+
+|  |  |
+|:---:|:---:|
+| <img src="art/sessions-by-tag.png" alt="Sessions grouped by tag" width="430"><br>**Grouped by tag** | <img src="art/preview.png" alt="Scrollback preview" width="430"><br>**Peek-mode scrollback preview** |
+| <img src="art/loading.png" alt="Honest loading screen" width="430"><br>**Concurrent cold-boot loading** | <img src="art/help-modal.png" alt="Keybindings help modal" width="430"><br>**Per-page `?` keymap** |
+| <img src="art/projects.png" alt="Projects page" width="430"><br>**Projects** | <img src="art/edit-project.png" alt="Edit project modal" width="430"><br>**Edit project — name, aliases, tags** |
+| <img src="art/filtering.png" alt="Live filter" width="430"><br>**Live fuzzy filter** | <img src="art/kill-confirm.png" alt="Kill confirmation modal" width="430"><br>**Destructive confirm** |
+
+Light mode and the `NO_COLOR` path render from the same token layer — see [Configuration](#configuration).
 
 ## Install
 
