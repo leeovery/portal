@@ -3,7 +3,7 @@ package cmd
 // Tests in this file mutate package-level state (bootstrapDeps) and the
 // shared rootCmd, and MUST NOT use t.Parallel.
 //
-// Task spectrum-tui-design-5-2 — the cold-vs-warm routing gate.
+// Task spectrum-tui-design-5-1 — the cold-vs-warm routing gate.
 // shouldRunConcurrentBootstrap must classify ONLY the cold + TUI path for the
 // concurrent bootstrap route. Cold is decided by a cheap `has-server` probe
 // (client.ServerRunning(), §10.1) BEFORE bootstrap runs — the flip defers the
@@ -26,7 +26,7 @@ func openProbeCmd() *cobra.Command {
 }
 
 // runningClient returns a *tmux.Client whose `info` probe SUCCEEDS, so
-// ServerRunning() == true (warm). errorClient returns one whose `info` FAILS, so
+// ServerRunning() == true (warm). coldClient returns one whose `info` FAILS, so
 // ServerRunning() == false (cold).
 func runningClient() *tmux.Client {
 	return tmux.NewClient(&recordingCommander{})

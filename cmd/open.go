@@ -499,8 +499,9 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	// Read the persisted appearance preference from the SAME prefsStore instance.
 	// LoadAppearance is tolerant — every degenerate case collapses to AppearanceAuto
 	// — so the discarded error is acceptable: a read failure can only yield Auto,
-	// which is the default detection behaviour anyway. The model only stores it for
-	// now; honouring it (skip detection + first-paint wait) is a later task.
+	// which is the default detection behaviour anyway. The value is honoured
+	// downstream: a `light`/`dark` pin skips detection + the first-paint wait via
+	// Build → armAppearanceDetection (§2.6).
 	appearance := prefs.AppearanceAuto
 	if prefsStore != nil {
 		appearance, _ = prefsStore.LoadAppearance()

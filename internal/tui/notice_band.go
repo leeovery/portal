@@ -182,8 +182,9 @@ func newBandBase(role noticeBandRole, mode theme.Mode, colourless bool) bandBase
 // renderNoticeBand renders the §11 shared notice band: a far-left `▌` left-bar in
 // the role colour, then — for the §11.2 flashes — a `⚠`/`✓` status glyph, then the
 // message in the supplied on-band text token, all on the role's tint and padded to
-// exactly width cells so the band occupies the full row like the section header it
-// sits above. The flash bands (warning / success) fill the row with the bg.warning
+// exactly width cells so each line spans the full row like the section header it
+// sits above (single-line when the message fits, wrapping to multi-line otherwise
+// — see below). The flash bands (warning / success) fill the row with the bg.warning
 // tint (§11.2); the persistent info band (§11.3 signpost) carries no status glyph
 // and sits on the bg.selection tint — the SAME tint as the §11.4 command-pending
 // banner, since the two are one info-message element. This is the shared base both
@@ -351,6 +352,8 @@ func (m Model) activeNoticeBand() (role noticeBandRole, message string, ok bool)
 	if m.byTagSignpost {
 		return bandInfo, byTagSignpostText, true
 	}
+	// No active band: ok=false, so the role is don't-care (callers gate on ok); the
+	// returned bandWarning is an arbitrary placeholder that is never rendered.
 	return bandWarning, "", false
 }
 

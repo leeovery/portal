@@ -263,11 +263,12 @@ func TestContentInset_GroupedPaginationInvariant(t *testing.T) {
 	}
 }
 
-// TestContentInset_AppliesOnProjectsPreviewLoading asserts the inset composes on
-// the Projects, Preview, and Loading pages — each renders to exactly termW × termH
-// with the top/bottom gutter rows blank, proving the single global wrap covers
-// every page (no per-page inset).
-func TestContentInset_AppliesOnProjectsPreviewLoading(t *testing.T) {
+// TestContentInset_AppliesOnProjectsLoading asserts the inset composes on the
+// Projects and Loading pages — each renders to exactly termW × termH with the
+// top/bottom gutter rows blank, proving the single global wrap covers every page
+// (no per-page inset). Preview's inset is covered separately by
+// TestModelViewRoutesPagePreviewToPreviewModel.
+func TestContentInset_AppliesOnProjectsLoading(t *testing.T) {
 	const w, h = 90, 24
 
 	t.Run("projects", func(t *testing.T) {

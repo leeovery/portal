@@ -161,6 +161,9 @@ the result against task 2-1.
   byte-identical). Re-eyeballed: **reads well, wash-out resolved.** Phase 2 task
   771c41 MUST use `state.green-on-selection` for the attached marker on the selected
   row.
+  > **Superseded (Phase 2) — see the supersession note above:** the dedicated
+  > `state.green-on-selection` override was removed and its light `#3B5E18` folded
+  > into the global `state.green` (light), so 771c41 uses the global token.
 - **Ctrl+↑/↓ chord finding:** **deliverable** — `Ctrl+↑`→`^[[1;5A`, `Ctrl+↓`→`^[[1;5B`,
   both distinct/bindable (verified at the gate, see above). Task 2-1 binds them
   directly; no fallback needed. Re-confirm tmux-passthrough at 2-1.

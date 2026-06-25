@@ -13,7 +13,7 @@ import (
 // centralisedColourSites enumerates every NON-test production .go file in the
 // internal/tui package (the package directory only — the theme/ subpackage, the
 // sole sanctioned home for raw colour values, is excluded by globbing the package
-// dir rather than recursing). It is the §2.8 "closed vocabulary, no literal hex at
+// dir rather than recursing). It is the §2.9 "closed vocabulary, no literal hex at
 // call sites" rule made executable: after the §2.9 role-token migration none of
 // these render files may construct a colour from a raw hex / ANSI-index literal —
 // every colour must flow from a theme token.

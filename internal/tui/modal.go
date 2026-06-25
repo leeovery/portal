@@ -29,6 +29,12 @@ const (
 // fillCanvas wrap in View() then paints the owned mode-matched canvas into every
 // surrounding cell (NO_COLOR suppression + the 80×24 fallback inherited from that
 // Phase 1 path), so this layer only centres — it never paints the backdrop.
+//
+// §14.6 ADAPT decision (the open adapt-vs-rework question): the existing
+// overlay-splice path (renderModal / renderListWithModal / modalStyle) was ADAPTED
+// — in fact removed — in favour of simply NOT composing the page chrome while a
+// modal is up. Clear-to-canvas needed only chrome suppression plus the existing
+// Phase 1 fillCanvas wrap; no modal-system rework was required.
 func placeModalOnClearedCanvas(panel string, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }
@@ -71,7 +77,7 @@ func renderDeleteModalOnClearedCanvas(name, path string, width, height int, mode
 // centres it on the cleared owned canvas via placeModalOnClearedCanvas, like every
 // modal wrapper but with the rename modal's own hand-drawn single-tone joined panel
 // (renderRenameModalContent — the SAME frame the help/kill modals use, three
-// compartments with the violet-outlined input box nested in the body). The rename
+// compartments with the orange-outlined input box nested in the body). The rename
 // flow LOGIC (updateRenameModal / renameAndRefresh) is unchanged — only the
 // rendering is reskinned.
 func renderRenameModalOnClearedCanvas(input textinput.Model, oldName string, width, height int, mode theme.Mode, colourless bool) string {

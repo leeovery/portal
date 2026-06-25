@@ -29,7 +29,8 @@ Type "go run ./cmd/capturetool --fixture sessions-flat"
 Enter
 
 # First paint: the model fetches the fixture sessions on Init and renders the
-# flat list. Give the compile + first render time to settle.
+# flat list. The 4s pad covers the `go run` compile (cold build cache) + first
+# render — don't trim it or a cold-cache run flakes.
 Sleep 4s
 
 Screenshot "testdata/vhs/sessions-flat.png"

@@ -7,8 +7,7 @@
 // Each token carries BOTH a Light and a Dark variant. The resolved appearance
 // flows from the §2.6 appearance gate into the model's canvasMode, which the
 // delegates carry as their Mode; renderers resolve each token per mode via
-// ColorFor(mode). The dark-pinned Color() convenience survives only for the
-// handful of not-yet-mode-resolved call sites.
+// ColorFor(mode).
 package theme
 
 import (
@@ -17,8 +16,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Mode is the resolved light/dark appearance the canvas is painted for. Until
-// OSC 11 detection lands (1-7), the resolver defaults to Dark.
+// Mode is the resolved light/dark appearance the canvas is painted for. Dark is
+// the §2.6 no-answer fallback the resolver defaults to.
 type Mode int
 
 const (
@@ -27,13 +26,13 @@ const (
 	// an unconfigured resolver paints the dark canvas it was tuned for.
 	Dark Mode = iota
 	// Light is the mode-matched near-white canvas appearance. Its variants are
-	// filled by task 1-4 and wired to detection by task 1-7.
+	// pinned and the §2.6 appearance gate resolves into it.
 	Light
 )
 
 // Token is one semantic role colour in the closed MV vocabulary. It carries a
-// Light and a Dark hex (or ANSI-index) variant; Dark is pinned to §2.9 now,
-// Light is a placeholder filled by task 1-4. Name is the §2.9 token name, used
+// Light and a Dark hex (or ANSI-index) variant, both pinned to §2.9. Name is
+// the §2.9 token name, used
 // only by All() consumers (tests, future theme tooling) — never at a render
 // call site.
 type Token struct {
@@ -113,10 +112,10 @@ func (t Theme) All() []Token {
 }
 
 // MV is the built-in Modern Vivid theme. DARK variants are pinned exactly to the
-// §2.9 token table (the authoritative hex source). LIGHT variants are filled by
-// task 1-4 (this task) and measured against the owned light canvas `#e1e2e7`
-// (§2.3 / §2.9); 1-7 wires the resolver. Neither edits any call site, because
-// every renderer already references these tokens.
+// §2.9 token table (the authoritative hex source). LIGHT variants are pinned and
+// measured against the owned light canvas `#e1e2e7` (§2.3 / §2.9); the §2.6
+// appearance gate resolves which variant renders. Neither edits any call site,
+// because every renderer already references these tokens.
 //
 // §2.9-erratum note (user-approved 2026-06-19). §2.9's published light *ratio*
 // column was computed against pure white `#FFFFFF`, but §2.3 / §2.9 mandate
@@ -144,6 +143,8 @@ var MV = Theme{
 	TextOnSelection: Token{Name: "text.on-selection", Dark: "#FFFFFF", Light: "#1A1B2E"},
 
 	// Accents (light variants vs `#e1e2e7`).
+	// §2.9 published light ratio 5.7 was vs #FFFFFF; #8A3FD1 measures 4.37 vs
+	// #e1e2e7, clearing the 3.0 UI floor unremedied (no darken needed).
 	AccentViolet: Token{Name: "accent.violet", Dark: "#BB9AF7", Light: "#8A3FD1"},
 	// §2.9 erratum: light #2E5FD0 → #2D5CCA (4.64 vs #e1e2e7).
 	AccentBlue: Token{Name: "accent.blue", Dark: "#7AA2F7", Light: "#2D5CCA"},

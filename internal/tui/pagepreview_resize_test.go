@@ -7,12 +7,12 @@ import (
 )
 
 // TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize pins
-// the task 1-7 resize contract: tea.WindowSizeMsg records msg.Width/msg.Height
-// on m.width/m.height and calls m.viewport.SetSize with both dimensions
-// reduced by previewFrameOverhead (= 2), clamped non-negative. The frame
-// occupies one row at the top and one at the bottom, plus one column at the
-// left and one at the right, so the inner viewport surface is
-// (msg.Width − 2) × (msg.Height − 2) per § Resize behaviour.
+// the resize contract: tea.WindowSizeMsg records msg.Width/msg.Height on
+// m.width/m.height and calls m.viewport.SetSize with both dimensions reduced by
+// previewFrameOverhead (= 6), clamped non-negative. The §9 joined panel's frame
+// spans 6 rows (top + header + 2 dividers + footer + bottom) and 6 columns
+// (2 side borders + 2·panelRowInset each side), so the inner viewport surface is
+// (msg.Width − 6) × (msg.Height − 6) per § Resize behaviour.
 func TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize(t *testing.T) {
 	m := newFramePreviewModelAt(t, "main", nil, 80, 24)
 

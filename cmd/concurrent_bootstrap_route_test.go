@@ -1,7 +1,7 @@
 package cmd
 
-// Task spectrum-tui-design-5-2 — the cold/TUI concurrent route through
-// PersistentPreRunE → openTUI.
+// Task spectrum-tui-design-5-1/5-2 — the cold/TUI concurrent route through
+// PersistentPreRunE → openTUI (the 5-1 gate decides it, 5-2 implements it).
 //
 // On the cold + TUI path PersistentPreRunE must DEFER bootstrap (NOT run the
 // orchestrator synchronously) and hand a deferred runner to openTUI, which runs

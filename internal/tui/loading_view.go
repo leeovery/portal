@@ -81,10 +81,6 @@ const (
 )
 
 const (
-	// loadingBlockWordmarkWidth is the rendered width of the widest banner row plus
-	// the caret (one space + the caret glyph). Below this (with margins) the screen
-	// degrades to the single-row letter-spaced wordmark, then the compact form
-	// (§2.7). Computed once in init from loadingWordmark so it never drifts.
 	loadingTickGlyphSlot = 2 // fixed-width glyph column so labels align
 	loadingTickGap       = "  "
 

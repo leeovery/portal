@@ -34,7 +34,7 @@ const (
 	renameWasPrefix = "was: "
 
 	// renameInputInnerWidth is the input box's inner content width (in cells) — the
-	// lipgloss box Width (the span inside the violet side borders, including the box's
+	// lipgloss box Width (the span inside the orange side borders, including the box's
 	// 1-cell horizontal padding each side). It also anchors the panel's body width so
 	// the panel stays a consistent size regardless of value/old-name length, and so an
 	// over-long `was:` line truncates to fit rather than stretching the panel. Sized to
@@ -93,7 +93,7 @@ func renamePanelContentWidth() int {
 }
 
 // renameModalBodyRows builds the body compartment rows: the NEW NAME label, the
-// three-row violet input box (top edge / value+cursor / bottom edge), then the
+// three-row orange input box (top edge / value+cursor / bottom edge), then the
 // truncated `was: <old name>` context line.
 func renameModalBodyRows(input textinput.Model, oldName string, mode theme.Mode, colourless bool) []string {
 	rows := []string{renameModalLabelRow(mode, colourless)}

@@ -16,9 +16,9 @@ import (
 // These helpers preserve the v1 matching SEMANTICS one-to-one so the migration
 // is parity-only: keyIsCode is the v1 `msg.Type == tea.KeyX` test for named
 // keys, isRuneKey is the v1 `msg.Type == tea.KeyRunes && string(msg.Runes) ==
-// ch` test for a single printable rune, and keyIsCtrlC / keyIsCtrlU / keyIsCtrlD
-// are the v1 dedicated ctrl-combo key types (no longer distinct Types in v2 —
-// they are a Code + ModCtrl pairing).
+// ch` test for a single printable rune, and keyIsCtrlC is the v1 dedicated
+// ctrl-combo key type (no longer a distinct Type in v2 — it is a Code + ModCtrl
+// pairing).
 
 // keyIsCode reports whether the key press is the named key with the given code
 // (e.g. tea.KeyEnter, tea.KeyEscape, tea.KeyTab). It is the v2 replacement for

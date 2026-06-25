@@ -54,7 +54,8 @@ type destructiveConfirmSpec struct {
 	// + bold as the body's first row.
 	targetName string
 	// nameTrailer, when non-empty, is appended to the name row in text.detail after a
-	// two-cell canvas gap (the kill modal's `· N window(s)` count). Empty for delete.
+	// two-cell canvas gap (the kill modal's `· N window(s)` count) — rendered by
+	// destructiveNameRow. Empty for delete.
 	nameTrailer string
 	// extraBodyRows are already-styled rows inserted below the name row, before the
 	// blank separator (the delete modal's project-path row). Empty for kill.

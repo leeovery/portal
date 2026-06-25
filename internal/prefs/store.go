@@ -199,6 +199,8 @@ func (s *Store) LoadAppearance() (Appearance, error) {
 // decides non-fatality. A non-ErrNotExist read error during the read phase is
 // propagated rather than silently overwriting an unreadable-but-present file.
 func (s *Store) Save(mode SessionListMode) error {
+	// The readFile "file existed" bool is intentionally unused here: the fresh
+	// re-read IS the read-modify-write preservation mechanism.
 	f, _, err := s.readFile()
 	if err != nil {
 		return err

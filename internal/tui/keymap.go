@@ -26,15 +26,13 @@ type keymapEntry struct {
 	// form: the condensed §3.4 footer ALWAYS reads Key (never HelpKey).
 	Key string
 	// HelpKey is the longer, glyph-rich key form the ? help modal (§8.5) renders
-	// where it diverges from the footer Key form. Post the §3.4 footer-glyph switch
-	// the footer Key forms are themselves glyphs (nav "↑↓", attach "⏎", preview
-	// "␣"); the surviving HelpKey override is nav→"↑/↓" (footer "↑↓" vs help's
-	// slashed "↑/↓") and page keeps "^↑/↓". enter/space's HelpKey now coincides
-	// with their glyph Key. When empty the help modal falls back to Key. The footer
-	// NEVER reads this field. It mirrors
-	// HelpAction's footer-vs-help split, keeping both forms on the ONE descriptor so
-	// the single-source-of-truth-for-DISPLAY contract holds: a binding change updates
-	// the footer and the help together. (Dispatch is out of scope — see the type doc.)
+	// where it diverges from the footer Key form. The footer Key forms are glyphs
+	// (nav "↑↓", attach "⏎", preview "␣"); the HelpKey override is nav→"↑/↓" (footer
+	// "↑↓" vs help's slashed "↑/↓") and page keeps "^↑/↓". When empty the help modal
+	// falls back to Key. The footer NEVER reads this field. It mirrors HelpAction's
+	// footer-vs-help split, keeping both forms on the ONE descriptor so the
+	// single-source-of-truth-for-DISPLAY contract holds: a binding change updates the
+	// footer and the help together. (Dispatch is out of scope — see the type doc.)
 	HelpKey string
 	// Action is the action label shown beside the glyph (e.g. "attach",
 	// "switch view"). It is the TERSE footer form — the condensed §3.4 footer is

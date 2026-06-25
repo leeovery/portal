@@ -28,12 +28,11 @@ import (
 // dropped). The header text + body rows carry their own per-row inset
 // (panelRowInset).
 //
-// NOTE (Phase 4, deferred): the Preview `?` help OVERLAYS the preview without
-// blanking it (§8.5/§9.3), and the Preview keymap descriptor + help-from-Preview
-// wiring are NOT built here. The Preview arm is intentionally out of scope for
-// this task — when Phase 4 wires it, it must route the Preview descriptor through
-// these SAME renderers (renderHelpModalContent) so the three help modals stay
-// descriptor-driven and never drift.
+// NOTE: Phase 4 task 4-7 wired the Preview `?` help — it OVERLAYS the preview
+// without blanking it (§8.5/§9.3) and routes the Preview keymap descriptor
+// through these SAME renderers (renderHelpModalContent; see overlayHelpOnPreview
+// in pagepreview.go), so the three help modals stay descriptor-driven and never
+// drift.
 
 const (
 	// helpTitleGlyph is the violet `?` glyph that opens the header title row,
@@ -187,7 +186,9 @@ func helpActionLabel(e keymapEntry) string {
 // footer-glyph switch the footer Key forms are glyphs themselves; the surviving
 // HelpKey override is nav (footer "↑↓" vs the help body's slashed "↑/↓"), with
 // page reading its Key "^↑/↓" directly and enter/space's HelpKey now coinciding
-// with their glyph Key. The footer NEVER calls this — it always reads Key directly.
+// with their glyph Key. The condensed sessions/projects footer never calls this —
+// it reads Key directly; the command-pending footer reuses this resolver to share
+// the `enter`→`⏎` encoding.
 func helpKeyGlyph(e keymapEntry) string {
 	if e.HelpKey != "" {
 		return e.HelpKey

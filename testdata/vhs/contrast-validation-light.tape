@@ -7,8 +7,8 @@
 # bg.warning #E8D6A8, bg.track #D2D4DE, borders #C9CDDB) against #e1e2e7 — the
 # light-tint-on-light-canvas wash-out risk a numeric pass alone cannot catch
 # (§2.9 / §15.6). The §4.1 on-tint foregrounds (text.on-selection / text.strong /
-# state.green-on-selection — the §2.8 darker on-selection override, the 1-9
-# wash-out remedy — on bg.selection; text.on-warning on bg.warning) are rendered
+# state.green (darkened light #3B5E18, the folded-in 1-9 wash-out remedy) on
+# bg.selection; text.on-warning on bg.warning) are rendered
 # ON their tints for the eyeball. Like the dark tape this NEVER opens a tmux
 # server or touches ~/.config/portal.
 #

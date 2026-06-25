@@ -412,10 +412,10 @@ type Model struct {
 	// flashWarning by every setFlash and is irrelevant once flashText is empty.
 	flashKind flashKind
 
-	// byTagSignpost is the persistent "No tags yet" signpost flag (spec §
-	// Mode Persistence & Empty States → Empty states → By Tag with zero
-	// tags). It is set true by rebuildSessionList whenever ModeByTag is
-	// active AND no project carries any tag — the zero-tags-anywhere gate.
+	// byTagSignpost is the persistent "No tags yet" signpost flag (§11.3 / §5.3 —
+	// By Tag with zero tags anywhere). It is set true by rebuildSessionList whenever
+	// ModeByTag is active AND no project carries any tag — the zero-tags-anywhere
+	// gate.
 	// In that state the list is built with the plain flat builder (degrade
 	// to flat) while viewSessionList renders a dimmed signpost row. Unlike
 	// flashText (transient, cleared on the next actionable key), this is a
@@ -3169,7 +3169,7 @@ func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
 	m.renameTarget = si.Session.Name
 	ti := textinput.New()
 	// No inline prompt: the §8.4 reskin renders the field as a `NEW NAME` label over
-	// a violet-outlined input box (renderRenameModalContent), so the textinput shows
+	// an orange-outlined input box (renderRenameModalContent), so the textinput shows
 	// the value alone — the former "New name: " prompt would double up inside the box.
 	ti.Prompt = ""
 	ti.SetValue(m.renameTarget)

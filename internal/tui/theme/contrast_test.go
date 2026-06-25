@@ -326,7 +326,9 @@ func TestPreviewPeekChromeClearsFloorAgainstCanvas(t *testing.T) {
 // TestEveryTokenHasLightVariant proves the §2.9 light column is fully populated:
 // every token in the closed vocabulary carries a non-empty Light hex. (The DARK
 // column is pinned by TestMVDarkVariantsPinned in theme_test.go.) This is the
-// "every §2.9 token carries a light variant" acceptance criterion.
+// "every §2.9 token carries a light variant" acceptance criterion. Companion (not
+// duplicate): theme_test.go's TestEachTokenCarriesLightVariant proves the resolver
+// seam (ColorFor(Light) ≠ ColorFor(Dark)); this one proves population + parseability.
 func TestEveryTokenHasLightVariant(t *testing.T) {
 	for _, tok := range theme.MV.All() {
 		if tok.Light == "" {

@@ -87,6 +87,8 @@ func renderSectionHeaderRow(left string, width int, canvasMode theme.Mode, colou
 	w := headerWidthOrFallback(width)
 	leftWidth := lipgloss.Width(left)
 
+	// Rendered eagerly so we can measure hintWidth for the degrade decision below;
+	// the `leftWidth >= w` branch discards it (cheap — runs once per frame).
 	hint := headerStyle(theme.MV.TextDetail, canvasMode, colourless).Render(sectionFilterHint)
 	hintWidth := lipgloss.Width(hint)
 
