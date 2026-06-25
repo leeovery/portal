@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-25
 cycle: 1
 phase: Gap Analysis
@@ -24,8 +24,8 @@ The spec states "These criteria are the observable contract; the fix is correct 
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added Testing Requirements case 5 — a deterministic interim-page assertion (assert PageSessions after dismissal, before the refetch SessionsMsg). Auto-mode.
 
 ---
 
@@ -43,8 +43,8 @@ This is the load-bearing ordering claim of the entire fix. The interim-Sessions 
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added an explicit "Ordering contract (cold route)" paragraph to Fix Approach making the same-handler-return ordering (transition mutates interim page first, then batches the refetch cmd) the load-bearing contract. Auto-mode.
 
 ---
 
@@ -64,8 +64,8 @@ Two related under-specifications:
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: CORRECTION to the fix design. Fix Approach bullet 1 amended: on the cold route transitionFromLoading does NOT set sessionsLoaded (leave false) and does NOT decide — this closes the window where a late ProjectsLoadedMsg would latch on Projects against the stale list. Ordering contract paragraph documents independence from ProjectsLoadedMsg arrival order. Guard test added as Testing Requirements case 6. Auto-mode.
 
 ---
 
@@ -83,8 +83,8 @@ These are presented as equivalent, but the spec never states that `progressRecei
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Canonical cold-route predicate" invariant — progressReceiver != nil is the single authoritative discriminator (matches refetchSessionsAfterRestore's guard); no alternative predicate may be introduced. Auto-mode.
 
 ---
 
@@ -102,8 +102,8 @@ What is not addressed: with the cold-route change, transitionFromLoading no long
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Captured by the ordering contract (deferral + refetch are a single unit, same handler return) plus the "Decision always resolves" invariant. Auto-mode.
 
 ---
 
@@ -121,8 +121,8 @@ The spec says the interim page must not be "blank" — but does not clarify whet
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Interim render content" invariant — the one-frame empty-Sessions empty-state render is an accepted valid (non-blank) page; must not be special-cased to suppress. Auto-mode.
 
 ---
 
@@ -140,8 +140,8 @@ The unaddressed question: can commandPending and the cold concurrent route co-oc
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "commandPending does not intersect the deferral" invariant — verified in code: Init's commandPending branch returns before wiring loading-page dismissal machinery, so transitionFromLoading is never invoked for a commandPending launch; no intersection, AC6 unchanged, no interim flash. Auto-mode.
 
 ---
 
@@ -156,7 +156,7 @@ An invariant states: "A SessionsMsg carrying an error continues to quit, exactly
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Failing refetch degrades to today's quit" invariant — an error-carrying refetch SessionsMsg runs tea.Quit (unchanged); must not strand the picker on the interim page; same error UX as warm. Auto-mode.
 
 ---
