@@ -23,6 +23,7 @@ After [shell integration](#shell-integration), you interact with Portal through 
 ## Features
 
 - **Interactive session picker** — fuzzy-filterable TUI for switching, creating, renaming, or killing tmux sessions from a bare shell.
+- **Modern Vivid interface** — a colourful, characterful TUI that paints its own mode-matched light/dark canvas (auto-detected via OSC 11, or pinned via the `appearance` preference; honours `NO_COLOR`), with an in-app `?` keymap on every page.
 - **Scrollback preview** — press `Space` on any session in the picker for a read-only Quick Look of its terminal scrollback. Cycle windows and panes without attaching. See [Scrollback Preview](#scrollback-preview).
 - **Session grouping & tags** — press `s` to cycle the session list between flat, grouped by project, and grouped by tag. Tag directories in the projects editor and every session opened there inherits the tags. See [Session Grouping & Tags](#session-grouping--tags).
 - **Path aliases + zoxide** — open sessions by short name (`x work`) or recent directory; falls back to a TUI filter when nothing matches.
@@ -238,19 +239,24 @@ portal init bash --cmd p
 
 ## TUI Keybindings
 
+Navigation is **arrows only** — there are no vim (`j`/`k`/`g`/`G`) or page-jump (`PgUp`/`Home`/…) aliases, and no uppercase bindings. Press **`?`** on any page for an in-app help modal listing that page's complete keymap.
+
 | Key | Action |
 |---|---|
-| `↑`/`k` | Move up |
-| `↓`/`j` | Move down |
-| `Enter` | Select session / confirm |
+| `↑` / `↓` | Move up / down |
+| `Ctrl+↑` / `Ctrl+↓` | Page up / down |
+| `Enter` | Attach to / open the highlighted session |
 | `Space` | Preview scrollback of highlighted session (sessions list only) |
-| `s` | Switch view: cycle Flat → By Project → By Tag (sessions list only) |
 | `/` | Filter mode (fuzzy search) |
-| `R` | Rename session |
-| `K` | Kill session |
-| `q`/`Esc` | Quit |
+| `s` | Switch view: cycle Flat → By Project → By Tag (sessions list only) |
+| `x` | Toggle between Sessions and Projects |
+| `r` | Rename session |
+| `k` | Kill session |
+| `n` | New session in the current directory |
+| `?` | Show the full keymap for the current page |
+| `q` / `Esc` | Quit (`Esc` clears an active filter first) |
 
-The TUI has three views: session list, project picker, and scrollback preview.
+The TUI has three views: session list, project picker, and scrollback preview. It paints its own light/dark canvas (set `appearance` in `prefs.json`, or `NO_COLOR` for a colourless render — see [Configuration](#configuration)).
 
 ### Scrollback Preview
 
@@ -262,16 +268,17 @@ firing, no tmux state mutation).
 
 | Key | Action |
 |---|---|
-| `]` | Next window (wraps) |
-| `[` | Previous window (wraps) |
+| `←` / `→` | Previous / next window (wraps) |
 | `Tab` | Next pane within the current window (wraps) |
-| `↑`/`↓`/`j`/`k`/`PgUp`/`PgDn`/`Home`/`End` | Scroll within the loaded buffer |
-| `Esc` | Return to the sessions list |
+| `↑` / `↓`, `Ctrl+↑` / `Ctrl+↓` | Scroll within the loaded buffer |
+| `Enter` | Attach to this pane |
+| `Space` / `Esc` | Return to the sessions list |
 
 Each pane shows the last ~1000 lines of saved scrollback, anchored at the
-tail. Chrome shows `Window M of N · Pane X of Y · <window-name>` plus key
-hints. A pane that has no saved content yet (brand-new session, daemon
-hasn't ticked) renders `(no saved content)`.
+tail. Chrome shows the session name with `Window x/y · Pane x/y` and a footer
+of key hints, in a distinct cyan "peek mode" frame so a preview never looks
+like a live session. A pane that has no saved content yet (brand-new session,
+daemon hasn't ticked) renders `(no saved content)`.
 
 ## Session Grouping & Tags
 
@@ -293,17 +300,21 @@ sessions and the headers step aside, restoring when the filter clears.
 
 **Tags live on directories (projects), not individual sessions.** Every session
 opened in a directory inherits that directory's tags via a live lookup — there is
-nothing to tag per session. Tags are freeform, trimmed, and lower-cased
-(`Work`, `WORK`, and `work` are the same tag); applying a tag to a second
-directory auto-joins that group, and removing the last use of a tag makes the
-group disappear. There is no tag registry and no `tags` CLI in v1.
+nothing to tag per session. Tags are freeform and trimmed, but **case-sensitive**
+(`Work` and `work` are different tags — the text is stored exactly as typed);
+applying a tag to a second directory auto-joins that group, and removing the last
+use of a tag makes the group disappear. There is no tag registry and no `tags`
+CLI in v1.
 
 **Managing tags:** open the projects picker (`x`, then switch to projects with
-`x`), highlight a project, and edit it. The edit modal has a **Tags** field
-alongside Name and Aliases — `Tab` cycles between the three fields, type a tag and
-press `Enter` to add it, highlight an entry and press `x` to remove it. Only
-directories already opened in Portal (i.e. known projects) are taggable — open a
-directory once, then tag it.
+`x`), highlight a project, and edit it. The edit modal has **Name**, **Aliases**,
+and **Tags** fields — `Tab` (or `↑`/`↓`) moves between them and `←`/`→` between
+chips and the trailing `+ add` slot. To add a tag, land on `+ add` and press
+`Enter` (or `+`), type it, and `Enter` to save; press `x` on a chip to remove it.
+Every edit **saves immediately** — there is no separate confirm step, and `Esc`
+never discards saved work (it just backs out the current edit or closes the
+modal). Only directories already opened in Portal (i.e. known projects) are
+taggable — open a directory once, then tag it.
 
 ## Automatic Server Bootstrap & Restoration
 
@@ -331,10 +342,12 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `aliases` | Path aliases (key=value, one per line) | `PORTAL_ALIASES_FILE` |
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
 | `hooks.json` | Per-pane resume hooks (pane → event → command) | `PORTAL_HOOKS_FILE` |
-| `prefs.json` | UI preferences (last-used session-list grouping mode) | `PORTAL_PREFS_FILE` |
+| `prefs.json` | UI preferences — last-used session-list grouping mode + the owned-canvas `appearance` (`auto`/`light`/`dark`) | `PORTAL_PREFS_FILE` |
 | `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (structured, rotating diagnostics — see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
+
+**Appearance.** Portal paints its own light or dark canvas so its colours always sit on the surface they were tuned for. By default (`"appearance": "auto"`) it detects your terminal's background via an OSC 11 query and matches it, falling back to dark if the terminal doesn't answer. Set `"appearance": "light"` or `"dark"` in `prefs.json` to pin the canvas and skip detection (useful when detection misfires, e.g. under tmux passthrough). Setting `NO_COLOR` (to any non-empty value) disables the canvas entirely and renders colourlessly on your terminal's native colours.
 
 ## Logging
 
