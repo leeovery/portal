@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-25
 cycle: 2
 phase: Input Review
@@ -25,8 +25,9 @@ Without this precondition stated, a reader could reasonably wonder why `sessions
 On the **cold concurrent route** (`progressReceiver != nil`), `transitionFromLoading()` sets a valid interim `activePage = PageSessions` but does **not** set `sessionsLoaded` and does **not** call `evaluateDefaultPage()`. Leaving `sessionsLoaded` false is load-bearing: it keeps every `evaluateDefaultPage()` invocation a no-op (via the `!sessionsLoaded` early-return) until the post-restore refetch lands, so nothing can latch against the stale interim list. The decision is left to the refetch.
 
 **Proposed Addition**:
+Add to the cold-route bullet: `sessionsLoaded` is already false at transition time because the frame-one stale `SessionsMsg` (landing while `activePage == PageLoading`) updates list contents but deliberately does not flip `sessionsLoaded` — so the fix only needs to *not set* it, never reset it.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added verbatim to Fix Approach cold-route bullet 1. Auto-mode.
 
 ---
