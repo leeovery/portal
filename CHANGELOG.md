@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-25
+
+✨ Added
+
+- Automatic light and dark canvas. Portal detects the terminal background via OSC 11 on first paint and matches it. A new `appearance` preference (`auto`, `light`, `dark`) in `prefs.json` overrides detection, and `NO_COLOR` disables colour entirely.
+- An honest loading screen on cold start. When the tmux server is not already running, bootstrap now runs concurrently with the UI behind a real loading view (block `PORTAL` wordmark, progress bar, and a live step list) instead of a blank pause.
+
+🔧 Changed
+
+- The session and project picker has been fully reskinned to the new Modern Vivid theme: a Tokyo Night inspired palette over an owned, mode matched canvas (dark `#0b0c14`, light `#e1e2e7`) that fills the terminal gutter.
+- Keymap revision: navigation is now arrow keys only (vim and page-jump aliases removed), `x` toggles between Sessions and Projects in both directions, `s` cycles session grouping (Flat, By Project, By Tag), `k` kills a session, `d` deletes a project, and `?` opens a per-page help modal.
+- The terminal background is now restored when Portal exits, with a guard that prevents terminals which echo the canvas colour back (such as Ghostty) from being left tinted.
+- The README has been restructured with screenshots of the new interface.
 ## [0.7.7] - 2026-06-17
 
 🔧 Changed
