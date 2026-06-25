@@ -2,12 +2,18 @@
 # every other key uses mint's compiled defaults. Run `mint setup` for the full
 # key reference.
 
-# Tooling/workflow artifacts (not shipped product source) — kept out of the
-# AI notes/commit diff so release notes and commit messages describe the CLI,
-# not workflow specs, agent definitions, or task-tracking state.
+# Tooling/workflow artifacts and test/doc assets (not shipped product behaviour),
+# kept out of the AI notes/commit diff so release notes and commit messages
+# describe the CLI, not workflow specs, agent definitions, task-tracking state,
+# test scaffolding, or visual fixtures. The test exclusion is load-bearing: for a
+# large feature, *_test.go (especially byte-exact golden fixtures) can be the bulk
+# of the diff and overflow the notes-AI context ("Prompt is too long").
 diff_exclude = [
     '.workflows/**',  # workflow specs/plans/knowledge (1.5k markdown files)
     '.claude/**',     # Claude Code agents, skills, settings
     '.agntc/**',      # agent tooling manifest
     '.tick/**',       # task-tracking state (multi-MB jsonl)
+    '**/*_test.go',   # Go tests, incl. large byte-exact golden fixtures (the dominant diff-size contributor); notes describe behaviour, not test scaffolding
+    'testdata/**',    # vhs capture tapes + reference/capture PNGs (visual-test fixtures)
+    'art/**',         # README screenshot assets (docs, not source)
 ]
