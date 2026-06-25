@@ -9,10 +9,11 @@
 > Bodies below were edited in place to match; this block is the only annotation. Original wording is recoverable via `git log -p`.
 
 > **⚠ Corrigendum — 2026-06-25 (spectrum-tui-design review).**
-> The §2.9 MV token-table **light column** and the §7.3 **no-matches glyph** were reconciled to the as-built implementation (the spec lagged the build-time §1-4 / §1-9 validation).
+> The §2.9 MV token-table **light column**, the §7.3 **no-matches glyph**, and the §11.3 **signpost text token** were reconciled to the as-built implementation (the spec lagged the build-time §1-4 / §1-9 validation and a deliberate info-band consistency decision).
 > - **§2.9 light variants & ratios.** The original light *ratio* column was computed against pure white `#FFFFFF`; §2.3 / §2.9 mandate measuring each light variant against the **owned light canvas `#e1e2e7`**. During validation, seven light foreground hexes were darkened (hue-preserved) to clear the floor against the real canvas, and `state.green`'s light value was folded to a single `#3B5E18` that clears **both** the canvas and the `bg.selection` tint (retiring the former light-only on-selection override). **Superseded → current:** `text.muted-bright` `#515A80`→`#4C5478`; `text.detail` `#5A6296`→`#586093`; `text.dim` `#7C84AA`→`#767DA2`; `accent.blue` `#2E5FD0`→`#2D5CCA`; `accent.cyan` `#0E7490`→`#0D6C87`; `state.green` `#4C7A1F`→`#3B5E18`; `state.red` `#C32647`→`#BD2545`. The light **ratio** column now reads vs `#e1e2e7` (on-tint tokens — `text.on-selection`, `text.on-warning` — measured against their tint). The two light surface tints that were `(§15)` placeholders are pinned: `bg.warning` `#E8D6A8`, `bg.track` `#D2D4DE`. Every light value is numerically re-verified in `internal/tui/theme/contrast_test.go`.
 > - **§7.3 no-matches glyph.** Superseded: `⌀` (U+2300 DIAMETER SIGN). Current: **`∅`** (U+2205 EMPTY SET) — chosen at build time for wider terminal-font support and a more apt "no results" semantics.
-> Bodies above (§2.9, §7.3) were edited in place to match; this block is the only annotation. Original wording is recoverable via `git log -p`.
+> - **§11.3 / §2.9 signpost text token.** Superseded: the "No tags yet" signpost message in `text.strong` (and `text.strong`'s §2.9 role line listing "banner/signpost"). Current: **`text.on-selection`** — the on-band token co-tuned for the `bg.selection` info-band tint, chosen deliberately so the signpost matches the §11.4 command-pending banner (all persistent info bands share the same on-band token). `text.strong`'s §2.9 role drops "banner/signpost" accordingly. Both candidate tokens clear the floor on the tint (`text.on-selection` 10.5:1, `text.strong` 5.7:1 light); the choice is consistency, not legibility.
+> Bodies above (§2.9, §7.3, §11.3) were edited in place to match; this block is the only annotation. Original wording is recoverable via `git log -p`.
 
 ## Specification
 
@@ -123,7 +124,7 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 | Token | Role | Dark (on `#0b0c14`) | Light (on `#e1e2e7`) | Floor |
 |---|---|---|---|---|
 | `text.primary` | names, wordmark, active labels, modal titles, chip text | `#C0CAF5` · 13.0 | `#2E3C64` · 8.3 | 4.5 |
-| `text.strong` | selected-row meta, help actions, banner/signpost | `#A9B1D6` · 9.9 | `#3F4760` · 7.1 | 4.5 |
+| `text.strong` | selected-row meta, help actions | `#A9B1D6` · 9.9 | `#3F4760` · 7.1 | 4.5 |
 | `text.muted-bright` | done-tick labels, selected-row path | `#828BB8` · 6.3 | `#4C5478` · 5.7 | 4.5 |
 | `text.detail` | paths, counts, footer labels, subtitles, group headings | `#737AA2` · 5.0 | `#586093` · 4.6 | 4.5 |
 | `text.dim` | group `··· N` counts, pending loading steps | `#535C86` · 3.2 | `#767DA2` · 3.1 | 3.0¹ |
@@ -459,7 +460,7 @@ A **transient band** under the title separator: an **`accent.orange` left-bar** 
 - **F10 — flash vs pagination:** the flash band is **chrome** — when it appears/clears, the list **viewport height is recomputed** (the same recompute the one-row-per-delegate invariant already mandates), so the list never overflows or miscounts rows.
 
 ### 11.3 "No tags yet" signpost (reskin)
-By-Tag with **zero tags anywhere**: an **`accent.violet` left-bar** signpost (`No tags yet — add tags in a project's editor: press x for projects, then e to edit`, `text.strong`) over the **flat list** — degrade-with-message, not a silent flatten (§5.3).
+By-Tag with **zero tags anywhere**: an **`accent.violet` left-bar** signpost (`No tags yet — add tags in a project's editor: press x for projects, then e to edit`, `text.on-selection` — the on-band token co-tuned for the `bg.selection` info-band tint, matching the §11.4 command-pending banner so all persistent info bands read consistently) over the **flat list** — degrade-with-message, not a silent flatten (§5.3).
 
 ### 11.4 Command-pending banner (reskin)
 When Projects is invoked to **run a command**: an **`accent.violet` left-bar** banner (`Pick a project to run`) with the command in an **`accent.orange` chip**; the footer becomes `⏎ run here · n run in cwd · esc cancel`. The screen keeps the **full Projects chrome** (green `Projects` header + `/ to filter`) — not a stripped page; the banner sits on top.

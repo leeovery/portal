@@ -6,7 +6,7 @@
 # carries a tag, the By-Tag view degrades to the flat session list under the
 # persistent accent.violet "No tags yet" info signpost (degrade with message, not
 # silent flatten — §5.3), funnelled through the §11 single-slot notice-band
-# arbiter. The capture shows the violet ▌ left-bar band + message (text.strong, no
+# arbiter. The capture shows the violet ▌ left-bar band + message (text.on-selection, no
 # tint) under the title separator, above the `Sessions — by tag` section header,
 # over the flat list. Like the other tapes this NEVER opens a tmux server or
 # touches ~/.config/portal.
