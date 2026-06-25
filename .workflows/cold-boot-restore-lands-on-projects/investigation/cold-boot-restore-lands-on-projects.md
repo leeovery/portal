@@ -132,10 +132,35 @@ On the cold concurrent-bootstrap route, the default-page decision (`evaluateDefa
 
 ## Fix Direction
 
-(pending — populated after analysis and findings review)
+> High-level only — the chosen approach is refined in specification. Confirmed with the user in findings review (Discussion below).
+
+The landing-page decision must be evaluated against the **post-restore** session list on the cold route, not the stale Init snapshot. The fix is fundamentally about *ordering / latch timing*: defer (or re-open) the page decision until the corrected session count is in hand.
+
+### Options Explored (high-level)
+
+- **A — Don't latch the decision in `transitionFromLoading` on the concurrent route; let the post-restore refetch drive it.** On the cold route, `transitionFromLoading` would flip to the loading-exit state but NOT call `evaluateDefaultPage`; the refetched `SessionsMsg` (which already calls `evaluateDefaultPage` when not on PageLoading) would make the landing decision against the correct, post-restore list. Warm route unchanged (no refetch, decision still made synchronously as today).
+- **B — Allow exactly one re-evaluation after the post-restore refetch.** Keep `transitionFromLoading` as-is but let the refetch's `SessionsMsg` re-open the latch once (e.g. the concurrent route clears/bypasses `defaultPageEvaluated` for the single post-restore refetch) so the page is re-decided on the corrected count.
+- **C — Gate the cold-route transition on the refetch completing first.** Restructure so the refetch lands *before* `transitionFromLoading` evaluates the page, making the decision against fresh data in one shot.
+
+**Leaning:** Option A — it removes the premature decision rather than patching the latch, keeps the warm path byte-identical (the §10.1 zero-new-risk contract), and reuses the existing post-refetch `evaluateDefaultPage` call site. To be finalised in specification.
+
+### Testing Recommendations
+
+- Add a cold-route test asserting the **active page is Sessions** when Init's `ListSessions` returns empty and the post-restore refetch returns N>0 sessions (the exact ordering of this bug). Distinct from existing "list is populated" assertions.
+- Confirm warm-route parity test still lands on Sessions and that `refetchSessionsAfterRestore` stays `nil` on warm.
+- Cover the empty-restore case: cold boot with genuinely zero sessions restored must still land on Projects (don't over-correct to always-Sessions).
+- Confirm `initialFilter` on a cold-boot launch applies to the Sessions list (same `evaluateDefaultPage` code path).
+
+### Risk Assessment
+
+- **Fix complexity:** Low (localised to the cold-route transition/decision ordering in `model.go`).
+- **Regression risk:** Low–Medium — touches load-bearing startup ordering with prior-incident history (slow-open / zombie-session); the warm path must stay untouched. Race review of the live event loop during loading still applies.
+- **Recommended approach:** Regular release (UX-only, no hotfix urgency).
 
 ---
 
 ## Notes
 
-(pending)
+- The seed's hypothesis was correct: the landing decision is captured before the restored sessions are visible to `ListSessions`. Investigation pins the *exact* mechanism — the one-shot `defaultPageEvaluated` latch in `evaluateDefaultPage`, decided inside `transitionFromLoading` against the stale Init snapshot, with the post-restore `refetchSessionsAfterRestore` landing too late to re-decide.
+- Not a race in the classic non-deterministic sense — it is **deterministic** on the cold route: Init always enumerates before restore, so the count is always 0 at decision time → always Projects (consistent with the "always Projects" observation).
+- The fix should be scoped to the concurrent cold route only; warm/CLI paths are correct and must remain untouched (zero-new-risk contract from `spectrum-tui-design`).
