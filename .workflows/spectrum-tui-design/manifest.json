@@ -236,7 +236,7 @@
     "review": {
       "items": {
         "spectrum-tui-design": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "spectrum-tui-design-1-1",
             "spectrum-tui-design-1-2",
