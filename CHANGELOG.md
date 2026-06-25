@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-06-25
+
+🔧 Changed
+
+- Go module updated to Go 1.26, enabling use of modern standard library idioms throughout the codebase.
+- Multiple string-splitting hot paths migrated to `strings.SplitSeq` and `strings.FieldsSeq` — avoids allocating intermediate string slices when iterating lines.
+- Slice containment checks, map copies, and backward iteration replaced with `slices.Contains`, `maps.Copy`, and `slices.Backward` from the standard library.
+- Clamped width and count calculations replaced with `min`/`max` builtins, removing repetitive if-guards across rendering code.
+
+✨ Added
+
+- `golangci-lint` configuration added (`.golangci.yml`), enabling the `modernize` linter alongside the standard set — run locally or from the release step to catch idiom drift.
+- README hero image updated to show the animated cold-boot sequence, and a new feature-tour animation added to the Screenshots section.
+
 ## [0.8.0] - 2026-06-25
 
 ✨ Added
