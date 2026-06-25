@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-26
 cycle: 3
 phase: Gap Analysis
@@ -31,9 +31,9 @@ Why this matters for implementation:
 Suggested correction direction: re-state the invariant in terms of the real mechanism — the `ProjectsLoadedMsg` handler calls `evaluateDefaultPage()` unconditionally on every project load, and premature latching during the interim window is prevented solely by the `!sessionsLoaded` early-return inside `evaluateDefaultPage()` (not by any page guard on the `ProjectsLoadedMsg` caller). For `SessionsMsg`, the `activePage == PageLoading` early-return additionally suppresses the call while on the loading page. This keeps the two handlers' actual guard shapes distinct and accurate.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Reword the "Decision always resolves" invariant to give the two handlers their real guard shapes: SessionsMsg arm gated by `activePage == PageLoading` early-return; ProjectsLoadedMsg arm calls evaluateDefaultPage unconditionally, with premature latching prevented solely by the `!sessionsLoaded` early-return inside evaluateDefaultPage (not a page guard on that caller).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Verified against model.go — ProjectsLoadedMsg handler calls evaluateDefaultPage unconditionally (no PageLoading gate); SessionsMsg handler has the PageLoading early-return. Reworded invariant. Ordering-contract paragraph was already accurate (attributes to !sessionsLoaded early-return), left unchanged. Auto-mode.
 
 ---
