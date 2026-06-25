@@ -64,6 +64,21 @@ These criteria are the observable contract; the fix is correct only if every row
 - **`commandPending` branch preserved.** The `commandPending → Projects` arm of `evaluateDefaultPage()` is independent of the deferral and must remain correct.
 - **Scope: cold concurrent route only.** The change is confined to the cold concurrent-bootstrap landing-decision ordering in `internal/tui/model.go`. No changes to the bootstrap orchestrator, restore engine, tmux enumeration, or `evaluateDefaultPage`'s decision logic.
 
+### Testing Requirements
+
+The existing cold-boot test (`internal/tui/coldboot_session_refetch_test.go`) passes for the **wrong reason**: it builds the model with no project store and never delivers `ProjectsLoadedMsg`, so `projectsLoaded` stays false, `evaluateDefaultPage()` early-returns without latching, and `activePage` keeps the tentative `PageSessions` set in `transitionFromLoading()`. The assertion passes despite the empty stale snapshot. In production `loadProjects` *does* emit `ProjectsLoadedMsg`, so the latch fires and the bug surfaces. Therefore:
+
+- **A regression test MUST deliver `ProjectsLoadedMsg` before the loading-page transition.** Without it, `projectsLoaded` stays false, the latch never fires, and the test passes without exercising the defect. This is mandatory for every cold-route landing-page test below.
+
+Required test cases:
+
+1. **Cold route, pre-restore-empty → N>0 (the exact bug ordering, AC1).** `Init`'s `ListSessions` returns empty; `ProjectsLoadedMsg` is delivered during loading; the post-restore refetch returns N>0 sessions. Assert the **active page is Sessions** (not merely that the list is populated — that is a distinct, weaker assertion the old test already made).
+2. **Cold route, empty restore → zero sessions (AC2).** Cold boot where the post-restore refetch genuinely returns zero sessions must still land on **Projects** — guards against over-correcting to always-Sessions.
+3. **Cold route, `initialFilter` + N>0 (AC3).** A cold-boot launch carrying an `initialFilter` lands on **Sessions** with the filter applied to the **session** list (same `evaluateDefaultPage` code path).
+4. **Warm-route parity (AC4/AC5).** The warm route still lands on Sessions for N>0, and `refetchSessionsAfterRestore()` stays `nil` on the warm route (no extra enumeration).
+
+Each test asserts the **active page**, not just list contents — the old blind spot.
+
 ---
 
 ## Working Notes
