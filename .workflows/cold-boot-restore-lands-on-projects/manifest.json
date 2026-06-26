@@ -33,7 +33,7 @@
         "cold-boot-restore-lands-on-projects": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "c08bdf7ab906e549d1e2c60b5cb92e2df80bd6c6",
+          "spec_commit": "5f01c1fe318b3cc207244a4497b7f18de965e964",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
