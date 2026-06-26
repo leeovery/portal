@@ -1823,10 +1823,28 @@ func (m Model) refetchSessionsAfterRestore() tea.Cmd {
 }
 
 // transitionFromLoading moves from the loading page to the normal sessions page.
-// It marks sessions as loaded so evaluateDefaultPage can determine the correct
-// landing page when projects also finish loading.
+//
+// On the warm/CLI route (nil progressReceiver) the Init snapshot is already
+// post-restore (PersistentPreRunE ran the orchestrator synchronously before the
+// model was built), so it marks sessions loaded and lets evaluateDefaultPage
+// make the landing decision immediately.
+//
+// On the cold concurrent route (non-nil progressReceiver) the Init snapshot is
+// stale/empty — Restore (bootstrap step 6) ran in a goroutine AFTER frame-one
+// enumeration, so the restored sessions did not exist yet when Init enumerated.
+// Deciding the landing page here would latch defaultPageEvaluated against that
+// stale interim list (→ Projects) and the post-restore refetch could never
+// re-decide. So on the cold route this only moves off PageLoading onto a valid
+// interim PageSessions and leaves sessionsLoaded false, so every
+// evaluateDefaultPage caller early-returns until the post-restore refetch's
+// SessionsMsg lands and makes the one true decision against the repaired list.
+// The refetch is dispatched in the SAME handler return (see the
+// LoadingMinElapsedMsg / BootstrapCompleteMsg arms).
 func (m *Model) transitionFromLoading() {
 	m.activePage = PageSessions
+	if m.progressReceiver != nil {
+		return
+	}
 	m.sessionsLoaded = true
 	m.evaluateDefaultPage()
 }
