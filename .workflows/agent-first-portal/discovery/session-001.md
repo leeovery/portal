@@ -118,8 +118,41 @@ synthesise topics.
 
 ## Topics Identified
 
-(none)
+### agent-state
+
+- Routing: discussion
+- Why: the import has the host-side architecture largely designed; the one open thread (verifying Claude hook→state mapping; non-Claude signalling) can be a research spike inside the discussion.
+
+### agent-state-surfacing
+
+- Routing: discussion
+- Why: extends the existing picker/TUI and tmux status line; clear shape, existing decision space.
+
+### session-control-overlay
+
+- Routing: discussion
+- Why: clear UX shape over existing tmux ops; replacing a known tool the user already uses.
+
+### resume-hook-internalisation
+
+- Routing: discussion
+- Why: mechanism is fairly clear (reuse the versioned hook-install machinery); the question is ownership, not feasibility.
+
+### mobile-client
+
+- Routing: research
+- Why: client framework and terminal engine are explicitly open in the import (RN/Expo and GhosttyKit are leads, not decided).
+
+### transport
+
+- Routing: research
+- Why: relay implementation, end-to-end encryption specifics and the APNs path were discussed only at a high level — open feasibility.
+
+### productisation
+
+- Routing: discussion
+- Why: mostly deciding posture (Free/Pro split, installer, pricing stance, positioning); competitor research already done in the import.
 
 ## Conclusion
 
-(none)
+7 topics added. Map now has 7 topics.
