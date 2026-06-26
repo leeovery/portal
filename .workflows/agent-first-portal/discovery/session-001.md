@@ -96,6 +96,22 @@ Decided / Open split. The document's internal decisions and phasing are
 the user's prior work; they inform the shape here but topic synthesis,
 routing, and any planning/phasing remain for the downstream phases.
 
+Two surfaces from the opening conversation are NOT in the import plan;
+the user confirmed both are in scope for this epic:
+
+- In-tmux Portal pop-up overlay — a Portal overlay accessible while an
+  agent runs, for rename/detach/quit of panes·windows·sessions; replaces
+  the user's current Alt+M tmux overlay tool. Not a full tmux reimpl —
+  just the relevant Portal/tmux actions surfaced cleanly.
+- Auto-registering the resume hook — making the resume-hook registration
+  internal/managed by Portal rather than hand-wired by the user. Distinct
+  from the plan's versioned installer for the agent-awareness hooks (the
+  plan keeps the resume engine itself "as-is").
+
+The user confirmed everything sketched — the import plan's full system
+plus these two surfaces — is in scope. Endpoint reached; ready to
+synthesise topics.
+
 ## Edits
 
 (none)
