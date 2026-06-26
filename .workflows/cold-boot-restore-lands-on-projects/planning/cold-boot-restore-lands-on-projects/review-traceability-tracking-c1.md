@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-26
 cycle: 1
 phase: Traceability Review
@@ -87,7 +87,7 @@ Append to **Edge Cases**:
 Append to **Spec Reference** (so it reads):
 `.workflows/cold-boot-restore-lands-on-projects/specification/cold-boot-restore-lands-on-projects/specification.md` — AC7, §Testing Requirements cases 5 & 6, §Fix Approach (Ordering contract), §Constraints (Valid interim page, Decision always resolves on the cold route, Interim render content, Failing refetch degrades to today's quit).
 
-**Resolution**: Pending
-**Notes**: The exact error-path assertion shape (`tea.Quit` returned directly vs. batched, and whether the handler exposes a quit via a sentinel msg) should match the existing failing-`SessionsMsg`/`Init`-fetch error handling already present in `internal/tui` — the implementer should mirror that established pattern rather than introduce a new one.
+**Resolution**: Fixed
+**Notes**: Applied to Task 1-4 (tick-6fee61) — appended failing-refetch quit guard test, acceptance criterion, test, edge case, and spec reference to both phase-1-tasks.md and the tick description. The exact error-path assertion shape (`tea.Quit` returned directly vs. batched, and whether the handler exposes a quit via a sentinel msg) should match the existing failing-`SessionsMsg`/`Init`-fetch error handling already present in `internal/tui` — the implementer should mirror that established pattern rather than introduce a new one.
 
 ---
