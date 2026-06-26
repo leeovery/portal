@@ -22,7 +22,8 @@ approved_at: 2026-06-26
 - [ ] The `defaultPageEvaluated` latch and `evaluateDefaultPage`'s decision logic are unmodified; a failing refetch `SessionsMsg` still quits without stranding the interim page; the full suite (`go test ./...`) is green with no regressions and no `t.Parallel()` added.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-26
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
