@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-26
 cycle: 2
 phase: Plan Integrity Review
@@ -82,8 +82,8 @@ sync.
 **Problem**: The deferral introduces a one-Update-cycle interim window between loading-page dismissal and the post-restore refetch's `SessionsMsg`. Three invariants must hold deterministically: (a) the interim page is a valid picker page — interim `PageSessions`, never `PageLoading`, blank, or undefined — even though it briefly renders the not-yet-repaired empty session list (AC7); (b) the landing decision is independent of `ProjectsLoadedMsg` arrival order — a `ProjectsLoadedMsg` that arrives in the interim window (after the transition, before the refetch `SessionsMsg`) must NOT latch Projects against the stale interim list, because `sessionsLoaded` is still false and `evaluateDefaultPage()` early-returns; and (c) a failing post-restore refetch `SessionsMsg` (one carrying an error) quits without stranding the picker on the interim `PageSessions` — degrading to today's quit UX rather than running the deferred decision.
 ```
 
-**Resolution**: Pending
-**Notes**: The proposed Problem mirrors tick-6fee61's "Three invariants" framing verbatim in
+**Resolution**: Fixed
+**Notes**: Applied to phase-1-tasks.md Task 1-4 Problem statement (now "Three invariants" with the explicit (c) failing-refetch invariant). tick-6fee61 already reads "Three invariants" — surfaces aligned. The proposed Problem mirrors tick-6fee61's "Three invariants" framing verbatim in
 intent and reuses task 1-4's own existing wording for the failing-refetch invariant (its
 AC: "runs `tea.Quit` before the deferred decision and does NOT strand the picker on the
 interim `PageSessions`"; spec §Constraints "Failing refetch degrades to today's quit"). No
