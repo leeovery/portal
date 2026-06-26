@@ -1,0 +1,12 @@
+{
+  "name": "agent-first-portal",
+  "work_type": "epic",
+  "status": "in-progress",
+  "created": "2026-06-26",
+  "description": "Reposition Portal as an agent-first tool — internal multi-agent session resume, an in-tmux pop-up overlay, a mobile companion app, and push notifications for remote agent handoff",
+  "phases": {
+    "discovery": {
+      "active_session": "001"
+    }
+  }
+}
