@@ -478,3 +478,152 @@ func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
 		t.Errorf("AC3: initialFilter must be zeroed after the deferred decision consumes it, got %q", got)
 	}
 }
+
+// cold-boot-restore-lands-on-projects-1-3 — Warm-route parity guard.
+//
+// The 1-1 fix (transitionFromLoading() gates the synchronous landing decision on
+// m.progressReceiver != nil — see internal/tui/model.go transitionFromLoading at
+// ~1843-1850 and refetchSessionsAfterRestore at ~1818-1823) must not perturb the
+// warm / CLI / synchronous route. These are TEST-ONLY parity / regression
+// assertions against the existing post-1-1 code — no production change. They lock
+// the zero-new-risk contract (spec §Constraints "Warm / CLI / direct-path
+// untouched"; the warm-path startup sequence has prior-incident history —
+// slow-open / zombie-session — so it must stay byte-identical to today): the warm
+// route (progressReceiver == nil) still decides the landing page synchronously at
+// transitionFromLoading() against its already-post-restore Init snapshot,
+// dispatches no post-complete refetch, lands on Sessions for N>0 (AC4) and on
+// Projects for zero sessions (AC5). They also lock AC6 — a commandPending launch
+// lands on Projects and never reaches the modified transition.
+//
+// No t.Parallel (cmd-package convention + the rest of the tui test surface).
+
+// TestWarmRoute_RefetchSessionsAfterRestore_Nil is the direct white-box predicate
+// assertion: refetchSessionsAfterRestore() returns nil on the warm route
+// (progressReceiver == nil) and non-nil on the cold route (progressReceiver
+// wired). progressReceiver != nil is the sole authoritative discriminator (spec
+// §Constraints "Canonical cold-route predicate"); pairing the two halves locks the
+// predicate symmetry — the warm route does NO extra enumeration, the cold route
+// always re-enumerates. (Model has a value receiver, so the method is called
+// directly on the value.)
+func TestWarmRoute_RefetchSessionsAfterRestore_Nil(t *testing.T) {
+	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+
+	// Warm route: serverStarted=true forces the loading page, but NO
+	// progressReceiver — proving the receiver, not serverStarted, gates the
+	// deferral/refetch.
+	warm := New(lister, WithServerStarted(true))
+	if cmd := warm.refetchSessionsAfterRestore(); cmd != nil {
+		t.Errorf("warm route (progressReceiver == nil) must return a nil refetch cmd, got non-nil")
+	}
+
+	// Cold route: a wired progressReceiver makes the predicate true → non-nil.
+	cold := New(lister,
+		WithServerStarted(true),
+		WithProgressReceiver(func() tea.Msg { return nil }),
+	)
+	if cmd := cold.refetchSessionsAfterRestore(); cmd == nil {
+		t.Errorf("cold route (progressReceiver != nil) must return a non-nil refetch cmd, got nil")
+	}
+}
+
+// TestWarmRoute_ZeroSessions_LandsOnProjects is the AC5 guard: a warm/synchronous
+// boot whose Init snapshot is empty (zero sessions) lands on PageProjects, exactly
+// as today. On the warm route transitionFromLoading() sets sessionsLoaded=true and
+// runs evaluateDefaultPage() synchronously against the already-post-restore (here
+// empty) Init snapshot, so the len(Items())>0 test chooses Projects. The
+// transition must ALSO dispatch no post-complete refetch — the lister call count
+// must not bump across the transition (mirrors TestWarmRoute_NoPostCompleteRefetch
+// at ~309-342).
+func TestWarmRoute_ZeroSessions_LandsOnProjects(t *testing.T) {
+	// Empty Init snapshot — the synchronous route's Init fetch already saw it
+	// (zero sessions restored). No refetch should consume a second step.
+	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+
+	// Warm route: serverStarted=true forces the loading page, NO progressReceiver.
+	m := New(lister,
+		WithServerStarted(true),
+		WithProjectStore(stubProjectStore{}),
+	)
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Empty Init snapshot ingested while on PageLoading.
+	model, _ = model.Update(SessionsMsg{Sessions: nil})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after empty SessionsMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Deliver ProjectsLoadedMsg (>=1 project so Projects is a meaningful landing)
+	// while on PageLoading so evaluateDefaultPage() can resolve at the transition.
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Close both gates: min-display floor elapsed, then terminal complete. On the
+	// warm route transitionFromLoading() makes the synchronous landing decision
+	// here and must dispatch no refetch.
+	model, _ = model.Update(LoadingMinElapsedMsg{})
+	callsBefore := lister.calls
+	model, completeCmd := model.Update(BootstrapCompleteMsg{})
+
+	final := model.(Model)
+	if final.ActivePage() != PageProjects {
+		t.Fatalf("AC5: warm boot with zero sessions must land on PageProjects, got %v", final.ActivePage())
+	}
+
+	// The warm transition handler must dispatch no post-complete refetch. No
+	// warnings were staged and refetchSessionsAfterRestore() returns nil on the
+	// warm route, so the batched cmd collapses to nil; even if non-nil, draining it
+	// must not bump the lister call count.
+	if completeCmd != nil {
+		drainBatchToModel(t, final, completeCmd)
+	}
+	if lister.calls != callsBefore {
+		t.Errorf("warm route must NOT re-fetch sessions on complete; ListSessions calls bumped from %d to %d", callsBefore, lister.calls)
+	}
+}
+
+// TestCommandPending_LandsOnProjects_NoInterimFlash is the AC6 guard: a
+// commandPending launch lands on PageProjects regardless of session count and is
+// never observed on the interim PageSessions the deferral introduces.
+//
+// Spec invariant (§Constraints "commandPending does not intersect the deferral"):
+// Init's commandPending branch (model.go ~1900-1902) returns BEFORE wiring
+// loadingPadTick / progressReceiver re-issue (model.go ~1909-1936), so
+// transitionFromLoading() is never invoked for a commandPending launch and no
+// interim Sessions flash occurs — even though WithProgressReceiver is wired here,
+// the commandPending short-circuit takes precedence. WithCommand
+// (model.go ~632-639) sets commandPending = true and activePage = PageProjects.
+func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
+	// A non-empty snapshot would otherwise route a normal launch to Sessions —
+	// commandPending must override that and land on Projects regardless.
+	sessions := []tmux.Session{{Name: "live-session", Windows: 1}}
+	lister := &coldBootStepLister{steps: [][]tmux.Session{sessions}}
+
+	// WithProgressReceiver is wired to prove the commandPending short-circuit
+	// (Init's early return) takes precedence over the cold-route deferral.
+	m := New(lister,
+		WithServerStarted(true),
+		WithProgressReceiver(func() tea.Msg { return nil }),
+	).WithCommand([]string{"echo", "hi"})
+
+	// WithCommand set activePage = PageProjects immediately.
+	if m.ActivePage() != PageProjects {
+		t.Fatalf("setup invariant: WithCommand must set activePage = PageProjects, got %v", m.ActivePage())
+	}
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Deliver ProjectsLoadedMsg (>=1 project) so the commandPending arm of
+	// evaluateDefaultPage() can resolve. No loading-page dismissal machinery is
+	// involved — the commandPending launch never enters that path.
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+
+	final := model.(Model)
+	if final.ActivePage() != PageProjects {
+		t.Fatalf("AC6: commandPending launch must land on PageProjects regardless of session count, got %v", final.ActivePage())
+	}
+}
