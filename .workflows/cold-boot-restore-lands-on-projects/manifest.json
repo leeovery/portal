@@ -35,12 +35,16 @@
           "format": "tick",
           "spec_commit": "5f01c1fe318b3cc207244a4497b7f18de965e964",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "cold-boot-restore-lands-on-projects-1-1",
-          "task_map": {}
+          "task": "cold-boot-restore-lands-on-projects-1-2",
+          "task_map": {
+            "cold-boot-restore-lands-on-projects-1": "tick-ce1601",
+            "cold-boot-restore-lands-on-projects-1-1": "tick-9b305e"
+          },
+          "external_id": "tick-bcb9b9"
         }
       }
     }
