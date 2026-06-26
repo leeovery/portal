@@ -39,11 +39,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "cold-boot-restore-lands-on-projects-1-3",
+          "task": "cold-boot-restore-lands-on-projects-1-4",
           "task_map": {
             "cold-boot-restore-lands-on-projects-1": "tick-ce1601",
             "cold-boot-restore-lands-on-projects-1-1": "tick-9b305e",
-            "cold-boot-restore-lands-on-projects-1-2": "tick-28a91d"
+            "cold-boot-restore-lands-on-projects-1-2": "tick-28a91d",
+            "cold-boot-restore-lands-on-projects-1-3": "tick-7f37e3"
           },
           "external_id": "tick-bcb9b9"
         }
