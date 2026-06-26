@@ -20,3 +20,13 @@ approved_at: 2026-06-26
 - [ ] Ordering contract — `ProjectsLoadedMsg` delivered in the interim window (after the transition, before the refetch `SessionsMsg`) does not latch on Projects against the stale list; final page is **Sessions**.
 - [ ] On the cold route `transitionFromLoading()` neither sets `sessionsLoaded` nor calls `evaluateDefaultPage()`; the deferral and the `refetchSessionsAfterRestore()` dispatch occur in the same handler return and stay coupled; `progressReceiver != nil` is the sole cold-route discriminator (no `serverStarted` / `tmux has-server` / `shouldRunConcurrentBootstrap` re-probe introduced).
 - [ ] The `defaultPageEvaluated` latch and `evaluateDefaultPage`'s decision logic are unmodified; a failing refetch `SessionsMsg` still quits without stranding the interim page; the full suite (`go test ./...`) is green with no regressions and no `t.Parallel()` added.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cold-boot-restore-lands-on-projects-1-1 | Gate transitionFromLoading on the cold route + reproduction test | refetch dispatch stays coupled in same handler return; warm route keeps sessionsLoaded=true + evaluateDefaultPage() byte-identical |
+| cold-boot-restore-lands-on-projects-1-2 | Cold-route decision-correctness coverage (no over-correction + filter routing) | zero-session cold boot lands on Projects (over-correction guard); initialFilter routes to session list not project list and is zeroed there |
+| cold-boot-restore-lands-on-projects-1-3 | Warm-route parity guard | warm route dispatches no post-complete refetch; zero-session warm boot lands on Projects |
+| cold-boot-restore-lands-on-projects-1-4 | Interim-page and late-ProjectsLoadedMsg ordering invariants | interim render may briefly show Sessions empty-state (not special-cased); late ProjectsLoadedMsg must not latch Projects against the stale list |
