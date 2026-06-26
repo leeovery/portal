@@ -28,7 +28,9 @@ package tui
 import (
 	"testing"
 
+	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -336,5 +338,143 @@ func TestWarmRoute_NoPostCompleteRefetch(t *testing.T) {
 	}
 	if lister.calls != callsBefore {
 		t.Errorf("warm/synchronous route must NOT re-fetch sessions on complete; ListSessions calls bumped from %d to %d", callsBefore, lister.calls)
+	}
+}
+
+// TestColdBoot_ZeroSessions_LandsOnProjects is the AC2 over-correction guard: the
+// 1-1 fix defers the landing decision to the post-restore refetch's SessionsMsg,
+// but it must NOT over-correct — a genuine zero-session cold boot (the refetch
+// itself returns an EMPTY snapshot) must still land on PageProjects. The deferral
+// changes WHEN the len(Items())>0 test runs, never WHAT it tests: empty → Projects.
+//
+// This is distinct from the stale-empty Init snapshot. Here BOTH the Init snapshot
+// AND the post-restore refetch are empty — restore reconstructed nothing — so the
+// deferred decision runs against a genuinely empty list and correctly chooses
+// Projects. A meaningful (>=1) project record is delivered so Projects is a real
+// landing surface rather than an empty page.
+func TestColdBoot_ZeroSessions_LandsOnProjects(t *testing.T) {
+	// The refetch is the lister's ONLY real invocation (the stale Init snapshot is
+	// fed manually below) — it returns an EMPTY slice, the genuine zero-session case.
+	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
+	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+
+	m := New(lister,
+		WithServerStarted(true),
+		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithProjectStore(stubProjectStore{}),
+	)
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Stale empty Init snapshot ingested while on PageLoading.
+	model, _ = model.Update(SessionsMsg{Sessions: stale})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// MANDATORY: deliver ProjectsLoadedMsg (>=1 project so Projects is a meaningful
+	// landing) while on PageLoading BEFORE the transition. This sets
+	// projectsLoaded=true so the deferred evaluateDefaultPage can run once the
+	// refetch lands.
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Close both gates, then drain the refetch (carries the empty post-restore
+	// SessionsMsg) so the landing decision is made against the repaired list.
+	model, _ = model.Update(LoadingMinElapsedMsg{})
+	model, completeCmd := model.Update(BootstrapCompleteMsg{})
+	final := drainBatchToModel(t, model.(Model), completeCmd)
+
+	if final.ActivePage() != PageProjects {
+		t.Fatalf("AC2: cold boot whose post-restore refetch returns ZERO sessions must land on PageProjects, got %v", final.ActivePage())
+	}
+
+	if got := visibleSessionNames(final); len(got) != 0 {
+		t.Errorf("AC2: zero-session cold boot must have an empty session list, got %v", got)
+	}
+}
+
+// TestColdBoot_InitialFilter_RoutesToSessions is the AC3 filter-routing guard
+// (the filter co-defect): a cold boot carrying an initialFilter must route that
+// filter to the SESSION list — and consume it there — once the deferred decision
+// resolves the page to Sessions. Both the len(Items())>0 page test and the
+// initialFilter application live inside the single evaluateDefaultPage() call, so
+// deferring that call to the post-restore SessionsMsg routes the filter against
+// the repaired list, never against the stale interim list.
+//
+// evaluateDefaultPage applies initialFilter to the session list only when
+// activePage == PageSessions && !commandPending, then zeroes m.initialFilter
+// unconditionally — so on the cold route the filter lands on Sessions (the
+// deferred decision resolves to Sessions on the N>0 refetch) and the project list
+// is left untouched. The chosen names match the filter so the visible list is
+// non-empty (filtered-count behaviour is out of scope; the page decision is on
+// raw len(Items())).
+func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
+	// The refetch is the lister's ONLY real invocation; it returns an N>0 snapshot
+	// where >=1 name matches the "alpha" filter so the visible list is non-empty.
+	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
+	restored := []tmux.Session{
+		{Name: "restored-alpha", Windows: 1},
+		{Name: "restored-bravo", Windows: 2},
+	}
+	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+
+	// WithInitialFilter is a post-construction Model method — chain it onto the
+	// New(...) result before driving the lifecycle.
+	m := New(lister,
+		WithServerStarted(true),
+		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithProjectStore(stubProjectStore{}),
+	).WithInitialFilter("alpha")
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Stale Init snapshot ingested while on PageLoading.
+	model, _ = model.Update(SessionsMsg{Sessions: stale})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// MANDATORY: deliver ProjectsLoadedMsg while on PageLoading BEFORE the
+	// transition so projectsLoaded=true and the deferred decision can run.
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Close both gates, then drain the refetch (carries the N>0 post-restore
+	// SessionsMsg) so the deferred decision routes the filter against the repaired
+	// list.
+	model, _ = model.Update(LoadingMinElapsedMsg{})
+	model, completeCmd := model.Update(BootstrapCompleteMsg{})
+	final := drainBatchToModel(t, model.(Model), completeCmd)
+
+	if final.ActivePage() != PageSessions {
+		t.Fatalf("AC3: cold boot with initialFilter and N>0 must land on PageSessions, got %v", final.ActivePage())
+	}
+
+	// The filter routed to the SESSION list and was applied there.
+	if got := final.SessionListFilterValue(); got != "alpha" {
+		t.Errorf("AC3: session list filter value must equal the initial filter, want %q got %q", "alpha", got)
+	}
+	if got := final.SessionListFilterState(); got != list.FilterApplied {
+		t.Errorf("AC3: session list filter state must be FilterApplied, got %v", got)
+	}
+
+	// The filter did NOT route to the PROJECT list.
+	if got := final.ProjectListFilterValue(); got != "" {
+		t.Errorf("AC3: project list filter value must be untouched (empty), got %q", got)
+	}
+	if got := final.ProjectListFilterState(); got == list.FilterApplied {
+		t.Errorf("AC3: project list filter state must NOT be FilterApplied, got %v", got)
+	}
+
+	// The initialFilter was consumed in the decision.
+	if got := final.InitialFilter(); got != "" {
+		t.Errorf("AC3: initialFilter must be zeroed after the deferred decision consumes it, got %q", got)
 	}
 }
