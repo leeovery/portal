@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Defer the Cold-Route Landing Decision
-status: draft
+status: approved
+approved_at: 2026-06-26
 
 **Goal**: Fix the cold concurrent-bootstrap landing-page decision so the picker opens on Sessions (not Projects) when N>0 sessions are restored, and a cold-route `initialFilter` is routed to the session list — by gating `transitionFromLoading()` on the cold route (`progressReceiver != nil`) to set a valid interim `activePage = PageSessions` without setting `sessionsLoaded` or calling `evaluateDefaultPage()`, leaving the single landing decision to the post-restore refetch's `SessionsMsg`. The latch and `evaluateDefaultPage` decision logic stay untouched; the warm/CLI route stays byte-identical. Ships with regression coverage for all six required scenarios, every one of which delivers `ProjectsLoadedMsg` before the transition so the latch is actually exercised (the existing test's blind spot).
 
