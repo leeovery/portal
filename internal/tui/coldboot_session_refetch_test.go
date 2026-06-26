@@ -27,6 +27,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
@@ -104,6 +105,49 @@ func driveColdBootToSessions(t *testing.T, m Model, staleSnapshot []tmux.Session
 // from drifting across the cluster of tests that deliver it.
 func oneProjectLoaded() []project.Project {
 	return []project.Project{{Path: "/p/one", Name: "one"}}
+}
+
+// twoRestoredSessions is the shared two-element post-restore snapshot the
+// cold-route refetch tests return as the restored fixture. Folding it into one
+// place keeps the literal from drifting across the cluster of tests that use it,
+// and twoRestoredSessionNames derives the paired expected-names list from these
+// same records so the fixture and its assertion cannot silently diverge.
+func twoRestoredSessions() []tmux.Session {
+	return []tmux.Session{
+		{Name: "restored-alpha", Windows: 1},
+		{Name: "restored-bravo", Windows: 2},
+	}
+}
+
+// twoRestoredSessionNames is the expected visible-names list paired with
+// twoRestoredSessions. It derives the names from the fixture itself so editing a
+// session name in twoRestoredSessions automatically tracks here — there is no
+// hand-synced second literal to drift.
+func twoRestoredSessionNames() []string {
+	sessions := twoRestoredSessions()
+	names := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+// assertVisibleSessionNames asserts the model's visible session names equal want
+// in order. context frames the length-mismatch fatal so each call site keeps its
+// own meaningful failure wording (the per-index mismatch error is uniform). It
+// wraps the len-check (t.Fatalf) + index loop (t.Errorf) the cold-route tests
+// previously repeated verbatim.
+func assertVisibleSessionNames(t *testing.T, m Model, want []string, context string) {
+	t.Helper()
+	got := visibleSessionNames(m)
+	if len(got) != len(want) {
+		t.Fatalf("%s\n  want %v\n  got  %v", context, want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("restored session mismatch at idx %d: want %q got %q (full: %v)", i, want[i], got[i], got)
+		}
+	}
 }
 
 // driveColdBootToTransition runs the cold/TUI loading lifecycle on m through the
@@ -207,10 +251,7 @@ func TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions(t *testing.T) {
 	// lister's ONLY real invocation is the post-complete re-fetch — it must
 	// return the POST-restore snapshot.
 	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
-	restored := []tmux.Session{
-		{Name: "restored-alpha", Windows: 1},
-		{Name: "restored-bravo", Windows: 2},
-	}
+	restored := twoRestoredSessions()
 	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
 
 	// Cold/TUI route: serverStarted=true (loading page) + a non-nil
@@ -225,8 +266,13 @@ func TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions(t *testing.T) {
 
 	final := driveColdBootToSessions(t, m, stale)
 
+	// This block keeps its own distinct failure messaging (the POST-restore vs
+	// empty-Init framing and the "post-restore session mismatch" index error carry
+	// meaning), so it is intentionally NOT routed through assertVisibleSessionNames;
+	// only the expected-names literal is derived from the shared fixture so it
+	// cannot drift.
 	got := visibleSessionNames(final)
-	want := []string{"restored-alpha", "restored-bravo"}
+	want := twoRestoredSessionNames()
 	if len(got) != len(want) {
 		t.Fatalf("cold-boot picker must reflect the POST-restore snapshot, not the empty Init snapshot\n  want %v\n  got  %v", want, got)
 	}
@@ -311,10 +357,7 @@ func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
 	// lister's ONLY real invocation is the post-restore refetch — it returns the
 	// restored N>0 snapshot.
 	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
-	restored := []tmux.Session{
-		{Name: "restored-alpha", Windows: 1},
-		{Name: "restored-bravo", Windows: 2},
-	}
+	restored := twoRestoredSessions()
 	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
 
 	m := New(lister,
@@ -333,16 +376,9 @@ func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
 		t.Fatalf("AC1: cold boot with N>0 restored sessions must land on PageSessions (no x required), got %v", final.ActivePage())
 	}
 
-	got := visibleSessionNames(final)
-	want := []string{"restored-alpha", "restored-bravo"}
-	if len(got) != len(want) {
-		t.Fatalf("expected all %d restored names visible\n  want %v\n  got  %v", len(want), want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("restored session mismatch at idx %d: want %q got %q (full: %v)", i, want[i], got[i], got)
-		}
-	}
+	want := twoRestoredSessionNames()
+	assertVisibleSessionNames(t, final, want,
+		fmt.Sprintf("expected all %d restored names visible", len(want)))
 }
 
 // TestWarmRoute_NoPostCompleteRefetch pins the warm/synchronous parity: with a
@@ -442,10 +478,7 @@ func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
 	// The refetch is the lister's ONLY real invocation; it returns an N>0 snapshot
 	// where >=1 name matches the "alpha" filter so the visible list is non-empty.
 	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
-	restored := []tmux.Session{
-		{Name: "restored-alpha", Windows: 1},
-		{Name: "restored-bravo", Windows: 2},
-	}
+	restored := twoRestoredSessions()
 	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
 
 	// WithInitialFilter is a post-construction Model method — chain it onto the
@@ -665,10 +698,7 @@ func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
 	// lister's ONLY real invocation is the post-restore refetch — it returns the
 	// restored N>0 snapshot.
 	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
-	restored := []tmux.Session{
-		{Name: "restored-alpha", Windows: 1},
-		{Name: "restored-bravo", Windows: 2},
-	}
+	restored := twoRestoredSessions()
 	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
 
 	m := New(lister,
@@ -706,16 +736,9 @@ func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
 		t.Fatalf("AC1: final landing after the refetch must be PageSessions, got %v", final.ActivePage())
 	}
 
-	got := visibleSessionNames(final)
-	want := []string{"restored-alpha", "restored-bravo"}
-	if len(got) != len(want) {
-		t.Fatalf("expected all %d restored names visible\n  want %v\n  got  %v", len(want), want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("restored session mismatch at idx %d: want %q got %q (full: %v)", i, want[i], got[i], got)
-		}
-	}
+	want := twoRestoredSessionNames()
+	assertVisibleSessionNames(t, final, want,
+		fmt.Sprintf("expected all %d restored names visible", len(want)))
 }
 
 // TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions is the ordering-contract
@@ -738,10 +761,7 @@ func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
 // late ProjectsLoadedMsg could be injected — defeating the strict interleave.
 func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
-	restored := []tmux.Session{
-		{Name: "restored-alpha", Windows: 1},
-		{Name: "restored-bravo", Windows: 2},
-	}
+	restored := twoRestoredSessions()
 	// The lister is wired but not driven directly in the strict-interleave portion;
 	// the post-restore SessionsMsg is injected manually below.
 	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
@@ -794,16 +814,9 @@ func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 		t.Fatalf("ordering: final page after the decision-bearing SessionsMsg must be PageSessions with N>0 restored sessions, got %v", final.ActivePage())
 	}
 
-	got := visibleSessionNames(final)
-	want := []string{"restored-alpha", "restored-bravo"}
-	if len(got) != len(want) {
-		t.Fatalf("expected all %d restored names visible after the late-ProjectsLoadedMsg interleave\n  want %v\n  got  %v", len(want), want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("restored session mismatch at idx %d: want %q got %q (full: %v)", i, want[i], got[i], got)
-		}
-	}
+	want := twoRestoredSessionNames()
+	assertVisibleSessionNames(t, final, want,
+		fmt.Sprintf("expected all %d restored names visible after the late-ProjectsLoadedMsg interleave", len(want)))
 }
 
 // TestColdBoot_RefetchError_QuitsWithoutStrandingInterim is the failing-refetch
