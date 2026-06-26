@@ -137,6 +137,9 @@
     },
     "cold-boot-restore-lands-on-projects": {
       "work_type": "bugfix"
+    },
+    "agent-first-portal": {
+      "work_type": "epic"
     }
   },
   "defaults": {
