@@ -15,7 +15,7 @@ notifications for remote agent handoff.
 
 ## Imports
 
-(none)
+- imports/portal-control-plane-plan.md
 
 ## Map State at Start
 
@@ -60,6 +60,41 @@ The seeds cluster into a local in-tmux story and a remote story:
 The work-type read converged on an epic — several independently-shippable
 features sharing one vision — and the user confirmed it. Topic synthesis
 and per-topic routing are deferred to the discovery session loop.
+
+After the epic was created, the user retroactively imported a substantial
+handoff document (imports/portal-control-plane-plan.md) — the output of a
+prior discussion that frames the whole initiative as growing Portal into
+an "agent-aware control plane over tmux sessions, with a mobile client."
+It is far more developed than the opening conversation and reshapes the
+map. Major surfaces it names (recorded as shape, not as settled topic
+decomposition — synthesis is still deferred):
+
+- Agent-state model — Working / Waiting / Idle / Unknown, the spine every
+  other surface reads from; captured on the host via per-agent hooks
+  (Claude first, multi-agent later) correlated to panes by $TMUX_PANE.
+- Host control plane — the existing in-tmux daemon grows an agent-state
+  tracker, an agent store (single source of truth), and a daemon IPC
+  socket; agent state surfaces inline in the existing picker rows plus a
+  "by status / needs attention" view mode.
+- Ambient surfacing — a Portal-owned tmux status-line segment and
+  notifications (macOS at desk; OSC 9 banner via Blink on mobile).
+- Mobile client — structured-first surface: control tower list, approval
+  cards, native compose box, embedded terminal (GhosttyKit lead), diff
+  viewer, browser preview.
+- Transport — Tailscale as the free/default data plane, a hosted relay as
+  a Pro convenience (never the only path), an optional future custom
+  multiplexed protocol.
+- Persistence/boot — a thin launchd boot agent for the reboot-then-pick-
+  up-on-phone case.
+- Productisation — free CLI + desktop control plane; Pro = mobile app,
+  push, relay; one-line installer; parked team story.
+
+The document also carries a build sequence (Phase 0 = host-side agent
+state + picker/status-line/notification surfacing; Phases 1–4 = launchd +
+push, thin client, diff/preview/brand, productise) and an explicit
+Decided / Open split. The document's internal decisions and phasing are
+the user's prior work; they inform the shape here but topic synthesis,
+routing, and any planning/phasing remain for the downstream phases.
 
 ## Edits
 
