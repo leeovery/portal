@@ -41,3 +41,13 @@ Address findings from Analysis (Cycle 1).
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
 | cold-boot-restore-lands-on-projects-2-1 | Extract a shared cold-route driver that delivers ProjectsLoadedMsg before the loading transition | TestColdBoot_InterimPage_IsValidSessions needs the pre-drain interim model/completeCmd — split the driver or return the interim model so the interim-page assertion is preserved exactly; no production code modified; existing driveColdBootToSessions helper left untouched |
+
+### Phase 3: Analysis (Cycle 2)
+
+Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cold-boot-restore-lands-on-projects-3-1 | Consolidate the restored-sessions fixture and visible-names assertion in coldboot_session_refetch_test.go | Expected names must derive from a single source shared with the fixture so editing one name cannot silently drift fixture from assertion; per-test New(...) construction blocks left unchanged (vary meaningfully); no production code modified; no t.Parallel() added |

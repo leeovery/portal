@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: Cold-boot Restore Lands on Projects (Cycle 2)
 
 ## Task 1: Consolidate the restored-sessions fixture and visible-names assertion in coldboot_session_refetch_test.go
-status: pending
+status: approved
 severity: low
 sources: duplication
 
