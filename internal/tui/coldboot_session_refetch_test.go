@@ -98,6 +98,70 @@ func driveColdBootToSessions(t *testing.T, m Model, staleSnapshot []tmux.Session
 	return drainBatchToModel(t, model.(Model), completeCmd)
 }
 
+// oneProjectLoaded is the shared single-project record the cold-route landing
+// tests deliver via ProjectsLoadedMsg so PageProjects is a meaningful landing
+// surface rather than an empty page. Folding it into one place keeps the literal
+// from drifting across the cluster of tests that deliver it.
+func oneProjectLoaded() []project.Project {
+	return []project.Project{{Path: "/p/one", Name: "one"}}
+}
+
+// driveColdBootToTransition runs the cold/TUI loading lifecycle on m through the
+// terminal BootstrapCompleteMsg transition — the FIRST half of the AC
+// landing-page drive sequence — and returns the interim Model (just past
+// transitionFromLoading, BEFORE the post-restore refetch is drained) together
+// with the batched completeCmd the transition dispatched.
+//
+// It encapsulates the spec's mandatory Testing-Requirements ordering in ONE
+// place: WindowSizeMsg → the stale (pre-restore) SessionsMsg + its PageLoading
+// invariant → ProjectsLoadedMsg (delivered while still on PageLoading, BEFORE
+// the transition, so projectsLoaded=true and evaluateDefaultPage's latch is
+// genuinely exercised) + its PageLoading invariant → LoadingMinElapsedMsg →
+// BootstrapCompleteMsg.
+//
+// Callers that need the pre-refetch interim model (the one-Update-cycle interim
+// window the deferral introduces) assert against the returned interim Model and
+// then drain completeCmd via drainBatchToModel; callers that only need the final
+// landing use driveColdBootWithProjects, which folds the drain in.
+func driveColdBootToTransition(t *testing.T, m Model, staleSnapshot []tmux.Session) (Model, tea.Cmd) {
+	t.Helper()
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Stale Init snapshot ingested while on PageLoading.
+	model, _ = model.Update(SessionsMsg{Sessions: staleSnapshot})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// MANDATORY (spec Testing Requirements): deliver ProjectsLoadedMsg while on
+	// PageLoading BEFORE the transition. This sets projectsLoaded=true so
+	// evaluateDefaultPage can latch on the stale interim list pre-fix — omitting
+	// it makes the test pass for the wrong reason.
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Close both gates: min-display floor elapsed, then terminal complete.
+	model, _ = model.Update(LoadingMinElapsedMsg{})
+	model, completeCmd := model.Update(BootstrapCompleteMsg{})
+
+	return model.(Model), completeCmd
+}
+
+// driveColdBootWithProjects runs the full cold-route landing drive sequence —
+// driveColdBootToTransition plus the post-restore refetch drain — and returns
+// the drained Model on its final landing page. This is the SECOND-half-folded-in
+// convenience used by the landing tests that only need the final page; tests
+// needing the pre-refetch interim model call driveColdBootToTransition directly.
+func driveColdBootWithProjects(t *testing.T, m Model, staleSnapshot []tmux.Session) Model {
+	t.Helper()
+	interim, completeCmd := driveColdBootToTransition(t, m, staleSnapshot)
+	return drainBatchToModel(t, interim, completeCmd)
+}
+
 // drainBatchToModel resolves a (possibly tea.Batch) cmd into its constituent
 // messages and feeds each back through Update. A tea.Batch returns a
 // tea.BatchMsg (a slice of child cmds), so a plain single-step drain would not
@@ -230,12 +294,11 @@ func TestColdBoot_PostCompleteRefetch_CompleteBeforeMinElapsed(t *testing.T) {
 // concurrent route, when N>0 sessions were restored, the picker must land on
 // PageSessions with all restored names visible — no x press required.
 //
-// The exact bug ordering is reproduced inline (the shared
-// driveColdBootToSessions driver does NOT deliver ProjectsLoadedMsg, so reusing
-// it would leave projectsLoaded false and pass the test for the wrong reason —
-// the latch would never fire). ProjectsLoadedMsg is delivered while on
-// PageLoading BEFORE the transition: without it the evaluateDefaultPage latch
-// can never fire on the stale interim list, so a pre-fix run would pass
+// The exact bug ordering runs through the shared driveColdBootWithProjects
+// driver, which delivers ProjectsLoadedMsg while on PageLoading BEFORE the
+// transition (the older driveColdBootToSessions driver omits it). That delivery
+// is mandatory: without it projectsLoaded stays false and the evaluateDefaultPage
+// latch can never fire on the stale interim list, so a pre-fix run would pass
 // vacuously.
 //
 // Pre-fix this test FAILS: transitionFromLoading unconditionally sets
@@ -260,31 +323,11 @@ func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
 		WithProjectStore(stubProjectStore{}),
 	)
 
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-	// Stale Init snapshot ingested while on PageLoading.
-	model, _ = model.Update(SessionsMsg{Sessions: stale})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
-	}
-
-	// MANDATORY: deliver ProjectsLoadedMsg while on PageLoading BEFORE the
-	// transition. This sets projectsLoaded=true so evaluateDefaultPage can latch
-	// on the stale interim list pre-fix — omitting it makes the test pass for the
-	// wrong reason.
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: nil})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
-	}
-
-	// Close both gates: min-display floor elapsed, then terminal complete.
-	model, _ = model.Update(LoadingMinElapsedMsg{})
-	model, completeCmd := model.Update(BootstrapCompleteMsg{})
-
-	// Drain the resulting batch (carries the refetch's SessionsMsg) so the
-	// landing decision is made against the repaired post-restore list.
-	final := drainBatchToModel(t, model.(Model), completeCmd)
+	// The shared driver performs the mandatory cold-route sequence — including
+	// the ProjectsLoadedMsg-before-transition delivery and both pre-transition
+	// PageLoading invariants — and drains the refetch so the landing decision is
+	// made against the repaired post-restore list.
+	final := driveColdBootWithProjects(t, m, stale)
 
 	if final.ActivePage() != PageSessions {
 		t.Fatalf("AC1: cold boot with N>0 restored sessions must land on PageSessions (no x required), got %v", final.ActivePage())
@@ -365,29 +408,11 @@ func TestColdBoot_ZeroSessions_LandsOnProjects(t *testing.T) {
 		WithProjectStore(stubProjectStore{}),
 	)
 
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-	// Stale empty Init snapshot ingested while on PageLoading.
-	model, _ = model.Update(SessionsMsg{Sessions: stale})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
-	}
-
-	// MANDATORY: deliver ProjectsLoadedMsg (>=1 project so Projects is a meaningful
-	// landing) while on PageLoading BEFORE the transition. This sets
-	// projectsLoaded=true so the deferred evaluateDefaultPage can run once the
-	// refetch lands.
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
-	}
-
-	// Close both gates, then drain the refetch (carries the empty post-restore
-	// SessionsMsg) so the landing decision is made against the repaired list.
-	model, _ = model.Update(LoadingMinElapsedMsg{})
-	model, completeCmd := model.Update(BootstrapCompleteMsg{})
-	final := drainBatchToModel(t, model.(Model), completeCmd)
+	// The shared driver delivers the mandatory ProjectsLoadedMsg (a meaningful
+	// >=1-project landing surface) before the transition and drains the empty
+	// post-restore refetch, so the landing decision runs against the repaired
+	// (genuinely empty) list.
+	final := driveColdBootWithProjects(t, m, stale)
 
 	if final.ActivePage() != PageProjects {
 		t.Fatalf("AC2: cold boot whose post-restore refetch returns ZERO sessions must land on PageProjects, got %v", final.ActivePage())
@@ -431,28 +456,10 @@ func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
 		WithProjectStore(stubProjectStore{}),
 	).WithInitialFilter("alpha")
 
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-	// Stale Init snapshot ingested while on PageLoading.
-	model, _ = model.Update(SessionsMsg{Sessions: stale})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
-	}
-
-	// MANDATORY: deliver ProjectsLoadedMsg while on PageLoading BEFORE the
-	// transition so projectsLoaded=true and the deferred decision can run.
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
-	}
-
-	// Close both gates, then drain the refetch (carries the N>0 post-restore
-	// SessionsMsg) so the deferred decision routes the filter against the repaired
-	// list.
-	model, _ = model.Update(LoadingMinElapsedMsg{})
-	model, completeCmd := model.Update(BootstrapCompleteMsg{})
-	final := drainBatchToModel(t, model.(Model), completeCmd)
+	// The shared driver delivers the mandatory ProjectsLoadedMsg before the
+	// transition and drains the N>0 post-restore refetch, so the deferred
+	// decision routes the filter against the repaired list.
+	final := driveColdBootWithProjects(t, m, stale)
 
 	if final.ActivePage() != PageSessions {
 		t.Fatalf("AC3: cold boot with initialFilter and N>0 must land on PageSessions, got %v", final.ActivePage())
@@ -557,7 +564,7 @@ func TestWarmRoute_ZeroSessions_LandsOnProjects(t *testing.T) {
 
 	// Deliver ProjectsLoadedMsg (>=1 project so Projects is a meaningful landing)
 	// while on PageLoading so evaluateDefaultPage() can resolve at the transition.
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
 	if model.(Model).ActivePage() != PageLoading {
 		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
 	}
@@ -621,7 +628,7 @@ func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
 	// Deliver ProjectsLoadedMsg (>=1 project) so the commandPending arm of
 	// evaluateDefaultPage() can resolve. No loading-page dismissal machinery is
 	// involved — the commandPending launch never enters that path.
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
 
 	final := model.(Model)
 	if final.ActivePage() != PageProjects {
@@ -670,31 +677,12 @@ func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
 		WithProjectStore(stubProjectStore{}),
 	)
 
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-	// Stale Init snapshot ingested while on PageLoading.
-	model, _ = model.Update(SessionsMsg{Sessions: stale})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
-	}
-
-	// MANDATORY: deliver ProjectsLoadedMsg while on PageLoading BEFORE the
-	// transition so projectsLoaded=true (exercises the latch machinery — without
-	// it evaluateDefaultPage could never latch even pre-fix, passing vacuously).
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
-	}
-
-	// Close both gates: min-display floor elapsed, then terminal complete.
-	model, _ = model.Update(LoadingMinElapsedMsg{})
-	model, completeCmd := model.Update(BootstrapCompleteMsg{})
-
-	// CAPTURE the interim model returned by the BootstrapCompleteMsg Update,
-	// BEFORE draining the batched refetch cmd. This is the one-Update-cycle
-	// interim window the deferral introduces.
-	interim := model.(Model)
+	// Drive only the FIRST half — through the transition — so the interim model
+	// (the one-Update-cycle window between the transition and the refetch drain)
+	// can be asserted BEFORE completeCmd is drained. The driver performs the
+	// mandatory ProjectsLoadedMsg-before-transition delivery and both
+	// pre-transition PageLoading invariants.
+	interim, completeCmd := driveColdBootToTransition(t, m, stale)
 
 	// AC7: the interim page is a valid picker page — PageSessions, never
 	// PageLoading or undefined — even though the refetch SessionsMsg has not
@@ -790,7 +778,7 @@ func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 	// guard), so the ONLY thing preventing a premature latch against the stale
 	// interim list is the !sessionsLoaded early-return inside evaluateDefaultPage().
 	// It must NOT latch Projects: page stays PageSessions.
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
 	if model.(Model).ActivePage() != PageSessions {
 		t.Fatalf("ordering: a late ProjectsLoadedMsg in the interim window must NOT latch Projects against the stale list (evaluateDefaultPage early-returns on !sessionsLoaded), page must stay PageSessions, got %v", model.(Model).ActivePage())
 	}
@@ -850,7 +838,7 @@ func TestColdBoot_RefetchError_QuitsWithoutStrandingInterim(t *testing.T) {
 	}
 
 	// Deliver ProjectsLoadedMsg while on PageLoading so projectsLoaded=true.
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
 	if model.(Model).ActivePage() != PageLoading {
 		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
 	}
