@@ -26,6 +26,7 @@ package tui
 // tui test surface (which mutates list state through Update).
 
 import (
+	"errors"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
@@ -625,5 +626,254 @@ func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
 	final := model.(Model)
 	if final.ActivePage() != PageProjects {
 		t.Fatalf("AC6: commandPending launch must land on PageProjects regardless of session count, got %v", final.ActivePage())
+	}
+}
+
+// cold-boot-restore-lands-on-projects-1-4 — Interim-page and late-ProjectsLoadedMsg
+// ordering invariants.
+//
+// The 1-1 fix (transitionFromLoading() in internal/tui/model.go:1843-1850 returns
+// early on the cold route, leaving sessionsLoaded=false so evaluateDefaultPage
+// early-returns) introduces a one-Update-cycle interim window between loading-page
+// dismissal and the post-restore refetch's SessionsMsg. These TEST-ONLY ordering
+// assertions lock three invariants against the post-1-1 code (no production
+// change): (a) the interim page is a valid picker page — PageSessions, never
+// PageLoading/blank/undefined (AC7); (b) a ProjectsLoadedMsg arriving in the
+// interim window does NOT latch Projects against the stale interim list, because
+// evaluateDefaultPage() early-returns on !sessionsLoaded; (c) a failing refetch
+// SessionsMsg quits without stranding the interim page (spec Constraints
+// "Failing refetch degrades to today's quit").
+//
+// No t.Parallel (cmd-package convention + the rest of the tui test surface).
+
+// TestColdBoot_InterimPage_IsValidSessions is the AC7 interim-window guard
+// (Testing Requirements case 5): immediately after the cold-route transition and
+// BEFORE the refetch SessionsMsg, ActivePage() must be PageSessions — a valid
+// picker page, never PageLoading or undefined — even though it briefly renders the
+// not-yet-repaired empty session list. The briefly-empty interim render is the
+// ACCEPTED state and must NOT be special-cased away. THEN, after draining the
+// refetch, the final landing is PageSessions per AC1 with all N restored names.
+func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
+	// The driver feeds the Init/stale snapshot manually via SessionsMsg, so the
+	// lister's ONLY real invocation is the post-restore refetch — it returns the
+	// restored N>0 snapshot.
+	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
+	restored := []tmux.Session{
+		{Name: "restored-alpha", Windows: 1},
+		{Name: "restored-bravo", Windows: 2},
+	}
+	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+
+	m := New(lister,
+		WithServerStarted(true),
+		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithProjectStore(stubProjectStore{}),
+	)
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Stale Init snapshot ingested while on PageLoading.
+	model, _ = model.Update(SessionsMsg{Sessions: stale})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// MANDATORY: deliver ProjectsLoadedMsg while on PageLoading BEFORE the
+	// transition so projectsLoaded=true (exercises the latch machinery — without
+	// it evaluateDefaultPage could never latch even pre-fix, passing vacuously).
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Close both gates: min-display floor elapsed, then terminal complete.
+	model, _ = model.Update(LoadingMinElapsedMsg{})
+	model, completeCmd := model.Update(BootstrapCompleteMsg{})
+
+	// CAPTURE the interim model returned by the BootstrapCompleteMsg Update,
+	// BEFORE draining the batched refetch cmd. This is the one-Update-cycle
+	// interim window the deferral introduces.
+	interim := model.(Model)
+
+	// AC7: the interim page is a valid picker page — PageSessions, never
+	// PageLoading or undefined — even though the refetch SessionsMsg has not
+	// landed yet.
+	if interim.ActivePage() != PageSessions {
+		t.Fatalf("AC7: interim page (after transition, before refetch SessionsMsg) must be PageSessions (a valid picker page, never PageLoading/undefined), got %v", interim.ActivePage())
+	}
+
+	// The interim render is NOT special-cased: the briefly-empty interim Sessions
+	// list is the ACCEPTED state (no empty-state suppression). Assert it is empty
+	// here so a future special-case that hid it would be caught.
+	if got := visibleSessionNames(interim); len(got) != 0 {
+		t.Errorf("AC7: interim Sessions list must be the accepted briefly-empty state before the refetch lands (not special-cased), got %v", got)
+	}
+
+	// THEN drain the refetch cmd (carries the post-restore SessionsMsg) and assert
+	// the final landing per AC1.
+	final := drainBatchToModel(t, interim, completeCmd)
+
+	if final.ActivePage() != PageSessions {
+		t.Fatalf("AC1: final landing after the refetch must be PageSessions, got %v", final.ActivePage())
+	}
+
+	got := visibleSessionNames(final)
+	want := []string{"restored-alpha", "restored-bravo"}
+	if len(got) != len(want) {
+		t.Fatalf("expected all %d restored names visible\n  want %v\n  got  %v", len(want), want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("restored session mismatch at idx %d: want %q got %q (full: %v)", i, want[i], got[i], got)
+		}
+	}
+}
+
+// TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions is the ordering-contract
+// guard (Testing Requirements case 6): the landing decision is independent of
+// ProjectsLoadedMsg arrival order. Here ProjectsLoadedMsg is delivered LATE — in
+// the interim window (after the transition, before the refetch SessionsMsg) — so
+// projectsLoaded is FALSE at the transition. A ProjectsLoadedMsg arriving in the
+// interim window must NOT latch Projects against the stale (empty) interim list,
+// because sessionsLoaded is still false and evaluateDefaultPage() early-returns.
+//
+// Decision point: under this adversarial ordering the post-restore SessionsMsg
+// handler (model.go:1993-2014) is the decision point — it lands SECOND, after the
+// late ProjectsLoadedMsg already set projectsLoaded=true, so sessionsLoaded &&
+// projectsLoaded are both true when the SessionsMsg arm calls evaluateDefaultPage()
+// off the interim PageSessions. The latch stays unset until then, so no path
+// strands the picker on the interim page.
+//
+// SessionsMsg is delivered directly (SessionsMsg{Sessions: restored}) rather than
+// via drainBatchToModel because the drain would resolve the refetch before the
+// late ProjectsLoadedMsg could be injected — defeating the strict interleave.
+func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
+	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
+	restored := []tmux.Session{
+		{Name: "restored-alpha", Windows: 1},
+		{Name: "restored-bravo", Windows: 2},
+	}
+	// The lister is wired but not driven directly in the strict-interleave portion;
+	// the post-restore SessionsMsg is injected manually below.
+	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+
+	m := New(lister,
+		WithServerStarted(true),
+		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithProjectStore(stubProjectStore{}),
+	)
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Stale empty Init snapshot ingested while on PageLoading. NOTE: ProjectsLoadedMsg
+	// is deliberately NOT delivered before the transition, so projectsLoaded is FALSE
+	// at the transition (the adversarial late-arrival ordering).
+	model, _ = model.Update(SessionsMsg{Sessions: stale})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Close both gates: min-display floor elapsed, then terminal complete.
+	model, _ = model.Update(LoadingMinElapsedMsg{})
+	model, _ = model.Update(BootstrapCompleteMsg{})
+
+	// Interim invariant: the page is a valid PageSessions immediately after the
+	// transition, even with projectsLoaded false.
+	if model.(Model).ActivePage() != PageSessions {
+		t.Fatalf("ordering: interim page after transition must be PageSessions (projectsLoaded false), got %v", model.(Model).ActivePage())
+	}
+
+	// Deliver ProjectsLoadedMsg (N>=1) LATE — in the interim window. Its handler
+	// (model.go:2086-2118) calls evaluateDefaultPage() unconditionally (no page
+	// guard), so the ONLY thing preventing a premature latch against the stale
+	// interim list is the !sessionsLoaded early-return inside evaluateDefaultPage().
+	// It must NOT latch Projects: page stays PageSessions.
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	if model.(Model).ActivePage() != PageSessions {
+		t.Fatalf("ordering: a late ProjectsLoadedMsg in the interim window must NOT latch Projects against the stale list (evaluateDefaultPage early-returns on !sessionsLoaded), page must stay PageSessions, got %v", model.(Model).ActivePage())
+	}
+
+	// Deliver the refetch's SessionsMsg (N>0) directly. This is the decision point
+	// under the adversarial ordering: it lands second, both gates of
+	// evaluateDefaultPage are now satisfied, and the landing resolves against the
+	// repaired post-restore list.
+	model, _ = model.Update(SessionsMsg{Sessions: restored})
+	final := model.(Model)
+
+	if final.ActivePage() != PageSessions {
+		t.Fatalf("ordering: final page after the decision-bearing SessionsMsg must be PageSessions with N>0 restored sessions, got %v", final.ActivePage())
+	}
+
+	got := visibleSessionNames(final)
+	want := []string{"restored-alpha", "restored-bravo"}
+	if len(got) != len(want) {
+		t.Fatalf("expected all %d restored names visible after the late-ProjectsLoadedMsg interleave\n  want %v\n  got  %v", len(want), want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("restored session mismatch at idx %d: want %q got %q (full: %v)", i, want[i], got[i], got)
+		}
+	}
+}
+
+// TestColdBoot_RefetchError_QuitsWithoutStrandingInterim is the failing-refetch
+// quit guard (spec Constraints "Failing refetch degrades to today's quit"): if the
+// post-restore refetch's SessionsMsg carries an error, the SessionsMsg handler
+// (model.go:1993-1995) runs tea.Quit BEFORE the deferred evaluateDefaultPage()
+// decision — exactly as a failing Init fetch would (see model_test.go:364-377).
+// The cold route must NOT strand the picker on the interim PageSessions silently
+// waiting for a further decision: it exits with the same error UX as the warm
+// route.
+//
+// Spec invariant: a SessionsMsg carrying an error continues to quit exactly as
+// today, and a single interim frame rendering on PageSessions before quit is
+// acceptable.
+func TestColdBoot_RefetchError_QuitsWithoutStrandingInterim(t *testing.T) {
+	stale := []tmux.Session{} // Init fires before Restore — empty pre-restore server.
+	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+
+	m := New(lister,
+		WithServerStarted(true),
+		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithProjectStore(stubProjectStore{}),
+	)
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Stale empty Init snapshot ingested while on PageLoading.
+	model, _ = model.Update(SessionsMsg{Sessions: stale})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Deliver ProjectsLoadedMsg while on PageLoading so projectsLoaded=true.
+	model, _ = model.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: "/p/one", Name: "one"}}})
+	if model.(Model).ActivePage() != PageLoading {
+		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
+	}
+
+	// Close both gates → transition onto the interim PageSessions.
+	model, _ = model.Update(LoadingMinElapsedMsg{})
+	model, _ = model.Update(BootstrapCompleteMsg{})
+
+	// Assert the interim page is PageSessions (a valid picker page) before the
+	// failing refetch lands.
+	interim := model.(Model)
+	if interim.ActivePage() != PageSessions {
+		t.Fatalf("setup invariant: interim page after transition must be PageSessions, got %v", interim.ActivePage())
+	}
+
+	// Deliver the post-restore refetch result as an error-carrying SessionsMsg
+	// directly through Update. The error path returns tea.Quit BEFORE the deferred
+	// evaluateDefaultPage() decision runs — mirroring model_test.go:364-377.
+	_, cmd := interim.Update(SessionsMsg{Err: errors.New("tmux refetch failed")})
+	if cmd == nil {
+		t.Fatal("failing refetch SessionsMsg must return a quit command, got nil")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("failing refetch SessionsMsg must run tea.Quit (mirroring a failing Init fetch), got %T", cmd())
 	}
 }
