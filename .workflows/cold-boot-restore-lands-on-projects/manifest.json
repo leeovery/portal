@@ -45,7 +45,9 @@
             "cold-boot-restore-lands-on-projects-1-1": "tick-9b305e",
             "cold-boot-restore-lands-on-projects-1-2": "tick-28a91d",
             "cold-boot-restore-lands-on-projects-1-3": "tick-7f37e3",
-            "cold-boot-restore-lands-on-projects-1-4": "tick-6fee61"
+            "cold-boot-restore-lands-on-projects-1-4": "tick-6fee61",
+            "cold-boot-restore-lands-on-projects-2": "tick-066bac",
+            "cold-boot-restore-lands-on-projects-2-1": "tick-4b4777"
           },
           "external_id": "tick-bcb9b9"
         }
@@ -57,7 +59,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,

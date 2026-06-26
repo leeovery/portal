@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: Cold-boot Restore Lands on Projects (Cycle 1)
 
 ## Task 1: Extract a shared cold-route driver that delivers ProjectsLoadedMsg before the loading transition
-status: pending
+status: approved
 severity: medium
 sources: duplication
 

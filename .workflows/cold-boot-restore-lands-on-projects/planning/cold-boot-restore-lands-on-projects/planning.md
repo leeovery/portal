@@ -31,3 +31,13 @@ approved_at: 2026-06-26
 | cold-boot-restore-lands-on-projects-1-2 | Cold-route decision-correctness coverage (no over-correction + filter routing) | zero-session cold boot lands on Projects (over-correction guard); initialFilter routes to session list not project list and is zeroed there |
 | cold-boot-restore-lands-on-projects-1-3 | Warm-route parity guard | warm route dispatches no post-complete refetch; zero-session warm boot lands on Projects |
 | cold-boot-restore-lands-on-projects-1-4 | Interim-page and late-ProjectsLoadedMsg ordering invariants | interim render may briefly show Sessions empty-state (not special-cased); late ProjectsLoadedMsg must not latch Projects against the stale list |
+
+### Phase 2: Analysis (Cycle 1)
+
+Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cold-boot-restore-lands-on-projects-2-1 | Extract a shared cold-route driver that delivers ProjectsLoadedMsg before the loading transition | TestColdBoot_InterimPage_IsValidSessions needs the pre-drain interim model/completeCmd — split the driver or return the interim model so the interim-page assertion is preserved exactly; no production code modified; existing driveColdBootToSessions helper left untouched |
