@@ -134,30 +134,36 @@ total: 4
 - Test for AC5 (zero-session warm boot), e.g. `TestWarmRoute_ZeroSessions_LandsOnProjects`: build with `New(lister, WithServerStarted(true), WithProjectStore(...))` — NO `WithProgressReceiver`. The lister returns an EMPTY snapshot. Drive `WindowSizeMsg`, empty `SessionsMsg` on `PageLoading`, `ProjectsLoadedMsg` (with ≥1 project) on `PageLoading`, `LoadingMinElapsedMsg`, `BootstrapCompleteMsg`. Assert `final.ActivePage() == PageProjects`. Assert the complete handler's returned cmd does NOT trigger a refetch (lister call count unchanged across the transition — mirror the assertion style in `TestWarmRoute_NoPostCompleteRefetch`).
 - Add a direct unit assertion that `refetchSessionsAfterRestore()` returns `nil` when `progressReceiver == nil`, e.g. `TestWarmRoute_RefetchSessionsAfterRestore_Nil`: construct a warm model (no `WithProgressReceiver`) and assert `m.refetchSessionsAfterRestore() == nil` (white-box, direct method call — the function is a `Model` value receiver). Pair with a cold model (`WithProgressReceiver(...)`) asserting it returns non-nil, to lock the predicate symmetry.
 - Confirm (assertion in a test, or by inspection captured in a test comment) that on the warm route `transitionFromLoading()` still sets `sessionsLoaded = true` and runs `evaluateDefaultPage()`: the N>0 warm test landing on Sessions and the zero-session warm test landing on Projects jointly prove the synchronous decision fires at transition.
+- AC6 (commandPending preservation), e.g. `TestCommandPending_LandsOnProjects_NoInterimFlash`: build with `New(lister, WithServerStarted(true), WithProgressReceiver(func() tea.Msg { return nil })).WithCommand([]string{"echo", "hi"})` — `WithCommand` sets `commandPending = true` and `activePage = PageProjects` (model.go:632-639). Drive `WindowSizeMsg`, then `ProjectsLoadedMsg` (≥1 project) so the `commandPending` arm of `evaluateDefaultPage()` (model.go:1619-1622) can resolve. Assert `final.ActivePage() == PageProjects`. The test verifies that a `commandPending` launch lands on Projects regardless of session count and never sits on `PageSessions` (the interim page the deferral introduces). Add a comment recording the spec invariant: `Init`'s `commandPending` branch (model.go:1882-1883) returns before wiring `loadingPadTick` / `progressReceiver`, so `transitionFromLoading()` is never invoked for a `commandPending` launch and no interim Sessions flash occurs — even though `WithProgressReceiver` is wired, the `commandPending` short-circuit takes precedence. No `t.Parallel()`.
 
 **Acceptance Criteria**:
 - [ ] AC4: warm route (`progressReceiver == nil`), N>0 sessions → lands on `PageSessions`, byte-identical to today (covered by the pre-existing `TestWarmRoute_NoPostCompleteRefetch` plus the no-refetch assertion).
 - [ ] AC5: warm route, zero sessions → lands on `PageProjects`.
 - [ ] `refetchSessionsAfterRestore()` returns `nil` on the warm route (no extra enumeration); returns non-nil on the cold route.
 - [ ] The warm-route transition handler dispatches no post-complete refetch cmd (lister call count does not bump across the transition).
+- [ ] AC6: a `commandPending` launch lands on `PageProjects` regardless of session count and is never observed on the interim `PageSessions`; the `commandPending → Projects` arm of `evaluateDefaultPage()` is unchanged.
+- [ ] Verified that the `commandPending` path never reaches `transitionFromLoading()` (the modified loading→picker transition): `Init`'s `commandPending` branch returns before wiring the loading-dismissal machinery, so no interim Sessions flash occurs on a `commandPending` launch.
 - [ ] All warm-route tests pass under `go test ./internal/tui/...`.
 
 **Tests**:
 - `"it lands the warm-route picker on Projects when zero sessions exist"`
 - `"it returns nil from refetchSessionsAfterRestore on the warm route and non-nil on the cold route"`
 - `"it dispatches no post-complete refetch on the warm route"` (existing `TestWarmRoute_NoPostCompleteRefetch` — keep green)
+- `"it lands a commandPending launch on Projects regardless of session count"`
+- `"it never flashes the interim Sessions page on a commandPending launch (transitionFromLoading is not invoked)"`
 
 **Edge Cases**:
 - Warm route must dispatch no post-complete refetch: the synchronous route ran the orchestrator before the model was built, so its Init snapshot is already post-restore — a refetch would be wasted work and a behaviour change (spec §Constraints: Warm / CLI / direct-path untouched).
 - Zero-session warm boot lands on Projects: the warm route's synchronous `evaluateDefaultPage()` at transition runs the same `len(Items())>0` test against the already-post-restore Init snapshot (empty → Projects), unchanged from today.
 - The `progressReceiver == nil` predicate is the sole discriminator; do not assert against `serverStarted` or any other probe (the warm test sets `WithServerStarted(true)` to force the loading page yet omits the receiver — proving the receiver, not `serverStarted`, gates the deferral).
+- `commandPending` does not intersect the deferral: `Init`'s `commandPending` branch returns before wiring `loadingPadTick` / `progressReceiver` re-issue, so `transitionFromLoading()` is never invoked and the interim Sessions page is never reached (spec §Constraints: "`commandPending` does not intersect the deferral"). AC6 therefore holds unchanged and is independent of the cold-route deferral.
 
 **Context**:
 > Warm / CLI / direct-path untouched (spec §Constraints): the synchronous route keeps making the landing decision at `transitionFromLoading()` time against its already-post-restore Init snapshot. No new enumeration, no behaviour change, no new ordering dependency. This is the zero-new-risk contract — the warm-path startup sequence has prior-incident history (slow-open / zombie-session) and must not be perturbed.
 > `refetchSessionsAfterRestore()` (model.go ~line 1818) returns `nil` when `m.progressReceiver == nil`, else `m.fetchSessionsCmd()`. The warm route never refetches.
 > AC4/AC5 (spec §Acceptance Criteria): warm path N>0 → Sessions (byte-identical to today); warm path zero → Projects (byte-identical to today).
 
-**Spec Reference**: `.workflows/cold-boot-restore-lands-on-projects/specification/cold-boot-restore-lands-on-projects/specification.md` — AC4, AC5, §Testing Requirements case 4, §Constraints (Warm / CLI / direct-path untouched, Canonical cold-route predicate).
+**Spec Reference**: `.workflows/cold-boot-restore-lands-on-projects/specification/cold-boot-restore-lands-on-projects/specification.md` — AC4, AC5, AC6, §Testing Requirements case 4, §Constraints (Warm / CLI / direct-path untouched, Canonical cold-route predicate, `commandPending` branch preserved, `commandPending` does not intersect the deferral).
 
 ## cold-boot-restore-lands-on-projects-1-4 | approved
 

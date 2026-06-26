@@ -47,8 +47,8 @@ Append to **Edge Cases**:
 Append to **Spec Reference** (so it reads):
 `.workflows/cold-boot-restore-lands-on-projects/specification/cold-boot-restore-lands-on-projects/specification.md` — AC4, AC5, AC6, §Testing Requirements case 4, §Constraints (Warm / CLI / direct-path untouched, Canonical cold-route predicate, `commandPending` branch preserved, `commandPending` does not intersect the deferral).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied to Task 1-3 (tick-7f37e3) — appended AC6 commandPending preservation test, acceptance criteria, tests, edge case, and spec reference to both phase-1-tasks.md and the tick description.
 
 ---
 
