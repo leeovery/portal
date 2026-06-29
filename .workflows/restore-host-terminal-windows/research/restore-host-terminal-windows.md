@@ -35,6 +35,15 @@ The manual multi-select trigger means we **do not** need to track the live windo
 
 **User preference (captured):** windows-only is acceptable for the MVP — the user rarely uses Ghostty tabs and is happy for a session that was a tab to reopen as a window. This **drops the window-vs-tab refinement from v1 scope** and, with it, the entire introspection requirement (see F2 below — Ghostty can't introspect tty/pid today anyway, so windows-only sidesteps the one hard blocker).
 
+## Deep-Dive Findings (terminal automation surface — folded in as surfaced)
+
+*Full report: `.workflows/.cache/restore-host-terminal-windows/research/restore-host-terminal-windows/deep-dive-001-terminal-automation-surface.md`. Verdict: **feature is feasible across all 5 target macOS terminals — spawn works everywhere.***
+
+- **Spawn is solved on Ghostty today (F1).** Ghostty 1.3.x (user confirmed on 1.3.1) ships an AppleScript dictionary: `new window with configuration` where the config carries a `command` field — so Portal can open a new Ghostty window running `tmux attach -t <session>` directly. No keystroke hacks. The whole feature rests on spawn; spawn exists.
+  - *Caveat (accepted):* each `new window` implicitly activates Ghostty / focuses the new window (issue #11457), so a burst multi-select flashes focus through the spawned windows. **User accepts this** — standard OS behaviour; only the end-state matters.
+  - *Caveat:* Ghostty AppleScript is a "preview feature, breaking changes expected in 1.4" — the dictionary shape may churn.
+- **Parity is free.** Spawn-and-attach uses the identical `tmux attach -t <session>` path as a manual attach from a bare shell. N selected sessions = N independent identical attaches. "Exactly as if done individually" is the default, not engineered.
+
 ## Two Feasibility Risks (the real research)
 
 1. **Spawn** — Can Portal programmatically open a new Ghostty **window** *or* **tab**, each running a specific command (`portal`/`tmux attach -t <session>`)? This is the central risk; the whole feature rests on it. Ghostty's automation surface (CLI actions, IPC, AppleScript dictionary, or fallback keystroke injection via System Events) needs verifying.
