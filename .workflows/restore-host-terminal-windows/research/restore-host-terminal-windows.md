@@ -33,6 +33,8 @@ The manual multi-select trigger means we **do not** need to track the live windo
 - The **only** new thing tracking buys is the **window-vs-tab consumption mode** per session — so a session that was a tab reopens as a tab, a window as a window.
 - **Implication:** the MVP (multi-select + spring-open) needs *near-zero new tracking*. Window-vs-tab fidelity is a **separable refinement** — v1 could default to "always window" and add mode-tracking later. This is a natural scope seam, not a decision to make here.
 
+**User preference (captured):** windows-only is acceptable for the MVP — the user rarely uses Ghostty tabs and is happy for a session that was a tab to reopen as a window. This **drops the window-vs-tab refinement from v1 scope** and, with it, the entire introspection requirement (see F2 below — Ghostty can't introspect tty/pid today anyway, so windows-only sidesteps the one hard blocker).
+
 ## Two Feasibility Risks (the real research)
 
 1. **Spawn** — Can Portal programmatically open a new Ghostty **window** *or* **tab**, each running a specific command (`portal`/`tmux attach -t <session>`)? This is the central risk; the whole feature rests on it. Ghostty's automation surface (CLI actions, IPC, AppleScript dictionary, or fallback keystroke injection via System Events) needs verifying.
