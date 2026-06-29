@@ -64,6 +64,13 @@
           "order": 7
         }
       }
+    },
+    "discussion": {
+      "items": {
+        "agent-state": {
+          "status": "in-progress"
+        }
+      }
     }
   },
   "imports": [
