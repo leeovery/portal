@@ -4,5 +4,13 @@
   "status": "in-progress",
   "created": "2026-06-29",
   "description": "Portal restores the host-local terminal layer after reboot: track which terminal windows were attached to which sessions on this machine, then re-spawn and re-attach them on demand. macOS Spaces placement is out of scope.",
-  "phases": {}
+  "phases": {
+    "research": {
+      "items": {
+        "restore-host-terminal-windows": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
 }

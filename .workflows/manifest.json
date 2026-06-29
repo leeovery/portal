@@ -140,6 +140,9 @@
     },
     "agent-first-portal": {
       "work_type": "epic"
+    },
+    "restore-host-terminal-windows": {
+      "work_type": "feature"
     }
   },
   "defaults": {
