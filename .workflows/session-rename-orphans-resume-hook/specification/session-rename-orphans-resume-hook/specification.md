@@ -65,6 +65,37 @@ Two new derivation primitives in `internal/tmux`:
 
 **Post-restore consistency.** After restore re-stamps `@portal-id` on the recreated live session (persistence topic), a subsequent stage-2 cleanup read of the *live* session yields the same key stage 3 baked — so cleanup never treats a freshly-restored hook as stale.
 
+## Cross-Reboot Persistence of `@portal-id`
+
+tmux user-options are in-memory server state; they do not survive a reboot. Portal owns save/restore, so it must persist `@portal-id` itself. This is **required** for the headline case: a session renamed *then* rebooted. At capture the session's saved `Name` is the post-rename name, but its hook was registered under the immutable id; restore must recover that id to bake the matching `--hook-key`. The id is unrecoverable after rename unless persisted — so it rides `sessions.json`.
+
+(Note: `@portal-dir` is deliberately *not* persisted/re-stamped today — it lazy-re-derives. `@portal-id` cannot lazy-re-derive an opaque token, so it must be saved. This is the one place the new option diverges from the `@portal-dir` precedent.)
+
+**1. Schema (`internal/state/schema.go`).** Add one field to `state.Session`:
+```go
+PortalID string `json:"portal_id"`
+```
+Additive and optional: an old `sessions.json` with no `portal_id` decodes to `""` (tolerant decode, same as other optional fields); a new binary reading it falls back to the session name. No schema `Version` bump and no `sessions.json` migration. Forward-compatible too — an older binary ignores the unknown field.
+
+**2. Capture (`internal/state/capture.go`).** Extend `captureFormat` with a session-scoped `#{@portal-id}` field and populate `Session.PortalID` from it. `#{@portal-id}` resolves per-pane to the owning session's option value, so it is present on every pane row for that session; the parser takes it when assembling the session. A legacy/un-stamped session captures `PortalID == ""`. (The opaque token is alphanumeric, so it cannot contain the `|||` field delimiter.)
+
+**3. Restore re-stamp (`internal/restore/session.go`).** In `createSkeleton`, immediately after `NewSessionWithCommand(sess.Name, …)` recreates the session, re-stamp the saved id when present — best-effort, mirroring creation-time stamping:
+```go
+if sess.PortalID != "" {
+    _ = r.Client.SetSessionOption(sess.Name, PortalIDOption, sess.PortalID)
+}
+```
+`sessions.json` is a snapshot the daemon **continuously regenerates from live tmux state**, not a store of record — so re-seeding the live session with its id is what keeps the id alive past the single restore read. Without the re-stamp the id resolves correctly for the *first* resume (baked from the saved snapshot) but is then lost, because:
+- **(a) Re-persistence.** The first post-restore capture (~1s later) rewrites `sessions.json` from live state; a session with no live `@portal-id` is captured as `PortalID == ""`, erasing the id from the snapshot → the *next* reboot resurrects a bare shell.
+- **(b) Survives cleanup.** Post-restore stale-cleanup (bootstrap step 11) builds its live-key set from the live `@portal-id`; with the id absent, the restored session's live key falls back to the name, which no longer matches the id-keyed `hooks.json` entry, so cleanup deletes the hook that just fired — in the same bootstrap.
+- **(c) Future rename.** A subsequent rename of the restored session stays stable only while the live id is present.
+
+A legacy session with no saved id is left un-stamped and falls through to the name-based key, exactly as before.
+
+**Constant.** The option name is a single shared constant `PortalIDOption = "@portal-id"`, referenced by every set-option site (creation, restore re-stamp) and kept in sync with the literal `@portal-id` embedded in `tmux.HookKeyFormat`. Its package placement is an implementation detail (it must be importable by the stamp and re-stamp sites).
+
+**Firing does not depend on the re-stamp (ordering).** Restore's order is `collectArmInfos` → `createSkeleton` → `armPanes` (`session.go:86`). The hook key is computed from **saved** `sess.PortalID` in `collectArmInfos` and baked into the helper's `--hook-key`; the helper resolves `hooks.json` by that baked key and **never reads the live `@portal-id`**. Hook firing is therefore correct independent of the re-stamp. The re-stamp (in `createSkeleton`) nonetheless precedes the helper launch (in `armPanes`), and serves only the post-restore concerns (a)–(c) above. **Implementation constraint:** the firing path must not be changed to read the live `@portal-id` — doing so would make hook firing depend on re-stamp ordering and reintroduce a rename-window race.
+
 ---
 
 ## Working Notes
