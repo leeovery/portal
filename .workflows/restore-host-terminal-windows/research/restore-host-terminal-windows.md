@@ -82,9 +82,28 @@ The user hit a real snag: if Portal natively supports only Ghostty, how does a W
 
 The user asked whether multi-select could later serve other actions (e.g. **bulk tag-adding**). Takeaway for v1: implement multi-select as a **general selection mode with spawn as its first action**, not a spawn-only modal — so future bulk operations can hang off the same selection. *Bulk-tagging itself is out of scope* (and would live on the **Projects** page = a separate feature; this feature's multi-select is **Sessions**-only). Noted, not built.
 
-### Open UX question (unsupported terminal)
+### Unsupported-terminal UX (decided — banner, not modal)
 
-When Portal runs in an **unsupported + unconfigured** terminal: disable/hide multi-select entirely, or keep selection available but have the spawn action guide the user to configure their terminal? (Interacts with the "multi-select is general" note — if selection serves future non-spawn actions, hiding it wholesale may be wrong.) Open for discussion.
+**Decision:** multi-select does **not** vanish in an unsupported/unconfigured terminal (it may serve future non-spawn actions, so hiding it wholesale is wrong). Instead, on trigger, show an **info banner** (Portal already has the component) — *"We don't support your terminal and you haven't configured one — check the docs."* No modal (a modal hides everything). The banner should name the **detected terminal identity** so the user knows exactly which config key to add (see identity resolution below). This resolves review-F8.
+
+### The terminal-identity problem (the real crux — user pushback, now reframed)
+
+The user correctly broke the naive "detect via env vars" story (review-F13 independently flagged the same): env vars alone (a) don't generalise to *unknown* terminals, (b) shouldn't be user-set, and (c) — the killer — **don't tell the user what string to key their config against**. For config lookup to work, the user's key must match Portal's detected identity, but the user has no way to know that string a priori. Chicken-and-egg.
+
+**Reframed resolution (to be verified by deep-dive 002):** identity comes from the **host terminal's actual process**, not env vars:
+- `tmux list-clients` → the **client PID** (the host-side `tmux attach` process, living *outside* tmux's env-clobber).
+- Walk that PID **up the process tree** → the terminal-emulator process (`ghostty`, `kitty`, `wezterm-gui`, `Warp`, `iTerm2`). Deterministic, works for **any** terminal (you always get a process name), works inside tmux.
+
+**This breaks the chicken-and-egg:** Portal owns the canonical identity and **surfaces it to the user** (in the unsupported banner, or a detect command). The matching key flows *Portal → user*, never user-guesses. Native adapters match the detected process against a built-in list; config entries are keyed by the same detected string.
+
+**Consequences:** multi-terminal Just Works (detect per-invocation what you're *currently* in → look up that). The "one terminal at a time" simplification the user floated is **not needed**.
+
+**Open edges to verify (deep-dive 002):**
+- **Multi-client ambiguity** — when several clients are attached to one session, which client is "the one viewing me"? Does tmux expose a deterministic signal, or does a plain `tmux` subprocess just get the most-recently-used client?
+- **Detached-session / no-client** case (less relevant — the user is *in* a terminal when triggering).
+- **Most stable identity key on macOS** — executable basename vs `.app` bundle id (e.g. `com.mitchellh.ghostty`).
+- **Post-reboot scenario** — a fresh terminal window attaching to an already-running server: does the client-PID→process-tree walk still resolve correctly (this is where the env-var approach was fragile, F13)?
+- Layering: process-tree as the reliable backbone, env vars as an optional fast-path/confirmation.
 
 ## Forward-Looking (out of scope — "keep half an eye")
 
