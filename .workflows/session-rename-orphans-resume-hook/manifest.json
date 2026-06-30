@@ -4,7 +4,15 @@
   "status": "in-progress",
   "created": "2026-06-30",
   "description": "Renaming a tmux session silently orphans its Portal resume hook, so the session reboots as a bare shell instead of resuming after reboot",
-  "phases": {},
+  "phases": {
+    "investigation": {
+      "items": {
+        "session-rename-orphans-resume-hook": {
+          "status": "in-progress"
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-06-30-session-rename-orphans-resume-hook.md",
