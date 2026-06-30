@@ -56,6 +56,47 @@ instead of resuming.
 - Seed: `.workflows/session-rename-orphans-resume-hook/seeds/2026-06-30-session-rename-orphans-resume-hook.md`
 - Discovery: `.workflows/session-rename-orphans-resume-hook/discovery/session-001.md`
 
+### Live Evidence (captured 2026-06-30, this session)
+
+`hooks.json` entries are `claude --resume <uuid>` commands — they are **not**
+hand-registered by `portal hooks set`; they are written by an external Claude
+Code SessionStart hook that calls `portal hooks set --on-resume` with the
+session's **current** structural key at the moment claude starts. This timing is
+load-bearing (see below).
+
+**Confirmed orphans (seed's two):** live sessions `finder-v2` and
+`agentic-workflows-refactor-wt` have no matching hook key; the original nanoid
+keys (`finder-wlRUOm:1.1`, `agentic-workflows-vAKe79:1.1`) are absent from
+`hooks.json` — deleted. History files still present (prune-on-missing-history
+not involved). Matches the seed exactly.
+
+**Live reproduction (user renamed several sessions mid-investigation):** four
+hook keys became orphaned (no live session) while their renamed sessions live
+on. Decoding the resume targets reveals two distinct outcomes — the key
+discriminator the seed lacked:
+
+| Old hook key (orphaned) | Worktree / resume uuid | New live session | New session has hook? |
+|---|---|---|---|
+| `portal-AusNIg:1.1` | portal / c9805093 | `portal-agent-first` | **NO — bug** |
+| `portal-LoMivh:1.1` | portal / 015232aa | `portal-restore-terminal-windows` | **NO — bug** |
+| `portal-2ohu9r:1.1` | skip-bootstrap / 648eb8f2 | `portal-skip-bootstrap-when-warm` | yes (new uuid 65b8…) |
+| `portal-3lDxwH:1.1` | session-rename-… / c5c8bd41 | `portal-session-rename-orphans-resume-hook` (this session) | yes (new uuid 9d5a…) |
+
+**Discriminator:** a rename orphans the hook **only when the inner claude
+process does not restart**. Where claude restarted (rows 3–4), the SessionStart
+hook re-registered under the new name with a *new* resume uuid, so the session
+is safe; the old key is a benign leftover. Where claude kept running (rows 1–2),
+nothing re-registers → the new-named session has no hook → bug.
+
+**Deletion is deferred, not immediate:** immediately after the renames all four
+orphaned keys were still present in `hooks.json` (no reboot/bootstrap had run).
+So the orphaned key is not deleted at rename time — it is removed by a later
+cleanup pass (bootstrap clean-stale / `portal clean` / daemon GC). Note this
+means the bare-shell symptom does **not** strictly require the deletion: at
+restore the session is recreated under its **new** saved name and the hydrate
+helper looks up the **new** structural key, which never matched the old-name
+hook key. The deletion only makes the loss permanent/unrecoverable.
+
 ---
 
 ## Analysis
