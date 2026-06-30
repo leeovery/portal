@@ -122,6 +122,21 @@ Architectural impact on *this* feature: "remember what was open" implies **intro
 - Portal already runs a **1s tick daemon** (`portal state daemon` inside `_portal-saver`) that captures session structure to `sessions.json`. The user's "keep a tick / log of how it's consumed" maps directly onto this existing seam — consumption-mode could ride the same capture loop.
 - The **"host-local vs other client" distinction** (original feasibility worry) softens under manual multi-select: the daemon runs on *this* host and the user reopens from *this* host, so a future mobile/relay client (per `agent-first-portal`) attaching to the same session wouldn't masquerade as a local window to reopen. The user has final say via the selection anyway.
 
+## Operational & Edge Surfaces (from review-001)
+
+The research is strong on terminal-automation feasibility but thin on operational/product surfaces. Captured here for discussion; some already resolved above.
+
+- **Burst failure modes (review-F1)** — the motivating scenario is a *large* burst (rebuild ~14 windows post-crash), yet the research reasons about the clean 3-window path. Partial failure (spawn/attach of window K fails — session killed since picker load), AppleScript throughput/rate-limit under rapid-fire, and the mid-burst TCC prompt all unexplored. Need a partial-failure contract: all-or-nothing vs best-effort-with-report.
+- **Trigger-context matrix (review-F2)** — behaviour when: user is *outside* tmux at trigger; a selected session is *already attached* elsewhere on this host; the picker is itself running in one of the windows being reopened. Map in/out-of-tmux × attached/detached × includes-self.
+- **Duplicate-surface guard (review-F3)** — *open, decision below.* Dropping live-window-inventory tracking (correct for the spawn primitive) means Portal can't tell a session already has a host window → may spawn a second. `tmux list-clients` cheaply exposes already-attached sessions without full inventory tracking.
+- **First-run TCC Automation permission (review-F4)** — first AppleScript call triggers the one-time macOS permission modal (the deep-dive author's own probe timed out on it, AppleEvent -1712). First-run blocker, not a caveat. Design the request→granted→spawn / denied→guidance flow; surface -1712/timeout rather than silently doing nothing.
+- **Testing strategy (review-F5)** — feature drives a real GUI terminal (hard in CI); project has deep test discipline. Identify the DI seam (an `Adapter` interface with a fake spawn), what's unit-testable (command/argv construction, detect-self resolution, precedence) vs integration/manual-gated.
+- **Where spawn executes architecturally (review-F6)** — picker action shelling out from the TUI process vs a new `portal` subcommand the picker invokes vs both. Determines which process's env feeds detect-self, how the `tmux attach` line is assembled, and whether a headless/scriptable reopen is possible. **Coupled to identity detection (deep-dive 002)** — resolve together.
+- **Keymap coexistence (review-F7)** — `M` selection mode vs the tight §12.2 keymap: `Enter` (single attach) and `Space` (preview) collide with selection-mode semantics; interaction with non-selectable HeaderItem rows, the `/` filter (letters become literal), and pagination all unwalked.
+- **Config schema (review-F9)** — v1 *ships* the user-config layer, so its concrete shape is more than a discussion detail: where it lives, format, how a terminal key maps to a command, `{session}` interpolation. Surface at least one worked example (a Warp user overriding spawn).
+- **Daemon/state footprint (review-F10)** — "near-zero state change" asserted as a corollary, not traced. Confirm which packages (state, daemon, prefs, a new config package) are/aren't touched by windows-only v1.
+- **Attach contention (review-F12)** — *open.* N near-simultaneous `tmux attach -t` against a server that may still be hydrating post-reboot (`@portal-restoring`, 1s capture tick, self-supervising daemon): genuinely independent of the bootstrap/restore/daemon machinery, or racing it?
+
 ## Open Questions
 
 - **Ghostty spawn:** does Ghostty expose a clean way to open a new window/tab running a given command? (CLI `+` actions, IPC socket, AppleScript dictionary, `open -na`, or keystroke fallback?) — *central feasibility risk, candidate for deep dive.*
