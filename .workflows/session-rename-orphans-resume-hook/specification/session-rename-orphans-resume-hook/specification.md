@@ -96,6 +96,21 @@ A legacy session with no saved id is left un-stamped and falls through to the na
 
 **Firing does not depend on the re-stamp (ordering).** Restore's order is `collectArmInfos` → `createSkeleton` → `armPanes` (`session.go:86`). The hook key is computed from **saved** `sess.PortalID` in `collectArmInfos` and baked into the helper's `--hook-key`; the helper resolves `hooks.json` by that baked key and **never reads the live `@portal-id`**. Hook firing is therefore correct independent of the re-stamp. The re-stamp (in `createSkeleton`) nonetheless precedes the helper launch (in `armPanes`), and serves only the post-restore concerns (a)–(c) above. **Implementation constraint:** the firing path must not be changed to read the live `@portal-id` — doing so would make hook firing depend on re-stamp ordering and reintroduce a rename-window race.
 
+## Scope & Non-Goals
+
+**Both rename triggers are fixed at the root — no rename interception anywhere.** Because the hook key no longer embeds the mutable name, nothing has to observe or react to a rename:
+- **External `tmux rename-session`** (not interceptable by Portal) — covered: the rename changes `#{session_name}` but not the immutable `@portal-id`, so the hook key is unaffected.
+- **Portal's in-TUI rename** (`renameAndRefresh`, `internal/tui/model.go`) — **no change required**. It continues to do a bare `RenameSession` + list refresh with zero hook re-keying. This is the decisive advantage over the rejected "intercept-and-re-key" approach, which could only ever fix the in-TUI path.
+
+**The external start-hook is unchanged.** The out-of-repo tool that registers hooks keeps calling `portal hooks set --on-resume` exactly as today; Portal resolves the stable key internally (stage 1). No change is required outside this repository.
+
+**Out of scope — other `session_name`-keyed subsystems (verified not affected the same way).** The investigation flagged these for resolution; they are deliberately **not** re-anchored to `@portal-id` by this fix:
+- **`@portal-skeleton-*` markers** (`internal/state/markers.go`, keyed by `SanitizePaneKey(name, w, p)`) are **transient**: they exist only inside the restore→hydration window, are cleared on hydration (`UnsetSkeletonMarker`), and any stale leftover is reaped by bootstrap steps 9–10. A rename in that sub-second window at most strands a marker that is then cleaned — no persisted user data is lost. (Contrast hooks, which are user config addressed across a reboot gap.)
+- **`sessions.json` delta/merge matching** (`mergeSkippedPanes`, keyed by `SanitizePaneKey`) governs only skeleton-marked panes during the restore window, while capture is suppressed by `@portal-restoring`. Post-restore, a rename simply causes the session to be re-captured under its new name, which is correct. No silent loss.
+- The **`@portal-active-*` marker** named in the investigation **does not exist** in the code (only a stale test-comment reference) — no action.
+
+**Not retrofitting legacy sessions (restated non-goal).** No backfill of `@portal-id` onto pre-existing sessions and no `hooks.json` re-key migration. Pre-fix sessions keep working via the name fallback and gain rename-immunity only when next recreated (see *Fix Overview → Coverage*).
+
 ---
 
 ## Working Notes
