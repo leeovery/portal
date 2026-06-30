@@ -42,11 +42,11 @@ A living index of subtopics tracked during the discussion.
 
 ### Map
 
-  Discussion Map — Skip Bootstrap When Warm (9 subtopics — 1 converging · 8 pending)
+  Discussion Map — Skip Bootstrap When Warm (9 subtopics — 1 decided · 1 converging · 7 pending)
 
   ┌─ → What "skip" means — classifying the 11 steps [converging]
   │  ├─ ✓ Protective steps stay on the warm path (EnsureSaver) [decided]
-  │  └─ ○ Cleanup steps over a long-lived (weeks) server [pending]
+  │  └─ → Cleanup steps over a long-lived (weeks) server [converging]
   ├─ ○ Latch storage & semantics [pending]
   ├─ ○ Where & when the latch is set [pending]
   ├─ ○ Latch-check placement in the entry path [pending]
@@ -110,6 +110,39 @@ Note: on the warm path EnsureSaver runs **outside** the `@portal-restoring` wind
 
 ---
 
+## Cleanup steps over a long-lived (weeks) server
+
+### Context
+
+The weeks-long-server constraint raised a worry: cleanup steps 9 (CleanStaleMarkers), 10 (SweepOrphanFIFOs), 11 (CleanStale hooks) are framed as once-per-lifetime, but if cruft *accrues* during a weeks-long warm lifetime, skipping them on warm commands would let it pile up for weeks (the daemon does **not** clean these — confirmed: the daemon's only GC is `gcOrphanScrollback`, scrollback `.bin` files, inside `Commit`; markers/FIFOs/hooks cleanup live only in bootstrap + `portal clean`).
+
+So the real question isn't "is cleanup important" — it's **"does a warm server actually produce new cleanup targets mid-lifetime?"** Traced each:
+
+### The trace (what produces each cleanup target)
+
+- **Skeleton markers (`@portal-skeleton-*`)** — `SetSkeletonMarker` is called from exactly **one** place: `internal/restore/session.go` during bootstrap step 6 restore. Nowhere else. A warm server creates **zero** new skeleton markers. Any stale ones are cold-boot restore leftovers, already cleaned by step 9 *during that same cold boot*. ⇒ Step 9 has **no mid-warm-lifetime workload**.
+- **Hydrate FIFOs (`hydrate-*.fifo`)** — `CreateFIFO` is called from exactly **one** place: `internal/restore/session.go:217` during restore. A warm server creates **zero** new FIFOs. ⇒ Step 10 has **no mid-warm-lifetime workload**.
+- **Hook entries (`hooks.json`)** — created by `portal hooks set` (user action, any time) and go stale when the keyed pane/session is killed (normal warm-server activity). This is the **only** Class-3 target a warm server genuinely produces over time.
+
+### Options Considered (for the hooks step only — 9 & 10 are moot on warm)
+
+- **Skip step 11 on warm too.** Dead hook entries (for killed sessions) accrue in `hooks.json` over weeks.
+  - Harm: low — dead entries don't fire (their pane doesn't exist); they're plain JSON bloat. Cleaned at next cold boot, and `portal clean` is an explicit manual sweep. **Bonus:** skipping step 11 on warm *reduces* exposure to the known `bootstrap-cleanstale-wipes-hooks-on-tmux-transient` bug (which only triggers inside a bootstrap when `list-panes -a` returns transiently-empty).
+- **Keep step 11 on warm.** Cleans dead hook entries promptly.
+  - Cons: re-introduces the hooks-wipe bug surface on every warm command; runs a `list-panes -a` diff-and-delete on commands that mostly have nothing to clean; and most users have *zero* resume-hook entries (opt-in feature), so it's pure overhead in the common case.
+- **Move cleanup into the daemon.** Make the lifetime-resident daemon prune stale hooks on its tick.
+  - Cons: scope expansion; the daemon already deliberately stays out of the hooks store; only buys prompt cleanup of low-harm bloat. Better as a separate consideration if it ever matters.
+
+### Decision (recommended — awaiting confirm)
+
+**Skip all of Class 3 on the warm path.** Steps 9 and 10 are trivially safe — a warm server produces none of their targets. Step 11 is also skipped: the only thing it would clean (dead hook entries) is low-harm, recoverable via `portal clean` + next cold boot, and skipping it actively shrinks the hooks-wipe bug surface. The weeks-long-server worry dissolves once you see that nearly all cleanup targets are *restore-window (cold-boot) artifacts*, not warm-server output.
+
+**Net result of the whole "scope" classification: the latch skips everything except step 5 (EnsureSaver).** A clean two-class split — protective liveness stays, all else is cold-only.
+
+Confidence: high. Open only on the `portal clean` adequacy assumption for hooks bloat (deemed sufficient).
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -122,8 +155,8 @@ Note: on the warm path EnsureSaver runs **outside** the `@portal-restoring` wind
 
 ### Current State
 
-- **Decided:** reject all-or-nothing skip; latch gates Class 1 (cold-only) steps; Class 2 (EnsureSaver protective liveness) stays on the warm path.
-- **Open:** Class 3 cleanup steps (9/10/11) — whether they skip on warm (risking weeks of accrual) or move to a lifetime-resident home (the daemon).
+- **Decided:** reject all-or-nothing skip; EnsureSaver (step 5, protective liveness) stays on the warm path.
+- **Converging (awaiting confirm):** skip all of Class 3 (steps 9/10/11) on warm — 9 & 10 produce nothing on a warm server; 11 (hooks) is low-harm + bug-reducing to skip. Net scope: **latch skips everything except step 5**.
 - Mechanism (server-option latch), set-point, check placement, race/failure handling, concurrent-path interaction, and edge cases all still pending.
 
 ## Triage
