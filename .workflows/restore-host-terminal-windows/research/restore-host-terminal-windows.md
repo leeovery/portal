@@ -62,6 +62,29 @@ The manual multi-select trigger means we **do not** need to track the live windo
 - **(b) External script file referenced by config** — for genuinely complex/multi-line logic (AppleScript + resize + title); config points to `~/.config/portal/terminals/<name>` and Portal runs it with the session passed as arg/env. Most flexible; keeps config clean; this is the "scriptable/pluggable" escape hatch.
 - **(c) Built-in Go adapter** — for *known* terminals the AppleScript/CLI lives in compiled code (cleanly escaped, or written to a temp script), never in user config. User only touches config to override or add a terminal.
 - *Leaning:* layered — (c) for known terminals (Ghostty), (a) for simple custom terminals, (b) as the power escape hatch. To be decided in discussion.
+- *Script-vs-file disambiguation (user asked):* config value is either an inline command or a file path. Context-detection ("does it resolve to an existing file?") is viable and has precedent; safest is to treat an existing-path-on-disk as a script file, else as an inline command (or support an explicit form later). Low-risk either way. Decided in discussion.
+
+**Decision — build the full user-config layer in v1** (user: "build all of it now"). Not just for other-terminal users — the user may want to override the native Ghostty command (e.g. add resize) and *will test the path*. So v1 ships: built-in Ghostty adapter **+** the user-config override/escape hatch.
+
+**Precedence (user-proposed, sound + standard):** user **config override** (highest) → **baked-in native adapter** → **unsupported** (lowest). Config wins so an override is always possible; absence falls back to native; absence of both = feature unavailable in that terminal. This is the conventional config-over-default layering.
+
+### The keying spanner → resolved by detect-self (deep-dive F6)
+
+The user hit a real snag: if Portal natively supports only Ghostty, how does a Warp user's config get *found*? Is config keyed by terminal name, or is it just "a spawn command" Portal runs blindly (in which case Portal doesn't know which terminal you're in — and **users use multiple terminals**, breaking a single blind command)?
+
+**Resolution (F6):** Portal **detects the host terminal it is running in** from environment variables, and *that* is the lookup key. The flow when you hit `M`: detect current terminal → look up (config override for that terminal? → native adapter for it? → unsupported). This resolves both halves of the spanner:
+- **"How does Portal know which terminal?"** — env-var detection (`TERM_PROGRAM` + app-specific vars).
+- **"Multiple terminals?"** — it keys off whichever terminal you're *currently working in* when you trigger the reopen, which is exactly the terminal the new windows should spawn into. The multi-terminal case is a feature, not a bug.
+
+**Gotcha (F6, Portal-specific, confirmed live):** **tmux clobbers `TERM_PROGRAM`** — inside tmux it reads `tmux`, not `ghostty`. So detection must lean on **app-specific env vars that survive the tmux rewrite** (`GHOSTTY_*`, `KITTY_*`, `WEZTERM_*`, `ALACRITTY_*`), falling back to `TERM_PROGRAM`/`TERM`. Edge: tmux only preserves vars present when the *server* started; `update-environment`/`show-environment` could recover the originating client's env if needed. This is the one non-trivial wrinkle in the otherwise-clean detect-self story.
+
+### Multi-select as a general mechanism (architectural note)
+
+The user asked whether multi-select could later serve other actions (e.g. **bulk tag-adding**). Takeaway for v1: implement multi-select as a **general selection mode with spawn as its first action**, not a spawn-only modal — so future bulk operations can hang off the same selection. *Bulk-tagging itself is out of scope* (and would live on the **Projects** page = a separate feature; this feature's multi-select is **Sessions**-only). Noted, not built.
+
+### Open UX question (unsupported terminal)
+
+When Portal runs in an **unsupported + unconfigured** terminal: disable/hide multi-select entirely, or keep selection available but have the spawn action guide the user to configure their terminal? (Interacts with the "multi-select is general" note — if selection serves future non-spawn actions, hiding it wholesale may be wrong.) Open for discussion.
 
 ## Forward-Looking (out of scope — "keep half an eye")
 
