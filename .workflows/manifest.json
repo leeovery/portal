@@ -143,6 +143,9 @@
     },
     "restore-host-terminal-windows": {
       "work_type": "feature"
+    },
+    "skip-bootstrap-when-warm": {
+      "work_type": "feature"
     }
   },
   "defaults": {
