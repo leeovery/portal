@@ -123,23 +123,105 @@ history path is **not** involved.
 
 ### Code Trace
 
-_(to be filled during Step 5 — Code Analysis)_
+**The hook identity is the mutable tmux session name.** The structural key
+`session_name:window_index.pane_index` embeds the live session name. Every stage
+that touches the hook computes this key from whatever the session is *currently*
+called — and those stages run at different times, so a rename desynchronizes
+them.
+
+**Key format** — `internal/tmux/tmux.go:779`:
+`StructuralKeyFormat = "#{session_name}:#{window_index}.#{pane_index}"`.
+`tmux.PaneTarget(name, w, p)` builds the same `name:w.p` string.
+
+**Stage 1 — Registration** (`cmd/hooks.go:60,103,118`): `portal hooks set
+--on-resume` resolves the *current* pane's structural key via
+`ResolveStructuralKey($TMUX_PANE)` (→ `display-message`, `tmux.go:323`) and
+stores under it: `store.Set(structuralKey, "on-resume", cmd, "cli")`. In
+practice these are written by an external Claude Code SessionStart hook, so the
+key freezes the session name *at the moment claude starts*.
+
+**Stage 2 — Capture** (`internal/state/capture.go:35` `captureFormat` reads live
+`#{session_name}`): the daemon writes `sessions.json` with the session's
+*current* (post-rename) name. No hook cleanup happens here — confirmed there is
+no `CleanStale`/hooks reference in `cmd/state_daemon.go`.
+
+**Stage 3 — Restore lookup** (`internal/restore/session.go:110`):
+`hookKey: tmux.PaneTarget(sess.Name, w.Index, p.Index)` where `sess.Name` is the
+saved (post-rename) name. `buildHydrateCommand` (`session.go:477`) bakes it into
+`portal state hydrate --hook-key <new-name>:w.p`. The hydrate helper
+(`cmd/state_hydrate.go:299` `hooks.LookupOnResume(store, cfg.HookKey)`) looks up
+that **new-name** key — but the hook is stored under the **old-name** key →
+**miss** → degrades to bare `$SHELL` (`state_hydrate.go:307`). This is the
+proximate cause of the bare-shell symptom; it does not depend on the deletion.
+
+**Stage 4 — Deletion** (`internal/hooks/store.go:249` `CleanStale(liveKeys)`):
+removes any hook key not in `liveKeys`. `liveKeys` come from live panes
+(`ListAllPanes`, structural keys = current/new names). The old-name key is not
+among them → deleted. Callers: bootstrap **step 11** (`cmd/bootstrap_production.go`
+→ `cmd/run_hook_stale_cleanup.go:120`) and `portal clean` (`cmd/clean.go:50`) —
+both run on essentially every Portal bootstrap, so the orphaned old-name key is
+removed at the next `portal` command after the rename. (Confirmed live: the four
+orphaned keys persisted only because no bootstrap had run since the renames.)
+
+**Why claude-restart sessions are immune:** if claude restarts after the rename
+(e.g. bridge-mode context clear fires SessionEnd+SessionStart), the SessionStart
+hook re-runs `portal hooks set` and re-registers under the *new* current name —
+so registration-time name == capture/restore-time name and the key stays
+addressable. The bug bites only when the inner process keeps running across the
+rename.
 
 ### Root Cause
 
-_(to be filled during Step 6)_
+Portal keys per-pane resume hooks (and resolves them at capture, restore, and
+cleanup) by the **mutable tmux session name** via the structural key
+`session_name:window.pane`. A `tmux rename-session` changes the name without
+restarting the pane process, so the hook — registered under the old name and
+never re-registered — becomes unaddressable: restore looks it up under the new
+name (miss → bare shell) and stale-cleanup deletes the old-name entry (making the
+loss permanent). There is no rename-aware re-keying path and no stable,
+rename-immune pane identity.
 
 ### Contributing Factors
 
-_(to be filled)_
+- **Structural key chosen for tmux-resurrect compatibility, now obsolete.** The
+  2026-04-30 spec `resume-hooks-lost-on-server-restart` deliberately replaced
+  ephemeral pane IDs with `session_name:window.pane` because that scheme survived
+  tmux-resurrect restarts. Portal no longer uses tmux-resurrect — it owns
+  save/restore end-to-end (`internal/restore`) — so the resurrect rationale that
+  forced a name-based key no longer applies, but the name-based key remains.
+- **Registration is external and timing-sensitive.** Hooks are written by a
+  Claude Code SessionStart hook keyed to the live name at start; nothing
+  re-registers on rename.
+- **Cleanup is name-diff based.** `CleanStale` treats "no live pane with this
+  key" as "stale", which a rename manufactures synthetically.
+- **Silent by design.** Hook lookup miss and stale deletion are both
+  intentionally silent (best-effort), so there is no user-visible signal.
 
 ### Why It Wasn't Caught
 
-_(to be filled)_
+- The structural-key spec's stated assumption was survival across
+  *resurrect/restart*; **rename was never in scope or considered.**
+- The failure is invisible until a reboot, and only for sessions renamed *while a
+  long-lived process keeps running* — a narrow, delayed condition.
+- Renaming-then-restarting (the common case during normal claude usage / bridge
+  mode) self-heals via re-registration, masking the bug in everyday use.
+- No test exercises "rename a session, then restore" — tests cover
+  restart-survival, not rename-survival.
 
 ### Blast Radius
 
-_(to be filled)_
+**Directly affected:**
+- Per-pane resume hooks (`hooks.json`) for any session renamed while its process
+  keeps running → silent loss of reboot resume (bare shell).
+
+**Potentially affected (same mutable-name keying — verify in spec/fix):**
+- `@portal-skeleton-*` / volatile markers keyed by structural key.
+- `@portal-active-{structural_key}` markers (per the 2026-04-30 spec).
+- `sessions.json` ↔ live-session matching is by structural identity
+  (`capture.go:164` "session name, window index, pane index") — rename changes
+  the identity used for delta detection.
+- Any other subsystem that addresses panes by `session_name:window.pane` across
+  a time gap spanning a possible rename.
 
 ---
 
