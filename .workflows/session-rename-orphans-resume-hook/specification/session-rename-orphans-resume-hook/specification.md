@@ -111,6 +111,34 @@ A legacy session with no saved id is left un-stamped and falls through to the na
 
 **Not retrofitting legacy sessions (restated non-goal).** No backfill of `@portal-id` onto pre-existing sessions and no `hooks.json` re-key migration. Pre-fix sessions keep working via the name fallback and gain rename-immunity only when next recreated (see *Fix Overview → Coverage*).
 
+## Testing Requirements
+
+The fix's correctness rests on one invariant — *every key-producing site derives the same key* — and on durability across *repeated* reboots. Tests must target both, plus the previously-uncovered rename gap.
+
+**Derivation primitives (unit).**
+- `tmux.HookKey(portalID, name, w, p)` returns `<id>:w.p` when `portalID != ""` and `<name>:w.p` when empty; covers multi-pane (distinct `w.p` suffixes under one id).
+- `HookKeyFormat` resolves correctly against a real tmux session both stamped (yields `<id>:w.p`) and un-stamped (yields `<name>:w.p`).
+- **Cross-site consistency:** for a given stamped session, the registration read (`ResolveHookKey`), the cleanup live-key enumeration, and the restore baker (`HookKey` from saved state) produce byte-identical keys.
+
+**Creation & persistence (component).**
+- `CreateFromDir` and `QuickStart` stamp `@portal-id` at creation; a stamp failure does not fail session creation (best-effort, mirrors `@portal-dir`).
+- Capture reads `#{@portal-id}` into `Session.PortalID`; an un-stamped session captures `""`.
+- `sessions.json` without a `portal_id` field decodes to `PortalID == ""` (tolerant decode, no error, no version bump).
+- Restore re-stamps `@portal-id` on the recreated session from the saved value, and skips the stamp when the saved value is empty.
+
+**The rename gap (integration — the headline coverage).**
+- **Rename, then restore, fires the hook.** Register a hook; rename the session; run restore; assert the resume hook fires (not bare `$SHELL`). Cover **both** triggers: raw `tmux rename-session` *and* the in-TUI rename path (`renameAndRefresh`).
+- **Durable across repeated reboots.** After a rename+restore, simulate the next capture and a second restore; assert the id is re-persisted and the hook still fires on the second cycle (guards the persistence chain in *Cross-Reboot Persistence (a)*).
+- **Post-restore cleanup keeps the restored hook.** Run restore, then the stale-cleanup pass (bootstrap step 11 / `portal clean`); assert the just-restored hook entry is **not** deleted (guards *(b)*).
+
+**Legacy / no-regression (integration).**
+- A pre-fix, name-keyed `hooks.json` entry for an **un-stamped, never-renamed** session still resolves and is **not** mass-orphaned by stale-cleanup after upgrade (the name fallback coincides with the on-disk key).
+- An un-stamped session degrades gracefully throughout (no panic; name-based key everywhere).
+
+**Multi-pane (integration).** Per-pane hooks under one session remain independently addressable and fire for the correct pane after a rename+restore.
+
+**Conventions.** Tests must not use `t.Parallel()` (package-level mock injection). Daemon-spawning / bootstrap-subprocess tests must use `portaltest.IsolateStateForTest` and apply the returned env. Real-tmux scenarios use the `tmuxtest` socket fixtures; restore scaffolding uses `restoretest`. Integration tests build the binary via the existing `portalbintest` / `restoretest` helpers.
+
 ---
 
 ## Working Notes
