@@ -27,8 +27,12 @@ instead of resuming.
 
 1. Create a Portal session (generated name `{project}-{nanoid}`) with a resume
    hook registered (e.g. `portal hooks set --on-resume "..."`).
-2. Rename the session with `tmux rename-session <new-name>` (the inner process
-   keeps running — it is **not** restarted).
+2. Rename the session — **either** trigger path orphans the hook identically:
+   - external `tmux rename-session <new-name>`, **or**
+   - Portal's own in-TUI rename modal (`r` key → `rename_modal.go` →
+     `model.go:3222` `renameAndRefresh` → `tmux.RenameSession`), which does a
+     bare rename + list refresh with **zero** hook re-keying.
+   The inner process keeps running — it is **not** restarted.
 3. Wait for the next bootstrap / orphan cleanup pass (or trigger one).
 4. Reboot / restart the tmux server.
 5. Observe: the renamed session comes back as a bare shell — hook gone.
@@ -174,12 +178,19 @@ rename.
 
 Portal keys per-pane resume hooks (and resolves them at capture, restore, and
 cleanup) by the **mutable tmux session name** via the structural key
-`session_name:window.pane`. A `tmux rename-session` changes the name without
+`session_name:window.pane`. Renaming a session (via external `tmux
+rename-session` **or** Portal's own in-TUI rename modal) changes the name without
 restarting the pane process, so the hook — registered under the old name and
 never re-registered — becomes unaddressable: restore looks it up under the new
 name (miss → bare shell) and stale-cleanup deletes the old-name entry (making the
 loss permanent). There is no rename-aware re-keying path and no stable,
 rename-immune pane identity.
+
+Independently validated (synthesis-001, high confidence): all four stages verified
+against the cited lines; the proximate cause (exact-key lookup miss) does not
+depend on the deletion; the daemon does **not** clean hooks; and the
+"base-index drift preservation" note in `restore/session.go` rescues only the
+window/pane index segments, never the session-name segment.
 
 ### Contributing Factors
 
@@ -212,7 +223,11 @@ rename-immune pane identity.
 
 **Directly affected:**
 - Per-pane resume hooks (`hooks.json`) for any session renamed while its process
-  keeps running → silent loss of reboot resume (bare shell).
+  keeps running → silent loss of reboot resume (bare shell). Both trigger paths
+  affected: external `tmux rename-session` **and** Portal's first-party in-TUI
+  rename modal (`model.go:3222`). The in-TUI path is **interceptable** (Portal
+  controls it); the external path is not — a fix that only patches the in-TUI
+  rename would leave external renames broken.
 
 **Potentially affected (same mutable-name keying — verify in spec/fix):**
 - `@portal-skeleton-*` / volatile markers keyed by structural key.
@@ -255,3 +270,17 @@ _(to be filled)_
 
 - Distinct from the separate, parked SessionEnd-cleanup question (bare shells
   resurrecting Claude).
+- **Assumption (not code-verified):** the "claude-restart self-heals" behaviour
+  rests on Claude Code's SessionStart hook (outside this repo) re-running
+  `portal hooks set` on restart. The re-registration code path is verified; the
+  external trigger firing is observed, not provable from the codebase.
+- **Fix constraint — hook-key format is load-bearing across releases**
+  (`tmux.go:556-557`: "changing it would silently invalidate every entry in
+  `hooks.json`"). Any re-keying / stable-identity scheme must either preserve
+  format compatibility or ship a migration, or it will orphan every existing
+  hook on upgrade — re-creating this exact symptom at scale.
+- **Fix constraint — both trigger paths.** A stable, rename-immune identity must
+  cover external `tmux rename-session` too, not only Portal's in-TUI rename
+  (which alone is interceptable). This points away from "intercept rename and
+  re-key" and toward an identity that does not embed the mutable name.
+- Validation artifact: `.workflows/.cache/session-rename-orphans-resume-hook/investigation/session-rename-orphans-resume-hook/synthesis-001.md`
