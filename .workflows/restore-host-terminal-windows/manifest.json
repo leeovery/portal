@@ -11,6 +11,13 @@
           "status": "completed"
         }
       }
+    },
+    "discussion": {
+      "items": {
+        "restore-host-terminal-windows": {
+          "status": "in-progress"
+        }
+      }
     }
   }
 }
