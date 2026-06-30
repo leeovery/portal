@@ -35,11 +35,11 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (12 subtopics — 1 decided · 11 pending)
+  Discussion Map — Restore Host Terminal Windows (12 subtopics — 1 decided · 1 exploring · 10 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ○ 2. Multi-select trigger & keymap coexistence [F7]
-  ├─ ○ 3. Burst & partial-failure contract [F1]
+  ├─ ◐ 3. Burst & partial-failure contract [F1] [exploring]
   ├─ ○ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2]
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
   ├─ ○ 6. Config schema & command representation [F9]
@@ -92,6 +92,22 @@ In-process vs subprocess for the picker→reopen call: chose **in-process** so s
 - **Mental model:** one service, two callers — like a Laravel Service class reached from both an Artisan command and an HTTP controller.
 - **Coupled-out:** in-process-vs-subprocess + wait-for-spawn-confirmation → #3; full terminal-identity detection → #7.
 - **Impl flag (review-002 F3, for spec):** spawned windows run `portal attach` as their startup command, so `portal`/`tmux` must be on `PATH` in Ghostty's launch context (not guaranteed a login shell).
+- **Bootstrap cost → external dependency (review-001 F1).** `attach` is not in `skipTmuxCheck`, so each spawned `portal attach` re-runs the full 11-step bootstrap orchestrator — a 14-window burst would fire 13 near-simultaneous full bootstraps against one server (a distinct concern from #11's tmux-attach race). We rejected the two workarounds (a hidden `--skip-bootstrap` flag; an internal bootstrap-exempt `portal state attach`-style command) — the latch belongs in bootstrap, not in a parallel attach path, and the awkward command name was the tell. Resolved by a **separate `warm-command-bootstrap-latch` feature** (logged to inbox `2026-06-30--warm-command-bootstrap-latch`): a once-per-server-lifetime tmux server-option latch (`@portal-bootstrapped`) set at end of bootstrap, so warm commands fast-skip the 11 steps. **This feature depends on that landing first**; reopen then spawns *plain* `portal attach` with no special-casing. This largely **subsumes #11** (attach contention).
+
+---
+
+## 3. Burst & Partial-Failure Contract
+
+### Context
+
+The motivating scenario is a *large* burst (rebuild ~14 windows post-crash), not the clean 3-window path. This subtopic owns the contract for when a burst does **not** fully complete: a spawn/attach fails, or the user aborts mid-burst.
+
+### Journey (in progress)
+
+- **Bootstrap-per-window reframe (review-001 F1) — resolved out of #3.** The "burst = N concurrent full bootstraps" angle is dissolved by the separate warm-command bootstrap-latch dependency (see #1's dependency note), leaving the burst as N cheap attaches. So #3 narrows back to genuine *spawn/attach* partial failure, not bootstrap contention.
+- **Still open:** the core partial-failure contract (all-or-nothing vs best-effort-with-report); and **user cancellation/interrupt mid-burst (review-001 F4)** — step 3 (self-exec into the Nth session) is a point of no return, so there's a live window where the picker has spawned K of N−1 and could catch an interrupt.
+
+*(exploring — no decision yet)*
 
 ---
 
@@ -109,7 +125,13 @@ In-process vs subprocess for the picker→reopen call: chose **in-process** so s
 
 - Research foundation settled (see Context); 12 live subtopics seeded.
 - **#1 Spawn-Execution Architecture — decided** (Option B: shared reopen package + `portal reopen` subcommand, picker calls in-process; N−1 spawned, picker self-reuses for the Nth).
+- **#3 Burst & Partial-Failure — exploring.** Bootstrap-per-window (review-001 F1) resolved out via an external dependency; core partial-failure contract + cancellation (F4) still open.
 - Open coupling threads: #3 (partial-failure / in-process-vs-subprocess / wait-for-spawn), #7 (terminal-identity detection).
+
+### Open Threads
+
+- **External dependency:** reopen depends on the `warm-command-bootstrap-latch` feature (inbox `2026-06-30--warm-command-bootstrap-latch`) landing first. The user will **not spec reopen until warm-command-bootstrap is done**; discussion proceeds assuming warm attaches are cheap by implementation time.
+- Outstanding review-001 findings to surface at their subtopics: F2 (headless `portal reopen` has no terminal to detect → #1/#7), F3 (spawned attach binds to PATH `portal`, version skew → #1/#7), F5 (reopen observability/log component → likely new subtopic), F6 (N=0/N=1 boundary of self-attach-last → #3), F7 (detect-self as standalone query / package shape → #7/#8).
 
 ## Triage
 
