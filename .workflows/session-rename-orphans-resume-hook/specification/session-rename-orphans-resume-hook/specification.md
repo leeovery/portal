@@ -41,6 +41,30 @@ The fix introduces an **immutable, rename-immune Portal session identity** and k
 
 **Coverage / natural migration.** The fix protects every session **created after it ships**. Pre-existing (legacy) sessions keep working via the name fallback but are **not** retrofitted: renaming a legacy session still orphans its hook (the original bug) until that session is next recreated from scratch, at which point it gains an `@portal-id` and becomes rename-immune. There is **no backfill and no `hooks.json` re-key migration** — legacy sessions migrate naturally as they are recreated.
 
+## Hook-Key Derivation (the four stages)
+
+The fix's central invariant: **every site that produces or consumes a hook key derives it by the identical rule** — `prefer @portal-id, else session_name`, suffixed `:window.pane`. If any site disagrees, hooks orphan (the bug). There are three key-*producing* sites (registration, stale-cleanup, restore) plus one key-*consuming* site (hydrate); all must agree.
+
+**Decoupling from `tmux.PaneTarget`.** `PaneTarget` stays exactly as-is — it remains the canonical, name-based `-t` *target* formatter, still used to address live panes (e.g. `respawn-pane`, `select-pane`). The hook key becomes a **separate concern** with its own formatter, so the change touches only hook identity, not tmux targeting.
+
+Two new derivation primitives in `internal/tmux`:
+- **`HookKeyFormat`** — a tmux format string for live reads: `#{?@portal-id,#{@portal-id},#{session_name}}:#{window_index}.#{pane_index}`. tmux resolves the conditional per-session: a stamped session yields `<id>:w.p`, an un-stamped one yields `<name>:w.p`.
+- **`HookKey(portalID, name string, window, pane int) string`** — a pure formatter for the saved path: returns `<portalID>:w.p` when `portalID != ""`, else `<name>:w.p`. The in-Go mirror of the tmux conditional, for use where the values come from saved state rather than a live tmux read.
+
+### Stage 1 — Registration (`cmd/hooks.go`)
+`resolveCurrentPaneKey()` today resolves `ResolveStructuralKey($TMUX_PANE)`, which reads the name-based `StructuralKeyFormat`. It is changed to resolve the **hook key** via a new client read using `HookKeyFormat` (e.g. `ResolveHookKey(paneID)` → `display-message -p -t <pane> <HookKeyFormat>`). `portal hooks set`/`rm` then store/remove under the stable key. The `--pane-key` literal pass-through on `rm` is unchanged (still a verbatim key).
+
+### Stage 2 — Stale cleanup live keys (`cmd/run_hook_stale_cleanup.go`, `cmd/clean.go`)
+`CleanStale(liveKeys)` deletes any `hooks.json` key not in `liveKeys`. The live-key enumeration that feeds it (today `ListAllPanes()` → `ListAllPanesWithFormat(StructuralKeyFormat)`) is changed to enumerate live panes' **hook keys** via `HookKeyFormat`. This is the load-bearing consistency point: liveKeys must be produced by the same rule as registration, or cleanup mass-orphans every stamped session's hook. The name-based `StructuralKeyFormat` / `ListAllPanes` remain available for any non-hook structural use; only the hook-cleanup enumeration switches to the hook-key format.
+
+### Stage 3 — Restore lookup baking (`internal/restore/session.go`)
+`collectArmInfos` today sets `hookKey: tmux.PaneTarget(sess.Name, w.Index, p.Index)` (saved name). It is changed to `hookKey: tmux.HookKey(sess.PortalID, sess.Name, w.Index, p.Index)` — preferring the **saved** `@portal-id` (from the persisted schema field; see persistence topic), else the saved name. The baked `--hook-key` therefore matches what registration stored. Base-index drift preservation is unchanged (the key still uses saved indices, FIFOs still use live indices).
+
+### Stage 4 — Hydrate lookup (`cmd/state_hydrate.go`)
+**No change.** The helper looks up `hooks.LookupOnResume(store, cfg.HookKey)` using the baked `--hook-key`, then execs `sh -c '<hook>; exec $SHELL'` on a hit or bare `$SHELL` on a miss. Because stage 3 now bakes the stable key and stage 1 stored under it, the lookup hits for any renamed-but-stamped session.
+
+**Post-restore consistency.** After restore re-stamps `@portal-id` on the recreated live session (persistence topic), a subsequent stage-2 cleanup read of the *live* session yields the same key stage 3 baked — so cleanup never treats a freshly-restored hook as stale.
+
 ---
 
 ## Working Notes
