@@ -44,6 +44,31 @@ The manual multi-select trigger means we **do not** need to track the live windo
   - *Caveat:* Ghostty AppleScript is a "preview feature, breaking changes expected in 1.4" — the dictionary shape may churn.
 - **Parity is free.** Spawn-and-attach uses the identical `tmux attach -t <session>` path as a manual attach from a bare shell. N selected sessions = N independent identical attaches. "Exactly as if done individually" is the default, not engineered.
 
+## Cross-Terminal Strategy (emerging)
+
+**Goal:** "just works" for current popular terminals — but **ship Ghostty only to begin with** (the user's Mac terminal). Others added over time.
+
+**Platform stance (user):** macOS-first. AppleScript being Mac-only is fine. **No Windows.** Linux is "loosely supported, never tested" — explicitly *not* a goal; a Linux user who wants this can self-configure their terminal's command. So the design must degrade to "bring your own command" gracefully, but we don't write/test Linux adapters.
+
+**Dual configurability (the core requirement):**
+- **User-level config** — a user can add/override their terminal's spawn command without touching Portal's code (covers the long tail + Linux + customisation).
+- **Binary-level (built-in) adapters** — known terminals work out of the box, zero config. New ones land via **open-source PR** (contribute the command/adapter so future users don't self-configure). This is an explicit contribution model.
+- **Why configurable even for supported terminals:** users may want to *extend* the spawn (e.g. open + resize window + set title), which they'd do by editing the command.
+
+**The contract (user's intuition — "that's almost a contract, isn't it?"):** every terminal, however implemented, answers one question: **given a session name, open a host window attached to it.** That single operation is the adapter contract. Built-in Go adapters and user-config entries are just two implementations of it.
+
+**Representation of complex commands (open research question the user raised):** how does an AppleScript (multi-line, quote-heavy) live in config? Candidate shapes:
+- **(a) Command/argv template** with a `{session}` placeholder — clean for CLI terminals (kitty `kitten @ launch`, wezterm `wezterm cli spawn`) and simple `osascript -e` one-liners. Avoids shell-quoting hell if expressed as an argv list, not a single string.
+- **(b) External script file referenced by config** — for genuinely complex/multi-line logic (AppleScript + resize + title); config points to `~/.config/portal/terminals/<name>` and Portal runs it with the session passed as arg/env. Most flexible; keeps config clean; this is the "scriptable/pluggable" escape hatch.
+- **(c) Built-in Go adapter** — for *known* terminals the AppleScript/CLI lives in compiled code (cleanly escaped, or written to a temp script), never in user config. User only touches config to override or add a terminal.
+- *Leaning:* layered — (c) for known terminals (Ghostty), (a) for simple custom terminals, (b) as the power escape hatch. To be decided in discussion.
+
+## Forward-Looking (out of scope — "keep half an eye")
+
+The user flagged a **future** feature (explicitly *not* this one): on reboot, **remember what was open** and offer *"restore your workspace?"* — re-opening windows **and placing them on their original macOS Spaces**. Different mechanism from this feature's manual multi-select (remember-and-restore vs select-and-open). Spaces placement is **already parked in the inbox**.
+
+Architectural impact on *this* feature: "remember what was open" implies **introspection returns as a requirement later** (to record the workspace), and Spaces placement adds a **window-placement** capability. So the adapter contract should be **capability-based** (spawn is the v1 method; leave room for an optional `introspect` and `place-on-space` later) rather than a single rigid function — so v1 doesn't paint the architecture into a corner. Design v1 minimal (spawn only) but extensible. *Noted, not designed here.*
+
 ## Two Feasibility Risks (the real research)
 
 1. **Spawn** — Can Portal programmatically open a new Ghostty **window** *or* **tab**, each running a specific command (`portal`/`tmux attach -t <session>`)? This is the central risk; the whole feature rests on it. Ghostty's automation surface (CLI actions, IPC, AppleScript dictionary, or fallback keystroke injection via System Events) needs verifying.
