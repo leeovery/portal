@@ -244,25 +244,77 @@ window/pane index segments, never the session-name segment.
 
 ### Chosen Approach
 
-_(to be filled during Step 8 — Findings Review)_
+**Anchor resume hooks to a stable, rename-immune Portal session identity** —
+stamp an immutable id at session creation as a tmux user-option (analogous to the
+existing `@portal-dir`), and key hooks off `<stable-id>:window.pane` instead of
+`<session-name>:window.pane`. The id is unaffected by `rename-session` and is
+persisted/re-stamped across reboot by Portal's own save/restore (which it now
+owns end-to-end).
+
+**Deciding factor:** it is the only direction that closes **both** trigger paths
+(external `tmux rename-session` *and* the in-TUI rename modal) at the root —
+because nothing has to intercept the rename; the identity simply never changes.
+It also requires **no change to the external Claude SessionStart hook** (it keeps
+calling `portal hooks set`; Portal resolves the stable key internally) and reuses
+a proven existing pattern (`@portal-dir`), so it sits naturally against the
+codebase.
 
 ### Options Explored
 
-Discovery flagged a candidate direction: a stable, rename-immune session
-identity (the keying is on the mutable session name). Design choice deferred to
-the specification phase.
+1. **Stable Portal session identity (chosen).** Immutable `@portal-*` user-option
+   stamped at creation; hook key uses it in place of the mutable name.
+2. **Intercept-and-rekey on rename** — rewrite `hooks.json` keys old→new when a
+   rename happens. *Rejected as primary:* only Portal's in-TUI rename is
+   interceptable; external `tmux rename-session` is not (a tmux `session-renamed`
+   hook is fragile and may not expose the old name), so the documented
+   reproduction stays broken. Patches the symptom; leaves identity mutable.
+3. **Drop per-pane structural addressing; key purely by session id** — *Rejected:*
+   breaks multi-pane support (hooks are per-pane); collapses into option 1 once
+   pane addressing is re-added.
 
 ### Discussion
 
-_(to be filled)_
+- Discovery had already pointed at a "stable, rename-immune identity"; the user
+  confirmed they like that direction. Investigation's job was to validate the
+  mechanism and pressure-test the direction against the code.
+- Synthesis validation widened the picture in two load-bearing ways that shaped
+  the choice: (a) Portal's **own in-TUI rename** triggers the identical bug, so a
+  fix that only intercepts Portal's rename is insufficient — this is what
+  eliminated option 2 as the primary fix; (b) the realisation that Portal no
+  longer depends on tmux-resurrect (owns save/restore) means it is free to choose
+  any identity scheme — the resurrect compatibility that originally forced a
+  name-based key is gone.
+- Key constraints carried into spec (not decisions made here): hook-key **format
+  is load-bearing** — changing it silently invalidates every existing
+  `hooks.json` entry, so a migration or a deliberate "let it re-register" call is
+  required; and **legacy sessions** created before the stamp ships need a fallback
+  (lazy-derive like the dir fallback, or accept self-heal on next claude restart).
 
 ### Testing Recommendations
 
-_(to be filled)_
+- New test: **rename a session, then run restore** → assert the resume hook still
+  fires (the gap that currently has zero coverage). Cover both triggers (raw
+  `tmux rename-session` and the in-TUI rename path).
+- Test that the stable id **survives a reboot/restore cycle** (capture → restore
+  re-stamps the same id) and that hook lookup keys off it.
+- Test **legacy/unstamped** sessions degrade gracefully (no panic; fallback
+  behaviour as specced).
+- Guard against **multi-pane** regression: per-pane hooks remain independently
+  addressable under the new key.
+- If a migration ships: test old-format `hooks.json` entries are re-keyed/handled
+  without mass-orphaning on upgrade.
 
 ### Risk Assessment
 
-_(to be filled)_
+- **Fix complexity:** Medium — touches the hook key derivation at every stage
+  (registration, capture/restore, cleanup), session creation stamping, and a
+  migration/fallback for existing data.
+- **Regression risk:** Medium — the hook-key format is shared across releases and
+  multiple subsystems; a careless change can orphan all existing hooks (the very
+  symptom under investigation) at scale. The stable-id approach is low-risk *to
+  the rename case itself* but the format/migration surface needs care.
+- **Recommended approach:** Regular release with an explicit migration/fallback
+  plan; not a hotfix (architectural keying change, not a one-liner).
 
 ---
 
