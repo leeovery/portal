@@ -42,12 +42,14 @@ A living index of subtopics tracked during the discussion.
 
 ### Map
 
-  Discussion Map — Skip Bootstrap When Warm (8 subtopics, all pending)
+  Discussion Map — Skip Bootstrap When Warm (9 subtopics — 1 converging · 8 pending)
 
-  ┌─ ○ Latch storage & semantics [pending]
+  ┌─ → What "skip" means — classifying the 11 steps [converging]
+  │  ├─ ✓ Protective steps stay on the warm path (EnsureSaver) [decided]
+  │  └─ ○ Cleanup steps over a long-lived (weeks) server [pending]
+  ├─ ○ Latch storage & semantics [pending]
   ├─ ○ Where & when the latch is set [pending]
   ├─ ○ Latch-check placement in the entry path [pending]
-  ├─ ○ What "skip" means — scope of the fast path [pending]
   ├─ ○ First-touch race tolerance [pending]
   ├─ ○ Partial-bootstrap / failure handling [pending]
   ├─ ○ Interaction with the cold+TUI concurrent path [pending]
@@ -56,6 +58,55 @@ A living index of subtopics tracked during the discussion.
 ---
 
 *Subtopics are documented below as they reach `decided` or accumulate enough exploration to capture.*
+
+---
+
+## What "skip" means — classifying the 11 steps
+
+### Context
+
+The seed framed the latch as all-or-nothing: latch set ⇒ skip all 11 steps. The first real design question is whether that's safe. It isn't uniformly — the 11 steps are not the same *kind* of work. Some are genuinely once-per-server-lifetime and categorically pointless on a warm server; others exist as ongoing safety nets that protect against mid-lifetime failure.
+
+**The driving motivation (from the user):** this latch is the pretext for `restore-host-terminal-windows`' multi-select reopen — opening, say, 20 sessions at once each in its own Ghostty window. Opening *one* new window that runs a full bootstrap is fine; opening *20 simultaneously*, each firing the full orchestrator against one server, is a stability hazard. The goal is **not** shaving nanoseconds off a warm command — it's collapsing that concurrency surface so simultaneous warm commands do cheap checks instead of N concurrent restore/sweep/clean passes.
+
+**Hard constraint — long-lived servers.** The user routinely keeps a tmux server alive for **weeks**; server restarts are rare and must not be relied on for recovery. Anything that today self-heals on the *next command* (because bootstrap re-runs every command) must keep a path to self-heal within a single, possibly weeks-long, server lifetime. We cannot push recovery to "next server restart."
+
+### The classification
+
+Three classes, not two:
+
+| Class | Steps | Warm-path behaviour |
+|---|---|---|
+| **1 — Cold-only** (genuinely once-per-lifetime, idempotent no-op when warm) | 1 EnsureServer, 2 RegisterPortalHooks, 3 SetRestoring, 4 SweepOrphanDaemons, 6 Restore, 7 EagerSignalHydrate, 8 ClearRestoring | **Skip when latched.** Server is up (latch died with it otherwise); hooks converged once and nothing re-adds them mid-lifetime; restore is a cold-boot concern; orphan-daemon sweep targets *prior-lifetime* leftovers (within a lifetime the daemon flock + self-supervision keep N≤1). |
+| **2 — Protective liveness** (safety net against mid-lifetime death) | 5 EnsureSaver | **Keep on every command** as a cheap probe + re-ensure if down. Decided — see child below. |
+| **3 — Cleanup / hygiene** (accrues over the lifetime) | 9 CleanStaleMarkers, 10 SweepOrphanFIFOs, 11 CleanStale (hooks) | **Open** — the weeks-long-server constraint makes "once per lifetime" insufficient. See child subtopic. |
+
+### Decision (parent)
+
+Reject the all-or-nothing skip. The latch gates **Class 1** only; **Class 2** stays on the warm path; **Class 3** is under discussion. This is the explicit "separate cold-start from warm-start" the user asked for. Confidence: high on Classes 1 and 2; Class 3 open.
+
+---
+
+## Protective steps stay on the warm path (EnsureSaver)
+
+### Context
+
+EnsureSaver (step 5) bootstraps/version-upgrades the `_portal-saver` session that hosts `portal state daemon`. Today it runs on *every* command, so it silently revives the daemon if it died mid-lifetime — the daemon's own self-supervision can `os.Exit(0)`, which tears down its pane and kills the `_portal-saver` session, and the next command's EnsureSaver brings it back. A naive latch (skip all 11) would remove that per-command safety net.
+
+### Options Considered
+
+- **A — Pure latch.** Skip all 11; saver revived only at server restart + the daemon's self-supervision.
+  - Cons: with weeks-long servers, a self-ejected daemon could stay dead for *weeks* → silent loss of scrollback capture and resurrection-state. Directly violates the hard constraint.
+- **B — Latch gates everything except a cheap saver-liveness check.** Warm commands skip Class 1 but still probe saver/daemon liveness (e.g. `SaverPanePIDOrAbsent`) and re-ensure if absent.
+  - Pros: preserves today's self-healing; the probe is ~1 tmux call; the expensive re-create path only fires on the rare failure case, and the daemon flock serialises concurrent re-creation correctly.
+- **C — Pure latch + harden the daemon so it never needs external revival.**
+  - Pros: cleanest entry path. Cons: "never dies" is unachievable in practice ("all sorts of things can happen"); betting stability on it is fragile.
+
+### Decision
+
+**Option B.** Keep EnsureSaver (saver/daemon liveness) on the warm path as a cheap probe + conditional re-ensure. The user is emphatic: keep the fail-safe ("Our fail-safe is great to keep") *and* separately pursue making the daemon as robust as possible (belt **and** suspenders — B does not preclude C's hardening as ongoing work). Deciding factor: weeks-long server lifetimes mean we cannot lean on restart for recovery, and the probe's cost is negligible even under the 20-simultaneous-windows burst (a healthy saver ⇒ 20 cheap probes; a dead one ⇒ flock-serialised single re-create).
+
+Note: on the warm path EnsureSaver runs **outside** the `@portal-restoring` window (no restore in flight), which is correct — the revived daemon should capture normally, not suppress.
 
 ---
 
@@ -71,7 +122,9 @@ A living index of subtopics tracked during the discussion.
 
 ### Current State
 
-- Discussion just initialized; no subtopics decided yet.
+- **Decided:** reject all-or-nothing skip; latch gates Class 1 (cold-only) steps; Class 2 (EnsureSaver protective liveness) stays on the warm path.
+- **Open:** Class 3 cleanup steps (9/10/11) — whether they skip on warm (risking weeks of accrual) or move to a lifetime-resident home (the daemon).
+- Mechanism (server-option latch), set-point, check placement, race/failure handling, concurrent-path interaction, and edge cases all still pending.
 
 ## Triage
 
