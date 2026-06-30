@@ -139,10 +139,12 @@ The user flagged a **future** feature (explicitly *not* this one): on reboot, **
 
 Architectural impact on *this* feature: "remember what was open" implies **introspection returns as a requirement later** (to record the workspace), and Spaces placement adds a **window-placement** capability. So the adapter contract should be **capability-based** (spawn is the v1 method; leave room for an optional `introspect` and `place-on-space` later) rather than a single rigid function — so v1 doesn't paint the architecture into a corner. Design v1 minimal (spawn only) but extensible. *Noted, not designed here.*
 
-## Two Feasibility Risks (the real research)
+## Two Feasibility Risks (original framing — BOTH now resolved/dropped)
 
-1. **Spawn** — Can Portal programmatically open a new Ghostty **window** *or* **tab**, each running a specific command (`portal`/`tmux attach -t <session>`)? This is the central risk; the whole feature rests on it. Ghostty's automation surface (CLI actions, IPC, AppleScript dictionary, or fallback keystroke injection via System Events) needs verifying.
-2. **Detect mode** — Can Portal tell, *right now*, whether session S is being consumed in a window vs a tab? The tmux client can't see this (terminal-level state, invisible to the shell). Requires querying Ghostty's surface structure externally and correlating to the tmux client (by tty or by `client_pid` → process tree). Harder than spawn; only needed for the window-vs-tab refinement, not the MVP.
+*These were the two "I have no idea if it's possible" risks that opened the research. Both are now closed — recorded here as the through-line from question to answer.*
+
+1. **Spawn — RESOLVED.** Can Portal programmatically open a new window running a command? **Yes** (deep-dive 001): Ghostty 1.3 AppleScript `new window with configuration … command`, and spawn works across all 5 target terminals. The central risk the feature rested on is cleared.
+2. **Detect mode — DROPPED (not resolved — removed from scope).** "Window vs tab" detection is no longer needed: the **windows-only MVP** dropped window-vs-tab fidelity, which removed the entire introspection requirement. (The *separate* "which terminal am I in" detection — not mode — was the real detection problem, and it's resolved via the process-tree walk in deep-dive 002.)
 
 ## Mechanism Notes (from KB + tmux knowledge)
 
@@ -174,11 +176,15 @@ The research is strong on terminal-automation feasibility but thin on operationa
 
 ## Open Questions
 
-- **Ghostty spawn:** does Ghostty expose a clean way to open a new window/tab running a given command? (CLI `+` actions, IPC socket, AppleScript dictionary, `open -na`, or keystroke fallback?) — *central feasibility risk, candidate for deep dive.*
-- **Mode detection:** can window-vs-tab be read externally and correlated to a tmux client? Or is it impractical enough that v1 defaults to "always window"?
-- **Other terminals:** Ghostty-only for v1, or must the design stay terminal-agnostic? (iTerm/Terminal.app have rich AppleScript; Ghostty may not.)
-- **Trigger surface:** multi-select (`M`) in the picker — does it coexist cleanly with the existing single-select attach, grouping modes, and the §12.2 keymap? Any conflict with `Space` preview / `Enter` attach semantics?
-- **Where does spawn run from?** The reopen must execute from a live terminal (to launch sibling windows). Is it a Portal subcommand, a picker action, or both?
+*The early feasibility open-questions are all now resolved or dropped (kept here as dispositions). The **live** open items that carry into discussion are the design/validation flags in "Operational & Edge Surfaces" above — not these.*
+
+- **Ghostty spawn** — RESOLVED (deep-dive 001: AppleScript `new window … command`).
+- **Mode detection (window-vs-tab)** — DROPPED (windows-only MVP).
+- **Other terminals** — RESOLVED into the **Cross-Terminal Strategy** (built-in adapters keyed by bundle-id families + user-config escape hatch; Ghostty-first).
+- **Trigger surface / `M` keymap coexistence** — still open → tracked as **review-F7** (a discussion-phase design item).
+- **Where does spawn run from?** — partially answered (the N-1 new windows run `portal attach <session>`; the trigger window reuses the picker via `switch-client`) but the *architectural placement* (picker action vs subcommand) is still open → tracked as **review-F6**, to resolve with detection.
+
+**Carried into discussion (live):** see "Operational & Edge Surfaces" — burst/partial-failure contract (F1), trigger-context matrix (F2), TCC first-run flow (F4), testing seam (F5), spawn-execution architecture (F6), `M` keymap coexistence (F7), config schema (F9), daemon/state footprint (F10), attach contention (F12); plus review-002's validation-before-build flags (lsappinfo/ps stability, activity-bump timing) and UX picks (default identity display, config key forms).
 
 ## Triage
 
