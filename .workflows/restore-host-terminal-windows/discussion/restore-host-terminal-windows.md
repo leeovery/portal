@@ -35,9 +35,9 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (12 subtopics · all pending)
+  Discussion Map — Restore Host Terminal Windows (12 subtopics — 1 decided · 11 pending)
 
-  ├─ ○ 1. Spawn-execution architecture — where the reopen runs from [F6]
+  ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ○ 2. Multi-select trigger & keymap coexistence [F7]
   ├─ ○ 3. Burst & partial-failure contract [F1]
   ├─ ○ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2]
@@ -56,6 +56,45 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ---
 
+## 1. Spawn-Execution Architecture
+
+### Context
+
+Research (review-F6) framed this as "where spawn executes architecturally": picker action shelling out from the TUI process vs a new `portal` subcommand vs both — flagged as coupled to identity detection because it determines which process's env feeds detect-self, how the attach line is assembled, and whether a headless/scriptable reopen is possible. It's the keystone: settling it shapes the config schema, test seam, and daemon footprint.
+
+### The constraint that narrows the space
+
+The decision is tighter than F6 implies. The **no-leftover-window** anti-requirement (net N windows, never N+1) forces the picker to **own its own window reuse**: it turns its own host window into one session via `switch-client` (inside tmux) or exec-`tmux attach` (outside tmux), which *replaces the picker process* so the window becomes a session rather than falling back to an empty shell. Therefore the picker always self-attaches to one of the N; only the **N−1 others** are externally spawned, and each just runs the **existing `portal attach <session>`**. So "where spawn runs" reduces to: *where does the detect-terminal + spawn-the-N−1 logic live?*
+
+### Options Considered
+
+**Option A — inline in the TUI.** The Bubble Tea process, on `Enter`, detects the host terminal and fires the spawns itself, then self-attaches.
+- Cons: spawn logic buried in the update loop is hard to unit-test; capability locked inside the TUI (no headless/scriptable reuse); no clean DI seam.
+
+**Option B — shared internal package + `portal reopen` subcommand (chosen).** Detection + adapter resolution + spawn live in an internal package; `portal reopen <sessions…>` is a thin CLI over it; the picker calls the **same package in-process** for the N−1, then self-attaches.
+- Pros: argv→effects boundary is unit-testable with a faked `Adapter` (command construction, detect-self resolution, precedence); `portal reopen` becomes a first-class headless command the deferred "remember-and-restore workspace" + Spaces follow-ons can reuse; matches the project's DI pattern.
+- Cons: slightly more surface than A (a new subcommand + package).
+
+### Journey
+
+Started from F6's three-way framing (picker vs subcommand vs both). Realised the "both" tension mostly dissolves once you see the picker *must* keep ownership of its own window reuse (the anti-leftover rule), so the subcommand can never own the whole flow — it owns the N−1 spawns, the picker owns its self-attach. That reframes A-vs-B as purely "where does the reusable spawn logic live," which testability + the explicitly-deferred workspace-restore feature settle decisively for B.
+
+Considered detection placement as a complication (does the subcommand vs TUI change what env detect-self sees?) and concluded it doesn't fight the choice: detection's backbone is the process-tree walk (`list-clients` → client PID by highest `client_activity` → walk to terminal bundle id), a library call both callers can make; env vars are only an optional fast-path. Detection anchors on the **triggering picker process** — outside tmux it walks its *own* tree to the terminal; inside tmux it hops via `list-clients` to the host client and walks that (one extra hop, same destination). Full identity resolution is subtopic #7.
+
+Walked the concrete 3-session flow to confirm the model: (1) detect terminal → (2) one `osascript` call per N−1 window, each carrying `portal attach <session>` as its startup command → (3) exec self into the last session. **Order is load-bearing**: step 3 is a point of no return (exec replaces the picker), so the N−1 spawns must complete first. One spawn call per window (not one combined script) for failure isolation.
+
+In-process vs subprocess for the picker→reopen call: chose **in-process** so spawn errors surface back into the TUI where the user is looking; the `portal reopen` subprocess remains the headless/test front door. Both the "in-process vs subprocess" detail and "does the picker wait to confirm the N−1 spawned before it execs into the Nth?" are **coupled to #3** (partial-failure contract) — left open there.
+
+### Decision
+
+**Option B.** Build a shared internal reopen package (detection + adapter resolution + spawn), exposed two ways: called **in-process by the picker** for the N−1 spawns, and as a **`portal reopen <sessions…>` subcommand** for headless/scriptable/test use. Each spawned window runs the existing `portal attach <session>`; `portal reopen` is *not* what runs in the new windows. The picker self-attaches to the remaining session via its existing connector, reusing its own window (anti-leftover). Confidence: high.
+
+- **Mental model:** one service, two callers — like a Laravel Service class reached from both an Artisan command and an HTTP controller.
+- **Coupled-out:** in-process-vs-subprocess + wait-for-spawn-confirmation → #3; full terminal-identity detection → #7.
+- **Impl flag (review-002 F3, for spec):** spawned windows run `portal attach` as their startup command, so `portal`/`tmux` must be on `PATH` in Ghostty's launch context (not guaranteed a login shell).
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -68,7 +107,9 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Current State
 
-- Research foundation settled (see Context); 12 live subtopics seeded, all pending.
+- Research foundation settled (see Context); 12 live subtopics seeded.
+- **#1 Spawn-Execution Architecture — decided** (Option B: shared reopen package + `portal reopen` subcommand, picker calls in-process; N−1 spawned, picker self-reuses for the Nth).
+- Open coupling threads: #3 (partial-failure / in-process-vs-subprocess / wait-for-spawn), #7 (terminal-identity detection).
 
 ## Triage
 
