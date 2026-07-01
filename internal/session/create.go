@@ -13,6 +13,21 @@ import (
 // object, not its name, so it survives rename without a re-stamp.
 const PortalDirOption = "@portal-dir"
 
+// PortalIDOption is the tmux session user-option that stamps a session with its
+// immutable, rename-immune Portal identity: a fresh opaque token frozen at
+// creation. Like @portal-dir it rides the session object, not its name, so it
+// survives a rename without a re-stamp — but resume hooks key on it precisely so
+// a rename cannot orphan them (the mutable session name cannot serve as that
+// anchor). Parallel to PortalDirOption in shape, it diverges in lifecycle:
+// @portal-dir lazy-re-derives when absent, whereas @portal-id must be persisted
+// across reboots and re-stamped on restore (a Phase 3 concern) because there is
+// no way to re-derive a frozen identity.
+//
+// The literal MUST stay byte-identical to the "@portal-id" embedded in
+// tmux.HookKeyFormat so every key-producing site agrees; consistency is achieved
+// by both using the identical literal.
+const PortalIDOption = "@portal-id"
+
 // ShellFromEnv returns the user's shell from $SHELL, falling back to /bin/sh.
 func ShellFromEnv() string {
 	shell := os.Getenv("SHELL")
@@ -87,13 +102,26 @@ func (sc *SessionCreator) CreateFromDir(dir string, command []string) (string, e
 		return "", fmt.Errorf("failed to create tmux session: %w", err)
 	}
 
-	// Stamp the resolved git-root onto the session as the @portal-dir fast-path
-	// for directory resolution at grouped render time. Best-effort: a stamp
-	// failure must not fail session creation — the lazy stamp-on-render fallback
-	// re-derives and re-stamps any un-stamped session on its first grouped
-	// render. Swallowed silently: the session package has no log component and
-	// the closed component vocabulary does not include one.
+	// Stamp @portal-dir and @portal-id onto the freshly-created session. Both are
+	// best-effort at this point: a stamp failure must never fail session creation.
+	// Swallowed silently — the session package has no log component and the closed
+	// component vocabulary does not include one.
+	//
+	// @portal-dir is the fast-path for directory resolution at grouped render
+	// time; an un-stamped session is re-derived and re-stamped by the lazy
+	// stamp-on-render fallback on its first grouped render.
+	//
+	// @portal-id is the immutable rename-immune identity resume hooks key on. It
+	// is frozen here from a fresh generator token; a generation error skips the
+	// stamp entirely (session left un-stamped, hook keys fall back to the session
+	// name). Fire-and-forget: no uniqueness check, so correctness relies on the
+	// generator's width making a birthday collision negligible — the accepted
+	// residual is hook-key cross-talk between two panes that happen to share an id.
 	_ = sc.tmux.SetSessionOption(prepared.SessionName, PortalDirOption, prepared.ResolvedDir)
+
+	if token, genErr := sc.gen(); genErr == nil {
+		_ = sc.tmux.SetSessionOption(prepared.SessionName, PortalIDOption, token)
+	}
 
 	return prepared.SessionName, nil
 }
