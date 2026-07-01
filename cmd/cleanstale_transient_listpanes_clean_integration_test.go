@@ -1,7 +1,7 @@
 //go:build integration
 
 // End-to-end integration coverage for the second destructive consumer
-// of ListAllPanes — the `portal clean` command's hook-cleanup tail
+// of ListAllPaneHookKeys — the `portal clean` command's hook-cleanup tail
 // (cmd/clean.go ~lines 75-141). The companion file
 // cmd/cleanstale_transient_listpanes_integration_test.go covers the
 // bootstrap-step-11 callsite; this file covers the analogous callsite
@@ -13,7 +13,7 @@
 // the `portal clean` analogue:
 //
 //   - mode_a_list_panes_exit_nonzero — `list-panes -a` returns
-//     ("", err); RunE hits the err-from-ListAllPanes branch, emits the
+//     ("", err); RunE hits the err-from-ListAllPaneHookKeys branch, emits the
 //     propagated-error Warn, returns nil (silence-and-continue at the
 //     user boundary), and hooks.json is byte-identical. The
 //     entry-point Debug (`live=...`) MUST be absent — the err branch
@@ -148,7 +148,7 @@ func assertNoStaleHookRemovalsOnStdout(t *testing.T, output string, seededKeys .
 
 // TestPortalClean_TmuxTransient_DoesNotWipeHooks closes the
 // `portal clean` half of the defect-class scope — the second
-// destructive consumer of ListAllPanes (the first being bootstrap
+// destructive consumer of ListAllPaneHookKeys (the first being bootstrap
 // step 11). Mirrors TestBootstrap_CleanStale_TmuxTransient_DoesNotWipeHooks
 // row-for-row at this callsite so a regression at either destructive
 // site fails loudly under tmux transient.
@@ -287,7 +287,7 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 		}
 
 		// Inject a panicking lister to structurally prove the
-		// early-exit branch never invokes ListAllPanes.
+		// early-exit branch never invokes ListAllPaneHookKeys.
 		installCleanDepsForLister(t, panickingPaneLister{})
 
 		// runPortalClean swallows panics in goroutines but a panic in

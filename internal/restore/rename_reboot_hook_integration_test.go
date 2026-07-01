@@ -37,7 +37,7 @@
 //
 // Build & run:
 //
-//	go test -tags=integration ./internal/restore/... -run RenameReboot
+//	go test -tags=integration ./internal/restore/... -run TestRenameRebootHook
 //	go test -short -tags=integration ./internal/restore/...   # skips this
 
 package restore_test

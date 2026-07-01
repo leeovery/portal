@@ -177,13 +177,13 @@ func keysOf(m map[string]map[string]string) []string {
 // TestCleanStaleAdapter_CleanStale pins the composition specifics of
 // cleanStaleAdapter — that its logger field flows through to the shared
 // runHookStaleCleanup helper and that it passes swallowListError=false
-// so a ListAllPanes failure surfaces back to the orchestrator (the
+// so a ListAllPaneHookKeys failure surfaces back to the orchestrator (the
 // bootstrap step-11 contract Warn-and-swallows at the orchestrator level,
 // not inside the adapter). Without a direct unit test the composition is
 // exercised only by the integration suite, leaving the field-name and
 // bool-parameter wiring untested at the package-cmd unit level.
 func TestCleanStaleAdapter_CleanStale(t *testing.T) {
-	t.Run("ListAllPanes error propagates and Warn flows through adapter logger", func(t *testing.T) {
+	t.Run("ListAllPaneHookKeys error propagates and Warn flows through adapter logger", func(t *testing.T) {
 		store, _ := newTempHooksStore(t, `{"a:0.0": {"on-resume": "cmd-a"}}`)
 		logger := &recordingLogger{}
 		sentinel := errors.New("simulated tmux")

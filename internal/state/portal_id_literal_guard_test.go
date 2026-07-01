@@ -8,8 +8,9 @@ import (
 // portalIDLiteral is the exact "@portal-id" session user-option name that MUST
 // be embedded in captureFormat's trailing column. It is spelled out here as a
 // literal (rather than imported from session.PortalIDOption) to avoid an import
-// cycle: internal/session imports internal/state, so internal/state cannot
-// import internal/session. This is a white-box (package state) test because
+// cycle: internal/session transitively depends on internal/state (via
+// tmux/project/resolver), so internal/state cannot import internal/session.
+// This is a white-box (package state) test because
 // captureFormat is unexported. The literal MUST stay byte-identical to
 // session.PortalIDOption and to the "@portal-id" embedded in captureFormat.
 const portalIDLiteral = "@portal-id"

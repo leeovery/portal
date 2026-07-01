@@ -419,7 +419,7 @@ func TestCleanCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("ListAllPanes error preserves hooks (safety net)", func(t *testing.T) {
+	t.Run("ListAllPaneHookKeys error preserves hooks (safety net)", func(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
@@ -445,12 +445,12 @@ func TestCleanCommand(t *testing.T) {
 		}
 
 		if buf.String() != "" {
-			t.Errorf("output = %q, want empty string when ListAllPanes errors", buf.String())
+			t.Errorf("output = %q, want empty string when ListAllPaneHookKeys errors", buf.String())
 		}
 
 		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["my-session:0.1"]; !ok {
-			t.Error("expected hook my-session:0.1 to be preserved when ListAllPanes errors")
+			t.Error("expected hook my-session:0.1 to be preserved when ListAllPaneHookKeys errors")
 		}
 	})
 

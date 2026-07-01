@@ -17,6 +17,11 @@ type HookKeyResolver interface {
 	ResolveHookKey(paneID string) (string, error)
 }
 
+// Compile-time assertion that the production tmux client satisfies the seam,
+// so a drift in ResolveHookKey's signature fails fast at build time rather
+// than only via the implicit assignment in resolveCurrentPaneKey.
+var _ HookKeyResolver = (*tmux.Client)(nil)
+
 // hooksDeps holds injectable dependencies for the hooks commands.
 // When nil, real implementations are used.
 var hooksDeps *HooksDeps

@@ -164,7 +164,7 @@ func TestHooksSetCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify hook was written under structural key
+		// Verify hook was written under hook key
 		data := readHooksJSON(t, hooksFile)
 		if data["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
 			t.Errorf("hook command = %q, want %q", data["my-session:0.0"]["on-resume"], "claude --resume abc123")
@@ -189,10 +189,10 @@ func TestHooksSetCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify structural key was used in the store (not raw pane ID)
+		// Verify hook key was used in the store (not raw pane ID)
 		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["proj-xyz:1.2"]; !ok {
-			t.Error("expected hook entry for structural key proj-xyz:1.2, not found")
+			t.Error("expected hook entry for hook key proj-xyz:1.2, not found")
 		}
 		if _, ok := data["%99"]; ok {
 			t.Error("raw pane ID %99 should not be used as key")
@@ -302,15 +302,15 @@ func TestHooksSetCommand(t *testing.T) {
 		// Read the raw JSON and verify the structure
 		data := readHooksJSON(t, hooksFile)
 
-		// Should have exactly one entry under structural key
+		// Should have exactly one entry under hook key
 		if len(data) != 1 {
 			t.Fatalf("expected 1 entry, got %d", len(data))
 		}
 
-		// The entry should be keyed by structural key, not raw pane ID
+		// The entry should be keyed by hook key, not raw pane ID
 		events, ok := data["my-session:0.0"]
 		if !ok {
-			t.Fatal("expected entry for structural key my-session:0.0")
+			t.Fatal("expected entry for hook key my-session:0.0")
 		}
 		if len(events) != 1 {
 			t.Fatalf("expected 1 event for my-session:0.0, got %d", len(events))
@@ -404,7 +404,7 @@ func TestHooksRmCommand(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 		t.Setenv("TMUX_PANE", "%3")
 
-		// Seed with an existing hook keyed by structural key
+		// Seed with an existing hook keyed by its hook key
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{
 			"my-session:0.0": {"on-resume": "claude --resume abc123"},
 		})
@@ -421,14 +421,14 @@ func TestHooksRmCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify hook was removed from file using structural key
+		// Verify hook was removed from file using hook key
 		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["my-session:0.0"]; ok {
-			t.Error("expected structural key my-session:0.0 entry to be removed from hooks file")
+			t.Error("expected hook key my-session:0.0 entry to be removed from hooks file")
 		}
 	})
 
-	t.Run("reads pane ID from TMUX_PANE and resolves structural key", func(t *testing.T) {
+	t.Run("reads pane ID from TMUX_PANE and resolves hook key", func(t *testing.T) {
 		dir := t.TempDir()
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
@@ -450,10 +450,10 @@ func TestHooksRmCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify structural key was used in the store removal (not raw pane ID)
+		// Verify hook key was used in the store removal (not raw pane ID)
 		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["proj-xyz:1.2"]; ok {
-			t.Error("expected structural key proj-xyz:1.2 entry to be removed")
+			t.Error("expected hook key proj-xyz:1.2 entry to be removed")
 		}
 		if _, ok := data["%42"]; ok {
 			t.Error("raw pane ID %42 should not be used as key")
@@ -562,7 +562,7 @@ func TestHooksRmCommand(t *testing.T) {
 
 		// my-session:0.0 should be gone
 		if _, ok := data["my-session:0.0"]; ok {
-			t.Error("expected structural key my-session:0.0 to be removed")
+			t.Error("expected hook key my-session:0.0 to be removed")
 		}
 
 		// other-proj:0.0 should remain
@@ -596,7 +596,7 @@ func TestHooksRmCommand(t *testing.T) {
 
 		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["my-session:0.0"]; ok {
-			t.Error("expected structural key my-session:0.0 to be removed when last event deleted")
+			t.Error("expected hook key my-session:0.0 to be removed when last event deleted")
 		}
 		if len(data) != 0 {
 			t.Errorf("expected empty hooks file, got %d entries", len(data))
