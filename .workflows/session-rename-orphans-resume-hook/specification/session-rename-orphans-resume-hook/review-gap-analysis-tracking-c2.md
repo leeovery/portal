@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-01
 cycle: 2
 phase: Gap Analysis
@@ -30,7 +30,7 @@ Left as-is, an implementer would guess. The QuickStart path proves the intended 
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. CreateFromDir bullet now states the token is generated via the injected id generator (sc.gen) before the stamp, and both generation and SetSessionOption errors are swallowed (session survives un-stamped -> name fallback), consistent with QuickStart and @portal-dir; never aborts creation.
 
 ---
