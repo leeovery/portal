@@ -575,6 +575,30 @@ func PaneTargetExact(session string, window, pane int) string {
 	return fmt.Sprintf("=%s:%d.%d", session, window, pane)
 }
 
+// HookKey is the canonical hook-key formatter for the saved path: the in-Go
+// mirror of HookKeyFormat's tmux conditional, applied to values read from
+// saved state (sessions.json) rather than a live tmux server. It returns
+// "<portalID>:window.pane" when portalID is non-empty (the immutable,
+// rename-immune @portal-id key), and "<name>:window.pane" when portalID is
+// empty (the legacy / un-stamped fallback, which equals the name-based key
+// already on disk so existing hooks.json entries keep matching with no
+// migration).
+//
+// The token is opaque and the name is used verbatim — no trimming, sanitizing,
+// or validation — so a saved-path key is byte-identical to the corresponding
+// live HookKeyFormat read at the same pane.
+//
+// This format is load-bearing: it is stable across releases — changing it
+// silently invalidates every entry in hooks.json. This is the same invariant
+// formerly carried by PaneTarget's doc-comment, transferred here now that
+// HookKey / HookKeyFormat own the hook-key derivation.
+func HookKey(portalID, name string, window, pane int) string {
+	if portalID != "" {
+		return fmt.Sprintf("%s:%d.%d", portalID, window, pane)
+	}
+	return fmt.Sprintf("%s:%d.%d", name, window, pane)
+}
+
 // exactTarget formats a tmux session target string with the "=" exact-match
 // prefix (e.g. "=my-session"). It is the session-level sibling of
 // PaneTargetExact (pane-level): together they are the two canonical ways to
