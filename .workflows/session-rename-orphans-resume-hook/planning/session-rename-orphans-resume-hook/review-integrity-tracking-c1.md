@@ -55,7 +55,7 @@ to:
 
 ---
 
-### 2. Task 3-3 states an incorrect import-cycle rationale ("`internal/session` imports only `internal/tmux`")
+### 2. [RESOLVED: Fixed] Task 3-3 states an incorrect import-cycle rationale ("`internal/session` imports only `internal/tmux`")
 
 **Severity**: Minor
 **Plan Reference**: Phase 3, task `session-rename-orphans-resume-hook-3-3` (Re-stamp `@portal-id` in `createSkeleton`)
