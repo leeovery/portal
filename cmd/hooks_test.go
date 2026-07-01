@@ -135,13 +135,13 @@ func TestHooksListCommand(t *testing.T) {
 	})
 }
 
-// mockKeyResolver implements StructuralKeyResolver for testing.
+// mockKeyResolver implements HookKeyResolver for testing.
 type mockKeyResolver struct {
 	key string
 	err error
 }
 
-func (m *mockKeyResolver) ResolveStructuralKey(_ string) (string, error) {
+func (m *mockKeyResolver) ResolveHookKey(_ string) (string, error) {
 	return m.key, m.err
 }
 
@@ -320,7 +320,7 @@ func TestHooksSetCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("ResolveStructuralKey failure returns user-facing error", func(t *testing.T) {
+	t.Run("it aborts hooks set when the hook-key read fails", func(t *testing.T) {
 		dir := t.TempDir()
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
@@ -345,6 +345,53 @@ func TestHooksSetCommand(t *testing.T) {
 		// Verify no side effects: no file written
 		if _, statErr := os.Stat(hooksFile); statErr == nil {
 			t.Error("hooks file should not have been created")
+		}
+	})
+
+	t.Run("it stores the hook under the resolved hook key", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%3")
+
+		resolver := &mockKeyResolver{key: "tok123:0.0"}
+		hooksDeps = &HooksDeps{KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "claude --resume abc123"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify hook was written under the resolved hook key
+		data := readHooksJSON(t, hooksFile)
+		if data["tok123:0.0"]["on-resume"] != "claude --resume abc123" {
+			t.Errorf("hook command = %q, want %q", data["tok123:0.0"]["on-resume"], "claude --resume abc123")
+		}
+	})
+
+	t.Run("it errors when TMUX_PANE is unset for set", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "")
+
+		resolver := &mockKeyResolver{key: "unused:0.0"}
+		hooksDeps = &HooksDeps{KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "some-cmd"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "must be run from inside a tmux pane") {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), "must be run from inside a tmux pane")
 		}
 	})
 
@@ -556,7 +603,7 @@ func TestHooksRmCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("ResolveStructuralKey failure returns user-facing error", func(t *testing.T) {
+	t.Run("it aborts hooks rm when the hook-key read fails and leaves the entry intact", func(t *testing.T) {
 		dir := t.TempDir()
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
@@ -650,6 +697,64 @@ func TestHooksRmCommand(t *testing.T) {
 		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["resolved-session:0.0"]; ok {
 			t.Error("expected resolved-session:0.0 entry to be removed via fallback")
+		}
+	})
+
+	t.Run("it removes the verbatim key on rm --pane-key without consulting the resolver", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "")
+
+		// Seed two entries; only the one passed via --pane-key should be removed.
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"sess:0.1":       {"on-resume": "claude --resume xyz"},
+			"other-proj:0.0": {"on-resume": "npm start"},
+		})
+
+		// Resolver must NOT be consulted on the --pane-key branch; use one that
+		// would fail loudly if called, so an accidental fallback is caught.
+		resolver := &mockKeyResolver{err: fmt.Errorf("resolver must not be called when --pane-key is set")}
+		hooksDeps = &HooksDeps{KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--pane-key", "sess:0.1", "--on-resume"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["sess:0.1"]; ok {
+			t.Error("expected verbatim key sess:0.1 to be removed via --pane-key")
+		}
+		if data["other-proj:0.0"]["on-resume"] != "npm start" {
+			t.Errorf("other-proj:0.0 on-resume = %q, want %q", data["other-proj:0.0"]["on-resume"], "npm start")
+		}
+	})
+
+	t.Run("it errors when TMUX_PANE is unset for the rm fallback", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "")
+
+		resolver := &mockKeyResolver{key: "unused:0.0"}
+		hooksDeps = &HooksDeps{KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "must be run from inside a tmux pane") {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), "must be run from inside a tmux pane")
 		}
 	})
 }
