@@ -130,8 +130,8 @@ func TestDaemonTick_LogsAnomalousShowEnvironmentFailureUnderComponentDaemon(t *t
 	// Two sessions in list-sessions; pane rows for both.
 	fc := &daemonFakeCommander{
 		sessionsOut: "A|1|0|\nB|1|0|",
-		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
-			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
+		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
+			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||",
 		envBySession: map[string]string{
 			"A": "FOO=bar",
 		},
@@ -208,8 +208,8 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 
 	fc := &daemonFakeCommander{
 		sessionsOut: "A|1|0|\nB|1|0|",
-		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
-			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
+		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
+			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||",
 	}
 	wrapped := &envFailingCommander{
 		inner: fc,

@@ -32,9 +32,16 @@ type CaptureClient interface {
 // topology of every pane across every session in a single list-panes -a call.
 // Fields are separated by "|||" — three characters that cannot occur in any
 // of the captured tmux variables.
-const captureFormat = "#{session_name}|||#{window_index}|||#{window_name}|||#{window_layout}|||#{window_zoomed_flag}|||#{window_active}|||#{pane_index}|||#{pane_current_path}|||#{pane_active}|||#{pane_current_command}"
+//
+// The trailing #{@portal-id} is the session-scoped immutable Portal id. It is
+// a session user-option, so it resolves per-pane to the owning session's value
+// (identical on every pane row of the same session); the parser consumes it
+// from the first row when assembling Session.PortalID. Its alphanumeric token
+// cannot contain "|||", so appending it as the last column keeps every existing
+// field index unchanged. An un-stamped (legacy) session resolves it to "".
+const captureFormat = "#{session_name}|||#{window_index}|||#{window_name}|||#{window_layout}|||#{window_zoomed_flag}|||#{window_active}|||#{pane_index}|||#{pane_current_path}|||#{pane_active}|||#{pane_current_command}|||#{@portal-id}"
 
-const captureFieldCount = 10
+const captureFieldCount = 11
 
 // internalSessionPrefix marks tmux sessions that Portal owns and which must
 // not appear in the captured structural index. See specification → Session
@@ -122,8 +129,17 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 			logger.Warn("capture anomalous session error", "session", name, "error", err)
 			continue
 		}
+		// @portal-id is session-scoped — identical on every pane row — so lift
+		// it once from the first row of the group. A zero-row session (no pane
+		// rows) yields "" here and empty Windows below; Restore rejects such an
+		// entry downstream, so no guard/skip is added at capture time.
+		portalID := ""
+		if rows := grouped[name]; len(rows) > 0 {
+			portalID = rows[0].portalID
+		}
 		sessions = append(sessions, Session{
 			Name:        name,
+			PortalID:    portalID,
 			Environment: parseShowEnvironment(envRaw),
 			Windows:     buildWindows(name, grouped[name]),
 		})
@@ -327,6 +343,9 @@ type paneRow struct {
 	cwd            string
 	paneActive     bool
 	currentCommand string
+	// portalID is the session-scoped @portal-id, repeated on every pane row of
+	// the same session; the consumer takes it from the first row of the group.
+	portalID string
 }
 
 // parsePaneRows splits raw list-panes -a output into rows grouped by session
@@ -380,6 +399,7 @@ func parsePaneRow(line string) (paneRow, error) {
 		cwd:            parts[7],
 		paneActive:     parseTmuxBool(parts[8]),
 		currentCommand: parts[9],
+		portalID:       parts[10],
 	}, nil
 }
 

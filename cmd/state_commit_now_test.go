@@ -384,7 +384,7 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 	client := &fakeCaptureClient{
 		sessions: []string{"work", "_portal-saver"},
 		rows: strings.Join([]string{
-			"work|||0|||main|||tiled|||0|||1|||0|||/home/u|||1|||zsh",
+			"work|||0|||main|||tiled|||0|||1|||0|||/home/u|||1|||zsh|||",
 		}, "\n"),
 		env: map[string]string{"work": "", "_portal-saver": ""},
 	}

@@ -82,9 +82,20 @@ func listSessionsFor(names ...string) string {
 	return strings.Join(lines, "\n")
 }
 
-// paneLine renders one pane row in the structural list-panes output format
-// CaptureStructure expects.
+// paneLine renders one un-stamped pane row (empty trailing @portal-id column)
+// in the structural list-panes output format CaptureStructure expects. The
+// bulk of the suite exercises legacy/un-stamped sessions, so this delegates to
+// paneLineWithID with an empty id — the append-only 11th field is present but
+// blank, matching a session created before @portal-id shipped.
 func paneLine(session string, windowIdx int, windowName, layout string, zoomed, windowActive bool, paneIdx int, cwd string, paneActive bool, currentCommand string) string {
+	return paneLineWithID(session, windowIdx, windowName, layout, zoomed, windowActive, paneIdx, cwd, paneActive, currentCommand, "")
+}
+
+// paneLineWithID renders one pane row with an explicit trailing @portal-id
+// column — the 11th and final |||-separated field of captureFormat. The id is
+// session-scoped in tmux (repeated on every pane row of the same session); the
+// parser consumes it from the first row when assembling Session.PortalID.
+func paneLineWithID(session string, windowIdx int, windowName, layout string, zoomed, windowActive bool, paneIdx int, cwd string, paneActive bool, currentCommand, portalID string) string {
 	bool01 := func(b bool) string {
 		if b {
 			return "1"
@@ -92,8 +103,8 @@ func paneLine(session string, windowIdx int, windowName, layout string, zoomed, 
 		return "0"
 	}
 	return fmt.Sprintf(
-		"%s|||%d|||%s|||%s|||%s|||%s|||%d|||%s|||%s|||%s",
-		session, windowIdx, windowName, layout, bool01(zoomed), bool01(windowActive), paneIdx, cwd, bool01(paneActive), currentCommand,
+		"%s|||%d|||%s|||%s|||%s|||%s|||%d|||%s|||%s|||%s|||%s",
+		session, windowIdx, windowName, layout, bool01(zoomed), bool01(windowActive), paneIdx, cwd, bool01(paneActive), currentCommand, portalID,
 	)
 }
 
@@ -508,6 +519,189 @@ func TestCaptureStructure(t *testing.T) {
 		_, err := state.CaptureStructure(client, nil, nil, nil)
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+// TestCaptureStructurePortalID pins the Cross-Reboot Persistence capture leg:
+// captureFormat appends #{@portal-id} as its 11th and final column, the parser
+// reads it into paneRow.portalID (parts[10]), and CaptureStructure lifts it
+// from the FIRST row of a session's grouped pane rows into Session.PortalID.
+// sessions.json is the only durable record of a session's immutable id across
+// a reboot, so a stamped session must round-trip its id into the snapshot while
+// an un-stamped (legacy) session yields "".
+func TestCaptureStructurePortalID(t *testing.T) {
+	t.Run("it captures a stamped session's @portal-id into Session.PortalID", func(t *testing.T) {
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes: paneLineWithID(
+				"work", 0, "main", "L", false, true, 0, "/tmp", true, "zsh", "aB3xY9kZ",
+			),
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 1 {
+			t.Fatalf("got %d sessions, want 1", len(idx.Sessions))
+		}
+		if idx.Sessions[0].PortalID != "aB3xY9kZ" {
+			t.Errorf("PortalID = %q, want %q", idx.Sessions[0].PortalID, "aB3xY9kZ")
+		}
+	})
+
+	t.Run("it captures an un-stamped session as an empty PortalID", func(t *testing.T) {
+		// paneLine emits an empty trailing @portal-id column — the legacy
+		// pre-stamp session shape.
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLine("work", 0, "main", "L", false, true, 0, "/tmp", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 1 {
+			t.Fatalf("got %d sessions, want 1", len(idx.Sessions))
+		}
+		if idx.Sessions[0].PortalID != "" {
+			t.Errorf("PortalID = %q, want empty for un-stamped session", idx.Sessions[0].PortalID)
+		}
+	})
+
+	t.Run("it lifts PortalID from the first pane row for a multi-pane session", func(t *testing.T) {
+		// @portal-id is session-scoped: every pane row of the same session
+		// carries the identical value. The lift takes it once, from the first
+		// row of grouped[name].
+		const id = "sessionScoped1"
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes: strings.Join([]string{
+				paneLineWithID("work", 0, "main", "L", false, true, 0, "/a", true, "zsh", id),
+				paneLineWithID("work", 0, "main", "L", false, true, 1, "/b", false, "vim", id),
+				paneLineWithID("work", 1, "side", "L2", false, false, 0, "/c", true, "bash", id),
+			}, "\n"),
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 1 {
+			t.Fatalf("got %d sessions, want 1", len(idx.Sessions))
+		}
+		if idx.Sessions[0].PortalID != id {
+			t.Errorf("PortalID = %q, want %q (lifted once from the first row)", idx.Sessions[0].PortalID, id)
+		}
+	})
+
+	t.Run("it rejects a wrong-arity pane row after the field-count bump", func(t *testing.T) {
+		// A 10-field row (the pre-bump arity) is now short by one column. The
+		// len(parts) != captureFieldCount guard — now enforcing arity 11 — must
+		// reject it with the canonical field-count error, and CaptureStructure
+		// must propagate it as a pre-loop fail-fatal (no partial index).
+		tenFieldRow := "work|||0|||main|||L|||0|||1|||0|||/tmp|||1|||zsh"
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    tenFieldRow,
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err == nil {
+			t.Fatal("expected error for a 10-field row under 11-arity, got nil")
+		}
+		if !strings.Contains(err.Error(), "unexpected pane row field count") {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), "unexpected pane row field count")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("expected empty Sessions on wrong-arity fail-fatal, got %d", len(idx.Sessions))
+		}
+	})
+
+	t.Run("it leaves every existing field index unchanged after the append", func(t *testing.T) {
+		// The append is index-preserving: fields 0..9 must parse into exactly
+		// the same Session/Window/Pane shape as before the @portal-id column
+		// existed. Stamp an id to prove the new column does not bleed into any
+		// earlier field.
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes: paneLineWithID(
+				"work", 3, "editor", "b25f,200x50,0,0", true, false, 5, "/Users/leeovery/Code/portal", true, "nvim", "keepIndex",
+			),
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 1 {
+			t.Fatalf("got %d sessions, want 1", len(idx.Sessions))
+		}
+		s := idx.Sessions[0]
+		if s.Name != "work" {
+			t.Errorf("Name = %q, want %q", s.Name, "work")
+		}
+		if len(s.Windows) != 1 {
+			t.Fatalf("got %d windows, want 1", len(s.Windows))
+		}
+		w := s.Windows[0]
+		if w.Index != 3 || w.Name != "editor" || w.Layout != "b25f,200x50,0,0" {
+			t.Errorf("window header = %+v, want index 3 / editor / b25f,200x50,0,0", w)
+		}
+		if !w.Zoomed || w.Active {
+			t.Errorf("window flags = zoomed:%v active:%v, want true/false", w.Zoomed, w.Active)
+		}
+		if len(w.Panes) != 1 {
+			t.Fatalf("got %d panes, want 1", len(w.Panes))
+		}
+		p := w.Panes[0]
+		if p.Index != 5 || p.CWD != "/Users/leeovery/Code/portal" || !p.Active || p.CurrentCommand != "nvim" {
+			t.Errorf("pane = %+v, want index 5 / portal cwd / active / nvim", p)
+		}
+		// And the appended column still lands in PortalID, not any earlier field.
+		if s.PortalID != "keepIndex" {
+			t.Errorf("PortalID = %q, want %q", s.PortalID, "keepIndex")
+		}
+	})
+
+	t.Run("it yields an empty PortalID and no windows for a zero-row session without panicking", func(t *testing.T) {
+		// A session enumerated by list-sessions but contributing zero pane
+		// rows (grouped[name] is empty) must lift PortalID == "" without
+		// panicking on the empty first-row read, and produce empty Windows.
+		// Restore rejects such an entry downstream — capture adds no guard.
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			// No pane rows for "work": list-panes returns empty output.
+			listPanes: "",
+			t:         t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 1 {
+			t.Fatalf("got %d sessions, want 1", len(idx.Sessions))
+		}
+		s := idx.Sessions[0]
+		if s.PortalID != "" {
+			t.Errorf("PortalID = %q, want empty for zero-row session", s.PortalID)
+		}
+		if len(s.Windows) != 0 {
+			t.Errorf("got %d windows, want 0 for zero-row session", len(s.Windows))
 		}
 	})
 }
@@ -1575,7 +1769,7 @@ func TestCaptureStructurePreLoopFailFatal(t *testing.T) {
 
 	t.Run("it returns an error when parsePaneRows hits a malformed row", func(t *testing.T) {
 		// Malformed row: too few "|||"-separated fields. captureFormat
-		// expects 10; this emits 3. parsePaneRows must return an error and
+		// expects 11; this emits 3. parsePaneRows must return an error and
 		// CaptureStructure must propagate it before the per-session loop.
 		mock := &captureMock{
 			listSessions: listSessionsFor("work"),
