@@ -19,6 +19,17 @@ approved_at: 2026-07-01
 - [ ] The four doc-comments (`PaneTarget`, `PaneTargetExact`, `StructuralKeyFormat`, `ListAllPanes`) no longer assert `hooks.json` key ownership; the stability invariant is documented on `HookKey` / `HookKeyFormat` instead
 - [ ] Full test suite green; `PaneTarget` / `StructuralKeyFormat` / `ListAllPanes` behaviour unchanged for name-based tmux targeting and non-hook structural use
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-rename-orphans-resume-hook-1-1 | Add `tmux.HookKey` pure Go hook-key formatter | empty portalID falls back to name, empty name with empty portalID yields `:w.p`, multi-pane distinct w.p suffixes under one id, base-index-1 indices, zero indices |
+| session-rename-orphans-resume-hook-1-2 | Add `tmux.HookKeyFormat` tmux format string and verify against real tmux | stamped session yields `<id>:w.p`, un-stamped session yields `<name>:w.p`, multi-window/multi-pane resolves distinct suffixes |
+| session-rename-orphans-resume-hook-1-3 | Add `session.PortalIDOption` constant and stamp `@portal-id` in `CreateFromDir` | token-generation error swallowed (session created un-stamped), `SetSessionOption` error swallowed (creation not aborted), stamp best-effort and non-fatal |
+| session-rename-orphans-resume-hook-1-4 | Stamp `@portal-id` in `QuickStart.Run` ExecArgs chain | token-generation error omits the set-option step (session un-stamped), stamp step ordered before attach-session, token interpolated as literal argv element |
+| session-rename-orphans-resume-hook-1-5 | Retire the four stale `hooks.json`-ownership doc-comments; transfer stability invariant to `HookKey`/`HookKeyFormat` | none |
+
 ### Phase 2: Live-Key Sites Adopt the Hook Key — registration + stale cleanup
 status: approved
 approved_at: 2026-07-01
