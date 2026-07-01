@@ -20,7 +20,8 @@ approved_at: 2026-07-01
 - [ ] Full test suite green; `PaneTarget` / `StructuralKeyFormat` / `ListAllPanes` behaviour unchanged for name-based tmux targeting and non-hook structural use
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-01
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
