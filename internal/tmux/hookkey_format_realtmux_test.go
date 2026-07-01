@@ -35,13 +35,6 @@ import (
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
-// portalIDOption is the literal session user-option name embedded in
-// tmux.HookKeyFormat. It is repeated here as a literal (rather than imported
-// from session.PortalIDOption, which does not yet exist) to avoid an import
-// for a single string and must stay byte-identical to the literal in
-// HookKeyFormat.
-const portalIDOption = "@portal-id"
-
 // readHookKey drives the production tmux.HookKeyFormat through a real
 // display-message read against target on the isolated socket, returning the
 // resolved key with the trailing newline trimmed. Reading via the exact
@@ -70,8 +63,8 @@ func TestHookKeyFormat_StampedSession(t *testing.T) {
 	}
 	ts.WaitForSession(t, sessionName, 2*time.Second)
 
-	if err := client.SetSessionOption(sessionName, portalIDOption, "tok123"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDOption, "tok123", err)
+	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tok123"); err != nil {
+		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDLiteral, "tok123", err)
 	}
 
 	// Base-index/pane-base-index default to 0 under -f /dev/null, so the
@@ -123,8 +116,8 @@ func TestHookKeyFormat_MultiWindowMultiPane(t *testing.T) {
 	}
 	ts.WaitForSession(t, sessionName, 2*time.Second)
 
-	if err := client.SetSessionOption(sessionName, portalIDOption, "tokMulti"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDOption, "tokMulti", err)
+	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tokMulti"); err != nil {
+		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDLiteral, "tokMulti", err)
 	}
 
 	// Split the initial pane (window 0 now has panes 0 and 1) and add a

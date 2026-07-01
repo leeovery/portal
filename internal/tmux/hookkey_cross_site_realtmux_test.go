@@ -45,12 +45,6 @@ import (
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
-// crossSitePortalIDOption is the literal session user-option name embedded in
-// tmux.HookKeyFormat. It is repeated here as a literal (rather than imported
-// from session.PortalIDOption) to avoid an import cycle and must stay
-// byte-identical to the literal in HookKeyFormat.
-const crossSitePortalIDOption = "@portal-id"
-
 // TestCrossSiteConsistency_StampedSession proves the registration read and the
 // cleanup enumeration agree on a stamped single-pane session's hook key. It
 // stamps @portal-id=tok123, resolves the registration key via ResolveHookKey
@@ -73,8 +67,8 @@ func TestCrossSiteConsistency_StampedSession(t *testing.T) {
 	}
 	ts.WaitForSession(t, sessionName, 2*time.Second)
 
-	if err := client.SetSessionOption(sessionName, crossSitePortalIDOption, "tok123"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, crossSitePortalIDOption, "tok123", err)
+	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tok123"); err != nil {
+		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDLiteral, "tok123", err)
 	}
 
 	// Registration read: display-message against the session's active pane.
@@ -122,8 +116,8 @@ func TestCrossSiteConsistency_MultiPaneStampedSession(t *testing.T) {
 	}
 	ts.WaitForSession(t, sessionName, 2*time.Second)
 
-	if err := client.SetSessionOption(sessionName, crossSitePortalIDOption, "tok123"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, crossSitePortalIDOption, "tok123", err)
+	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tok123"); err != nil {
+		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDLiteral, "tok123", err)
 	}
 
 	// Split the initial pane (window 0 gains pane 1) and add a second window

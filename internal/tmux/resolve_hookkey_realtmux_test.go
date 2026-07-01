@@ -58,11 +58,11 @@ func TestResolveHookKey_StampedSession(t *testing.T) {
 	}
 	ts.WaitForSession(t, sessionName, 2*time.Second)
 
-	// Use the literal "@portal-id" (session.PortalIDOption) to avoid an import
-	// cycle; it must stay byte-identical to the literal embedded in
-	// tmux.HookKeyFormat.
-	if err := client.SetSessionOption(sessionName, "@portal-id", "tok123"); err != nil {
-		t.Fatalf("SetSessionOption(%q, @portal-id, tok123): %v", sessionName, err)
+	// portalIDLiteral is the shared "@portal-id" literal (spelled out rather
+	// than imported from session.PortalIDOption to avoid an import cycle; must
+	// stay byte-identical to the literal embedded in tmux.HookKeyFormat).
+	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tok123"); err != nil {
+		t.Fatalf("SetSessionOption(%q, %q, tok123): %v", sessionName, portalIDLiteral, err)
 	}
 
 	got, err := client.ResolveHookKey(sessionName)

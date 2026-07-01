@@ -40,12 +40,6 @@ import (
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
-// hookKeyPortalIDOption is the literal session user-option name embedded in
-// tmux.HookKeyFormat. It is repeated here as a literal (rather than imported
-// from session.PortalIDOption) to avoid an import cycle and must stay
-// byte-identical to the literal in HookKeyFormat.
-const hookKeyPortalIDOption = "@portal-id"
-
 // TestListAllPaneHookKeys_StampedSession proves ListAllPaneHookKeys enumerates a
 // stamped session's pane as "<@portal-id>:w.p" — the rename-immune case. It
 // creates a session, stamps @portal-id via the production SetSessionOption, then
@@ -66,8 +60,8 @@ func TestListAllPaneHookKeys_StampedSession(t *testing.T) {
 	}
 	ts.WaitForSession(t, sessionName, 2*time.Second)
 
-	if err := client.SetSessionOption(sessionName, hookKeyPortalIDOption, "tok123"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, hookKeyPortalIDOption, "tok123", err)
+	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tok123"); err != nil {
+		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDLiteral, "tok123", err)
 	}
 
 	keys, err := client.ListAllPaneHookKeys()
@@ -131,8 +125,8 @@ func TestListAllPaneHookKeys_MultiWindowMultiPane(t *testing.T) {
 	}
 	ts.WaitForSession(t, sessionName, 2*time.Second)
 
-	if err := client.SetSessionOption(sessionName, hookKeyPortalIDOption, "tokMulti"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, hookKeyPortalIDOption, "tokMulti", err)
+	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tokMulti"); err != nil {
+		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDLiteral, "tokMulti", err)
 	}
 
 	// Split the initial pane (window 0 now has panes 0 and 1) and add a second
@@ -179,8 +173,8 @@ func TestListAllPaneHookKeys_MixedStampedAndUnstamped(t *testing.T) {
 	}
 	ts.WaitForSession(t, unstamped, 2*time.Second)
 
-	if err := client.SetSessionOption(stamped, hookKeyPortalIDOption, "tokMix"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", stamped, hookKeyPortalIDOption, "tokMix", err)
+	if err := client.SetSessionOption(stamped, portalIDLiteral, "tokMix"); err != nil {
+		t.Fatalf("SetSessionOption(%q, %q, %q): %v", stamped, portalIDLiteral, "tokMix", err)
 	}
 
 	keys, err := client.ListAllPaneHookKeys()
