@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-01
 cycle: 1
 phase: Gap Analysis
@@ -38,8 +38,8 @@ This is the load-bearing persistence step; leaving the assembly mechanism to gue
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Capture §2 now specifies: parse into a `portalID` field on `paneRow`, lift `Session.PortalID` from the first row of `grouped[name]` (all rows identical per session).
 
 ---
 
@@ -56,8 +56,8 @@ The spec should state the expected behavior: either (a) this window is acceptabl
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Documented as benign — zero-row (churn) session yields empty id + empty Windows and is rejected by Restore, so the empty id is never consumed; no guard needed.
 
 ---
 
@@ -76,8 +76,8 @@ This matters for correctness: a silent name-based fallback on a transient read f
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Stage 1 now pins the failure contract: on read failure, abort/propagate (parity with ResolveStructuralKey); never synthesize a name-based key.
 
 ---
 
@@ -98,8 +98,8 @@ Note: the current `NewNanoIDGenerator` is 6 chars alphanumeric; the spec's "wide
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Identity section now states fire-and-forget generation (no uniqueness check), width-only correctness, and the accepted cross-talk residual; ties to QuickStart's seam-less argv chain.
 
 ---
 
@@ -114,8 +114,8 @@ For `CreateFromDir` the spec is concrete (a Go-level `SetSessionOption` call aft
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. QuickStart bullet now states the token is generated in Go inside Run before ExecArgs, interpolated as a literal; generation failure omits the stamp step (best-effort).
 
 ---
 
@@ -130,7 +130,7 @@ The spec correctly flags that `captureFormat` is fixed-arity, that `captureField
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Folded into Finding 1's Capture addition — append `#{@portal-id}` as the last column so existing indices are unchanged.
 
 ---
