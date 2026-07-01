@@ -139,6 +139,24 @@ The fix's correctness rests on one invariant — *every key-producing site deriv
 
 **Conventions.** Tests must not use `t.Parallel()` (package-level mock injection). Daemon-spawning / bootstrap-subprocess tests must use `portaltest.IsolateStateForTest` and apply the returned env. Real-tmux scenarios use the `tmuxtest` socket fixtures; restore scaffolding uses `restoretest`. Integration tests build the binary via the existing `portalbintest` / `restoretest` helpers.
 
+## Acceptance Criteria
+
+1. **Stamping.** Every session created via `portal open` / QuickStart and via `SessionCreator.CreateFromDir` carries an immutable, opaque `@portal-id` user-option from creation. A stamp failure is non-fatal.
+2. **Rename survives reboot.** A session that is renamed (via external `tmux rename-session` **or** the in-TUI rename modal) while its pane process keeps running, then rebooted/restored, resumes its registered hook — not a bare shell.
+3. **Durable across repeated reboots.** The hook continues to fire on every subsequent reboot, because `@portal-id` is re-stamped at restore and re-persisted by the next capture.
+4. **Cleanup safety.** Stale-cleanup (bootstrap step 11 / `portal clean`) never deletes a freshly-restored hook, and never mass-orphans existing hooks on upgrade.
+5. **No-migration upgrade.** After upgrading, an un-stamped, never-renamed session's existing `hooks.json` entry still resolves and fires (name fallback coincides with the on-disk key). No `sessions.json` migration and no schema `Version` bump.
+6. **No external/UI change.** The out-of-repo start-hook and the in-TUI rename path require no changes.
+7. **Multi-pane.** Per-pane hooks under one session remain independently addressable and fire on the correct pane after rename+restore.
+8. **Graceful legacy.** Un-stamped sessions never panic and degrade to the name-based key everywhere.
+
+## Risks
+
+- **Missed key-producing site (primary risk).** If any current or future caller builds a hook key or live-key set from the name-based `StructuralKeyFormat` instead of the hook-key derivation, stamped sessions' hooks orphan at scale — the original symptom. Mitigation: a single shared `HookKeyFormat` / `HookKey` primitive used at every site, plus the cross-site consistency test. The firing path must never read the live `@portal-id` (ordering trap).
+- **Best-effort stamping.** A swallowed stamp failure leaves that session on the name fallback (rename-vulnerable, like legacy) — non-fatal and self-correcting on next recreation; acceptable.
+- **Token collision.** The opaque token's width must keep birthday-collision across the session population negligible (implementation detail).
+- **Release type.** Regular release (additive schema field + keying change across registration/capture/restore/cleanup), not a hotfix.
+
 ---
 
 ## Working Notes
