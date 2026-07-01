@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Stable Identity Foundation — @portal-id stamping + hook-key primitives
-status: draft
+status: approved
+approved_at: 2026-07-01
 
 **Goal**: Introduce the immutable `@portal-id` session identity (`session.PortalIDOption`), stamp it at both first-party creation paths (`CreateFromDir`, `QuickStart`), and add the shared `HookKey` / `HookKeyFormat` derivation primitives in `internal/tmux` — retiring the four now-false `hooks.json`-ownership doc-comments and transferring the "format is stable across releases" invariant to the new primitives. This phase establishes the identity and the single derivation rule only; no consumer switches to the new key yet.
 
@@ -19,7 +20,8 @@ status: draft
 - [ ] Full test suite green; `PaneTarget` / `StructuralKeyFormat` / `ListAllPanes` behaviour unchanged for name-based tmux targeting and non-hook structural use
 
 ### Phase 2: Live-Key Sites Adopt the Hook Key — registration + stale cleanup
-status: draft
+status: approved
+approved_at: 2026-07-01
 
 **Goal**: Switch the two live-tmux key sites to the hook-key derivation — hook registration (`cmd/hooks.go`, via a new `ResolveHookKey` read using `HookKeyFormat`) and the stale-cleanup live-key enumeration (`cmd/clean.go` / `cmd/run_hook_stale_cleanup.go`, enumerating live panes' hook keys) — so a stamped session both registers and is swept under its immutable id rather than its mutable name.
 
@@ -35,7 +37,8 @@ status: draft
 - [ ] Full test suite green
 
 ### Phase 3: Cross-Reboot Persistence — schema, capture, restore re-stamp + baking
-status: draft
+status: approved
+approved_at: 2026-07-01
 
 **Goal**: Persist `@portal-id` across reboots (additive `Session.PortalID` schema field + `#{@portal-id}` capture column) and consume it at restore — re-stamping the recreated live session from the saved value and baking the stable `--hook-key` via `tmux.HookKey(sess.PortalID, ...)` in `collectArmInfos`. This closes the headline rename-then-reboot gap durably across repeated reboots and delivers the integration coverage that proves the whole invariant.
 
