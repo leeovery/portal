@@ -35,12 +35,16 @@
           "format": "tick",
           "spec_commit": "a3e1894ebf753f0afce72ed468f33e696bc1ec85",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "session-rename-orphans-resume-hook-1-1",
-          "task_map": {}
+          "task": "session-rename-orphans-resume-hook-1-2",
+          "task_map": {
+            "session-rename-orphans-resume-hook-1": "tick-9b76df",
+            "session-rename-orphans-resume-hook-1-1": "tick-7ebd68"
+          },
+          "external_id": "tick-1bedd3"
         }
       }
     }
