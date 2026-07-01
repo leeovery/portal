@@ -206,9 +206,9 @@ func runRenameRebootFire(t *testing.T, rename func(t *testing.T, ts *tmuxtest.So
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
 
 	// Hook side-effect file. The on-resume hook appends a line on each
-	// firing; verifyHookFiredOnce asserts exactly one line — zero means the
-	// hook orphaned (bare-shell miss), more than one means the helper's exec
-	// $SHELL didn't replace the helper.
+	// firing; assertHookFireCount(t, file, 1) asserts exactly one line — zero
+	// means the hook orphaned (bare-shell miss), more than one means the
+	// helper's exec $SHELL didn't replace the helper.
 	hookFireFile := filepath.Join(t.TempDir(), "hook-fired.txt")
 	hookCmd := "echo HOOK_FIRED >> " + hookFireFile
 
@@ -341,7 +341,7 @@ func runRenameRebootFire(t *testing.T, rename func(t *testing.T, ts *tmuxtest.So
 
 	// HEADLINE ASSERTION: the hook fired exactly once. A bare-shell miss
 	// (the pre-fix bug) leaves the file empty/absent.
-	verifyRenameHookFiredOnce(t, hookFireFile)
+	assertHookFireCount(t, hookFireFile, 1)
 }
 
 // findCapturedSession returns the captured Session with the given name, or
@@ -372,24 +372,5 @@ func verifyHookKeyed(t *testing.T, hooksPath, wantKey string) {
 	}
 	if _, ok := events["on-resume"]; !ok {
 		t.Fatalf("hooks.json missing on-resume entry under stable key %q; got events=%v", wantKey, events)
-	}
-}
-
-// verifyRenameHookFiredOnce asserts the on-resume hook ran exactly once. The
-// hook command is `echo HOOK_FIRED >> file`, so the marker count is the
-// firing count. Zero means the hook orphaned across the rename (the pre-fix
-// bare-shell bug); more than one means the helper's `exec $SHELL` branch did
-// not replace the helper. Mirrors reboot_roundtrip_test.go's
-// verifyHookFiredOnce shape (kept local so this file stays self-contained
-// across build-tag boundaries — that helper lives in package bootstrap_test).
-func verifyRenameHookFiredOnce(t *testing.T, hookFireFile string) {
-	t.Helper()
-	data, err := os.ReadFile(hookFireFile)
-	if err != nil {
-		t.Fatalf("read hook fire file %s (bare-shell miss leaves it absent): %v", hookFireFile, err)
-	}
-	count := strings.Count(string(data), "HOOK_FIRED")
-	if count != 1 {
-		t.Errorf("hook fired %d times; want exactly 1\nfile contents:\n%s", count, data)
 	}
 }
