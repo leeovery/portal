@@ -35,7 +35,6 @@
 package restore_test
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -145,11 +144,14 @@ func TestRenameRebootHook_DurableAcrossRepeatedReboots(t *testing.T) {
 	// PortalID == "" (erasing the id → second-reboot bare shell). The capture
 	// read (not a direct show-options read) is the exact production mechanism
 	// that re-persists the id, so this is where the chain-(a) tripwire fires.
+	// Captured ONCE here and reused for the second restore below — nothing
+	// mutates the live server between this read and cycle 2.
+	nextIdx, err := state.CaptureStructure(client, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("next CaptureStructure: %v", err)
+	}
+
 	t.Run("it re-persists the @portal-id on the next capture after restore", func(t *testing.T) {
-		nextIdx, err := state.CaptureStructure(client, nil, nil, nil)
-		if err != nil {
-			t.Fatalf("next CaptureStructure: %v", err)
-		}
 		sess := findCapturedSession(t, nextIdx, renameNewName)
 		if sess.PortalID != renamePortalID {
 			t.Fatalf("next capture PortalID = %q; want %q (id must be RE-PERSISTED by the re-stamp — "+
@@ -158,18 +160,12 @@ func TestRenameRebootHook_DurableAcrossRepeatedReboots(t *testing.T) {
 		}
 	})
 
-	// The persisted second-cycle snapshot: re-capture NOW (post-restore, live
-	// re-stamped) so sessions.json carries the re-persisted id, then feed it to
-	// the second restore.
-	secondIdx, err := state.CaptureStructure(client, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("second-cycle CaptureStructure: %v", err)
-	}
-
-	// NON-VACUOUS guard: the captured id MUST be non-empty BEFORE the second
-	// restore, or cycle 2 would restore a bare shell and the second-fire
-	// assertion below could never be reached honestly.
-	secondSess := findCapturedSession(t, secondIdx, renameNewName)
+	// NON-VACUOUS guard on the PARENT t — a subtest's Fatalf halts only the
+	// subtest, not this parent, so the pre-second-restore precondition is
+	// re-asserted here on the same captured snapshot: the id MUST be non-empty
+	// BEFORE the second restore, or cycle 2 would restore a bare shell and the
+	// second-fire assertion below could never be reached honestly.
+	secondSess := findCapturedSession(t, nextIdx, renameNewName)
 	if secondSess.PortalID == "" {
 		t.Fatalf("pre-second-restore captured PortalID is empty; the second restore would resurrect a bare shell (chain (a))")
 	}
@@ -178,7 +174,7 @@ func TestRenameRebootHook_DurableAcrossRepeatedReboots(t *testing.T) {
 
 	// ---- Cycle 2: SECOND reboot from the re-persisted sessions.json. ----
 
-	persistIndex(t, secondIdx, stateDir)
+	persistIndex(t, nextIdx, stateDir)
 	seedScrollback(t, stateDir, renameNewName)
 
 	if err := rebootAndHydrate(t, ts, client, stateDir); err != nil {
@@ -226,33 +222,7 @@ func captureAndPersist(t *testing.T, client *tmux.Client, stateDir, name, wantPo
 	persistIndex(t, idx, stateDir)
 }
 
-// persistIndex writes idx to sessions.json via the canonical encoder so the
-// on-disk schema matches what CaptureStructure produced.
-func persistIndex(t *testing.T, idx state.Index, stateDir string) {
-	t.Helper()
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
-}
-
-// seedScrollback writes the pane's on-disk scrollback fixture — the bytes the
-// hydrate helper later dumps. Seeded fresh per cycle so each restore replays a
-// deterministic buffer regardless of the previous cycle's helper run.
-func seedScrollback(t *testing.T, stateDir, name string) {
-	t.Helper()
-	scrollbackKey := state.SanitizePaneKey(name, 0, 0)
-	scrollbackPath := state.ScrollbackFile(stateDir, scrollbackKey)
-	if err := os.MkdirAll(filepath.Dir(scrollbackPath), 0o700); err != nil {
-		t.Fatalf("mkdir scrollback dir: %v", err)
-	}
-	if err := os.WriteFile(scrollbackPath, []byte("\x1b[31mred\x1b[0m\nbefore reboot\n"), 0o600); err != nil {
-		t.Fatalf("write fixture scrollback: %v", err)
-	}
-}
+// persistIndex and seedScrollback live in rename_reboot_shared_test.go.
 
 // rebootAndHydrate performs the reboot half of one cycle: kill the server,
 // bring up a fresh one, restore from sessions.json (via restoreWithMarker so
@@ -298,20 +268,4 @@ func rebootAndHydrate(t *testing.T, ts *tmuxtest.Socket, client *tmux.Client, st
 	return nil
 }
 
-// assertHookFireCount asserts the on-resume hook has fired exactly `want` times
-// cumulatively — the hook command appends one HOOK_FIRED marker per firing, so
-// the marker count is the cumulative firing count across reboot cycles. Zero /
-// short of `want` means a bare-shell miss on the most recent cycle (the chain-
-// (a) regression); more than `want` means the helper's exec $SHELL branch did
-// not replace the helper.
-func assertHookFireCount(t *testing.T, hookFireFile string, want int) {
-	t.Helper()
-	data, err := os.ReadFile(hookFireFile)
-	if err != nil {
-		t.Fatalf("read hook fire file %s (bare-shell miss leaves it absent): %v", hookFireFile, err)
-	}
-	got := strings.Count(string(data), "HOOK_FIRED")
-	if got != want {
-		t.Errorf("hook fired %d times cumulatively; want exactly %d\nfile contents:\n%s", got, want, data)
-	}
-}
+// assertHookFireCount lives in rename_reboot_shared_test.go.

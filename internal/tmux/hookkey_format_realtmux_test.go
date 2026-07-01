@@ -110,21 +110,11 @@ func TestHookKeyFormat_MultiWindowMultiPane(t *testing.T) {
 	ts := tmuxtest.New(t, "hookkey-")
 	client := ts.Client()
 
+	// Seed the shared 3-pane stamped fixture (w0.p0, w0.p1, w1.p0). This test
+	// addresses panes by their session:window.pane target string below, so the
+	// returned pane ids are not needed here.
 	const sessionName = "hk-multi"
-	if err := client.NewSession(sessionName, t.TempDir(), ""); err != nil {
-		t.Fatalf("NewSession(%q): %v", sessionName, err)
-	}
-	ts.WaitForSession(t, sessionName, 2*time.Second)
-
-	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tokMulti"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDLiteral, "tokMulti", err)
-	}
-
-	// Split the initial pane (window 0 now has panes 0 and 1) and add a
-	// second window (window 1, pane 0). Targets address panes directly via
-	// session:window.pane.
-	ts.Run(t, "split-window", "-t", sessionName+":0")
-	ts.Run(t, "new-window", "-t", sessionName)
+	seedThreePaneStampedSession(t, ts, client, sessionName, "tokMulti")
 
 	cases := []struct {
 		name   string

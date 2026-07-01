@@ -59,17 +59,9 @@ import (
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
-// renameRebootFireConsts pin the fixture identity used by every subtest.
-const (
-	// renamePortalID is the immutable @portal-id stamped on the session. The
-	// whole point of the fix is that the hook key derives from THIS token,
-	// not the session name, so a rename leaves the key untouched.
-	renamePortalID = "tok123"
-	// renameOldName / renameNewName are the pre- and post-rename session
-	// names. Only #{session_name} changes; @portal-id stays renamePortalID.
-	renameOldName = "renamesrc"
-	renameNewName = "renamedst"
-)
+// The rename→reboot fixture consts (renamePortalID / renameOldName /
+// renameNewName) and the shared assertion helpers live in
+// rename_reboot_shared_test.go.
 
 // TestRenameRebootHook_ExternalRename covers the external `tmux
 // rename-session` trigger: Portal cannot intercept it, so the fix must rest
@@ -344,33 +336,4 @@ func runRenameRebootFire(t *testing.T, rename func(t *testing.T, ts *tmuxtest.So
 	assertHookFireCount(t, hookFireFile, 1)
 }
 
-// findCapturedSession returns the captured Session with the given name, or
-// fatals with the captured names for diagnostics. It is the non-vacuous guard
-// that the round-trip actually captured the post-rename session.
-func findCapturedSession(t *testing.T, idx state.Index, name string) state.Session {
-	t.Helper()
-	var names []string
-	for _, s := range idx.Sessions {
-		if s.Name == name {
-			return s
-		}
-		names = append(names, s.Name)
-	}
-	t.Fatalf("captured index has no session %q; captured names=%v", name, names)
-	return state.Session{}
-}
-
-// verifyHookKeyed asserts hooks.json contains an on-resume entry under the
-// exact stable id-key — proving registration stored under the rename-immune
-// key rather than the mutable name. Reads via the same store the production
-// path uses.
-func verifyHookKeyed(t *testing.T, hooksPath, wantKey string) {
-	t.Helper()
-	events, err := hooks.NewStore(hooksPath).Get(wantKey)
-	if err != nil {
-		t.Fatalf("hooks.Get(%q): %v", wantKey, err)
-	}
-	if _, ok := events["on-resume"]; !ok {
-		t.Fatalf("hooks.json missing on-resume entry under stable key %q; got events=%v", wantKey, events)
-	}
-}
+// findCapturedSession and verifyHookKeyed live in rename_reboot_shared_test.go.

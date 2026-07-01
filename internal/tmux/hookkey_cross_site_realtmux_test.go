@@ -110,29 +110,10 @@ func TestCrossSiteConsistency_MultiPaneStampedSession(t *testing.T) {
 		t.Fatalf("EnsureServer: %v", err)
 	}
 
-	const sessionName = "xsite-multi"
-	if err := client.NewSession(sessionName, t.TempDir(), ""); err != nil {
-		t.Fatalf("NewSession(%q): %v", sessionName, err)
-	}
-	ts.WaitForSession(t, sessionName, 2*time.Second)
-
-	if err := client.SetSessionOption(sessionName, portalIDLiteral, "tok123"); err != nil {
-		t.Fatalf("SetSessionOption(%q, %q, %q): %v", sessionName, portalIDLiteral, "tok123", err)
-	}
-
-	// Split the initial pane (window 0 gains pane 1) and add a second window
-	// (window 1, pane 0) so the session spans three panes with distinct w.p.
-	if err := client.SplitWindow(sessionName+":0", "", ""); err != nil {
-		t.Fatalf("SplitWindow(%q): %v", sessionName+":0", err)
-	}
-	if err := client.NewWindow(sessionName, "", "", ""); err != nil {
-		t.Fatalf("NewWindow(%q): %v", sessionName, err)
-	}
-
-	// Enumerate the session's live pane ids, then resolve each pane's
+	// Seed the shared 3-pane stamped fixture, then resolve each pane's
 	// registration key by its concrete #{pane_id} target so each per-pane
 	// registration read is unambiguous (no active-pane resolution ambiguity).
-	paneIDs := sessionPaneIDs(t, ts, sessionName)
+	paneIDs := seedThreePaneStampedSession(t, ts, client, "xsite-multi", "tok123")
 	if len(paneIDs) != 3 {
 		t.Fatalf("expected 3 panes (w0.p0, w0.p1, w1.p0), got %d: %v", len(paneIDs), paneIDs)
 	}
@@ -213,19 +194,8 @@ func TestCrossSiteConsistency_UnstampedSession(t *testing.T) {
 	}
 }
 
-// sessionPaneIDs returns every #{pane_id} of the named session, in the order
-// tmux enumerates them, via a real list-panes -s read on the isolated socket.
-func sessionPaneIDs(t *testing.T, ts *tmuxtest.Socket, session string) []string {
-	t.Helper()
-	out := ts.Run(t, "list-panes", "-s", "-t", session, "-F", "#{pane_id}")
-	var ids []string
-	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		if id := strings.TrimSpace(line); id != "" {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
+// sessionPaneIDs (the shared 3-pane fixture's pane-id reader) lives in
+// hookkey_realtmux_shared_test.go.
 
 // uniqueCount returns the number of distinct strings in s.
 func uniqueCount(s []string) int {
