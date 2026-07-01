@@ -158,7 +158,7 @@
     "review": {
       "items": {
         "session-rename-orphans-resume-hook": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "session-rename-orphans-resume-hook-1-1",
             "session-rename-orphans-resume-hook-1-2",
