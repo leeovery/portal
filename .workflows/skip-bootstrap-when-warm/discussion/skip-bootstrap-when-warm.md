@@ -69,6 +69,8 @@ The seed framed the latch as all-or-nothing: latch set ⇒ skip all 11 steps. Th
 
 **The driving motivation (from the user):** this latch is the pretext for `restore-host-terminal-windows`' multi-select reopen — opening, say, 20 sessions at once each in its own Ghostty window. Opening *one* new window that runs a full bootstrap is fine; opening *20 simultaneously*, each firing the full orchestrator against one server, is a stability hazard. The goal is **not** shaving nanoseconds off a warm command — it's collapsing that concurrency surface so simultaneous warm commands do cheap checks instead of N concurrent restore/sweep/clean passes.
 
+**Grounding — current warm-path reality (important):** today *every* warm command runs the full 11 steps synchronously (no loading screen — that's cold-only). The user runs `x` (= `portal open`) hundreds of times/day, each a full bootstrap, and it's fine. So a *single* warm bootstrap is **not** unsafe — the heavy steps are guarded/idempotent: Restore silently **skips already-live sessions** (`internal/restore/restore.go:170`, "steady-state common case"), so on a warm server it's a near-no-op that does not churn sessions. (An earlier framing that repeating these steps is "actively unsafe" was **overstated** and corrected — the only latent edge is a ~1s resurrection race if a session is killed *outside* the picker and `x` is run before the daemon's next tick captures the kill; pre-existing, rare, not this feature's concern.) The real drivers for skipping on warm are therefore (1) the **concurrent** 20× reopen burst, and (2) redundant per-command work — **not** correctness of a lone warm bootstrap.
+
 **Hard constraint — long-lived servers.** The user routinely keeps a tmux server alive for **weeks**; server restarts are rare and must not be relied on for recovery. Anything that today self-heals on the *next command* (because bootstrap re-runs every command) must keep a path to self-heal within a single, possibly weeks-long, server lifetime. We cannot push recovery to "next server restart."
 
 ### The classification
@@ -148,13 +150,13 @@ The hook key is the structural key `#{session_name}:#{window_index}.#{pane_index
 
 Steps 9 and 10: **skip on warm**, decided — a warm server produces none of their targets.
 
-Step 11 (hooks): the user wants cleanup **not to wait**. Given the misfire trace above the risk is bloat, not misfiring — but the user's preference stands. The fork is *where* prompt cleanup lives:
+Step 11 (hooks): the user wants cleanup **not to wait**. Given the misfire trace above the risk is bloat, not misfiring — but the user's preference stands. With the corrected grounding (cleanup runs on every `x` today and is harmless), the decision is just *which commands keep running it once we optimize the warm path*:
 
-- **Skip on warm; rely on `portal clean` + cold boot.** Simplest; bloat-only cost. *(Original recommendation; user leans against.)*
-- **Keep step 11 on the warm path** (like EnsureSaver). ⚠️ **Anti-recommended** — this re-inflates the exact concurrency/destructive surface the feature exists to remove: 20 burst `portal attach` commands would each run a `list-panes -a` diff + atomic `hooks.json` rewrite, and that operation is precisely the `bootstrap-cleanstale-wipes-hooks-on-tmux-transient` bug surface.
-- **Move hook cleanup into the daemon.** Lifetime-resident single writer that already knows the live pane set each tick; prompt cleanup with **no** per-command work and **no** burst-concurrency on `hooks.json`. Scope addition (daemon gains a hooks-store write duty + guarded posture); could be in this feature or a tightly-coupled follow-up.
+- **Command-classified — cleanup on `open`, skipped on `attach`.** `open`/`x` is run hundreds of times/day, single-invocation (never bursted), and already makes the user wait for a UI. Keeping a cleanup pass there is essentially **status quo for `open`**; the change is dropping it (and the heavy steps) from the bursty `attach` path. Cleanup stays prompt; zero daemon scope; the only cost is a small command-name branch in the entry path. Bounds: cleanup cadence is coupled to how often `open` is run (a non-issue for this user).
+- **Keep cleanup on *all* warm commands (incl. `attach`).** ⚠️ **Anti-recommended** — re-inflates the exact concurrency surface the feature removes: 20 burst `attach` each running a `list-panes -a` diff + atomic `hooks.json` rewrite (the `bootstrap-cleanstale-wipes-hooks-on-tmux-transient` surface).
+- **Daemon-owned cleanup.** Lifetime-resident single writer that already has the live pane set each tick; prompt cleanup, uniform light path for *all* warm commands (optimizes `open` fully too), no `hooks.json` write contention. Scope addition (daemon gains a guarded hooks-store write duty); most robust, decouples cadence from command usage.
 
-Leaning: **daemon-owned cleanup** if prompt cleanup is required, because per-command cleanup contradicts the feature's whole purpose.
+Leaning: **command-classified (cleanup on `open`)** — proportionate to the low stakes, near-zero scope, strictly fewer cleanup runs than today, and it fully satisfies "don't wait" because `x` runs constantly. **Daemon-owned** is the pick only if we want cleanup fully decoupled from command usage and are willing to grow the daemon.
 
 ---
 
