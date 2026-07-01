@@ -48,6 +48,19 @@ approved_at: 2026-07-01
 - [ ] A pre-fix, name-keyed `hooks.json` entry for an un-stamped, never-renamed session still resolves and is not mass-orphaned by stale-cleanup after upgrade (name fallback coincides with the on-disk key)
 - [ ] Full test suite green
 
+#### Tasks
+status: approved
+approved_at: 2026-07-01
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-rename-orphans-resume-hook-2-1 | Add `tmux.ResolveHookKey` client read using `HookKeyFormat` | display-message read failure aborts with wrapped error (no name-based synthesis), stamped pane yields `<id>:w.p`, un-stamped pane yields `<name>:w.p` |
+| session-rename-orphans-resume-hook-2-2 | Switch `resolveCurrentPaneKey` (`cmd/hooks.go`) to resolve the hook key | ResolveHookKey read failure aborts both `hooks set` and `hooks rm`, `rm --pane-key` verbatim key bypasses re-derivation, missing `TMUX_PANE` still errors |
+| session-rename-orphans-resume-hook-2-3 | Add `tmux.ListAllPaneHookKeys` enumeration (`list-panes -a` with `HookKeyFormat`) | stamped sessions enumerate `<id>:w.p`, un-stamped enumerate `<name>:w.p`, list-panes error propagates `(nil, err)`, empty output yields empty slice |
+| session-rename-orphans-resume-hook-2-4 | Repoint the stale-cleanup live-key enumeration (`AllPaneLister`) to hook keys | freshly-registered stamped-session hook survives cleanup, list-panes error still preserves hooks (swallow policy intact), empty live set still triggers the mass-deletion hazard guard (no deletion), name-based `ListAllPanes`/`StructuralKeyFormat` unchanged for skeleton-marker/daemon use |
+| session-rename-orphans-resume-hook-2-5 | Cross-site consistency test: registration read == cleanup enumeration (live half) | multi-pane session (distinct `w.p` suffixes under one id agree across sites), un-stamped session agrees on the name-based key across both sites |
+| session-rename-orphans-resume-hook-2-6 | No-regression test: un-stamped, never-renamed `hooks.json` entry survives upgrade | name fallback coincides with on-disk key (entry preserved), a truly-stale name-keyed entry is still swept |
+
 ### Phase 3: Cross-Reboot Persistence — schema, capture, restore re-stamp + baking
 status: approved
 approved_at: 2026-07-01
