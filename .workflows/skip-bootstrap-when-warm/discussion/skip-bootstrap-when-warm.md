@@ -42,7 +42,7 @@ A living index of subtopics tracked during the discussion.
 
 ### Map
 
-  Discussion Map — Skip Bootstrap When Warm (12 subtopics — 8 decided · 1 converging · 3 pending)
+  Discussion Map — Skip Bootstrap When Warm (12 subtopics — 10 decided · 2 pending)
 
   ┌─ ✓ Full vs Abridged bootstrap — classifying the 11 steps [decided]
   │  ├─ ✓ EnsureSaver stays on abridged path (liveness + version-gate) [decided]
@@ -50,7 +50,7 @@ A living index of subtopics tracked during the discussion.
   │  └─ ✓ "Full"/"Abridged" naming & single-abridged constraint [decided]
   ├─ ✓ Latch storage & semantics [decided]
   ├─ ✓ Latch set-point & timing (final action of a successful Run) [decided]
-  ├─ ○ Latch-check placement + abridged-path wiring (client / serverStarted / warnings) [pending]
+  ├─ ✓ Latch-check placement + abridged wiring (loading-screen keyed on latch-absent) [decided]
   ├─ ✓ First-touch race window — end-set collapses reopen-burst; pure cold-burst tolerated [decided]
   ├─ ✓ Partial-bootstrap / soft-vs-fatal failure handling (soft latches, fatal doesn't) [decided]
   ├─ ✓ Full-bootstrap concurrent/loading-path interaction (set inside Run) [decided]
@@ -206,6 +206,40 @@ The review (F1/F2/F7) isolated this as the load-bearing decision: a full bootstr
 **Bonus (retires F5 & F8):** because the latch is set only after step 7 (EagerSignalHydrate) and step 8 (Clear `@portal-restoring`) have run, "latch present" *guarantees* hydrate signalling finished and `@portal-restoring` was cleared. So the two markers can never both be set on an abridged command (F5 two-marker inconsistency), and a late-arming skeleton pane can't be stranded unsignalled (F8) — both fall out of the ordering with no extra logic.
 
 Confidence: high. User: "exactly the same decisions as I would have made."
+
+---
+
+## Latch-check placement + abridged-path wiring
+
+### Context
+
+Where the latch-check sits in the entry path, how the abridged path plugs into existing plumbing, and (F3/F9) how `serverStarted` and warnings behave when no full orchestrator runs.
+
+### Decision
+
+**Placement — a single latch-read drives a three-way branch.** In `PersistentPreRunE`, after the tmux client is built, read the latch (`TryGetServerOption(@portal-bootstrapped)`; an error / down-server read is treated as **absent**):
+
+- **latch present** → abridged path.
+- **latch absent** (cold *or* warm-unlatched) → full bootstrap: concurrent + loading screen on the TUI path (`open`, no args), synchronous otherwise.
+
+A separate `ServerRunning()` probe is not strictly required — the latch-read fails gracefully on a down server, so "absent-or-unreadable" already means "full bootstrap needed." (An explicit server-check-then-latch ordering is behaviourally identical, at the cost of one extra `tmux info` on the warm path; single-read chosen for minimalism. Style call left open to the user.)
+
+**Loading-screen trigger moves from server-down → latch-absent (user refinement).** The concurrent/loading path now fires whenever a *full* bootstrap runs on the TUI path — keyed off latch-absent, not server-down. This retires the warm-unlatched edge as an improvement: a hand-started tmux server + `x` now gets the loading screen + progress during its first full bootstrap instead of a synchronous no-progress stall. Conceptual cleanup: "loading screen" now means exactly "a full bootstrap is in progress." No change to *what* the full bootstrap does (Restore etc. already ran on warm-unlatched today) — only the presentation improves.
+
+| Command | Latch | Outcome |
+|---|---|---|
+| `open` (no args) TUI | absent | full bootstrap, concurrent + loading screen |
+| `open` (no args) TUI | present | abridged (sync plumbing, instant picker) |
+| `attach` / `open <path>` / CLI | absent | full bootstrap, synchronous |
+| `attach` / CLI | present | abridged (sync plumbing) |
+
+**Abridged wiring reuses the sync plumbing (resolves F3 & F9).**
+
+- **F3 — `serverStarted=false`** is injected (correct: the command did not start the server). Its *sole* production consumer is `openTUI`'s loading-page gate → `false` → no loading page → instant picker, which is exactly right for a warm command. No hidden "third state" to disambiguate.
+- **F9 — warnings.** EnsureSaver's `SaverDownWarning` funnels into the same package-level `bootstrapWarnings` sink the sync path already uses → CLI flushes to stderr; TUI drains to the notice band. Identical to a warm command today; no new emission mechanism.
+- **Shape (constraint, not prescription):** the abridged path runs through the *same* entry-path plumbing (warning sink + context injection) as the sync full path, differing only in executing a reduced step set (EnsureSaver only). This is what makes F3/F9 inherit the existing, tested handling.
+
+Confidence: high. User confirmed placement, reuse-the-plumbing shape, and the loading-screen refinement.
 
 ---
 
