@@ -12,10 +12,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// AllPaneLister returns the structural keys for all panes across all tmux sessions.
-// Each key uses the format session_name:window_index.pane_index.
+// AllPaneLister returns each live pane's hook key across all tmux sessions —
+// the live set that feeds hooks.Store.CleanStale. Each key has the form
+// <@portal-id or session_name>:window_index.pane_index, resolved per-session
+// by tmux.HookKeyFormat (a stamped session yields "<id>:w.p", an un-stamped one
+// "<name>:w.p"). This is the hook-key sibling of the name-based structural
+// enumeration; the cleanup live set must derive keys the same way registration
+// does so freshly-registered id-keyed entries are not mass-orphaned.
 type AllPaneLister interface {
-	ListAllPanes() ([]string, error)
+	ListAllPaneHookKeys() ([]string, error)
 }
 
 // CleanDeps holds injectable dependencies for the clean command.
@@ -110,8 +115,8 @@ func cleanStaleHooks(w io.Writer) error {
 	// at its single declaration site. This keeps the format string
 	// declared exactly once across package cmd (acceptance criterion
 	// 1 of the parent plan task). The trade-off is a redundant
-	// ListAllPanes call on the Load-failure path — acceptable because
-	// (a) the helper's swallow policy means ListAllPanes never fails
+	// ListAllPaneHookKeys call on the Load-failure path — acceptable because
+	// (a) the helper's swallow policy means ListAllPaneHookKeys never fails
 	// the user's command, and (b) Load failures are rare (corrupt or
 	// permission-denied hooks.json).
 	//
@@ -136,13 +141,13 @@ func cleanStaleHooks(w io.Writer) error {
 	}
 
 	// Delegate the six-branch algorithm to the shared helper.
-	// swallowListError=true so a transient ListAllPanes failure never
+	// swallowListError=true so a transient ListAllPaneHookKeys failure never
 	// fails the user's command (the Warn lands in portal.log for audit).
 	// onRemoved prints "Removed stale hook: <key>" per removed entry,
 	// preserving the pre-extraction user-facing stdout byte-for-byte.
 	//
 	// Return value is deliberately discarded: with swallowListError=true
-	// the helper already returns nil for ListAllPanes errors. The
+	// the helper already returns nil for ListAllPaneHookKeys errors. The
 	// remaining return paths are (a) nil on the happy path and (b) a
 	// hookStore.Load / CleanStale error on the destructive branches.
 	// Per spec §Logger plumbing / portal clean: "the subcommand's

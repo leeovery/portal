@@ -328,6 +328,27 @@ func (c *Client) ResolveStructuralKey(paneID string) (string, error) {
 	return output, nil
 }
 
+// ResolveHookKey is the canonical live-read hook-key resolver: it issues a
+// single display-message read against paneID using HookKeyFormat and returns
+// the tmux-resolved key. tmux picks the branch per session — a stamped session
+// (carrying @portal-id) resolves to "<id>:w.p" (rename-immune) while an
+// un-stamped session resolves to "<name>:w.p" (the legacy / no-migration
+// fallback). The stamped-vs-un-stamped conditional resolves entirely inside
+// tmux via HookKeyFormat, so there is deliberately no Go-side "id absent"
+// branch here: one read, one error path.
+//
+// On a read failure it returns ("", wrapped error) and MUST NEVER fall back to
+// synthesizing a name-based key — doing so would silently orphan a stamped
+// session's hook by keying it off the mutable session name. See HookKey /
+// HookKeyFormat for the derivation primitives this read mirrors.
+func (c *Client) ResolveHookKey(paneID string) (string, error) {
+	output, err := c.cmd.Run("display-message", "-p", "-t", paneID, HookKeyFormat)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve hook key for pane %q: %w", paneID, err)
+	}
+	return output, nil
+}
+
 // ActivePaneCurrentPath returns the active pane's current_path for the named
 // session in a single tmux read. It runs "display-message -p -t <session> -F
 // '#{pane_current_path}'" which, with no pane target, resolves against the
@@ -544,17 +565,17 @@ type PaneCoord struct {
 
 // PaneTarget formats a tmux pane target string in the canonical
 // "session:window.pane" form accepted by tmux's `-t` flag (e.g.
-// "my-project:0.1"). It is the single canonical formatter for this target;
-// callers must not hand-roll the equivalent fmt.Sprintf so the format stays
-// uniform across the codebase.
+// "my-project:0.1"). It is the single canonical name-based formatter for this
+// target; callers must not hand-roll the equivalent fmt.Sprintf so the format
+// stays uniform across the codebase.
 //
-// This format is dual-purpose: it doubles as the canonical hooks.json key
-// for per-pane on-resume hooks (see internal/restore/session.go
-// collectArmInfos). Callers issuing a -t flag against tmux MUST instead use
-// PaneTargetExact, which prepends tmux's exact-match prefix "=" to the
-// session segment. PaneTarget intentionally does NOT carry the prefix so
-// the hook-key format stays stable across releases — changing it would
-// silently invalidate every entry in hooks.json.
+// Callers issuing a -t flag against tmux MUST instead use PaneTargetExact,
+// which prepends tmux's exact-match prefix "=" to the session segment;
+// PaneTarget (no prefix) is for building a plain name-based target only.
+//
+// This formatter is NOT the hook key. Per-pane on-resume hook keys are derived
+// by HookKey / HookKeyFormat (the rename-immune @portal-id primitives); do not
+// reintroduce name-based keying here.
 func PaneTarget(session string, window, pane int) string {
 	return fmt.Sprintf("%s:%d.%d", session, window, pane)
 }
@@ -569,10 +590,36 @@ func PaneTarget(session string, window, pane int) string {
 // or operating on the wrong session. See spec § Pre-select + attach sequence
 // > Exact-match target syntax.
 //
-// PaneTarget (no prefix) remains the canonical hook-key formatter; do not
-// mix the two — hook lookups against an "=" -prefixed key would miss.
+// PaneTarget (no prefix) builds the plain name-based -t target; do not mix the
+// two — a -t target resolution against a key with the wrong prefix ("=" present
+// where a plain target is expected, or absent where exact match is required)
+// would resolve to the wrong pane.
 func PaneTargetExact(session string, window, pane int) string {
 	return fmt.Sprintf("=%s:%d.%d", session, window, pane)
+}
+
+// HookKey is the canonical hook-key formatter for the saved path: the in-Go
+// mirror of HookKeyFormat's tmux conditional, applied to values read from
+// saved state (sessions.json) rather than a live tmux server. It returns
+// "<portalID>:window.pane" when portalID is non-empty (the immutable,
+// rename-immune @portal-id key), and "<name>:window.pane" when portalID is
+// empty (the legacy / un-stamped fallback, which equals the name-based key
+// already on disk so existing hooks.json entries keep matching with no
+// migration).
+//
+// The token is opaque and the name is used verbatim — no trimming, sanitizing,
+// or validation — so a saved-path key is byte-identical to the corresponding
+// live HookKeyFormat read at the same pane.
+//
+// This format is load-bearing: it is stable across releases — changing it
+// silently invalidates every entry in hooks.json. This is the same invariant
+// formerly carried by PaneTarget's doc-comment, transferred here now that
+// HookKey / HookKeyFormat own the hook-key derivation.
+func HookKey(portalID, name string, window, pane int) string {
+	if portalID != "" {
+		return fmt.Sprintf("%s:%d.%d", portalID, window, pane)
+	}
+	return fmt.Sprintf("%s:%d.%d", name, window, pane)
 }
 
 // exactTarget formats a tmux session target string with the "=" exact-match
@@ -770,20 +817,44 @@ func (c *Client) ShowEnvironment(session string) (string, error) {
 
 // StructuralKeyFormat is the canonical tmux format string that yields a pane's
 // structural key (e.g. "my-project:0.1") — the load-bearing join key between
-// live-pane enumeration (list-panes / display-message), persisted hook entries
-// in hooks.json, and @portal-skeleton-* marker names. Every tmux call whose
-// output is consumed as a structural key MUST request exactly this format so
-// the two cleanup paths (stale-marker cleanup and orphan-FIFO sweep) and the
-// hook lookup table all agree on what constitutes a paneKey. Drift here would
-// silently desync the cleanup paths' interpretation of "what is a paneKey".
+// live-pane enumeration (list-panes / display-message) and @portal-skeleton-*
+// marker names. Every tmux call whose output is consumed as a structural key
+// MUST request exactly this format so the two cleanup paths (stale-marker
+// cleanup and orphan-FIFO sweep) agree on what constitutes a paneKey. Drift
+// here would silently desync the cleanup paths' interpretation of "what is a
+// paneKey".
+//
+// This is a name-based structural key, NOT the hook key: hook-key derivation
+// lives in HookKey / HookKeyFormat (the rename-immune @portal-id primitives).
 const StructuralKeyFormat = "#{session_name}:#{window_index}.#{pane_index}"
+
+// HookKeyFormat is the canonical tmux format string for live hook-key reads —
+// the tmux-resolved sibling of the pure-Go HookKey. tmux resolves the
+// conditional per-session: a session carrying @portal-id yields "<id>:w.p"
+// (rename-immune), and an un-stamped session yields "<name>:w.p". tmux's
+// #{?cond,a,b} treats an unset or empty @portal-id as false, so an un-stamped
+// session (legacy, manually-created, or a best-effort stamp that failed) takes
+// the #{session_name} branch — the no-migration fallback, since the name is the
+// key already on disk in hooks.json.
+//
+// Like StructuralKeyFormat, this format is load-bearing and MUST stay stable
+// across releases: changing it silently invalidates every hooks.json entry.
+// Every live-tmux site that produces or consumes a hook key (registration in
+// cmd/hooks.go and the stale-cleanup live-key enumeration) MUST request exactly
+// this format so all key-producing sites agree — drift here re-orphans stamped
+// sessions' hooks at scale, the exact bug this format removes.
+//
+// The embedded literal "@portal-id" MUST match session.PortalIDOption
+// byte-for-byte; consistency is achieved by both using the identical literal.
+const HookKeyFormat = "#{?@portal-id,#{@portal-id},#{session_name}}:#{window_index}.#{pane_index}"
 
 // ListAllPanes enumerates every live pane across every tmux session and returns
 // the canonical structural key for each one. Keys have the form
 // "session_name:window_index.pane_index" (e.g. "my-project:0.0") — the same
-// format produced by (*Client).ResolveStructuralKey and used as the lookup key
-// in hooks.json, so callers can intersect the returned slice with persisted
-// hook entries directly.
+// name-based structural format produced by (*Client).ResolveStructuralKey, used
+// for structural enumeration (e.g. @portal-skeleton-* marker matching and
+// sessions.json delta/merge), not for hook-key lookup (see HookKey /
+// HookKeyFormat).
 //
 // The implementation delegates to the error-propagating ListAllPanesWithFormat
 // helper. On any tmux failure (transport error, exit ≠ 0, server gone) it
@@ -794,10 +865,41 @@ const StructuralKeyFormat = "#{session_name}:#{window_index}.#{pane_index}"
 // This helper deliberately does not paper over failure modes: policy for an
 // empty result vs. a tmux error is the caller's decision. Treating a tmux
 // failure as "no live panes" silently elides every entry that depends on the
-// live set (notably hooks.json), so the discriminating contract is load-
-// bearing.
+// live set, so the discriminating contract is load-bearing.
 func (c *Client) ListAllPanes() ([]string, error) {
 	raw, err := c.ListAllPanesWithFormat(StructuralKeyFormat)
+	if err != nil {
+		return nil, err
+	}
+	return parsePaneOutput(raw), nil
+}
+
+// ListAllPaneHookKeys is the canonical live hook-key enumeration for stale
+// cleanup: it enumerates every live pane across every tmux session and returns
+// the hook key for each one, resolved per-session by HookKeyFormat's tmux
+// conditional — a stamped session (@portal-id set) yields "<id>:w.p" (the
+// immutable, rename-immune key) and an un-stamped session yields "<name>:w.p"
+// (the legacy / no-migration fallback). The conditional is evaluated per pane
+// row, so a mixed stamped/un-stamped population resolves each session's prefix
+// independently within a single read.
+//
+// It is the hook-key sibling of ListAllPanes and shares that method's
+// discriminating error contract: on any tmux failure (transport error,
+// exit ≠ 0, server gone) it returns (nil, err) with the underlying error
+// wrapped — callers can use errors.Is / errors.As against any sentinel in the
+// chain — NOT a "no live panes" empty slice. Treating a tmux failure as an
+// empty live set would mass-orphan every hooks.json entry (each key would be
+// absent from the live set and deleted), so the discriminating contract is
+// load-bearing. On success it returns the parsed hook-key slice (a non-nil
+// empty slice on empty output).
+//
+// This method exists SEPARATELY from ListAllPanes rather than repointing it:
+// ListAllPanes' StructuralKeyFormat (name-based) is still required by non-hook
+// structural callers (skeleton-marker cleanup and the daemon), so its format
+// must stay StructuralKeyFormat. Only the hook-cleanup live-key enumeration
+// uses this hook-key variant.
+func (c *Client) ListAllPaneHookKeys() ([]string, error) {
+	raw, err := c.ListAllPanesWithFormat(HookKeyFormat)
 	if err != nil {
 		return nil, err
 	}

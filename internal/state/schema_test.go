@@ -17,7 +17,8 @@ func fullyPopulatedIndex() state.Index {
 		SavedAt: time.Date(2026, 4, 17, 10, 30, 0, 123456789, time.UTC),
 		Sessions: []state.Session{
 			{
-				Name: "work",
+				Name:     "work",
+				PortalID: "aB3xY9kZ",
 				Environment: map[string]string{
 					"LANG": "en_US.UTF-8",
 					"TERM": "xterm-256color",
@@ -89,6 +90,76 @@ func TestEncodeDecodeIndex_RoundTripsFullyPopulatedIndex(t *testing.T) {
 
 	if !reflect.DeepEqual(got, original) {
 		t.Errorf("round-trip mismatch:\n got:  %#v\n want: %#v", got, original)
+	}
+}
+
+func TestEncodeDecodeIndex_RoundTripsNonEmptyPortalID(t *testing.T) {
+	original := state.Index{
+		Version: state.SchemaVersion,
+		SavedAt: time.Date(2026, 4, 17, 10, 30, 0, 0, time.UTC),
+		Sessions: []state.Session{
+			{
+				Name:        "work",
+				PortalID:    "aB3xY9kZ",
+				Environment: map[string]string{},
+				Windows:     []state.Window{},
+			},
+		},
+	}
+
+	data, err := state.EncodeIndex(original)
+	if err != nil {
+		t.Fatalf("EncodeIndex: unexpected error: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"portal_id": "aB3xY9kZ"`)) {
+		t.Errorf("expected portal_id to serialise under its JSON tag; got:\n%s", data)
+	}
+
+	got, err := state.DecodeIndex(data)
+	if err != nil {
+		t.Fatalf("DecodeIndex: unexpected error: %v", err)
+	}
+	if len(got.Sessions) != 1 {
+		t.Fatalf("expected 1 session; got %d", len(got.Sessions))
+	}
+	if got.Sessions[0].PortalID != "aB3xY9kZ" {
+		t.Errorf("PortalID not preserved: got %q; want %q", got.Sessions[0].PortalID, "aB3xY9kZ")
+	}
+}
+
+func TestDecodeIndex_DecodesSessionsWithoutPortalIDToEmptyString(t *testing.T) {
+	raw := []byte(`{
+  "version": 1,
+  "saved_at": "2026-04-17T10:30:00Z",
+  "sessions": [
+    {
+      "name": "work",
+      "windows": [
+        {
+          "index": 0,
+          "name": "main",
+          "panes": [{"index": 0}]
+        }
+      ]
+    }
+  ]
+}`)
+
+	idx, err := state.DecodeIndex(raw)
+	if err != nil {
+		t.Fatalf("DecodeIndex: unexpected error: %v", err)
+	}
+	if len(idx.Sessions) != 1 {
+		t.Fatalf("expected 1 session; got %d", len(idx.Sessions))
+	}
+	if idx.Sessions[0].PortalID != "" {
+		t.Errorf("expected empty PortalID for legacy payload; got %q", idx.Sessions[0].PortalID)
+	}
+}
+
+func TestSchemaVersion_NotBumpedForAdditivePortalIDField(t *testing.T) {
+	if state.SchemaVersion != 1 {
+		t.Errorf("SchemaVersion must stay 1 for the additive portal_id field; got %d", state.SchemaVersion)
 	}
 }
 

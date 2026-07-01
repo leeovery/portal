@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -59,8 +60,14 @@ type SessionRestorer struct {
 // arm phase can build each pane's hydrate command without re-walking the saved
 // session structure. `scrollAbs` is the absolute path to the saved scrollback
 // file (saved-indexed, deliberately not live-indexed — see spec § Index
-// Semantics). `hookKey` is the raw saved structural identifier preserved
-// across base-index drift so hooks.json lookups stay addressable.
+// Semantics). `hookKey` is the stable hook key derived purely from saved state
+// via tmux.HookKey — it prefers the saved @portal-id (rename-immune) and falls
+// back to the saved name when the id is empty. It rides the SAVED (window,
+// pane) indices so it is preserved across base-index drift and matches what
+// hook registration stored, keeping hooks.json lookups addressable across any
+// number of renames. It is computed here from saved state only; the firing
+// path (the helper) resolves hooks.json by this baked key and never reads the
+// live @portal-id.
 type savedPaneArmInfo struct {
 	scrollAbs string
 	hookKey   string
@@ -107,7 +114,7 @@ func (r *SessionRestorer) collectArmInfos(sess state.Session) []savedPaneArmInfo
 		for _, p := range w.Panes {
 			infos = append(infos, savedPaneArmInfo{
 				scrollAbs: filepath.Join(r.StateDir, p.ScrollbackFile),
-				hookKey:   tmux.PaneTarget(sess.Name, w.Index, p.Index),
+				hookKey:   tmux.HookKey(sess.PortalID, sess.Name, w.Index, p.Index),
 			})
 		}
 	}
@@ -129,6 +136,20 @@ func (r *SessionRestorer) createSkeleton(sess state.Session) error {
 	rootCWD := sess.Windows[0].Panes[0].CWD
 	if err := r.Client.NewSessionWithCommand(sess.Name, rootCWD, ""); err != nil {
 		return err
+	}
+
+	// Re-stamp the saved @portal-id onto the freshly-recreated live session,
+	// mirroring creation-time stamping (internal/session's CreateFromDir /
+	// QuickStart). sessions.json is a snapshot the daemon regenerates from live
+	// tmux state, not a store of record — without re-seeding the live id here it
+	// would be lost after the single restore read: the next capture would write
+	// "" (bare-shell recovery), post-restore stale-cleanup would key the session
+	// by name and delete the just-fired hook, and a later rename would only be
+	// stable while the live id is present. Best-effort (mirrors CreateFromDir):
+	// a stamp failure must not abort restore. Skipped when empty — a legacy /
+	// un-stamped saved session is left un-stamped (name-fallback path).
+	if sess.PortalID != "" {
+		_ = r.Client.SetSessionOption(sess.Name, session.PortalIDOption, sess.PortalID)
 	}
 
 	r.applyEnvironment(sess)

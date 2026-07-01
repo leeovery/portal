@@ -144,7 +144,7 @@ func TestDaemonLoop_SelfCheckSkipsCaptureOnEjectTick(t *testing.T) {
 
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|",
-		panesOut:    "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
+		panesOut:    "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||",
 	}
 	deps := makeDeps(t, dir, fc)
 	deps.TickerPeriod = 1 * time.Millisecond

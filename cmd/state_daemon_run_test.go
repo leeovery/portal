@@ -255,8 +255,10 @@ func touchSaveRequested(t *testing.T, dir string) {
 // path.
 func oneSession() (sessionsOut, panesOut string) {
 	sessionsOut = "work|1|0|"
-	// Format matches captureFormat in internal/state/capture.go.
-	panesOut = "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh"
+	// Format matches captureFormat in internal/state/capture.go. The trailing
+	// empty |||-separated field is the un-stamped @portal-id column (11th
+	// field) added by the fixed-arity bump; a legacy session resolves it to "".
+	panesOut = "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||"
 	return
 }
 
@@ -457,8 +459,8 @@ func TestDaemonTick_SkipsSkeletonMarkedPanesInScrollback(t *testing.T) {
 	fc := &daemonFakeCommander{
 		markersOut:  markersOut,
 		sessionsOut: "work|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash|||",
 		captureByTarget: map[string]string{
 			"work:0.0": "captured-pane-0",
 			"work:0.1": "should-not-be-captured",
@@ -491,8 +493,8 @@ func TestDaemonTick_ContinuesOnPerPaneCaptureError(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash|||",
 		captureErrByTarget: map[string]error{
 			"work:0.0": errors.New("flaky pane"),
 		},
@@ -883,9 +885,9 @@ func TestCaptureAndCommit_UncancelledCtxMatchesPreThreadingBehaviour(t *testing.
 	// loop's pane-iteration across the (sess, win, pane) nesting.
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|\nside|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
-			"side|||0|||main|||layout|||0|||1|||0|||/var|||1|||zsh",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash|||\n" +
+			"side|||0|||main|||layout|||0|||1|||0|||/var|||1|||zsh|||",
 		captureByTarget: map[string]string{
 			"work:0.0": "work-pane-0-bytes",
 			"work:0.1": "work-pane-1-bytes",
@@ -967,7 +969,7 @@ func TestCaptureAndCommit_PreCancelledCtxReturnsImmediately(t *testing.T) {
 	// capture panes, commit) — the assertions below would catch the leak.
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|",
-		panesOut:    "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
+		panesOut:    "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||",
 		captureByTarget: map[string]string{
 			"work:0.0": "work-pane-0-bytes",
 		},
@@ -1037,9 +1039,9 @@ func TestCaptureAndCommit_CancelDuringCaptureStructureReturnsBeforePerPaneWork(t
 	// sessions.json).
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|\nside|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
-			"side|||0|||main|||layout|||0|||1|||0|||/var|||1|||zsh",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash|||\n" +
+			"side|||0|||main|||layout|||0|||1|||0|||/var|||1|||zsh|||",
 		captureByTarget: map[string]string{
 			"work:0.0": "work-pane-0-bytes",
 			"work:0.1": "work-pane-1-bytes",
@@ -1131,9 +1133,9 @@ func TestCaptureAndCommit_CancelMidLoopAfterKofNPanesProcessed(t *testing.T) {
 	// pane-iteration loop.
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
-			"work|||0|||main|||layout|||0|||1|||2|||/tmp|||0|||fish",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash|||\n" +
+			"work|||0|||main|||layout|||0|||1|||2|||/tmp|||0|||fish|||",
 		captureByTarget: map[string]string{
 			"work:0.0": "work-pane-0-bytes",
 			"work:0.1": "work-pane-1-bytes",
@@ -1196,9 +1198,9 @@ func TestCaptureAndCommit_UncancelledMultiPaneFixtureProcessesAllPanesAndCommits
 
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
-			"work|||0|||main|||layout|||0|||1|||2|||/tmp|||0|||fish",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash|||\n" +
+			"work|||0|||main|||layout|||0|||1|||2|||/tmp|||0|||fish|||",
 		captureByTarget: map[string]string{
 			"work:0.0": "work-pane-0-bytes",
 			"work:0.1": "work-pane-1-bytes",

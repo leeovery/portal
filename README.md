@@ -183,6 +183,8 @@ xctl alias list                      # list all aliases
 
 Register per-pane commands that re-execute automatically when a session is attached after a reboot. `hooks set` must be run from inside a tmux pane; `hooks rm` defaults to the current pane but accepts `--pane-key` to remove a hook for any pane (including ones that no longer exist).
 
+Renaming a session — from the picker's `r` modal or an external `tmux rename-session` — no longer orphans its resume hooks. Hooks anchor to a stable, rename-immune session identity rather than the session name, so a renamed session still re-runs its command after the next reboot.
+
 ```bash
 xctl hooks set --on-resume "npm start"            # register a resume hook
 xctl hooks rm --on-resume                         # remove the current pane's hook
