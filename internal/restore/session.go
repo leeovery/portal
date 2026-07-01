@@ -60,8 +60,14 @@ type SessionRestorer struct {
 // arm phase can build each pane's hydrate command without re-walking the saved
 // session structure. `scrollAbs` is the absolute path to the saved scrollback
 // file (saved-indexed, deliberately not live-indexed — see spec § Index
-// Semantics). `hookKey` is the raw saved structural identifier preserved
-// across base-index drift so hooks.json lookups stay addressable.
+// Semantics). `hookKey` is the stable hook key derived purely from saved state
+// via tmux.HookKey — it prefers the saved @portal-id (rename-immune) and falls
+// back to the saved name when the id is empty. It rides the SAVED (window,
+// pane) indices so it is preserved across base-index drift and matches what
+// hook registration stored, keeping hooks.json lookups addressable across any
+// number of renames. It is computed here from saved state only; the firing
+// path (the helper) resolves hooks.json by this baked key and never reads the
+// live @portal-id.
 type savedPaneArmInfo struct {
 	scrollAbs string
 	hookKey   string
@@ -108,7 +114,7 @@ func (r *SessionRestorer) collectArmInfos(sess state.Session) []savedPaneArmInfo
 		for _, p := range w.Panes {
 			infos = append(infos, savedPaneArmInfo{
 				scrollAbs: filepath.Join(r.StateDir, p.ScrollbackFile),
-				hookKey:   tmux.PaneTarget(sess.Name, w.Index, p.Index),
+				hookKey:   tmux.HookKey(sess.PortalID, sess.Name, w.Index, p.Index),
 			})
 		}
 	}

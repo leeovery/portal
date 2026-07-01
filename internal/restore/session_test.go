@@ -295,28 +295,124 @@ func TestSessionRestorer_HydrateCommandContainsAbsoluteScrollbackPath(t *testing
 	}
 }
 
-func TestSessionRestorer_HydrateCommandContainsRawHookKey(t *testing.T) {
-	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
-	client := tmux.NewClient(mock)
-	dir := t.TempDir()
-	r := &restore.SessionRestorer{Client: client, StateDir: dir}
+func TestSessionRestorer_HydrateCommandBakesStableHookKey(t *testing.T) {
+	t.Run("it bakes the id-based hook key when the saved PortalID is set", func(t *testing.T) {
+		mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
+		client := tmux.NewClient(mock)
+		dir := t.TempDir()
+		r := &restore.SessionRestorer{Client: client, StateDir: dir}
 
-	// Saved indices are 3, 7 — exercise the raw form rather than 0.0.
-	sess := newSession("work", nil,
-		newWindow(3, "main",
-			newPane(7, "/work", "scrollback/work__3.7.bin"),
-		),
-	)
+		// Saved indices are 3, 7 — exercise the raw form rather than 0.0. The
+		// baked key must prefer the saved @portal-id over the saved name.
+		sess := newSession("work", nil,
+			newWindow(3, "main",
+				newPane(7, "/work", "scrollback/work__3.7.bin"),
+			),
+		)
+		sess.PortalID = "tok123"
 
-	if _, err := r.Restore(sess); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
+		if _, err := r.Restore(sess); err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
 
-	hydrate := respawnPaneHydrateCommand(t, mock.Calls)
-	wantHookKey := "work:3.7"
-	if !strings.Contains(hydrate, "--hook-key '"+wantHookKey+"'") {
-		t.Errorf("hydrate cmd %q does not contain --hook-key '%s'", hydrate, wantHookKey)
-	}
+		hydrate := respawnPaneHydrateCommand(t, mock.Calls)
+		wantHookKey := "tok123:3.7"
+		if !strings.Contains(hydrate, "--hook-key '"+wantHookKey+"'") {
+			t.Errorf("hydrate cmd %q does not contain --hook-key '%s'", hydrate, wantHookKey)
+		}
+	})
+
+	t.Run("it bakes the name-based hook key when the saved PortalID is empty", func(t *testing.T) {
+		mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
+		client := tmux.NewClient(mock)
+		dir := t.TempDir()
+		r := &restore.SessionRestorer{Client: client, StateDir: dir}
+
+		// Legacy / un-stamped saved session (PortalID empty) — the baked key
+		// must fall back to the saved name.
+		sess := newSession("work", nil,
+			newWindow(3, "main",
+				newPane(7, "/work", "scrollback/work__3.7.bin"),
+			),
+		)
+
+		if _, err := r.Restore(sess); err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+
+		hydrate := respawnPaneHydrateCommand(t, mock.Calls)
+		wantHookKey := "work:3.7"
+		if !strings.Contains(hydrate, "--hook-key '"+wantHookKey+"'") {
+			t.Errorf("hydrate cmd %q does not contain --hook-key '%s'", hydrate, wantHookKey)
+		}
+	})
+}
+
+func TestSessionRestorer_HydrateBakesDistinctPerPaneSuffixesUnderOneID(t *testing.T) {
+	t.Run("it bakes distinct per-pane suffixes under one id for a multi-pane session", func(t *testing.T) {
+		mock := &mockCommander{RunFunc: restoreRunFunc("0:0\n0:1\n1:0")}
+		client := tmux.NewClient(mock)
+		dir := t.TempDir()
+		r := &restore.SessionRestorer{Client: client, StateDir: dir}
+
+		sess := newSession("work", nil,
+			newWindow(0, "main",
+				newPane(0, "/work", "scrollback/work__0.0.bin"),
+				newPane(1, "/work", "scrollback/work__0.1.bin"),
+			),
+			newWindow(1, "logs",
+				newPane(0, "/work", "scrollback/work__1.0.bin"),
+			),
+		)
+		sess.PortalID = "tok123"
+
+		if _, err := r.Restore(sess); err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+
+		bakedKeys := respawnPaneHookKeys(t, mock.Calls)
+		wantKeys := []string{"tok123:0.0", "tok123:0.1", "tok123:1.0"}
+		if len(bakedKeys) != len(wantKeys) {
+			t.Fatalf("baked hook keys = %v, want %v", bakedKeys, wantKeys)
+		}
+		for i, want := range wantKeys {
+			if bakedKeys[i] != want {
+				t.Errorf("baked hook key[%d] = %q, want %q (shared id prefix, distinct :w.p suffix)", i, bakedKeys[i], want)
+			}
+		}
+	})
+}
+
+func TestSessionRestorer_HydrateBakesKeyFromSavedStateIndependentOfLiveReStamp(t *testing.T) {
+	t.Run("it derives the baked key from saved state independent of any live re-stamp", func(t *testing.T) {
+		mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
+		client := tmux.NewClient(mock)
+		dir := t.TempDir()
+		r := &restore.SessionRestorer{Client: client, StateDir: dir}
+
+		sess := newSession("work", nil,
+			newWindow(3, "main",
+				newPane(7, "/work", "scrollback/work__3.7.bin"),
+			),
+		)
+		sess.PortalID = "tok123"
+
+		if _, err := r.Restore(sess); err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+
+		// The baked --hook-key is a pure function of the SAVED struct — it must
+		// equal HookKey computed directly from sess.PortalID and the saved
+		// (name, window, pane), never a value read back from the live tmux
+		// re-stamp. This guards the ordering trap: firing resolves hooks.json by
+		// this baked key and must not depend on when (or whether) the live
+		// @portal-id was re-stamped.
+		hydrate := respawnPaneHydrateCommand(t, mock.Calls)
+		wantHookKey := tmux.HookKey(sess.PortalID, sess.Name, 3, 7)
+		if !strings.Contains(hydrate, "--hook-key '"+wantHookKey+"'") {
+			t.Errorf("hydrate cmd %q does not contain saved-state-derived --hook-key '%s'", hydrate, wantHookKey)
+		}
+	})
 }
 
 // respawnPaneHydrateCommand returns the hydrate command argument from the
@@ -334,6 +430,39 @@ func respawnPaneHydrateCommand(t *testing.T, calls [][]string) string {
 		t.Fatalf("respawn-pane args = %v, want length 5", args)
 	}
 	return args[4]
+}
+
+// respawnPaneHookKeys returns the baked --hook-key value from every
+// respawn-pane hydrate command in calls, in call order. Fails the test if any
+// respawn-pane command does not carry a single-quoted --hook-key token.
+func respawnPaneHookKeys(t *testing.T, calls [][]string) []string {
+	t.Helper()
+	var keys []string
+	for _, idx := range findAllCalls(calls, "respawn-pane") {
+		args := calls[idx]
+		if len(args) != 5 {
+			t.Fatalf("respawn-pane args = %v, want length 5", args)
+		}
+		keys = append(keys, extractHookKey(t, args[4]))
+	}
+	return keys
+}
+
+// extractHookKey pulls the single-quoted value following the --hook-key flag
+// out of a hydrate command string. Fails the test if the flag or its
+// single-quoted argument is absent.
+func extractHookKey(t *testing.T, hydrate string) string {
+	t.Helper()
+	const marker = "--hook-key '"
+	_, rest, found := strings.Cut(hydrate, marker)
+	if !found {
+		t.Fatalf("hydrate cmd %q lacks a %q token", hydrate, marker)
+	}
+	key, _, closed := strings.Cut(rest, "'")
+	if !closed {
+		t.Fatalf("hydrate cmd %q has an unterminated --hook-key single quote", hydrate)
+	}
+	return key
 }
 
 func TestSessionRestorer_FIFOUsesLivePaneKeyFromListPanesReQuery(t *testing.T) {
