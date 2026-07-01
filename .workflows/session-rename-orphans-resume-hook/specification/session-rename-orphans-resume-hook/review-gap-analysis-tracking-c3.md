@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-01
 cycle: 3
 phase: Gap Analysis
@@ -34,7 +34,7 @@ Why it matters for planning: an implementer following the deliverable literally 
 **Proposed Addition**:
 _Leave blank until discussed._ (Direction: broaden the deliverable to enumerate every in-source doc-comment that currently claims a name-based format is the hooks.json lookup key — at minimum `PaneTarget`/`PaneTargetExact` (`tmux.go:551-558`, `572-573`), `StructuralKeyFormat` (`tmux.go:771-779`), and `ListAllPanes` (`tmux.go:781-798`, incl. its `ResolveStructuralKey` reference at line 784). For the `StructuralKeyFormat`/`ListAllPanes` pair the correct rewording is not "the invariant transfers" but "these remain the name-based structural/target formatters for non-hook use; they are NO LONGER the hooks.json key — see `HookKey`/`HookKeyFormat`," matching Stage 2's "remain available for any non-hook structural use.")
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. The 'retire the stale doc-comments' deliverable now enumerates all four sites: PaneTarget (551-558), PaneTargetExact (572-573), StructuralKeyFormat (771-779), and ListAllPanes (781-798); notes they remain valid for name-based targeting but must stop claiming hooks.json ownership.
 
 ---

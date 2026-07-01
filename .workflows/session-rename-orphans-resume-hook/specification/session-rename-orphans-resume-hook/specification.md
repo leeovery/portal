@@ -49,7 +49,13 @@ The fix's central invariant: **every site that produces or consumes a hook key d
 
 **Decoupling from `tmux.PaneTarget`.** `PaneTarget` stays exactly as-is — it remains the canonical, name-based `-t` *target* formatter, still used to address live panes (e.g. `respawn-pane`, `select-pane`). The hook key becomes a **separate concern** with its own formatter, so the change touches only hook identity, not tmux targeting.
 
-**Deliverable — retire the stale doc-comments.** `PaneTarget`/`PaneTargetExact` today carry in-source doc-comments (`tmux.go:551-558`, `572-573`) asserting `PaneTarget` *is* the canonical `hooks.json` key formatter and that its format must never change or it orphans `hooks.json`. After the fix those comments are false and must be updated: the canonical hook-key formatter is now `HookKey` / `HookKeyFormat`, and the load-bearing "format is stable across releases — changing it silently invalidates every `hooks.json` entry" invariant **transfers to those new primitives**, it does not disappear. Leaving the old comments in place would invite a future caller back into name-based keying — re-establishing the exact drift this fix removes.
+**Deliverable — retire the stale doc-comments.** Four in-source doc-comments today assert that a name-based formatter *is* the canonical `hooks.json` key/lookup and that its format must never change or it orphans `hooks.json`. After the fix all four are false and must be updated:
+- `PaneTarget` (`tmux.go:551-558`) — "the hook-key format stays stable across releases … changing it would silently invalidate every entry in hooks.json".
+- `PaneTargetExact` (`tmux.go:572-573`) — "PaneTarget (no prefix) remains the canonical hook-key formatter".
+- `StructuralKeyFormat` (`tmux.go:771-779`) — "used as the lookup key in hooks.json … the hook lookup table all agree".
+- `ListAllPanes` (`tmux.go:781-798`, incl. its `ResolveStructuralKey` reference) — "the same format … used as the lookup key in hooks.json".
+
+The canonical hook-key formatter is now `HookKey` / `HookKeyFormat`, and the load-bearing "format is stable across releases — changing it silently invalidates every `hooks.json` entry" invariant **transfers to those new primitives**, it does not disappear. `PaneTarget`, `StructuralKeyFormat`, and `ListAllPanes` remain valid for name-based tmux *targeting* / non-hook structural use (per Stage 2), but their comments must stop claiming `hooks.json` ownership. Leaving any of the four in place would invite a future caller back into name-based keying — re-establishing the exact drift this fix removes.
 
 Two new derivation primitives in `internal/tmux`:
 - **`HookKeyFormat`** — a tmux format string for live reads: `#{?@portal-id,#{@portal-id},#{session_name}}:#{window_index}.#{pane_index}`. tmux resolves the conditional per-session: a stamped session yields `<id>:w.p`, an un-stamped one yields `<name>:w.p`.
