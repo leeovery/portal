@@ -42,19 +42,20 @@ A living index of subtopics tracked during the discussion.
 
 ### Map
 
-  Discussion Map — Skip Bootstrap When Warm (10 subtopics — 1 decided · 2 converging · 7 pending)
+  Discussion Map — Skip Bootstrap When Warm (12 subtopics — 4 decided · 8 pending)
 
-  ┌─ → Full vs Abridged bootstrap — classifying the 11 steps [converging]
-  │  ├─ ✓ Protective steps stay abridged-path (EnsureSaver) [decided]
-  │  ├─ → Hooks cleanup home → the _portal-saver daemon [converging]
-  │  └─ ○ "Full"/"Abridged" naming & the single-abridged constraint [pending]
+  ┌─ ✓ Full vs Abridged bootstrap — classifying the 11 steps [decided]
+  │  ├─ ✓ EnsureSaver stays on abridged path (liveness + version-gate) [decided]
+  │  ├─ ✓ Hooks cleanup home → the _portal-saver daemon [decided]
+  │  └─ ✓ "Full"/"Abridged" naming & single-abridged constraint [decided]
   ├─ ○ Latch storage & semantics [pending]
-  ├─ ○ Where & when the latch is set [pending]
-  ├─ ○ Latch-check placement in the entry path [pending]
-  ├─ ○ First-touch race tolerance [pending]
-  ├─ ○ Partial-bootstrap / failure handling [pending]
-  ├─ ○ Interaction with the full-bootstrap concurrent/loading path [pending]
-  └─ ○ Edge cases & invalidation [pending]
+  ├─ ○ Latch set-point & timing (atomic with a successful Run) [pending]
+  ├─ ○ Latch-check placement + abridged-path wiring (client / serverStarted / warnings) [pending]
+  ├─ ○ First-touch race window (cold-burst vs reopen-burst) [pending]
+  ├─ ○ Partial-bootstrap / soft-vs-fatal failure handling [pending]
+  ├─ ○ Full-bootstrap concurrent/loading-path interaction [pending]
+  ├─ ○ Edge cases & latch invalidation (two-marker interaction) [pending]
+  └─ ○ Test strategy for verifying the skip [pending]
 
 ---
 
@@ -122,6 +123,8 @@ EnsureSaver (step 5) bootstraps/version-upgrades the `_portal-saver` session tha
 
 Note: on the warm path EnsureSaver runs **outside** the `@portal-restoring` window (no restore in flight), which is correct — the revived daemon should capture normally, not suppress.
 
+**EnsureSaver has two duties, not one (resolves review F6).** EnsureSaver = (a) *liveness* — create `_portal-saver` + daemon if absent (`BootstrapPortalSaver`); and (b) *version-gate* — if the running daemon's binary is stale after a `portal` upgrade, kill + recreate it on the new binary via a guarded kill-barrier (`EnsurePortalSaverVersion`). The abridged path therefore keeps the **full** EnsureSaver step, **not** a liveness-only `SaverPanePIDOrAbsent` probe. Rationale: with a weeks-long server + persistent latch, a liveness-only abridged path would let a stale-version daemon survive a binary upgrade for the rest of the lifetime (latch set ⇒ every command abridged ⇒ never re-versioned). Confidence: high — directly serves the weeks-long-server constraint. (Cost check: the version read is cheap; the kill-barrier only fires on an actual version mismatch, which in the reopen scenario has already been resolved by the trigger command's full bootstrap before the burst — so the 20× burst does no upgrades.)
+
 ---
 
 ## Cleanup steps over a long-lived (weeks) server
@@ -158,19 +161,22 @@ The hook key is the structural key `#{session_name}:#{window_index}.#{pane_index
 
 **Conclusion: a genuinely-stale hook entry cannot fire on the wrong session.** The only cost of leaving it is inert JSON bloat. (Confidence: high, modulo a user manually recreating a session under an old nanoid name by hand — not a realistic path.)
 
-### Decision — daemon-owned cleanup (converging, awaiting confirm)
+### Decision — daemon-owned cleanup (DECIDED, in-scope)
 
 Steps 9 and 10: skipped on the abridged path, decided — a warm server produces none of their targets (they stay in the full bootstrap for cold-boot leftovers).
 
-Step 11 (hooks): the **single-abridged-version constraint forces the resolution**. Command-classified cleanup (the earlier "cleanup on `open`, not `attach`" idea) is exactly the multiple-abridged-variants the user rejects — dropped. Keeping cleanup in the one abridged path means the 20× `attach` burst runs it (the anti-recommended `list-panes -a` + `hooks.json` rewrite concurrency surface). So cleanup can live in **neither** abridged variant. It moves out of the per-command path entirely and onto the **`_portal-saver` daemon** (`portal state daemon`):
+Step 11 (hooks): the **single-abridged-version constraint forces the resolution**. Command-classified cleanup (the earlier "cleanup on `open`, not `attach`" idea) is exactly the multiple-abridged-variants the user rejects — dropped. Keeping cleanup in the one abridged path means the 20× `attach` burst runs it (the anti-recommended `list-panes -a` + `hooks.json` rewrite concurrency surface). So cleanup can live in **neither** abridged variant. It moves out of the per-command path entirely and onto the **`_portal-saver` daemon** (`portal state daemon`). **User confirmed: in-scope for this feature.**
 
-- The daemon is the existing background process inside the hidden `_portal-saver` tmux session — **not launchd** (that was previously rejected and is not being reopened). It already ticks ~1s capturing state, so it already holds the live pane set.
-- Give it a **periodic, guarded** hooks-cleanup pass (cadence TBD — not every tick; guard = never treat an empty live-pane read as authoritative, mirroring bootstrap step 9/11's mass-delete hazard guard).
-- Result: cleanup runs across the whole server lifetime (doesn't "wait"), the abridged path stays a single lean version, the burst does zero cleanup, and no new OS-level process is introduced.
+**Operational contract (resolves review F4):**
 
-Scope note: this grows the daemon (new guarded hooks-store write duty + failure posture). Flagged to the user as a scope addition to this feature (vs. a tightly-coupled follow-up). Given the misfire trace (stale hooks are inert), the fallback if the user declines the daemon scope is "cleanup runs only on full bootstraps + `portal clean`" — but that reintroduces the weeks-long wait the user rejected.
+- **Home:** the existing background process inside the hidden `_portal-saver` tmux session — **not launchd** (previously rejected, not reopened).
+- **Reuse, don't reinvent:** the daemon calls the existing shared `cmd/run_hook_stale_cleanup.go` `runHookStaleCleanup` helper. That helper already carries the **mass-deletion hazard guard** (`len(livePanes)==0 && hooks present` → skip + WARN, never wipe) and drives `hooks.Store.CleanStale`, which emits the existing `EmitCleanStaleSummary` **audit breadcrumb** — so no new audit event/vocabulary is invented.
+- **No layering problem:** `runHookStaleCleanup` and the daemon (`cmd/state_daemon.go`) are both in package `cmd` — same package, so no new import and **no cycle**. (The "daemon stays out of the hooks store" note was a soft observation, not a hard boundary.)
+- **Cadence (user directive):** *not* every 1s tick. Throttled to ~10s via a cheap `time.Since(lastCleanup) >= interval` check evaluated per tick; the cleanup body fires only when the interval has elapsed. Exact interval is a tuning detail (10s default). Rationale: the 1s tick must stay light (capture/scrollback save is the priority and can exceed 1s); stale hooks are inert so precise timing is irrelevant. (Lazier alternative noted, not chosen: trigger cleanup only when the live-session set shrinks.)
+- **Priority / non-interference:** cleanup never competes with a pending capture — the tick loop is single-threaded and already skips entirely while `@portal-restoring` is set and on the `!dirty && !gap` idle fast-path; cleanup is gated so scrollback saving always wins.
+- **Failure posture:** log WARN and retry next cadence (mirrors the tick loop's existing "tick failed" handling); a cleanup error never escalates or crashes the daemon.
 
-Confidence: high on the reasoning; awaiting user confirm on taking the daemon-cleanup scope into this feature.
+Confidence: high. Contract fully specified; only the numeric interval is a tuning detail left to implementation.
 
 ---
 
@@ -186,10 +192,11 @@ Confidence: high on the reasoning; awaiting user confirm on taking the daemon-cl
 
 ### Current State
 
-- **Decided:** two named paths — **full bootstrap** (all 11, sets latch) vs a single **abridged bootstrap** (EnsureSaver liveness probe only). EnsureSaver stays; Class-1 heavy steps skipped when latched.
-- **Converging (awaiting confirm):** hooks cleanup (step 11) moves to the **`_portal-saver` daemon** on a guarded cadence — forced by the single-abridged-version constraint. Scope addition flagged.
-- **Naming locked:** full/abridged, not cold/warm; the latch is the switch.
-- Mechanism (server-option latch), set-point, check placement, race/failure handling, full-bootstrap concurrent/loading-path interaction, and edge cases all still pending.
+- **Decided:** two named paths — **full bootstrap** (all 11, sets latch) vs a single **abridged bootstrap** (full EnsureSaver — liveness **and** version-gate — only). Class-1 heavy steps skipped when latched.
+- **Decided:** hooks cleanup (step 11) moves to the **`_portal-saver` daemon**, in-scope for this feature. Contract fixed: reuse `runHookStaleCleanup` (inherits mass-delete guard + audit breadcrumb; same `cmd` package → no cycle), ~10s throttled cadence off the 1s tick, WARN-and-continue failure posture.
+- **Decided:** naming full/abridged (not cold/warm); the latch is the switch; EnsureSaver keeps its version-gate on the abridged path (F6).
+- **Review set 001 folded in:** F4 & F6 resolved above; F1/F2/F3/F5/F7/F8/F9/F10 mapped onto the pending mechanism subtopics.
+- **Next block — the latch mechanism:** storage/semantics, **set-point & timing** (the crux the review isolates — F1/F2/F7/F8), check-placement + abridged wiring, race window, failure handling, concurrent/loading-path interaction, invalidation/edge cases, and test strategy — all pending.
 
 ## Triage
 
