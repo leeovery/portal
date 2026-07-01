@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-01
 cycle: 1
 phase: Plan Integrity Review
@@ -81,7 +81,7 @@ to:
 
 ---
 
-### 3. Task 2-3's "non-nil empty slice" test criterion offers three unresolved fallbacks, leaving the implementer to choose
+### 3. [RESOLVED: Fixed] Task 2-3's "non-nil empty slice" test criterion offers three unresolved fallbacks, leaving the implementer to choose
 
 **Severity**: Minor
 **Plan Reference**: Phase 2, task `session-rename-orphans-resume-hook-2-3` (Add `tmux.ListAllPaneHookKeys`), the Tests entry for the empty-slice case
