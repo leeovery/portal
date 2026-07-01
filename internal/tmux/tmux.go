@@ -874,6 +874,38 @@ func (c *Client) ListAllPanes() ([]string, error) {
 	return parsePaneOutput(raw), nil
 }
 
+// ListAllPaneHookKeys is the canonical live hook-key enumeration for stale
+// cleanup: it enumerates every live pane across every tmux session and returns
+// the hook key for each one, resolved per-session by HookKeyFormat's tmux
+// conditional — a stamped session (@portal-id set) yields "<id>:w.p" (the
+// immutable, rename-immune key) and an un-stamped session yields "<name>:w.p"
+// (the legacy / no-migration fallback). The conditional is evaluated per pane
+// row, so a mixed stamped/un-stamped population resolves each session's prefix
+// independently within a single read.
+//
+// It is the hook-key sibling of ListAllPanes and shares that method's
+// discriminating error contract: on any tmux failure (transport error,
+// exit ≠ 0, server gone) it returns (nil, err) with the underlying error
+// wrapped — callers can use errors.Is / errors.As against any sentinel in the
+// chain — NOT a "no live panes" empty slice. Treating a tmux failure as an
+// empty live set would mass-orphan every hooks.json entry (each key would be
+// absent from the live set and deleted), so the discriminating contract is
+// load-bearing. On success it returns the parsed hook-key slice (a non-nil
+// empty slice on empty output).
+//
+// This method exists SEPARATELY from ListAllPanes rather than repointing it:
+// ListAllPanes' StructuralKeyFormat (name-based) is still required by non-hook
+// structural callers (skeleton-marker cleanup and the daemon), so its format
+// must stay StructuralKeyFormat. Only the hook-cleanup live-key enumeration
+// uses this hook-key variant.
+func (c *Client) ListAllPaneHookKeys() ([]string, error) {
+	raw, err := c.ListAllPanesWithFormat(HookKeyFormat)
+	if err != nil {
+		return nil, err
+	}
+	return parsePaneOutput(raw), nil
+}
+
 // SendKeys delivers a command to the specified tmux pane followed by Enter.
 // The target parameter is a structural key (e.g. "my-session:0.1").
 func (c *Client) SendKeys(target string, command string) error {
