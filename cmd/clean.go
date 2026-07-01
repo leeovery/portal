@@ -115,8 +115,8 @@ func cleanStaleHooks(w io.Writer) error {
 	// at its single declaration site. This keeps the format string
 	// declared exactly once across package cmd (acceptance criterion
 	// 1 of the parent plan task). The trade-off is a redundant
-	// ListAllPanes call on the Load-failure path — acceptable because
-	// (a) the helper's swallow policy means ListAllPanes never fails
+	// ListAllPaneHookKeys call on the Load-failure path — acceptable because
+	// (a) the helper's swallow policy means ListAllPaneHookKeys never fails
 	// the user's command, and (b) Load failures are rare (corrupt or
 	// permission-denied hooks.json).
 	//
@@ -141,13 +141,13 @@ func cleanStaleHooks(w io.Writer) error {
 	}
 
 	// Delegate the six-branch algorithm to the shared helper.
-	// swallowListError=true so a transient ListAllPanes failure never
+	// swallowListError=true so a transient ListAllPaneHookKeys failure never
 	// fails the user's command (the Warn lands in portal.log for audit).
 	// onRemoved prints "Removed stale hook: <key>" per removed entry,
 	// preserving the pre-extraction user-facing stdout byte-for-byte.
 	//
 	// Return value is deliberately discarded: with swallowListError=true
-	// the helper already returns nil for ListAllPanes errors. The
+	// the helper already returns nil for ListAllPaneHookKeys errors. The
 	// remaining return paths are (a) nil on the happy path and (b) a
 	// hookStore.Load / CleanStale error on the destructive branches.
 	// Per spec §Logger plumbing / portal clean: "the subcommand's

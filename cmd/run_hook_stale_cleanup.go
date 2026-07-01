@@ -13,7 +13,7 @@ package cmd
 // Policy axes:
 //
 //   - swallowListError (bool): how to surface a non-nil err from
-//     ListAllPanes. The bootstrap adapter passes false (the orchestrator
+//     ListAllPaneHookKeys. The bootstrap adapter passes false (the orchestrator
 //     Warn-and-swallows at step 11, so the helper escalates the err up
 //     through the StaleCleaner interface). The portal-clean RunE passes
 //     true because the user-boundary contract pre-fix already silenced
@@ -28,7 +28,7 @@ package cmd
 //     output preserves the pre-extraction contract byte-for-byte.
 //
 // Algorithm (mirrors the pre-extraction six-branch shape verbatim):
-//   1. ListAllPanes. On error emit Warn, then return err (swallowListError
+//   1. ListAllPaneHookKeys. On error emit Warn, then return err (swallowListError
 //      false) or nil (swallowListError true). The entry-point Debug is NOT
 //      emitted on this branch (terminal-Warn-only branch).
 //   2. store.Load. On error emit Warn, return err. The destructive
@@ -43,7 +43,7 @@ package cmd
 //   6. store.CleanStale. On success, emit completion Debug and invoke
 //      onRemoved once per removed key (when non-nil). Errors from
 //      CleanStale propagate up verbatim regardless of policy — policy
-//      governs ListAllPanes errors only.
+//      governs ListAllPaneHookKeys errors only.
 //
 // Note on duplicate Load: the portal-clean RunE loads the hooks store
 // once upfront to check the persisted==0 early-exit, then delegates to
@@ -63,7 +63,7 @@ import (
 // (cleanCmd.RunE). See the package-doc-style block above for the full
 // algorithm description, policy axes, and design rationale.
 //
-// swallowListError selects how a non-nil err from ListAllPanes surfaces:
+// swallowListError selects how a non-nil err from ListAllPaneHookKeys surfaces:
 // false → return err to the caller (bootstrap step-11 contract); true →
 // return nil after logging the Warn (portal-clean user-boundary contract).
 //
