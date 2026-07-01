@@ -33,7 +33,7 @@
         "session-rename-orphans-resume-hook": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "5b28f7782131da98fb99b92e416250cf10844aee",
+          "spec_commit": "a3e1894ebf753f0afce72ed468f33e696bc1ec85",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
