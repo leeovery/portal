@@ -544,17 +544,17 @@ type PaneCoord struct {
 
 // PaneTarget formats a tmux pane target string in the canonical
 // "session:window.pane" form accepted by tmux's `-t` flag (e.g.
-// "my-project:0.1"). It is the single canonical formatter for this target;
-// callers must not hand-roll the equivalent fmt.Sprintf so the format stays
-// uniform across the codebase.
+// "my-project:0.1"). It is the single canonical name-based formatter for this
+// target; callers must not hand-roll the equivalent fmt.Sprintf so the format
+// stays uniform across the codebase.
 //
-// This format is dual-purpose: it doubles as the canonical hooks.json key
-// for per-pane on-resume hooks (see internal/restore/session.go
-// collectArmInfos). Callers issuing a -t flag against tmux MUST instead use
-// PaneTargetExact, which prepends tmux's exact-match prefix "=" to the
-// session segment. PaneTarget intentionally does NOT carry the prefix so
-// the hook-key format stays stable across releases — changing it would
-// silently invalidate every entry in hooks.json.
+// Callers issuing a -t flag against tmux MUST instead use PaneTargetExact,
+// which prepends tmux's exact-match prefix "=" to the session segment;
+// PaneTarget (no prefix) is for building a plain name-based target only.
+//
+// This formatter is NOT the hook key. Per-pane on-resume hook keys are derived
+// by HookKey / HookKeyFormat (the rename-immune @portal-id primitives); do not
+// reintroduce name-based keying here.
 func PaneTarget(session string, window, pane int) string {
 	return fmt.Sprintf("%s:%d.%d", session, window, pane)
 }
@@ -569,8 +569,10 @@ func PaneTarget(session string, window, pane int) string {
 // or operating on the wrong session. See spec § Pre-select + attach sequence
 // > Exact-match target syntax.
 //
-// PaneTarget (no prefix) remains the canonical hook-key formatter; do not
-// mix the two — hook lookups against an "=" -prefixed key would miss.
+// PaneTarget (no prefix) builds the plain name-based -t target; do not mix the
+// two — a -t target resolution against a key with the wrong prefix ("=" present
+// where a plain target is expected, or absent where exact match is required)
+// would resolve to the wrong pane.
 func PaneTargetExact(session string, window, pane int) string {
 	return fmt.Sprintf("=%s:%d.%d", session, window, pane)
 }
@@ -794,12 +796,15 @@ func (c *Client) ShowEnvironment(session string) (string, error) {
 
 // StructuralKeyFormat is the canonical tmux format string that yields a pane's
 // structural key (e.g. "my-project:0.1") — the load-bearing join key between
-// live-pane enumeration (list-panes / display-message), persisted hook entries
-// in hooks.json, and @portal-skeleton-* marker names. Every tmux call whose
-// output is consumed as a structural key MUST request exactly this format so
-// the two cleanup paths (stale-marker cleanup and orphan-FIFO sweep) and the
-// hook lookup table all agree on what constitutes a paneKey. Drift here would
-// silently desync the cleanup paths' interpretation of "what is a paneKey".
+// live-pane enumeration (list-panes / display-message) and @portal-skeleton-*
+// marker names. Every tmux call whose output is consumed as a structural key
+// MUST request exactly this format so the two cleanup paths (stale-marker
+// cleanup and orphan-FIFO sweep) agree on what constitutes a paneKey. Drift
+// here would silently desync the cleanup paths' interpretation of "what is a
+// paneKey".
+//
+// This is a name-based structural key, NOT the hook key: hook-key derivation
+// lives in HookKey / HookKeyFormat (the rename-immune @portal-id primitives).
 const StructuralKeyFormat = "#{session_name}:#{window_index}.#{pane_index}"
 
 // HookKeyFormat is the canonical tmux format string for live hook-key reads —
@@ -825,9 +830,10 @@ const HookKeyFormat = "#{?@portal-id,#{@portal-id},#{session_name}}:#{window_ind
 // ListAllPanes enumerates every live pane across every tmux session and returns
 // the canonical structural key for each one. Keys have the form
 // "session_name:window_index.pane_index" (e.g. "my-project:0.0") — the same
-// format produced by (*Client).ResolveStructuralKey and used as the lookup key
-// in hooks.json, so callers can intersect the returned slice with persisted
-// hook entries directly.
+// name-based structural format produced by (*Client).ResolveStructuralKey, used
+// for structural enumeration (e.g. @portal-skeleton-* marker matching and
+// sessions.json delta/merge), not for hook-key lookup (see HookKey /
+// HookKeyFormat).
 //
 // The implementation delegates to the error-propagating ListAllPanesWithFormat
 // helper. On any tmux failure (transport error, exit ≠ 0, server gone) it
@@ -838,8 +844,7 @@ const HookKeyFormat = "#{?@portal-id,#{@portal-id},#{session_name}}:#{window_ind
 // This helper deliberately does not paper over failure modes: policy for an
 // empty result vs. a tmux error is the caller's decision. Treating a tmux
 // failure as "no live panes" silently elides every entry that depends on the
-// live set (notably hooks.json), so the discriminating contract is load-
-// bearing.
+// live set, so the discriminating contract is load-bearing.
 func (c *Client) ListAllPanes() ([]string, error) {
 	raw, err := c.ListAllPanesWithFormat(StructuralKeyFormat)
 	if err != nil {
