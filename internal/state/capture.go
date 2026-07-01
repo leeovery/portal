@@ -259,6 +259,7 @@ func findOrAppendSession(fresh *Index, ps Session) int {
 	}
 	fresh.Sessions = append(fresh.Sessions, Session{
 		Name:        ps.Name,
+		PortalID:    ps.PortalID,
 		Environment: ps.Environment,
 		Windows:     []Window{},
 	})
