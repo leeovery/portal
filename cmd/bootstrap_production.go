@@ -68,7 +68,7 @@ func (a *saverAdapter) EnsureSaver() error {
 //
 // The lister field is the AllPaneLister interface (declared in
 // cmd/clean.go) — production wiring passes a *tmux.Client which
-// satisfies the interface via ListAllPanes. Using the interface (rather
+// satisfies the interface via ListAllPaneHookKeys. Using the interface (rather
 // than the concrete *tmux.Client) lets unit tests substitute a stub
 // without needing a test-only adapter mirror.
 type cleanStaleAdapter struct {
