@@ -39,7 +39,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "session-rename-orphans-resume-hook-2-2",
+          "task": "session-rename-orphans-resume-hook-2-3",
           "task_map": {
             "session-rename-orphans-resume-hook-1": "tick-9b76df",
             "session-rename-orphans-resume-hook-1-1": "tick-7ebd68",
@@ -48,7 +48,8 @@
             "session-rename-orphans-resume-hook-1-4": "tick-959a17",
             "session-rename-orphans-resume-hook-1-5": "tick-33e7ca",
             "session-rename-orphans-resume-hook-2": "tick-dce9f1",
-            "session-rename-orphans-resume-hook-2-1": "tick-10d1b7"
+            "session-rename-orphans-resume-hook-2-1": "tick-10d1b7",
+            "session-rename-orphans-resume-hook-2-2": "tick-94ec77"
           },
           "external_id": "tick-1bedd3"
         }
