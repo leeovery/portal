@@ -31,7 +31,7 @@
     "planning": {
       "items": {
         "session-rename-orphans-resume-hook": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
           "spec_commit": "a3e1894ebf753f0afce72ed468f33e696bc1ec85",
           "task_list_gate_mode": "auto",
