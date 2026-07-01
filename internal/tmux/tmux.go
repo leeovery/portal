@@ -802,6 +802,26 @@ func (c *Client) ShowEnvironment(session string) (string, error) {
 // silently desync the cleanup paths' interpretation of "what is a paneKey".
 const StructuralKeyFormat = "#{session_name}:#{window_index}.#{pane_index}"
 
+// HookKeyFormat is the canonical tmux format string for live hook-key reads —
+// the tmux-resolved sibling of the pure-Go HookKey. tmux resolves the
+// conditional per-session: a session carrying @portal-id yields "<id>:w.p"
+// (rename-immune), and an un-stamped session yields "<name>:w.p". tmux's
+// #{?cond,a,b} treats an unset or empty @portal-id as false, so an un-stamped
+// session (legacy, manually-created, or a best-effort stamp that failed) takes
+// the #{session_name} branch — the no-migration fallback, since the name is the
+// key already on disk in hooks.json.
+//
+// Like StructuralKeyFormat, this format is load-bearing and MUST stay stable
+// across releases: changing it silently invalidates every hooks.json entry.
+// Every live-tmux site that produces or consumes a hook key (registration in
+// cmd/hooks.go and the stale-cleanup live-key enumeration) MUST request exactly
+// this format so all key-producing sites agree — drift here re-orphans stamped
+// sessions' hooks at scale, the exact bug this format removes.
+//
+// The embedded literal "@portal-id" MUST match session.PortalIDOption
+// byte-for-byte; consistency is achieved by both using the identical literal.
+const HookKeyFormat = "#{?@portal-id,#{@portal-id},#{session_name}}:#{window_index}.#{pane_index}"
+
 // ListAllPanes enumerates every live pane across every tmux session and returns
 // the canonical structural key for each one. Keys have the form
 // "session_name:window_index.pane_index" (e.g. "my-project:0.0") — the same
