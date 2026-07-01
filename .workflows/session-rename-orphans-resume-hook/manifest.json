@@ -108,7 +108,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 2,
-          "current_task": "session-rename-orphans-resume-hook-2-4",
+          "current_task": "session-rename-orphans-resume-hook-2-5",
           "completed_tasks": [
             "session-rename-orphans-resume-hook-1-1",
             "session-rename-orphans-resume-hook-1-2",
@@ -117,7 +117,8 @@
             "session-rename-orphans-resume-hook-1-5",
             "session-rename-orphans-resume-hook-2-1",
             "session-rename-orphans-resume-hook-2-2",
-            "session-rename-orphans-resume-hook-2-3"
+            "session-rename-orphans-resume-hook-2-3",
+            "session-rename-orphans-resume-hook-2-4"
           ],
           "completed_phases": [
             1

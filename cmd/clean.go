@@ -12,10 +12,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// AllPaneLister returns the structural keys for all panes across all tmux sessions.
-// Each key uses the format session_name:window_index.pane_index.
+// AllPaneLister returns each live pane's hook key across all tmux sessions —
+// the live set that feeds hooks.Store.CleanStale. Each key has the form
+// <@portal-id or session_name>:window_index.pane_index, resolved per-session
+// by tmux.HookKeyFormat (a stamped session yields "<id>:w.p", an un-stamped one
+// "<name>:w.p"). This is the hook-key sibling of the name-based structural
+// enumeration; the cleanup live set must derive keys the same way registration
+// does so freshly-registered id-keyed entries are not mass-orphaned.
 type AllPaneLister interface {
-	ListAllPanes() ([]string, error)
+	ListAllPaneHookKeys() ([]string, error)
 }
 
 // CleanDeps holds injectable dependencies for the clean command.

@@ -79,13 +79,13 @@ import (
 	"github.com/leeovery/portal/internal/transienttest"
 )
 
-// panickingPaneLister is an AllPaneLister whose ListAllPanes panics on
+// panickingPaneLister is an AllPaneLister whose ListAllPaneHookKeys panics on
 // invocation. Used by the persisted_empty_early_exit subtest to
 // structurally prove the early-exit branch never reaches the lister.
 type panickingPaneLister struct{}
 
-func (panickingPaneLister) ListAllPanes() ([]string, error) {
-	panic("ListAllPanes must not be invoked when persisted==0 (early-exit branch)")
+func (panickingPaneLister) ListAllPaneHookKeys() ([]string, error) {
+	panic("ListAllPaneHookKeys must not be invoked when persisted==0 (early-exit branch)")
 }
 
 // setupCleanTransientEnv is the portal-clean callsite's env-builder.

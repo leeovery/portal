@@ -323,6 +323,50 @@ func TestCleanCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("preserves a stamped-session hook whose id-key matches the live set", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		// A stamped session registers its hook under the @portal-id key
+		// (e.g. "tok123:0.0"). The live set now carries the same id-keyed
+		// value via ListAllPaneHookKeys, so the stamped hook survives while
+		// a truly-stale entry (absent from the live set) is removed.
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"tok123:0.0": {"on-resume": "cmd-live"},
+			"orphan:0.0": {"on-resume": "cmd-stale"},
+		})
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"tok123:0.0"}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := "Removed stale hook: orphan:0.0\n"
+		if buf.String() != want {
+			t.Errorf("output = %q, want %q", buf.String(), want)
+		}
+
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["tok123:0.0"]; !ok {
+			t.Error("expected stamped-session hook tok123:0.0 to be preserved (present in live set)")
+		}
+		if _, ok := data["orphan:0.0"]; ok {
+			t.Error("expected truly-stale hook orphan:0.0 to be removed")
+		}
+	})
+
 	t.Run("zero live panes refuses to wipe hooks (hazard guard)", func(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
@@ -685,6 +729,6 @@ type mockCleanPaneLister struct {
 	err   error
 }
 
-func (m *mockCleanPaneLister) ListAllPanes() ([]string, error) {
+func (m *mockCleanPaneLister) ListAllPaneHookKeys() ([]string, error) {
 	return m.panes, m.err
 }

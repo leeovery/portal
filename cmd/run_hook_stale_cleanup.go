@@ -86,7 +86,7 @@ func runHookStaleCleanup(
 		logger = bootstrapLogger
 	}
 
-	livePanes, err := lister.ListAllPanes()
+	livePanes, err := lister.ListAllPaneHookKeys()
 	if err != nil {
 		logger.Warn("stale-hook cleanup: list-panes failed", "error", err)
 		if swallowListError {
