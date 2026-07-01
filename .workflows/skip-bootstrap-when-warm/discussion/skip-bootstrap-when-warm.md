@@ -42,18 +42,18 @@ A living index of subtopics tracked during the discussion.
 
 ### Map
 
-  Discussion Map — Skip Bootstrap When Warm (12 subtopics — 4 decided · 8 pending)
+  Discussion Map — Skip Bootstrap When Warm (12 subtopics — 8 decided · 1 converging · 3 pending)
 
   ┌─ ✓ Full vs Abridged bootstrap — classifying the 11 steps [decided]
   │  ├─ ✓ EnsureSaver stays on abridged path (liveness + version-gate) [decided]
   │  ├─ ✓ Hooks cleanup home → the _portal-saver daemon [decided]
   │  └─ ✓ "Full"/"Abridged" naming & single-abridged constraint [decided]
-  ├─ ○ Latch storage & semantics [pending]
-  ├─ ○ Latch set-point & timing (atomic with a successful Run) [pending]
+  ├─ ✓ Latch storage & semantics [decided]
+  ├─ ✓ Latch set-point & timing (final action of a successful Run) [decided]
   ├─ ○ Latch-check placement + abridged-path wiring (client / serverStarted / warnings) [pending]
-  ├─ ○ First-touch race window (cold-burst vs reopen-burst) [pending]
-  ├─ ○ Partial-bootstrap / soft-vs-fatal failure handling [pending]
-  ├─ ○ Full-bootstrap concurrent/loading-path interaction [pending]
+  ├─ ✓ First-touch race window — end-set collapses reopen-burst; pure cold-burst tolerated [decided]
+  ├─ ✓ Partial-bootstrap / soft-vs-fatal failure handling (soft latches, fatal doesn't) [decided]
+  ├─ ✓ Full-bootstrap concurrent/loading-path interaction (set inside Run) [decided]
   ├─ ○ Edge cases & latch invalidation (two-marker interaction) [pending]
   └─ ○ Test strategy for verifying the skip [pending]
 
@@ -177,6 +177,35 @@ Step 11 (hooks): the **single-abridged-version constraint forces the resolution*
 - **Failure posture:** log WARN and retry next cadence (mirrors the tick loop's existing "tick failed" handling); a cleanup error never escalates or crashes the daemon.
 
 Confidence: high. Contract fully specified; only the numeric interval is a tuning detail left to implementation.
+
+---
+
+## Latch storage & semantics
+
+### Decision
+
+`@portal-bootstrapped` as a tmux **server option**, used as a presence-latch — the same shape as the existing `@portal-restoring`: set via `SetServerOption`, read via `TryGetServerOption` (presence = any non-empty value; a `state`-package helper mirroring `IsRestoringSet`). It **dies with the tmux server**, which is the entire point: a server restart auto-clears it → the next command runs a full bootstrap. Reuses the existing `internal/state/markers.go` seam vocabulary (`RestoringChecker` / `ServerOptionWriter`). Confidence: high — proven, near-zero-risk pattern; user did not contest.
+
+---
+
+## Latch set-point & timing (the crux)
+
+### Context
+
+The review (F1/F2/F7) isolated this as the load-bearing decision: a full bootstrap can take seconds (it restores N sessions), so the window between "full bootstrap starts" and "latch set" is where all the concurrency/atomicity risk lives.
+
+### Decision
+
+**Set the latch as the final action of a *successful* `Orchestrator.Run` — after step 11, gated on no fatal error.** Three consequences, all agreed by the user:
+
+1. **Atomic-with-success, uniform across both invocation modes (retires F2).** The latch is set *inside* `Run`, not by the two callers, so the synchronous path and the concurrent cold+TUI goroutine both get it identically — no second set-point to keep in sync. "Latch present" ⟺ "a full bootstrap ran to completion."
+2. **Set at the *end*, not early — safe and sufficient.** Early-setting (e.g. right after the server is up) is **unsafe**: a concurrent command would see the latch and take the abridged path *before Restore recreated the sessions*, then attach to a session that doesn't exist yet. End-setting is **sufficient** for the target scenario because the reopen burst can't fire until the user multi-selects in the picker, and the picker only appears *after* bootstrap completes (loading screen on cold, synchronous on warm) — so by the time 20 `attach` fire, the latch is already set and they all take the abridged path.
+   - **Explicitly accepted non-goal:** a *pure cold-burst* — N commands hitting a genuinely serverless tmux simultaneously, *not* via the picker — is **not** collapsed by end-setting. That isn't the reopen flow, and it's already tolerated today (daemon flock + idempotent hook convergence). We accept it rather than complicate the set-point.
+3. **"Successful" = no *fatal* error; soft warnings still latch (the F1 answer).** A soft-step warning (`SaverDownWarning`, `CorruptSessionsJSONWarning`, partial restore) still sets the latch, because those either self-heal on the abridged path (EnsureSaver re-probes every command) or are non-retryable (a corrupt file won't un-corrupt next command). Requiring a totally-clean run would let one transient `SaverDownWarning` force every command back to full bootstrap for the whole server lifetime — defeating the feature. Only a **fatal** step (steps 1/2/3/8, which already abort with a non-zero exit / red TUI frame) leaves the latch **unset**, so the next command correctly retries the full bootstrap.
+
+**Bonus (retires F5 & F8):** because the latch is set only after step 7 (EagerSignalHydrate) and step 8 (Clear `@portal-restoring`) have run, "latch present" *guarantees* hydrate signalling finished and `@portal-restoring` was cleared. So the two markers can never both be set on an abridged command (F5 two-marker inconsistency), and a late-arming skeleton pane can't be stranded unsignalled (F8) — both fall out of the ordering with no extra logic.
+
+Confidence: high. User: "exactly the same decisions as I would have made."
 
 ---
 
