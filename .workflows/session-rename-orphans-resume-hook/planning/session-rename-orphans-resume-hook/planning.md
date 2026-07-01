@@ -77,3 +77,17 @@ approved_at: 2026-07-01
 - [ ] Rename-then-restore fires the registered hook (not bare `$SHELL`) for both triggers: raw `tmux rename-session` and the in-TUI `renameAndRefresh` path
 - [ ] Durable across repeated reboots: after rename+restore, a simulated next capture re-persists the id and a second restore still fires the hook
 - [ ] Post-restore stale-cleanup (bootstrap step 11 / `portal clean`) does not delete the just-restored hook; per-pane hooks under one session fire on the correct pane after rename+restore; un-stamped sessions degrade to the name-based key everywhere with no panic
+
+#### Tasks
+status: approved
+approved_at: 2026-07-01
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-rename-orphans-resume-hook-3-1 | Add `PortalID` field to `state.Session` schema (`json:"portal_id"`, tolerant decode) | sessions.json without `portal_id` decodes to `""`, older binary ignores the field (forward-compatible), no schema `Version` bump, encode/decode round-trip preserves the id |
+| session-rename-orphans-resume-hook-3-2 | Extend capture to read `#{@portal-id}` into `Session.PortalID` (append column, bump `captureFieldCount` 10→11, parser lockstep) | un-stamped session captures `""`, zero-row session yields `PortalID==""` (benign, already rejected by `Restore`), every existing field index unchanged (append-only), row parser rejects wrong-arity rows, all panes of a session carry the same session-scoped value |
+| session-rename-orphans-resume-hook-3-3 | Re-stamp `@portal-id` in `createSkeleton` from the saved value (best-effort after `NewSessionWithCommand`) | empty saved `PortalID` skips the stamp, `SetSessionOption` error swallowed (restore not aborted), re-stamp precedes `armPanes` (order preserved) |
+| session-rename-orphans-resume-hook-3-4 | Bake the stable hook key in `collectArmInfos` via `tmux.HookKey(sess.PortalID, sess.Name, w.Index, p.Index)` | empty saved `PortalID` falls back to name-based key, saved-index (base-index drift) preservation unchanged, ordering-trap guard — firing path never reads live `@portal-id`, multi-pane distinct `w.p` suffixes under one id |
+| session-rename-orphans-resume-hook-3-5 | Integration: rename-then-restore fires the registered hook for both triggers (raw `tmux rename-session` and in-TUI `renameAndRefresh`) | hook fires (not bare `$SHELL`) after external rename, hook fires after in-TUI `renameAndRefresh` rename, pane process kept running across rename (no self-heal restart) |
+| session-rename-orphans-resume-hook-3-6 | Integration: durable across repeated reboots + post-restore cleanup keeps the restored hook | id re-persisted by simulated next capture after restore, hook still fires on the second reboot cycle, freshly-restored hook survives the stale-cleanup pass (bootstrap step 11 / `portal clean`), live-key set from re-stamped `@portal-id` matches the id-keyed `hooks.json` entry |
+| session-rename-orphans-resume-hook-3-7 | Integration: multi-pane fires on the correct pane + graceful legacy degradation | per-pane hooks fire on the correct pane after rename+restore, un-stamped session degrades to name-based key end-to-end, no panic on empty/absent `PortalID` anywhere in the chain |
