@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-01
 cycle: 2
 phase: Plan Integrity Review
@@ -18,7 +18,7 @@ The three cycle-1 fixes were re-checked and are internally consistent, introduci
 
 ## Findings
 
-### 1. Task 3-5's new `tui`-package unit test conflicts with the existing `tui_test` rename scaffolding and specifies an unobservable assertion
+### 1. [RESOLVED: Fixed] Task 3-5's new `tui`-package unit test conflicts with the existing `tui_test` rename scaffolding and specifies an unobservable assertion
 
 **Severity**: Important
 **Plan Reference**: Phase 3, Task session-rename-orphans-resume-hook-3-5 (the in-TUI seam unit test added by the cycle-1 split) — `Do` bullet "In-TUI seam unit test (package `tui`)", the third `Tests` bullet, and Acceptance Criterion 3.
