@@ -10,7 +10,7 @@ The failure is **silent** (no error or warning at rename time) and **delayed** (
 - external `tmux rename-session`, and
 - Portal's own in-TUI rename modal (`r` key → `renameAndRefresh` → `tmux.RenameSession`), which today does a bare rename + list refresh with **zero** hook re-keying.
 
-It bites **only when the inner pane process does not restart** across the rename. If the process restarts (e.g. the external tool's own start-hook re-runs `portal hooks set` under the new name), the hook self-heals — which is why the bug hid in everyday use.
+It bites **only when the inner pane process does not restart** across the rename. If the process restarts (e.g. the external tool's own start-hook re-runs `portal hooks set` under the new name), the hook self-heals — which is why the bug hid in everyday use. (This self-heal depends on out-of-repo tooling actually re-running `portal hooks set` on restart: Portal's re-registration path is verified, but the external trigger firing is *observed*, not guaranteed by this codebase.)
 
 ## Root Cause
 
@@ -47,6 +47,8 @@ The fix's central invariant: **every site that produces or consumes a hook key d
 
 **Decoupling from `tmux.PaneTarget`.** `PaneTarget` stays exactly as-is — it remains the canonical, name-based `-t` *target* formatter, still used to address live panes (e.g. `respawn-pane`, `select-pane`). The hook key becomes a **separate concern** with its own formatter, so the change touches only hook identity, not tmux targeting.
 
+**Deliverable — retire the stale doc-comments.** `PaneTarget`/`PaneTargetExact` today carry in-source doc-comments (`tmux.go:551-558`, `572-573`) asserting `PaneTarget` *is* the canonical `hooks.json` key formatter and that its format must never change or it orphans `hooks.json`. After the fix those comments are false and must be updated: the canonical hook-key formatter is now `HookKey` / `HookKeyFormat`, and the load-bearing "format is stable across releases — changing it silently invalidates every `hooks.json` entry" invariant **transfers to those new primitives**, it does not disappear. Leaving the old comments in place would invite a future caller back into name-based keying — re-establishing the exact drift this fix removes.
+
 Two new derivation primitives in `internal/tmux`:
 - **`HookKeyFormat`** — a tmux format string for live reads: `#{?@portal-id,#{@portal-id},#{session_name}}:#{window_index}.#{pane_index}`. tmux resolves the conditional per-session: a stamped session yields `<id>:w.p`, an un-stamped one yields `<name>:w.p`.
 - **`HookKey(portalID, name string, window, pane int) string`** — a pure formatter for the saved path: returns `<portalID>:w.p` when `portalID != ""`, else `<name>:w.p`. The in-Go mirror of the tmux conditional, for use where the values come from saved state rather than a live tmux read.
@@ -78,6 +80,8 @@ PortalID string `json:"portal_id"`
 Additive and optional: an old `sessions.json` with no `portal_id` decodes to `""` (tolerant decode, same as other optional fields); a new binary reading it falls back to the session name. No schema `Version` bump and no `sessions.json` migration. Forward-compatible too — an older binary ignores the unknown field.
 
 **2. Capture (`internal/state/capture.go`).** Extend `captureFormat` with a session-scoped `#{@portal-id}` field and populate `Session.PortalID` from it. `#{@portal-id}` resolves per-pane to the owning session's option value, so it is present on every pane row for that session; the parser takes it when assembling the session. A legacy/un-stamped session captures `PortalID == ""`. (The opaque token is alphanumeric, so it cannot contain the `|||` field delimiter.)
+
+`captureFormat` is **fixed-arity**: it is paired with `const captureFieldCount` (currently `10`) that the row parser length-validates against. Adding the field is not free-form — `captureFieldCount` must bump to `11` and the parser's field-index reads must update in lockstep, or every captured row is rejected/mis-slotted.
 
 **3. Restore re-stamp (`internal/restore/session.go`).** In `createSkeleton`, immediately after `NewSessionWithCommand(sess.Name, …)` recreates the session, re-stamp the saved id when present — best-effort, mirroring creation-time stamping:
 ```go
