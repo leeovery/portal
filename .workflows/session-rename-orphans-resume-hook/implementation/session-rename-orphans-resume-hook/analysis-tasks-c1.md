@@ -6,7 +6,7 @@ total_proposed: 5
 # Analysis Tasks: session-rename-orphans-resume-hook (Cycle 1)
 
 ## Task 1: Copy PortalID in the findOrAppendSession append branch
-status: pending
+status: approved
 severity: medium
 sources: standards, architecture
 
@@ -32,7 +32,7 @@ sources: standards, architecture
 - Add a focused unit test in `internal/state/capture_test.go` that drives the merge/append path directly (or via a lowered `sessionLive` condition in a test-only construction) so a prev session carrying a non-empty `PortalID` is appended into a fresh index, and assert the appended `Session.PortalID` equals the prev `PortalID`. This pins the trap closed independently of the branch's production reachability. Follow the existing `capture_test.go` conventions (no `t.Parallel()`).
 
 ## Task 2: Fix the stale ListAllPanes doc-comment on cleanStaleAdapter
-status: pending
+status: approved
 severity: medium
 sources: standards, architecture
 
@@ -55,7 +55,7 @@ sources: standards, architecture
 - No new test (documentation-only correction). Existing `cmd` tests must still pass (`go test ./cmd/...`).
 
 ## Task 3: Update the ListAllPanes prose in the shared stale-cleanup helper
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -78,7 +78,7 @@ sources: standards
 - No new test (documentation-only correction).
 
 ## Task 4: Add a fast static byte-identity guard for the three @portal-id literals
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -107,7 +107,7 @@ sources: architecture
 - This task IS the test. Verify it fails when the literal in either format string is mutated (e.g. temporarily change `captureFormat`'s trailing column to `#{@portal_id}` and confirm the guard fails), then revert.
 
 ## Task 5: Collapse the triplicated @portal-id test constant in the tmux_test package
-status: pending
+status: approved
 severity: low
 sources: duplication
 

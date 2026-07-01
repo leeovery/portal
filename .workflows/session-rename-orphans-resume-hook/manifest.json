@@ -61,7 +61,13 @@
             "session-rename-orphans-resume-hook-3-4": "tick-2786cf",
             "session-rename-orphans-resume-hook-3-5": "tick-0ccccc",
             "session-rename-orphans-resume-hook-3-6": "tick-f8ed1f",
-            "session-rename-orphans-resume-hook-3-7": "tick-3159e0"
+            "session-rename-orphans-resume-hook-3-7": "tick-3159e0",
+            "session-rename-orphans-resume-hook-analysis-1": "tick-46b8f1",
+            "session-rename-orphans-resume-hook-analysis-1-1": "tick-c5cde0",
+            "session-rename-orphans-resume-hook-analysis-1-2": "tick-9b5a22",
+            "session-rename-orphans-resume-hook-analysis-1-3": "tick-6cdf8c",
+            "session-rename-orphans-resume-hook-analysis-1-4": "tick-8cde60",
+            "session-rename-orphans-resume-hook-analysis-1-5": "tick-70f32a"
           },
           "external_id": "tick-1bedd3"
         }
@@ -73,7 +79,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,

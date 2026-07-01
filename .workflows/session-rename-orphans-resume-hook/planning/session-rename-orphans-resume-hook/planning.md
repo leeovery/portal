@@ -91,3 +91,17 @@ approved_at: 2026-07-01
 | session-rename-orphans-resume-hook-3-5 | Integration: rename-then-restore fires the registered hook for both triggers (raw `tmux rename-session` and in-TUI `renameAndRefresh`) | hook fires (not bare `$SHELL`) after external rename, hook fires after in-TUI `renameAndRefresh` rename, pane process kept running across rename (no self-heal restart) |
 | session-rename-orphans-resume-hook-3-6 | Integration: durable across repeated reboots + post-restore cleanup keeps the restored hook | id re-persisted by simulated next capture after restore, hook still fires on the second reboot cycle, freshly-restored hook survives the stale-cleanup pass (bootstrap step 11 / `portal clean`), live-key set from re-stamped `@portal-id` matches the id-keyed `hooks.json` entry |
 | session-rename-orphans-resume-hook-3-7 | Integration: multi-pane fires on the correct pane + graceful legacy degradation | per-pane hooks fire on the correct pane after rename+restore, un-stamped session degrades to name-based key end-to-end, no panic on empty/absent `PortalID` anywhere in the chain |
+
+### Phase 4: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-rename-orphans-resume-hook-analysis-1-1 | Copy `PortalID` in the `findOrAppendSession` append branch | append branch currently unreachable (no live bug), latent re-orphan trap if `sessionLive` gate relaxed, `Windows` stays empty `[]Window{}`, no change to merge/gate logic |
+| session-rename-orphans-resume-hook-analysis-1-2 | Fix the stale `ListAllPanes` doc-comment on `cleanStaleAdapter` | comment-only edit, sibling `stale_marker_cleanup.go:43` `ListAllPanes` reference must NOT change (name-based skeleton-marker cleanup) |
+| session-rename-orphans-resume-hook-analysis-1-3 | Update the `ListAllPanes` prose in the shared stale-cleanup helper | eight comment references across two files, comment-only (no call site/logic change), preserve name-based-vs-hook-key distinction |
+| session-rename-orphans-resume-hook-analysis-1-4 | Add a fast static byte-identity guard for the three `@portal-id` literals | import-cycle avoidance dictates guard placement, no-tmux (does not depend on `SkipIfNoTmux`), pins canonical literal value, guard must fail on a mutated literal |
+| session-rename-orphans-resume-hook-analysis-1-5 | Collapse the triplicated `@portal-id` test constant in the `tmux_test` package | three consts + one inlined literal collapse to one, import-cycle avoidance preserved (literal not `session.PortalIDOption`), surviving decl keeps byte-identity comment |
