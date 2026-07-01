@@ -133,13 +133,28 @@ So the real question isn't "is cleanup important" — it's **"does a warm server
 - **Move cleanup into the daemon.** Make the lifetime-resident daemon prune stale hooks on its tick.
   - Cons: scope expansion; the daemon already deliberately stays out of the hooks store; only buys prompt cleanup of low-harm bloat. Better as a separate consideration if it ever matters.
 
-### Decision (recommended — awaiting confirm)
+### Can a stale hook *misfire*? (the "side effect" question)
 
-**Skip all of Class 3 on the warm path.** Steps 9 and 10 are trivially safe — a warm server produces none of their targets. Step 11 is also skipped: the only thing it would clean (dead hook entries) is low-harm, recoverable via `portal clean` + next cold boot, and skipping it actively shrinks the hooks-wipe bug surface. The weeks-long-server worry dissolves once you see that nearly all cleanup targets are *restore-window (cold-boot) artifacts*, not warm-server output.
+The user's concern with skipping hook cleanup is **side effects**, not bloat. So: can a genuinely-stale hook entry ever fire on the *wrong* target?
 
-**Net result of the whole "scope" classification: the latch skips everything except step 5 (EnsureSaver).** A clean two-class split — protective liveness stays, all else is cold-only.
+The hook key is the structural key `#{session_name}:#{window_index}.#{pane_index}` (`tmux.StructuralKeyFormat`, e.g. `myproj-AbC123:0.0`). Session names are `{project}-{nanoid}` and `GenerateSessionName` **guarantees uniqueness**. A "stale" entry = a key not present in the live pane set. For that key to become live again, a session with that exact nanoid-bearing name must exist again — which only happens when Portal **restores that same saved session** (same identity) after a reboot, and firing then is the hook's *intended* behaviour, not a misfire.
 
-Confidence: high. Open only on the `portal clean` adequacy assumption for hooks bloat (deemed sufficient).
+- A different, newly-created session gets a **new** nanoid ⇒ new key ⇒ never collides with the stale entry.
+- Within-session index reuse (`window.pane` recycled by a new pane in a *surviving* session) keeps the key **live**, so it's never classed as stale — that's a separate positional-key property of the hooks feature, orthogonal to cleanup timing, and unfixable by cleaning stale entries anyway.
+
+**Conclusion: a genuinely-stale hook entry cannot fire on the wrong session.** The only cost of leaving it is inert JSON bloat. (Confidence: high, modulo a user manually recreating a session under an old nanoid name by hand — not a realistic path.)
+
+### Decision (parent still open — hooks-cleanup home under discussion)
+
+Steps 9 and 10: **skip on warm**, decided — a warm server produces none of their targets.
+
+Step 11 (hooks): the user wants cleanup **not to wait**. Given the misfire trace above the risk is bloat, not misfiring — but the user's preference stands. The fork is *where* prompt cleanup lives:
+
+- **Skip on warm; rely on `portal clean` + cold boot.** Simplest; bloat-only cost. *(Original recommendation; user leans against.)*
+- **Keep step 11 on the warm path** (like EnsureSaver). ⚠️ **Anti-recommended** — this re-inflates the exact concurrency/destructive surface the feature exists to remove: 20 burst `portal attach` commands would each run a `list-panes -a` diff + atomic `hooks.json` rewrite, and that operation is precisely the `bootstrap-cleanstale-wipes-hooks-on-tmux-transient` bug surface.
+- **Move hook cleanup into the daemon.** Lifetime-resident single writer that already knows the live pane set each tick; prompt cleanup with **no** per-command work and **no** burst-concurrency on `hooks.json`. Scope addition (daemon gains a hooks-store write duty + guarded posture); could be in this feature or a tightly-coupled follow-up.
+
+Leaning: **daemon-owned cleanup** if prompt cleanup is required, because per-command cleanup contradicts the feature's whole purpose.
 
 ---
 
