@@ -42,17 +42,18 @@ A living index of subtopics tracked during the discussion.
 
 ### Map
 
-  Discussion Map — Skip Bootstrap When Warm (9 subtopics — 1 decided · 1 converging · 7 pending)
+  Discussion Map — Skip Bootstrap When Warm (10 subtopics — 1 decided · 2 converging · 7 pending)
 
-  ┌─ → What "skip" means — classifying the 11 steps [converging]
-  │  ├─ ✓ Protective steps stay on the warm path (EnsureSaver) [decided]
-  │  └─ → Cleanup steps over a long-lived (weeks) server [converging]
+  ┌─ → Full vs Abridged bootstrap — classifying the 11 steps [converging]
+  │  ├─ ✓ Protective steps stay abridged-path (EnsureSaver) [decided]
+  │  ├─ → Hooks cleanup home → the _portal-saver daemon [converging]
+  │  └─ ○ "Full"/"Abridged" naming & the single-abridged constraint [pending]
   ├─ ○ Latch storage & semantics [pending]
   ├─ ○ Where & when the latch is set [pending]
   ├─ ○ Latch-check placement in the entry path [pending]
   ├─ ○ First-touch race tolerance [pending]
   ├─ ○ Partial-bootstrap / failure handling [pending]
-  ├─ ○ Interaction with the cold+TUI concurrent path [pending]
+  ├─ ○ Interaction with the full-bootstrap concurrent/loading path [pending]
   └─ ○ Edge cases & invalidation [pending]
 
 ---
@@ -83,9 +84,20 @@ Three classes, not two:
 | **2 — Protective liveness** (safety net against mid-lifetime death) | 5 EnsureSaver | **Keep on every command** as a cheap probe + re-ensure if down. Decided — see child below. |
 | **3 — Cleanup / hygiene** (accrues over the lifetime) | 9 CleanStaleMarkers, 10 SweepOrphanFIFOs, 11 CleanStale (hooks) | **Open** — the weeks-long-server constraint makes "once per lifetime" insufficient. See child subtopic. |
 
+### Naming & the single-abridged constraint (user directive)
+
+- **Terminology:** use **full bootstrap** vs **abridged bootstrap**, *not* cold/warm — "cold/warm" collides with "is the tmux server running." The real trigger is the **latch** ("has Portal bootstrapped *this* server yet"), which usually coincides with server-was-off but isn't identical (a hand-started tmux server + `x` has no latch → gets the full bootstrap).
+- **One abridged version only.** The user explicitly rejects multiple abridged variants (e.g. an `open`-flavour that cleans + an `attach`-flavour that doesn't). There is exactly one abridged path, run identically by every command against an already-bootstrapped server.
+- **Same orchestrator, two invocation modes (grounding).** Full and abridged are not different programs — the full path is the existing `Orchestrator.Run`; on a cold `portal open` it runs concurrently behind the loading screen (slow: start server + restore N sessions), otherwise synchronously. The loading screen is a slow-path wrapper, not a distinct bootstrap.
+
 ### Decision (parent)
 
-Reject the all-or-nothing skip. The latch gates **Class 1** only; **Class 2** stays on the warm path; **Class 3** is under discussion. This is the explicit "separate cold-start from warm-start" the user asked for. Confidence: high on Classes 1 and 2; Class 3 open.
+Reject the all-or-nothing skip. Split into two named paths:
+
+- **Full bootstrap** (latch absent): all 11 steps, then set the latch.
+- **Abridged bootstrap** (latch present): **EnsureSaver liveness probe only** (Class-2 protective) — the single, uniform reduced path. Everything in Class 1 is skipped; Class-3 cleanup is removed from the per-command path entirely and homed on the daemon (see child).
+
+Confidence: high. This is the explicit "separate full from abridged" the user asked for, with a single abridged version.
 
 ---
 
@@ -146,17 +158,19 @@ The hook key is the structural key `#{session_name}:#{window_index}.#{pane_index
 
 **Conclusion: a genuinely-stale hook entry cannot fire on the wrong session.** The only cost of leaving it is inert JSON bloat. (Confidence: high, modulo a user manually recreating a session under an old nanoid name by hand — not a realistic path.)
 
-### Decision (parent still open — hooks-cleanup home under discussion)
+### Decision — daemon-owned cleanup (converging, awaiting confirm)
 
-Steps 9 and 10: **skip on warm**, decided — a warm server produces none of their targets.
+Steps 9 and 10: skipped on the abridged path, decided — a warm server produces none of their targets (they stay in the full bootstrap for cold-boot leftovers).
 
-Step 11 (hooks): the user wants cleanup **not to wait**. Given the misfire trace above the risk is bloat, not misfiring — but the user's preference stands. With the corrected grounding (cleanup runs on every `x` today and is harmless), the decision is just *which commands keep running it once we optimize the warm path*:
+Step 11 (hooks): the **single-abridged-version constraint forces the resolution**. Command-classified cleanup (the earlier "cleanup on `open`, not `attach`" idea) is exactly the multiple-abridged-variants the user rejects — dropped. Keeping cleanup in the one abridged path means the 20× `attach` burst runs it (the anti-recommended `list-panes -a` + `hooks.json` rewrite concurrency surface). So cleanup can live in **neither** abridged variant. It moves out of the per-command path entirely and onto the **`_portal-saver` daemon** (`portal state daemon`):
 
-- **Command-classified — cleanup on `open`, skipped on `attach`.** `open`/`x` is run hundreds of times/day, single-invocation (never bursted), and already makes the user wait for a UI. Keeping a cleanup pass there is essentially **status quo for `open`**; the change is dropping it (and the heavy steps) from the bursty `attach` path. Cleanup stays prompt; zero daemon scope; the only cost is a small command-name branch in the entry path. Bounds: cleanup cadence is coupled to how often `open` is run (a non-issue for this user).
-- **Keep cleanup on *all* warm commands (incl. `attach`).** ⚠️ **Anti-recommended** — re-inflates the exact concurrency surface the feature removes: 20 burst `attach` each running a `list-panes -a` diff + atomic `hooks.json` rewrite (the `bootstrap-cleanstale-wipes-hooks-on-tmux-transient` surface).
-- **Daemon-owned cleanup.** Lifetime-resident single writer that already has the live pane set each tick; prompt cleanup, uniform light path for *all* warm commands (optimizes `open` fully too), no `hooks.json` write contention. Scope addition (daemon gains a guarded hooks-store write duty); most robust, decouples cadence from command usage.
+- The daemon is the existing background process inside the hidden `_portal-saver` tmux session — **not launchd** (that was previously rejected and is not being reopened). It already ticks ~1s capturing state, so it already holds the live pane set.
+- Give it a **periodic, guarded** hooks-cleanup pass (cadence TBD — not every tick; guard = never treat an empty live-pane read as authoritative, mirroring bootstrap step 9/11's mass-delete hazard guard).
+- Result: cleanup runs across the whole server lifetime (doesn't "wait"), the abridged path stays a single lean version, the burst does zero cleanup, and no new OS-level process is introduced.
 
-Leaning: **command-classified (cleanup on `open`)** — proportionate to the low stakes, near-zero scope, strictly fewer cleanup runs than today, and it fully satisfies "don't wait" because `x` runs constantly. **Daemon-owned** is the pick only if we want cleanup fully decoupled from command usage and are willing to grow the daemon.
+Scope note: this grows the daemon (new guarded hooks-store write duty + failure posture). Flagged to the user as a scope addition to this feature (vs. a tightly-coupled follow-up). Given the misfire trace (stale hooks are inert), the fallback if the user declines the daemon scope is "cleanup runs only on full bootstraps + `portal clean`" — but that reintroduces the weeks-long wait the user rejected.
+
+Confidence: high on the reasoning; awaiting user confirm on taking the daemon-cleanup scope into this feature.
 
 ---
 
@@ -172,9 +186,10 @@ Leaning: **command-classified (cleanup on `open`)** — proportionate to the low
 
 ### Current State
 
-- **Decided:** reject all-or-nothing skip; EnsureSaver (step 5, protective liveness) stays on the warm path.
-- **Converging (awaiting confirm):** skip all of Class 3 (steps 9/10/11) on warm — 9 & 10 produce nothing on a warm server; 11 (hooks) is low-harm + bug-reducing to skip. Net scope: **latch skips everything except step 5**.
-- Mechanism (server-option latch), set-point, check placement, race/failure handling, concurrent-path interaction, and edge cases all still pending.
+- **Decided:** two named paths — **full bootstrap** (all 11, sets latch) vs a single **abridged bootstrap** (EnsureSaver liveness probe only). EnsureSaver stays; Class-1 heavy steps skipped when latched.
+- **Converging (awaiting confirm):** hooks cleanup (step 11) moves to the **`_portal-saver` daemon** on a guarded cadence — forced by the single-abridged-version constraint. Scope addition flagged.
+- **Naming locked:** full/abridged, not cold/warm; the latch is the switch.
+- Mechanism (server-option latch), set-point, check placement, race/failure handling, full-bootstrap concurrent/loading-path interaction, and edge cases all still pending.
 
 ## Triage
 
