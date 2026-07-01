@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: Session Rename Orphans Resume Hook (Cycle 2)
 
 ## Task 1: Add a fast tmux-less guard binding session.PortalIDOption to the hook-key format strings
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -36,7 +36,7 @@ sources: architecture
 - Confirm the full suite still passes: `go build -o portal .` and `go test ./...`.
 
 ## Task 2: Delete redundant verifyRenameHookFiredOnce; reuse the shared assertHookFireCount helper
-status: pending
+status: approved
 severity: low
 sources: duplication
 

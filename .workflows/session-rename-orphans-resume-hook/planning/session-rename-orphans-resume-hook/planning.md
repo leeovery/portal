@@ -105,3 +105,14 @@ approved_at: 2026-07-01
 | session-rename-orphans-resume-hook-analysis-1-3 | Update the `ListAllPanes` prose in the shared stale-cleanup helper | eight comment references across two files, comment-only (no call site/logic change), preserve name-based-vs-hook-key distinction |
 | session-rename-orphans-resume-hook-analysis-1-4 | Add a fast static byte-identity guard for the three `@portal-id` literals | import-cycle avoidance dictates guard placement, no-tmux (does not depend on `SkipIfNoTmux`), pins canonical literal value, guard must fail on a mutated literal |
 | session-rename-orphans-resume-hook-analysis-1-5 | Collapse the triplicated `@portal-id` test constant in the `tmux_test` package | three consts + one inlined literal collapse to one, import-cycle avoidance preserved (literal not `session.PortalIDOption`), surviving decl keeps byte-identity comment |
+
+### Phase 5: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-rename-orphans-resume-hook-analysis-2-1 | Add a fast tmux-less guard binding `session.PortalIDOption` to the hook-key format strings | source-of-truth constant change caught in tmux-less path, not `//go:build integration`-gated / no `SkipIfNoTmux`, ties constant to `tmux.HookKeyFormat` embedding, `captureFormat` unreachable from `cmd` (transitive chain via shared literal), adds coverage only (no prod/cycle-1-guard edits) |
+| session-rename-orphans-resume-hook-analysis-2-2 | Delete redundant `verifyRenameHookFiredOnce`; reuse the shared `assertHookFireCount` helper | single call site repointed to `assertHookFireCount(t, file, 1)`, function + doc-comment deleted, only genuinely-orphaned imports removed, `assertHookFireCount` unchanged, 3-6/3-7 files untouched, no behaviour change to 3-5 test |
