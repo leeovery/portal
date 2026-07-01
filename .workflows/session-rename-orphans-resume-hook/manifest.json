@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "session-rename-orphans-resume-hook": {
-          "status": "in-progress",
+          "status": "completed",
           "sources": {
             "session-rename-orphans-resume-hook": {
               "status": "incorporated"
@@ -24,7 +24,7 @@
           "review_cycle": 4,
           "finding_gate_mode": "auto",
           "construction_gate_mode": "gated",
-          "date": "2026-06-30"
+          "date": "2026-07-01"
         }
       }
     }
