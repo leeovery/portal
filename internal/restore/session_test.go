@@ -10,6 +10,7 @@ import (
 
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -735,6 +736,146 @@ func TestSessionRestorer_ArmPanesReturnsWrappedErrorOnRespawnPaneFailure(t *test
 	respawnIdxs := findAllCalls(mock.Calls, "respawn-pane")
 	if len(respawnIdxs) != 2 {
 		t.Errorf("respawn-pane calls = %d, want 2 (pane 0 armed, pane 1 failed, pane 2 skipped); calls: %v", len(respawnIdxs), mock.Calls)
+	}
+}
+
+// portalIDSetOptionCall returns the args of the first set-option call that
+// stamps session.PortalIDOption (@portal-id) on the named session, and true if
+// one exists. The @portal-id set-option shape is
+// [set-option, -t, <session>, @portal-id, <value>].
+func portalIDSetOptionCall(calls [][]string, name string) ([]string, bool) {
+	for _, c := range calls {
+		if len(c) == 5 && c[0] == "set-option" && c[1] == "-t" && c[2] == name && c[3] == session.PortalIDOption {
+			return c, true
+		}
+	}
+	return nil, false
+}
+
+// setOptionCallIndex returns the index of the first set-option call stamping
+// session.PortalIDOption on name, or -1 if absent.
+func setOptionCallIndex(calls [][]string, name string) int {
+	for i, c := range calls {
+		if len(c) == 5 && c[0] == "set-option" && c[1] == "-t" && c[2] == name && c[3] == session.PortalIDOption {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestSessionRestorer_ReStampsPortalIDFromSavedValue(t *testing.T) {
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
+	client := tmux.NewClient(mock)
+	dir := t.TempDir()
+	r := &restore.SessionRestorer{Client: client, StateDir: dir}
+
+	sess := newSession("work", nil,
+		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
+	)
+	sess.PortalID = "aB3xY9kZ"
+
+	if _, err := r.Restore(sess); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	call, ok := portalIDSetOptionCall(mock.Calls, "work")
+	if !ok {
+		t.Fatalf("expected a set-option @portal-id call on session %q; calls: %v", "work", mock.Calls)
+	}
+	if call[4] != "aB3xY9kZ" {
+		t.Errorf("re-stamped @portal-id value = %q, want %q", call[4], "aB3xY9kZ")
+	}
+
+	// Re-stamp must land after new-session and before the first set-environment
+	// (applyEnvironment). No environment here, so assert ordering against
+	// new-session only.
+	newSessionAt := callsAt(mock.Calls, "new-session")
+	stampAt := setOptionCallIndex(mock.Calls, "work")
+	if newSessionAt < 0 || stampAt < 0 {
+		t.Fatalf("expected new-session and @portal-id set-option both present; new-session=%d stamp=%d", newSessionAt, stampAt)
+	}
+	if stampAt <= newSessionAt {
+		t.Errorf("ordering violated: new-session(%d) must precede @portal-id set-option(%d)", newSessionAt, stampAt)
+	}
+}
+
+func TestSessionRestorer_SkipsReStampWhenSavedPortalIDEmpty(t *testing.T) {
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
+	client := tmux.NewClient(mock)
+	dir := t.TempDir()
+	r := &restore.SessionRestorer{Client: client, StateDir: dir}
+
+	// PortalID left empty (legacy / un-stamped saved session).
+	sess := newSession("work", nil,
+		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
+	)
+
+	if _, err := r.Restore(sess); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	if _, ok := portalIDSetOptionCall(mock.Calls, "work"); ok {
+		t.Errorf("expected NO @portal-id set-option call for empty saved PortalID; calls: %v", mock.Calls)
+	}
+}
+
+func TestSessionRestorer_SucceedsWhenPortalIDReStampFails(t *testing.T) {
+	mock := &mockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) == 5 && args[0] == "set-option" && args[3] == session.PortalIDOption {
+				return "", errors.New("set-option boom")
+			}
+			if len(args) > 0 && args[0] == "list-panes" {
+				return "0:0", nil
+			}
+			return "", nil
+		},
+	}
+	client := tmux.NewClient(mock)
+	dir := t.TempDir()
+	r := &restore.SessionRestorer{Client: client, StateDir: dir}
+
+	sess := newSession("work", nil,
+		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
+	)
+	sess.PortalID = "aB3xY9kZ"
+
+	if _, err := r.Restore(sess); err != nil {
+		t.Fatalf("Restore returned error %v, expected nil (@portal-id re-stamp failure must be swallowed)", err)
+	}
+
+	// The stamp was attempted (and failed, swallowed).
+	if _, ok := portalIDSetOptionCall(mock.Calls, "work"); !ok {
+		t.Errorf("expected the @portal-id set-option to be attempted; calls: %v", mock.Calls)
+	}
+	// Arm phase still ran despite the swallowed stamp failure.
+	if got := len(findAllCalls(mock.Calls, "respawn-pane")); got != 1 {
+		t.Errorf("respawn-pane calls = %d, want 1 (arm phase must still run); calls: %v", got, mock.Calls)
+	}
+}
+
+func TestSessionRestorer_ReStampsPortalIDBeforeArmingPanes(t *testing.T) {
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
+	client := tmux.NewClient(mock)
+	dir := t.TempDir()
+	r := &restore.SessionRestorer{Client: client, StateDir: dir}
+
+	sess := newSession("work", nil,
+		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
+	)
+	sess.PortalID = "aB3xY9kZ"
+
+	if _, err := r.Restore(sess); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	stampAt := setOptionCallIndex(mock.Calls, "work")
+	respawnAt := callsAt(mock.Calls, "respawn-pane")
+	if stampAt < 0 || respawnAt < 0 {
+		t.Fatalf("expected @portal-id set-option and respawn-pane both present; stamp=%d respawn=%d", stampAt, respawnAt)
+	}
+	if stampAt >= respawnAt {
+		t.Errorf("ordering violated: @portal-id set-option(%d) must precede respawn-pane(%d) (re-stamp before arm)", stampAt, respawnAt)
 	}
 }
 
