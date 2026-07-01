@@ -16,7 +16,7 @@ Three findings follow: one Important (a test-coverage integrity gap where an acc
 
 ## Findings
 
-### 1. Task 3-5 Trigger B cannot genuinely exercise `renameAndRefresh` from `restore_test`; acceptance criterion overstates coverage
+### 1. Task 3-5 Trigger B cannot genuinely exercise `renameAndRefresh` from `restore_test`; acceptance criterion overstates coverage [RESOLVED: Fixed]
 
 **Severity**: Important
 **Plan Reference**: Phase 3, task `session-rename-orphans-resume-hook-3-5` (Integration — rename-then-restore fires the registered hook for both triggers)
