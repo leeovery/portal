@@ -328,6 +328,27 @@ func (c *Client) ResolveStructuralKey(paneID string) (string, error) {
 	return output, nil
 }
 
+// ResolveHookKey is the canonical live-read hook-key resolver: it issues a
+// single display-message read against paneID using HookKeyFormat and returns
+// the tmux-resolved key. tmux picks the branch per session — a stamped session
+// (carrying @portal-id) resolves to "<id>:w.p" (rename-immune) while an
+// un-stamped session resolves to "<name>:w.p" (the legacy / no-migration
+// fallback). The stamped-vs-un-stamped conditional resolves entirely inside
+// tmux via HookKeyFormat, so there is deliberately no Go-side "id absent"
+// branch here: one read, one error path.
+//
+// On a read failure it returns ("", wrapped error) and MUST NEVER fall back to
+// synthesizing a name-based key — doing so would silently orphan a stamped
+// session's hook by keying it off the mutable session name. See HookKey /
+// HookKeyFormat for the derivation primitives this read mirrors.
+func (c *Client) ResolveHookKey(paneID string) (string, error) {
+	output, err := c.cmd.Run("display-message", "-p", "-t", paneID, HookKeyFormat)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve hook key for pane %q: %w", paneID, err)
+	}
+	return output, nil
+}
+
 // ActivePaneCurrentPath returns the active pane's current_path for the named
 // session in a single tmux read. It runs "display-message -p -t <session> -F
 // '#{pane_current_path}'" which, with no pane target, resolves against the
