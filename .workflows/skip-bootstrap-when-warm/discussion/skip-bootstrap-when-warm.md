@@ -174,11 +174,13 @@ The hook key is the structural key `#{session_name}:#{window_index}.#{pane_index
 
 Steps 9 and 10: skipped on the abridged path, decided — a warm server produces none of their targets (they stay in the full bootstrap for cold-boot leftovers).
 
-Step 11 (hooks): the **single-abridged-version constraint forces the resolution**. Command-classified cleanup (the earlier "cleanup on `open`, not `attach`" idea) is exactly the multiple-abridged-variants the user rejects — dropped. Keeping cleanup in the one abridged path means the 20× `attach` burst runs it (the anti-recommended `list-panes -a` + `hooks.json` rewrite concurrency surface). So cleanup can live in **neither** abridged variant. It moves out of the per-command path entirely and onto the **`_portal-saver` daemon** (`portal state daemon`). **User confirmed: in-scope for this feature.**
+Step 11 (hooks): the **single-abridged-version constraint forces the resolution**. Command-classified cleanup (the earlier "cleanup on `open`, not `attach`" idea) is exactly the multiple-abridged-variants the user rejects — dropped. Keeping cleanup in the one abridged path means the 20× `attach` burst runs it (the anti-recommended `list-panes -a` + `hooks.json` rewrite concurrency surface). So cleanup can live in **neither** abridged variant, and it is **removed from the orchestrator entirely** — the `_portal-saver` daemon (`portal state daemon`) becomes its **sole automatic home**. **User confirmed: in-scope for this feature.**
+
+**Step 11 leaves the full bootstrap too (resolves review F2 — decided with user).** Not just skipped on the abridged path — the `CleanStale` step and its seam are removed from the orchestrator, taking it from 11 steps to 10. Rationale (user-led): a bootstrap-time cleanup would only *uniquely* help when a full bootstrap runs **and** EnsureSaver fails to start the daemon — a scenario that is already catastrophic (no daemon ⇒ no scrollback capture), where an inert stale-hook entry is noise. What step 11 cleans is inert anyway (stale entries can't misfire — see the trace above), and `portal clean` remains a **daemon-independent manual backstop**. At cold boot the freshly-started daemon cleans on its first eligible tick (~10s) rather than during bootstrap — fine, since it's inert. (Trade-off acknowledged: this is slightly more surgery — the orchestrator loses a step + its `CleanStale` seam/adapter — versus leaving step 11 in for a harmless idempotent double-clean; the clean single-home model won.)
 
 **Operational contract (resolves review F4):**
 
-- **Home:** the existing background process inside the hidden `_portal-saver` tmux session — **not launchd** (previously rejected, not reopened).
+- **Home:** the existing background process inside the hidden `_portal-saver` tmux session — **not launchd** (previously rejected, not reopened). `portal clean` is the manual, daemon-independent backstop.
 - **Reuse, don't reinvent:** the daemon calls the existing shared `cmd/run_hook_stale_cleanup.go` `runHookStaleCleanup` helper. That helper already carries the **mass-deletion hazard guard** (`len(livePanes)==0 && hooks present` → skip + WARN, never wipe) and drives `hooks.Store.CleanStale`, which emits the existing `EmitCleanStaleSummary` **audit breadcrumb** — so no new audit event/vocabulary is invented.
 - **No layering problem:** `runHookStaleCleanup` and the daemon (`cmd/state_daemon.go`) are both in package `cmd` — same package, so no new import and **no cycle**. (The "daemon stays out of the hooks store" note was a soft observation, not a hard boundary.)
 - **Cadence (user directive):** *not* every 1s tick. Throttled to ~10s via a cheap `time.Since(lastCleanup) >= interval` check evaluated per tick; the cleanup body fires only when the interval has elapsed. Exact interval is a tuning detail (10s default). Rationale: the 1s tick must stay light (capture/scrollback save is the priority and can exceed 1s); stale hooks are inert so precise timing is irrelevant. (Lazier alternative noted, not chosen: trigger cleanup only when the live-session set shrinks.)
@@ -278,7 +280,7 @@ Confidence: high. User confirmed placement, reuse-the-plumbing shape, and the lo
 ### Accepted residues (harmless bloat — reviewed & tolerated)
 
 - **Cold-boot cleanup leftovers (review F1).** If a cold boot's steps 9/10 (marker/FIFO cleanup) soft-fail, that residue isn't retried until the next full bootstrap. Accepted: markers/FIFOs are inert (the daemon-merge live-set filter already prevents dead-session resurrection), and version-stamped upgrades now give *extra* full-bootstrap cleanup passes beyond just restarts.
-- **Daemon-death vs cleanup home (review F5).** Step-11 hooks cleanup was relocated from an always-runs path (per-command bootstrap) to a conditionally-alive one (the daemon) — a named trade. Backstop: cleanup still runs in every *full* bootstrap (cold boot + each upgrade), and the abridged path's liveness EnsureSaver revives a dead daemon. Worst case (daemon dead *and* revival failing) leaves only inert hooks bloat until the next full bootstrap. Accepted given the misfire trace (stale hooks can't fire on the wrong session).
+- **Daemon-death vs cleanup home (review F5 + F2 decision).** Step-11 hooks cleanup was relocated from an always-runs path (per-command bootstrap) to a conditionally-alive one (the daemon), and removed from the orchestrator — a named trade. Homes: the daemon (cadence, warm lifetime + cold-boot first tick) revived by the abridged liveness EnsureSaver, plus `portal clean` (manual, daemon-independent). Worst case (daemon dead *and* revival failing *and* no `portal clean`) leaves only inert hooks bloat until the daemon next revives. Accepted given the misfire trace (stale hooks can't fire on the wrong session) — the user explicitly weighed keeping a bootstrap-time pass and rejected it: it would only help when the daemon can't start at all, which is already a catastrophic (capture-down) state.
 
 Confidence: high. All review-002 mechanism findings (F1–F8) resolved or explicitly accepted.
 
@@ -292,7 +294,7 @@ The feature's value is *not running* steps, which is harder to assert than runni
 
 ### Decision (shape approved by user)
 
-- **Branch selection (unit, seam-mocked).** The orchestrator + steps are already `bootstrapDeps`-injected. Set `@portal-bootstrapped` on a fake client to {absent, version-match, version-mismatch} and assert: *satisfied* → only EnsureSaver invoked, Restore/Sweep/CleanStale **not** invoked; *not satisfied* → full `Run` **and** latch ends stamped with the current version. Assert via seam call-recording.
+- **Branch selection (unit, seam-mocked).** The orchestrator + steps are already `bootstrapDeps`-injected. Set `@portal-bootstrapped` on a fake client to {absent, version-match, version-mismatch} and assert: *satisfied* → only EnsureSaver invoked, the heavy steps (RegisterHooks / Restore / marker+FIFO sweeps) **not** invoked; *not satisfied* → full `Run` (now 10 steps, no `CleanStale`) **and** latch ends stamped with the current version. Assert via seam call-recording. (Also assert the daemon's throttled cleanup is the only hooks-`CleanStale` caller left, since bootstrap no longer runs it.)
 - **Set-point gating.** Inject a soft-warning step → assert latch **is** set; inject a fatal step → assert latch **unset**. Directly nails the soft-vs-fatal rule.
 - **Abridged self-heal (crash-recovery regression guard).** Latch satisfied + saver dead → assert the abridged liveness EnsureSaver revives it. This is the explicit guard for the "keep the fail-safe" thread.
 - **Daemon cleanup.** Unit-test the throttled cadence gate (`time.Since(lastCleanup) >= interval`); the cleanup body is the existing `runHookStaleCleanup` (already covered, guard included).
@@ -319,12 +321,12 @@ Confidence: high. User: "The test strategy sounded okay to me."
 
 ### Current State
 
-- **Decided:** two named paths — **full bootstrap** (all 11, sets latch) vs a single **abridged bootstrap** (full EnsureSaver — liveness **and** version-gate — only). Class-1 heavy steps skipped when latched.
-- **Decided:** hooks cleanup (step 11) moves to the **`_portal-saver` daemon**, in-scope for this feature. Contract fixed: reuse `runHookStaleCleanup` (inherits mass-delete guard + audit breadcrumb; same `cmd` package → no cycle), ~10s throttled cadence off the 1s tick, WARN-and-continue failure posture.
-- **Decided:** naming full/abridged (not cold/warm); the latch is the switch; EnsureSaver keeps its version-gate on the abridged path (F6).
-- **Decided (mechanism):** version-stamped `@portal-bootstrapped` server option; latch set as the final action of a successful `Run` (soft warnings still latch, fatal doesn't); single-read three-way branch (satisfied→abridged, else full — concurrent+loading on TUI); loading-screen keyed on latch-not-satisfied; abridged EnsureSaver = liveness-only (version-gate → full bootstrap on version-mismatch).
-- **Reviews folded in:** set 001 (F1–F10) and set 002 (F1–F8) all resolved or explicitly accepted.
-- **All 12 subtopics decided.** Test strategy approved. Two reviews (001, 002) incorporated; final review pass pending before conclusion.
+- **Two named paths:** **full bootstrap** (sets the latch) vs a single **abridged bootstrap** whose only work is a liveness-only EnsureSaver. Class-1 heavy steps skipped when the latch is satisfied.
+- **Abridged EnsureSaver = liveness-only** (full crash/death recovery preserved). The version-gate lives solely in the full bootstrap, triggered by a version-mismatch latch.
+- **Version-stamped latch:** `@portal-bootstrapped = <binary version>`; satisfied = present **and** version-matches. Set as the final action of a successful `Run` (soft warnings still latch; only fatal steps leave it unset). Single-read three-way branch (satisfied → abridged; else full — concurrent+loading on the TUI path). Loading-screen keyed on latch-not-satisfied.
+- **Hooks cleanup: sole automatic home is the `_portal-saver` daemon** (throttled ~10s cadence, reusing `runHookStaleCleanup` — inherits the mass-delete guard + audit breadcrumb, same `cmd` package → no cycle, WARN-and-continue). **Step 11 is removed from the orchestrator entirely** (11 → 10 steps); `portal clean` remains the daemon-independent manual backstop.
+- **Naming:** full/abridged (not cold/warm); the latch is the switch.
+- **All 12 subtopics decided.** Reviews 001, 002, 003 folded in (all findings resolved or explicitly accepted).
 
 ## Triage
 
