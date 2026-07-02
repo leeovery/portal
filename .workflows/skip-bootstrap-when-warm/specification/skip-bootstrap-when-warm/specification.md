@@ -97,6 +97,34 @@ Local/unversioned builds carry a constant version string, so version-stamping on
 
 ---
 
+## Latch Set-Point & Timing
+
+This is the load-bearing decision: a full bootstrap can take seconds (it restores N sessions), so the window between "full bootstrap starts" and "latch set" is where all concurrency/atomicity risk lives.
+
+### Decision
+
+**Set the latch as the final action of a *successful* `Orchestrator.Run` — after the last step, gated on no fatal error.**
+
+1. **Atomic-with-success, uniform across both invocation modes.** The latch is set *inside* `Run`, not by the two callers, so the synchronous path and the concurrent cold+TUI goroutine both get it identically — no second set-point to keep in sync. "Latch present" ⟺ "a full bootstrap ran to completion."
+
+2. **Set at the *end*, not early.** Early-setting (e.g. right after the server is up) is **unsafe**: a concurrent command would see the latch and take the abridged path *before Restore recreated the sessions*, then attach to a session that doesn't exist yet. End-setting is **sufficient** for the target scenario: the reopen burst can't fire until the user multi-selects in the picker, and the picker only appears *after* bootstrap completes (loading screen on cold, synchronous on warm) — so by the time the ~20 `attach` fire, the latch is already set and they all take the abridged path.
+   - **Explicitly accepted non-goal:** a *pure cold-burst* — N commands hitting a genuinely serverless tmux simultaneously, *not* via the picker — is **not** collapsed by end-setting. That isn't the reopen flow, and it is already tolerated today (daemon flock + idempotent hook convergence). We accept it rather than complicate the set-point.
+
+3. **"Successful" = no *fatal* error; soft warnings still latch.** A soft-step warning (`SaverDownWarning`, `CorruptSessionsJSONWarning`, partial restore) **still sets the latch**, because those either self-heal on the abridged path (EnsureSaver re-probes every command) or are non-retryable (a corrupt file won't un-corrupt next command). Requiring a totally-clean run would let one transient `SaverDownWarning` force every command back to full bootstrap for the whole server lifetime — defeating the feature. Only a **fatal** step (EnsureServer / RegisterPortalHooks / SetRestoring / ClearRestoring — the steps that already abort with a non-zero exit / red TUI frame) leaves the latch **unset**, so the next command correctly retries the full bootstrap.
+
+### Write posture
+
+The terminal `SetServerOption("@portal-bootstrapped", version)` is **best-effort**: on failure, log WARN and swallow — never fatal. A failed write simply leaves the latch unset, so the next command reads "not satisfied" and re-runs the (idempotent, near-no-op on warm) full bootstrap, retrying the write. (Full failure/invalidation treatment is in **Edge Cases & Latch Invalidation**.)
+
+### Ordering bonus
+
+Because the latch is set only *after* `EagerSignalHydrate` and `Clear @portal-restoring` have run, "latch present" **guarantees** hydrate signalling finished and `@portal-restoring` was cleared. Two consequences fall out with no extra logic:
+
+- The latch and `@portal-restoring` can never both be set on an abridged command.
+- A late-arming skeleton pane can't be stranded unsignalled.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
