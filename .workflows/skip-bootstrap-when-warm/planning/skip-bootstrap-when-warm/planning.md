@@ -20,6 +20,16 @@ approved_at: 2026-07-02
 - [ ] `internal/tui/loading_progress.go` — `stepLabelTable` and `totalBootstrapSteps` become `1..10` (drop key 11, no renumber); the drift-guard test asserts `1..10` and passes; the loading bar reaches 100% on a successful full bootstrap.
 - [ ] Full test suite green; existing full-bootstrap behaviour (restore, sweeps, warnings) is unchanged apart from the dropped step.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| skip-bootstrap-when-warm-1-1 | Latch read/verdict helper with version-aware three-way semantics | absent → not satisfied, version-mismatch → not satisfied, read-error/down-server → not satisfied, empty stored value → not satisfied, present + exact version match → satisfied |
+| skip-bootstrap-when-warm-1-2 | Set the latch as the final action of a successful Orchestrator.Run | fatal-step abort leaves latch unset, soft-warning run still latches, write failure logs WARN and is swallowed (not fatal, not in warnings, not on progress channel), latch written before terminal completion event on concurrent path |
+| skip-bootstrap-when-warm-1-3 | Remove the CleanStale step from the orchestrator (11 → 10 steps) | none |
+| skip-bootstrap-when-warm-1-4 | Retune loading_progress.go to ten bootstrap steps | bar reaches exactly 100% after the tenth step, drift-guard table covers exactly 1..10 with no gaps |
+
 ### Phase 2: Entry-path branch + abridged bootstrap path
 status: approved
 approved_at: 2026-07-02
