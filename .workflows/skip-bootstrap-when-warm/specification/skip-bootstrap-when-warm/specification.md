@@ -87,9 +87,11 @@ The latch is **satisfied** only when it is **present *and* its stored version eq
 
 Both "value mismatch" and "unreadable/error" fold into *not satisfied → full bootstrap*. A separate `ServerRunning()` probe is not required — the read fails gracefully on a down server. Single read chosen for minimalism.
 
+**Value format (v1):** the stored value is **exactly `cmd.version`** — a bare version string, nothing else. The satisfied test is a plain string equality (`stored == cmd.version`), so the format must stay parse-free. Forensic extras (set-timestamp, pid) are **out of scope for v1**: adding them would require a delimiter/parse-and-compare rule (equality could no longer be naive), so they are deferred rather than left as an ambiguous "implementation detail."
+
 ### Why version-stamped, not presence
 
-The user upgrades Portal often (brew) and restarts tmux rarely (weeks). A **presence** latch would keep `RegisterPortalHooks` from ever re-running mid-lifetime, so a new binary's changed global-hook bodies would silently lag the installed version until a tmux restart — potentially weeks. **Version-stamping** makes a release upgrade re-converge hooks and recreate the daemon on the new binary on the **first post-upgrade command**, then re-stamp the latch with the new version. It self-heals with no special-casing. The stored value also serves forensics: the version is the load-bearing field; optional cheap additions (set-timestamp, pid) are an implementation detail.
+The user upgrades Portal often (brew) and restarts tmux rarely (weeks). A **presence** latch would keep `RegisterPortalHooks` from ever re-running mid-lifetime, so a new binary's changed global-hook bodies would silently lag the installed version until a tmux restart — potentially weeks. **Version-stamping** makes a release upgrade re-converge hooks and recreate the daemon on the new binary on the **first post-upgrade command**, then re-stamp the latch with the new version. It self-heals with no special-casing. The version is the load-bearing (and, in v1, the only) field of the stored value — forensic extras are deferred (see the value-format note above).
 
 ### Dev-build nuance (accepted)
 
@@ -116,6 +118,12 @@ This is the load-bearing decision: a full bootstrap can take seconds (it restore
 
 The terminal `SetServerOption("@portal-bootstrapped", version)` is **best-effort**: on failure, log WARN and swallow — never fatal. A failed write simply leaves the latch unset, so the next command reads "not satisfied" and re-runs the (idempotent, near-no-op on warm) full bootstrap, retrying the write. (Full failure/invalidation treatment is in **Edge Cases & Latch Invalidation**.)
 
+### Insertion point in `Run`
+
+`Run` ends with a non-numbered "Return" boundary that has already accumulated the soft `warnings` slice and then emits the `bootstrap: orchestration complete` summary before returning `(serverStarted, warnings, nil)`. The latch write goes **after the last soft step and after the fatal-error gate, but before the orchestration-complete summary + return** — i.e. once no fatal error can occur, stamp the latch, then emit the summary and return. On the concurrent path this also means the latch is written **before** the terminal completion event (`BootstrapCompleteMsg` / the progress pipe's `Done`) is emitted, so "latch present ⟺ a full bootstrap ran to completion" holds by the time the picker transitions and any reopen burst could fire.
+
+A latch-write failure is a **pure log line** (WARN under the bootstrap component) on both paths — it is **not** appended to the returned `warnings` slice and **not** routed through the progress channel / `bootstrapWarnings` sink (unlike `SaverDownWarning`). It self-heals (next command re-runs the near-no-op full bootstrap), so there is nothing actionable to surface to the user; the same treatment applies inside the concurrent goroutine.
+
 ### Ordering bonus
 
 Because the latch is set only *after* `EagerSignalHydrate` and `Clear @portal-restoring` have run, "latch present" **guarantees** hydrate signalling finished and `@portal-restoring` was cleared. Two consequences fall out with no extra logic:
@@ -136,9 +144,21 @@ In `PersistentPreRunE`, after the tmux client is built, read the latch (`TryGetS
 
 A separate `ServerRunning()` probe is not required — the latch-read fails gracefully on a down server, so "unreadable" folds into "not satisfied → full bootstrap."
 
+### Control-flow sequencing (single read, computed once)
+
+The latch verdict is read **once** and threaded — never read twice. Sequencing in `PersistentPreRunE`, after the tmux client is built:
+
+1. **Compute the verdict once.** Perform the single `TryGetServerOption` read + version compare into a `latchSatisfied bool`.
+2. **Abridged gate first.** If `latchSatisfied` → take the **abridged path** (liveness-only EnsureSaver + context injection + warning drain; see below) and return. The orchestrator and the concurrent route are never reached.
+3. **Full-bootstrap routing.** If **not** `latchSatisfied` → full bootstrap. The concurrent-vs-synchronous choice is then made by `shouldRunConcurrentBootstrap`, which **drops its `ServerRunning()` probe** and reduces to the TUI-path test only (`isTUIPath && client != nil`) — because "needs a full bootstrap" is already established by the not-satisfied verdict, and a full bootstrap on the TUI path should always show the loading screen. No second latch read, no server-down probe.
+
+So the abridged branch sits **upstream** of `shouldRunConcurrentBootstrap`; the concurrent route is reached only on the not-satisfied path, where the single verdict has already decided full-bootstrap. This is what keeps the design to one read while serving both the abridged-vs-full decision and the concurrent-route decision.
+
 ### Loading-screen trigger: latch-absent, not server-down
 
 The concurrent/loading path (`shouldRunConcurrentBootstrap`) currently fires only for `portal open` (no args) **and** server-not-running. It now fires whenever a **full** bootstrap runs on the TUI path — keyed off **latch-not-satisfied**, not server-down. This retires the warm-unlatched edge as an improvement: a hand-started tmux server + `x` now gets the loading screen + progress during its first full bootstrap instead of a synchronous no-progress stall. Conceptually, "loading screen" now means exactly "a full bootstrap is in progress." *What* the full bootstrap does is unchanged (Restore etc. already ran on warm-unlatched today) — only the presentation improves.
+
+**`serverStarted` force-true stays correct on this route.** On the concurrent route `openTUI` forces `serverStarted=true` (currently justified as "cold by construction"). Extending the route to a warm-unlatched server means the server was *not* actually started by this command — but the force-true remains correct, because `serverStarted`'s **sole** effect is to park the model on the loading page (`WithServerStarted(true)` → `activePage = PageLoading`); no other consumer reads it. On the concurrent route the variable's real meaning is "a full bootstrap is in progress → show the loading page," which is exactly what we want whether or not the server pre-existed. So `openTUI`'s force-true does **not** need to become conditional; the "cold by construction" comment should be reworded to "full bootstrap in progress."
 
 ### Outcome matrix
 
@@ -153,7 +173,7 @@ The concurrent/loading path (`shouldRunConcurrentBootstrap`) currently fires onl
 
 The abridged path runs through the **same entry-path plumbing** (warning sink + context injection) as the synchronous full path, differing only in executing a reduced step set (EnsureSaver only). This is what makes the following inherit existing, tested handling:
 
-- **Context injection.** The abridged path still injects `serverStartedKey` + `tmuxClientKey` into `cmd.Context()` (exactly as the sync path does) — it just doesn't run the orchestrator. `serverStarted` is injected as **`false`** (correct: the command did not start the server). Its sole production consumer is `openTUI`'s loading-page gate → `false` → no loading page → instant picker, which is exactly right for a warm command. There is no hidden "third state" to disambiguate.
+- **Context injection.** The abridged path still injects `serverStartedKey` + `tmuxClientKey` into `cmd.Context()` (exactly as the sync path does) — it just doesn't run the orchestrator. `serverStarted` is injected as **`false`** (correct: the command did not start the server). Its sole production consumer is `openTUI`'s loading-page gate → `false` → no loading page → instant picker, which is exactly right for a warm command. There is no hidden "third state" to disambiguate. **Load-bearing precondition:** the abridged path must **not** stash the `deferredBootstrapKey` context value — `openTUI` force-sets `serverStarted=true` whenever a deferred bootstrap is present on the context, which would wrongly show the loading page. Abridged sets no deferred bootstrap, so `deferredBootstrapFromContext` returns nil and `serverStarted=false` survives to the instant-picker gate.
 - **Warnings.** EnsureSaver's `SaverDownWarning` funnels into the same package-level `bootstrapWarnings` sink the sync path already uses → the CLI flushes to stderr; the TUI drains to the notice band. Identical to a warm command today; no new emission mechanism.
 
 ---
@@ -173,6 +193,10 @@ The version-stamped latch splits these:
 
 - **Abridged path → liveness only.** A *satisfied* latch (present **and** version-matching) already proves the running daemon is the current binary, so the version-gate is redundant. Abridged EnsureSaver reduces to a pure liveness probe (`SaverPanePIDOrAbsent` + re-ensure if absent).
 - **Full bootstrap → keeps the version-gate.** A version bump makes the latch mismatch → full bootstrap → the version-gate kill-barrier recreates the daemon on the new binary → re-stamp.
+
+### Where it lives (build shape)
+
+The abridged path does **not** run through the orchestrator, so its EnsureSaver is a **new liveness-only helper in package `cmd`** — not a "liveness mode" of the orchestrator step. It composes the existing primitives directly: `SaverPanePIDOrAbsent` (presence probe) → `BootstrapPortalSaver` (re-ensure if absent), and on failure constructs a `SaverDownWarning` fed into the same package-level `bootstrapWarnings` sink the sync path uses. It never calls `EnsurePortalSaverVersion` (the version-gate) — that lives solely in the full-bootstrap orchestrator step, which retains both duties.
 
 ### Liveness-only is *not* reduced crash recovery
 
@@ -225,8 +249,10 @@ Rationale for full removal (not just skipping on abridged): a bootstrap-time cle
 - **Home:** the existing background process inside the hidden `_portal-saver` tmux session — **not launchd**. `portal clean` remains the manual, daemon-independent backstop.
 - **Reuse, don't reinvent:** the daemon calls the existing shared `cmd/run_hook_stale_cleanup.go` `runHookStaleCleanup` helper. That helper already carries the **mass-deletion hazard guard** (`len(livePanes)==0 && hooks present` → skip + WARN, never wipe) and drives `hooks.Store.CleanStale`, which emits the existing `EmitCleanStaleSummary` **audit breadcrumb** — so no new audit event/vocabulary is invented.
 - **No layering problem:** `runHookStaleCleanup` and the daemon (`cmd/state_daemon.go`) are both in package `cmd` — same package, so no new import and no cycle.
-- **Cadence:** **not** every 1s tick. Throttled to ~10s via a cheap `time.Since(lastCleanup) >= interval` check evaluated per tick; the cleanup body fires only when the interval has elapsed. The 1s tick must stay light (capture/scrollback save is the priority and can exceed 1s); stale hooks are inert so precise timing is irrelevant. Exact interval is a tuning detail (**10s default**).
-- **Priority / non-interference:** cleanup never competes with a pending capture — the tick loop is single-threaded and already skips entirely while `@portal-restoring` is set and on the `!dirty && !gap` idle fast-path; cleanup is gated so scrollback saving always wins.
+- **Cadence:** **not** every 1s tick. Throttled to ~10s via a cheap `time.Since(lastCleanup) >= interval` check; the cleanup body fires only when the interval has elapsed. The 1s tick must stay light (capture/scrollback save is the priority and can exceed 1s); stale hooks are inert so precise timing is irrelevant. Exact interval is a tuning detail (**10s default**).
+- **Placement in the tick (load-bearing).** The daemon's `tick` today has three early returns in order: (1) `@portal-restoring` set → return; (2) `!dirty && !gap` idle fast-path → return; (3) otherwise `captureAndCommit`. Cleanup must be placed on the **idle branch** — evaluated *after* the `@portal-restoring` check but *at* the `!dirty && !gap` point, replacing the bare idle `return` with "check the cleanup throttle → maybe run cleanup → return." This is what makes cleanup actually fire on a mostly-idle warm server (the weeks-long scenario it targets). Placing it *after* the idle return instead would gate cleanup behind capture work, so it would **never** run on an idle server — the opposite of the goal. Net behaviour: `@portal-restoring` set → no cleanup (whole tick skipped); capture pending (`dirty || gap`) → capture runs, cleanup skipped this tick (scrollback always wins); idle (`!dirty && !gap`) + throttle elapsed → cleanup runs. On a continuously-busy server cleanup is deferred until idle ticks resume — acceptable, since stale hooks are inert and a busy server accrues few of them.
+- **First-cleanup timing.** Initialise `lastCleanup` to the daemon's **start time** (not the zero `time.Time`), so the first cleanup fires one interval (~10s) after daemon start rather than on the first idle tick (~1s). This matches the "cleans on its first eligible tick (~10s)" cold-boot statement and makes the cadence-gate unit test deterministic.
+- **Priority / non-interference:** cleanup never competes with a pending capture — the tick loop is single-threaded, cleanup lives only on the idle branch (capture ticks never reach it), and it is skipped entirely while `@portal-restoring` is set. Scrollback saving always wins.
 - **Failure posture:** log WARN and retry next cadence (mirrors the tick loop's existing "tick failed" handling); a cleanup error never escalates or crashes the daemon.
 
 ---
@@ -248,6 +274,11 @@ Rationale for full removal (not just skipping on abridged): a bootstrap-time cle
 
 - **Cold-boot cleanup leftovers.** If a cold boot's marker/FIFO cleanup soft-fails, that residue isn't retried until the next full bootstrap. Accepted: markers/FIFOs are inert (the daemon-merge live-set filter already prevents dead-session resurrection), and version-stamped upgrades now give *extra* full-bootstrap cleanup passes beyond just restarts.
 - **Daemon-death vs cleanup home.** Hooks cleanup was relocated from an always-runs path (per-command bootstrap) to a conditionally-alive one (the daemon) and removed from the orchestrator — a named trade. Homes: the daemon (revived by the abridged liveness EnsureSaver) plus `portal clean` (manual, daemon-independent). Worst case (daemon dead *and* revival failing *and* no `portal clean`) leaves only inert hooks bloat until the daemon next revives. Accepted given the misfire trace (stale hooks can't fire on the wrong session); a bootstrap-time pass was explicitly weighed and rejected — it would only help when the daemon can't start at all, already a catastrophic (capture-down) state.
+- **Flapping daemon starves cleanup.** A daemon that repeatedly self-ejects and is re-revived within short windows (< the ~10s cleanup interval) resets its in-process `lastCleanup` each incarnation, so cleanup could be starved indefinitely even while liveness probes report "alive." Accepted for the same reason as the dead-daemon case: the un-cleaned residue is inert hooks bloat (cannot misfire), and a flapping daemon is itself a rare pathological state whose real problem is the flapping, not the deferred cleanup.
+
+### Out of scope (planning must not invent)
+
+- **No `portal`-level unset command.** The manual escape hatch is exactly `tmux set-option -u @portal-bootstrapped` — the entire user-facing contract for forcing a re-bootstrap. `UnsetServerOption` is listed as a reused mechanism only for that raw path; production code never unsets the latch. No `portal clean` flag, subcommand, or help-text surface for unsetting the latch is added in v1.
 
 ---
 
@@ -261,7 +292,7 @@ The feature's value is *not running* steps, which is harder to assert than runni
   - Assert via seam call-recording. Also assert the daemon's throttled cleanup is the **only** hooks-`CleanStale` caller left (bootstrap no longer runs it).
 - **Set-point gating.** Inject a soft-warning step → assert the latch **is** set; inject a fatal step → assert the latch **unset**. Directly nails the soft-vs-fatal rule.
 - **Abridged self-heal (crash-recovery regression guard).** Latch satisfied + saver dead → assert the abridged liveness EnsureSaver revives it. This is the explicit guard for the "keep the fail-safe" thread.
-- **Daemon cleanup.** Unit-test the throttled cadence gate (`time.Since(lastCleanup) >= interval`); the cleanup body is the existing `runHookStaleCleanup` (already covered, mass-delete guard included).
+- **Daemon cleanup.** Unit-test the throttled cadence gate (`time.Since(lastCleanup) >= interval`) with `lastCleanup` initialised to daemon-start (assert no cleanup before one interval elapses, then cleanup on the first eligible idle tick). Assert cleanup runs on an **idle** tick (`!dirty && !gap`) and is **skipped** while `@portal-restoring` is set and on capture-pending ticks. The cleanup body is the existing `runHookStaleCleanup` (already covered, mass-delete guard included).
 - **Integration (real tmux).** Extend `cmd/concurrent_*_test.go` + `tmuxtest` socket fixtures, **under `IsolateStateForTest`** (mandatory for daemon-spawning tests): a warm+satisfied command skips restore but revives a killed saver; a version-mismatch latch triggers a full re-bootstrap that re-stamps.
 - **Design-for-test.** Make the "current version" **injectable** (it is `cmd.version`) so a version-mismatch branch is unit-testable without rebuilding the binary.
 
@@ -281,9 +312,11 @@ Confirmed anchors (code map, 2026-06-30) for planning. This is a map, not a task
 
 ### Orchestrator
 
-- **`cmd/bootstrap/bootstrap.go` `Run(ctx) (serverStarted bool, warnings []Warning, err error)`** — set the latch as the final action on no fatal error. Remove the `CleanStale` step + its seam/adapter (11 → 10 steps).
+- **`cmd/bootstrap/bootstrap.go` `Run(ctx) (serverStarted bool, warnings []Warning, err error)`** — set the latch as the final action on no fatal error (see **Insertion point in `Run`**). Remove the `CleanStale` step + its seam/adapter (11 → 10 steps).
   - Fatal steps (return `*FatalError`): EnsureServer, RegisterPortalHooks, SetRestoring, ClearRestoring.
   - Soft steps: SweepOrphanDaemons, EnsureSaver (`SaverDownWarning`), Restore (`CorruptSessionsJSONWarning`), EagerSignalHydrate, CleanStaleMarkers, SweepOrphanFIFOs.
+  - The `11 → 10` change also touches the **`totalSteps = 11` constant** (a documented "load-bearing contract" feeding the `orchestration complete` summary's `steps` attr → set to `10`), the package doc comment enumerating the "eleven-step" sequence, and the removed step's `emitStep(11, …)` call.
+- **`internal/tui/loading_progress.go`** — `stepLabelTable` maps the real step indices (1..11) to the 5 friendly labels; removing `CleanStale` drops its table entry (and any mapping/drift-guard test that pins the step count). Verify the real-step→label mapping and the `N/M` counter (only on `Restoring sessions`) still hold at 10 steps.
 
 ### Latch mechanism (reuse existing)
 
