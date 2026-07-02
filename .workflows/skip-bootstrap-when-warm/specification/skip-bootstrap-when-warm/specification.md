@@ -231,6 +231,26 @@ Rationale for full removal (not just skipping on abridged): a bootstrap-time cle
 
 ---
 
+## Edge Cases & Latch Invalidation
+
+`@portal-bootstrapped` is a *persistent* lifetime latch (unlike the transient `@portal-restoring`), so its failure/staleness modes need explicit treatment. **Guiding principle:** don't program around anything that self-heals via an idempotent, no-op full bootstrap.
+
+### Invalidation & failure modes
+
+- **Auto-invalidation by design.** The latch is a server option → dies with the server → restart auto-clears it → next command full-bootstraps. No explicit invalidation code.
+- **Upgrade invalidation.** Version-mismatch is treated as "not satisfied" → the first post-upgrade command full-bootstraps (re-registers hooks, recreates the daemon on the new binary) and re-stamps. Self-healing; no special-casing.
+- **Two markers can't both be set.** The latch is set *last* (after `Clear @portal-restoring`), so "latch satisfied" ⇒ restoring was cleared. A crash mid-bootstrap leaves the latch unset → next command full-bootstraps and re-clears any leaked restoring marker. No inconsistent state reachable on a steady server.
+- **Latch-set write failure.** The terminal `SetServerOption("@portal-bootstrapped", version)` is **best-effort**: on failure, log WARN and swallow. The next command reads "not satisfied" → re-runs the (idempotent, near-no-op on warm) full bootstrap → retries the write. Self-heals; **never fatal**.
+- **Manual escape hatch.** `tmux set-option -u @portal-bootstrapped` forces the next command back to a full bootstrap — handy for debugging or forcing a re-converge without a tmux restart.
+- **Abridged EnsureSaver hard-failure.** With the version-gate moved off the abridged path, abridged EnsureSaver is liveness-only; a failure to re-ensure an absent saver surfaces as a soft `SaverDownWarning` (via the existing sink) and the command **proceeds** — attach/switch still works; capture simply resumes on the next successful revival. No kill-barrier runs on the abridged path, so there is no kill-barrier-failure branch to handle there (it lives in the full bootstrap, already a soft step).
+
+### Accepted residues (harmless bloat — reviewed & tolerated)
+
+- **Cold-boot cleanup leftovers.** If a cold boot's marker/FIFO cleanup soft-fails, that residue isn't retried until the next full bootstrap. Accepted: markers/FIFOs are inert (the daemon-merge live-set filter already prevents dead-session resurrection), and version-stamped upgrades now give *extra* full-bootstrap cleanup passes beyond just restarts.
+- **Daemon-death vs cleanup home.** Hooks cleanup was relocated from an always-runs path (per-command bootstrap) to a conditionally-alive one (the daemon) and removed from the orchestrator — a named trade. Homes: the daemon (revived by the abridged liveness EnsureSaver) plus `portal clean` (manual, daemon-independent). Worst case (daemon dead *and* revival failing *and* no `portal clean`) leaves only inert hooks bloat until the daemon next revives. Accepted given the misfire trace (stale hooks can't fire on the wrong session); a bootstrap-time pass was explicitly weighed and rejected — it would only help when the daemon can't start at all, already a catastrophic (capture-down) state.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
