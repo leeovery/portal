@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-02
 cycle: 1
 phase: Input Review
@@ -25,7 +25,7 @@ The spec asserts flatly that "A lone warm bootstrap is *already* safe today" (li
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -45,7 +45,7 @@ The weeks-long-server constraint raised a worry: cleanup steps (marker sweep, FI
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -65,7 +65,7 @@ Rationale for full removal (not just skipping on abridged): a bootstrap-time cle
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -85,7 +85,7 @@ Within-session index reuse keeps the key **live** (never classed as stale). **Co
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---

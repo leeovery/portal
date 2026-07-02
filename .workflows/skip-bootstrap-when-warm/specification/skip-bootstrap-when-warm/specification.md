@@ -14,7 +14,7 @@ Set a single **server-scoped latch** at the end of a successful bootstrap. Later
 
 - **Primary driver — collapse the concurrency surface.** This latch is the pretext for the downstream `restore-host-terminal-windows` feature, whose multi-select reopen spawns N−1 windows each running `portal attach <session>` (and `attach` is *not* in `skipTmuxCheck`). A 20-window post-crash rebuild would otherwise fire ~20 near-simultaneous full bootstraps against one server — a stability hazard. The latch collapses that to ~20 cheap latch-checks.
 - **Secondary driver — stop redundant per-command work.** Every warm command stops re-running restore/sweep/clean.
-- **Explicit non-goal — single-command safety.** A lone warm bootstrap is *already* safe today: `Restore` skips already-live sessions (`internal/restore/restore.go`), so on a warm server it is a near-no-op. The feature is **not** about correctness of one warm bootstrap; it is about concurrency and redundancy.
+- **Explicit non-goal — single-command safety.** A lone warm bootstrap is *already* safe today: `Restore` skips already-live sessions (`internal/restore/restore.go`), so on a warm server it is a near-no-op. The feature is **not** about correctness of one warm bootstrap; it is about concurrency and redundancy. (One pre-existing latent edge is acknowledged and explicitly out of scope: a ~1s resurrection race if a session is killed *outside* the picker and `x` runs before the daemon's next tick captures the kill — rare, not introduced or changed by this feature.)
 
 ### Hard constraint — long-lived servers
 
@@ -197,7 +197,7 @@ On the warm path EnsureSaver runs **outside** the `@portal-restoring` window (no
 
 ## Daemon-Owned Hooks Cleanup
 
-The weeks-long-server constraint raised a worry: cleanup steps (marker sweep, FIFO sweep, hooks `CleanStale`) are framed as once-per-lifetime, but if cruft *accrues* during a weeks-long lifetime, skipping them on abridged commands would let it pile up for weeks. Tracing each cleanup target to its producer resolves this.
+The weeks-long-server constraint raised a worry: cleanup steps (marker sweep, FIFO sweep, hooks `CleanStale`) are framed as once-per-lifetime, but if cruft *accrues* during a weeks-long lifetime, skipping them on abridged commands would let it pile up for weeks. This matters because the daemon does **not** clean any of these today — its only GC is `gcOrphanScrollback` (scrollback `.bin` files, inside `Commit`); marker/FIFO/hooks cleanup live only in bootstrap + `portal clean`. So re-homing cleanup on the daemon is a genuinely new responsibility, not something it already did. Tracing each cleanup target to its producer resolves the worry.
 
 ### The trace — what a warm server actually produces
 
@@ -209,7 +209,7 @@ So the marker/FIFO sweeps have no warm workload and stay in the full bootstrap f
 
 ### A stale hook entry cannot misfire
 
-The user's concern is side-effects, not bloat — can a stale hook fire on the wrong target? No. The hook key is the structural key `#{session_name}:#{window_index}.#{pane_index}` (e.g. `myproj-AbC123:0.0`). Session names are `{project}-{nanoid}` and `GenerateSessionName` **guarantees uniqueness**. A "stale" entry = a key not in the live pane set. For that key to become live again, a session with that exact nanoid-bearing name must exist again — which only happens when Portal **restores that same saved session** (same identity) after a reboot, where firing is the hook's *intended* behaviour. A different, newly-created session gets a new nanoid → new key → never collides. Within-session index reuse keeps the key **live** (never classed as stale). **Conclusion: a genuinely-stale hook entry cannot fire on the wrong session — the only cost of leaving it is inert JSON bloat.**
+The user's concern is side-effects, not bloat — can a stale hook fire on the wrong target? No. The hook key is the structural key `#{session_name}:#{window_index}.#{pane_index}` (e.g. `myproj-AbC123:0.0`). Session names are `{project}-{nanoid}` and `GenerateSessionName` **guarantees uniqueness**. A "stale" entry = a key not in the live pane set. For that key to become live again, a session with that exact nanoid-bearing name must exist again — which only happens when Portal **restores that same saved session** (same identity) after a reboot, where firing is the hook's *intended* behaviour. A different, newly-created session gets a new nanoid → new key → never collides. Within-session index reuse keeps the key **live** (never classed as stale). **Conclusion: a genuinely-stale hook entry cannot fire on the wrong session — the only cost of leaving it is inert JSON bloat.** (The one boundary condition, explicitly named and dismissed as unrealistic: a user manually recreating a session under an old nanoid name by hand.)
 
 ### Decision — remove hooks cleanup from the orchestrator; home it on the daemon
 
@@ -218,7 +218,7 @@ The single-abridged constraint forces this: a command-classified cleanup ("clean
 - **Steps 9 & 10 (marker/FIFO sweeps):** stay in the full bootstrap, skipped on the abridged path (a warm server produces none of their targets).
 - **Former step 11 (`CleanStale` hooks):** **removed from the orchestrator entirely** — the step *and* its seam/adapter — taking the orchestrator from 11 → 10 steps. The `_portal-saver` daemon (`portal state daemon`) becomes its **sole automatic home**.
 
-Rationale for full removal (not just skipping on abridged): a bootstrap-time cleanup would only *uniquely* help when a full bootstrap runs **and** EnsureSaver fails to start the daemon — a scenario already catastrophic (no daemon ⇒ no scrollback capture), where an inert stale-hook entry is noise. What it cleans is inert anyway. At cold boot the freshly-started daemon cleans on its first eligible tick (~10s) rather than during bootstrap — fine, since it's inert. (Trade-off acknowledged: slightly more surgery than leaving a harmless idempotent double-clean in place; the clean single-home model won.)
+Rationale for full removal (not just skipping on abridged): a bootstrap-time cleanup would only *uniquely* help when a full bootstrap runs **and** EnsureSaver fails to start the daemon — a scenario already catastrophic (no daemon ⇒ no scrollback capture), where an inert stale-hook entry is noise. What it cleans is inert anyway. At cold boot the freshly-started daemon cleans on its first eligible tick (~10s) rather than during bootstrap — fine, since it's inert. **Bonus:** taking hooks cleanup off the per-command bootstrap path also removes exposure to the known `bootstrap-cleanstale-wipes-hooks-on-tmux-transient` bug (which only triggers inside a bootstrap when `list-panes -a` returns transiently-empty) — keeping the step would have re-introduced that hooks-wipe surface on every warm command. (Trade-off acknowledged: slightly more surgery than leaving a harmless idempotent double-clean in place; the clean single-home model won.)
 
 ### Operational contract
 
