@@ -62,6 +62,41 @@ There is **exactly one** abridged path, run identically by every command against
 
 ---
 
+## The Version-Stamped Latch
+
+### Storage
+
+`@portal-bootstrapped`, a tmux **server option** whose value is the **binary version** (a *version-stamped* latch, not a bare presence flag):
+
+- Set via `SetServerOption("@portal-bootstrapped", <version>)` (`set-option -s`).
+- Read via `TryGetServerOption` → `(value, found, err)`.
+- Cleared via `UnsetServerOption` (`set-option -su`, idempotent) — used by the manual escape hatch; production code never needs to unset it.
+
+Same server-option mechanism as `@portal-restoring`: it **dies with the tmux server**, so a server restart auto-clears it and the next command full-bootstraps. It reuses the existing `internal/state/markers.go` seam vocabulary (`RestoringChecker` for the read, `ServerOptionWriter` for set/unset) and the `internal/tmux/tmux.go` server-option API. The difference from `@portal-restoring` is that the **value is load-bearing** (a version), not presence-only. `@portal-restoring` is the direct precedent — an already-existing presence-latch on the same mechanism.
+
+### Semantics — "satisfied"
+
+The latch is **satisfied** only when it is **present *and* its stored version equals the running binary's `cmd.version`**. A single `TryGetServerOption` read drives a three-way outcome:
+
+| Read result | Meaning | Path |
+|---|---|---|
+| Absent (not found) | Cold / fresh server | Not satisfied → **full bootstrap** |
+| Present, version **matches** | Already bootstrapped this binary | Satisfied → **abridged bootstrap** |
+| Present, version **mismatches** | Post-upgrade | Not satisfied → **full bootstrap** |
+| Read error / down-server | Unreadable | Not satisfied → **full bootstrap** |
+
+Both "value mismatch" and "unreadable/error" fold into *not satisfied → full bootstrap*. A separate `ServerRunning()` probe is not required — the read fails gracefully on a down server. Single read chosen for minimalism.
+
+### Why version-stamped, not presence
+
+The user upgrades Portal often (brew) and restarts tmux rarely (weeks). A **presence** latch would keep `RegisterPortalHooks` from ever re-running mid-lifetime, so a new binary's changed global-hook bodies would silently lag the installed version until a tmux restart — potentially weeks. **Version-stamping** makes a release upgrade re-converge hooks and recreate the daemon on the new binary on the **first post-upgrade command**, then re-stamp the latch with the new version. It self-heals with no special-casing. The stored value also serves forensics: the version is the load-bearing field; optional cheap additions (set-timestamp, pid) are an implementation detail.
+
+### Dev-build nuance (accepted)
+
+Local/unversioned builds carry a constant version string, so version-stamping only re-bootstraps on real version bumps (releases), not local rebuilds. The user rarely runs local builds (they interfere with the brew-installed version and aren't easily isolated), so this is a non-issue. Testing local hook changes uses the escape hatch: `tmux set-option -u @portal-bootstrapped` forces the next command back to a full bootstrap.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
