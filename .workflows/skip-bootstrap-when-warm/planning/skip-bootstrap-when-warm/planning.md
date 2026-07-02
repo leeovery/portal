@@ -76,7 +76,8 @@ approved_at: 2026-07-02
 - [ ] Full test suite green, including the throttled-cadence unit test (no cleanup before one interval; cleanup on the first eligible idle tick) under `IsolateStateForTest` for any daemon-spawning integration coverage.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-02
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
