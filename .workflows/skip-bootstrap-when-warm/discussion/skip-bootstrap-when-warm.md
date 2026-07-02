@@ -42,19 +42,19 @@ A living index of subtopics tracked during the discussion.
 
 ### Map
 
-  Discussion Map — Skip Bootstrap When Warm (12 subtopics — 10 decided · 2 pending)
+  Discussion Map — Skip Bootstrap When Warm (12 subtopics — 11 decided · 1 pending)
 
   ┌─ ✓ Full vs Abridged bootstrap — classifying the 11 steps [decided]
-  │  ├─ ✓ EnsureSaver stays on abridged path (liveness + version-gate) [decided]
+  │  ├─ ✓ EnsureSaver on abridged path = liveness-only (version-gate → full bootstrap) [decided]
   │  ├─ ✓ Hooks cleanup home → the _portal-saver daemon [decided]
   │  └─ ✓ "Full"/"Abridged" naming & single-abridged constraint [decided]
-  ├─ ✓ Latch storage & semantics [decided]
+  ├─ ✓ Latch storage & semantics — version-stamped server option [decided]
   ├─ ✓ Latch set-point & timing (final action of a successful Run) [decided]
-  ├─ ✓ Latch-check placement + abridged wiring (loading-screen keyed on latch-absent) [decided]
+  ├─ ✓ Latch-check placement + abridged wiring (single read; version-match branch) [decided]
   ├─ ✓ First-touch race window — end-set collapses reopen-burst; pure cold-burst tolerated [decided]
   ├─ ✓ Partial-bootstrap / soft-vs-fatal failure handling (soft latches, fatal doesn't) [decided]
   ├─ ✓ Full-bootstrap concurrent/loading-path interaction (set inside Run) [decided]
-  ├─ ○ Edge cases & latch invalidation (two-marker interaction) [pending]
+  ├─ ✓ Edge cases & latch invalidation (version-stamp; self-heal; F1/F2/F5/F8) [decided]
   └─ ○ Test strategy for verifying the skip [pending]
 
 ---
@@ -123,7 +123,12 @@ EnsureSaver (step 5) bootstraps/version-upgrades the `_portal-saver` session tha
 
 Note: on the warm path EnsureSaver runs **outside** the `@portal-restoring` window (no restore in flight), which is correct — the revived daemon should capture normally, not suppress.
 
-**EnsureSaver has two duties, not one (resolves review F6).** EnsureSaver = (a) *liveness* — create `_portal-saver` + daemon if absent (`BootstrapPortalSaver`); and (b) *version-gate* — if the running daemon's binary is stale after a `portal` upgrade, kill + recreate it on the new binary via a guarded kill-barrier (`EnsurePortalSaverVersion`). The abridged path therefore keeps the **full** EnsureSaver step, **not** a liveness-only `SaverPanePIDOrAbsent` probe. Rationale: with a weeks-long server + persistent latch, a liveness-only abridged path would let a stale-version daemon survive a binary upgrade for the rest of the lifetime (latch set ⇒ every command abridged ⇒ never re-versioned). Confidence: high — directly serves the weeks-long-server constraint. (Cost check: the version read is cheap; the kill-barrier only fires on an actual version mismatch, which in the reopen scenario has already been resolved by the trigger command's full bootstrap before the burst — so the 20× burst does no upgrades.)
+**EnsureSaver has two duties — and the version-stamped latch splits them across the two paths (SUPERSEDES the earlier "abridged keeps full EnsureSaver" framing).** EnsureSaver = (a) *liveness* — create `_portal-saver` + daemon if absent (`BootstrapPortalSaver`); and (b) *version-gate* — if the running daemon's binary is stale, kill + recreate it on the new binary via a guarded kill-barrier (`EnsurePortalSaverVersion`).
+
+- Originally (when the latch was going to be presence-only) we required the abridged path to run the **full** EnsureSaver, because otherwise a stale-version daemon could survive a binary upgrade for a weeks-long lifetime (that was review F6).
+- **The version-stamped latch changes this.** A *satisfied* latch (present **and** version-matching) already proves the running daemon is the current binary — so on the abridged path EnsureSaver reduces to a pure **liveness** probe (`SaverPanePIDOrAbsent` + re-ensure if absent). The **version-gate lives only in the full bootstrap**, which a version bump now triggers (latch mismatch → full bootstrap → recreate daemon on new binary → re-stamp).
+
+**Final decision: abridged EnsureSaver = liveness-only.** This is simpler than the earlier framing *and* strictly safer on concurrency: it dissolves review F3 (no warm command ever runs the version-gate kill-barrier, so N concurrent warm commands can never race to kill-barrier a stale daemon — the single post-upgrade full bootstrap does the recreate once). Liveness re-ensure of a genuinely-absent saver stays serialised by the daemon flock as before. Confidence: high.
 
 ---
 
@@ -184,7 +189,15 @@ Confidence: high. Contract fully specified; only the numeric interval is a tunin
 
 ### Decision
 
-`@portal-bootstrapped` as a tmux **server option**, used as a presence-latch — the same shape as the existing `@portal-restoring`: set via `SetServerOption`, read via `TryGetServerOption` (presence = any non-empty value; a `state`-package helper mirroring `IsRestoringSet`). It **dies with the tmux server**, which is the entire point: a server restart auto-clears it → the next command runs a full bootstrap. Reuses the existing `internal/state/markers.go` seam vocabulary (`RestoringChecker` / `ServerOptionWriter`). Confidence: high — proven, near-zero-risk pattern; user did not contest.
+`@portal-bootstrapped` as a tmux **server option**, storing the **binary version** as its value (a *version-stamped* latch, not a bare presence flag): set via `SetServerOption(@portal-bootstrapped, <version>)`, read via `TryGetServerOption`. Same server-option mechanism as `@portal-restoring` (dies with the tmux server → server restart auto-clears it → next command full-bootstraps), reusing the `internal/state/markers.go` seam vocabulary (`RestoringChecker` / `ServerOptionWriter`), but the value is load-bearing rather than presence-only.
+
+**Latch is "satisfied" only when present *and* its stored version equals the running binary's `cmd.version`.** Absent → full bootstrap (cold or fresh). Present-but-mismatched → full bootstrap (post-upgrade). Present-and-matching → abridged. A single read (`TryGetServerOption`) drives all three: an error/down-server read or a value mismatch both resolve to "not satisfied → full bootstrap." (User: "single read is fine.")
+
+**Why version-stamped, not presence (resolves review F4/F6/F7):** the user upgrades portal often (brew) and restarts tmux rarely (weeks). A presence-latch would keep `RegisterPortalHooks` (step 2) from ever re-running mid-lifetime, so a new binary's changed global-hook bodies would silently lag the installed version until a tmux restart — weeks. Version-stamping makes a release upgrade re-converge hooks + recreate the daemon on the first post-upgrade command, then re-stamp. The user endorsed this: "on upgrade, we will always run a full bootstrap, which will then reset the marker with the new version … it self-heals." The stored value also answers F7 (forensics): at minimum the version; optionally set-timestamp / pid as cheap additions (value shape is an implementation detail — version is the load-bearing field).
+
+**Dev-build nuance (accepted):** local/unversioned builds carry a constant version string, so version-stamping only re-bootstraps on real version bumps (releases), not local rebuilds. The user rarely runs local builds ("it messes with the brew-installed version, not easily isolatable"), so this is a non-issue; testing local hook changes uses the escape hatch (`tmux set-option -u @portal-bootstrapped`).
+
+Confidence: high. Decided with the user.
 
 ---
 
@@ -217,21 +230,21 @@ Where the latch-check sits in the entry path, how the abridged path plugs into e
 
 ### Decision
 
-**Placement — a single latch-read drives a three-way branch.** In `PersistentPreRunE`, after the tmux client is built, read the latch (`TryGetServerOption(@portal-bootstrapped)`; an error / down-server read is treated as **absent**):
+**Placement — a single latch-read drives a three-way branch.** In `PersistentPreRunE`, after the tmux client is built, read the latch (`TryGetServerOption(@portal-bootstrapped)`) and compare its value to the running binary version:
 
-- **latch present** → abridged path.
-- **latch absent** (cold *or* warm-unlatched) → full bootstrap: concurrent + loading screen on the TUI path (`open`, no args), synchronous otherwise.
+- **latch satisfied** (present **and** version matches) → abridged path.
+- **latch not satisfied** (absent, unreadable/down-server, **or** version-mismatch) → full bootstrap: concurrent + loading screen on the TUI path (`open`, no args), synchronous otherwise.
 
-A separate `ServerRunning()` probe is not strictly required — the latch-read fails gracefully on a down server, so "absent-or-unreadable" already means "full bootstrap needed." (An explicit server-check-then-latch ordering is behaviourally identical, at the cost of one extra `tmux info` on the warm path; single-read chosen for minimalism. Style call left open to the user.)
+A separate `ServerRunning()` probe is not required — the latch-read fails gracefully on a down server, so "unreadable" folds into "not satisfied → full bootstrap." Single read chosen for minimalism (user: "single read is fine").
 
 **Loading-screen trigger moves from server-down → latch-absent (user refinement).** The concurrent/loading path now fires whenever a *full* bootstrap runs on the TUI path — keyed off latch-absent, not server-down. This retires the warm-unlatched edge as an improvement: a hand-started tmux server + `x` now gets the loading screen + progress during its first full bootstrap instead of a synchronous no-progress stall. Conceptual cleanup: "loading screen" now means exactly "a full bootstrap is in progress." No change to *what* the full bootstrap does (Restore etc. already ran on warm-unlatched today) — only the presentation improves.
 
 | Command | Latch | Outcome |
 |---|---|---|
-| `open` (no args) TUI | absent | full bootstrap, concurrent + loading screen |
-| `open` (no args) TUI | present | abridged (sync plumbing, instant picker) |
-| `attach` / `open <path>` / CLI | absent | full bootstrap, synchronous |
-| `attach` / CLI | present | abridged (sync plumbing) |
+| `open` (no args) TUI | not satisfied (absent / version-mismatch) | full bootstrap, concurrent + loading screen |
+| `open` (no args) TUI | satisfied (present + version match) | abridged (sync plumbing, instant picker) |
+| `attach` / `open <path>` / CLI | not satisfied | full bootstrap, synchronous |
+| `attach` / CLI | satisfied | abridged (sync plumbing) |
 
 **Abridged wiring reuses the sync plumbing (resolves F3 & F9).**
 
@@ -240,6 +253,30 @@ A separate `ServerRunning()` probe is not strictly required — the latch-read f
 - **Shape (constraint, not prescription):** the abridged path runs through the *same* entry-path plumbing (warning sink + context injection) as the sync full path, differing only in executing a reduced step set (EnsureSaver only). This is what makes F3/F9 inherit the existing, tested handling.
 
 Confidence: high. User confirmed placement, reuse-the-plumbing shape, and the loading-screen refinement.
+
+---
+
+## Edge cases & latch invalidation
+
+### Context
+
+`@portal-bootstrapped` is a *persistent* lifetime latch (unlike the transient `@portal-restoring`), so its failure/staleness modes need explicit treatment. Guiding principle (user): **don't program around anything that self-heals via an idempotent no-op full bootstrap.**
+
+### Decisions
+
+- **Auto-invalidation by design.** The latch is a server option → dies with the server → restart auto-clears it → next command full-bootstraps. No explicit invalidation code.
+- **Upgrade invalidation.** Version-mismatch is treated as "not satisfied" → the first post-upgrade command full-bootstraps (re-registers hooks, recreates the daemon on the new binary) and re-stamps. Self-healing; no special-casing.
+- **Two markers can't both be set.** The latch is set *last* (after step 8 clears `@portal-restoring`), so "latch satisfied" ⇒ restoring was cleared. A crash mid-bootstrap leaves the latch unset → next command full-bootstraps and re-clears any leaked restoring marker. No inconsistent state reachable on a steady server.
+- **Latch-set write failure (resolves review F2).** The terminal `SetServerOption(@portal-bootstrapped, version)` is **best-effort**: on failure, log WARN and swallow. Consequence: the next command reads "not satisfied" → re-runs the (idempotent, near-no-op on warm) full bootstrap → retries the write. Self-heals; **never fatal**. Consistent with the don't-program-around-self-healing principle.
+- **Manual escape hatch.** `tmux set-option -u @portal-bootstrapped` forces the next command back to a full bootstrap — handy for debugging or forcing a re-converge without a tmux restart.
+- **Abridged EnsureSaver hard-failure (resolves review F8).** With the version-gate moved off the abridged path, abridged EnsureSaver is liveness-only; a failure to re-ensure an absent saver surfaces as a soft `SaverDownWarning` (via the existing sink) and the command **proceeds** — attach/switch still works; capture simply resumes on the next successful revival. No kill-barrier runs on the abridged path, so there is no kill-barrier-failure branch to handle there (it lives in the full bootstrap, already a soft step).
+
+### Accepted residues (harmless bloat — reviewed & tolerated)
+
+- **Cold-boot cleanup leftovers (review F1).** If a cold boot's steps 9/10 (marker/FIFO cleanup) soft-fail, that residue isn't retried until the next full bootstrap. Accepted: markers/FIFOs are inert (the daemon-merge live-set filter already prevents dead-session resurrection), and version-stamped upgrades now give *extra* full-bootstrap cleanup passes beyond just restarts.
+- **Daemon-death vs cleanup home (review F5).** Step-11 hooks cleanup was relocated from an always-runs path (per-command bootstrap) to a conditionally-alive one (the daemon) — a named trade. Backstop: cleanup still runs in every *full* bootstrap (cold boot + each upgrade), and the abridged path's liveness EnsureSaver revives a dead daemon. Worst case (daemon dead *and* revival failing) leaves only inert hooks bloat until the next full bootstrap. Accepted given the misfire trace (stale hooks can't fire on the wrong session).
+
+Confidence: high. All review-002 mechanism findings (F1–F8) resolved or explicitly accepted.
 
 ---
 
@@ -258,8 +295,9 @@ Confidence: high. User confirmed placement, reuse-the-plumbing shape, and the lo
 - **Decided:** two named paths — **full bootstrap** (all 11, sets latch) vs a single **abridged bootstrap** (full EnsureSaver — liveness **and** version-gate — only). Class-1 heavy steps skipped when latched.
 - **Decided:** hooks cleanup (step 11) moves to the **`_portal-saver` daemon**, in-scope for this feature. Contract fixed: reuse `runHookStaleCleanup` (inherits mass-delete guard + audit breadcrumb; same `cmd` package → no cycle), ~10s throttled cadence off the 1s tick, WARN-and-continue failure posture.
 - **Decided:** naming full/abridged (not cold/warm); the latch is the switch; EnsureSaver keeps its version-gate on the abridged path (F6).
-- **Review set 001 folded in:** F4 & F6 resolved above; F1/F2/F3/F5/F7/F8/F9/F10 mapped onto the pending mechanism subtopics.
-- **Next block — the latch mechanism:** storage/semantics, **set-point & timing** (the crux the review isolates — F1/F2/F7/F8), check-placement + abridged wiring, race window, failure handling, concurrent/loading-path interaction, invalidation/edge cases, and test strategy — all pending.
+- **Decided (mechanism):** version-stamped `@portal-bootstrapped` server option; latch set as the final action of a successful `Run` (soft warnings still latch, fatal doesn't); single-read three-way branch (satisfied→abridged, else full — concurrent+loading on TUI); loading-screen keyed on latch-not-satisfied; abridged EnsureSaver = liveness-only (version-gate → full bootstrap on version-mismatch).
+- **Reviews folded in:** set 001 (F1–F10) and set 002 (F1–F8) all resolved or explicitly accepted.
+- **Last open subtopic:** test strategy for verifying the skip (how to assert abridged skips the heavy steps yet still re-ensures a dead saver; latch observability; the cold+TUI set-point).
 
 ## Triage
 
