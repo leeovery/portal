@@ -39,10 +39,11 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "skip-bootstrap-when-warm-1-2",
+          "task": "skip-bootstrap-when-warm-1-3",
           "task_map": {
             "skip-bootstrap-when-warm-1": "tick-648308",
-            "skip-bootstrap-when-warm-1-1": "tick-7a8b27"
+            "skip-bootstrap-when-warm-1-1": "tick-7a8b27",
+            "skip-bootstrap-when-warm-1-2": "tick-f09675"
           },
           "external_id": "tick-0d5812"
         }
