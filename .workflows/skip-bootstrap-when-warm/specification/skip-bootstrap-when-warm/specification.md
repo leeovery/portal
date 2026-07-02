@@ -195,6 +195,42 @@ On the warm path EnsureSaver runs **outside** the `@portal-restoring` window (no
 
 ---
 
+## Daemon-Owned Hooks Cleanup
+
+The weeks-long-server constraint raised a worry: cleanup steps (marker sweep, FIFO sweep, hooks `CleanStale`) are framed as once-per-lifetime, but if cruft *accrues* during a weeks-long lifetime, skipping them on abridged commands would let it pile up for weeks. Tracing each cleanup target to its producer resolves this.
+
+### The trace — what a warm server actually produces
+
+- **Skeleton markers (`@portal-skeleton-*`)** — `SetSkeletonMarker` is called from exactly **one** place: `internal/restore/session.go` during bootstrap restore. A warm server creates **zero**. Any stale ones are cold-boot restore leftovers, already cleaned by the marker sweep during that same cold boot. ⇒ **no mid-lifetime workload.**
+- **Hydrate FIFOs (`hydrate-*.fifo`)** — `CreateFIFO` is called from exactly **one** place: `internal/restore/session.go` during restore. A warm server creates **zero**. ⇒ **no mid-lifetime workload.**
+- **Hook entries (`hooks.json`)** — created by `portal hooks set` (user action, any time) and go stale when the keyed pane/session is killed (normal warm activity). This is the **only** cleanup target a warm server genuinely produces over time.
+
+So the marker/FIFO sweeps have no warm workload and stay in the full bootstrap for cold-boot leftovers. Only hooks cleanup needs a new home.
+
+### A stale hook entry cannot misfire
+
+The user's concern is side-effects, not bloat — can a stale hook fire on the wrong target? No. The hook key is the structural key `#{session_name}:#{window_index}.#{pane_index}` (e.g. `myproj-AbC123:0.0`). Session names are `{project}-{nanoid}` and `GenerateSessionName` **guarantees uniqueness**. A "stale" entry = a key not in the live pane set. For that key to become live again, a session with that exact nanoid-bearing name must exist again — which only happens when Portal **restores that same saved session** (same identity) after a reboot, where firing is the hook's *intended* behaviour. A different, newly-created session gets a new nanoid → new key → never collides. Within-session index reuse keeps the key **live** (never classed as stale). **Conclusion: a genuinely-stale hook entry cannot fire on the wrong session — the only cost of leaving it is inert JSON bloat.**
+
+### Decision — remove hooks cleanup from the orchestrator; home it on the daemon
+
+The single-abridged constraint forces this: a command-classified cleanup ("clean on `open`, not `attach`") is the rejected multi-variant design, and keeping cleanup in the one abridged path would run it under the 20× `attach` burst (the anti-recommended `list-panes -a` + `hooks.json` rewrite concurrency surface). So cleanup can live in **neither** abridged variant.
+
+- **Steps 9 & 10 (marker/FIFO sweeps):** stay in the full bootstrap, skipped on the abridged path (a warm server produces none of their targets).
+- **Former step 11 (`CleanStale` hooks):** **removed from the orchestrator entirely** — the step *and* its seam/adapter — taking the orchestrator from 11 → 10 steps. The `_portal-saver` daemon (`portal state daemon`) becomes its **sole automatic home**.
+
+Rationale for full removal (not just skipping on abridged): a bootstrap-time cleanup would only *uniquely* help when a full bootstrap runs **and** EnsureSaver fails to start the daemon — a scenario already catastrophic (no daemon ⇒ no scrollback capture), where an inert stale-hook entry is noise. What it cleans is inert anyway. At cold boot the freshly-started daemon cleans on its first eligible tick (~10s) rather than during bootstrap — fine, since it's inert. (Trade-off acknowledged: slightly more surgery than leaving a harmless idempotent double-clean in place; the clean single-home model won.)
+
+### Operational contract
+
+- **Home:** the existing background process inside the hidden `_portal-saver` tmux session — **not launchd**. `portal clean` remains the manual, daemon-independent backstop.
+- **Reuse, don't reinvent:** the daemon calls the existing shared `cmd/run_hook_stale_cleanup.go` `runHookStaleCleanup` helper. That helper already carries the **mass-deletion hazard guard** (`len(livePanes)==0 && hooks present` → skip + WARN, never wipe) and drives `hooks.Store.CleanStale`, which emits the existing `EmitCleanStaleSummary` **audit breadcrumb** — so no new audit event/vocabulary is invented.
+- **No layering problem:** `runHookStaleCleanup` and the daemon (`cmd/state_daemon.go`) are both in package `cmd` — same package, so no new import and no cycle.
+- **Cadence:** **not** every 1s tick. Throttled to ~10s via a cheap `time.Since(lastCleanup) >= interval` check evaluated per tick; the cleanup body fires only when the interval has elapsed. The 1s tick must stay light (capture/scrollback save is the priority and can exceed 1s); stale hooks are inert so precise timing is irrelevant. Exact interval is a tuning detail (**10s default**).
+- **Priority / non-interference:** cleanup never competes with a pending capture — the tick loop is single-threaded and already skips entirely while `@portal-restoring` is set and on the `!dirty && !gap` idle fast-path; cleanup is gated so scrollback saving always wins.
+- **Failure posture:** log WARN and retry next cadence (mirrors the tick loop's existing "tick failed" handling); a cleanup error never escalates or crashes the daemon.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
