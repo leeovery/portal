@@ -1,1 +1,51 @@
 # Plan: Skip Bootstrap When Warm
+
+## Phases
+
+### Phase 1: Version-stamped latch + full-bootstrap set-point
+status: draft
+
+**Goal**: A successful full bootstrap stamps `@portal-bootstrapped` with the running binary's `cmd.version`, and the latch can be read back with correct version-aware three-way semantics. `CleanStale` (former step 11) is removed from the orchestrator, dropping it from 11 → 10 steps.
+
+**Why this order**: The latch is the foundation both later phases consume — the entry-path branch reads it, and the abridged path is only reachable once a full run sets it. The set-point is best-effort surgery inside `Orchestrator.Run`, and it shares that same `Run` surface with the `CleanStale` removal — building them together keeps all orchestrator changes in one cohesive, testable increment. Removing `CleanStale` here is a prerequisite for re-homing it on the daemon in Phase 3 (the single-home contract).
+
+**Acceptance**:
+- [ ] A latch read/verdict helper reduces `TryGetServerOption("@portal-bootstrapped")` results — {absent, version-match, version-mismatch, read-error/down-server} — to a single `latchSatisfied bool`, satisfied only when present **and** stored version equals the running version (plain string equality, parse-free `cmd.version`).
+- [ ] The running version is injectable so the version-mismatch branch is unit-testable without rebuilding the binary.
+- [ ] `Orchestrator.Run` sets `@portal-bootstrapped = <version>` via `SetServerOption` as its final action — after the last soft step and the fatal-error gate, before the orchestration-complete summary and return — identically on both invocation modes (synchronous and concurrent-goroutine), and before the terminal completion event on the concurrent path.
+- [ ] A run with only soft warnings (`SaverDownWarning` / `CorruptSessionsJSONWarning` / partial restore) **sets** the latch; a run that aborts at a fatal step (EnsureServer / RegisterPortalHooks / SetRestoring / ClearRestoring) leaves it **unset**.
+- [ ] A latch-write failure logs WARN under the bootstrap component and is swallowed — never fatal, never appended to the returned `warnings` slice or routed through the progress channel.
+- [ ] The `CleanStale` step, its `StaleCleaner` seam, and its production adapter are removed from the orchestrator; `totalSteps` becomes `10`, the package doc enumerates ten steps, and the removed `emitStep(11, …)` call is gone.
+- [ ] `internal/tui/loading_progress.go` — `stepLabelTable` and `totalBootstrapSteps` become `1..10` (drop key 11, no renumber); the drift-guard test asserts `1..10` and passes; the loading bar reaches 100% on a successful full bootstrap.
+- [ ] Full test suite green; existing full-bootstrap behaviour (restore, sweeps, warnings) is unchanged apart from the dropped step.
+
+### Phase 2: Entry-path branch + abridged bootstrap path
+status: draft
+
+**Goal**: `PersistentPreRunE` reads the latch once and, when satisfied, takes a single abridged path — liveness-only `EnsureSaver` plus the identical context-injection and warning plumbing the synchronous path already uses — instead of running the full orchestrator; when not satisfied it routes to the unchanged full bootstrap (concurrent + loading screen on the TUI path, synchronous otherwise).
+
+**Why this order**: Consumes the latch read semantics and the set-point from Phase 1 — the abridged path is only meaningfully reachable once a prior full run has stamped the latch. This phase delivers the feature's primary user-visible outcome (warm commands skip the full orchestrator and its concurrency surface) and must come before the daemon work, which is a corollary that only matters once warm commands stop cleaning hooks.
+
+**Acceptance**:
+- [ ] A single `TryGetServerOption` read + version compare computes the `latchSatisfied` verdict exactly once, positioned upstream of `shouldRunConcurrentBootstrap`; the verdict is never re-read.
+- [ ] Latch satisfied → a new **liveness-only** `EnsureSaver` helper in package `cmd` (`SaverPanePIDOrAbsent` → `BootstrapPortalSaver` if absent) runs and returns without reaching the orchestrator or the concurrent route; it **never** calls `EnsurePortalSaverVersion` (the version-gate).
+- [ ] The abridged path injects `serverStartedKey = false` and `tmuxClientKey` into `cmd.Context()`, sets **no** `deferredBootstrapKey`, and funnels a `SaverDownWarning` into the existing `bootstrapWarnings` sink (CLI → stderr; TUI → notice band) — no new emission mechanism.
+- [ ] `shouldRunConcurrentBootstrap` drops its `ServerRunning()` probe and reduces to the TUI-path test only (keyed off latch-not-satisfied); a warm-unlatched `portal open` now shows the loading screen + progress, and `openTUI`'s `serverStarted` force-true stays correct (comment reworded to "full bootstrap in progress").
+- [ ] Latch satisfied + saver dead → the abridged liveness probe revives it (crash-recovery regression guard); a version-mismatch latch → full re-bootstrap that re-stamps with the new version.
+- [ ] The full outcome matrix holds: `open` (no args) TUI satisfied → abridged instant picker; not satisfied → concurrent + loading; `attach` / `open <path>` / CLI satisfied → abridged sync; not satisfied → synchronous full bootstrap.
+- [ ] Full test suite green, including warm-path parity coverage under `IsolateStateForTest`.
+
+### Phase 3: Daemon-owned hooks cleanup
+status: draft
+
+**Goal**: The `_portal-saver` daemon becomes the sole automatic home for the removed hooks stale-cleanup, running the existing `runHookStaleCleanup` on a throttled (~10s) gate placed on the tick loop's idle branch, so stale `hooks.json` entries are still reaped over a weeks-long warm server lifetime that no longer full-bootstraps per command.
+
+**Why this order**: Depends on `CleanStale` being removed from the orchestrator (Phase 1) so the single-home contract holds, and completes the weeks-long-server guarantee that the abridged path (Phase 2) would otherwise break by never re-cleaning hooks. It is genuinely distinct work — a new daemon responsibility with its own concurrency/placement reasoning — so it earns its own checkpoint after the entry-path behaviour is proven.
+
+**Acceptance**:
+- [ ] `daemonDeps` carries a `*hooks.Store` built **once** at daemon startup via the existing `loadHookStore()` (resolving the *same* `hooks.json` foreground commands mutate); the existing `daemonDeps.Client` is reused as the `AllPaneLister`; `lastCleanup` is initialised to daemon-start time so the first cleanup fires ~10s after start.
+- [ ] Cleanup invokes the existing `runHookStaleCleanup` with `lister=Client`, `store=`the startup store, `swallowListError=true`, `onRemoved=nil` — reusing the mass-deletion hazard guard and the `EmitCleanStaleSummary` audit breadcrumb; no new audit event or vocabulary.
+- [ ] The cleanup gate sits on the **idle branch** — at the `!dirty && !gap` point, after the `@portal-restoring` check, replacing the bare idle `return` — throttled by `time.Since(lastCleanup) >= interval` (~10s default).
+- [ ] Cleanup fires on an idle tick once one interval has elapsed; it is **skipped** while `@portal-restoring` is set and on capture-pending (`dirty || gap`) ticks (scrollback always wins); a cleanup error logs WARN and never escalates or crashes the daemon.
+- [ ] The daemon is the **only** remaining automatic hooks-`CleanStale` caller (bootstrap no longer runs it); `portal clean` remains the manual backstop.
+- [ ] Full test suite green, including the throttled-cadence unit test (no cleanup before one interval; cleanup on the first eligible idle tick) under `IsolateStateForTest` for any daemon-spawning integration coverage.
