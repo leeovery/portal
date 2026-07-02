@@ -158,6 +158,43 @@ The abridged path runs through the **same entry-path plumbing** (warning sink + 
 
 ---
 
+## Abridged EnsureSaver — Liveness-Only
+
+EnsureSaver (Class 2) is the one step that stays on the abridged path. It is the safety net against the `_portal-saver` daemon dying mid-lifetime — the daemon's own self-supervision can `os.Exit(0)`, tearing down its pane and killing the `_portal-saver` session, and a per-command re-ensure brings it back. With weeks-long servers, dropping this net would let a self-ejected daemon stay dead for weeks (silent loss of scrollback capture and resurrection-state), so it must keep running per-command.
+
+### EnsureSaver's two duties, split across the two paths
+
+EnsureSaver does two things:
+
+- **(a) Liveness** — create `_portal-saver` + daemon if absent (`BootstrapPortalSaver`).
+- **(b) Version-gate** — if the running daemon's binary is stale, kill + recreate it on the new binary via a guarded kill-barrier (`EnsurePortalSaverVersion`).
+
+The version-stamped latch splits these:
+
+- **Abridged path → liveness only.** A *satisfied* latch (present **and** version-matching) already proves the running daemon is the current binary, so the version-gate is redundant. Abridged EnsureSaver reduces to a pure liveness probe (`SaverPanePIDOrAbsent` + re-ensure if absent).
+- **Full bootstrap → keeps the version-gate.** A version bump makes the latch mismatch → full bootstrap → the version-gate kill-barrier recreates the daemon on the new binary → re-stamp.
+
+### Liveness-only is *not* reduced crash recovery
+
+Dropping the version re-check is **not** a reduction in crash/death recovery. On every abridged command the liveness probe asks "is the `_portal-saver` daemon alive?" (`SaverPanePIDOrAbsent`) and recreates it if absent. A random daemon crash → pane process exits → `_portal-saver` session gone → the next warm command's liveness probe revives it. That is exactly the fail-safe from the "keep EnsureSaver on the warm path" decision, preserved unchanged. The **only** thing dropped from the abridged path is the redundant *version* re-check.
+
+### Concurrency benefit (dissolves the kill-barrier race)
+
+Because no abridged command ever runs the version-gate kill-barrier, N concurrent warm commands can never race to kill-barrier a stale daemon — the single post-upgrade full bootstrap does the recreate once. Liveness re-ensure of a genuinely-absent saver stays serialised by the daemon flock as before.
+
+### Two independent daemon safety nets (both preserved)
+
+1. **Self-supervision** — the daemon self-ejects if it detects it is no longer the legitimate `_portal-saver` pane (split-brain guard).
+2. **Abridged liveness revival** — on every warm command (plus a full bootstrap on cold boot / upgrade).
+
+This is belt-and-suspenders: keep the fail-safe *and* separately pursue making the daemon as robust as possible (ongoing work, not gated by this feature).
+
+### Restore-window note
+
+On the warm path EnsureSaver runs **outside** the `@portal-restoring` window (no restore in flight), which is correct — a revived daemon should capture normally, not suppress.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
