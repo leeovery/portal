@@ -48,6 +48,16 @@ approved_at: 2026-07-02
 - [ ] The full outcome matrix holds: `open` (no args) TUI satisfied → abridged instant picker; not satisfied → concurrent + loading; `attach` / `open <path>` / CLI satisfied → abridged sync; not satisfied → synchronous full bootstrap.
 - [ ] Full test suite green, including warm-path parity coverage under `IsolateStateForTest`.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| skip-bootstrap-when-warm-2-1 | Liveness-only EnsureSaver helper in package cmd | saver alive → no-op (no revive, no warning), saver absent → revive via BootstrapPortalSaver, revive fails → SaverDownWarning into bootstrapWarnings sink and command proceeds (non-fatal), SaverPanePIDOrAbsent transient error → treated as absent → attempt revive, never calls EnsurePortalSaverVersion (no version-gate / kill-barrier) |
+| skip-bootstrap-when-warm-2-2 | Re-key shouldRunConcurrentBootstrap to latch-not-satisfied + reword openTUI comment | warm-unlatched open (no args) now shows loading screen + progress, nil client → synchronous, non-TUI command (open <path> / attach / CLI) → never concurrent regardless of latch, ServerRunning() probe dropped, openTUI serverStarted force-true stays correct on extended route (comment-only reword to "full bootstrap in progress") |
+| skip-bootstrap-when-warm-2-3 | Latch-read three-way branch + abridged-path wiring in PersistentPreRunE | latch read computed once (never re-read), abridged injects serverStartedKey=false + tmuxClientKey, abridged sets NO deferredBootstrapKey (serverStarted=false survives → instant picker), CLI abridged flushes warnings to stderr / TUI abridged drains to notice band, read-error/down-server folds into not-satisfied → full bootstrap, verdict threaded into re-keyed shouldRunConcurrentBootstrap not re-read |
+| skip-bootstrap-when-warm-2-4 | Integration coverage — abridged self-heal + version-mismatch re-bootstrap (real tmux) | warm+satisfied skips restore (heavy steps not run), warm+satisfied + saver dead → abridged liveness revives it, version-mismatch latch → full re-bootstrap re-stamps current version, full outcome matrix rows hold, daemon-spawning tests under IsolateStateForTest |
+
 ### Phase 3: Daemon-owned hooks cleanup
 status: approved
 approved_at: 2026-07-02
