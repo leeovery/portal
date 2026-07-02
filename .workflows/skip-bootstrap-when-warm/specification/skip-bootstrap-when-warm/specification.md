@@ -267,6 +267,41 @@ The feature's value is *not running* steps, which is harder to assert than runni
 
 ---
 
+## Affected Code Surface
+
+Confirmed anchors (code map, 2026-06-30) for planning. This is a map, not a task list.
+
+### Entry path
+
+- **`cmd/root.go` `PersistentPreRunE`** — where the latch-read + three-way branch is added, after the tmux client is built and before the orchestrator runs. `skipTmuxCheck` = `alias, clean, help, hooks, init, state, version` (`attach` is **not** in it — the F1 dependency).
+- **`shouldRunConcurrentBootstrap` (`cmd`)** — currently returns true only for `portal open` (no args) **and** server-not-running (via one `ServerRunning()` `tmux info` probe). Re-key its trigger to **latch-not-satisfied** on the TUI path.
+- **`runBootstrap` / `bootstrapOnce` (`sync.Once`, `cmd`)** — existing in-process memoisation; the latch is its cross-*process* equivalent.
+- **Context injection** — the sync path injects `serverStartedKey` + `tmuxClientKey` into `cmd.Context()`; the abridged path must inject the same (`serverStarted=false`) without running the orchestrator.
+- **`bootstrapWarnings` sink (`cmd`)** — the abridged path's `SaverDownWarning` reuses it (CLI → stderr; TUI → notice band).
+
+### Orchestrator
+
+- **`cmd/bootstrap/bootstrap.go` `Run(ctx) (serverStarted bool, warnings []Warning, err error)`** — set the latch as the final action on no fatal error. Remove the `CleanStale` step + its seam/adapter (11 → 10 steps).
+  - Fatal steps (return `*FatalError`): EnsureServer, RegisterPortalHooks, SetRestoring, ClearRestoring.
+  - Soft steps: SweepOrphanDaemons, EnsureSaver (`SaverDownWarning`), Restore (`CorruptSessionsJSONWarning`), EagerSignalHydrate, CleanStaleMarkers, SweepOrphanFIFOs.
+
+### Latch mechanism (reuse existing)
+
+- **`internal/tmux/tmux.go`** — `SetServerOption(name, value)` (`set-option -s`), `TryGetServerOption(name) (val, found, err)`, `UnsetServerOption(name)` (`set-option -su`, idempotent).
+- **`internal/state/markers.go`** — seam interfaces `RestoringChecker` (TryGet) and `ServerOptionWriter` (Set/Unset); `@portal-restoring` is the direct precedent (set/cleared/read via `IsRestoringSet`).
+- **`cmd.version`** (ldflags-injected) — the value stamped into the latch; must be injectable for tests.
+
+### Daemon (new cleanup home)
+
+- **`cmd/state_daemon.go`** — the 1s `TickerPeriod` tick loop; add the throttled (`time.Since(lastCleanup) >= interval`, ~10s) hooks-cleanup gate, skipped while `@portal-restoring` is set and on the `!dirty && !gap` idle fast-path.
+- **`cmd/run_hook_stale_cleanup.go` `runHookStaleCleanup`** — the reused cleanup body (mass-delete guard + `EmitCleanStaleSummary` audit breadcrumb); same `cmd` package → no new import, no cycle.
+
+### Cleanup-target producers (why steps 9/10 have no warm workload)
+
+- **`internal/restore/session.go`** — the sole call sites of `SetSkeletonMarker` and `CreateFIFO` (both restore-only).
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
