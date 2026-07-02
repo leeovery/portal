@@ -49,7 +49,8 @@ approved_at: 2026-07-02
 - [ ] Full test suite green, including warm-path parity coverage under `IsolateStateForTest`.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-02
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|

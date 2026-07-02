@@ -39,7 +39,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "~",
+          "task": "skip-bootstrap-when-warm-2-1",
           "task_map": {
             "skip-bootstrap-when-warm-1": "tick-648308",
             "skip-bootstrap-when-warm-1-1": "tick-7a8b27",
