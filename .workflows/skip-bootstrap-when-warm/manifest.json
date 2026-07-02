@@ -39,7 +39,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 3,
-          "task": "skip-bootstrap-when-warm-3-1",
+          "task": "skip-bootstrap-when-warm-3-2",
           "task_map": {
             "skip-bootstrap-when-warm-1": "tick-648308",
             "skip-bootstrap-when-warm-1-1": "tick-7a8b27",
@@ -50,7 +50,9 @@
             "skip-bootstrap-when-warm-2-1": "tick-66413d",
             "skip-bootstrap-when-warm-2-2": "tick-eb4711",
             "skip-bootstrap-when-warm-2-3": "tick-f3a3c3",
-            "skip-bootstrap-when-warm-2-4": "tick-929fc1"
+            "skip-bootstrap-when-warm-2-4": "tick-929fc1",
+            "skip-bootstrap-when-warm-3": "tick-f36ddf",
+            "skip-bootstrap-when-warm-3-1": "tick-5a9eb4"
           },
           "external_id": "tick-0d5812"
         }
