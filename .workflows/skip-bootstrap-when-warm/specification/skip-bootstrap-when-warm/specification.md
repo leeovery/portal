@@ -125,6 +125,39 @@ Because the latch is set only *after* `EagerSignalHydrate` and `Clear @portal-re
 
 ---
 
+## Latch-Check Placement & Abridged-Path Wiring
+
+### Placement — a single latch-read drives a three-way branch
+
+In `PersistentPreRunE`, after the tmux client is built, read the latch (`TryGetServerOption("@portal-bootstrapped")`) and compare its value to the running binary version:
+
+- **Latch satisfied** (present **and** version matches) → **abridged path**.
+- **Latch not satisfied** (absent, unreadable/down-server, **or** version-mismatch) → **full bootstrap**: concurrent + loading screen on the TUI path (`open`, no args), synchronous otherwise.
+
+A separate `ServerRunning()` probe is not required — the latch-read fails gracefully on a down server, so "unreadable" folds into "not satisfied → full bootstrap."
+
+### Loading-screen trigger: latch-absent, not server-down
+
+The concurrent/loading path (`shouldRunConcurrentBootstrap`) currently fires only for `portal open` (no args) **and** server-not-running. It now fires whenever a **full** bootstrap runs on the TUI path — keyed off **latch-not-satisfied**, not server-down. This retires the warm-unlatched edge as an improvement: a hand-started tmux server + `x` now gets the loading screen + progress during its first full bootstrap instead of a synchronous no-progress stall. Conceptually, "loading screen" now means exactly "a full bootstrap is in progress." *What* the full bootstrap does is unchanged (Restore etc. already ran on warm-unlatched today) — only the presentation improves.
+
+### Outcome matrix
+
+| Command | Latch | Outcome |
+|---|---|---|
+| `open` (no args) TUI | not satisfied (absent / version-mismatch) | full bootstrap, concurrent + loading screen |
+| `open` (no args) TUI | satisfied (present + version match) | abridged (sync plumbing, instant picker) |
+| `attach` / `open <path>` / CLI | not satisfied | full bootstrap, synchronous |
+| `attach` / CLI | satisfied | abridged (sync plumbing) |
+
+### Abridged wiring reuses the sync plumbing
+
+The abridged path runs through the **same entry-path plumbing** (warning sink + context injection) as the synchronous full path, differing only in executing a reduced step set (EnsureSaver only). This is what makes the following inherit existing, tested handling:
+
+- **Context injection.** The abridged path still injects `serverStartedKey` + `tmuxClientKey` into `cmd.Context()` (exactly as the sync path does) — it just doesn't run the orchestrator. `serverStarted` is injected as **`false`** (correct: the command did not start the server). Its sole production consumer is `openTUI`'s loading-page gate → `false` → no loading page → instant picker, which is exactly right for a warm command. There is no hidden "third state" to disambiguate.
+- **Warnings.** EnsureSaver's `SaverDownWarning` funnels into the same package-level `bootstrapWarnings` sink the sync path already uses → the CLI flushes to stderr; the TUI drains to the notice band. Identical to a warm command today; no new emission mechanism.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
