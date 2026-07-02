@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-02
 cycle: 1
 phase: Plan Integrity Review
@@ -34,7 +34,7 @@ This is the only structural finding; the rest of the plan meets the integrity ba
 - In `Run`, insert the latch write as the final action before the `o.Logger.Info("orchestration complete", ...)` summary line and the `return` — i.e. after the last best-effort step and after the fatal-error gate. **Ordering note (co-evolution with task 1-3):** if this task lands before 1-3, the live `Run` still contains Step 11 (`CleanStale`) after `emitStep(10, stepSweepOrphanFIFOs)`; place the latch write *after* that CleanStale block (immediately before the Return boundary), NOT immediately after `emitStep(10, …)` — the write must be `Run`'s last pre-return action so it never precedes a soft step that is still present. Once 1-3 removes CleanStale, the write is already correctly terminal at `emitStep(10, …)`'s tail with no further edit needed. Because all fatal steps (`EnsureServer`, `RegisterPortalHooks`, `SetRestoring`, `ClearRestoring`) `return` early via `o.fatalf`, execution only reaches this point on a non-fatal run — so no extra error gate is needed; add a one-line comment stating this. Guard the call `if o.Latch != nil { ... }` so tests / fallbacks may leave it nil.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim (auto mode) to both the phase-1 task detail file and the Tick task tick-f09675.
 
 ---
