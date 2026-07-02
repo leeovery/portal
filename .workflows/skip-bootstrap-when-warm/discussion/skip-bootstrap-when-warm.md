@@ -42,7 +42,7 @@ A living index of subtopics tracked during the discussion.
 
 ### Map
 
-  Discussion Map — Skip Bootstrap When Warm (12 subtopics — 11 decided · 1 pending)
+  Discussion Map — Skip Bootstrap When Warm (12 subtopics — all decided)
 
   ┌─ ✓ Full vs Abridged bootstrap — classifying the 11 steps [decided]
   │  ├─ ✓ EnsureSaver on abridged path = liveness-only (version-gate → full bootstrap) [decided]
@@ -55,7 +55,7 @@ A living index of subtopics tracked during the discussion.
   ├─ ✓ Partial-bootstrap / soft-vs-fatal failure handling (soft latches, fatal doesn't) [decided]
   ├─ ✓ Full-bootstrap concurrent/loading-path interaction (set inside Run) [decided]
   ├─ ✓ Edge cases & latch invalidation (version-stamp; self-heal; F1/F2/F5/F8) [decided]
-  └─ ○ Test strategy for verifying the skip [pending]
+  └─ ✓ Test strategy for verifying the skip [decided]
 
 ---
 
@@ -284,15 +284,38 @@ Confidence: high. All review-002 mechanism findings (F1–F8) resolved or explic
 
 ---
 
+## Test strategy for verifying the skip
+
+### Context
+
+The feature's value is *not running* steps, which is harder to assert than running them, and the blast radius is load-bearing core machinery — so the test shape is worth settling before implementation (review F10 flagged that a testable design may feed back into the mechanism decisions; it does — see "design-for-test" below).
+
+### Decision (shape approved by user)
+
+- **Branch selection (unit, seam-mocked).** The orchestrator + steps are already `bootstrapDeps`-injected. Set `@portal-bootstrapped` on a fake client to {absent, version-match, version-mismatch} and assert: *satisfied* → only EnsureSaver invoked, Restore/Sweep/CleanStale **not** invoked; *not satisfied* → full `Run` **and** latch ends stamped with the current version. Assert via seam call-recording.
+- **Set-point gating.** Inject a soft-warning step → assert latch **is** set; inject a fatal step → assert latch **unset**. Directly nails the soft-vs-fatal rule.
+- **Abridged self-heal (crash-recovery regression guard).** Latch satisfied + saver dead → assert the abridged liveness EnsureSaver revives it. This is the explicit guard for the "keep the fail-safe" thread.
+- **Daemon cleanup.** Unit-test the throttled cadence gate (`time.Since(lastCleanup) >= interval`); the cleanup body is the existing `runHookStaleCleanup` (already covered, guard included).
+- **Integration (real tmux).** Extend `cmd/concurrent_*_test.go` + `tmuxtest` socket fixtures, **under `IsolateStateForTest`** (mandatory for daemon-spawning tests): warm+satisfied command skips restore but revives a killed saver; a version-mismatch latch triggers a full re-bootstrap that re-stamps.
+- **Design-for-test.** Make the "current version" **injectable** (it is `cmd.version`) so a version-mismatch branch is unit-testable without rebuilding the binary.
+
+Confidence: high. User: "The test strategy sounded okay to me."
+
+---
+
 ## Summary
 
 ### Key Insights
 
-*(captured as the discussion progresses)*
+1. **Almost all "cleanup" is restore-window (cold-boot) debris, not warm-server output.** Tracing each cleanup target (`SetSkeletonMarker`, `CreateFIFO`) to its single call site — restore — collapsed the weeks-long-server worry: steps 9/10 have zero warm workload; only step-11 hooks accrue mid-lifetime.
+2. **The version-stamped latch is the linchpin.** Storing the binary version (not a bare presence flag) makes the latch a version-aware gate that (a) auto-applies release upgrades via a full re-bootstrap, (b) lets the abridged path shed the version-gate down to a pure liveness probe, and (c) carries forensic metadata — resolving three review findings (F4/F6/F7) at once and dissolving a concurrency concern (F3).
+3. **Set-point-by-ordering.** Setting the latch as the *final* action of a successful `Run` (soft warnings still latch; only fatal steps don't) makes "latch satisfied ⟺ a full bootstrap ran to completion past step 8," retiring a whole cluster of atomicity/ordering/two-marker concerns for free.
+4. **Motivation is concurrency + redundancy, not single-command safety.** A lone warm bootstrap is already safe today (Restore skips live sessions); the feature exists to collapse the reopen burst's N concurrent full bootstraps and to stop redundant per-command work.
+5. **Self-heal principle (user).** Don't program around anything that recovers via an idempotent, no-op full bootstrap — latch-write failure, post-upgrade mismatch, and crash recovery all lean on it.
 
 ### Open Threads
 
-*(captured as the discussion progresses)*
+- None blocking. Two implementation-tuning details deliberately left open: the daemon hooks-cleanup cadence interval (~10s default) and any optional forensic extras in the latch value beyond the version (set-timestamp / pid).
 
 ### Current State
 
@@ -301,7 +324,7 @@ Confidence: high. All review-002 mechanism findings (F1–F8) resolved or explic
 - **Decided:** naming full/abridged (not cold/warm); the latch is the switch; EnsureSaver keeps its version-gate on the abridged path (F6).
 - **Decided (mechanism):** version-stamped `@portal-bootstrapped` server option; latch set as the final action of a successful `Run` (soft warnings still latch, fatal doesn't); single-read three-way branch (satisfied→abridged, else full — concurrent+loading on TUI); loading-screen keyed on latch-not-satisfied; abridged EnsureSaver = liveness-only (version-gate → full bootstrap on version-mismatch).
 - **Reviews folded in:** set 001 (F1–F10) and set 002 (F1–F8) all resolved or explicitly accepted.
-- **Last open subtopic:** test strategy for verifying the skip (how to assert abridged skips the heavy steps yet still re-ensures a dead saver; latch observability; the cold+TUI set-point).
+- **All 12 subtopics decided.** Test strategy approved. Two reviews (001, 002) incorporated; final review pass pending before conclusion.
 
 ## Triage
 
