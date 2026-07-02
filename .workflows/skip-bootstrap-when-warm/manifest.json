@@ -34,12 +34,12 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "88659b23ca44f9117c3a089081ca9ebc3252aec9",
-          "task_list_gate_mode": "gated",
+          "task_list_gate_mode": "auto",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "~",
+          "task": "skip-bootstrap-when-warm-1-1",
           "task_map": {}
         }
       }

@@ -21,7 +21,8 @@ approved_at: 2026-07-02
 - [ ] Full test suite green; existing full-bootstrap behaviour (restore, sweeps, warnings) is unchanged apart from the dropped step.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-02
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
