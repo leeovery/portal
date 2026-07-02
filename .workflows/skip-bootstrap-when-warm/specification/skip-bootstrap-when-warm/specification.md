@@ -32,6 +32,36 @@ This feature is built **before** `restore-host-terminal-windows`, which depends 
 
 ---
 
+## The Two Bootstrap Paths
+
+The all-or-nothing "latch set ⇒ skip all steps" framing is rejected — the orchestrator's steps are not the same *kind* of work. Some are genuinely once-per-lifetime and categorically pointless on a latched server; one is an ongoing safety net that must keep running. The design splits into two named paths, selected by the latch.
+
+### Terminology
+
+- **Full bootstrap** vs **abridged bootstrap** — *not* "cold"/"warm". "Cold/warm" collides with "is the tmux server running"; the real trigger is the **latch** ("has Portal bootstrapped *this* server yet"). These usually coincide with server-was-off but are not identical: a hand-started tmux server hit by `x` has no latch → gets the full bootstrap.
+- **Same orchestrator, two invocation modes.** Full and abridged are not different programs. The full path is the existing `Orchestrator.Run`; on a cold `portal open` it runs concurrently behind the loading screen, otherwise synchronously. The loading screen is a slow-path wrapper, not a distinct bootstrap.
+
+### Step classification
+
+Three classes:
+
+| Class | Steps | Path behaviour when latched |
+|---|---|---|
+| **1 — Cold-only** (once-per-lifetime; idempotent no-op when warm) | EnsureServer, RegisterPortalHooks, SetRestoring, SweepOrphanDaemons, Restore, EagerSignalHydrate, ClearRestoring | **Skipped.** Server is up (else the latch would have died with it); hooks converged once and nothing re-adds them mid-lifetime; restore is a cold-boot concern; the orphan-daemon sweep targets *prior-lifetime* leftovers (within a lifetime the daemon flock + self-supervision keep N≤1). |
+| **2 — Protective liveness** (safety net against mid-lifetime death) | EnsureSaver | **Kept on every abridged command** as a cheap probe + re-ensure if down. (Reduced to liveness-only — see the EnsureSaver topic.) |
+| **3 — Cleanup / hygiene** (accrues over the lifetime) | CleanStaleMarkers, SweepOrphanFIFOs, ~~CleanStale (hooks)~~ | Markers/FIFO sweeps stay in the full bootstrap for cold-boot leftovers (a warm server produces none). Hooks `CleanStale` is **removed from the orchestrator entirely** and re-homed on the daemon — see that topic. |
+
+### The two paths
+
+- **Full bootstrap** (latch not satisfied): the full orchestrator — **10 steps** (the original 11 minus `CleanStale`, which is removed and relocated to the daemon; the marker/FIFO sweeps stay for cold-boot leftovers) — then set the latch as the final action of a successful run.
+- **Abridged bootstrap** (latch satisfied): **EnsureSaver liveness probe only** — the single, uniform reduced path. Everything else is skipped.
+
+### Single-abridged constraint (user directive)
+
+There is **exactly one** abridged path, run identically by every command against an already-bootstrapped server. Multiple abridged variants (e.g. an `open`-flavour that cleans + an `attach`-flavour that doesn't) are explicitly rejected. This constraint is load-bearing: it is what forces hooks cleanup out of the orchestrator entirely (a per-command-classified cleanup would be exactly the rejected multi-variant design, and keeping it in the one abridged path would run it under the 20× `attach` burst).
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
