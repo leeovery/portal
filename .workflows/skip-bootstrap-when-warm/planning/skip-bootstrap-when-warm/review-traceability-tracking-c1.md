@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-02
 cycle: 1
 phase: Traceability Review
@@ -73,7 +73,7 @@ site anyway, making the instruction dead guidance).
 - Body: call `_, present, err := tmux.SaverPanePIDOrAbsent(client, tmux.PortalSaverName)`. Treat `present == true && err == nil` as alive → return immediately (no revive, no warning). Treat every other shape — `!present` (absent) OR a non-nil `err` (transient probe error) — as "needs revive" (per spec §Abridged EnsureSaver: a transient error folds into "attempt revive"; mirror Component D's "treat any error as absent" collapse for the liveness case).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Sole non-traceable content in the entire plan. If the user prefers to keep a diagnostic breadcrumb, it should be approved as an intentional addition (and the helper signature would then need a logger argument for the "if a logger is readily available" clause to be reachable — currently it is not). Otherwise remove per the Proposed text.
 
 ---
