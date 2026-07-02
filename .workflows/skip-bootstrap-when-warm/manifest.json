@@ -49,7 +49,8 @@
             "skip-bootstrap-when-warm-2": "tick-bb9807",
             "skip-bootstrap-when-warm-2-1": "tick-66413d",
             "skip-bootstrap-when-warm-2-2": "tick-eb4711",
-            "skip-bootstrap-when-warm-2-3": "tick-f3a3c3"
+            "skip-bootstrap-when-warm-2-3": "tick-f3a3c3",
+            "skip-bootstrap-when-warm-2-4": "tick-929fc1"
           },
           "external_id": "tick-0d5812"
         }
