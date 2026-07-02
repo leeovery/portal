@@ -74,3 +74,13 @@ approved_at: 2026-07-02
 - [ ] Cleanup fires on an idle tick once one interval has elapsed; it is **skipped** while `@portal-restoring` is set and on capture-pending (`dirty || gap`) ticks (scrollback always wins); a cleanup error logs WARN and never escalates or crashes the daemon.
 - [ ] The daemon is the **only** remaining automatic hooks-`CleanStale` caller (bootstrap no longer runs it); `portal clean` remains the manual backstop.
 - [ ] Full test suite green, including the throttled-cadence unit test (no cleanup before one interval; cleanup on the first eligible idle tick) under `IsolateStateForTest` for any daemon-spawning integration coverage.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| skip-bootstrap-when-warm-3-1 | Wire the hooks store and lastCleanup into daemonDeps | loadHookStore() error at startup surfaces (does not silently disable cleanup), lastCleanup init to daemon-start time not zero-value so first cleanup fires ~10s in, store resolves same hooks.json foreground commands mutate via inherited PORTAL_HOOKS_FILE/XDG_CONFIG_HOME env, Client reused as AllPaneLister (no new client/seam) |
+| skip-bootstrap-when-warm-3-2 | Throttled hooks-cleanup gate calling runHookStaleCleanup | not-elapsed → no cleanup call and lastCleanup unchanged, exactly-elapsed boundary (>= interval) → fires and resets lastCleanup, cleanup error logged WARN and swallowed (never returned, never crashes daemon), args pinned lister=Client / store=startup store / swallowListError=true / onRemoved=nil, reuses mass-delete guard + EmitCleanStaleSummary breadcrumb (no new audit event) |
+| skip-bootstrap-when-warm-3-3 | Place the cleanup gate on the tick idle branch | @portal-restoring set → whole tick skipped, no cleanup; capture-pending (dirty \|\| gap) → capture runs, cleanup skipped this tick (scrollback always wins); idle (!dirty && !gap) + throttle elapsed → cleanup runs then returns; daemon is the only remaining automatic hooks-CleanStale caller |
+| skip-bootstrap-when-warm-3-4 | Real-tmux daemon integration coverage for throttled cleanup | no cleanup before one interval elapses, stale hooks.json entry reaped after the interval on an idle server, live-keyed entry retained, daemon-spawning test under IsolateStateForTest, no t.Parallel |
