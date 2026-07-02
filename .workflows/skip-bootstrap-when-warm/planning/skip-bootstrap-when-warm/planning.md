@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Version-stamped latch + full-bootstrap set-point
-status: draft
+status: approved
+approved_at: 2026-07-02
 
 **Goal**: A successful full bootstrap stamps `@portal-bootstrapped` with the running binary's `cmd.version`, and the latch can be read back with correct version-aware three-way semantics. `CleanStale` (former step 11) is removed from the orchestrator, dropping it from 11 → 10 steps.
 
@@ -20,7 +21,8 @@ status: draft
 - [ ] Full test suite green; existing full-bootstrap behaviour (restore, sweeps, warnings) is unchanged apart from the dropped step.
 
 ### Phase 2: Entry-path branch + abridged bootstrap path
-status: draft
+status: approved
+approved_at: 2026-07-02
 
 **Goal**: `PersistentPreRunE` reads the latch once and, when satisfied, takes a single abridged path — liveness-only `EnsureSaver` plus the identical context-injection and warning plumbing the synchronous path already uses — instead of running the full orchestrator; when not satisfied it routes to the unchanged full bootstrap (concurrent + loading screen on the TUI path, synchronous otherwise).
 
@@ -36,7 +38,8 @@ status: draft
 - [ ] Full test suite green, including warm-path parity coverage under `IsolateStateForTest`.
 
 ### Phase 3: Daemon-owned hooks cleanup
-status: draft
+status: approved
+approved_at: 2026-07-02
 
 **Goal**: The `_portal-saver` daemon becomes the sole automatic home for the removed hooks stale-cleanup, running the existing `runHookStaleCleanup` on a throttled (~10s) gate placed on the tick loop's idle branch, so stale `hooks.json` entries are still reaped over a weeks-long warm server lifetime that no longer full-bootstraps per command.
 
