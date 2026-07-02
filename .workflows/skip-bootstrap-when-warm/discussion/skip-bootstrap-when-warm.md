@@ -95,8 +95,8 @@ Three classes, not two:
 
 Reject the all-or-nothing skip. Split into two named paths:
 
-- **Full bootstrap** (latch absent): all 11 steps, then set the latch.
-- **Abridged bootstrap** (latch present): **EnsureSaver liveness probe only** (Class-2 protective) — the single, uniform reduced path. Everything in Class 1 is skipped; Class-3 cleanup is removed from the per-command path entirely and homed on the daemon (see child).
+- **Full bootstrap** (latch not satisfied): the full orchestrator, then set the latch. (Final composition: **10 steps** — the original 11 minus `CleanStale`, which is removed entirely and relocated to the daemon; see the cleanup subtopic. Steps 9/10 marker/FIFO cleanup stay here for cold-boot leftovers.)
+- **Abridged bootstrap** (latch satisfied): **EnsureSaver liveness probe only** (Class-2 protective) — the single, uniform reduced path. Everything else is skipped; Class-3 hooks cleanup is removed from the orchestrator entirely and homed on the daemon (see child).
 
 Confidence: high. This is the explicit "separate full from abridged" the user asked for, with a single abridged version.
 
