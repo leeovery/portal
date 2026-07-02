@@ -251,6 +251,22 @@ Rationale for full removal (not just skipping on abridged): a bootstrap-time cle
 
 ---
 
+## Test Strategy
+
+The feature's value is *not running* steps, which is harder to assert than running them, and the blast radius is load-bearing core machinery — so the tests target branch selection, set-point gating, and self-heal directly.
+
+- **Branch selection (unit, seam-mocked).** The orchestrator + steps are already `bootstrapDeps`-injected. Set `@portal-bootstrapped` on a fake client to {absent, version-match, version-mismatch} and assert:
+  - *Satisfied* → **only EnsureSaver invoked**; the heavy steps (RegisterHooks / Restore / marker+FIFO sweeps) **not** invoked.
+  - *Not satisfied* → full `Run` (now **10 steps, no `CleanStale`**) runs **and** the latch ends stamped with the current version.
+  - Assert via seam call-recording. Also assert the daemon's throttled cleanup is the **only** hooks-`CleanStale` caller left (bootstrap no longer runs it).
+- **Set-point gating.** Inject a soft-warning step → assert the latch **is** set; inject a fatal step → assert the latch **unset**. Directly nails the soft-vs-fatal rule.
+- **Abridged self-heal (crash-recovery regression guard).** Latch satisfied + saver dead → assert the abridged liveness EnsureSaver revives it. This is the explicit guard for the "keep the fail-safe" thread.
+- **Daemon cleanup.** Unit-test the throttled cadence gate (`time.Since(lastCleanup) >= interval`); the cleanup body is the existing `runHookStaleCleanup` (already covered, mass-delete guard included).
+- **Integration (real tmux).** Extend `cmd/concurrent_*_test.go` + `tmuxtest` socket fixtures, **under `IsolateStateForTest`** (mandatory for daemon-spawning tests): a warm+satisfied command skips restore but revives a killed saver; a version-mismatch latch triggers a full re-bootstrap that re-stamps.
+- **Design-for-test.** Make the "current version" **injectable** (it is `cmd.version`) so a version-mismatch branch is unit-testable without rebuilding the binary.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
