@@ -496,7 +496,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// bootstrap ran to completion" holds before any reopen burst could fire.
 	if o.Latch != nil {
 		if err := o.Latch.SetServerOption(state.BootstrappedMarkerName, o.Version); err != nil {
-			o.Logger.Warn("latch write failed", "marker", state.BootstrappedMarkerName, "error", err)
+			o.Logger.Warn("latch write failed for "+state.BootstrappedMarkerName, "error", err)
 		}
 	}
 

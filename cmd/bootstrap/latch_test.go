@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/logtest"
@@ -167,7 +168,10 @@ func TestOrchestratorRun_swallowsLatchWriteFailureAsWarn(t *testing.T) {
 			len(events), stepCompletes, events)
 	}
 
-	// A WARN under component=bootstrap carrying the latch marker.
+	// A WARN under component=bootstrap whose message names the specific latch
+	// marker. The marker name is folded into the message text — there is no
+	// non-vocabulary "marker" attr (the closed attr-key vocabulary permits only
+	// "error" alongside the handler-injected baselines here).
 	foundWarn := false
 	for _, rec := range sink.Records() {
 		if rec.Level != slog.LevelWarn {
@@ -177,14 +181,17 @@ func TestOrchestratorRun_swallowsLatchWriteFailureAsWarn(t *testing.T) {
 		if !ok || comp.String() != "bootstrap" {
 			continue
 		}
-		marker, ok := rec.Attrs["marker"]
-		if ok && marker.String() == state.BootstrappedMarkerName {
-			foundWarn = true
-			break
+		if !strings.Contains(rec.Msg, state.BootstrappedMarkerName) {
+			continue
 		}
+		if _, hasMarker := rec.Attrs["marker"]; hasMarker {
+			t.Errorf("latch-write WARN must not carry a non-vocabulary \"marker\" attr; rec=%+v", rec)
+		}
+		foundWarn = true
+		break
 	}
 	if !foundWarn {
-		t.Errorf("expected a WARN under component=bootstrap carrying marker=%q; records=%+v",
+		t.Errorf("expected a WARN under component=bootstrap whose message names %q; records=%+v",
 			state.BootstrappedMarkerName, sink.Records())
 	}
 }
