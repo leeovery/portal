@@ -209,6 +209,12 @@ var daemonLockFile *os.File
 // documents the scenario-2 `refresh-client` substitution rationale.
 const selfSupervisionHysteresisTicks = 3
 
+// hookCleanupInterval is the throttle interval for the daemon-owned hooks
+// stale-cleanup gate; the 1s tick stays light (capture/scrollback save is the
+// priority and can exceed 1s) while stale hooks are inert so precise timing is
+// irrelevant. Tuning detail — 10s default.
+const hookCleanupInterval = 10 * time.Second
+
 // defaultDaemonRun is the production daemon body: a 1-second ticker that fires
 // captures when the dirty flag is set or the 30-second max-gap has elapsed,
 // returning to delegate the final flush to daemonShutdownFunc on ctx-cancel.
@@ -377,6 +383,32 @@ func tick(ctx context.Context, deps *daemonDeps) {
 	if err := os.Remove(state.SaveRequested(deps.Dir)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		deps.Logger.Warn("remove save.requested failed", "error", err)
 	}
+}
+
+// maybeRunHookCleanup is the throttled gate for the daemon-owned hooks
+// stale-cleanup (spec § Daemon-Owned Hooks Cleanup → Operational contract).
+// Below the throttle interval it is a pure no-op (no cleanup call, lastCleanup
+// untouched); once time.Since(deps.lastCleanup) >= hookCleanupInterval it
+// invokes the shared runHookStaleCleanup helper verbatim with the four pinned
+// arguments — lister=deps.Client, store=deps.HookStore, swallowListError=true,
+// onRemoved=nil — reusing that helper's mass-deletion hazard guard and its
+// EmitCleanStaleSummary audit breadcrumb (no new audit event is introduced).
+//
+// deps.lastCleanup is reset AFTER the cleanup body runs (whether it succeeded or
+// errored), so a failing cleanup still advances the throttle and retries next
+// cadence rather than hammering the store every tick. A cleanup error is logged
+// WARN and swallowed (mirroring the tick loop's "tick failed" handling) — the
+// gate never returns an error and never crashes the daemon.
+//
+// Task 3-3 places this on the tick's idle branch; here it is standalone.
+func maybeRunHookCleanup(deps *daemonDeps) {
+	if time.Since(deps.lastCleanup) < hookCleanupInterval {
+		return
+	}
+	if err := runHookStaleCleanup(deps.Client, deps.HookStore, deps.Logger, true, nil); err != nil {
+		deps.Logger.Warn("hooks stale-cleanup failed", "error", err)
+	}
+	deps.lastCleanup = time.Now()
 }
 
 // captureAndCommit runs a full save cycle: list skeleton markers, capture the
