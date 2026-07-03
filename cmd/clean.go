@@ -135,16 +135,16 @@ func cleanStaleHooks(w io.Writer) error {
 		return nil
 	}
 
-	// Delegate the six-branch algorithm to the shared helper.
-	// swallowListError=true so a transient ListAllPanes failure never
-	// fails the user's command (the Warn lands in portal.log for audit).
-	// onRemoved prints "Removed stale hook: <key>" per removed entry,
-	// preserving the pre-extraction user-facing stdout byte-for-byte.
+	// Delegate the shared algorithm to the helper. A transient ListAllPanes
+	// failure never fails the user's command — the helper logs the Warn to
+	// portal.log for audit and returns nil. onRemoved prints
+	// "Removed stale hook: <key>" per removed entry, preserving the
+	// pre-extraction user-facing stdout byte-for-byte.
 	//
-	// Return value is deliberately discarded: with swallowListError=true
-	// the helper already returns nil for ListAllPanes errors. The
-	// remaining return paths are (a) nil on the happy path and (b) a
-	// hookStore.Load / CleanStale error on the destructive branches.
+	// Return value is deliberately discarded: the helper already returns
+	// nil for ListAllPanes errors. The remaining return paths are (a) nil
+	// on the happy path and (b) a hookStore.Load / CleanStale error on the
+	// destructive branches.
 	// Per spec §Logger plumbing / portal clean: "the subcommand's
 	// RunE continues to return nil for the hook-cleanup tail's
 	// transient failures (matching the existing pre-fix safety-net
@@ -156,7 +156,6 @@ func cleanStaleHooks(w io.Writer) error {
 		buildCleanPaneLister(),
 		hookStore,
 		logger,
-		true,
 		func(paneID string) {
 			_, _ = fmt.Fprintf(w, "Removed stale hook: %s\n", paneID)
 		},

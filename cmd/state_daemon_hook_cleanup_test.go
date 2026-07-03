@@ -155,9 +155,9 @@ func TestMaybeRunHookCleanup_LogsWarnAndSwallowsCleanupError(t *testing.T) {
 	}
 }
 
-func TestMaybeRunHookCleanup_PinsSwallowListErrorTrue(t *testing.T) {
-	// swallowListError=true is proven by seeding a ListAllPanes error: the
-	// cleanup logs its own WARN, returns nil (no gate WARN), and reaps nothing.
+func TestMaybeRunHookCleanup_ListPanesErrorSwallowedNoReap(t *testing.T) {
+	// A ListAllPanes error is Warn-and-continue: the cleanup logs its own WARN,
+	// returns nil (no gate WARN), and reaps nothing.
 	// onRemoved=nil is exercised (without panic) by the reap path in
 	// TestMaybeRunHookCleanup_RunsAndResetsOnceIntervalElapsed; lister/store are
 	// proven by the reap / no-reap behaviour across these tests.
@@ -175,7 +175,7 @@ func TestMaybeRunHookCleanup_PinsSwallowListErrorTrue(t *testing.T) {
 	// Must not panic or crash on the ListAllPanes error.
 	maybeRunHookCleanup(deps)
 
-	// swallowListError=true → no reap (cleanup short-circuits after the
+	// ListAllPanes error → no reap (cleanup short-circuits after the
 	// list-panes WARN, before CleanStale).
 	postRun, err := store.Load()
 	if err != nil {

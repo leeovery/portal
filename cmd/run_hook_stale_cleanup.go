@@ -2,35 +2,40 @@ package cmd
 
 // runHookStaleCleanup is the single source of truth for the
 // "prune hooks.json of entries whose paneKey no longer matches a live
-// tmux pane" algorithm. It collapses what used to be six branches of
-// duplicated code across three sites (cleanStaleAdapter.CleanStale,
-// portal-clean RunE, and the cleanStaleAdapterT test mirror) into one
-// helper whose log format strings are declared exactly once. Integration
-// tests substring-assert against those format strings; collapsing the
-// declarations to a single site eliminates the drift class where a
-// reword at one site silently passes against an un-reworded sibling.
+// tmux pane" algorithm. It is the shared implementation behind two live
+// callers:
 //
-// Policy axes:
+//   - the daemon's throttled hook cleanup, maybeRunHookCleanup
+//     (cmd/state_daemon.go), which runs it once per hookCleanupInterval on
+//     the tick loop's idle branch; and
+//   - the portal-clean hook-cleanup tail, cleanCmd.RunE → cleanStaleHooks
+//     (cmd/clean.go), which runs it at the end of `portal clean`.
 //
-//   - swallowListError (bool): how to surface a non-nil err from
-//     ListAllPanes. The bootstrap adapter passes false (the orchestrator
-//     Warn-and-swallows at step 11, so the helper escalates the err up
-//     through the StaleCleaner interface). The portal-clean RunE passes
-//     true because the user-boundary contract pre-fix already silenced
-//     this branch — the Warn breadcrumb lands in portal.log for post-hoc
-//     audit while the command continues to return nil. Both values still
-//     emit the propagated-error Warn.
+// Its log format strings are declared exactly once here. Integration tests
+// substring-assert against those format strings; collapsing the declarations
+// to a single site eliminates the drift class where a reword at one site
+// silently passes against an un-reworded sibling.
+//
+// Both callers treat a non-nil err from ListAllPanes as Warn-and-continue:
+// the helper emits the "stale-hook cleanup: list-panes failed" Warn to
+// portal.log for post-hoc audit and returns nil, so a transient tmux read
+// never fails the daemon tick or the user's command. There is no policy
+// parameter — neither live caller wants a propagated ListAllPanes error.
+// hookStore.Load and store.CleanStale errors DO propagate (return err); each
+// live caller handles that non-nil return itself (the daemon logs WARN and
+// swallows; portal clean discards it after the canonical Warn is already in
+// portal.log).
 //
 //   - onRemoved (nil-tolerant): per-removal callback invoked after a
-//     successful store.CleanStale. The bootstrap adapter passes nil
-//     (nothing to print to the user). portal clean passes a stdout
-//     writer that prints "Removed stale hook: <key>" so the user-facing
-//     output preserves the pre-extraction contract byte-for-byte.
+//     successful store.CleanStale. The daemon passes nil (nothing to print
+//     to the user). portal clean passes a stdout writer that prints
+//     "Removed stale hook: <key>" so the user-facing output preserves the
+//     pre-extraction contract byte-for-byte.
 //
-// Algorithm (mirrors the pre-extraction six-branch shape verbatim):
-//   1. ListAllPanes. On error emit Warn, then return err (swallowListError
-//      false) or nil (swallowListError true). The entry-point Debug is NOT
-//      emitted on this branch (terminal-Warn-only branch).
+// Algorithm:
+//   1. ListAllPanes. On error emit Warn and return nil (Warn-and-continue).
+//      The entry-point Debug is NOT emitted on this branch (terminal-Warn-only
+//      branch).
 //   2. store.Load. On error emit Warn, return err. The destructive
 //      CleanStale call is NOT made on this branch.
 //   3. Entry-point Debug breadcrumb with live + persisted counts.
@@ -42,10 +47,9 @@ package cmd
 //      to do and no hazard to guard against).
 //   6. store.CleanStale. On success, emit completion Debug and invoke
 //      onRemoved once per removed key (when non-nil). Errors from
-//      CleanStale propagate up verbatim regardless of policy — policy
-//      governs ListAllPanes errors only.
+//      CleanStale propagate up verbatim.
 //
-// Note on duplicate Load: the portal-clean RunE loads the hooks store
+// Note on duplicate Load: the portal-clean tail loads the hooks store
 // once upfront to check the persisted==0 early-exit, then delegates to
 // this helper which loads again. The redundant ReadFile is intentional
 // — keeps the helper self-contained (no pre-loaded-map parameter) and
@@ -58,14 +62,15 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 )
 
-// runHookStaleCleanup is the shared implementation of bootstrap step 11
-// (cleanStaleAdapter.CleanStale) and the portal-clean hook-cleanup tail
-// (cleanCmd.RunE). See the package-doc-style block above for the full
-// algorithm description, policy axes, and design rationale.
+// runHookStaleCleanup is the shared implementation of the daemon's throttled
+// hook cleanup (maybeRunHookCleanup, cmd/state_daemon.go) and the portal-clean
+// hook-cleanup tail (cleanCmd.RunE → cleanStaleHooks, cmd/clean.go). See the
+// package-doc-style block above for the full algorithm description and design
+// rationale.
 //
-// swallowListError selects how a non-nil err from ListAllPanes surfaces:
-// false → return err to the caller (bootstrap step-11 contract); true →
-// return nil after logging the Warn (portal-clean user-boundary contract).
+// A non-nil err from ListAllPanes is Warn-and-continue: the helper logs the
+// list-panes Warn and returns nil. hookStore.Load and store.CleanStale errors
+// still propagate to the caller as a non-nil return.
 //
 // A nil logger is tolerated — substituted with the bootstrap package's
 // discard logger so the call sites in this function can invoke logger.Warn /
@@ -73,13 +78,12 @@ import (
 // component's *slog.Logger.
 //
 // A nil onRemoved is tolerated — the per-removed-entry callback is
-// simply skipped when nil (the bootstrap adapter passes nil; portal
-// clean passes a stdout writer).
+// simply skipped when nil (the daemon passes nil; portal clean passes a
+// stdout writer).
 func runHookStaleCleanup(
 	lister AllPaneLister,
 	store *hooks.Store,
 	logger *slog.Logger,
-	swallowListError bool,
 	onRemoved func(string),
 ) error {
 	if logger == nil {
@@ -89,10 +93,7 @@ func runHookStaleCleanup(
 	livePanes, err := lister.ListAllPanes()
 	if err != nil {
 		logger.Warn("stale-hook cleanup: list-panes failed", "error", err)
-		if swallowListError {
-			return nil
-		}
-		return err
+		return nil
 	}
 
 	persisted, err := store.Load()

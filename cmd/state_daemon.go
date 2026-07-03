@@ -398,10 +398,13 @@ func tick(ctx context.Context, deps *daemonDeps) {
 // stale-cleanup (spec § Daemon-Owned Hooks Cleanup → Operational contract).
 // Below the throttle interval it is a pure no-op (no cleanup call, lastCleanup
 // untouched); once time.Since(deps.lastCleanup) >= hookCleanupInterval it
-// invokes the shared runHookStaleCleanup helper verbatim with the four pinned
-// arguments — lister=deps.Client, store=deps.HookStore, swallowListError=true,
+// invokes the shared runHookStaleCleanup helper verbatim with the pinned
+// arguments — lister=deps.Client, store=deps.HookStore, logger=deps.Logger,
 // onRemoved=nil — reusing that helper's mass-deletion hazard guard and its
 // EmitCleanStaleSummary audit breadcrumb (no new audit event is introduced).
+// A ListAllPanes failure is logged-and-swallowed inside the helper (returns
+// nil); only a hookStore.Load / CleanStale error surfaces as the non-nil
+// return handled by the WARN guard below.
 //
 // deps.lastCleanup is reset AFTER the cleanup body runs (whether it succeeded or
 // errored), so a failing cleanup still advances the throttle and retries next
@@ -423,7 +426,7 @@ func maybeRunHookCleanup(deps *daemonDeps) {
 	if time.Since(deps.lastCleanup) < hookCleanupInterval {
 		return
 	}
-	if err := runHookStaleCleanup(deps.Client, deps.HookStore, deps.Logger, true, nil); err != nil {
+	if err := runHookStaleCleanup(deps.Client, deps.HookStore, deps.Logger, nil); err != nil {
 		deps.Logger.Warn("hooks stale-cleanup failed", "error", err)
 	}
 	deps.lastCleanup = time.Now()

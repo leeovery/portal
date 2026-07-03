@@ -1,19 +1,21 @@
 package cmd
 
-// Unit coverage for the shared runHookStaleCleanup helper extracted from
-// cleanStaleAdapter.CleanStale (cmd/bootstrap_production.go) and the
-// portal-clean RunE (cmd/clean.go). One helper, one declaration of each
-// load-bearing log format string, one source of truth that both production
-// callsites delegate to so integration substring-asserts cannot drift
-// between sites.
+// Unit coverage for the shared runHookStaleCleanup helper. Its two live
+// callers are the daemon's throttled hook cleanup (maybeRunHookCleanup,
+// cmd/state_daemon.go) and the portal-clean hook-cleanup tail
+// (cleanCmd.RunE → cleanStaleHooks, cmd/clean.go). One helper, one
+// declaration of each load-bearing log format string, one source of truth
+// that both callsites delegate to so integration substring-asserts cannot
+// drift between sites.
 //
 // Coverage axes (one subtest each):
 //   - hazard guard fires when len(live)==0 && len(persisted)>0
 //   - both-empty no-op (no Warn, no completion Debug)
-//   - ListAllPanes error under swallowListError=false propagates
-//   - ListAllPanes error under swallowListError=true logs Warn and returns nil
+//   - ListAllPanes error logs Warn and returns nil (single behaviour)
+//   - hookStore.Load error returns non-nil with Warn
 //   - onRemoved invoked once per removed entry (and nil onRemoved is safe)
 //   - happy-path entry-point + completion Debug logging
+//   - nil logger tolerated
 
 import (
 	"errors"
@@ -49,7 +51,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: []string{}, err: nil}
 
-		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), nil); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -78,7 +80,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: []string{}, err: nil}
 
-		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), nil); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -102,7 +104,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		}
 	})
 
-	t.Run("ListAllPanes error under swallowListError=false propagates as soft warning", func(t *testing.T) {
+	t.Run("ListAllPanes error logs Warn and returns nil", func(t *testing.T) {
 		seed := `{"a:0.0": {"on-resume": "cmd-a"}}`
 		store, path := newTempHooksStore(t, seed)
 		before := readFileBytes(t, path)
@@ -111,12 +113,9 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: nil, err: sentinel}
 
-		err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil)
-		if err == nil {
-			t.Fatalf("runHookStaleCleanup: want error, got nil")
-		}
-		if !errors.Is(err, sentinel) {
-			t.Errorf("err = %v, want errors.Is == sentinel %v", err, sentinel)
+		err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), nil)
+		if err != nil {
+			t.Fatalf("runHookStaleCleanup on ListAllPanes error: want nil, got %v", err)
 		}
 
 		after := readFileBytes(t, path)
@@ -137,39 +136,10 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		}
 	})
 
-	t.Run("ListAllPanes error under swallowListError=true logs Warn and returns nil", func(t *testing.T) {
-		seed := `{"a:0.0": {"on-resume": "cmd-a"}}`
-		store, path := newTempHooksStore(t, seed)
-		before := readFileBytes(t, path)
-
-		sentinel := errors.New("tmux dead")
-		logger := &recordingLogger{}
-		lister := &stubAllPaneLister{panes: nil, err: sentinel}
-
-		err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), true, nil)
-		if err != nil {
-			t.Fatalf("runHookStaleCleanup under swallowListError=true: want nil err, got %v", err)
-		}
-
-		after := readFileBytes(t, path)
-		if !reflect.DeepEqual(before, after) {
-			t.Errorf("hooks.json modified on ListAllPanes-error swallow path: before=%q after=%q", before, after)
-		}
-
-		if got := countMatching(logger.entries, "warn", "bootstrap", listPanesWarnFmt); got != 1 {
-			t.Errorf("list-panes Warn count = %d, want 1 under swallow; entries=%+v", got, logger.entries)
-		}
-
-		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugFmt); got != 0 {
-			t.Errorf("entry-point Debug count = %d, want 0 under swallow; entries=%+v", got, logger.entries)
-		}
-	})
-
 	t.Run("hookStore.Load error returns err with Warn", func(t *testing.T) {
 		// Force a Load failure by pointing the store at a directory entry
-		// (os.ReadFile fails with EISDIR). Use swallowListError=false
-		// because the spec keeps Load-error as a returnable failure (not
-		// the list-panes swallow policy).
+		// (os.ReadFile fails with EISDIR). Load-error is a returnable
+		// failure (unlike ListAllPanes errors, which are logged-and-swallowed).
 		dir := t.TempDir()
 		// Create a subdir at the would-be hooks.json path so ReadFile fails.
 		bogusPath := filepath.Join(dir, "hooks.json")
@@ -181,7 +151,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: []string{"a:0.0"}, err: nil}
 
-		err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil)
+		err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), nil)
 		if err == nil {
 			t.Fatalf("runHookStaleCleanup: want Load error, got nil")
 		}
@@ -213,7 +183,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 			removedSeen = append(removedSeen, name)
 		}
 
-		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, onRemoved); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), onRemoved); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -241,7 +211,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		lister := &stubAllPaneLister{panes: []string{"a:0.0"}, err: nil}
 
 		// Must not panic when onRemoved is nil and entries are removed.
-		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), nil); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -262,7 +232,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: []string{"a:0.0", "b:0.0", "c:0.0"}, err: nil}
 
-		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), nil); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -301,7 +271,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		store, _ := newTempHooksStore(t, seed)
 		lister := &stubAllPaneLister{panes: []string{"a:0.0"}, err: nil}
 
-		if err := runHookStaleCleanup(lister, store, nil, false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, nil, nil); err != nil {
 			t.Fatalf("runHookStaleCleanup with nil logger: %v", err)
 		}
 	})
