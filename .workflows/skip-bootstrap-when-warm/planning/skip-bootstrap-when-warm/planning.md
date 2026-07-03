@@ -117,3 +117,13 @@ Address findings from Analysis (Cycle 3).
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
 | skip-bootstrap-when-warm-6-1 | Correct the stale "cleanup steps 9-11" step-range in the bootstrap_progress.go race-review invariant comment | comment-only edit (no production code / signatures / asserted behaviour changed), cmd/bootstrap_progress.go:34 reads "cleanup steps 9-10" (no "9-11"), no residual step-11 or "eleven-step" reference remains anywhere in cmd/bootstrap_progress.go, go build ./... succeeds and go test ./cmd/... stays green as a regression guard |
+
+### Phase 7: Analysis (Cycle 4)
+
+Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| skip-bootstrap-when-warm-7-1 | Drop the non-vocabulary `marker` attr from the latch-write-failure WARN | marker attr pair removed from the ~line-499 WARN and the error attr retained, latch name folded into the message so @portal-bootstrapped is still identified, whole-tree search for marker as an slog attr key in production (non-test) code returns zero, path stays best-effort (failure swallowed, WARN under the bootstrap component, no behaviour change beyond this one line), any test asserting on the WARN retuned to the new message/attr-set and all bootstrap/latch tests green |
