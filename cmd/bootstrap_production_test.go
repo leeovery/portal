@@ -1,16 +1,15 @@
 package cmd
 
-// Shared test scaffolding for the bootstrap step-11 stale-hook cleanup
-// path. The duplicated cleanStaleAdapterT mirror type and its
-// TestCleanStaleAdapter subtests were removed once
-// runHookStaleCleanup became the single source of truth for the
-// algorithm (see cmd/run_hook_stale_cleanup.go and
+// Shared test scaffolding for the hooks stale-cleanup path. The
+// duplicated cleanStaleAdapterT mirror type and its TestCleanStaleAdapter
+// subtests were removed once runHookStaleCleanup became the single source
+// of truth for the algorithm (see cmd/run_hook_stale_cleanup.go and
 // cmd/run_hook_stale_cleanup_test.go) — production wiring composes the
-// helper through cleanStaleAdapter (cmd/bootstrap_production.go) and
-// cleanCmd.RunE (cmd/clean.go) so no test mirror is needed. The
-// remaining helpers (recordingLogger, stubAllPaneLister,
-// newTempHooksStore, readFileBytes, countMatching, keysOf) are
-// consumed by run_hook_stale_cleanup_test.go.
+// helper through cleanCmd.RunE (cmd/clean.go) so no test mirror is
+// needed (the bootstrap-step CleanStale callsite was removed when hooks
+// cleanup left the orchestrator). The remaining helpers (recordingLogger,
+// stubAllPaneLister, newTempHooksStore, readFileBytes, countMatching,
+// keysOf) are consumed by run_hook_stale_cleanup_test.go.
 
 import (
 	"context"
@@ -178,65 +177,4 @@ func keysOf(m map[string]map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-// TestCleanStaleAdapter_CleanStale pins the composition specifics of
-// cleanStaleAdapter — that its logger field flows through to the shared
-// runHookStaleCleanup helper and that it passes swallowListError=false
-// so a ListAllPanes failure surfaces back to the orchestrator (the
-// bootstrap step-11 contract Warn-and-swallows at the orchestrator level,
-// not inside the adapter). Without a direct unit test the composition is
-// exercised only by the integration suite, leaving the field-name and
-// bool-parameter wiring untested at the package-cmd unit level.
-func TestCleanStaleAdapter_CleanStale(t *testing.T) {
-	t.Run("ListAllPanes error propagates and Warn flows through adapter logger", func(t *testing.T) {
-		store, _ := newTempHooksStore(t, `{"a:0.0": {"on-resume": "cmd-a"}}`)
-		logger := &recordingLogger{}
-		sentinel := errors.New("simulated tmux")
-		lister := &stubAllPaneLister{panes: nil, err: sentinel}
-
-		adapter := &cleanStaleAdapter{
-			lister: lister,
-			store:  store,
-			logger: logger.Logger().With("component", "bootstrap"),
-		}
-
-		err := adapter.CleanStale()
-		if err == nil {
-			t.Fatal("CleanStale: want error (proves swallowListError=false was passed), got nil")
-		}
-		if !errors.Is(err, sentinel) {
-			t.Errorf("err = %v, want errors.Is == sentinel %v", err, sentinel)
-		}
-
-		const listPanesWarnMsg = "stale-hook cleanup: list-panes failed"
-		if got := countMatching(logger.entries, "warn", "bootstrap", listPanesWarnMsg); got != 1 {
-			t.Errorf("list-panes Warn count via adapter logger = %d, want 1 (proves the logger field flowed through); entries=%+v", got, logger.entries)
-		}
-	})
-
-	t.Run("normal path emits entry-point Debug through adapter logger", func(t *testing.T) {
-		seed := `{
-  "a:0.0": {"on-resume": "cmd-a"},
-  "b:0.0": {"on-resume": "cmd-b"}
-}`
-		store, _ := newTempHooksStore(t, seed)
-		logger := &recordingLogger{}
-		lister := &stubAllPaneLister{panes: []string{"a:0.0"}, err: nil}
-
-		adapter := &cleanStaleAdapter{
-			lister: lister,
-			store:  store,
-			logger: logger.Logger().With("component", "bootstrap"),
-		}
-
-		if err := adapter.CleanStale(); err != nil {
-			t.Fatalf("CleanStale: %v", err)
-		}
-
-		const entryDebugMsg = "stale-hook cleanup counts"
-		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugMsg); got != 1 {
-			t.Errorf("entry-point Debug count via adapter logger = %d, want 1 (proves the logger field flowed through); entries=%+v", got, logger.entries)
-		}
-	})
 }

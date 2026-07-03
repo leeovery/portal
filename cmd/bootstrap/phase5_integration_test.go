@@ -1,6 +1,6 @@
 package bootstrap_test
 
-// Phase 5 integration tests exercise the eleven-step bootstrap.Orchestrator
+// Phase 5 integration tests exercise the ten-step bootstrap.Orchestrator
 // against a real tmux server using the same isolated-socket pattern as
 // internal/restore/integration_test.go (Phase 3, task 3-13). Each test runs an
 // isolated tmux instance via `tmux -S <abs-socket-path>` rooted in a per-test
@@ -142,7 +142,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 // the capture→persist→kill→restore round-trip. The unique coverage here is
 // that the bootstrap.Orchestrator (not just restore.Orchestrator) wires the
 // Restore step correctly — i.e. step 6 actually creates the missing session
-// when invoked through the eleven-step sequence.
+// when invoked through the ten-step sequence.
 func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 

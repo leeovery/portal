@@ -1,7 +1,7 @@
 package bootstrapadapter
 
 // Production adapter for the bootstrap.OrphanSweeper interface — step 4 of
-// the eleven-step bootstrap sequence. The adapter is a thin wrapper that
+// the ten-step bootstrap sequence. The adapter is a thin wrapper that
 // pins the canonical Pgrep form (`pgrep -fx '^portal state daemon( |$)'`,
 // via state.PgrepPortalDaemons) and forwards tmux.SaverPanePIDOrAbsent
 // verbatim into the (pid int, present bool, err error) seam consumed by

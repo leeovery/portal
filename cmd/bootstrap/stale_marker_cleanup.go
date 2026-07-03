@@ -49,8 +49,7 @@ type MarkerUnsetter interface {
 // marker whose paneKey is absent from the live-pane set. Each responsibility
 // (marker enumeration, live-pane enumeration, marker unset) is a separate
 // small interface so each can be mocked independently in tests, mirroring the
-// dependency-shape pattern established by the FIFOSweeper / StaleCleaner
-// adjacent seams.
+// dependency-shape pattern established by the FIFOSweeper adjacent seam.
 //
 // Logger is optional. When non-nil, soft warnings (per-unset failure,
 // malformed live-pane line) are emitted via Logger.Warn under the bootstrap

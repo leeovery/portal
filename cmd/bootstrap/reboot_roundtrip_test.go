@@ -12,7 +12,7 @@
 //   - The Phase 3 round-trip (TestPhase3Integration_SaveRestoreRoundTrip)
 //     proves the in-package skeleton-restore primitive works against a
 //     fresh server. It does NOT exercise the bootstrap orchestrator's
-//     eleven-step wiring nor the in-pane hydrate helper.
+//     ten-step wiring nor the in-pane hydrate helper.
 //   - This test wires the full bootstrap.Orchestrator with the production
 //     RestoreAdapter so step ordering, marker lifecycle, and FIFO arming
 //     are all exercised. It then drives the FIFO byte-write that
@@ -329,9 +329,9 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// Wire the bootstrap orchestrator with production adapters for the
 	// steps we want to exercise (Restoring marker lifecycle, real
 	// Restore via RestoreAdapter, real FIFOSweeper) and no-op stubs for
-	// the rest (Hooks registration, EnsureSaver, CleanStale) — the
-	// step under test is Restore + the marker discipline around it,
-	// not hook registration or saver bootstrap.
+	// the rest (Hooks registration, EnsureSaver) — the step under test
+	// is Restore + the marker discipline around it, not hook registration
+	// or saver bootstrap.
 	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{

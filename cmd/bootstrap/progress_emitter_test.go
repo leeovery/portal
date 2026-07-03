@@ -4,7 +4,7 @@ package bootstrap
 //
 // The §10.2 concurrent cold-boot route streams a per-step progress event to
 // the loading-page TUI. The orchestrator gains a context-carried emitter seam
-// (WithProgressEmitter) that each of the eleven steps invokes at the same site
+// (WithProgressEmitter) that each of the ten steps invokes at the same site
 // it logs "step complete", in step order. On the synchronous warm/CLI route no
 // emitter is in the context, so Run behaves exactly as today (the emitter read
 // resolves to nil and every emit is a no-op).
@@ -16,7 +16,7 @@ import (
 
 // TestRun_EmitsProgressEventPerStepInOrder asserts the orchestrator emits one
 // StepEvent per real bootstrap step, in spec order, with the canonical step
-// index (1..11) and name, when an emitter is wired through the context.
+// index (1..10) and name, when an emitter is wired through the context.
 func TestRun_EmitsProgressEventPerStepInOrder(t *testing.T) {
 	r := &stepRecorder{}
 	o := newOrchestrator(r, nil)
@@ -41,7 +41,6 @@ func TestRun_EmitsProgressEventPerStepInOrder(t *testing.T) {
 		{Index: 8, Name: stepClearRestoring},
 		{Index: 9, Name: stepCleanStaleMarkers},
 		{Index: 10, Name: stepSweepOrphanFIFOs},
-		{Index: 11, Name: stepCleanStale},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("emitted %d events, want %d: %+v", len(got), len(want), got)
@@ -69,7 +68,7 @@ func TestRun_NoEmitterIsNoOp(t *testing.T) {
 	want := []string{
 		"EnsureServer", "RegisterPortalHooks", "Set", "SweepOrphanDaemons",
 		"EnsureSaver", "Restore", "EagerSignalHydrate", "Clear",
-		"CleanStaleMarkers", "Sweep", "CleanStale",
+		"CleanStaleMarkers", "Sweep",
 	}
 	if !equalCalls(r.calls, want) {
 		t.Errorf("call order = %v, want %v", r.calls, want)

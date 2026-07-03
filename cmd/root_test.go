@@ -259,7 +259,7 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 	t.Run("orchestrator Run not called for skipTmuxCheck commands", func(t *testing.T) {
 		// Canonical coverage site for the skipTmuxCheck allowlist contract:
 		// every command on the allowlist must execute without invoking the
-		// 11-step bootstrap orchestrator. The hooks rows guard against
+		// 10-step bootstrap orchestrator. The hooks rows guard against
 		// regression of the hooks-skip-bootstrap spec
 		// (.workflows/hooks-skip-bootstrap/specification/...) which moved
 		// `hooks` into the allowlist to eliminate the cascading-bootstrap

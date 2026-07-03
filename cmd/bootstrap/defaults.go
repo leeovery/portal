@@ -22,7 +22,7 @@ package bootstrap
 // Defaulting policy (mirrors the legacy buildIntegrationOrchestrator
 // contract):
 //
-//   - Hooks, OrphanSweeper, Saver, Restore, StaleMarkers, Sweeper, Clean:
+//   - Hooks, OrphanSweeper, Saver, Restore, StaleMarkers, Sweeper:
 //     default to their canonical NoOp form when the corresponding With*
 //     option is not supplied.
 //   - EagerSignaler: defaults to a real *EagerSignalCore wired with the
@@ -73,7 +73,6 @@ type defaultsConfig struct {
 	eagerSignaler EagerHydrateSignaler
 	staleMarkers  MarkerCleaner
 	sweeper       FIFOSweeper
-	clean         StaleCleaner
 
 	// restoreSet latches whether the caller invoked WithRestore at all
 	// (vs. left it unset). The EagerSignaler default-selection branch
@@ -137,11 +136,6 @@ func WithSweeper(s FIFOSweeper) Option {
 	return func(c *defaultsConfig) { c.sweeper = s }
 }
 
-// WithClean supplies a real StaleCleaner for step 11.
-func WithClean(s StaleCleaner) Option {
-	return func(c *defaultsConfig) { c.clean = s }
-}
-
 // NewWithDefaults constructs an *Orchestrator with NoOp defaults for
 // every degradable step seam. Mandatory positional inputs:
 //
@@ -160,7 +154,7 @@ func WithClean(s StaleCleaner) Option {
 //
 // Variadic With* options override individual seams; see WithHooks,
 // WithOrphanSweeper, WithSaver, WithRestore, WithEagerSignaler,
-// WithStaleMarkers, WithSweeper, WithClean.
+// WithStaleMarkers, WithSweeper.
 //
 // The returned *Orchestrator never has a nil step seam — Run is callable
 // without immediate panic on the happy NoOp path. Step ordering lives in
@@ -211,9 +205,6 @@ func NewWithDefaults(
 	if cfg.sweeper == nil {
 		cfg.sweeper = NoOpFIFOSweeper{}
 	}
-	if cfg.clean == nil {
-		cfg.clean = NoOpStaleCleaner{}
-	}
 
 	return &Orchestrator{
 		Server:        server,
@@ -225,7 +216,6 @@ func NewWithDefaults(
 		EagerSignaler: cfg.eagerSignaler,
 		StaleMarkers:  cfg.staleMarkers,
 		Sweeper:       cfg.sweeper,
-		Clean:         cfg.clean,
 		Logger:        logger,
 	}
 }

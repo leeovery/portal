@@ -7,7 +7,7 @@
 // internal/transienttest package; this file exercises each helper
 // through one concrete code path so a future change that breaks the
 // helper contracts surfaces here rather than in the downstream
-// bootstrap-step-11 / portal-clean integration tests.
+// portal-clean integration tests.
 //
 // Isolation invariant: every subtest that touches the state dir or
 // spawns a subprocess MUST go through portaltest.IsolateStateForTest

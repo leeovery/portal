@@ -10,8 +10,8 @@
 // invariants the prior incident (slow-open / empty-previews / zombie-session)
 // threatened:
 //
-//   - orchestrator STEP ORDERING preserved on the concurrent route (the eleven
-//     StepEvents stream in 1..11 order).
+//   - orchestrator STEP ORDERING preserved on the concurrent route (the ten
+//     StepEvents stream in 1..10 order).
 //   - the @portal-restoring SET-before-restore / CLEAR-before-cleanup window is
 //     intact concurrently (cleared by the time the terminal event lands).
 //   - the daemon is spawned EXACTLY ONCE (singleton) — pgrep + the saver-pane
@@ -263,17 +263,17 @@ func driveConcurrentColdBoot(t *testing.T, orch *bootstrap.Orchestrator, stateDi
 	}
 }
 
-// assertElevenStepOrder fails unless order is exactly [1,2,...,11]. The eleven
+// assertTenStepOrder fails unless order is exactly [1,2,...,10]. The ten
 // orchestrator steps must stream in canonical order on the concurrent route —
 // the same load-bearing ordering the synchronous route guaranteed (§10.2 Part A).
-func assertElevenStepOrder(t *testing.T, order []int) {
+func assertTenStepOrder(t *testing.T, order []int) {
 	t.Helper()
-	if len(order) != 11 {
-		t.Fatalf("concurrent cold boot streamed %d step ticks, want 11 (one per real step): %v", len(order), order)
+	if len(order) != 10 {
+		t.Fatalf("concurrent cold boot streamed %d step ticks, want 10 (one per real step): %v", len(order), order)
 	}
 	for i, idx := range order {
 		if idx != i+1 {
-			t.Errorf("step order[%d] = %d, want %d — the concurrent route must preserve canonical 1..11 ordering (full: %v)", i, idx, i+1, order)
+			t.Errorf("step order[%d] = %d, want %d — the concurrent route must preserve canonical 1..10 ordering (full: %v)", i, idx, i+1, order)
 		}
 	}
 }
@@ -359,7 +359,7 @@ func assertRestoringCleared(t *testing.T, client *tmux.Client) {
 
 // TestConcurrentColdBoot_StepOrderingAndDaemonSingleton is the flagship Part-D
 // assertion: a REAL concurrent cold boot with saved sessions to restore (the
-// SLOW-restore shape) must (a) stream the eleven steps in order, (b) reach the
+// SLOW-restore shape) must (a) stream the ten steps in order, (b) reach the
 // terminal complete with serverStarted=true, (c) clear @portal-restoring, and
 // (d) leave exactly one daemon (the saver pane) with no zombie/leak.
 func TestConcurrentColdBoot_StepOrderingAndDaemonSingleton(t *testing.T) {
@@ -383,7 +383,7 @@ func TestConcurrentColdBoot_StepOrderingAndDaemonSingleton(t *testing.T) {
 		t.Error("concurrent route must carry serverStarted=true on the terminal event (cold boot started the server)")
 	}
 
-	assertElevenStepOrder(t, res.stepOrder)
+	assertTenStepOrder(t, res.stepOrder)
 	assertRestoringCleared(t, client)
 	panePID := assertDaemonSingletonNoZombie(t, client, stateDir)
 
@@ -398,7 +398,7 @@ func TestConcurrentColdBoot_StepOrderingAndDaemonSingleton(t *testing.T) {
 		}
 	}
 
-	t.Logf("concurrent cold boot OK: 11 steps in order, daemon singleton pane PID=%d, restored sessions live", panePID)
+	t.Logf("concurrent cold boot OK: 10 steps in order, daemon singleton pane PID=%d, restored sessions live", panePID)
 }
 
 // TestConcurrentColdBoot_FastEmptyRestore_NoZombie covers the FAST cold-boot
@@ -423,11 +423,11 @@ func TestConcurrentColdBoot_FastEmptyRestore_NoZombie(t *testing.T) {
 	if !res.sawComplete {
 		t.Fatal("fast cold boot never reached the terminal BootstrapCompleteMsg")
 	}
-	assertElevenStepOrder(t, res.stepOrder)
+	assertTenStepOrder(t, res.stepOrder)
 	assertRestoringCleared(t, client)
 	panePID := assertDaemonSingletonNoZombie(t, client, stateDir)
 
-	t.Logf("fast (M=0) cold boot OK in %s: 11 steps in order, daemon singleton pane PID=%d", elapsed, panePID)
+	t.Logf("fast (M=0) cold boot OK in %s: 10 steps in order, daemon singleton pane PID=%d", elapsed, panePID)
 }
 
 // TestConcurrentColdBoot_RestoringWindowSetBeforeRestore proves the
@@ -513,7 +513,7 @@ func (p *restoreWindowProbe) SetProgress(fn func(n, m int)) {
 // SYNCHRONOUSLY (no deferred bootstrap stashed), (b) serverStarted threaded as
 // false (so the TUI shows no loading page — WithServerStarted(false) leaves
 // activePage at the default Sessions, not PageLoading), and (c) the synchronous
-// orchestrator's eleven steps ran in canonical order.
+// orchestrator's ten steps ran in canonical order.
 func TestConcurrentColdBoot_WarmParity_NoLoadingPageSynchronousOrdering(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
@@ -552,7 +552,7 @@ func TestConcurrentColdBoot_WarmParity_NoLoadingPageSynchronousOrdering(t *testi
 	// route runs Run synchronously inside PersistentPreRunE, so any emitter wired
 	// via ctx is invoked there; but the synchronous route does NOT wire an
 	// emitter, so we assert ordering via an instrumented runner instead.
-	runner := &orderRecordingRunner{steps: 11, started: false}
+	runner := &orderRecordingRunner{steps: 10, started: false}
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
@@ -584,15 +584,15 @@ func TestConcurrentColdBoot_WarmParity_NoLoadingPageSynchronousOrdering(t *testi
 		t.Error("warm path threaded serverStarted=true; the warm route must show NO loading page (serverStarted=false)")
 	}
 	// (c) synchronous ordering parity.
-	assertElevenStepOrder(t, runner.order)
+	assertTenStepOrder(t, runner.order)
 }
 
 // orderRecordingRunner drives the ctx-carried progress emitter through N steps in
 // order (mirroring the real orchestrator's emit-per-step contract) AND records
 // the order it itself emitted, so the warm-parity test can assert synchronous
-// ordering without standing up the eleven real seams. On the synchronous route
+// ordering without standing up the ten real seams. On the synchronous route
 // no emitter is wired, so the recorded order is the runner's own — which is the
-// canonical 1..11 by construction; the assertion guards against a regression that
+// canonical 1..10 by construction; the assertion guards against a regression that
 // reorders or drops steps in a future refactor of this instrumented runner.
 type orderRecordingRunner struct {
 	steps   int

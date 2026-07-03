@@ -1,13 +1,12 @@
 //go:build integration
 
-// End-to-end integration coverage for the second destructive consumer
-// of ListAllPanes — the `portal clean` command's hook-cleanup tail
-// (cmd/clean.go ~lines 75-141). The companion file
-// cmd/cleanstale_transient_listpanes_integration_test.go covers the
-// bootstrap-step-11 callsite; this file covers the analogous callsite
-// inside cleanCmd.RunE so a regression at *either* destructive call
-// path fails loudly under the simulated tmux `list-panes -a`
-// transients motivating the workstream.
+// End-to-end integration coverage for the `portal clean` command's
+// hook-cleanup tail (cmd/clean.go ~lines 75-141) — now the sole
+// destructive consumer of ListAllPanes wired through runHookStaleCleanup
+// (the former bootstrap-step callsite was removed when hooks stale-cleanup
+// left the orchestrator). This file drives cleanCmd.RunE so a regression
+// in that destructive call path fails loudly under the simulated tmux
+// `list-panes -a` transients motivating the workstream.
 //
 // Four subtests pin the four rows of the spec's coverage matrix for
 // the `portal clean` analogue:
@@ -49,8 +48,8 @@
 // `transienttest.FailureMode` (+ PassThrough / FailExitNonZero /
 // FailEmptyStdout) shapes live in internal/transienttest. The
 // `configDirFromEnvSlice`, `staleHookCleanupLogLines`, and
-// `containsLineMatching` helpers remain in the sibling
-// cmd/cleanstale_transient_listpanes_integration_test.go file (same
+// `containsLineMatching` helpers live in the sibling
+// cmd/cleanstale_transient_listpanes_shared_test.go file (same
 // `package cmd`, same `//go:build integration` tag) and are accessible
 // here verbatim.
 //
@@ -90,15 +89,12 @@ func (panickingPaneLister) ListAllPanes() ([]string, error) {
 
 // setupCleanTransientEnv is the portal-clean callsite's env-builder.
 // The portal-clean entry point has no callsite-specific extras
-// beyond the four invariant scaffolding steps shared with the
-// bootstrap callsite (no tmux dependency at this layer, no
-// subprocess spawn, no socket), so this helper is a pure
+// beyond the four invariant scaffolding steps (no tmux dependency at
+// this layer, no subprocess spawn, no socket), so this helper is a pure
 // delegation to isolateCleanStaleTestEnv. It survives as a thin
-// pass-through so call sites read symmetrically with the
-// bootstrap-callsite setupTransientCleanStaleEnv and so any future
-// callsite-specific extra can be layered here without touching the
-// individual subtests. XDG_CONFIG_HOME re-push rationale is
-// documented at isolateCleanStaleTestEnv.
+// pass-through so any future callsite-specific extra can be layered here
+// without touching the individual subtests. XDG_CONFIG_HOME re-push
+// rationale is documented at isolateCleanStaleTestEnv.
 func setupCleanTransientEnv(t *testing.T) (env []string, stateDir string) {
 	t.Helper()
 	return isolateCleanStaleTestEnv(t)
@@ -146,12 +142,11 @@ func assertNoStaleHookRemovalsOnStdout(t *testing.T, output string, seededKeys .
 	}
 }
 
-// TestPortalClean_TmuxTransient_DoesNotWipeHooks closes the
-// `portal clean` half of the defect-class scope — the second
-// destructive consumer of ListAllPanes (the first being bootstrap
-// step 11). Mirrors TestBootstrap_CleanStale_TmuxTransient_DoesNotWipeHooks
-// row-for-row at this callsite so a regression at either destructive
-// site fails loudly under tmux transient.
+// TestPortalClean_TmuxTransient_DoesNotWipeHooks pins the `portal clean`
+// hook-cleanup tail — now the sole destructive consumer of ListAllPanes
+// (the former bootstrap-step callsite was removed when hooks stale-cleanup
+// left the orchestrator) — so a regression at this destructive site fails
+// loudly under tmux transient.
 func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 	// Portal-clean-callsite invoker for the table-driven mode
 	// subtests. The portal-clean entry point intercepts

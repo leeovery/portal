@@ -83,9 +83,9 @@ var cleanCmd = &cobra.Command{
 // log sweep can run after it regardless of the persisted==0 short-circuit.
 func cleanStaleHooks(w io.Writer) error {
 	// Log under the bootstrap component so the hook-cleanup tail emits the
-	// same auditable breadcrumbs as bootstrap step 11
-	// (cleanStaleAdapter.CleanStale, which composes the same shared
-	// helper). The handler is configured once by main -> log.Init.
+	// same auditable breadcrumbs as the shared runHookStaleCleanup helper
+	// (see cmd/run_hook_stale_cleanup.go). The handler is configured once by
+	// main -> log.Init.
 	logger := bootstrapLogger
 
 	// Load hook store first to check if any hooks exist.

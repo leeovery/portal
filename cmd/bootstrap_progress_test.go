@@ -26,7 +26,7 @@ import (
 // emittingRunner is a bootstrap.Runner that drives the context-carried progress
 // emitter through N steps before returning the configured (started, warnings,
 // err) tuple — mirroring the real orchestrator's emit-per-step contract without
-// standing up the eleven step seams.
+// standing up the ten step seams.
 type emittingRunner struct {
 	steps    int
 	started  bool

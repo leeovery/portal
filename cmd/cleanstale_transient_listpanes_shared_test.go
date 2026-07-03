@@ -1,48 +1,30 @@
 //go:build integration
 
-// Shared scaffolding for the two transient-listpanes integration test
-// files in this package:
+// Scaffolding for the transient-listpanes integration test covering the
+// `portal clean` RunE hook-cleanup callsite
+// (cmd/cleanstale_transient_listpanes_clean_integration_test.go). The
+// companion bootstrap-step callsite was retired when hooks stale-cleanup
+// left the orchestrator, so this file no longer straddles two consumers;
+// its helpers (isolateCleanStaleTestEnv, runTransientCleanStaleModeSubtest,
+// configDirFromEnvSlice, staleHookCleanupLogLines, containsLineMatching)
+// are consumed by that single file.
 //
-//   - cmd/cleanstale_transient_listpanes_integration_test.go
-//     (bootstrap-step-11 callsite)
-//   - cmd/cleanstale_transient_listpanes_clean_integration_test.go
-//     (portal-clean RunE callsite)
+// isolateCleanStaleTestEnv is the single source of truth for the four
+// invariant scaffolding steps: portaltest.IsolateStateForTest →
+// Setenv("PORTAL_STATE_DIR") → Setenv("PORTAL_LOG_LEVEL", "debug") →
+// Setenv("XDG_CONFIG_HOME", ...). runTransientCleanStaleModeSubtest is the
+// table-driven driver for the mode_a / mode_b subtest shape (byte-identity
+// hooks.json invariant + `runHookStaleCleanup` log-fingerprint needles);
+// the callsite passes a `transientModeSpec` declaring only the deltas
+// (entry-point invoker closure + an optional extra-assert closure to verify
+// no "Removed stale hook:" line surfaces on stdout).
 //
-// Both files target the same hook-cleanup contract at different
-// entry points. Two layers of duplication had crept across them and
-// motivated this consolidation:
+// The "normal_path" and "persisted_empty_early_exit" subtests are left as
+// bespoke subtest bodies in the consumer file — they diverge enough in
+// shape that table-driving them would obscure rather than clarify.
 //
-//  1. Env-builder helpers (`setupTransientCleanStaleEnv` and
-//     `setupCleanTransientEnv`) repeated the same four invariant
-//     scaffolding steps: portaltest.IsolateStateForTest →
-//     Setenv("PORTAL_STATE_DIR") → Setenv("PORTAL_LOG_LEVEL", "debug")
-//     → Setenv("XDG_CONFIG_HOME", ...). `isolateCleanStaleTestEnv`
-//     below is the single source of truth for those four steps; the
-//     two file-level helpers compose it with their respective
-//     entry-point-specific extras (the bootstrap path additionally
-//     skips-if-no-tmux, stages the `portal` binary on PATH, and
-//     constructs an isolated tmux socket).
-//
-//  2. The mode_a / mode_b subtest bodies in both files executed the
-//     same six-step shape with the same seed map and the same
-//     `runHookStaleCleanup` log-fingerprint needles. Drift between
-//     the two files would let a regression at one callsite hide
-//     behind a still-passing assertion at the other.
-//     `runTransientCleanStaleModeSubtest` below is the single
-//     table-driven driver for that shape; the two callsites pass a
-//     `transientModeSpec` declaring only the deltas (entry-point
-//     invoker closure + an optional extra-assert closure used by the
-//     portal-clean callsite to additionally verify no
-//     "Removed stale hook:" line surfaces on stdout).
-//
-// The "normal_path" and "persisted_empty_early_exit" subtests are
-// intentionally left as bespoke subtest bodies in their respective
-// files — they diverge enough in shape that table-driving them would
-// obscure rather than clarify.
-//
-// Package + build tag mirror the two consumer files so the shared
-// helpers are visible to both at compile time and only compile under
-// the integration build.
+// Package + build tag match the consumer file so the shared helpers are
+// visible at compile time and only compile under the integration build.
 
 package cmd
 
@@ -98,7 +80,7 @@ func isolateCleanStaleTestEnv(t *testing.T) (env []string, stateDir string) {
 }
 
 // transientModeSpec parameterises the table-driven driver below.
-// Only the deltas between the four mode_a / mode_b subtest bodies
+// Only the deltas between the mode_a / mode_b subtest bodies
 // are declared — the seed map, the snapshot/byte-identity assertion,
 // and the `runHookStaleCleanup` log-fingerprint needles are baked
 // into the driver itself.
@@ -109,20 +91,17 @@ func isolateCleanStaleTestEnv(t *testing.T) (env []string, stateDir string) {
 //   - mode: which transienttest.FailureMode the Commander should
 //     simulate. Drives both the install-commander step and the
 //     mode-specific log-fingerprint needles the driver asserts.
-//   - invoke: per-callsite entry-point closure. Receives the env
-//     slice + stateDir produced by the env-builder and is
-//     responsible for installing its callsite-specific commander
-//     seam (`commanderFactory` for the bootstrap callsite,
-//     `cleanDeps.AllPaneLister` for the portal-clean callsite),
+//   - invoke: entry-point closure. Receives the env slice + stateDir
+//     produced by the env-builder and is responsible for installing the
+//     portal-clean callsite's commander seam (`cleanDeps.AllPaneLister`),
 //     invoking the entry point, and returning any post-invocation
 //     output the extraAssert may want to inspect. A non-nil err
 //     return fails the subtest with a callsite-appropriate message
 //     supplied by the closure.
-//   - extraAssert: optional per-callsite post-invocation assertions
-//     beyond the shared byte-identity + log-fingerprint asserts.
-//     The portal-clean callsite uses this to additionally verify
-//     no "Removed stale hook:" line surfaces on stdout; the
-//     bootstrap callsite passes nil.
+//   - extraAssert: optional post-invocation assertions beyond the
+//     shared byte-identity + log-fingerprint asserts. The portal-clean
+//     callsite uses this to additionally verify no "Removed stale hook:"
+//     line surfaces on stdout.
 type transientModeSpec struct {
 	name        string
 	mode        transienttest.FailureMode
@@ -153,9 +132,8 @@ var transientModeSeedEntries = map[string]string{
 //  5. spec.extraAssert (if non-nil) — callsite-specific extras.
 //  6. portal.log fingerprint needles for spec.mode.
 //
-// Failure messages reference spec.name so a regression at one
-// callsite is unambiguous even when both files' subtests run in the
-// same `go test` invocation.
+// Failure messages reference spec.name so a regression in either mode
+// subtest is unambiguous when they run in the same `go test` invocation.
 func runTransientCleanStaleModeSubtest(t *testing.T, spec transientModeSpec) {
 	t.Helper()
 
@@ -231,4 +209,54 @@ func runTransientCleanStaleModeSubtest(t *testing.T, spec transientModeSpec) {
 		t.Fatalf("runTransientCleanStaleModeSubtest: unsupported FailureMode %v for subtest %s — driver supports only FailExitNonZero / FailEmptyStdout",
 			spec.mode, spec.name)
 	}
+}
+
+// configDirFromEnvSlice extracts the XDG_CONFIG_HOME value from the
+// env slice produced by portaltest.IsolateStateForTest. The slice
+// always contains exactly one such entry — its absence signals an
+// isolation regression worth a fatal test failure.
+func configDirFromEnvSlice(t *testing.T, env []string) string {
+	t.Helper()
+	const key = "XDG_CONFIG_HOME="
+	for _, e := range env {
+		if strings.HasPrefix(e, key) {
+			return strings.TrimPrefix(e, key)
+		}
+	}
+	t.Fatalf("configDirFromEnvSlice: XDG_CONFIG_HOME not present in env slice — IsolateStateForTest contract regression")
+	return ""
+}
+
+// staleHookCleanupLogLines returns the subset of portal.log lines that
+// carry the stale-hook cleanup prefix. Filtering on the prefix excludes
+// bootstrap step 9's CleanStaleMarkers log lines (which have their own
+// prefix) and any unrelated noise, narrowing the assertion surface to
+// exactly the hook-cleanup path under test.
+func staleHookCleanupLogLines(portalLog string) []string {
+	const prefix = "stale-hook cleanup:"
+	var matches []string
+	for _, line := range strings.Split(portalLog, "\n") {
+		if strings.Contains(line, prefix) {
+			matches = append(matches, line)
+		}
+	}
+	return matches
+}
+
+// containsLineMatching reports whether any line contains every
+// substring in needles (AND semantics).
+func containsLineMatching(lines []string, needles ...string) bool {
+	for _, line := range lines {
+		matched := true
+		for _, n := range needles {
+			if !strings.Contains(line, n) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }

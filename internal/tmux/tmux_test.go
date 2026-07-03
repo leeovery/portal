@@ -1660,7 +1660,7 @@ func TestListAllPanes(t *testing.T) {
 	// Legitimate-empty contract: exit 0 + empty stdout ⇒ ([]string{}, nil).
 	// This is the distinguishability boundary between failure mode (a)
 	// "tmux failed" (non-nil err) and failure mode (b) "no panes exist"
-	// (nil err, empty slice). Phase 2's hazard guard in cleanStaleAdapter /
+	// (nil err, empty slice). The hazard guard in runHookStaleCleanup /
 	// `portal clean` relies on this shape to detect mode (b) and refuse to
 	// wipe markers when the live pane set is authoritatively empty.
 	// Do not delete this subtest or the whitespace-only sibling below.

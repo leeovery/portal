@@ -24,7 +24,7 @@ import (
 // restoreEmittingRunner drives the context-carried emitter through a fixed
 // set of restore per-session events (Index 6, RestoreN/RestoreM populated)
 // then returns the configured terminal tuple — mirroring how the real step 6
-// streams N/M without standing up the eleven step seams.
+// streams N/M without standing up the ten step seams.
 type restoreEmittingRunner struct {
 	m       int
 	started bool

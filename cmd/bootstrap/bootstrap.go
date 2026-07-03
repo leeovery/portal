@@ -1,4 +1,4 @@
-// Package bootstrap composes the eleven-step PersistentPreRunE sequence
+// Package bootstrap composes the ten-step PersistentPreRunE sequence
 // pinned by the resurrection spec. Step ordering is load-bearing;
 // "Return" is the post-step boundary, not a numbered step:
 //
@@ -28,7 +28,6 @@
 //  10. SweepOrphanFIFOs (best-effort; observes still-set per-pane
 //     @portal-skeleton-* markers from step 6 — those outlive
 //     @portal-restoring and are cleared per-pane on hydration)
-//  11. CleanStale (best-effort)
 //
 // Return is the post-step boundary that collects accumulated warnings.
 package bootstrap
@@ -54,10 +53,10 @@ import (
 var cleanLogger = log.For("clean")
 
 // totalSteps is the fixed step count carried verbatim on the
-// orchestration-complete summary's steps attr. The eleven-step sequence is a
+// orchestration-complete summary's steps attr. The ten-step sequence is a
 // load-bearing contract; this constant is the single source of truth for the
 // summary line.
-const totalSteps = 11
+const totalSteps = 10
 
 // Closed StepName set — the canonical step= value for BOTH the per-step
 // entering DEBUG breadcrumb and the per-step "step complete" INFO summary, so
@@ -76,7 +75,6 @@ const (
 	stepClearRestoring     = "ClearRestoring"
 	stepCleanStaleMarkers  = "CleanStaleMarkers"
 	stepSweepOrphanFIFOs   = "SweepOrphanFIFOs"
-	stepCleanStale         = "CleanStale"
 )
 
 // Runner is the abstraction cmd/root.go depends on so PersistentPreRunE
@@ -197,18 +195,13 @@ type MarkerCleaner interface {
 // itself fails. The orchestrator treats a non-nil err as a soft warning
 // and continues — a stuck FIFO must never block PersistentPreRunE.
 //
-// Step 10 of the bootstrap sequence: runs after CleanStaleMarkers (step 9)
-// so any stale markers protecting orphan FIFOs are unset first, but
-// before CleanStale (step 11) so the per-pane skeleton markers it
-// observes via state.ListSkeletonMarkers are still set on the live tmux
+// Step 10 (the final step) of the bootstrap sequence: runs after
+// CleanStaleMarkers (step 9) so any stale markers protecting orphan FIFOs
+// are unset first, observing the per-pane skeleton markers it enumerates
+// via state.ListSkeletonMarkers while they are still set on the live tmux
 // server.
 type FIFOSweeper interface {
 	Sweep() error
-}
-
-// StaleCleaner prunes stale entries from the on-disk hooks store.
-type StaleCleaner interface {
-	CleanStale() error
 }
 
 // LatchWriter records the version-stamped bootstrap latch
@@ -222,7 +215,7 @@ type LatchWriter interface {
 	SetServerOption(name, value string) error
 }
 
-// Orchestrator runs the eleven-step bootstrap sequence. Wiring of
+// Orchestrator runs the ten-step bootstrap sequence. Wiring of
 // production implementations lives in cmd/root.go (task 5-3); this
 // package stays pure (interfaces + Run) so the ordering contract is
 // independently testable.
@@ -233,7 +226,7 @@ type LatchWriter interface {
 // each step emits a per-step entering DEBUG breadcrumb (surfaced only at
 // PORTAL_LOG_LEVEL=debug) plus, on the non-fatal continuation path, one INFO
 // "step complete step=<StepName> took=T" summary; the Return post-step
-// boundary emits one INFO "orchestration complete steps=11 warnings=N took=T".
+// boundary emits one INFO "orchestration complete steps=10 warnings=N took=T".
 // The closed StepName set (the step* consts) is the single source of truth
 // shared by the entering breadcrumb and the step-complete summary so their
 // step= attrs always agree. A fatal abort at a fatal step (EnsureServer,
@@ -259,7 +252,6 @@ type Orchestrator struct {
 	EagerSignaler EagerHydrateSignaler
 	StaleMarkers  MarkerCleaner
 	Sweeper       FIFOSweeper
-	Clean         StaleCleaner
 	// Latch records the version-stamped @portal-bootstrapped latch as the
 	// final action of a successful Run (after the last soft step and the
 	// fatal-error gate). Best-effort and nil-tolerant: Run guards the write
@@ -272,7 +264,7 @@ type Orchestrator struct {
 	Logger  *slog.Logger // nil tolerated; Run substitutes a discard default
 }
 
-// Run executes the eleven bootstrap steps in spec order. It returns the
+// Run executes the ten bootstrap steps in spec order. It returns the
 // serverStarted flag from step 1 (EnsureServer) verbatim, the slice of
 // soft Warnings accumulated across steps 5-6 (in step order), and any
 // fatal error. The ctx parameter is reserved for Phase 6 timeout/cancel
@@ -297,7 +289,6 @@ type Orchestrator struct {
 //   - Step 9 (CleanStaleMarkers) returns non-nil → logged via Warn and
 //     swallowed.
 //   - Step 10 (Sweep) returns non-nil → logged via Warn and swallowed.
-//   - Step 11 (CleanStale) returns non-nil → logged via Warn and swallowed.
 //
 // After the last soft step and the fatal-error gate, before the
 // orchestration-complete summary, Run stamps the version-stamped latch via a
@@ -475,11 +466,11 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	o.Logger.Info("step complete", "step", stepCleanStaleMarkers, log.Took(stepStart))
 	emitStep(9, stepCleanStaleMarkers)
 
-	// Step 10 — SweepOrphanFIFOs (best-effort). Runs after Clear so the
-	// daemon's suppression window has closed and after CleanStaleMarkers
-	// so any stale markers protecting orphan FIFOs are unset first, but
-	// before CleanStale so the per-pane @portal-skeleton-* markers from
-	// step 6 are still observable (those outlive @portal-restoring and
+	// Step 10 — SweepOrphanFIFOs (best-effort, final step). Runs after
+	// Clear so the daemon's suppression window has closed and after
+	// CleanStaleMarkers so any stale markers protecting orphan FIFOs are
+	// unset first. It observes the per-pane @portal-skeleton-* markers from
+	// step 6 while they are still set (those outlive @portal-restoring and
 	// are cleared per-pane on hydration). A non-nil err is logged and
 	// swallowed — a stuck FIFO must never block PersistentPreRunE.
 	o.Logger.Debug("step entering", "step", stepSweepOrphanFIFOs)
@@ -490,16 +481,6 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	}
 	o.Logger.Info("step complete", "step", stepSweepOrphanFIFOs, log.Took(stepStart))
 	emitStep(10, stepSweepOrphanFIFOs)
-
-	// Step 11 — CleanStale (best-effort).
-	o.Logger.Debug("step entering", "step", stepCleanStale)
-	stepStart = time.Now()
-	if err := o.Clean.CleanStale(); err != nil {
-		o.Logger.Warn("step failed", "step", stepCleanStale, "error", err)
-		// Continue per spec.
-	}
-	o.Logger.Info("step complete", "step", stepCleanStale, log.Took(stepStart))
-	emitStep(11, stepCleanStale)
 
 	// Latch — final pre-return action, after the last soft step. Every fatal
 	// step (EnsureServer, RegisterPortalHooks, SetRestoring, ClearRestoring)

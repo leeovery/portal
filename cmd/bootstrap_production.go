@@ -20,8 +20,7 @@ package cmd
 //   - cmd/bootstrap_production.go (camelCase, unexported): adapters that
 //     compose dependencies test code cannot reach in this package's
 //     current shape — the package-level cmd.version variable
-//     (saverAdapter), the hook-store path-resolution chain
-//     (cleanStaleAdapter). Lowercase reflects "this struct is the wiring
+//     (saverAdapter). Lowercase reflects "this struct is the wiring
 //     this binary uses; tests compose their own." The stale-marker
 //     cleanup core (bootstrap.MarkerCleanupCore) is also constructed
 //     inline at the wiring site below — *tmux.Client satisfies every one
@@ -37,11 +36,8 @@ package cmd
 //     when they need it.
 
 import (
-	"log/slog"
-
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
-	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -62,37 +58,6 @@ func (a *saverAdapter) EnsureSaver() error {
 	return tmux.EnsurePortalSaverVersion(a.client, a.stateDir, version)
 }
 
-// cleanStaleAdapter prunes the on-disk hooks store of entries whose
-// structural key no longer matches a live tmux pane. Step 11 of the
-// bootstrap sequence; best-effort per spec.
-//
-// The lister field is the AllPaneLister interface (declared in
-// cmd/clean.go) — production wiring passes a *tmux.Client which
-// satisfies the interface via ListAllPanes. Using the interface (rather
-// than the concrete *tmux.Client) lets unit tests substitute a stub
-// without needing a test-only adapter mirror.
-type cleanStaleAdapter struct {
-	lister AllPaneLister
-	store  *hooks.Store
-	logger *slog.Logger
-}
-
-// CleanStale delegates to runHookStaleCleanup with swallowListError=false
-// (the bootstrap step-11 contract — the orchestrator Warn-and-swallows at
-// its own level so errors surface through the StaleCleaner interface) and
-// no per-removal callback (bootstrap has nothing to print to the user).
-// Algorithm, hazard guard, and log format strings all live in the
-// shared helper — see cmd/run_hook_stale_cleanup.go for the full design
-// rationale.
-func (a *cleanStaleAdapter) CleanStale() error {
-	return runHookStaleCleanup(a.lister, a.store, a.logger, false, nil)
-}
-
-// Compile-time assertion that *tmux.Client satisfies AllPaneLister so
-// the production wiring at buildProductionOrchestrator can pass a
-// *tmux.Client into the cleanStaleAdapter.lister field unchanged.
-var _ AllPaneLister = (*tmux.Client)(nil)
-
 // commanderFactory is the indirection seam tests use to inject a
 // wrapping tmux.Commander into the production orchestrator-builder
 // chain. Production code leaves it at the default — a freshly
@@ -101,7 +66,7 @@ var _ AllPaneLister = (*tmux.Client)(nil)
 // unaffected. Integration tests under //go:build integration override
 // this var (under t.Cleanup restore) to inject, for example, a
 // TransientListPanesCommander wrapping a socket-anchored inner
-// Commander so the entire eleven-step bootstrap pipeline observes
+// Commander so the entire bootstrap pipeline observes
 // the test's failure policy via a single, structurally-pinned seam.
 //
 // Discipline: callers MUST NOT cache the Client built from this
@@ -121,9 +86,6 @@ var commanderFactory = func() tmux.Commander { return &tmux.RealCommander{} }
 // the Restore adapter, hydrate for the eager signaler, daemon for the
 // version-writer breadcrumb). The handler is configured once by main ->
 // log.Init.
-//
-// HookStore: when loadHookStore fails (path resolution error) the
-// CleanStale step degrades to bootstrap.NoOpStaleCleaner.
 //
 // Commander seam: the underlying *tmux.Client is built via
 // commanderFactory rather than tmux.DefaultClient so integration
@@ -145,15 +107,6 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	// Rotation and the append-only writer discipline are handler-owned
 	// (Phase 2), so there is no per-process log open here.
 	logger := bootstrapLogger
-
-	// Resolve the hooks store. On failure the CleanStale step is
-	// downgraded to a no-op rather than aborting bootstrap.
-	var cleaner bootstrap.StaleCleaner
-	if hookStore, err := loadHookStore(); err == nil && hookStore != nil {
-		cleaner = &cleanStaleAdapter{lister: client, store: hookStore, logger: logger}
-	} else {
-		cleaner = bootstrap.NoOpStaleCleaner{}
-	}
 
 	// restoreInner.Progress is intentionally left nil here. The §10.4 per-session
 	// N/M progress callback is installed at Run time by bootstrap step 6 via the
@@ -201,7 +154,6 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 			StateDir: stateDir,
 			Logger:   logger,
 		},
-		Clean: cleaner,
 		// Latch stamps the version-stamped @portal-bootstrapped latch as the
 		// final action of a successful Run. *tmux.Client satisfies
 		// bootstrap.LatchWriter via SetServerOption; Version is the same

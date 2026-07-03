@@ -2,8 +2,8 @@ package bootstrap
 
 // Canonical no-op implementations exist only for the Orchestrator steps the
 // spec permits to degrade-and-continue: Hooks, OrphanSweeper, Saver, Restore,
-// EagerHydrateSignaler, MarkerCleaner, FIFOSweeper, and StaleCleaner. Server
-// and RestoringMarker are fatal-on-failure (steps 1, 3, and 8); they
+// EagerHydrateSignaler, MarkerCleaner, and FIFOSweeper. Server and
+// RestoringMarker are fatal-on-failure (steps 1, 3, and 8); they
 // intentionally have no NoOp because reaching for a "default" would silently
 // violate the bootstrap contract.
 //
@@ -17,9 +17,9 @@ package bootstrap
 //
 //   - Tests that exercise a subset of the bootstrap sequence and want to
 //     stub out steps incidental to the scenario under test.
-//   - Production fallbacks (e.g. cmd/bootstrap_production.go uses
-//     NoOpStaleCleaner when hook-store path resolution fails) where the
-//     spec mandates degrade-and-continue rather than aborting bootstrap.
+//   - Production fallbacks (e.g. cmd/bootstrap_production.go uses a NoOp
+//     step seam when its dependencies cannot be resolved) where the spec
+//     mandates degrade-and-continue rather than aborting bootstrap.
 
 // NoOpHooks satisfies HookRegistrar. RegisterPortalHooks always reports
 // success. Useful for tests / production fallbacks.
@@ -80,10 +80,3 @@ type NoOpFIFOSweeper struct{}
 
 // Sweep always returns nil.
 func (NoOpFIFOSweeper) Sweep() error { return nil }
-
-// NoOpStaleCleaner satisfies StaleCleaner. CleanStale always reports
-// success. Useful for tests / production fallbacks.
-type NoOpStaleCleaner struct{}
-
-// CleanStale always returns nil.
-func (NoOpStaleCleaner) CleanStale() error { return nil }

@@ -9,8 +9,8 @@ import "github.com/leeovery/portal/internal/warning"
 // FatalError carries that line in UserMessage and the underlying cause for
 // errors.Is / errors.As traversal and portal.log diagnostics.
 //
-// Soft failures (EnsureSaver, CleanStale, Restore content errors) are NOT
-// wrapped in FatalError — they degrade locally and continue per spec.
+// Soft failures (EnsureSaver, SweepOrphanFIFOs, Restore content errors) are
+// NOT wrapped in FatalError — they degrade locally and continue per spec.
 type FatalError struct {
 	// UserMessage is the single line emitted to stderr at the top-level
 	// Execute path. It is the only text the user sees; the spec mandates

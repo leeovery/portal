@@ -16,9 +16,9 @@ func TestHooksListCommand(t *testing.T) {
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
-		// Stub bootstrap so the orchestrator's CleanStale step does
-		// not prune the hand-seeded hook entry whose structural key
-		// has no matching live tmux pane.
+		// Stub bootstrap so the real orchestrator does not run against
+		// the test's tmux server while the hand-seeded hook entry is
+		// under assertion.
 		bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 		t.Cleanup(func() { bootstrapDeps = nil })
 
@@ -92,8 +92,8 @@ func TestHooksListCommand(t *testing.T) {
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
-		// Stub bootstrap so CleanStale does not prune entries whose
-		// structural keys have no live tmux pane.
+		// Stub bootstrap so the real orchestrator does not run against
+		// the test's tmux server while the seeded entries are asserted.
 		bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 		t.Cleanup(func() { bootstrapDeps = nil })
 

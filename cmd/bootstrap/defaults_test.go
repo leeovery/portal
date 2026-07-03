@@ -9,7 +9,7 @@ package bootstrap_test
 // Test scope:
 //
 //   - Defaulting policy: every degradable step seam (Hooks, Saver, Restore,
-//     EagerSignaler, StaleMarkers, Sweeper, Clean) defaults to its NoOp form
+//     EagerSignaler, StaleMarkers, Sweeper) defaults to its NoOp form
 //     when the corresponding With* option is not supplied.
 //   - Option pass-through: each With* option sets the corresponding seam
 //     verbatim.
@@ -84,9 +84,6 @@ func TestNewWithDefaults_DefaultsAllDegradableStepsToNoOp(t *testing.T) {
 	if _, ok := o.Sweeper.(bootstrap.NoOpFIFOSweeper); !ok {
 		t.Errorf("Sweeper type = %T; want bootstrap.NoOpFIFOSweeper", o.Sweeper)
 	}
-	if _, ok := o.Clean.(bootstrap.NoOpStaleCleaner); !ok {
-		t.Errorf("Clean type = %T; want bootstrap.NoOpStaleCleaner", o.Clean)
-	}
 }
 
 // TestNewWithDefaults_WiresPositionalSeams asserts that the four
@@ -124,7 +121,6 @@ func TestNewWithDefaults_HonorsAllWithOptions(t *testing.T) {
 	eager := stubEager{}
 	staleMarkers := stubMarkerCleaner{}
 	sweeper := stubSweeper{}
-	clean := stubStaleCleaner{}
 
 	o := bootstrap.NewWithDefaults(stubServerSeam{}, "", nil, stubRestoringMarker{},
 		bootstrap.WithHooks(hooks),
@@ -134,7 +130,6 @@ func TestNewWithDefaults_HonorsAllWithOptions(t *testing.T) {
 		bootstrap.WithEagerSignaler(eager),
 		bootstrap.WithStaleMarkers(staleMarkers),
 		bootstrap.WithSweeper(sweeper),
-		bootstrap.WithClean(clean),
 	)
 
 	if o.Hooks != hooks {
@@ -157,9 +152,6 @@ func TestNewWithDefaults_HonorsAllWithOptions(t *testing.T) {
 	}
 	if o.Sweeper != sweeper {
 		t.Errorf("Sweeper = %v; want stubSweeper{}", o.Sweeper)
-	}
-	if o.Clean != clean {
-		t.Errorf("Clean = %v; want stubStaleCleaner{}", o.Clean)
 	}
 }
 
@@ -264,7 +256,3 @@ func (stubMarkerCleaner) CleanStaleMarkers() error { return nil }
 type stubSweeper struct{}
 
 func (stubSweeper) Sweep() error { return nil }
-
-type stubStaleCleaner struct{}
-
-func (stubStaleCleaner) CleanStale() error { return nil }

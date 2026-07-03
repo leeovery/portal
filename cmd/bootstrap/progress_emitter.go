@@ -12,14 +12,14 @@ package bootstrap
 //   - The concurrent route wraps the context via WithProgressEmitter; only that
 //     route observes any emit.
 //
-// Each of the eleven steps emits its StepEvent at the SAME site it logs "step
+// Each of the ten steps emits its StepEvent at the SAME site it logs "step
 // complete", in step order — a fatal step that aborts emits no event for the
 // aborting step (mirroring the no-step-complete-log contract) and nothing after.
 
 import "context"
 
 // StepEvent is the per-step progress signal streamed on the concurrent route.
-// Index is the 1-based canonical step number (1..11); Name is the closed
+// Index is the 1-based canonical step number (1..10); Name is the closed
 // StepName for that step (the step* consts — the same identifier the
 // step-complete log line carries). The cmd layer maps these onto the
 // loading-page channel event (friendly-label grouping is task 5-4).

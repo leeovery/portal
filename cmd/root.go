@@ -24,11 +24,10 @@ import (
 //     pane) and a single tmux display-message round-trip via
 //     buildHooksTmuxClient() in cmd/hooks.go to resolve the structural
 //     pane key; they do not need daemon orchestration, saver bootstrap,
-//     version-upgrade machinery, Restore, EagerSignalHydrate,
-//     marker/FIFO cleanup, or hookStore.CleanStale. hooks list needs
-//     nothing tmux-related at all. Stale-entry auto-cleanup remains
-//     attached to bootstrap-triggering commands (portal open / x /
-//     attach).
+//     version-upgrade machinery, Restore, EagerSignalHydrate, or
+//     marker/FIFO cleanup. hooks list needs nothing tmux-related at all.
+//     Stale hook-entry cleanup is no longer a bootstrap step; `portal
+//     clean` is the manual home.
 //   - state: every `portal state ...` subcommand. User-facing children
 //     (status, cleanup) inspect or tear down machinery the bootstrap sets
 //     up — running bootstrap first would be circular. Internal children
@@ -95,7 +94,7 @@ var (
 // set (test mode), uses the injected Orchestrator verbatim — runBootstrap
 // short-circuits a nil runner to (false, nil, nil) for tests indifferent
 // to bootstrap. In production, builds a fully-wired
-// *bootstrap.Orchestrator that runs the canonical eleven-step sequence
+// *bootstrap.Orchestrator that runs the canonical ten-step sequence
 // (see cmd/bootstrap_production.go).
 //
 // In production the returned hook-registration callback is nil: hook

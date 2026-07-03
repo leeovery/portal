@@ -358,11 +358,11 @@ func newSymptomFixture(t *testing.T, binary, binDir, sockPrefix string) symptomF
 	// reflects that sub-test's stateDir.
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 	// Isolate the per-file config env vars too — the bootstrap subprocess
-	// spawned below (portal list) runs the full eleven-step orchestrator,
-	// including step 11 CleanStale. Without these the subprocess inherits
-	// the developer's real ~/.config/portal/hooks.json / projects.json /
-	// aliases and CleanStale wipes them against the test's tmux server's
-	// pane set (which has nothing in common with the developer's hooks).
+	// spawned below (portal list) runs the full orchestrator against the
+	// test's tmux server. Without these the subprocess would inherit the
+	// developer's real ~/.config/portal/hooks.json / projects.json /
+	// aliases and resolve config against them instead of the test's
+	// isolated state (which has nothing in common with the developer's).
 	t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(stateDir, "hooks.json"))
 	t.Setenv("PORTAL_PROJECTS_FILE", filepath.Join(stateDir, "projects.json"))
 	t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(stateDir, "aliases"))
@@ -495,7 +495,7 @@ func runPortalCommitNow(t *testing.T, binary string, f symptomFixture) {
 // runPortalList invokes `portal list` as a subprocess against the
 // fixture's tmux socket and state directory. This is the canonical
 // trigger for the full bootstrap orchestrator from outside the test
-// process: PersistentPreRunE runs all eleven steps before list itself
+// process: PersistentPreRunE runs all ten steps before list itself
 // emits anything, so the side effects (hook registration, saver
 // spawn, first sessions.json) are in place by the time the
 // subprocess exits.

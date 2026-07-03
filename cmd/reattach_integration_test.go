@@ -66,7 +66,7 @@
 //     attach logic runs" — i.e. the Restore step's contract. A stub
 //     Orchestrator would not exercise that contract. We wire a real
 //     bootstrap.Orchestrator with NoOp shims for the steps incidental
-//     to this scenario (Hooks, Saver, Sweeper, Clean) and real
+//     to this scenario (Hooks, Saver, Sweeper) and real
 //     RestoringMarker + RestoreAdapter so step 6 actually runs.
 //
 // Why we build the portal binary on PATH:
@@ -143,8 +143,8 @@ func ensurePortalOnPATH(t *testing.T) {
 // for the reattach integration scenario: real RestoringMarker
 // (Set/Clear) and real RestoreAdapter (so step 6 actually creates the
 // skeleton from sessions.json), with NoOp shims for the steps
-// incidental to this scenario (Hooks, Saver, StaleMarkers, Sweeper,
-// Clean). The same adapter shape used by Phase 5's
+// incidental to this scenario (Hooks, Saver, StaleMarkers, Sweeper).
+// The same adapter shape used by Phase 5's
 // TestPhase5_RestoreCreatesMissingSession in
 // cmd/bootstrap/phase5_integration_test.go.
 //

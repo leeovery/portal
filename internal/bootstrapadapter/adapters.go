@@ -148,22 +148,21 @@ func NewRestoreAdapter(client *tmux.Client, stateDir string, logger *slog.Logger
 	}
 }
 
-// FIFOSweeper satisfies bootstrap.FIFOSweeper. Step 10 of the bootstrap
-// sequence — runs after step 8 clears @portal-restoring (so the daemon's
-// suppression window has closed) and after step 9 (CleanStaleMarkers) so
-// any stale markers protecting orphan FIFOs are unset first, but before
-// step 11 (CleanStale), so the per-pane @portal-skeleton-* markers from
-// step 6 are still set on the live tmux server. Those markers outlive
-// @portal-restoring and are cleared per-pane on hydration;
-// ListSkeletonMarkers is the source of truth for "which paneKeys deserve
-// their FIFO".
+// FIFOSweeper satisfies bootstrap.FIFOSweeper. Step 10 (the final step) of
+// the bootstrap sequence — runs after step 8 clears @portal-restoring (so
+// the daemon's suppression window has closed) and after step 9
+// (CleanStaleMarkers) so any stale markers protecting orphan FIFOs are unset
+// first, while the per-pane @portal-skeleton-* markers from step 6 are still
+// set on the live tmux server. Those markers outlive @portal-restoring and
+// are cleared per-pane on hydration; ListSkeletonMarkers is the source of
+// truth for "which paneKeys deserve their FIFO".
 //
 // Sweep is best-effort, but visibility-preserving:
 //
 //   - A ShowAllServerOptions failure (the seam ListSkeletonMarkers uses)
 //     is wrapped and returned so the orchestrator's step-10 Warn-and-swallow
 //     path logs it uniformly with the per-FIFO Warn lines below. Bootstrap
-//     does not abort — the orchestrator continues to step 11 (CleanStale).
+//     does not abort — the orchestrator swallows it and completes the run.
 //   - Per-FIFO removal errors are logged via Logger and skipped inside
 //     state.SweepOrphanFIFOs.
 //

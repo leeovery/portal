@@ -14,7 +14,7 @@ package bootstrap_test
 //
 // Defaults policy: every step that the spec permits to degrade-and-continue
 // defaults to its NoOp form (Hooks, OrphanSweeper, Saver, Restore,
-// EagerSignaler, StaleMarkers, Sweeper, Clean). RestoringMarker is always
+// EagerSignaler, StaleMarkers, Sweeper). RestoringMarker is always
 // real because step 3 / step 8 are fatal-on-failure and the marker contract
 // is exercised in every Run path.
 
@@ -41,7 +41,6 @@ type orchestratorOpts struct {
 	EagerSignaler bootstrap.EagerHydrateSignaler
 	StaleMarkers  bootstrap.MarkerCleaner
 	Sweeper       bootstrap.FIFOSweeper
-	Clean         bootstrap.StaleCleaner
 	Logger        *slog.Logger
 }
 
@@ -89,9 +88,6 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 	}
 	if opts.Sweeper != nil {
 		withOpts = append(withOpts, bootstrap.WithSweeper(opts.Sweeper))
-	}
-	if opts.Clean != nil {
-		withOpts = append(withOpts, bootstrap.WithClean(opts.Clean))
 	}
 
 	return bootstrap.NewWithDefaults(

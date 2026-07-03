@@ -2,7 +2,7 @@ package cmd
 
 // §10.2 concurrent cold-boot bootstrap — progress channel + goroutine wrapper.
 //
-// On the cold + TUI path the eleven-step orchestrator runs in a goroutine while
+// On the cold + TUI path the ten-step orchestrator runs in a goroutine while
 // Bubble Tea renders the loading page from frame one. This file owns the seam
 // between the two: a buffered progress channel carrying serverStarted + one
 // per-step event + a terminal done/fatal marker, plus the receiver tea.Cmd the
@@ -73,7 +73,7 @@ import (
 	"github.com/leeovery/portal/internal/tui"
 )
 
-// bootstrapProgressBufferSize bounds the progress channel. Eleven real steps
+// bootstrapProgressBufferSize bounds the progress channel. Ten real steps
 // plus the terminal marker fit comfortably; a generous-but-bounded buffer means
 // a fast orchestrator never blocks on a slow render, while the bound prevents an
 // unbounded backlog. task 5-3 adds per-session restore events under the same
@@ -83,7 +83,7 @@ const bootstrapProgressBufferSize = 64
 // bootstrapProgress is the event shape carried on the progress channel. Exactly
 // one terminal event (Done) is sent, last, before the channel closes.
 type bootstrapProgress struct {
-	// Step is the per-step progress event (Index 1..11, Name the closed
+	// Step is the per-step progress event (Index 1..10, Name the closed
 	// StepName). Only Index reaches the wire message; the friendly §10.4 label is
 	// derived consumer-side (internal/tui/loading_progress.go), so no label is
 	// carried here. Zero on the terminal event.
