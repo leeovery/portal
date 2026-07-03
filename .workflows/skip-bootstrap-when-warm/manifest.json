@@ -102,7 +102,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 3,
-          "current_task": "skip-bootstrap-when-warm-3-1",
+          "current_task": "skip-bootstrap-when-warm-3-2",
           "completed_tasks": [
             "skip-bootstrap-when-warm-1-1",
             "skip-bootstrap-when-warm-1-2",
@@ -111,7 +111,8 @@
             "skip-bootstrap-when-warm-2-1",
             "skip-bootstrap-when-warm-2-2",
             "skip-bootstrap-when-warm-2-3",
-            "skip-bootstrap-when-warm-2-4"
+            "skip-bootstrap-when-warm-2-4",
+            "skip-bootstrap-when-warm-3-1"
           ],
           "completed_phases": [
             1,

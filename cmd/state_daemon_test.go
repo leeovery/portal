@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -893,6 +894,129 @@ func TestDefaultSaverMembershipProbe(t *testing.T) {
 
 		if defaultSaverMembershipProbe(client, 4242) {
 			t.Errorf("probe = true, want false when pid != selfPID (orphan daemon)")
+		}
+	})
+}
+
+// TestStateDaemon_HooksCleanupWiring pins task 3-1: the daemon RunE must carry
+// a *hooks.Store built once from loadHookStore() (resolving the SAME hooks.json
+// foreground commands mutate) plus a lastCleanup throttle anchor initialised to
+// the daemon-start instant. Both are the inputs the throttled daemon-owned
+// hooks stale-cleanup gate (tasks 3-2/3-3) will consume; this task wires the
+// fields only. withImmediateRun short-circuits the tick loop, so no daemon
+// subprocess is spawned (these are in-process unit tests, not the
+// IsolateStateForTest daemon-spawning class).
+func TestStateDaemon_HooksCleanupWiring(t *testing.T) {
+	t.Run("it builds the hook store from loadHookStore at startup", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
+
+		holder := withImmediateRun(t)
+		withDaemonLockFileReset(t)
+
+		if _, _, err := runStateDaemon(t); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		deps := *holder
+		if deps == nil {
+			t.Fatal("daemon deps not captured")
+		}
+		if deps.HookStore == nil {
+			t.Fatal("deps.HookStore is nil; want a non-nil store built from loadHookStore()")
+		}
+	})
+
+	t.Run("it initialises lastCleanup to a non-zero start time", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
+
+		holder := withImmediateRun(t)
+		withDaemonLockFileReset(t)
+
+		if _, _, err := runStateDaemon(t); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		now := time.Now()
+
+		deps := *holder
+		if deps == nil {
+			t.Fatal("daemon deps not captured")
+		}
+		if deps.lastCleanup.IsZero() {
+			t.Fatal("deps.lastCleanup is the zero time.Time; want the daemon-start instant so the first cleanup fires one interval after start, not on the first idle tick")
+		}
+		// Loosely bounded to absorb CI scheduling jitter: lastCleanup is set to
+		// time.Now() inside RunE, a hair before this post-run capture.
+		if delta := now.Sub(deps.lastCleanup); delta < 0 || delta > 2*time.Second {
+			t.Errorf("deps.lastCleanup = %v; want within 2s of %v (delta %v)", deps.lastCleanup, now, delta)
+		}
+	})
+
+	t.Run("it resolves the same hooks.json path foreground commands use", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		hooksPath := filepath.Join(t.TempDir(), "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
+
+		// Seed one entry through the very path a foreground `portal hooks set`
+		// resolves, so a daemon store pointed at a DIFFERENT file would visibly
+		// fail to read it back.
+		const key = "proj-AbC123:0.0"
+		if err := hooks.NewStore(hooksPath).Set(key, "on-resume", "echo hi", "cli"); err != nil {
+			t.Fatalf("seed hooks.json: %v", err)
+		}
+
+		holder := withImmediateRun(t)
+		withDaemonLockFileReset(t)
+
+		if _, _, err := runStateDaemon(t); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		deps := *holder
+		if deps == nil {
+			t.Fatal("daemon deps not captured")
+		}
+		loaded, err := deps.HookStore.Load()
+		if err != nil {
+			t.Fatalf("deps.HookStore.Load(): %v", err)
+		}
+		events, ok := loaded[key]
+		if !ok {
+			t.Fatalf("daemon hook store did not resolve the foreground hooks.json; loaded=%v", loaded)
+		}
+		if got := events["on-resume"]; got != "echo hi" {
+			t.Errorf("on-resume command = %q; want %q", got, "echo hi")
+		}
+	})
+
+	// AMBIGUITY NOTE (task 3-1): loadHookStore() only errors when path
+	// resolution fails. With PORTAL_HOOKS_FILE unset that reduces to
+	// os.UserHomeDir() failing, which we induce deterministically on this
+	// platform (darwin) by blanking $HOME. PORTAL_STATE_DIR still drives
+	// EnsureDir, so only the hooks-path branch is perturbed. If a future
+	// platform resolved a home dir without $HOME this branch would need the
+	// source-inspection fallback the task describes; today the live error is
+	// deterministic, so we assert the real RunE surface rather than grepping
+	// source.
+	t.Run("it surfaces a loadHookStore error rather than silently disabling cleanup", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		t.Setenv("PORTAL_HOOKS_FILE", "") // force fall-through to home-dir resolution
+		t.Setenv("HOME", "")              // os.UserHomeDir() now errors → loadHookStore errors
+
+		_ = withImmediateRun(t) // guard: a regression that does NOT error must not spin the real tick loop
+		withDaemonLockFileReset(t)
+
+		_, _, err := runStateDaemon(t)
+		if err == nil {
+			t.Fatal("expected RunE to surface the loadHookStore error; got nil (cleanup would be silently disabled)")
+		}
+		if !strings.Contains(err.Error(), "load hook store") {
+			t.Errorf("error = %v; want it wrapped with %q", err, "load hook store")
 		}
 	})
 }

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -27,10 +28,27 @@ import (
 // HashMap by WriteScrollbackIfChanged, PrevIndex by captureAndCommit.
 // LastSaveAt is updated by tick when a capture-and-commit succeeds.
 type daemonDeps struct {
-	Dir          string
-	Version      string
-	Logger       *slog.Logger
-	Client       *tmux.Client
+	Dir     string
+	Version string
+	Logger  *slog.Logger
+	Client  *tmux.Client
+
+	// HookStore is built once at daemon startup via loadHookStore(); it MUST
+	// resolve the same hooks.json foreground commands mutate (relies on the
+	// daemon inheriting the same PORTAL_HOOKS_FILE / XDG_CONFIG_HOME env — the
+	// same env-inheritance rule the state daemon already depends on for
+	// PORTAL_STATE_DIR). It is the *hooks.Store the daemon-owned hooks
+	// stale-cleanup gate (tasks 3-2/3-3) drives via runHookStaleCleanup; the
+	// lister for that call is the existing Client (*tmux.Client satisfies
+	// AllPaneLister via ListAllPanes) — no new client, no new seam.
+	HookStore *hooks.Store
+
+	// lastCleanup is the throttle anchor for the daemon-owned hooks
+	// stale-cleanup gate (tasks 3-2/3-3); initialised to the daemon-START time
+	// so the first cleanup fires one interval (~10s) after start, not on the
+	// first idle tick (~1s).
+	lastCleanup time.Time
+
 	HashMap      state.HashMap
 	PrevIndex    *state.Index
 	LastSaveAt   time.Time
@@ -630,12 +648,27 @@ var stateDaemonCmd = &cobra.Command{
 			logger.Warn("ReadIndex failed", "error", err)
 		}
 
+		// Build the hooks store once, from the SAME resolver foreground commands
+		// use (loadHookStore → hooksFilePath → configFilePath("PORTAL_HOOKS_FILE",
+		// "hooks.json")), so the daemon-owned stale-cleanup gate (tasks 3-2/3-3)
+		// cleans the identical hooks.json the user edits. A resolution failure
+		// surfaces here rather than silently leaving the daemon with a nil store
+		// (which would silently disable cleanup for the whole daemon lifetime).
+		hookStore, err := loadHookStore()
+		if err != nil {
+			return fmt.Errorf("load hook store: %w", err)
+		}
+
 		client := tmux.DefaultClient()
 		deps := &daemonDeps{
-			Dir:          dir,
-			Version:      version,
-			Logger:       logger,
-			Client:       client,
+			Dir:     dir,
+			Version: version,
+			Logger:  logger,
+			Client:  client,
+			// lastCleanup is anchored to daemon-START time so the first hooks
+			// stale-cleanup (tasks 3-2/3-3) fires one interval after start.
+			HookStore:    hookStore,
+			lastCleanup:  time.Now(),
 			HashMap:      hm,
 			PrevIndex:    prevIdx,
 			TickerPeriod: 1 * time.Second,
