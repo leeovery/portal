@@ -85,3 +85,14 @@ approved_at: 2026-07-02
 | skip-bootstrap-when-warm-3-2 | Throttled hooks-cleanup gate calling runHookStaleCleanup | not-elapsed → no cleanup call and lastCleanup unchanged, exactly-elapsed boundary (>= interval) → fires and resets lastCleanup, cleanup error logged WARN and swallowed (never returned, never crashes daemon), args pinned lister=Client / store=startup store / swallowListError=true / onRemoved=nil, reuses mass-delete guard + EmitCleanStaleSummary breadcrumb (no new audit event) |
 | skip-bootstrap-when-warm-3-3 | Place the cleanup gate on the tick idle branch | @portal-restoring set → whole tick skipped, no cleanup; capture-pending (dirty \|\| gap) → capture runs, cleanup skipped this tick (scrollback always wins); idle (!dirty && !gap) + throttle elapsed → cleanup runs then returns; daemon is the only remaining automatic hooks-CleanStale caller |
 | skip-bootstrap-when-warm-3-4 | Real-tmux daemon integration coverage for throttled cleanup | no cleanup before one interval elapses, stale hooks.json entry reaped after the interval on an idle server, live-keyed entry retained, daemon-spawning test under IsolateStateForTest, no t.Parallel |
+
+### Phase 4: Analysis (Cycle 1)
+
+Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| skip-bootstrap-when-warm-4-1 | Consolidate duplicated scaffolding in the abridged bootstrap tests | three latch-verdict tests collapse to one table-driven test with cases for latch-absent / version-mismatch / latch-read-error each asserting runner.calls == 1, shared saverAbsentReviveFailsCommander() fixture with no inline RunFunc copy left in abridged_route_test.go or abridged_saver_test.go, pure consolidation changes no asserted behaviour, go test ./cmd passes |
+| skip-bootstrap-when-warm-4-2 | Decouple daemon capture startup from best-effort hooks-cleanup store resolution | loadHookStore() failure no longer returns an error from daemon RunE (tick loop starts, cleanup disabled), exactly one WARN on the disabled-cleanup path using only closed vocabulary (error attr under daemon component, no new attr/event), maybeRunHookCleanup no-ops when store nil (no panic, no lastCleanup mutation surprise), capture/commit and self-supervision probe unaffected, existing state_daemon tests green |

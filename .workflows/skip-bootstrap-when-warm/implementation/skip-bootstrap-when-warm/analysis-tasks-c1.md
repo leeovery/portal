@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: Skip Bootstrap When Warm (Cycle 1)
 
 ## Task 1: Consolidate duplicated scaffolding in the abridged bootstrap tests
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -36,7 +36,7 @@ sources: duplication
 - `go test ./cmd -run TestPersistentPreRunE_Abridged` and `go test ./cmd -run TestEnsureSaverLiveness` — green using the shared fixture.
 
 ## Task 2: Decouple daemon capture startup from best-effort hooks-cleanup store resolution
-status: pending
+status: approved
 severity: low
 sources: architecture
 
