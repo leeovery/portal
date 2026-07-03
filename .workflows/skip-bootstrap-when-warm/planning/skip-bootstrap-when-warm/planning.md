@@ -107,3 +107,13 @@ Address findings from Analysis (Cycle 2).
 |-------------|------|------------|
 | skip-bootstrap-when-warm-5-1 | Simplify runHookStaleCleanup to its post-step-11 usage — drop the dead swallowListError axis and fix the stale contract doc | swallowListError parameter removed and the dead ListAllPanes-error return err branch deleted (path now logs the Warn and returns nil unconditionally), both production callers (state_daemon.go maybeRunHookCleanup + clean.go cleanCmd.RunE) compile against the simplified signature and behave identically, Load-error and CleanStale-error branches still propagate non-nil, contract doc rewritten to name the daemon + portal-clean callers and drop every step-11 / cleanStaleAdapter / StaleCleaner reference, hooks_cleanstale_single_caller_guard_test.go untouched, unit tests retuned (ListAllPanes error now asserts nil return + list-panes Warn), go build ./... and go test ./cmd/... green |
 | skip-bootstrap-when-warm-5-2 | Log the underlying error on abridged saver revive failure to restore diagnosability parity | failed BootstrapPortalSaver on the abridged path emits exactly one bootstrap-component WARN carrying the underlying error attr before adding SaverDownWarning, uses the package-level bootstrapLogger (no new logger parameter), SaverDownWarning sink + command-proceeds-anyway no-error-return posture unchanged, successful-presence early return emits no WARN, ensureSaverLiveness Failure-posture doc paragraph updated, go build ./... and go test ./cmd/... green |
+
+### Phase 6: Analysis (Cycle 3)
+
+Address findings from Analysis (Cycle 3).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| skip-bootstrap-when-warm-6-1 | Correct the stale "cleanup steps 9-11" step-range in the bootstrap_progress.go race-review invariant comment | comment-only edit (no production code / signatures / asserted behaviour changed), cmd/bootstrap_progress.go:34 reads "cleanup steps 9-10" (no "9-11"), no residual step-11 or "eleven-step" reference remains anywhere in cmd/bootstrap_progress.go, go build ./... succeeds and go test ./cmd/... stays green as a regression guard |
