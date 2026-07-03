@@ -109,7 +109,7 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 5,
+          "current_phase": 6,
           "current_task": "~",
           "completed_tasks": [
             "skip-bootstrap-when-warm-1-1",
@@ -127,14 +127,16 @@
             "skip-bootstrap-when-warm-4-1",
             "skip-bootstrap-when-warm-4-2",
             "skip-bootstrap-when-warm-5-1",
-            "skip-bootstrap-when-warm-5-2"
+            "skip-bootstrap-when-warm-5-2",
+            "skip-bootstrap-when-warm-6-1"
           ],
           "completed_phases": [
             1,
             2,
             3,
             4,
-            5
+            5,
+            6
           ]
         }
       }

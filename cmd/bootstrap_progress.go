@@ -31,7 +31,7 @@ package cmd
 // no concurrent tmux writer to interleave with Run's steps.
 //
 //  1. @portal-restoring suppression window (Set step 3 BEFORE Sweep/Saver/Restore;
-//     Clear step 8 BEFORE cleanup steps 9-11). HOLDS. Set and Clear are
+//     Clear step 8 BEFORE cleanup steps 9-10). HOLDS. Set and Clear are
 //     sequential statements inside Run on the orchestrator goroutine; the live
 //     loop never reads or writes the marker. The only concurrent reader of
 //     @portal-restoring is the SAVER-PANE DAEMON (spawned by step 5), and its
@@ -244,7 +244,7 @@ func (p *bootstrapProgressPipe) receiver() tea.Cmd {
 		}
 		// Only Index (the stable §10.4 key the consumer maps) and the restore N/M
 		// counter ride the wire. The friendly label is derived consumer-side in
-		// loading_progress.go — the sole authority for the 11→5 mapping — so no
+		// loading_progress.go — the sole authority for the 10→5 mapping — so no
 		// label or raw StepName is copied here.
 		return tui.BootstrapProgressMsg{
 			Index:    ev.Step.Index,
