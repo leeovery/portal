@@ -44,6 +44,46 @@ func satisfiedLatchAliveSaverCommander() *recordingCommander {
 	}
 }
 
+// saverAbsentReviveFailsCommander returns a recordingCommander driving the
+// "saver absent, revive fails" scenario: the _portal-saver presence probe reads
+// absent (list-panes -> noSuchSessionErr) and every revive attempt fails
+// (has-session -> can't-find-session, new-session -> create-denied), so
+// ensureSaverLiveness exhausts its retries and funnels a SaverDownWarning. It
+// carries NO latch (show-option) arm — ensureSaverLiveness never reads the latch.
+// The PersistentPreRunE route tests layer one on via
+// satisfiedLatchSaverAbsentCommander.
+func saverAbsentReviveFailsCommander() *recordingCommander {
+	return &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch {
+			case len(args) > 0 && args[0] == "list-panes":
+				return "", noSuchSessionErr() // saver absent -> revive
+			case len(args) > 0 && args[0] == "has-session":
+				return "", errors.New("can't find session") // absent
+			case len(args) > 0 && args[0] == "new-session":
+				return "", errors.New("create denied") // revive fails across all retries
+			}
+			return "", nil
+		},
+	}
+}
+
+// satisfiedLatchSaverAbsentCommander layers a satisfied-latch show-option arm
+// over saverAbsentReviveFailsCommander, so PersistentPreRunE reads the latch as
+// SATISFIED (routes to the abridged path) and then finds the saver absent and
+// un-revivable — the shared scaffold for both abridged-warning route tests.
+func satisfiedLatchSaverAbsentCommander() *recordingCommander {
+	base := saverAbsentReviveFailsCommander()
+	return &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "show-option" {
+				return version, nil // stored latch == running version -> satisfied
+			}
+			return base.RunFunc(args...)
+		},
+	}
+}
+
 // optionAbsentErr is a *tmux.CommandError whose stderr carries tmux's
 // option-absent phrasing, so GetServerOption maps it to ErrOptionNotFound and
 // TryGetServerOption collapses it to ("", false, nil) — the "latch absent"
@@ -82,91 +122,72 @@ func installMockList(t *testing.T) {
 	t.Cleanup(func() { listDeps = nil })
 }
 
-func TestPersistentPreRunE_FullBootstrap_WhenLatchAbsent(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	client := tmux.NewClient(&recordingCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) > 0 && args[0] == "show-option" {
-				return "", optionAbsentErr() // ("",false,nil) -> not satisfied
-			}
-			return "", nil
+// TestPersistentPreRunE_FullBootstrap_WhenNotSatisfied proves every
+// not-satisfied @portal-bootstrapped verdict — latch absent, version mismatch,
+// and latch read error — folds into the full-bootstrap route, driving the
+// orchestrator exactly once. The three cases differ only in the show-option
+// read outcome, an optional running-version override, and the assertion reason;
+// the setup -> Execute -> assert body is shared.
+func TestPersistentPreRunE_FullBootstrap_WhenNotSatisfied(t *testing.T) {
+	cases := []struct {
+		name            string
+		showOptValue    string
+		showOptErr      error
+		versionOverride string // "" -> leave the running version untouched
+		reason          string // parenthetical rationale in the assertion message
+	}{
+		{
+			name:       "latch absent",
+			showOptErr: optionAbsentErr(), // ("",false,nil) -> not satisfied
+			reason:     "full bootstrap",
 		},
-	})
-	runner := &recordingRunner{started: false}
-	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
-	t.Cleanup(func() { bootstrapDeps = nil })
-
-	installMockList(t)
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"list"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if runner.calls != 1 {
-		t.Errorf("latch absent: orchestrator calls = %d, want 1 (full bootstrap)", runner.calls)
-	}
-}
-
-func TestPersistentPreRunE_FullBootstrap_OnVersionMismatch(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	prevVersion := version
-	version = "v2.0.0"
-	t.Cleanup(func() { version = prevVersion })
-
-	client := tmux.NewClient(&recordingCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) > 0 && args[0] == "show-option" {
-				return "v1.0.0", nil // present but != running version -> not satisfied
-			}
-			return "", nil
+		{
+			name:            "version mismatch",
+			showOptValue:    "v1.0.0", // present but != running version -> not satisfied
+			versionOverride: "v2.0.0",
+			reason:          "full bootstrap re-stamps",
 		},
-	})
-	runner := &recordingRunner{started: false}
-	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
-	t.Cleanup(func() { bootstrapDeps = nil })
-
-	installMockList(t)
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"list"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if runner.calls != 1 {
-		t.Errorf("version mismatch: orchestrator calls = %d, want 1 (full bootstrap re-stamps)", runner.calls)
-	}
-}
-
-func TestPersistentPreRunE_FullBootstrap_OnLatchReadError(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	client := tmux.NewClient(&recordingCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) > 0 && args[0] == "show-option" {
-				return "", errors.New("tmux socket connect failed") // read error -> not satisfied
-			}
-			return "", nil
+		{
+			name:       "latch read error",
+			showOptErr: errors.New("tmux socket connect failed"), // read error -> not satisfied
+			reason:     "folds into full bootstrap",
 		},
-	})
-	runner := &recordingRunner{started: false}
-	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
-	t.Cleanup(func() { bootstrapDeps = nil })
-
-	installMockList(t)
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"list"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if runner.calls != 1 {
-		t.Errorf("latch read error: orchestrator calls = %d, want 1 (folds into full bootstrap)", runner.calls)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetBootstrapOnce(t)
+
+			if tc.versionOverride != "" {
+				prevVersion := version
+				version = tc.versionOverride
+				t.Cleanup(func() { version = prevVersion })
+			}
+
+			client := tmux.NewClient(&recordingCommander{
+				RunFunc: func(args ...string) (string, error) {
+					if len(args) > 0 && args[0] == "show-option" {
+						return tc.showOptValue, tc.showOptErr
+					}
+					return "", nil
+				},
+			})
+			runner := &recordingRunner{started: false}
+			bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
+			t.Cleanup(func() { bootstrapDeps = nil })
+
+			installMockList(t)
+
+			resetRootCmd()
+			rootCmd.SetArgs([]string{"list"})
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if runner.calls != 1 {
+				t.Errorf("%s: orchestrator calls = %d, want 1 (%s)", tc.name, runner.calls, tc.reason)
+			}
+		})
 	}
 }
 
@@ -179,21 +200,7 @@ func TestPersistentPreRunE_Abridged_EmitsWarningsToStderrOnCLIPath(t *testing.T)
 	stubSaverAliveCheck(t, false)
 	shrinkSaverRetryDelay(t)
 
-	client := tmux.NewClient(&recordingCommander{
-		RunFunc: func(args ...string) (string, error) {
-			switch {
-			case len(args) > 0 && args[0] == "show-option":
-				return version, nil // latch satisfied -> abridged
-			case len(args) > 0 && args[0] == "list-panes":
-				return "", noSuchSessionErr() // saver absent -> revive
-			case len(args) > 0 && args[0] == "has-session":
-				return "", errors.New("can't find session") // absent
-			case len(args) > 0 && args[0] == "new-session":
-				return "", errors.New("create denied") // revive fails across all retries
-			}
-			return "", nil
-		},
-	})
+	client := tmux.NewClient(satisfiedLatchSaverAbsentCommander())
 	runner := &recordingRunner{started: false}
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })
@@ -228,21 +235,7 @@ func TestPersistentPreRunE_Abridged_LeavesWarningsForOpenTUIOnTUIPath(t *testing
 	stubSaverAliveCheck(t, false)
 	shrinkSaverRetryDelay(t)
 
-	client := tmux.NewClient(&recordingCommander{
-		RunFunc: func(args ...string) (string, error) {
-			switch {
-			case len(args) > 0 && args[0] == "show-option":
-				return version, nil // latch satisfied -> abridged
-			case len(args) > 0 && args[0] == "list-panes":
-				return "", noSuchSessionErr() // saver absent -> revive
-			case len(args) > 0 && args[0] == "has-session":
-				return "", errors.New("can't find session")
-			case len(args) > 0 && args[0] == "new-session":
-				return "", errors.New("create denied") // revive fails -> SaverDownWarning
-			}
-			return "", nil
-		},
-	})
+	client := tmux.NewClient(satisfiedLatchSaverAbsentCommander())
 	runner := &recordingRunner{started: false}
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })

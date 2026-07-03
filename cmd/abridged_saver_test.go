@@ -180,20 +180,7 @@ func TestEnsureSaverLiveness_FunnelsSaverDownWarningWhenReviveFails(t *testing.T
 	stubSaverAliveCheck(t, false)
 	shrinkSaverRetryDelay(t)
 
-	cmder := &recordingCommander{
-		RunFunc: func(args ...string) (string, error) {
-			switch args[0] {
-			case "list-panes":
-				return "", noSuchSessionErr() // absent presence probe
-			case "has-session":
-				return "", errors.New("can't find session") // absent on every re-probe
-			case "new-session":
-				return "", errors.New("create denied") // fails across all retries
-			}
-			t.Fatalf("unexpected tmux call: %v", args)
-			return "", nil
-		},
-	}
+	cmder := saverAbsentReviveFailsCommander()
 
 	ensureSaverLiveness(tmux.NewClient(cmder), t.TempDir())
 
