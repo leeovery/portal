@@ -615,11 +615,23 @@ func TestReattachIntegration_UnknownNameNotFoundError(t *testing.T) {
 // — and by the time the TUI's session lister consults tmux, every
 // saved name has already been skeleton-restored by bootstrap step 6.
 //
-// We override openTUIFunc to capture its inputs without launching a
-// real Bubble Tea program (the TUI requires a TTY which test harnesses
-// do not provide). The post-Run assertion is that the live tmux server
-// observable by the TUI's lister includes the saved-only name —
-// equivalent to "the TUI would render it as a selectable session".
+// Phase-2 routing note: setupReattachEnv warms the tmux server but never
+// stamps the `@portal-bootstrapped` latch, so warm+unlatched
+// `portal open` (no args, TUI path) now takes the CONCURRENT/DEFERRED
+// route — PersistentPreRunE stashes the orchestrator on the context
+// (deferredBootstrapKey) instead of running it synchronously, and the
+// real openTUI is what drives it (pipe.start → runner.Run). Restore
+// step 6 therefore rides that deferred bootstrap, NOT the synchronous
+// PersistentPreRunE path.
+//
+// We override openTUIFunc to capture its inputs without launching a real
+// Bubble Tea program (the TUI requires a TTY which test harnesses do not
+// provide) — but the stub must DRIVE the deferred bootstrap to
+// completion first, exactly as the real openTUI does on this route, or
+// restore step 6 never runs and tui-ghost is never created. The
+// post-Run assertion is that the live tmux server observable by the
+// TUI's lister includes the saved-only name — equivalent to "the TUI
+// would render it as a selectable session".
 func TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
@@ -636,14 +648,26 @@ func TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton(t *testing.T) 
 	}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
-	// Capture-only TUI launcher — does not start the program. We assert
-	// it was reached and that, by the time it would have run, the saved
-	// name is queryable as a live session on the server the TUI's
-	// lister would target.
+	// Capture-only TUI launcher — does not start the Bubble Tea program.
+	// On the warm+unlatched concurrent route PersistentPreRunE deferred
+	// the orchestrator (deferredBootstrapKey) instead of running it, and
+	// the real openTUI is what drives it via pipe.start → runner.Run.
+	// This stub replaces openTUI, so it must drive that deferred runner
+	// to completion itself — otherwise restore step 6 never runs and
+	// tui-ghost is never created. We run the runner synchronously here
+	// (the real route runs it in a goroutine streaming progress; the
+	// difference is immaterial to the post-Run has-session assertion,
+	// which only needs restore to have completed by the time the stub
+	// returns).
 	var tuiCalled bool
 	origFunc := openTUIFunc
-	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+	openTUIFunc = func(cmd *cobra.Command, _ string, _ []string, _ bool) error {
 		tuiCalled = true
+		if d := deferredBootstrapFromContext(cmd); d != nil {
+			if _, _, err := d.runner.Run(cmd.Context()); err != nil {
+				t.Fatalf("deferred bootstrap Run: %v", err)
+			}
+		}
 		return nil
 	}
 	t.Cleanup(func() { openTUIFunc = origFunc })

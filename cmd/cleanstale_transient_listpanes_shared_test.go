@@ -30,6 +30,7 @@ package cmd
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,10 +73,36 @@ import (
 // does not perturb it.
 func isolateCleanStaleTestEnv(t *testing.T) (env []string, stateDir string) {
 	t.Helper()
+	// TestMain (testmain_isolation_test.go) poisons PORTAL_HOOKS_FILE to
+	// /nonexistent/... so a test that forgets to isolate fails loudly.
+	// IsolateStateForTest scrubs only XDG_CONFIG_HOME — NOT
+	// PORTAL_HOOKS_FILE — so the poisoned value would survive into the env
+	// slice it derives from os.Environ() (which SeedHooksJSON /
+	// ResolveHooksFilePathFromEnv prefer over the XDG-derived default,
+	// matching production precedence), and SeedHooksJSON would mkdir
+	// /nonexistent and fail. Point PORTAL_HOOKS_FILE at a writable isolated
+	// location BEFORE IsolateStateForTest so the derived env slice carries
+	// the good path AND the in-process `portal clean` RunE (which resolves
+	// hooks.json via os.Getenv) lands on the same file. Minimal test-local
+	// fix; the broader "IsolateStateForTest should also scrub PORTAL_*_FILE"
+	// root cause is deliberately out of scope for this task.
+	t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "portal", "hooks.json"))
 	env, stateDir = portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 	t.Setenv("PORTAL_LOG_LEVEL", "debug")
 	t.Setenv("XDG_CONFIG_HOME", configDirFromEnvSlice(t, env))
+	// Wire the production internal/log file handler at the isolated state dir
+	// so the in-process `portal clean` RunE (which logs via the global
+	// log.For("bootstrap") component logger) lands its stale-hook cleanup
+	// breadcrumbs in <stateDir>/portal.log — exactly as main -> log.Init does
+	// in the real binary. The observability migration (internal/log) replaced
+	// the old openNoRotateLogger, which auto-resolved portal.log from
+	// PORTAL_STATE_DIR; the global-handler model needs an explicit Init, which
+	// this scaffolding never re-added (masked until now by the earlier
+	// PORTAL_HOOKS_FILE fast-fail). initTestLogToStateDirAs brackets the
+	// process-wide handler swap with SetTestHandler snapshot/restore, so it
+	// does not leak into sibling subtests.
+	initTestLogToStateDirAs(t, stateDir, "test", "clean")
 	return env, stateDir
 }
 
@@ -176,32 +203,34 @@ func runTransientCleanStaleModeSubtest(t *testing.T, spec transientModeSpec) {
 
 	switch spec.mode {
 	case transienttest.FailExitNonZero:
-		// mode (a): propagated-error Warn must be present; the
-		// entry-point Debug (`live=...`) must be absent — the
-		// err-from-ListAllPanes branch returns BEFORE the Debug
-		// emission.
+		// mode (a): propagated-error Warn must be present; the entry-point
+		// Debug ("stale-hook cleanup counts ...") must be absent — the
+		// err-from-ListAllPanes branch returns BEFORE the Debug emission.
 		if !containsLineMatching(lines, "stale-hook cleanup:", "list-panes failed", "simulated transient") {
 			t.Fatalf("missing mode (a) propagated-error Warn line under %s; want a `stale-hook cleanup:` line containing `list-panes failed` and `simulated transient`\n"+
 				"  matched stale-hook lines:\n%s",
 				spec.name, strings.Join(lines, "\n"))
 		}
 		for _, line := range lines {
-			if strings.Contains(line, "live=") {
-				t.Fatalf("mode (a) emitted entry-point Debug (`live=...`) under %s; must be absent — the err-from-ListAllPanes branch returns before the Debug emission\n"+
+			if strings.Contains(line, "stale-hook cleanup counts") {
+				t.Fatalf("mode (a) emitted entry-point Debug (`stale-hook cleanup counts ...`) under %s; must be absent — the err-from-ListAllPanes branch returns before the Debug emission\n"+
 					"  offending line: %s",
 					spec.name, line)
 			}
 		}
 	case transienttest.FailEmptyStdout:
-		// mode (b): entry-point Debug (live=0, persisted=N) AND the
-		// hazard-guard Warn must both be present.
-		if !containsLineMatching(lines, "stale-hook cleanup:", "live=0", "persisted=3") {
-			t.Fatalf("missing mode (b) entry-point Debug under %s; want a `stale-hook cleanup:` line containing `live=0` and `persisted=3`\n"+
+		// mode (b): entry-point Debug (panes=0, entries=N) AND the
+		// hazard-guard Warn must both be present. runHookStaleCleanup emits
+		// the entry-point breadcrumb as "stale-hook cleanup counts panes=N
+		// entries=M" (the observability-migration wording; the pre-migration
+		// "live=0 persisted=N" phrasing is gone).
+		if !containsLineMatching(lines, "stale-hook cleanup counts", "panes=0", "entries=3") {
+			t.Fatalf("missing mode (b) entry-point Debug under %s; want a `stale-hook cleanup counts` line containing `panes=0` and `entries=3`\n"+
 				"  matched stale-hook lines:\n%s",
 				spec.name, strings.Join(lines, "\n"))
 		}
-		if !containsLineMatching(lines, "stale-hook cleanup:", "zero live panes", "3 hook(s) present", "mass-deletion hazard") {
-			t.Fatalf("missing mode (b) hazard-guard Warn under %s; want a `stale-hook cleanup:` line containing `zero live panes`, `3 hook(s) present`, and `mass-deletion hazard`\n"+
+		if !containsLineMatching(lines, "stale-hook cleanup:", "zero live panes", "entries=3", "mass-deletion hazard") {
+			t.Fatalf("missing mode (b) hazard-guard Warn under %s; want a `stale-hook cleanup:` line containing `zero live panes`, `entries=3`, and `mass-deletion hazard`\n"+
 				"  matched stale-hook lines:\n%s",
 				spec.name, strings.Join(lines, "\n"))
 		}
@@ -228,12 +257,17 @@ func configDirFromEnvSlice(t *testing.T, env []string) string {
 }
 
 // staleHookCleanupLogLines returns the subset of portal.log lines that
-// carry the stale-hook cleanup prefix. Filtering on the prefix excludes
-// bootstrap step 9's CleanStaleMarkers log lines (which have their own
-// prefix) and any unrelated noise, narrowing the assertion surface to
-// exactly the hook-cleanup path under test.
+// carry the stale-hook cleanup prefix. The prefix is matched WITHOUT the
+// trailing colon so it captures both the colon-suffixed Warn lines
+// ("stale-hook cleanup: list-panes failed", "stale-hook cleanup: zero
+// live panes ...", "stale-hook cleanup: persisted=0, skipping") AND the
+// no-colon entry-point / completion Debug lines ("stale-hook cleanup
+// counts panes=N entries=M", "stale-hook cleanup removed reaped=N")
+// emitted by runHookStaleCleanup. It still excludes bootstrap step 9's
+// CleanStaleMarkers log lines (a distinct message) and unrelated noise,
+// narrowing the assertion surface to exactly the hook-cleanup path.
 func staleHookCleanupLogLines(portalLog string) []string {
-	const prefix = "stale-hook cleanup:"
+	const prefix = "stale-hook cleanup"
 	var matches []string
 	for _, line := range strings.Split(portalLog, "\n") {
 		if strings.Contains(line, prefix) {

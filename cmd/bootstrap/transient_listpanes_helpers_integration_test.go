@@ -27,6 +27,7 @@ package bootstrap_test
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -151,6 +152,20 @@ func TestTransientListPanesHelpers_Smoke(t *testing.T) {
 	})
 
 	t.Run("seed_and_read_hooks_json_roundtrip", func(t *testing.T) {
+		// TestMain (testmain_isolation_test.go) poisons PORTAL_HOOKS_FILE to
+		// /nonexistent/portal-test-must-isolate-hooks.json so a test that forgets
+		// to isolate fails loudly. IsolateStateForTest scrubs only
+		// XDG_CONFIG_HOME — NOT PORTAL_HOOKS_FILE — so the poisoned value survives
+		// into the env slice it derives from os.Environ(), and
+		// ResolveHooksFilePathFromEnv prefers PORTAL_HOOKS_FILE over the
+		// XDG-derived default (production precedence). Point PORTAL_HOOKS_FILE at a
+		// writable isolated location BEFORE IsolateStateForTest so the derived env
+		// slice carries the good path; otherwise SeedHooksJSON would mkdir
+		// /nonexistent and fail. (Minimal test-local fix; the broader
+		// "IsolateStateForTest should also scrub PORTAL_*_FILE" root cause is
+		// deliberately out of scope for this task.)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "portal", "hooks.json"))
+
 		env, _ := portaltest.IsolateStateForTest(t)
 
 		entries := map[string]string{

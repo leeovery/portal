@@ -19,10 +19,12 @@
 //   - NO slow-open regression: a FAST cold boot (M=0, nothing to restore) AND a
 //     SLOW restore (saved sessions to skeleton-restore) both reach a clean
 //     terminal complete with the daemon singleton intact.
-//   - WARM-PATH PARITY: a warm boot (serverStarted=false) takes the SYNCHRONOUS
-//     path with no loading page and unchanged ordering — asserted in the
-//     non-integration sibling cmd/concurrent_bootstrap_route_test.go and pinned
-//     here via TestConcurrentColdBoot_WarmParity_NoLoadingPageSynchronousOrdering.
+//   - WARM-UNLATCHED ROUTING: a hand-started (warm) tmux server carrying NO
+//     @portal-bootstrapped latch, opened via `portal open` (the TUI path), takes
+//     the CONCURRENT / DEFERRED / loading route — the trigger is latch-absent,
+//     NOT server-down (spec § Latch-Check Placement → "Loading-screen trigger:
+//     latch-absent, not server-down") — pinned here via
+//     TestConcurrentColdBoot_WarmUnlatchedOpen_TakesConcurrentDeferredRoute.
 //
 // Discipline (load-bearing — the prior incident was a leaked test daemon
 // corrupting the dev install):
@@ -506,15 +508,27 @@ func (p *restoreWindowProbe) SetProgress(fn func(n, m int)) {
 	}
 }
 
-// TestConcurrentColdBoot_WarmParity_NoLoadingPageSynchronousOrdering pins the
-// WARM-PATH PARITY: a warm boot (server already running ⇒ serverStarted=false)
-// takes the SYNCHRONOUS path with unchanged ordering and NO loading page. We
-// drive PersistentPreRunE with a warm client and assert (a) the orchestrator ran
-// SYNCHRONOUSLY (no deferred bootstrap stashed), (b) serverStarted threaded as
-// false (so the TUI shows no loading page — WithServerStarted(false) leaves
-// activePage at the default Sessions, not PageLoading), and (c) the synchronous
-// orchestrator's ten steps ran in canonical order.
-func TestConcurrentColdBoot_WarmParity_NoLoadingPageSynchronousOrdering(t *testing.T) {
+// TestConcurrentColdBoot_WarmUnlatchedOpen_TakesConcurrentDeferredRoute pins the
+// WARM-BUT-UNLATCHED routing contract (spec § Latch-Check Placement → "Loading-
+// screen trigger: latch-absent, not server-down"). A hand-started (warm) tmux
+// server with NO @portal-bootstrapped latch stamped, opened via `portal open`
+// (zero args — the TUI path), now takes the CONCURRENT / DEFERRED / loading route
+// — the same route a cold boot takes — NOT the retired synchronous-no-loading-page
+// path. The trigger is latch-absent, not server-down.
+//
+// This supersedes the retired TestConcurrentColdBoot_WarmParity_NoLoadingPage-
+// SynchronousOrdering, whose synchronous-warm-unlatched contract Phase 2 replaced.
+// It is the real-tmux (genuinely WARM, already-running server) analogue of the
+// unit-level TestAbridged_OutcomeMatrix_OpenNotSatisfied_ConcurrentDeferred (which
+// exercises the same route against a down server); driving both against the same
+// deferred-route shape proves the concurrent flip keys off the LATCH, not the
+// server-running probe.
+//
+// We drive PersistentPreRunE with a warm-but-unlatched client and assert (a) the
+// orchestrator was DEFERRED (a deferredBootstrap is stashed for openTUI's
+// goroutine, deferredBootstrapFromContext != nil) and (b) it did NOT run
+// synchronously inside PersistentPreRunE (runner.calls == 0).
+func TestConcurrentColdBoot_WarmUnlatchedOpen_TakesConcurrentDeferredRoute(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
 	}
@@ -532,36 +546,44 @@ func TestConcurrentColdBoot_WarmParity_NoLoadingPageSynchronousOrdering(t *testi
 
 	ts := tmuxtest.New(t, "ptl-cc-warm-")
 	client := ts.Client()
-	// Warm: the server is already running before PersistentPreRunE probes it.
+	// Warm: the server is already running before PersistentPreRunE probes the
+	// latch — but NO @portal-bootstrapped option is ever stamped, so the latch
+	// reads NOT satisfied and the TUI path must route concurrent/deferred.
 	if _, err := client.EnsureServer(); err != nil {
 		t.Fatalf("EnsureServer (pre-warm the server): %v", err)
+	}
+	// Pin the premise: warm server, latch absent ⇒ not satisfied.
+	if state.BootstrappedLatchSatisfied(client, version) {
+		t.Fatal("latch unexpectedly satisfied on a warm-but-unstamped server; the warm-unlatched premise is broken")
 	}
 	// Blocking server reap BEFORE tmuxtest's kill-server (t.Cleanup LIFO): the
 	// warm server's default-pane shell holds HOME at the IsolateStateForTest
 	// tempdir; reapTmuxServer SIGHUPs it and waits for the server to go away so
-	// the shell exits before the framework's HOME-tempdir RemoveAll. No
-	// _portal-saver exists on the warm path (no daemon), so a kill-session
-	// _portal-saver cleanup would be a no-op — the prior teardown-race source.
+	// the shell exits before the framework's HOME-tempdir RemoveAll. The deferred
+	// orchestrator never runs on this route (openTUIFunc is stubbed to a no-op
+	// below), so NO _portal-saver daemon is spawned — reapTmuxServer alone is the
+	// correct reap (no daemon-death wait needed).
 	t.Cleanup(func() { reapTmuxServer(t, ts) })
 
 	resetBootstrapOnce(t)
+	resetBootstrapWarnings(t)
 
-	// A recording orchestrator that streams its step order through the SAME
-	// emitter contract the real orchestrator uses — so we can assert the
-	// synchronous route's ordering parity without the per-step seams. The warm
-	// route runs Run synchronously inside PersistentPreRunE, so any emitter wired
-	// via ctx is invoked there; but the synchronous route does NOT wire an
-	// emitter, so we assert ordering via an instrumented runner instead.
-	runner := &orderRecordingRunner{steps: 10, started: false}
+	// On the concurrent route PersistentPreRunE stashes the runner in context
+	// (deferredBootstrap) and returns WITHOUT calling Run — the recording runner
+	// proves it never ran synchronously.
+	runner := &recordingRunner{started: true}
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	var deferredSeen bool
-	var serverStartedToTUI bool
 	origFunc := openTUIFunc
-	openTUIFunc = func(cmd *cobra.Command, _ string, _ []string, started bool) error {
+	openTUIFunc = func(cmd *cobra.Command, _ string, _ []string, _ bool) error {
+		// On the deferred route the orchestrator has NOT run inside
+		// PersistentPreRunE — openTUI's goroutine would run it (stubbed out here).
+		if runner.calls != 0 {
+			t.Errorf("orchestrator ran synchronously (%d calls) on the warm-unlatched TUI path; want deferred", runner.calls)
+		}
 		deferredSeen = deferredBootstrapFromContext(cmd) != nil
-		serverStartedToTUI = started
 		return nil
 	}
 	t.Cleanup(func() { openTUIFunc = origFunc })
@@ -569,46 +591,15 @@ func TestConcurrentColdBoot_WarmParity_NoLoadingPageSynchronousOrdering(t *testi
 	resetRootCmd()
 	rootCmd.SetArgs([]string{"open"})
 	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("Execute (warm open): %v", err)
+		t.Fatalf("Execute (warm-unlatched open): %v", err)
 	}
 
-	// (a) synchronous, not deferred.
-	if deferredSeen {
-		t.Error("warm path stashed a deferred bootstrap; the warm route must run the orchestrator SYNCHRONOUSLY")
+	// (a) DEFERRED: a deferred bootstrap was stashed for openTUI's goroutine.
+	if !deferredSeen {
+		t.Error("warm-unlatched open did not stash a deferred bootstrap; the concurrent + loading route is expected (trigger is latch-absent, not server-down)")
 	}
-	if runner.calls != 1 {
-		t.Errorf("warm path: orchestrator Run calls = %d, want 1 (synchronous, in PersistentPreRunE)", runner.calls)
+	// (b) NOT synchronous: the orchestrator never ran inside PersistentPreRunE.
+	if runner.calls != 0 {
+		t.Errorf("warm-unlatched open: orchestrator calls = %d, want 0 (deferred to openTUI's goroutine, not synchronous)", runner.calls)
 	}
-	// (b) no loading page: serverStarted threaded as false.
-	if serverStartedToTUI {
-		t.Error("warm path threaded serverStarted=true; the warm route must show NO loading page (serverStarted=false)")
-	}
-	// (c) synchronous ordering parity.
-	assertTenStepOrder(t, runner.order)
-}
-
-// orderRecordingRunner drives the ctx-carried progress emitter through N steps in
-// order (mirroring the real orchestrator's emit-per-step contract) AND records
-// the order it itself emitted, so the warm-parity test can assert synchronous
-// ordering without standing up the ten real seams. On the synchronous route
-// no emitter is wired, so the recorded order is the runner's own — which is the
-// canonical 1..10 by construction; the assertion guards against a regression that
-// reorders or drops steps in a future refactor of this instrumented runner.
-type orderRecordingRunner struct {
-	steps   int
-	started bool
-	calls   int
-	order   []int
-}
-
-func (r *orderRecordingRunner) Run(ctx context.Context) (bool, []bootstrap.Warning, error) {
-	r.calls++
-	emit := bootstrap.ProgressEmitterFromContextForTest(ctx)
-	for i := 1; i <= r.steps; i++ {
-		r.order = append(r.order, i)
-		if emit != nil {
-			emit(bootstrap.StepEvent{Index: i, Name: "step"})
-		}
-	}
-	return r.started, nil, nil
 }

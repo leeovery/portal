@@ -66,7 +66,7 @@
         "skip-bootstrap-when-warm": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 0,
@@ -101,8 +101,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 2,
-          "current_task": "skip-bootstrap-when-warm-2-4",
+          "current_phase": 3,
+          "current_task": "skip-bootstrap-when-warm-3-1",
           "completed_tasks": [
             "skip-bootstrap-when-warm-1-1",
             "skip-bootstrap-when-warm-1-2",
@@ -110,10 +110,12 @@
             "skip-bootstrap-when-warm-1-4",
             "skip-bootstrap-when-warm-2-1",
             "skip-bootstrap-when-warm-2-2",
-            "skip-bootstrap-when-warm-2-3"
+            "skip-bootstrap-when-warm-2-3",
+            "skip-bootstrap-when-warm-2-4"
           ],
           "completed_phases": [
-            1
+            1,
+            2
           ]
         }
       }

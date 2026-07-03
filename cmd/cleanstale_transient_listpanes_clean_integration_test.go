@@ -14,30 +14,31 @@
 //   - mode_a_list_panes_exit_nonzero — `list-panes -a` returns
 //     ("", err); RunE hits the err-from-ListAllPanes branch, emits the
 //     propagated-error Warn, returns nil (silence-and-continue at the
-//     user boundary), and hooks.json is byte-identical. The
-//     entry-point Debug (`live=...`) MUST be absent — the err branch
-//     returns before the Debug emission.
+//     user boundary), and hooks.json is byte-identical. The entry-point
+//     Debug ("stale-hook cleanup counts ...") MUST be absent — the err
+//     branch returns before the Debug emission.
 //
 //   - mode_b_list_panes_empty_stdout — `list-panes -a` returns
 //     ("", nil); RunE parses zero live panes, emits the entry-point
-//     Debug (live=0 persisted=N), then the hazard-guard Warn skips the
-//     destructive store.CleanStale. hooks.json byte-identical, RunE
-//     returns nil, no "Removed stale hook:" lines surface on stdout.
+//     Debug ("stale-hook cleanup counts panes=0 entries=N"), then the
+//     hazard-guard Warn skips the destructive store.CleanStale.
+//     hooks.json byte-identical, RunE returns nil, no "Removed stale
+//     hook:" lines surface on stdout.
 //
 //   - normal_path_legitimate_stale_removal_still_works — pass-through
 //     Commander targeting a real tmuxtest socket. A live pane exists;
 //     hooks.json carries one entry whose key matches the live pane
 //     (must survive) and one orphan entry (must be removed). RunE
 //     returns nil, stdout reports the orphan removal, the completion
-//     Debug (removed=1) lands in portal.log.
+//     Debug ("stale-hook cleanup removed reaped=1") lands in portal.log.
 //
 //   - persisted_empty_early_exit_emits_breadcrumb — hooks.json absent
 //     (or empty). RunE hits the persisted==0 early-exit, emits
 //     "stale-hook cleanup: persisted=0, skipping" Debug, and the
-//     `live=` substring is absent (early-exit fires before
-//     enumeration). hooks.json remains absent / empty. AllPaneLister
-//     MUST NOT be invoked — a panic-on-call stub structurally proves
-//     this.
+//     "stale-hook cleanup counts ..." entry-point Debug is absent
+//     (early-exit fires before enumeration). hooks.json remains absent /
+//     empty. AllPaneLister MUST NOT be invoked — a panic-on-call stub
+//     structurally proves this.
 //
 // Package: `package cmd` so the test can mutate the unexported
 // `cleanDeps` seam directly (same pattern as cmd/clean_test.go).
@@ -258,14 +259,18 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			t.Fatalf("no `stale-hook cleanup:` lines found in portal.log on the normal path; want entry-point + completion Debug\n"+
 				"  full log:\n%s", portaltest.ReadPortalLogSafe(stateDir))
 		}
-		// Entry-point Debug: persisted=2.
-		if !containsLineMatching(lines, "stale-hook cleanup:", "persisted=2") {
-			t.Fatalf("missing normal-path entry-point Debug; want a `stale-hook cleanup:` line containing `persisted=2`\n"+
+		// Entry-point Debug: "stale-hook cleanup counts panes=1 entries=2"
+		// (observability-migration wording; the pre-migration "persisted=2"
+		// phrasing is gone).
+		if !containsLineMatching(lines, "stale-hook cleanup counts", "entries=2") {
+			t.Fatalf("missing normal-path entry-point Debug; want a `stale-hook cleanup counts` line containing `entries=2`\n"+
 				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
 		}
-		// Completion Debug: removed=1.
-		if !containsLineMatching(lines, "stale-hook cleanup:", "removed=1") {
-			t.Fatalf("missing normal-path completion Debug; want a `stale-hook cleanup:` line containing `removed=1`\n"+
+		// Completion Debug: "stale-hook cleanup removed reaped=1"
+		// (observability-migration wording; the pre-migration "removed=1"
+		// attr key is now "reaped").
+		if !containsLineMatching(lines, "stale-hook cleanup removed", "reaped=1") {
+			t.Fatalf("missing normal-path completion Debug; want a `stale-hook cleanup removed` line containing `reaped=1`\n"+
 				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
 		}
 	})
@@ -319,12 +324,12 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			t.Fatalf("missing persisted-empty early-exit Debug; want a `stale-hook cleanup:` line containing `persisted=0` and `skipping`\n"+
 				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
 		}
-		// And the `live=` substring must be absent — the early-exit
-		// fires before the entry-point Debug (which is the only line
-		// in this path that would include `live=`).
+		// And the entry-point Debug ("stale-hook cleanup counts ...") must
+		// be absent — the early-exit fires before runHookStaleCleanup runs,
+		// so its enumeration breadcrumb never emits.
 		for _, line := range lines {
-			if strings.Contains(line, "live=") {
-				t.Fatalf("persisted-empty path emitted entry-point Debug (`live=...`); must be absent — the early-exit returns before enumeration\n"+
+			if strings.Contains(line, "stale-hook cleanup counts") {
+				t.Fatalf("persisted-empty path emitted entry-point Debug (`stale-hook cleanup counts ...`); must be absent — the early-exit returns before enumeration\n"+
 					"  offending line: %s", line)
 			}
 		}
