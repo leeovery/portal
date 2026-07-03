@@ -354,7 +354,15 @@ func defaultDaemonTickLoop(ctx context.Context, deps *daemonDeps) error {
 //  1. @portal-restoring suppresses the entire tick (incl. clearing the dirty
 //     flag) so a save.requested touch during restore survives until restore
 //     completes.
-//  2. !dirty && !gap is the no-op fast path (per-tick idle cost is one stat).
+//  2. !dirty && !gap is the idle fast path — after the no-op stat, run the
+//     throttled daemon-owned hooks stale-cleanup gate (maybeRunHookCleanup;
+//     ~10s throttle) then return. Cleanup lives HERE — on the idle branch,
+//     after the @portal-restoring check — so it fires on a mostly-idle warm
+//     server; placing it after the capture branch would gate it behind capture
+//     work and it would never run on an idle server. It is skipped entirely
+//     while @portal-restoring is set (whole tick skipped) and on capture-pending
+//     ticks (dirty||gap -> capture runs, cleanup skipped; scrollback always
+//     wins).
 //  3. captureAndCommit failures leave LastSaveAt and save.requested untouched
 //     so the next tick retries.
 func tick(ctx context.Context, deps *daemonDeps) {
@@ -370,6 +378,7 @@ func tick(ctx context.Context, deps *daemonDeps) {
 	dirty := fileExists(state.SaveRequested(deps.Dir))
 	gap := time.Since(deps.LastSaveAt) >= deps.MaxGap
 	if !dirty && !gap {
+		maybeRunHookCleanup(deps)
 		return
 	}
 

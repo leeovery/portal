@@ -180,15 +180,26 @@ func (c *daemonFakeCommander) callsContaining(cmd string) [][]string {
 // scrollback subdirectory exists). PrevIndex defaults to nil; HashMap to a
 // fresh empty map; LastSaveAt to zero (which makes gap=true on the first tick
 // — most tests override it).
+//
+// HookStore + lastCleanup default to production-shaped values so the tick's
+// idle branch (which now runs the throttled hooks-cleanup gate) is safe for
+// every tick-level test: HookStore is a fresh empty store (production always
+// builds one via loadHookStore) and lastCleanup is anchored to "now" (mirroring
+// the daemon-start anchor), so the ~10s throttle is NOT elapsed by default and
+// the gate no-ops unless a test explicitly rewinds deps.lastCleanup and seeds
+// deps.HookStore.
 func makeDeps(t *testing.T, dir string, fc *daemonFakeCommander) *daemonDeps {
 	t.Helper()
 	if _, err := state.EnsureDir(); err != nil {
 		t.Fatalf("EnsureDir: %v", err)
 	}
+	store, _ := newTempHooksStore(t, "")
 	return &daemonDeps{
 		Dir:          dir,
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Client:       tmux.NewClient(fc),
+		HookStore:    store,
+		lastCleanup:  time.Now(),
 		HashMap:      state.HashMap{},
 		TickerPeriod: 1 * time.Millisecond,
 		MaxGap:       30 * time.Second,
@@ -582,6 +593,163 @@ func TestDaemonTick_LogsAndSkipsOnCommitErrorWithoutAdvancingLastSaveAt(t *testi
 	}
 	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
 		t.Errorf("save.requested should survive commit failure: %v", err)
+	}
+}
+
+// TestDaemonTick_RunsHookCleanupOnIdleTick pins the load-bearing placement of
+// the daemon-owned hooks stale-cleanup gate (spec § Daemon-Owned Hooks Cleanup
+// → Placement in the tick): on an idle tick (!dirty && !gap, @portal-restoring
+// unset) with the throttle elapsed, maybeRunHookCleanup runs and reaps the stale
+// entry — and it does so on the idle fast path, so NO capture cycle (list-sessions)
+// runs that tick.
+func TestDaemonTick_RunsHookCleanupOnIdleTick(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	seed := `{
+  "stale:0.0": {"on-resume": "cmd-stale"},
+  "live:0.0": {"on-resume": "cmd-live"}
+}`
+	store, _ := newTempHooksStore(t, seed)
+
+	// panesOut carries the single live pane key; the stale key is absent so the
+	// cleanup reaps it. No sessionsOut — capture must not run on an idle tick.
+	fc := &daemonFakeCommander{panesOut: "live:0.0"}
+	deps := makeDeps(t, dir, fc)
+	deps.HookStore = store
+	deps.LastSaveAt = time.Now()                                          // gap=false
+	deps.MaxGap = 30 * time.Second                                        // !gap
+	deps.lastCleanup = time.Now().Add(-hookCleanupInterval - time.Second) // throttle elapsed
+	// No save.requested → !dirty. @portal-restoring unset (default).
+
+	tick(t.Context(), deps)
+
+	// Cleanup ran on the idle branch: the stale entry is reaped, live survives.
+	postRun, err := store.Load()
+	if err != nil {
+		t.Fatalf("store.Load: %v", err)
+	}
+	if _, ok := postRun["stale:0.0"]; ok {
+		t.Errorf("stale hook entry not reaped on idle tick; hooks=%v", keysOf(postRun))
+	}
+	if _, ok := postRun["live:0.0"]; !ok {
+		t.Errorf("live hook entry wrongly reaped on idle tick; hooks=%v", keysOf(postRun))
+	}
+
+	// Still the idle fast path — no capture cycle ran.
+	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+		t.Errorf("list-sessions invoked on an idle tick (capture must not run): %v", got)
+	}
+}
+
+// TestDaemonTick_SkipsHookCleanupWhenRestoring pins that a @portal-restoring-set
+// tick short-circuits the whole tick BEFORE the idle branch, so cleanup never
+// runs during a restore window even with the throttle elapsed (spec § Placement
+// in the tick — skipped entirely while @portal-restoring is set).
+func TestDaemonTick_SkipsHookCleanupWhenRestoring(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	seed := `{
+  "stale:0.0": {"on-resume": "cmd-stale"}
+}`
+	store, _ := newTempHooksStore(t, seed)
+
+	fc := &daemonFakeCommander{
+		optionByName: map[string]string{state.RestoringMarkerName: "1"},
+		panesOut:     "live:0.0",
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.HookStore = store
+	deps.LastSaveAt = time.Now()
+	deps.lastCleanup = time.Now().Add(-hookCleanupInterval - time.Second) // throttle elapsed
+
+	tick(t.Context(), deps)
+
+	// @portal-restoring returns before the idle branch — the stale entry survives.
+	postRun, err := store.Load()
+	if err != nil {
+		t.Fatalf("store.Load: %v", err)
+	}
+	if _, ok := postRun["stale:0.0"]; !ok {
+		t.Errorf("stale hook entry reaped during restore window; cleanup must be skipped; hooks=%v", keysOf(postRun))
+	}
+
+	// The cleanup's ListAllPanes (list-panes) must never have been invoked.
+	if got := fc.callsContaining("list-panes"); len(got) != 0 {
+		t.Errorf("list-panes (cleanup) invoked during restore window: %v", got)
+	}
+}
+
+// TestDaemonTick_SkipsHookCleanupOnDirtyCaptureTick pins that a capture-pending
+// (dirty) tick takes the captureAndCommit branch and never reaches the idle
+// branch, so cleanup is skipped that tick — scrollback always wins (spec §
+// Placement in the tick — dirty||gap → capture runs, cleanup skipped).
+func TestDaemonTick_SkipsHookCleanupOnDirtyCaptureTick(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	seed := `{
+  "stale:0.0": {"on-resume": "cmd-stale"}
+}`
+	store, _ := newTempHooksStore(t, seed)
+
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	deps.HookStore = store
+	deps.LastSaveAt = time.Now()                                          // gap=false
+	deps.lastCleanup = time.Now().Add(-hookCleanupInterval - time.Second) // throttle elapsed
+	touchSaveRequested(t, dir)                                            // dirty=true
+
+	tick(t.Context(), deps)
+
+	// dirty → capture branch taken; the idle branch (cleanup) is never reached.
+	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
+		t.Errorf("list-sessions not invoked; capture must run on a dirty tick")
+	}
+	postRun, err := store.Load()
+	if err != nil {
+		t.Fatalf("store.Load: %v", err)
+	}
+	if _, ok := postRun["stale:0.0"]; !ok {
+		t.Errorf("stale hook entry reaped on a capture-pending tick; cleanup must be skipped; hooks=%v", keysOf(postRun))
+	}
+}
+
+// TestDaemonTick_SkipsHookCleanupOnMaxGapCaptureTick is the gap-driven peer of
+// the dirty-tick guard: a max-gap capture tick (!dirty but gap=true) runs
+// captureAndCommit and never reaches the idle branch, so cleanup is skipped that
+// tick (spec § Placement in the tick — dirty||gap → capture runs).
+func TestDaemonTick_SkipsHookCleanupOnMaxGapCaptureTick(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	seed := `{
+  "stale:0.0": {"on-resume": "cmd-stale"}
+}`
+	store, _ := newTempHooksStore(t, seed)
+
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	deps.HookStore = store
+	deps.MaxGap = 10 * time.Millisecond
+	deps.LastSaveAt = time.Now().Add(-1 * time.Hour)                      // gap=true
+	deps.lastCleanup = time.Now().Add(-hookCleanupInterval - time.Second) // throttle elapsed
+	// No save.requested → !dirty; gap=true drives the capture branch.
+
+	tick(t.Context(), deps)
+
+	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
+		t.Errorf("list-sessions not invoked; capture must run on a max-gap tick")
+	}
+	postRun, err := store.Load()
+	if err != nil {
+		t.Fatalf("store.Load: %v", err)
+	}
+	if _, ok := postRun["stale:0.0"]; !ok {
+		t.Errorf("stale hook entry reaped on a max-gap capture tick; cleanup must be skipped; hooks=%v", keysOf(postRun))
 	}
 }
 
