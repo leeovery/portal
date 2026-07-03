@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -993,30 +995,51 @@ func TestStateDaemon_HooksCleanupWiring(t *testing.T) {
 		}
 	})
 
-	// AMBIGUITY NOTE (task 3-1): loadHookStore() only errors when path
-	// resolution fails. With PORTAL_HOOKS_FILE unset that reduces to
-	// os.UserHomeDir() failing, which we induce deterministically on this
-	// platform (darwin) by blanking $HOME. PORTAL_STATE_DIR still drives
-	// EnsureDir, so only the hooks-path branch is perturbed. If a future
-	// platform resolved a home dir without $HOME this branch would need the
-	// source-inspection fallback the task describes; today the live error is
-	// deterministic, so we assert the real RunE surface rather than grepping
-	// source.
-	t.Run("it surfaces a loadHookStore error rather than silently disabling cleanup", func(t *testing.T) {
+	// RECONCILED (analysis cycle 1, task 4-2): loadHookStore() failure must NOT
+	// abort the daemon. Capture (the daemon's primary job) cannot be gated on the
+	// best-effort hooks stale-cleanup store, so a resolution failure disables only
+	// cleanup — one observable WARN (component=daemon, error attr) and RunE
+	// proceeds to the tick loop with a nil store — mirroring the runtime
+	// "never crash the daemon" posture. loadHookStore() only errors on path
+	// resolution; with PORTAL_HOOKS_FILE unset that reduces to os.UserHomeDir()
+	// failing, induced deterministically on darwin by blanking $HOME.
+	// PORTAL_STATE_DIR still drives EnsureDir, so only the hooks-path branch is
+	// perturbed.
+	t.Run("it disables cleanup with a WARN rather than aborting the daemon on a loadHookStore error", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("PORTAL_STATE_DIR", dir)
 		t.Setenv("PORTAL_HOOKS_FILE", "") // force fall-through to home-dir resolution
 		t.Setenv("HOME", "")              // os.UserHomeDir() now errors → loadHookStore errors
 
-		_ = withImmediateRun(t) // guard: a regression that does NOT error must not spin the real tick loop
+		sink := &logtest.Sink{}
+		log.SetTestHandler(t, sink)
+
+		holder := withImmediateRun(t)
 		withDaemonLockFileReset(t)
 
-		_, _, err := runStateDaemon(t)
-		if err == nil {
-			t.Fatal("expected RunE to surface the loadHookStore error; got nil (cleanup would be silently disabled)")
+		if _, _, err := runStateDaemon(t); err != nil {
+			t.Fatalf("RunE must proceed to the tick loop despite loadHookStore failure; got error: %v", err)
 		}
-		if !strings.Contains(err.Error(), "load hook store") {
-			t.Errorf("error = %v; want it wrapped with %q", err, "load hook store")
+
+		deps := *holder
+		if deps == nil {
+			t.Fatal("daemon deps not captured")
+		}
+		if deps.HookStore != nil {
+			t.Errorf("deps.HookStore = %v; want nil (cleanup disabled on loadHookStore failure)", deps.HookStore)
+		}
+
+		body := sink.Body()
+		const warnMsg = "load hook store failed; hooks stale-cleanup disabled"
+		if !strings.Contains(body, warnMsg) {
+			t.Errorf("expected disabled-cleanup WARN %q; got:\n%s", warnMsg, body)
+		}
+		if !strings.Contains(body, "component=daemon") {
+			t.Errorf("expected the disabled-cleanup WARN under the daemon component; got:\n%s", body)
+		}
+		// Exactly one WARN on this path — the disabled-cleanup notice must not be noisy.
+		if n := strings.Count(body, warnMsg); n != 1 {
+			t.Errorf("expected exactly one disabled-cleanup WARN; got %d in:\n%s", n, body)
 		}
 	})
 }

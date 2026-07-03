@@ -197,6 +197,37 @@ func TestMaybeRunHookCleanup_PinsSwallowListErrorTrue(t *testing.T) {
 	}
 }
 
+func TestMaybeRunHookCleanup_NilStoreNoOps(t *testing.T) {
+	// A nil HookStore means loadHookStore() failed at daemon startup and cleanup
+	// is disabled (task 4-2). The gate must then be a pure no-op: no capture-path
+	// tmux work, no throttle mutation, no panic — even when the throttle interval
+	// has elapsed (the branch that WOULD run cleanup if a store were present).
+	fc := &daemonFakeCommander{panesOut: "live:0.0"}
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
+	deps := hookCleanupDeps(fc, nil, logger) // nil store — cleanup disabled
+
+	anchor := time.Now().Add(-hookCleanupInterval - time.Second) // elapsed
+	deps.lastCleanup = anchor
+
+	// Must not panic on a nil store.
+	maybeRunHookCleanup(deps)
+
+	// Capture path untouched — ListAllPanes (list-panes) never invoked.
+	if got := fc.callsContaining("list-panes"); len(got) != 0 {
+		t.Errorf("list-panes invoked with a nil store: %v", got)
+	}
+
+	// lastCleanup untouched — a disabled-cleanup no-op must not advance the throttle.
+	if !deps.lastCleanup.Equal(anchor) {
+		t.Errorf("lastCleanup mutated with a nil store: got %v, want %v", deps.lastCleanup, anchor)
+	}
+
+	// No gate WARN — nothing ran, so there is nothing to warn about.
+	if got := sink.Body(); strings.Contains(got, "hooks stale-cleanup failed") {
+		t.Errorf("gate WARN fired with a nil store; got:\n%s", got)
+	}
+}
+
 func TestMaybeRunHookCleanup_ReusesMassDeletionGuard(t *testing.T) {
 	// Elapsed throttle + non-empty hooks + zero live panes → the shared helper's
 	// mass-deletion hazard guard defers (never wipes) and logs its hazard WARN.

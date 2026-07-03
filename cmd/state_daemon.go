@@ -409,8 +409,17 @@ func tick(ctx context.Context, deps *daemonDeps) {
 // WARN and swallowed (mirroring the tick loop's "tick failed" handling) — the
 // gate never returns an error and never crashes the daemon.
 //
+// A nil deps.HookStore means loadHookStore() failed at daemon startup (task 4-2)
+// and cleanup is disabled for this daemon's lifetime. The gate then no-ops
+// before the throttle check — the store never reaches runHookStaleCleanup and
+// lastCleanup is left untouched (there is nothing to throttle), so the capture
+// path is entirely undisturbed.
+//
 // Task 3-3 places this on the tick's idle branch; here it is standalone.
 func maybeRunHookCleanup(deps *daemonDeps) {
+	if deps.HookStore == nil {
+		return
+	}
 	if time.Since(deps.lastCleanup) < hookCleanupInterval {
 		return
 	}
@@ -692,12 +701,18 @@ var stateDaemonCmd = &cobra.Command{
 		// Build the hooks store once, from the SAME resolver foreground commands
 		// use (loadHookStore → hooksFilePath → configFilePath("PORTAL_HOOKS_FILE",
 		// "hooks.json")), so the daemon-owned stale-cleanup gate (tasks 3-2/3-3)
-		// cleans the identical hooks.json the user edits. A resolution failure
-		// surfaces here rather than silently leaving the daemon with a nil store
-		// (which would silently disable cleanup for the whole daemon lifetime).
+		// cleans the identical hooks.json the user edits. Hooks stale-cleanup is an
+		// explicitly best-effort responsibility ("never crash the daemon" —
+		// maybeRunHookCleanup logs WARN and swallows every cleanup error), so its
+		// wiring must not be fatal either: a path-resolution failure must NOT abort
+		// the daemon's PRIMARY job (scrollback capture + resurrection state). On
+		// failure we log one observable WARN and proceed with a nil store;
+		// maybeRunHookCleanup no-ops while the store is absent, so cleanup is
+		// disabled for this daemon's lifetime but capture runs regardless.
 		hookStore, err := loadHookStore()
 		if err != nil {
-			return fmt.Errorf("load hook store: %w", err)
+			logger.Warn("load hook store failed; hooks stale-cleanup disabled", "error", err)
+			hookStore = nil
 		}
 
 		client := tmux.DefaultClient()
