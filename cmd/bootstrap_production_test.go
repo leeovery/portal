@@ -20,9 +20,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/tmux"
 )
+
+// Compile-time assertion that *tmux.Client satisfies bootstrap.LatchWriter via
+// its existing SetServerOption(name, value) method, so buildProductionOrchestrator
+// can wire the shared client into the Orchestrator.Latch field unchanged.
+var _ bootstrap.LatchWriter = (*tmux.Client)(nil)
 
 // recordedLog captures one Logger emission for post-call assertions. After
 // the observability migration the message is the slog terse phrase and

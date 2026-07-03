@@ -201,8 +201,14 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 			StateDir: stateDir,
 			Logger:   logger,
 		},
-		Clean:  cleaner,
-		Logger: logger,
+		Clean: cleaner,
+		// Latch stamps the version-stamped @portal-bootstrapped latch as the
+		// final action of a successful Run. *tmux.Client satisfies
+		// bootstrap.LatchWriter via SetServerOption; Version is the same
+		// ldflags-injected cmd.version the saverAdapter reads.
+		Latch:   client,
+		Version: version,
+		Logger:  logger,
 	}
 	return orch, client
 }

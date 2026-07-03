@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/state"
 )
 
 // cleanLogger is the clean-component-bound logger used for the two
@@ -210,6 +211,17 @@ type StaleCleaner interface {
 	CleanStale() error
 }
 
+// LatchWriter records the version-stamped bootstrap latch
+// (@portal-bootstrapped) as the final action of a successful full
+// bootstrap. It is a best-effort, nil-tolerant seam: Run guards the write
+// with a nil check and a failure is logged WARN and swallowed (never
+// fatal, never appended to the returned warnings, never emitted as a
+// progress StepEvent). *tmux.Client satisfies it implicitly via its
+// existing SetServerOption(name, value) method.
+type LatchWriter interface {
+	SetServerOption(name, value string) error
+}
+
 // Orchestrator runs the eleven-step bootstrap sequence. Wiring of
 // production implementations lives in cmd/root.go (task 5-3); this
 // package stays pure (interfaces + Run) so the ordering contract is
@@ -231,6 +243,12 @@ type StaleCleaner interface {
 // failures emit via Error before the orchestrator returns the wrapped
 // *FatalError so the same line lands in portal.log under the bootstrap
 // component as well as on stderr.
+//
+// After the last soft step and the fatal-error gate, before the
+// orchestration-complete summary, a best-effort
+// SetServerOption(@portal-bootstrapped, Version) via the Latch seam records
+// that a full bootstrap ran to completion; a write failure is logged WARN and
+// swallowed (never fatal, never in warnings, never on the progress channel).
 type Orchestrator struct {
 	Server        ServerBootstrapper
 	Hooks         HookRegistrar
@@ -242,7 +260,16 @@ type Orchestrator struct {
 	StaleMarkers  MarkerCleaner
 	Sweeper       FIFOSweeper
 	Clean         StaleCleaner
-	Logger        *slog.Logger // nil tolerated; Run substitutes a discard default
+	// Latch records the version-stamped @portal-bootstrapped latch as the
+	// final action of a successful Run (after the last soft step and the
+	// fatal-error gate). Best-effort and nil-tolerant: Run guards the write
+	// with a nil check and swallows any failure as a WARN log line.
+	Latch LatchWriter
+	// Version is the ldflags-injected binary version stamped verbatim into
+	// the latch value — a parse-free bare version string (latch satisfaction
+	// downstream is a plain equality against the running binary's version).
+	Version string
+	Logger  *slog.Logger // nil tolerated; Run substitutes a discard default
 }
 
 // Run executes the eleven bootstrap steps in spec order. It returns the
@@ -271,6 +298,15 @@ type Orchestrator struct {
 //     swallowed.
 //   - Step 10 (Sweep) returns non-nil → logged via Warn and swallowed.
 //   - Step 11 (CleanStale) returns non-nil → logged via Warn and swallowed.
+//
+// After the last soft step and the fatal-error gate, before the
+// orchestration-complete summary, Run stamps the version-stamped latch via a
+// best-effort SetServerOption(@portal-bootstrapped, Version) through the Latch
+// seam (skipped when Latch is nil). The write is gated on no fatal error
+// (every fatal step returns early), so a soft-warning-only run still latches
+// while a fatal abort leaves the latch unset. A write failure is logged WARN
+// under the bootstrap component and swallowed — never fatal, never appended to
+// the returned warnings, never emitted as a progress StepEvent.
 func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// Resolve the §10.2 progress emitter once. On the synchronous warm/CLI
 	// route no emitter is wired, so emit is nil and emitStep is a no-op — the
@@ -464,6 +500,24 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	}
 	o.Logger.Info("step complete", "step", stepCleanStale, log.Took(stepStart))
 	emitStep(11, stepCleanStale)
+
+	// Latch — final pre-return action, after the last soft step. Every fatal
+	// step (EnsureServer, RegisterPortalHooks, SetRestoring, ClearRestoring)
+	// returns early via o.fatalf, so execution reaches here only on a
+	// non-fatal run — no extra error gate is needed. The version-stamped
+	// @portal-bootstrapped latch records that a full bootstrap ran to
+	// completion so later warm commands can take the cheap abridged path.
+	// Best-effort: a write failure is a pure WARN log line under the bootstrap
+	// component — never fatal, never appended to warnings, never emitted as a
+	// StepEvent on the progress channel. Because it is Run's last pre-return
+	// action it also precedes the concurrent route's terminal Done event (the
+	// goroutine sends Done only after Run returns), so "latch present ⟺ a full
+	// bootstrap ran to completion" holds before any reopen burst could fire.
+	if o.Latch != nil {
+		if err := o.Latch.SetServerOption(state.BootstrappedMarkerName, o.Version); err != nil {
+			o.Logger.Warn("latch write failed", "marker", state.BootstrappedMarkerName, "error", err)
+		}
+	}
 
 	// Return — post-step boundary (not numbered). Step 6 never produces a
 	// fatal error; warnings already carry the user-facing surface. The
