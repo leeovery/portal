@@ -96,3 +96,14 @@ Address findings from Analysis (Cycle 1).
 |-------------|------|------------|
 | skip-bootstrap-when-warm-4-1 | Consolidate duplicated scaffolding in the abridged bootstrap tests | three latch-verdict tests collapse to one table-driven test with cases for latch-absent / version-mismatch / latch-read-error each asserting runner.calls == 1, shared saverAbsentReviveFailsCommander() fixture with no inline RunFunc copy left in abridged_route_test.go or abridged_saver_test.go, pure consolidation changes no asserted behaviour, go test ./cmd passes |
 | skip-bootstrap-when-warm-4-2 | Decouple daemon capture startup from best-effort hooks-cleanup store resolution | loadHookStore() failure no longer returns an error from daemon RunE (tick loop starts, cleanup disabled), exactly one WARN on the disabled-cleanup path using only closed vocabulary (error attr under daemon component, no new attr/event), maybeRunHookCleanup no-ops when store nil (no panic, no lastCleanup mutation surprise), capture/commit and self-supervision probe unaffected, existing state_daemon tests green |
+
+### Phase 5: Analysis (Cycle 2)
+
+Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| skip-bootstrap-when-warm-5-1 | Simplify runHookStaleCleanup to its post-step-11 usage — drop the dead swallowListError axis and fix the stale contract doc | swallowListError parameter removed and the dead ListAllPanes-error return err branch deleted (path now logs the Warn and returns nil unconditionally), both production callers (state_daemon.go maybeRunHookCleanup + clean.go cleanCmd.RunE) compile against the simplified signature and behave identically, Load-error and CleanStale-error branches still propagate non-nil, contract doc rewritten to name the daemon + portal-clean callers and drop every step-11 / cleanStaleAdapter / StaleCleaner reference, hooks_cleanstale_single_caller_guard_test.go untouched, unit tests retuned (ListAllPanes error now asserts nil return + list-panes Warn), go build ./... and go test ./cmd/... green |
+| skip-bootstrap-when-warm-5-2 | Log the underlying error on abridged saver revive failure to restore diagnosability parity | failed BootstrapPortalSaver on the abridged path emits exactly one bootstrap-component WARN carrying the underlying error attr before adding SaverDownWarning, uses the package-level bootstrapLogger (no new logger parameter), SaverDownWarning sink + command-proceeds-anyway no-error-return posture unchanged, successful-presence early return emits no WARN, ensureSaverLiveness Failure-posture doc paragraph updated, go build ./... and go test ./cmd/... green |

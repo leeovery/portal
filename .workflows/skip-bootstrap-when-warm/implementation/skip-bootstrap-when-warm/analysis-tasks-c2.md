@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: Skip Bootstrap When Warm (Cycle 2)
 
 ## Task 1: Simplify runHookStaleCleanup to its post-step-11 usage — drop the dead swallowListError axis and fix the stale contract doc
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -36,7 +36,7 @@ sources: architecture
 - `go test ./cmd/...` (the daemon hook-cleanup and portal-clean integration/log-fingerprint tests must still pass unchanged).
 
 ## Task 2: Log the underlying error on abridged saver revive failure to restore diagnosability parity
-status: pending
+status: approved
 severity: low
 sources: standards
 
