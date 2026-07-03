@@ -2,12 +2,12 @@ package tui
 
 import "fmt"
 
-// Task spectrum-tui-design-5-4 — step mapping (11 real bootstrap steps → 5
+// Task spectrum-tui-design-5-4 — step mapping (10 real bootstrap steps → 5
 // friendly labels). §10.4.
 //
 // The honest loading screen (§10.3) must show progress the user can read, but
-// the bootstrap has 11 internal steps with cryptic names (EnsureServer,
-// RegisterPortalHooks, SweepOrphanDaemons, …). §10.4 collapses the 11 real steps
+// the bootstrap has 10 internal steps with cryptic names (EnsureServer,
+// RegisterPortalHooks, SweepOrphanDaemons, …). §10.4 collapses the 10 real steps
 // into 5 friendly labels, advancing the progress bar on EVERY real step while
 // the active label is the friendly group the current step falls in.
 //
@@ -20,7 +20,7 @@ import "fmt"
 //
 // It deliberately does NOT import cmd/bootstrap (wrong import direction / cycle
 // risk — internal/tui must not depend on cmd). The mapping keys off the
-// BootstrapProgressMsg.Index (1..11), the stable canonical step number, so the
+// BootstrapProgressMsg.Index (1..10), the stable canonical step number, so the
 // closed step* StepName strings live only on the producer side.
 
 // The five §10.4 friendly labels. Mirrored as exported constants so task 5-5's
@@ -35,10 +35,10 @@ const (
 
 // totalBootstrapSteps is the count of real bootstrap steps. The bar advances by
 // 1/totalBootstrapSteps per distinct completed step index, so it reaches 100%
-// only after the last real step — eleven increments, NOT five (one per friendly
+// only after the last real step — ten increments, NOT five (one per friendly
 // label). Keep this in lockstep with stepLabelTable (the drift guard test
-// TestMappingCoversAllElevenStepsNoGaps asserts the table covers exactly 1..11).
-const totalBootstrapSteps = 11
+// TestMappingCoversAllTenStepsNoGaps asserts the table covers exactly 1..10).
+const totalBootstrapSteps = 10
 
 // LabelState is the §10.3 tick state of a friendly label: done (✓), active (◐),
 // or pending (·). Render glyphs/colours are task 5-5's concern.
@@ -68,7 +68,7 @@ var labelOrder = []string{
 	LabelRunningResumeCommands,
 }
 
-// stepLabelTable is the §10.4 mapping encoded ONCE: step index (1..11) → friendly
+// stepLabelTable is the §10.4 mapping encoded ONCE: step index (1..10) → friendly
 // label. This is the single source of truth — the bar advance, active-label
 // selection, and tick-off all derive from it.
 //
@@ -79,7 +79,7 @@ var labelOrder = []string{
 // mapping; resolveLabel discriminates on RestoreM for step 6 (see restoreStep).
 //
 // §10.4 explicitly permits the implementation to adjust WHICH fast cleanup step
-// (8–11) sits under WHICH label — the cleanup steps are near-instant and fold
+// (8–10) sits under WHICH label — the cleanup steps are near-instant and fold
 // under the final label — but the bar MUST advance through every real step.
 var stepLabelTable = map[int]string{
 	1:  LabelStartedTmuxServer,     // EnsureServer
@@ -92,7 +92,6 @@ var stepLabelTable = map[int]string{
 	8:  LabelRunningResumeCommands, // ClearRestoring (@portal-restoring) + on-resume hydrate commands fold here
 	9:  LabelRunningResumeCommands, // CleanStaleMarkers
 	10: LabelRunningResumeCommands, // SweepOrphanFIFOs
-	11: LabelRunningResumeCommands, // CleanStale
 }
 
 // restoreStep is the index of the Restore step — the only step that dual-maps on
@@ -205,7 +204,7 @@ func (p LoadingProgress) clone() LoadingProgress {
 }
 
 // View derives the render inputs from the accumulated state — a pure projection.
-// task 5-5 renders this. The bar is (distinct completed steps)/11; each label's
+// task 5-5 renders this. The bar is (distinct completed steps)/10; each label's
 // done/active/pending state follows labelState (done when all its steps
 // completed, active when it is the executing frontier, else pending). Only
 // "Restoring sessions" carries a counter, and only when at least one skeleton
@@ -274,7 +273,7 @@ func LabelForStepIndex(index int) string {
 // real steps has completed; the ACTIVE label is the FIRST not-yet-done label in
 // render order (the group whose steps are now executing); all labels after it
 // are PENDING. Before any step completes, every label is pending; once all
-// eleven steps complete, every label is done (no active frontier remains).
+// ten steps complete, every label is done (no active frontier remains).
 //
 // Done deriving from step completion is what makes a multi-step label
 // ("Registered hooks", "Running resume commands") stay active until its LAST
@@ -288,7 +287,7 @@ func LabelForStepIndex(index int) string {
 // events at all — marks step 6 done at once, leaving "Restoring sessions"
 // reading done, never active and never stalled (the bar still advances through
 // step 6). Likewise "Running resume commands" with zero on-resume work ticks
-// done once steps 8–11 complete.
+// done once steps 8–10 complete.
 func (p LoadingProgress) labelState(text string) LabelState {
 	if p.labelDone(text) {
 		return LabelDone

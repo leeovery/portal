@@ -68,7 +68,7 @@ func TestBootstrapComplete_TransitionGatedOnTerminalEvent(t *testing.T) {
 
 	// Min elapsed, plus several progress events — still on loading.
 	model, _ = model.Update(tui.LoadingMinElapsedMsg{})
-	for i := 1; i <= 11; i++ {
+	for i := 1; i <= 10; i++ {
 		model, _ = model.Update(tui.BootstrapProgressMsg{Index: i})
 	}
 	if model.(tui.Model).ActivePage() != tui.PageLoading {

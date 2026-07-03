@@ -170,7 +170,7 @@ type BootstrapCompleteMsg struct {
 // receiver so the next channel event is pulled, and never drives the
 // loading-page transition (only the terminal BootstrapCompleteMsg does).
 //
-// Index is the 1-based canonical bootstrap step number (1..11) — the stable key
+// Index is the 1-based canonical bootstrap step number (1..10) — the stable key
 // the consumer maps to a §10.4 friendly label. The mapping lives in exactly one
 // place (loading_progress.go's stepLabelTable / LabelForStep), so the wire
 // message deliberately carries NO friendly label and NO raw StepName: a copy of

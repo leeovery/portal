@@ -135,7 +135,7 @@ func TestInertDuringLoading_NoMutationFromLiveEventLoop(t *testing.T) {
 
 	// Interleave progress events: these drive the loading-screen render and
 	// re-issue the receiver, but must NEVER reach a mutation path.
-	for i := 1; i <= 11; i++ {
+	for i := 1; i <= 10; i++ {
 		model, _ = model.Update(BootstrapProgressMsg{Index: i})
 		if model.(Model).ActivePage() != PageLoading {
 			t.Fatalf("a progress event (index %d) transitioned off PageLoading — only the terminal complete event may", i)
