@@ -155,11 +155,45 @@ var rootCmd = &cobra.Command{
 
 		runner, client, registerHooks := buildBootstrapDeps()
 
-		// TODO(2-3): replace with the single upstream latch verdict computed once
-		// in PersistentPreRunE. Transitional local computation so the re-keyed
-		// shouldRunConcurrentBootstrap signature compiles; guarded on a non-nil
-		// client because BootstrappedLatchSatisfied reads through the client.
+		// Latch-driven three-way branch (spec § Latch-Check Placement &
+		// Abridged-Path Wiring). The verdict is read EXACTLY ONCE here and
+		// threaded downstream — it is never re-read:
+		//
+		//   - satisfied (present AND stored version == running version) ->
+		//     ABRIDGED path below: liveness-only EnsureSaver + sync-plumbing
+		//     context injection + warning drain, then return. The orchestrator
+		//     and the concurrent route are never reached.
+		//   - not satisfied (absent / version-mismatch / read-error /
+		//     down-server / nil client all fold here) -> FULL bootstrap, routed
+		//     concurrent-vs-synchronous by shouldRunConcurrentBootstrap below.
+		//
+		// The client != nil guard folds a nil client (defensive — skipTmuxCheck
+		// commands never reach here) into not-satisfied with no panic, matching
+		// today's behaviour.
 		latchSatisfied := client != nil && state.BootstrappedLatchSatisfied(client, version)
+
+		// Abridged path. It reuses the SAME entry-path plumbing as the
+		// synchronous full path — the bootstrapWarnings sink and the
+		// serverStartedKey/tmuxClientKey context injection — differing only in
+		// executing a reduced step set (saver liveness only, no orchestrator).
+		// Load-bearing precondition: it sets NO deferredBootstrapKey, so
+		// deferredBootstrapFromContext returns nil in openTUI and the injected
+		// serverStarted=false survives to the instant-picker gate (no loading
+		// page). serverStarted is false because this command did not start the
+		// server. On the CLI path the SaverDownWarning (if any) flushes to stderr
+		// before RunE; on the TUI path it is left in the sink for openTUI to
+		// stage onto the notice band.
+		if latchSatisfied {
+			stateDir, _ := state.Dir()
+			ensureSaverLiveness(client, stateDir)
+			if !isTUIPath(cmd, args) {
+				bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
+			}
+			ctx := context.WithValue(cmd.Context(), serverStartedKey, false)
+			ctx = context.WithValue(ctx, tmuxClientKey, client)
+			cmd.SetContext(ctx)
+			return nil
+		}
 
 		// §10.2 startup flip — concurrent full-bootstrap route on the TUI path.
 		//
@@ -170,10 +204,12 @@ var rootCmd = &cobra.Command{
 		// probe. On that route the orchestrator is NOT run synchronously here — it
 		// is DEFERRED to openTUI, which runs it in a goroutine while Bubble Tea
 		// renders the loading page from frame one, streaming progress over a
-		// channel (cmd/bootstrap_progress.go). Every other path — the latch-
-		// satisfied route and cold CLI/direct-path — keeps today's exact
-		// synchronous bootstrap below, byte-for-byte: the serverStartedKey context
-		// delivery and the sync.Once memo are untouched off the deferred route.
+		// channel (cmd/bootstrap_progress.go). Every other not-satisfied path —
+		// cold CLI / direct-path (!isTUIPath) — keeps today's exact synchronous
+		// bootstrap below, byte-for-byte: the serverStartedKey context delivery
+		// and the sync.Once memo are untouched off the deferred route. (The
+		// latch-satisfied route already returned above via the abridged gate and
+		// never reaches here.)
 		if shouldRunConcurrentBootstrap(cmd, args, client, latchSatisfied) {
 			ctx := cmd.Context()
 			if client != nil {

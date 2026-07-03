@@ -116,20 +116,19 @@ func TestWithServerStarted_GatesLoadingPage(t *testing.T) {
 	})
 }
 
-// TestPersistentPreRunE_WarmDirectTUI_RunsSynchronously proves a latch-satisfied
-// TUI open keeps the synchronous route: serverStarted=false is threaded to
-// openTUI (no deferred bootstrap, no loading page) and the orchestrator (a
-// recording fake) runs exactly once.
-func TestPersistentPreRunE_WarmDirectTUI_RunsSynchronously(t *testing.T) {
+// TestPersistentPreRunE_LatchedTUI_ReadsLatchExactlyOnce proves the latch
+// verdict is computed EXACTLY ONCE per PersistentPreRunE: a satisfied latch is
+// diverted to the abridged path after a single @portal-bootstrapped read
+// (show-option), and the verdict is never re-read — the retired ServerRunning()
+// probe is gone and shouldRunConcurrentBootstrap is never reached on the
+// satisfied path. openTUI is reached with serverStarted=false (instant picker)
+// and the full orchestrator never runs; the abridged saver-liveness probe
+// (list-panes) is the only other seam call.
+func TestPersistentPreRunE_LatchedTUI_ReadsLatchExactlyOnce(t *testing.T) {
 	resetBootstrapOnce(t)
+	resetBootstrapWarnings(t)
 
-	// Transitional (task 2-2): PersistentPreRunE reads @portal-bootstrapped to
-	// compute latchSatisfied before routing. Return the running version so the
-	// latch is SATISFIED — keeping this the synchronous (non-concurrent) route
-	// while the abridged branch is not yet wired (task 2-3 owns that upstream).
-	rec := &recordingCommander{
-		RunFunc: func(_ ...string) (string, error) { return version, nil },
-	}
+	rec := satisfiedLatchAliveSaverCommander()
 	client := tmux.NewClient(rec)
 	runner := &recordingRunner{started: false} // warm: server already running
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
@@ -152,18 +151,15 @@ func TestPersistentPreRunE_WarmDirectTUI_RunsSynchronously(t *testing.T) {
 	}
 
 	if !openTUIReached {
-		t.Fatal("openTUI was not reached on the synchronous TUI path")
+		t.Fatal("openTUI was not reached on the abridged TUI path")
 	}
 	if capturedServerStarted {
-		t.Error("synchronous path threaded serverStarted=true to openTUI; want false (no loading page)")
+		t.Error("abridged path threaded serverStarted=true to openTUI; want false (no loading page)")
 	}
-	if runner.calls != 1 {
-		t.Errorf("synchronous path: orchestrator calls = %d, want 1", runner.calls)
+	if runner.calls != 0 {
+		t.Errorf("abridged path: orchestrator calls = %d, want 0 (never runs the full bootstrap)", runner.calls)
 	}
-	// NOTE(2-3): retune exact tmux-call count once the single upstream latch-read
-	// lands. Transitionally the sole seam tmux call is the @portal-bootstrapped
-	// latch read (show-option) that replaced the retired has-server info probe.
-	if len(rec.Calls) != 1 || rec.Calls[0][0] != "show-option" {
-		t.Errorf("synchronous path seam calls = %v, want exactly one show-option latch read", rec.Calls)
+	if got := countOp(rec.Calls, "show-option"); got != 1 {
+		t.Errorf("latch read count (show-option) = %d, want exactly 1 (single-read invariant): %v", got, rec.Calls)
 	}
 }

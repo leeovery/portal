@@ -434,14 +434,17 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	gitResolver := &resolverAdapter{}
 	gen := session.NewNanoIDGenerator()
 
-	// §10.2 concurrent cold-boot route: PersistentPreRunE deferred the
-	// orchestrator on the cold + TUI path. Build the progress pipe, launch the
-	// orchestrator in a goroutine, and stream live per-step progress to the
-	// loading page over the channel. The model renders the loading page from
-	// frame one (serverStarted=true on this route is definitional — the server
-	// was not running, so EnsureServer will start it). On every synchronous path
-	// pipe is nil and openTUI keeps today's behaviour (serverStarted carried via
-	// the serverStartedKey context that the caller already read).
+	// §10.2 concurrent full-bootstrap route: PersistentPreRunE deferred the
+	// orchestrator on the (latch-not-satisfied) TUI path. Build the progress
+	// pipe, launch the orchestrator in a goroutine, and stream live per-step
+	// progress to the loading page over the channel. The model renders the
+	// loading page from frame one — serverStarted is forced true just below
+	// because a full bootstrap is in progress on this route, NOT because the
+	// server was necessarily cold: a warm-unlatched server (hand-started tmux hit
+	// by `x`) reaches this route too, so "the server was not running" is not a
+	// safe assumption. On every synchronous path pipe is nil and openTUI keeps
+	// today's behaviour (serverStarted carried via the serverStartedKey context
+	// that the caller already read).
 	var pipe *bootstrapProgressPipe
 	if deferred := deferredBootstrapFromContext(cmd); deferred != nil {
 		pipe = newBootstrapProgressPipe()

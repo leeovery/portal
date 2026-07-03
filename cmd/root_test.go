@@ -407,7 +407,11 @@ func (r *recordingHookRegistrar) Register(c *tmux.Client) error {
 func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
 	t.Run("RegisterHooks is called once after orchestrator for non-exempt commands", func(t *testing.T) {
 		runner := &recordingRunner{}
-		client := tmux.NewClient(&tmux.RealCommander{})
+		// Latch NOT satisfied so PersistentPreRunE takes the full-bootstrap path
+		// where RegisterHooks fires (a satisfied latch would divert to the
+		// abridged path, which deliberately skips hook registration). The client
+		// instance is preserved for the gotSame assertion below.
+		client := notSatisfiedLatchClient()
 		registrar := &recordingHookRegistrar{want: client}
 
 		bootstrapDeps = &BootstrapDeps{
@@ -485,7 +489,10 @@ func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
 
 	t.Run("RegisterHooks error propagates from PersistentPreRunE", func(t *testing.T) {
 		sentinel := errors.New("hook registration failed")
-		client := tmux.NewClient(&tmux.RealCommander{})
+		// Latch NOT satisfied so the full-bootstrap path runs and RegisterHooks
+		// is reached (the abridged path would skip it and never surface the
+		// sentinel).
+		client := notSatisfiedLatchClient()
 		registrar := &recordingHookRegistrar{err: sentinel}
 
 		bootstrapDeps = &BootstrapDeps{

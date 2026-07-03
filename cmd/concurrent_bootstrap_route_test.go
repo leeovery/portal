@@ -71,25 +71,19 @@ func TestPersistentPreRunE_ColdTUI_DefersBootstrap(t *testing.T) {
 	}
 }
 
-// TestPersistentPreRunE_LatchedTUI_RunsSynchronously proves a latch-satisfied
-// TUI open keeps the synchronous route: the orchestrator runs in
-// PersistentPreRunE, serverStarted is threaded via serverStartedKey, and NO
-// deferred bootstrap is stashed.
-//
-// NOTE(2-3): task 2-3 owns re-tightening this once the single upstream latch
-// verdict + the abridged (latch-satisfied) branch land — at which point a
-// satisfied latch takes the abridged path rather than the synchronous
-// orchestrator run asserted here.
-func TestPersistentPreRunE_LatchedTUI_RunsSynchronously(t *testing.T) {
+// TestPersistentPreRunE_LatchedTUI_TakesAbridgedPath proves a latch-satisfied
+// TUI open takes the ABRIDGED path: the full orchestrator is never run
+// (runner.calls == 0), serverStarted=false is threaded to openTUI (no loading
+// page -> instant picker), and NO deferred bootstrap is stashed. The latch
+// verdict computed once upstream in PersistentPreRunE diverts satisfied
+// commands before the concurrent route is ever consulted.
+func TestPersistentPreRunE_LatchedTUI_TakesAbridgedPath(t *testing.T) {
 	resetBootstrapOnce(t)
+	resetBootstrapWarnings(t)
 
-	// Latch satisfied → synchronous route. Transitional (task 2-2): the entry
-	// path reads @portal-bootstrapped to compute latchSatisfied; return the
-	// running version so the latch is satisfied and shouldRunConcurrentBootstrap
-	// routes non-concurrent.
-	client := tmux.NewClient(&recordingCommander{
-		RunFunc: func(_ ...string) (string, error) { return version, nil },
-	})
+	// Satisfied latch (@portal-bootstrapped == running version) + a live saver,
+	// so the abridged saver-liveness probe is a no-op.
+	client := tmux.NewClient(satisfiedLatchAliveSaverCommander())
 	runner := &recordingRunner{started: false}
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })
@@ -110,14 +104,14 @@ func TestPersistentPreRunE_LatchedTUI_RunsSynchronously(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if runner.calls != 1 {
-		t.Errorf("warm path: orchestrator calls = %d, want 1 (synchronous)", runner.calls)
+	if runner.calls != 0 {
+		t.Errorf("abridged path: orchestrator calls = %d, want 0 (never runs the full bootstrap)", runner.calls)
 	}
 	if deferredSeen {
-		t.Error("warm path stashed a deferred bootstrap; want synchronous route")
+		t.Error("abridged path stashed a deferred bootstrap; want none (serverStarted=false must survive to the instant-picker gate)")
 	}
 	if serverStarted {
-		t.Error("warm path threaded serverStarted=true; want false")
+		t.Error("abridged path threaded serverStarted=true; want false (no loading page)")
 	}
 }
 
