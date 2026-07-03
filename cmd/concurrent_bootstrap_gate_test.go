@@ -3,13 +3,13 @@ package cmd
 // Tests in this file mutate package-level state (bootstrapDeps) and the
 // shared rootCmd, and MUST NOT use t.Parallel.
 //
-// Task spectrum-tui-design-5-1 — the cold-vs-warm routing gate.
-// shouldRunConcurrentBootstrap must classify ONLY the cold + TUI path for the
-// concurrent bootstrap route. Cold is decided by a cheap `has-server` probe
-// (client.ServerRunning(), §10.1) BEFORE bootstrap runs — the flip defers the
-// orchestrator into a goroutine, so the post-bootstrap serverStarted signal is
-// not yet available. The probe is gated behind isTUIPath so non-TUI commands and
-// direct-path opens never probe.
+// The cold-vs-warm routing gate, re-keyed for skip-bootstrap-when-warm.
+// shouldRunConcurrentBootstrap now decides the concurrent + loading-screen route
+// off the caller-supplied latch verdict, NOT its own has-server probe: it fires
+// on the TUI path (`portal open`, zero args) with a non-nil client whenever the
+// latch is NOT satisfied — i.e. whenever a FULL bootstrap must run behind the
+// loading screen. The retired ServerRunning() probe is gone, so the decider
+// issues zero tmux round-trips.
 
 import (
 	"testing"
@@ -25,80 +25,70 @@ func openProbeCmd() *cobra.Command {
 	return &cobra.Command{Use: "open"}
 }
 
-// runningClient returns a *tmux.Client whose `info` probe SUCCEEDS, so
-// ServerRunning() == true (warm). coldClient returns one whose `info` FAILS, so
-// ServerRunning() == false (cold).
-func runningClient() *tmux.Client {
+// probeClient returns a non-nil *tmux.Client for the decider unit tests. The
+// re-keyed decider issues ZERO tmux round-trips (the has-server probe is gone),
+// so the backing commander is never called — a plain recording commander suffices.
+func probeClient() *tmux.Client {
 	return tmux.NewClient(&recordingCommander{})
 }
 
-func coldClient() *tmux.Client {
-	return tmux.NewClient(coldCommander())
-}
-
 func TestShouldRunConcurrentBootstrap(t *testing.T) {
-	t.Run("cold + TUI (server not running, zero args) routes concurrent", func(t *testing.T) {
-		if !shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, coldClient()) {
-			t.Error("cold + TUI: shouldRunConcurrentBootstrap = false, want true")
+	t.Run("it routes concurrent for warm-unlatched open (TUI, not satisfied)", func(t *testing.T) {
+		if !shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, probeClient(), false) {
+			t.Error("TUI + not satisfied: shouldRunConcurrentBootstrap = false, want true")
 		}
 	})
 
-	t.Run("warm (server running, zero args) routes synchronous", func(t *testing.T) {
-		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, runningClient()) {
-			t.Error("warm: shouldRunConcurrentBootstrap = true, want false")
+	t.Run("it routes non-concurrent when the latch is satisfied", func(t *testing.T) {
+		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, probeClient(), true) {
+			t.Error("TUI + satisfied: shouldRunConcurrentBootstrap = true, want false")
 		}
 	})
 
-	t.Run("cold + CLI/direct-path (server not running, path arg) routes synchronous", func(t *testing.T) {
-		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{"~/dir"}, coldClient()) {
-			t.Error("cold + direct-path: shouldRunConcurrentBootstrap = true, want false")
-		}
-	})
-
-	t.Run("non-open command (cold, zero args) routes synchronous", func(t *testing.T) {
-		if shouldRunConcurrentBootstrap(&cobra.Command{Use: "list"}, []string{}, coldClient()) {
-			t.Error("list: shouldRunConcurrentBootstrap = true, want false (not the TUI path)")
-		}
-	})
-
-	t.Run("nil client routes synchronous (defensive)", func(t *testing.T) {
-		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, nil) {
+	t.Run("it routes non-concurrent for a nil client", func(t *testing.T) {
+		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, nil, false) {
 			t.Error("nil client: shouldRunConcurrentBootstrap = true, want false")
 		}
 	})
+
+	t.Run("it routes non-concurrent for a non-TUI command", func(t *testing.T) {
+		if shouldRunConcurrentBootstrap(&cobra.Command{Use: "list"}, []string{}, probeClient(), false) {
+			t.Error("non-TUI command: shouldRunConcurrentBootstrap = true, want false (not the TUI path)")
+		}
+	})
+
+	t.Run("it routes non-concurrent for a direct-path open", func(t *testing.T) {
+		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{"~/dir"}, probeClient(), false) {
+			t.Error("direct-path open: shouldRunConcurrentBootstrap = true, want false")
+		}
+	})
 }
 
-// TestShouldRunConcurrentBootstrap_ProbesOnlyOnTUIPath proves the `has-server`
-// probe (the single sanctioned `info` round-trip, §10.1) fires ONLY on the TUI
-// path. Non-TUI commands and direct-path opens are classified before the probe,
-// so they issue zero tmux round-trips through the decider.
-func TestShouldRunConcurrentBootstrap_ProbesOnlyOnTUIPath(t *testing.T) {
-	t.Run("non-TUI command: no probe", func(t *testing.T) {
-		rec := &recordingCommander{}
-		client := tmux.NewClient(rec)
-		_ = shouldRunConcurrentBootstrap(&cobra.Command{Use: "list"}, []string{}, client)
-		if len(rec.Calls) != 0 {
-			t.Errorf("non-TUI path probed %d times %v, want 0", len(rec.Calls), rec.Calls)
-		}
-	})
-
-	t.Run("direct-path open: no probe", func(t *testing.T) {
-		rec := &recordingCommander{}
-		client := tmux.NewClient(rec)
-		_ = shouldRunConcurrentBootstrap(openProbeCmd(), []string{"/dir"}, client)
-		if len(rec.Calls) != 0 {
-			t.Errorf("direct-path probed %d times %v, want 0", len(rec.Calls), rec.Calls)
-		}
-	})
-
-	t.Run("TUI path: exactly one `info` probe", func(t *testing.T) {
-		rec := &recordingCommander{}
-		client := tmux.NewClient(rec)
-		_ = shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, client)
-		if len(rec.Calls) != 1 || len(rec.Calls[0]) == 0 || rec.Calls[0][0] != "info" {
-			t.Errorf("TUI path probe calls = %v, want exactly [[info]] (the sanctioned has-server check)", rec.Calls)
-		}
-	})
+// TestShouldRunConcurrentBootstrap_IssuesNoProbe proves the re-keyed decider is
+// pure: the retired has-server `info` probe is gone, so it issues ZERO tmux
+// round-trips on EVERY path (the route is decided by the caller-supplied
+// latchSatisfied verdict, not by probing the client). Previously the TUI path
+// paid exactly one sanctioned `info` round-trip; now it pays none.
+func TestShouldRunConcurrentBootstrap_IssuesNoProbe(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  *cobra.Command
+		args []string
+	}{
+		{"non-TUI command", &cobra.Command{Use: "list"}, []string{}},
+		{"direct-path open", openProbeCmd(), []string{"/dir"}},
+		{"TUI path", openProbeCmd(), []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &recordingCommander{}
+			client := tmux.NewClient(rec)
+			_ = shouldRunConcurrentBootstrap(tc.cmd, tc.args, client, false)
+			if len(rec.Calls) != 0 {
+				t.Errorf("%s: decider issued %d tmux round-trips %v, want 0", tc.name, len(rec.Calls), rec.Calls)
+			}
+		})
+	}
 }
 
 // TestWithServerStarted_GatesLoadingPage confirms the warm path
@@ -126,16 +116,20 @@ func TestWithServerStarted_GatesLoadingPage(t *testing.T) {
 	})
 }
 
-// TestPersistentPreRunE_WarmDirectTUI_RunsSynchronously proves the warm
-// direct-TUI path keeps the synchronous route: serverStarted=false is threaded
-// to openTUI exactly as today (no deferred bootstrap, no loading page). The only
-// seam-issued tmux call is the single sanctioned `info` has-server probe (§10.1)
-// that decided the path is warm — the orchestrator (a recording fake) is the
-// owner of every other tmux round-trip.
+// TestPersistentPreRunE_WarmDirectTUI_RunsSynchronously proves a latch-satisfied
+// TUI open keeps the synchronous route: serverStarted=false is threaded to
+// openTUI (no deferred bootstrap, no loading page) and the orchestrator (a
+// recording fake) runs exactly once.
 func TestPersistentPreRunE_WarmDirectTUI_RunsSynchronously(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	rec := &recordingCommander{}
+	// Transitional (task 2-2): PersistentPreRunE reads @portal-bootstrapped to
+	// compute latchSatisfied before routing. Return the running version so the
+	// latch is SATISFIED — keeping this the synchronous (non-concurrent) route
+	// while the abridged branch is not yet wired (task 2-3 owns that upstream).
+	rec := &recordingCommander{
+		RunFunc: func(_ ...string) (string, error) { return version, nil },
+	}
 	client := tmux.NewClient(rec)
 	runner := &recordingRunner{started: false} // warm: server already running
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
@@ -158,16 +152,18 @@ func TestPersistentPreRunE_WarmDirectTUI_RunsSynchronously(t *testing.T) {
 	}
 
 	if !openTUIReached {
-		t.Fatal("openTUI was not reached on the warm direct-TUI path")
+		t.Fatal("openTUI was not reached on the synchronous TUI path")
 	}
 	if capturedServerStarted {
-		t.Error("warm path threaded serverStarted=true to openTUI; want false (no loading page)")
+		t.Error("synchronous path threaded serverStarted=true to openTUI; want false (no loading page)")
 	}
 	if runner.calls != 1 {
-		t.Errorf("warm path: orchestrator calls = %d, want 1 (synchronous)", runner.calls)
+		t.Errorf("synchronous path: orchestrator calls = %d, want 1", runner.calls)
 	}
-	// Exactly one seam tmux call: the sanctioned `info` has-server probe (§10.1).
-	if len(rec.Calls) != 1 || rec.Calls[0][0] != "info" {
-		t.Errorf("warm path seam calls = %v, want exactly [[info]] (the has-server probe)", rec.Calls)
+	// NOTE(2-3): retune exact tmux-call count once the single upstream latch-read
+	// lands. Transitionally the sole seam tmux call is the @portal-bootstrapped
+	// latch read (show-option) that replaced the retired has-server info probe.
+	if len(rec.Calls) != 1 || rec.Calls[0][0] != "show-option" {
+		t.Errorf("synchronous path seam calls = %v, want exactly one show-option latch read", rec.Calls)
 	}
 }

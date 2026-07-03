@@ -446,8 +446,13 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	if deferred := deferredBootstrapFromContext(cmd); deferred != nil {
 		pipe = newBootstrapProgressPipe()
 		pipe.start(cmd.Context(), deferred.runner)
-		// Cold by construction: the loading page must show, so force serverStarted
-		// regardless of the caller's (false, deferred) flag.
+		// Full bootstrap in progress: the loading page must show, so force
+		// serverStarted regardless of the caller's (false, deferred) flag.
+		// serverStarted's sole effect is parking the model on the loading page
+		// (WithServerStarted(true) -> activePage = PageLoading); on the deferred
+		// route the server may or may not have pre-existed (warm-unlatched), but a
+		// full bootstrap is running either way, which is exactly when the loading
+		// page should show.
 		serverStarted = true
 	}
 

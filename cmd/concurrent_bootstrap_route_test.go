@@ -20,8 +20,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// coldCommander is a recordingCommander whose "info" probe fails, so
-// client.ServerRunning() reports false — the cold-boot signal.
+// coldCommander is a recordingCommander whose "info" probe fails and whose
+// @portal-bootstrapped read returns an empty (non-version) value, so the latch
+// reads as NOT satisfied — the full-bootstrap signal. (The "info" failure is
+// retained for any residual ServerRunning() callers; the routing decision is now
+// driven by the latch verdict, not ServerRunning().)
 func coldCommander() *recordingCommander {
 	return &recordingCommander{
 		RunFunc: func(args ...string) (string, error) {
@@ -68,15 +71,25 @@ func TestPersistentPreRunE_ColdTUI_DefersBootstrap(t *testing.T) {
 	}
 }
 
-// TestPersistentPreRunE_WarmTUI_RunsSynchronously proves the warm + TUI path
-// keeps the synchronous route: the orchestrator runs in PersistentPreRunE,
-// serverStarted is threaded via serverStartedKey, and NO deferred bootstrap is
-// stashed.
-func TestPersistentPreRunE_WarmTUI_RunsSynchronously(t *testing.T) {
+// TestPersistentPreRunE_LatchedTUI_RunsSynchronously proves a latch-satisfied
+// TUI open keeps the synchronous route: the orchestrator runs in
+// PersistentPreRunE, serverStarted is threaded via serverStartedKey, and NO
+// deferred bootstrap is stashed.
+//
+// NOTE(2-3): task 2-3 owns re-tightening this once the single upstream latch
+// verdict + the abridged (latch-satisfied) branch land — at which point a
+// satisfied latch takes the abridged path rather than the synchronous
+// orchestrator run asserted here.
+func TestPersistentPreRunE_LatchedTUI_RunsSynchronously(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	// Warm: info probe succeeds → ServerRunning() == true.
-	client := tmux.NewClient(&recordingCommander{})
+	// Latch satisfied → synchronous route. Transitional (task 2-2): the entry
+	// path reads @portal-bootstrapped to compute latchSatisfied; return the
+	// running version so the latch is satisfied and shouldRunConcurrentBootstrap
+	// routes non-concurrent.
+	client := tmux.NewClient(&recordingCommander{
+		RunFunc: func(_ ...string) (string, error) { return version, nil },
+	})
 	runner := &recordingRunner{started: false}
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
@@ -154,19 +155,26 @@ var rootCmd = &cobra.Command{
 
 		runner, client, registerHooks := buildBootstrapDeps()
 
-		// §10.2 startup flip — cold + TUI concurrent route.
+		// TODO(2-3): replace with the single upstream latch verdict computed once
+		// in PersistentPreRunE. Transitional local computation so the re-keyed
+		// shouldRunConcurrentBootstrap signature compiles; guarded on a non-nil
+		// client because BootstrappedLatchSatisfied reads through the client.
+		latchSatisfied := client != nil && state.BootstrappedLatchSatisfied(client, version)
+
+		// §10.2 startup flip — concurrent full-bootstrap route on the TUI path.
 		//
-		// shouldRunConcurrentBootstrap scopes the concurrent cold-boot bootstrap
-		// to the COLD + TUI path only (a cheap `has-server` probe via
-		// client.ServerRunning() decides cold, per §10.1; `isTUIPath` decides
-		// TUI). On that one path the orchestrator is NOT run synchronously here —
-		// it is DEFERRED to openTUI, which runs it in a goroutine while Bubble Tea
+		// shouldRunConcurrentBootstrap scopes the concurrent full bootstrap to the
+		// TUI path (`isTUIPath` decides TUI) when the latch is NOT satisfied — i.e.
+		// whenever a FULL bootstrap must run behind the loading screen. The trigger
+		// is latch-not-satisfied (the verdict computed upstream), NOT a server-down
+		// probe. On that route the orchestrator is NOT run synchronously here — it
+		// is DEFERRED to openTUI, which runs it in a goroutine while Bubble Tea
 		// renders the loading page from frame one, streaming progress over a
-		// channel (cmd/bootstrap_progress.go). Every other path — warm (any
-		// command) and cold CLI/direct-path — keeps today's exact synchronous
-		// bootstrap below, byte-for-byte: the serverStartedKey context delivery
-		// and the sync.Once memo are untouched off the deferred route.
-		if shouldRunConcurrentBootstrap(cmd, args, client) {
+		// channel (cmd/bootstrap_progress.go). Every other path — the latch-
+		// satisfied route and cold CLI/direct-path — keeps today's exact
+		// synchronous bootstrap below, byte-for-byte: the serverStartedKey context
+		// delivery and the sync.Once memo are untouched off the deferred route.
+		if shouldRunConcurrentBootstrap(cmd, args, client, latchSatisfied) {
 			ctx := cmd.Context()
 			if client != nil {
 				ctx = context.WithValue(ctx, tmuxClientKey, client)
@@ -233,33 +241,34 @@ func isTUIPath(cmd *cobra.Command, args []string) bool {
 	return cmd.Name() == "open" && len(args) == 0
 }
 
-// shouldRunConcurrentBootstrap is the cold-vs-warm routing decider for the
-// §10.2 startup flip: it reports whether this invocation is the one path the
-// concurrent cold-boot bootstrap is scoped to — COLD + TUI.
+// shouldRunConcurrentBootstrap is the routing decider for the §10.2 startup
+// flip: it reports whether this invocation takes the concurrent + loading-screen
+// route rather than the synchronous one.
 //
-//   - Cold = the tmux server is NOT yet running. Because the decision must be
-//     made BEFORE bootstrap runs (the flip's whole point is to defer the
-//     orchestrator into a goroutine), serverStarted from the orchestrator's
-//     return is not yet available — so a cheap `has-server` probe decides, per
-//     §10.1 ("A cheap `tmux has-server` check decides"). client.ServerRunning()
-//     IS that probe (a single `tmux info` round-trip). It runs ONLY on the TUI
-//     path: isTUIPath is evaluated first so non-TUI commands (warm or cold) and
-//     direct-path opens never probe, and the warm-direct-TUI path pays exactly
-//     one sanctioned `info` round-trip to learn it is warm.
+// The concurrent/loading route fires whenever a FULL bootstrap runs on the TUI
+// path — keyed off latch-not-satisfied (the verdict computed once upstream in
+// PersistentPreRunE), NOT server-down. A full bootstrap on the TUI path should
+// always show the loading screen, so "loading screen" now means exactly "a full
+// bootstrap is in progress" (whether the server was cold or warm-unlatched). The
+// retired ServerRunning() has-server probe is gone; this decider issues zero
+// tmux round-trips.
+//
 //   - TUI = isTUIPath(cmd, args) is true, i.e. `portal open` with zero
 //     positional args. `open <path>` resolves directly via openPath and is
 //     therefore NOT the TUI path.
+//   - nil client (skipTmuxCheck commands never reach here, but be defensive)
+//     classifies synchronous.
 //
-// Every other path — warm (any command) and cold CLI/direct-path — keeps
-// today's exact synchronous bootstrap. nil client (skipTmuxCheck commands never
-// reach here, but be defensive) classifies synchronous.
-func shouldRunConcurrentBootstrap(cmd *cobra.Command, args []string, client *tmux.Client) bool {
+// latchSatisfied is passed in rather than recomputed here: the abridged branch
+// returns upstream on the satisfied path (see Task 2-3), so by the time this
+// decider is reached !latchSatisfied is effectively always true — but it is
+// threaded explicitly to preserve the single-read invariant and to keep the
+// contract self-describing.
+func shouldRunConcurrentBootstrap(cmd *cobra.Command, args []string, client *tmux.Client, latchSatisfied bool) bool {
 	if !isTUIPath(cmd, args) || client == nil {
 		return false
 	}
-	// Cold = server not yet running. isTUIPath gated this so warm/CLI/direct
-	// paths never reach the probe.
-	return !client.ServerRunning()
+	return !latchSatisfied
 }
 
 // fatalErrorStderr is the sink for *bootstrap.FatalError user messages.
