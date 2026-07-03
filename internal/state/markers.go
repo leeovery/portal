@@ -18,6 +18,16 @@ const SkeletonMarkerPrefix = "@portal-skeleton-"
 // captures entirely so it does not record half-built session structure.
 const RestoringMarkerName = "@portal-restoring"
 
+// BootstrappedMarkerName is the tmux server-option name of the version-stamped
+// bootstrap latch. It uses the same server-option mechanism as
+// RestoringMarkerName — it dies with the tmux server, so a server restart
+// auto-clears it and the next command re-runs a full bootstrap. It differs in
+// that its VALUE is load-bearing (the running binary version), not
+// presence-only: satisfaction is a plain equality against the running version
+// (see BootstrappedLatchSatisfied), so a post-upgrade binary re-bootstraps and
+// re-stamps on its first command.
+const BootstrappedMarkerName = "@portal-bootstrapped"
+
 // ServerOptionLister is the seam used by ListSkeletonMarkers. It is satisfied
 // implicitly by *tmux.Client via its ShowAllServerOptions method. Defining the
 // interface here keeps internal/state free of an internal/tmux import, which
@@ -151,4 +161,44 @@ func IsRestoringSet(c RestoringChecker) (bool, error) {
 		return false, nil
 	}
 	return val != "", nil
+}
+
+// BootstrappedLatchSatisfied reports whether the @portal-bootstrapped latch is
+// satisfied for runningVersion — i.e. the latch is present AND its stored value
+// exactly equals runningVersion. A single TryGetServerOption read drives a
+// four-outcome verdict, all folded into one boolean:
+//
+//	absent (found == false)      -> false (cold/fresh server → full bootstrap)
+//	present + value matches      -> true  (already bootstrapped this binary)
+//	present + value mismatches   -> false (post-upgrade → full bootstrap)
+//	read error / down server     -> false (unreadable → full bootstrap)
+//
+// The comparison is a naive parse-free string equality (stored ==
+// runningVersion) because the stored value format is exactly cmd.version in v1,
+// with no forensic extras. An empty stored value (found == true, val == "") is
+// therefore not satisfied unless runningVersion is itself empty; production
+// always passes a non-empty version, so this falls out of plain equality rather
+// than a special case.
+//
+// Both "value mismatch" and "unreadable/error" deliberately fold into
+// not-satisfied: a down server makes the read fail gracefully, so no separate
+// ServerRunning() probe is needed. Unlike IsRestoringSet — which propagates its
+// error so a real failure cannot masquerade as "not restoring" — this helper
+// intentionally swallows the read error into a bare bool: the Phase 2 consumer
+// wants a single verdict, and "unreadable" correctly maps to "full bootstrap."
+// Do not "fix" this into a (bool, error) signature.
+//
+// runningVersion is a plain string parameter (not read from cmd.version) so
+// internal/state stays a leaf — importing cmd would close a cycle, since
+// internal/tmux imports internal/state — and so the version-mismatch branch is
+// unit-testable without rebuilding the binary.
+func BootstrappedLatchSatisfied(c RestoringChecker, runningVersion string) bool {
+	val, found, err := c.TryGetServerOption(BootstrappedMarkerName)
+	if err != nil {
+		return false
+	}
+	if !found {
+		return false
+	}
+	return val == runningVersion
 }

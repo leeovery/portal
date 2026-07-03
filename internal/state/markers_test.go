@@ -19,14 +19,17 @@ func (m *listerMock) ShowAllServerOptions() (string, error) {
 
 // checkerMock satisfies state.RestoringChecker. The found flag and value are
 // returned verbatim so individual tests can exercise the absent vs. set vs.
-// empty-value paths independently.
+// empty-value paths independently. gotName records the last option name read
+// so tests can assert exactly which server option was queried.
 type checkerMock struct {
-	val   string
-	found bool
-	err   error
+	val     string
+	found   bool
+	err     error
+	gotName string
 }
 
 func (m *checkerMock) TryGetServerOption(name string) (string, bool, error) {
+	m.gotName = name
 	return m.val, m.found, m.err
 }
 
@@ -206,6 +209,54 @@ func TestIsRestoringSet(t *testing.T) {
 		_, err := state.IsRestoringSet(&checkerMock{err: errors.New("tmux exploded")})
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestBootstrappedLatchSatisfied(t *testing.T) {
+	t.Run("it returns true when latch present and version matches", func(t *testing.T) {
+		got := state.BootstrappedLatchSatisfied(&checkerMock{val: "1.2.3", found: true}, "1.2.3")
+		if !got {
+			t.Errorf("got false; want true (present + version match)")
+		}
+	})
+
+	t.Run("it returns false when latch absent", func(t *testing.T) {
+		got := state.BootstrappedLatchSatisfied(&checkerMock{found: false}, "1.2.3")
+		if got {
+			t.Errorf("got true; want false (latch absent)")
+		}
+	})
+
+	t.Run("it returns false when stored version mismatches running version", func(t *testing.T) {
+		got := state.BootstrappedLatchSatisfied(&checkerMock{val: "1.2.2", found: true}, "1.2.3")
+		if got {
+			t.Errorf("got true; want false (version mismatch)")
+		}
+	})
+
+	t.Run("it returns false on read error / down server", func(t *testing.T) {
+		got := state.BootstrappedLatchSatisfied(&checkerMock{err: errors.New("tmux exploded")}, "1.2.3")
+		if got {
+			t.Errorf("got true; want false (read error / down server)")
+		}
+	})
+
+	t.Run("it returns false when stored value is empty and running version is non-empty", func(t *testing.T) {
+		got := state.BootstrappedLatchSatisfied(&checkerMock{val: "", found: true}, "1.2.3")
+		if got {
+			t.Errorf("got true; want false (empty stored value)")
+		}
+	})
+
+	t.Run("it reads exactly the @portal-bootstrapped option name", func(t *testing.T) {
+		if state.BootstrappedMarkerName != "@portal-bootstrapped" {
+			t.Errorf("BootstrappedMarkerName = %q, want %q", state.BootstrappedMarkerName, "@portal-bootstrapped")
+		}
+		c := &checkerMock{val: "1.2.3", found: true}
+		state.BootstrappedLatchSatisfied(c, "1.2.3")
+		if c.gotName != state.BootstrappedMarkerName {
+			t.Errorf("read option name %q, want %q", c.gotName, state.BootstrappedMarkerName)
 		}
 	})
 }
