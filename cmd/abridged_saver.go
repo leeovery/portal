@@ -30,7 +30,11 @@ import (
 // bootstrapWarnings sink the sync path uses (CLI flushes it to stderr; the TUI
 // drains it to the notice band) and the command PROCEEDS — attach/switch still
 // works and capture resumes on the next successful revival. There is no error
-// return: all failure surfaces through the warning sink.
+// return: all failure surfaces through the warning sink. Additionally, before
+// funneling that user-facing warning it emits one bootstrap-component WARN
+// carrying the underlying cause (via the package-level bootstrapLogger),
+// mirroring the full-bootstrap step-5 "step failed" breadcrumb so portal.log
+// records why the revive failed — the SaverDownWarning itself is causeless.
 //
 // stateDir is a parameter (rather than resolved internally) so the caller owns
 // resolution and the helper stays unit-testable; the production caller passes
@@ -44,8 +48,12 @@ func ensureSaverLiveness(client *tmux.Client, stateDir string) {
 	}
 
 	// Absent (or unprovable) — re-ensure idempotently. A revive failure is
-	// non-fatal: record the soft warning and let the command proceed.
+	// non-fatal: log the underlying cause, record the soft warning, and let the
+	// command proceed. The WARN mirrors the full-bootstrap step-5 "step failed"
+	// breadcrumb (cmd/bootstrap/bootstrap.go) so the abridged path retains
+	// diagnosability parity — the SaverDownWarning alone carries no cause.
 	if err := tmux.BootstrapPortalSaver(client, stateDir); err != nil {
+		bootstrapLogger.Warn("abridged EnsureSaver: saver revive failed", "error", err)
 		bootstrapWarnings.Add(bootstrap.SaverDownWarning())
 	}
 }

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -190,6 +192,65 @@ func TestEnsureSaverLiveness_FunnelsSaverDownWarningWhenReviveFails(t *testing.T
 	}
 	if !reflect.DeepEqual(got[0], bootstrap.SaverDownWarning()) {
 		t.Errorf("warning = %#v, want %#v", got[0], bootstrap.SaverDownWarning())
+	}
+}
+
+// TestEnsureSaverLiveness_LogsWarnWithUnderlyingErrorWhenReviveFails asserts
+// that a failed BootstrapPortalSaver on the abridged path emits exactly one
+// bootstrap-component WARN carrying the underlying error — restoring
+// diagnosability parity with the full-bootstrap step-5 "step failed" WARN
+// (cmd/bootstrap/bootstrap.go) — while the SaverDownWarning funnel and the
+// proceed-anyway (no error return) posture stay unchanged. The package-level
+// bootstrapLogger (log.For("bootstrap")) routes through the swapped sink.
+func TestEnsureSaverLiveness_LogsWarnWithUnderlyingErrorWhenReviveFails(t *testing.T) {
+	resetBootstrapWarnings(t)
+	stubSaverAliveCheck(t, false)
+	shrinkSaverRetryDelay(t)
+
+	sink := &logtest.Sink{}
+	log.SetTestHandler(t, sink)
+
+	cmder := saverAbsentReviveFailsCommander()
+
+	ensureSaverLiveness(tmux.NewClient(cmder), t.TempDir())
+
+	if n := countLines(sink, "WARN", "component=bootstrap", "abridged EnsureSaver", "error="); n != 1 {
+		t.Errorf("expected exactly one bootstrap-component WARN carrying the underlying error, got %d in:\n%s", n, sink.Body())
+	}
+
+	// The SaverDownWarning funnel and proceed-anyway posture are unchanged.
+	got := bootstrapWarnings.Drain()
+	if len(got) != 1 || !reflect.DeepEqual(got[0], bootstrap.SaverDownWarning()) {
+		t.Errorf("expected exactly one SaverDownWarning still funneled, got %#v", got)
+	}
+}
+
+// TestEnsureSaverLiveness_LogsNoWarnWhenSaverPresent asserts the successful
+// presence early return emits no WARN (and adds no warning) — the breadcrumb
+// is confined to the revive-failure branch.
+func TestEnsureSaverLiveness_LogsNoWarnWhenSaverPresent(t *testing.T) {
+	resetBootstrapWarnings(t)
+
+	sink := &logtest.Sink{}
+	log.SetTestHandler(t, sink)
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if args[0] == "list-panes" && isPanePIDProbe(args) {
+				return "12345\n", nil // present pane, parseable pid -> alive
+			}
+			t.Fatalf("unexpected tmux call for present+alive saver: %v", args)
+			return "", nil
+		},
+	}
+
+	ensureSaverLiveness(tmux.NewClient(cmder), t.TempDir())
+
+	if n := countLines(sink, "WARN"); n != 0 {
+		t.Errorf("expected no WARN on the present-saver early return, got %d in:\n%s", n, sink.Body())
+	}
+	if got := bootstrapWarnings.Drain(); len(got) != 0 {
+		t.Errorf("expected empty warnings sink for present saver, got %v", got)
 	}
 }
 
