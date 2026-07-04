@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/state"
 )
 
 // IsolateStateForTest returns an env slice and stateDir scoped to a
@@ -53,6 +55,16 @@ import (
 func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 	t.Helper()
 
+	// Enable the daemon-pgrep sandbox for this test: state.PgrepPortalDaemons
+	// will surface ONLY daemons the test registers (SpawnIsolatedDaemon plus the
+	// _portal-saver pane PID read by the saver-read helpers). Because the orphan
+	// sweep SIGKILLs only PIDs its Pgrep seam returns, this makes it structurally
+	// impossible for a sweep to enumerate — and therefore kill — the developer's
+	// live daemon (or any process the test did not spawn). No-op in
+	// non-integration builds. Reset on cleanup so it cannot bleed across tests.
+	state.EnableDaemonSandbox()
+	t.Cleanup(state.ResetDaemonSandbox)
+
 	// Host-noise mitigation: re-point HOME at a fresh tempdir and
 	// clear XDG_CONFIG_HOME on the test process BEFORE the snapshot
 	// runs. t.Setenv registers a Cleanup that restores the prior
@@ -89,6 +101,13 @@ func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatalf("portaltest: mkdir stateDir: %v", err)
 	}
+
+	// Register this test's state dir with the daemon-pgrep sandbox. The saver
+	// daemon that later runs against it (respawns and all) is owned via its
+	// live <stateDir>/daemon.pid, so PgrepPortalDaemons surfaces it and the
+	// real daemon (a different state dir) stays invisible. No-op in
+	// non-integration builds.
+	state.RegisterSandboxStateDir(stateDir)
 
 	env = filterXDGConfigHome(os.Environ())
 	env = append(env, "XDG_CONFIG_HOME="+configDir)

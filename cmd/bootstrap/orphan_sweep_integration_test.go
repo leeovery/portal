@@ -62,6 +62,7 @@ import (
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
@@ -376,6 +377,9 @@ func waitForSaverPanePID(t *testing.T, sock *tmuxtest.Socket) int {
 	if !ok {
 		t.Fatalf("saver pane PID did not become observable within %s", pgrepConvergenceTimeout)
 	}
+	// Register the saver-pane daemon with the pgrep sandbox so it is surfaced by
+	// the scoped enumeration (and recognised as the legitimate sweep survivor).
+	state.RegisterSandboxDaemon(pid)
 	return pid
 }
 
@@ -390,6 +394,7 @@ func readSaverPanePID(t *testing.T, sock *tmuxtest.Socket) int {
 		if err == nil {
 			p, perr := strconv.Atoi(strings.TrimSpace(out))
 			if perr == nil && p > 0 {
+				state.RegisterSandboxDaemon(p)
 				return p
 			}
 		}

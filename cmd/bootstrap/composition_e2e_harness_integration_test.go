@@ -42,6 +42,7 @@ package bootstrap_test
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -185,6 +186,24 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	}
 	legitimateDaemonPID := waitForSaverPanePID(t, sock)
 	waitForDaemonPID(t, stateDir, legitimateDaemonPID)
+
+	// Own the saver by its LIVE _portal-saver pane PID. This is the respawn-
+	// and manipulation-immune ownership signal: it tracks the saver across the
+	// bootstrap slice's respawns AND survives the Step-6 overwrite below that
+	// replaces the legitimate stateDir's daemon.pid with orphan 1's PID. Without
+	// it the pgrep sandbox would lose sight of the saver the moment daemon.pid is
+	// overwritten, and the post-bootstrap convergence would see an empty set.
+	state.RegisterSandboxDaemonSource(func() (int, bool) {
+		out, err := sock.TryRun("list-panes", "-t", tmux.PortalSaverName, "-F", "#{pane_pid}")
+		if err != nil {
+			return 0, false
+		}
+		p, perr := strconv.Atoi(strings.TrimSpace(out))
+		if perr != nil || p <= 0 {
+			return 0, false
+		}
+		return p, true
+	})
 
 	// Step 6: spawn orphan 1 with its OWN PORTAL_STATE_DIR so it does
 	// not immediately lose the daemon.lock against the legitimate
@@ -458,4 +477,3 @@ func TestCompositeHarness_PreState(t *testing.T) {
 		}
 	}
 }
-

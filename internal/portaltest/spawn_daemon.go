@@ -22,6 +22,8 @@ package portaltest
 import (
 	"os/exec"
 	"testing"
+
+	"github.com/leeovery/portal/internal/state"
 )
 
 // SpawnIsolatedDaemon launches a `portal state daemon` subprocess with
@@ -63,6 +65,12 @@ func SpawnIsolatedDaemon(t *testing.T, envSlice []string) (*exec.Cmd, string) {
 		t.Fatalf("portaltest: start isolated portal state daemon (stateDir=%s): %v", stateDir, err)
 	}
 	RegisterSubprocessCleanup(t, cmd)
+	// Register with the daemon-pgrep sandbox so this test-spawned daemon is
+	// visible to the test's state.PgrepPortalDaemons (and thus a legitimate
+	// sweep target). Register both the state dir (respawn-immune, via its
+	// daemon.pid) and the initial PID (belt). No-op in non-integration builds.
+	state.RegisterSandboxStateDir(stateDir)
+	state.RegisterSandboxDaemon(cmd.Process.Pid)
 	return cmd, stateDir
 }
 

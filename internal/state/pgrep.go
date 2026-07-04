@@ -99,5 +99,12 @@ func PgrepPortalDaemons() ([]int, error) {
 		}
 		pids = append(pids, pid)
 	}
-	return pids, nil
+	// Test-isolation chokepoint: in an integration test binary this drops every
+	// PID the running test did not register as its own, so the orphan sweep (the
+	// sole caller that SIGKILLs pgrep results) can never enumerate — and thus
+	// never kill — the developer's live daemon. Identity function in production
+	// (see pgrep_sandbox_prod.go); the real filter lives in pgrep_sandbox.go
+	// under //go:build integration and is compile-time absent from the shipped
+	// binary.
+	return sandboxFilterPgrep(pids), nil
 }
