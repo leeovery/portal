@@ -35,11 +35,11 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (12 subtopics — 1 decided · 1 exploring · 10 pending)
+  Discussion Map — Restore Host Terminal Windows (12 subtopics — 2 decided · 10 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ○ 2. Multi-select trigger & keymap coexistence [F7]
-  ├─ ◐ 3. Burst & partial-failure contract [F1] [exploring]
+  ├─ ✓ 3. Burst & partial-failure contract [F1] [decided]
   ├─ ○ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2]
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
   ├─ ○ 6. Config schema & command representation [F9]
@@ -144,11 +144,14 @@ Checked the near-complete `warm-command-bootstrap-latch` against reopen's need. 
 
 With F3 fixed, the picker always bootstraps *first* (its own `PersistentPreRunE`) and stamps the latch to its own version, then spawns that *same* binary — so at burst time the latch is **always** satisfied and no spawned window full-bootstraps. The only residual is a mid-picker-session in-place binary swap (negligible). User accepts it (rare; full bootstrap is a safe no-op). A conditional "if the first spawn triggers a full bootstrap, wait for its ack before firing the rest" was floated — sequential + the token ack (which fires *after* the latch re-stamp) would cap it at exactly **one** bootstrap for free. **Deferred as YAGNI** given F3 renders the case negligible; recorded as optional future hardening, and the ack is the natural wait-signal if it's ever wanted.
 
-### Still open (to close #3)
+### Decision — N=0 / N=1 boundary (review-001 F6)
 
-- **N=0 / N=1 boundary (review-001 F6).** Does "self-attach to the Nth" hold for a one-session selection (degenerate to a plain attach?) and a zero-session "confirm"?
+The "self-attach to the Nth of N" rule is total:
 
-*(exploring — contract, confirmation, spawn-via-own-exe, and sequential all decided; only F6 remains)*
+- **N=1** (one selected, Enter): zero windows to spawn — the picker self-attaches to that one session, i.e. it **degenerates to a plain single attach** to the current window. No special-casing; selecting one in multi-mode and pressing Enter is just a normal attach.
+- **N=0** (nothing selected, Enter): a **no-op that exits multi-select mode**, dropping back to the standard picker (Portal stays open) — the same effect as pressing `Esc`. Nothing opens.
+
+*(decided — full partial-failure contract, token-ack confirmation, spawn-via-own-exe, sequential spawn, and N=0/N=1 boundary all resolved)*
 
 ---
 
@@ -166,8 +169,8 @@ With F3 fixed, the picker always bootstraps *first* (its own `PersistentPreRunE`
 
 - Research foundation settled (see Context); 12 live subtopics seeded.
 - **#1 Spawn-Execution Architecture — decided** (Option B: shared reopen package + `portal reopen` subcommand, picker calls in-process; N−1 spawned, picker self-reuses for the Nth).
-- **#3 Burst & Partial-Failure — exploring.** Bootstrap-per-window (review-001 F1) resolved out via an external dependency; core partial-failure contract + cancellation (F4) still open.
-- Open coupling threads: #3 (partial-failure / in-process-vs-subprocess / wait-for-spawn), #7 (terminal-identity detection).
+- **#3 Burst & Partial-Failure — decided.** Best-effort; picker-orchestrated, self-attach-last; in-process; token-ack confirmation via `@portal-reopen-*` server option; spawn via `os.Executable()` (F3); sequential; N=1 degenerates to plain attach, N=0 exits multi-mode (F6). Skip-bootstrap latch verified sufficient.
+- Open coupling thread: #7 (terminal-identity detection) — also home to outstanding review findings F2 (headless reopen has no terminal) and F7 (detect-self package shape). F5 (reopen observability) still to place.
 
 ### Open Threads
 
