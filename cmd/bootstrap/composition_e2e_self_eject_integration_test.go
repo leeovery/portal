@@ -217,16 +217,6 @@ func TestCompositeBootstrap_ExternalSaverKillTriggersSelfEject(t *testing.T) {
 	// startup window where the per-tick probe has not yet armed.
 	waitForIdentifyDaemon(t, survivorPID)
 
-	// Pre-eject scrollback fingerprint. The scrollback dir under
-	// h.StateDir is the daemon's per-pane capture target; we
-	// fingerprint it BEFORE inducing the mismatch so the post-eject
-	// snapshot can prove no defer-driven final flush ran.
-	scrollbackDir := state.ScrollbackDir(h.StateDir)
-	snapBefore, err := portaltest.SnapshotStateDir(scrollbackDir)
-	if err != nil {
-		t.Fatalf("snapBefore SnapshotStateDir(%s): %v", scrollbackDir, err)
-	}
-
 	// daemon.pid pre-eject sanity: must reference the survivor. After
 	// the convergence path, BootstrapPortalSaver's freshly-spawned
 	// daemon writes its own PID into daemon.pid. The post-eject
@@ -331,34 +321,25 @@ func TestCompositeBootstrap_ExternalSaverKillTriggersSelfEject(t *testing.T) {
 	// dumps across multiple failed assertions.
 	logBlob := portaltest.ReadPortalLogSafe(h.StateDir)
 
-	// Post-eject scrollback fingerprint. snapAfter is captured
-	// IMMEDIATELY after exit observation so the eject-window is as
-	// narrow as possible — any post-exit ambient writer (none
-	// expected; pgrep was 1 + survivor just died = 0) would
-	// otherwise pollute the comparison.
-	snapAfter, err := portaltest.SnapshotStateDir(scrollbackDir)
-	if err != nil {
-		t.Fatalf("snapAfter SnapshotStateDir(%s): %v\n--- portal.log ---\n%s",
-			scrollbackDir, err, logBlob)
-	}
-
-	// Assertion 1: scrollback bytes-identical pre/post the eject
-	// window. Spec § Component D "No final flush on self-eject":
-	// snapBefore == snapAfter across all Fingerprint fields. Empty-
-	// both is a legitimate pass (the load-bearing invariant is "no
-	// delta", not "non-empty pre-snapshot").
-	if deltas := portaltest.DiffFingerprints(snapBefore, snapAfter); len(deltas) > 0 {
-		lines := make([]string, len(deltas))
-		for k, d := range deltas {
-			lines[k] = "  " + portaltest.FormatDelta(d)
-		}
-		t.Fatalf("scrollback dir mutated between snapBefore (pre-external-mismatch) "+
-			"and snapAfter (post-self-eject) — spec § Component D requires "+
-			"NO final flush on self-eject\n"+
-			"  scrollback dir: %s\n"+
-			"  delta(s):\n%s\n"+
-			"--- portal.log ---\n%s",
-			scrollbackDir, strings.Join(lines, "\n"), logBlob)
+	// Assertion 1: the self-eject performed NO final flush. Spec § Component D
+	// "No final flush on self-eject": the eject tick calls osExit(0) BEFORE
+	// tick() (defaultDaemonTickLoop), so no captureAndCommit runs on the way
+	// out. Verify via LOG ORDERING — no "capture: tick complete" appears after
+	// the "daemon: self-eject" marker.
+	//
+	// A scrollback-dir fingerprint does NOT work here: the pre-mismatch →
+	// post-eject window necessarily spans the 2-3 pre-eject ticks, and the
+	// harness seeds continuously-dirty user sessions, so those NORMAL ticks
+	// legitimately capture scrollback inside the window — a mutation that is not
+	// a final flush. Log ordering isolates the eject tick precisely and still
+	// catches a real regression: routing the eject through daemonShutdownFunc
+	// (which DOES captureAndCommit) would emit "capture: tick complete" after
+	// the marker.
+	if ejectIdx := strings.LastIndex(logBlob, selfEjectComposite_LogMarker); ejectIdx >= 0 &&
+		strings.Contains(logBlob[ejectIdx:], "capture: tick complete") {
+		t.Fatalf("a capture ran AFTER daemon: self-eject — spec § Component D requires "+
+			"NO final flush on self-eject (the eject tick MUST osExit(0) before tick())\n"+
+			"--- portal.log from the self-eject marker onward ---\n%s", logBlob[ejectIdx:])
 	}
 
 	// Assertion 2: daemon.pid file remains on disk post-eject and

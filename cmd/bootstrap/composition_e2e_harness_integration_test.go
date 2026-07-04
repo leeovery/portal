@@ -166,6 +166,25 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
+	// Teardown-race guard. The saver daemon flushes scrollback on its graceful
+	// SIGHUP shutdown (correct product behaviour); when tmuxtest's kill-server
+	// tears down the saver pane at test end that async flush can still be writing
+	// into stateDir when IsolateStateForTest's t.TempDir RemoveAll runs — a
+	// "directory not empty" cleanup flake. Registered HERE (after
+	// IsolateStateForTest, before tmuxtest.New) so LIFO runs it AFTER kill-server
+	// SIGHUPs the saver and BEFORE the stateDir RemoveAll: it waits (bounded) for
+	// the saver process to exit so the flush cannot race the removal.
+	var saverTeardownPID int
+	t.Cleanup(func() {
+		if saverTeardownPID <= 0 {
+			return
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for pidAlive(saverTeardownPID) && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+
 	// Step 3: isolated tmux server + client. The server inherits the
 	// test process's env (including PORTAL_STATE_DIR + XDG_CONFIG_HOME)
 	// via the standard exec.Command env inheritance.
@@ -186,6 +205,8 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	}
 	legitimateDaemonPID := waitForSaverPanePID(t, sock)
 	waitForDaemonPID(t, stateDir, legitimateDaemonPID)
+	// Arm the teardown-race guard registered above with the live saver PID.
+	saverTeardownPID = legitimateDaemonPID
 
 	// Own the saver by its LIVE _portal-saver pane PID. This is the respawn-
 	// and manipulation-immune ownership signal: it tracks the saver across the
