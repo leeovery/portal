@@ -9,12 +9,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// StructuralKeyResolver resolves a tmux pane ID (e.g. "%3") to its structural
-// key (e.g. "my-session:0.0") by querying tmux for session name, window index,
-// and pane index.
-type StructuralKeyResolver interface {
-	ResolveStructuralKey(paneID string) (string, error)
+// HookKeyResolver resolves a tmux pane ID (e.g. "%3") to its hook key
+// (e.g. "<@portal-id or session_name>:window.pane") via HookKeyFormat — a
+// stamped session resolves off the immutable @portal-id (rename-immune), an
+// un-stamped session off the session name.
+type HookKeyResolver interface {
+	ResolveHookKey(paneID string) (string, error)
 }
+
+// Compile-time assertion that the production tmux client satisfies the seam,
+// so a drift in ResolveHookKey's signature fails fast at build time rather
+// than only via the implicit assignment in resolveCurrentPaneKey.
+var _ HookKeyResolver = (*tmux.Client)(nil)
 
 // hooksDeps holds injectable dependencies for the hooks commands.
 // When nil, real implementations are used.
@@ -22,7 +28,7 @@ var hooksDeps *HooksDeps
 
 // HooksDeps allows injecting dependencies for testing.
 type HooksDeps struct {
-	KeyResolver StructuralKeyResolver
+	KeyResolver HookKeyResolver
 }
 
 // requireTmuxPane reads TMUX_PANE from the environment and returns an
@@ -42,27 +48,27 @@ func buildHooksTmuxClient() *tmux.Client {
 }
 
 // resolveCurrentPaneKey reads TMUX_PANE from the environment, resolves
-// it to a structural key (e.g. "my-session:0.0") via the injected or
-// default StructuralKeyResolver, and returns the result.
+// it to a hook key (e.g. "<@portal-id or session_name>:window.pane") via the
+// injected or default HookKeyResolver, and returns the result.
 func resolveCurrentPaneKey() (string, error) {
 	paneID, err := requireTmuxPane()
 	if err != nil {
 		return "", err
 	}
 
-	var keyResolver StructuralKeyResolver
+	var keyResolver HookKeyResolver
 	if hooksDeps != nil && hooksDeps.KeyResolver != nil {
 		keyResolver = hooksDeps.KeyResolver
 	} else {
 		keyResolver = buildHooksTmuxClient()
 	}
 
-	structuralKey, err := keyResolver.ResolveStructuralKey(paneID)
+	hookKey, err := keyResolver.ResolveHookKey(paneID)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve structural key for current pane: %w", err)
+		return "", fmt.Errorf("failed to resolve hook key for current pane: %w", err)
 	}
 
-	return structuralKey, nil
+	return hookKey, nil
 }
 
 var hooksCmd = &cobra.Command{
@@ -100,7 +106,7 @@ var hooksSetCmd = &cobra.Command{
 	Short: "Register a resume hook for the current pane",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		structuralKey, err := resolveCurrentPaneKey()
+		hookKey, err := resolveCurrentPaneKey()
 		if err != nil {
 			return err
 		}
@@ -115,7 +121,7 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		return store.Set(structuralKey, "on-resume", command, "cli")
+		return store.Set(hookKey, "on-resume", command, "cli")
 	},
 }
 
@@ -146,11 +152,11 @@ var hooksRmCmd = &cobra.Command{
 			return err
 		}
 
-		var structuralKey string
+		var hookKey string
 		if paneKey != "" {
-			structuralKey = paneKey
+			hookKey = paneKey
 		} else {
-			structuralKey, err = resolveCurrentPaneKey()
+			hookKey, err = resolveCurrentPaneKey()
 			if err != nil {
 				return err
 			}
@@ -161,7 +167,7 @@ var hooksRmCmd = &cobra.Command{
 			return err
 		}
 
-		return store.Remove(structuralKey, "on-resume", "cli")
+		return store.Remove(hookKey, "on-resume", "cli")
 	},
 }
 

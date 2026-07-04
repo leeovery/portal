@@ -1,7 +1,7 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.5.11",
-    "commit": "e951347907976b0409b00f6781cd5f440b623d04",
+    "ref": "v0.5.12",
+    "commit": "6177da9293cc52607f389aba913860084aa3b08f",
     "agents": [
       "claude"
     ],
@@ -63,13 +63,16 @@
       ".claude/skills/workflow-discovery/",
       ".claude/skills/workflow-discovery/SKILL.md",
       ".claude/skills/workflow-discovery/references/",
+      ".claude/skills/workflow-discovery/references/brief-synthesis.md",
       ".claude/skills/workflow-discovery/references/conclude-discovery.md",
       ".claude/skills/workflow-discovery/references/confirm-and-persist.md",
       ".claude/skills/workflow-discovery/references/confirm-trigger.md",
+      ".claude/skills/workflow-discovery/references/continuity-load.md",
       ".claude/skills/workflow-discovery/references/detection-core.md",
       ".claude/skills/workflow-discovery/references/discovery-guidelines.md",
       ".claude/skills/workflow-discovery/references/document-review.md",
       ".claude/skills/workflow-discovery/references/first-phase-routing.md",
+      ".claude/skills/workflow-discovery/references/harvest-nudge.md",
       ".claude/skills/workflow-discovery/references/import-files.md",
       ".claude/skills/workflow-discovery/references/initialize-discovery.md",
       ".claude/skills/workflow-discovery/references/land-seed.md",
@@ -155,6 +158,7 @@
       ".claude/skills/workflow-knowledge/SKILL.md",
       ".claude/skills/workflow-knowledge/chunking/",
       ".claude/skills/workflow-knowledge/chunking/analysis.json",
+      ".claude/skills/workflow-knowledge/chunking/discovery.json",
       ".claude/skills/workflow-knowledge/chunking/discussion.json",
       ".claude/skills/workflow-knowledge/chunking/imports.json",
       ".claude/skills/workflow-knowledge/chunking/investigation.json",
@@ -235,6 +239,7 @@
       ".claude/skills/workflow-migrate/scripts/migrations/042-allow-workflows-writes.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/043-handled-umbrellas-and-restamp-caches.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/044-allow-workflows-mv.sh",
+      ".claude/skills/workflow-migrate/scripts/migrations/045-move-discovery-sessions.sh",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
@@ -365,6 +370,8 @@
       ".claude/skills/workflow-shared/references/final-review-menu.md",
       ".claude/skills/workflow-shared/references/natural-breaks.md",
       ".claude/skills/workflow-shared/references/pivot-to-epic.md",
+      ".claude/skills/workflow-shared/references/read-brief-context.md",
+      ".claude/skills/workflow-shared/references/reconcile-advisory.md",
       ".claude/skills/workflow-shared/references/research-analysis.md",
       ".claude/skills/workflow-shared/references/resume-detection.md",
       ".claude/skills/workflow-shared/references/routing-decision.md",
@@ -466,7 +473,7 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "installedAt": "2026-06-17T21:57:30.402Z",
+    "installedAt": "2026-07-01T18:01:36.418Z",
     "constraint": "^0.5.0"
   },
   "samber/cc-skills-golang": {

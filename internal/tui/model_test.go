@@ -1606,13 +1606,22 @@ func TestSessionListHelpBar(t *testing.T) {
 }
 
 // mockSessionRenamer implements tui.SessionRenamer for testing.
+//
+// calls counts every RenameSession invocation. It exists so a test can assert
+// the in-TUI rename path reduces to a SINGLE RenameSession(old, new) call with
+// no other session-rename-adjacent work (notably no hook re-keying) — the
+// SessionRenamer is the ONLY seam the rename path touches, so a single
+// increment here is the structural proof that renameAndRefresh does a bare
+// rename + list refresh.
 type mockSessionRenamer struct {
 	renamedOld string
 	renamedNew string
+	calls      int
 	err        error
 }
 
 func (m *mockSessionRenamer) RenameSession(oldName, newName string) error {
+	m.calls++
 	m.renamedOld = oldName
 	m.renamedNew = newName
 	return m.err
@@ -1697,6 +1706,73 @@ func TestRenameSession(t *testing.T) {
 		if renamer.renamedNew != "new-alpha" {
 			t.Errorf("expected new name %q, got %q", "new-alpha", renamer.renamedNew)
 		}
+	})
+
+	t.Run("it reduces the in-TUI rename path to a single RenameSession with no hook re-keying", func(t *testing.T) {
+		// This drives the SAME exported rename path as the subtest above
+		// (tui.New + WithRenamer → r → type → Enter → renameAndRefresh's
+		// tea.Cmd) but asserts the STRUCTURAL invariant behind spec
+		// Acceptance Criteria 6 ("No external/UI change") and the fix's
+		// central premise: the in-TUI rename is a bare RenameSession(old,
+		// new) + list refresh with ZERO hook re-keying. If the fix were the
+		// rejected "intercept-and-re-key" design, this path would have to
+		// touch a hook seam; it does not, which is exactly why external and
+		// in-TUI renames are both fixed at the root (@portal-id) rather than
+		// intercepted here.
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		renamer := &mockSessionRenamer{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := newModelWithRenamer(lister, nil, renamer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Open rename modal, clear, type a new name, confirm — the exact
+		// keystroke sequence the in-TUI rename path processes.
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+		for _, r := range "renamed-alpha" {
+			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		}
+		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command from rename confirmation, got nil")
+		}
+
+		// Executing the returned command runs renameAndRefresh, which is
+		// the whole in-TUI rename side-effect: sessionRenamer.RenameSession
+		// followed by a sessionLister.ListSessions refresh (model.go
+		// renameAndRefresh). Nothing else runs.
+		msg := cmd()
+		if _, ok := msg.(tui.SessionsMsg); !ok {
+			t.Fatalf("expected SessionsMsg (list refresh) after rename, got %T", msg)
+		}
+
+		// EXACTLY ONE RenameSession(old, new) call — no repeat, no
+		// second rename-adjacent call. The rename path issues a single
+		// client.RenameSession(old, new), byte-identical to the external
+		// `tmux rename-session` the integration test's external leg drives.
+		if renamer.calls != 1 {
+			t.Errorf("in-TUI rename should call RenameSession exactly once; got %d calls", renamer.calls)
+		}
+		if renamer.renamedOld != "alpha" || renamer.renamedNew != "renamed-alpha" {
+			t.Errorf("in-TUI rename should be RenameSession(%q, %q); got RenameSession(%q, %q)",
+				"alpha", "renamed-alpha", renamer.renamedOld, renamer.renamedNew)
+		}
+
+		// Structural proof of "no hook re-keying": the tui Model wires NO
+		// hook seam at all. SessionRenamer (the seam this path uses) has a
+		// single method — RenameSession — and there is no hooks store, no
+		// hook-key resolver, and no hook interface anywhere in the tui
+		// package's rename wiring (grep internal/tui for hook: the only
+		// matches are bootstrap loading-step labels and an unrelated layout
+		// hook, never a resume-hook seam). renameAndRefresh therefore
+		// CANNOT re-key hooks even in principle — the hook survives a rename
+		// solely because it is keyed off the immutable @portal-id, proven
+		// end-to-end by the RenameSession-equivalent integration leg.
+		var _ tui.SessionRenamer = renamer
 	})
 
 	t.Run("empty rename input is rejected on enter", func(t *testing.T) {

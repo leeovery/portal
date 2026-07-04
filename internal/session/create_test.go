@@ -121,6 +121,15 @@ func (m *mockProjectStore) Upsert(path, name, via string) error {
 	return m.upsertErr
 }
 
+// setOptionCall records a single SetSessionOption invocation. Both @portal-dir
+// and @portal-id stamp via SetSessionOption, so tests record ALL calls and
+// assert each option independently.
+type setOptionCall struct {
+	Session string
+	Name    string
+	Value   string
+}
+
 // mockTmuxClient implements session.TmuxClient for testing.
 type mockTmuxClient struct {
 	existingSessions   map[string]bool
@@ -129,11 +138,19 @@ type mockTmuxClient struct {
 	newSessionShellCmd string
 	newSessionErr      error
 
-	setOptionCalled  bool
-	setOptionSession string
-	setOptionName    string
-	setOptionValue   string
-	setOptionErr     error
+	setOptionCalls []setOptionCall
+	setOptionErr   error
+}
+
+// setOptionCallFor returns the recorded SetSessionOption call for the given
+// option name, and whether one was made.
+func (m *mockTmuxClient) setOptionCallFor(name string) (setOptionCall, bool) {
+	for _, c := range m.setOptionCalls {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return setOptionCall{}, false
 }
 
 func (m *mockTmuxClient) HasSession(name string) bool {
@@ -148,10 +165,11 @@ func (m *mockTmuxClient) NewSession(name, dir, shellCommand string) error {
 }
 
 func (m *mockTmuxClient) SetSessionOption(session, name, value string) error {
-	m.setOptionCalled = true
-	m.setOptionSession = session
-	m.setOptionName = name
-	m.setOptionValue = value
+	m.setOptionCalls = append(m.setOptionCalls, setOptionCall{
+		Session: session,
+		Name:    name,
+		Value:   value,
+	})
 	return m.setOptionErr
 }
 
@@ -444,17 +462,15 @@ func TestCreateFromDir(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if !tmuxClient.setOptionCalled {
-			t.Fatal("expected SetSessionOption to be called")
+		dirCall, ok := tmuxClient.setOptionCallFor(session.PortalDirOption)
+		if !ok {
+			t.Fatal("expected SetSessionOption to be called for @portal-dir")
 		}
-		if tmuxClient.setOptionSession != sessionName {
-			t.Errorf("stamp session = %q, want %q", tmuxClient.setOptionSession, sessionName)
+		if dirCall.Session != sessionName {
+			t.Errorf("stamp session = %q, want %q", dirCall.Session, sessionName)
 		}
-		if tmuxClient.setOptionName != session.PortalDirOption {
-			t.Errorf("stamp option name = %q, want %q", tmuxClient.setOptionName, session.PortalDirOption)
-		}
-		if tmuxClient.setOptionValue != gitRoot {
-			t.Errorf("stamp value = %q, want %q", tmuxClient.setOptionValue, gitRoot)
+		if dirCall.Value != gitRoot {
+			t.Errorf("stamp value = %q, want %q", dirCall.Value, gitRoot)
 		}
 	})
 
@@ -499,10 +515,14 @@ func TestCreateFromDir(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if tmuxClient.setOptionValue != gitRoot {
-			t.Errorf("stamp value = %q, want resolved git root %q", tmuxClient.setOptionValue, gitRoot)
+		dirCall, ok := tmuxClient.setOptionCallFor(session.PortalDirOption)
+		if !ok {
+			t.Fatal("expected SetSessionOption to be called for @portal-dir")
 		}
-		if tmuxClient.setOptionValue == subDir {
+		if dirCall.Value != gitRoot {
+			t.Errorf("stamp value = %q, want resolved git root %q", dirCall.Value, gitRoot)
+		}
+		if dirCall.Value == subDir {
 			t.Errorf("stamp value must not be the input subdir %q", subDir)
 		}
 	})
@@ -523,8 +543,132 @@ func TestCreateFromDir(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if tmuxClient.setOptionCalled {
+		if len(tmuxClient.setOptionCalls) != 0 {
 			t.Error("SetSessionOption must not be called when NewSession fails")
+		}
+	})
+
+	t.Run("stamps @portal-id with a fresh token after creating a session", func(t *testing.T) {
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{existingSessions: map[string]bool{}}
+		gen := func() (string, error) { return "abc123", nil }
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		sessionName, err := creator.CreateFromDir(dir, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		idCall, ok := tmuxClient.setOptionCallFor(session.PortalIDOption)
+		if !ok {
+			t.Fatal("expected SetSessionOption to be called for @portal-id")
+		}
+		if idCall.Session != sessionName {
+			t.Errorf("stamp session = %q, want %q", idCall.Session, sessionName)
+		}
+		if idCall.Value != "abc123" {
+			t.Errorf("stamp value = %q, want fresh token %q", idCall.Value, "abc123")
+		}
+	})
+
+	t.Run("stamps both @portal-dir and @portal-id on a successful create", func(t *testing.T) {
+		gitRoot := t.TempDir()
+		gitResolver := &mockGitResolver{resolvedDir: gitRoot}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{existingSessions: map[string]bool{}}
+		gen := func() (string, error) { return "abc123", nil }
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		if _, err := creator.CreateFromDir(gitRoot, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if _, ok := tmuxClient.setOptionCallFor(session.PortalDirOption); !ok {
+			t.Error("expected SetSessionOption to be called for @portal-dir")
+		}
+		if _, ok := tmuxClient.setOptionCallFor(session.PortalIDOption); !ok {
+			t.Error("expected SetSessionOption to be called for @portal-id")
+		}
+	})
+
+	t.Run("returns the session name when the @portal-id stamp SetSessionOption fails", func(t *testing.T) {
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{
+			existingSessions: map[string]bool{},
+			setOptionErr:     fmt.Errorf("set-option failed"),
+		}
+		gen := func() (string, error) { return "abc123", nil }
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		sessionName, err := creator.CreateFromDir(dir, nil)
+		if err != nil {
+			t.Fatalf("@portal-id stamp failure must not fail creation, got error: %v", err)
+		}
+
+		wantName := filepath.Base(dir) + "-abc123"
+		if sessionName != wantName {
+			t.Errorf("session name = %q, want %q", sessionName, wantName)
+		}
+	})
+
+	t.Run("creates the session un-stamped when stamp-time token generation fails", func(t *testing.T) {
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{existingSessions: map[string]bool{}}
+		// The generator succeeds for the session-name generation (first call in
+		// PrepareSession) and fails on the stamp-time call (second).
+		calls := 0
+		gen := func() (string, error) {
+			calls++
+			if calls == 1 {
+				return "abc123", nil
+			}
+			return "", fmt.Errorf("random source exhausted")
+		}
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		sessionName, err := creator.CreateFromDir(dir, nil)
+		if err != nil {
+			t.Fatalf("stamp-time token generation failure must not fail creation, got error: %v", err)
+		}
+
+		wantName := filepath.Base(dir) + "-abc123"
+		if sessionName != wantName {
+			t.Errorf("session name = %q, want %q", sessionName, wantName)
+		}
+
+		if _, ok := tmuxClient.setOptionCallFor(session.PortalIDOption); ok {
+			t.Error("@portal-id must not be stamped when stamp-time token generation fails")
+		}
+	})
+
+	t.Run("does not stamp @portal-id when NewSession fails", func(t *testing.T) {
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{
+			existingSessions: map[string]bool{},
+			newSessionErr:    fmt.Errorf("tmux error"),
+		}
+		gen := func() (string, error) { return "abc123", nil }
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		_, err := creator.CreateFromDir(dir, nil)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if _, ok := tmuxClient.setOptionCallFor(session.PortalIDOption); ok {
+			t.Error("@portal-id must not be stamped when NewSession fails")
 		}
 	})
 

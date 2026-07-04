@@ -22,8 +22,15 @@ type Index struct {
 }
 
 // Session captures a single tmux session: its name, environment, and windows.
+//
+// PortalID carries the session's immutable @portal-id (portal_id), persisted so
+// a renamed session's hook key survives a reboot — tmux user-options are
+// in-memory server state and do not outlive the reboot gap. An absent field
+// decodes to "" (a legacy/un-stamped session), which restore treats as the
+// name-fallback path.
 type Session struct {
 	Name        string            `json:"name"`
+	PortalID    string            `json:"portal_id"`
 	Environment map[string]string `json:"environment"`
 	Windows     []Window          `json:"windows"`
 }

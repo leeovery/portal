@@ -16,11 +16,11 @@ package cmd
 // to a single site eliminates the drift class where a reword at one site
 // silently passes against an un-reworded sibling.
 //
-// Both callers treat a non-nil err from ListAllPanes as Warn-and-continue:
+// Both callers treat a non-nil err from ListAllPaneHookKeys as Warn-and-continue:
 // the helper emits the "stale-hook cleanup: list-panes failed" Warn to
 // portal.log for post-hoc audit and returns nil, so a transient tmux read
 // never fails the daemon tick or the user's command. There is no policy
-// parameter — neither live caller wants a propagated ListAllPanes error.
+// parameter — neither live caller wants a propagated ListAllPaneHookKeys error.
 // hookStore.Load and store.CleanStale errors DO propagate (return err); each
 // live caller handles that non-nil return itself (the daemon logs WARN and
 // swallows; portal clean discards it after the canonical Warn is already in
@@ -33,7 +33,7 @@ package cmd
 //     pre-extraction contract byte-for-byte.
 //
 // Algorithm:
-//   1. ListAllPanes. On error emit Warn and return nil (Warn-and-continue).
+//   1. ListAllPaneHookKeys. On error emit Warn and return nil (Warn-and-continue).
 //      The entry-point Debug is NOT emitted on this branch (terminal-Warn-only
 //      branch).
 //   2. store.Load. On error emit Warn, return err. The destructive
@@ -68,7 +68,7 @@ import (
 // package-doc-style block above for the full algorithm description and design
 // rationale.
 //
-// A non-nil err from ListAllPanes is Warn-and-continue: the helper logs the
+// A non-nil err from ListAllPaneHookKeys is Warn-and-continue: the helper logs the
 // list-panes Warn and returns nil. hookStore.Load and store.CleanStale errors
 // still propagate to the caller as a non-nil return.
 //
@@ -90,7 +90,7 @@ func runHookStaleCleanup(
 		logger = bootstrapLogger
 	}
 
-	livePanes, err := lister.ListAllPanes()
+	livePanes, err := lister.ListAllPaneHookKeys()
 	if err != nil {
 		logger.Warn("stale-hook cleanup: list-panes failed", "error", err)
 		return nil

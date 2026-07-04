@@ -27,6 +27,24 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 )
 
+// recordingHookKeyLister satisfies AllPaneLister via ListAllPaneHookKeys
+// and counts invocations, proving the helper enumerates live keys through
+// the hook-key method rather than the name-based ListAllPanes.
+type recordingHookKeyLister struct {
+	panes        []string
+	err          error
+	hookKeyCalls int
+}
+
+func (r *recordingHookKeyLister) ListAllPaneHookKeys() ([]string, error) {
+	r.hookKeyCalls++
+	return r.panes, r.err
+}
+
+// Compile-time assertion that recordingHookKeyLister satisfies AllPaneLister
+// via the hook-key method.
+var _ AllPaneLister = (*recordingHookKeyLister)(nil)
+
 // TestRunHookStaleCleanup drives runHookStaleCleanup against a real
 // *hooks.Store (seeded via newTempHooksStore in bootstrap_production_test.go).
 func TestRunHookStaleCleanup(t *testing.T) {
@@ -270,6 +288,57 @@ func TestRunHookStaleCleanup(t *testing.T) {
 
 		if err := runHookStaleCleanup(lister, store, nil, nil); err != nil {
 			t.Fatalf("runHookStaleCleanup with nil logger: %v", err)
+		}
+	})
+
+	t.Run("it enumerates live keys via ListAllPaneHookKeys not ListAllPanes", func(t *testing.T) {
+		// The live-key set MUST come from the hook-key enumeration so it
+		// matches the id-keyed hooks.json entries registration writes
+		// (Task 2-2). Repointing the AllPaneLister method to
+		// ListAllPaneHookKeys makes a name-based regression a compile
+		// error; this recording stub proves the switch at the call site.
+		seed := `{"a:0.0": {"on-resume": "cmd-a"}}`
+		store, _ := newTempHooksStore(t, seed)
+
+		logger := &recordingLogger{}
+		rec := &recordingHookKeyLister{panes: []string{"a:0.0"}}
+
+		if err := runHookStaleCleanup(rec, store, logger.Logger().With("component", "bootstrap"), nil); err != nil {
+			t.Fatalf("runHookStaleCleanup: %v", err)
+		}
+
+		if rec.hookKeyCalls != 1 {
+			t.Errorf("ListAllPaneHookKeys call count = %d, want 1 (the enumeration must switch to the hook-key method)", rec.hookKeyCalls)
+		}
+	})
+
+	t.Run("it preserves a stamped-session hook whose id-key matches the live set", func(t *testing.T) {
+		// A freshly-registered stamped-session hook is keyed by @portal-id
+		// (e.g. "tok123:0.0"). The live set now carries the same id-keyed
+		// value via ListAllPaneHookKeys, so the stamped hook survives while
+		// a truly-stale entry (absent from the live set) is removed.
+		seed := `{
+  "tok123:0.0": {"on-resume": "cmd-live"},
+  "orphan:0.0": {"on-resume": "cmd-stale"}
+}`
+		store, _ := newTempHooksStore(t, seed)
+
+		logger := &recordingLogger{}
+		lister := &stubAllPaneLister{panes: []string{"tok123:0.0"}, err: nil}
+
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), nil); err != nil {
+			t.Fatalf("runHookStaleCleanup: %v", err)
+		}
+
+		postRun, err := store.Load()
+		if err != nil {
+			t.Fatalf("store.Load post-run: %v", err)
+		}
+		if _, ok := postRun["tok123:0.0"]; !ok {
+			t.Errorf("stamped-session hook tok123:0.0 was removed; want preserved (present in live set); got %v", keysOf(postRun))
+		}
+		if _, ok := postRun["orphan:0.0"]; ok {
+			t.Errorf("truly-stale hook orphan:0.0 survived; want removed; got %v", keysOf(postRun))
 		}
 	})
 }

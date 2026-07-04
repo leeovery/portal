@@ -40,9 +40,7 @@ xctl list                          # list running sessions
 
 ### Requirements
 
-- **tmux ≥ 3.0** (released Feb 2020). Portal uses array-indexed global hooks
-  (`set-hook -ga`) which require 3.0+. Earlier versions exit with
-  `Portal requires tmux ≥ 3.0 (found <version>). Please upgrade.`
+- **tmux ≥ 3.0** (released Feb 2020). Older versions are refused with a clear upgrade message.
 - **Go** (to build from source), **macOS or Linux**.
 
 **macOS**
@@ -78,11 +76,11 @@ The full tour: grouping, fuzzy filter, scrollback preview, attach. Stills below.
 | <img src="art/projects.webp" alt="Projects page" width="430"><br>**Projects** | <img src="art/edit-project.webp" alt="Edit project modal" width="430"><br>**Edit project: name, aliases, tags** |
 | <img src="art/filtering.webp" alt="Live filter" width="430"><br>**Live fuzzy filter** | <img src="art/kill-confirm.webp" alt="Kill confirmation modal" width="430"><br>**Destructive confirm** |
 
-Light mode and the `NO_COLOR` path render from the same token layer (see [Configuration](#configuration)).
+The same screens render in light mode and under `NO_COLOR` (see [Configuration](#configuration)).
 
 ## Features
 
-- **Modern Vivid TUI**: a colourful, keyboard-driven picker that owns its own light/dark canvas (auto-detected via OSC 11, or pinned via `appearance`; honours `NO_COLOR`), with an in-app `?` keymap on every page.
+- **Modern Vivid TUI**: a colourful, keyboard-driven picker that owns its own light or dark canvas (auto-detected, or pinned via `appearance`, and honours `NO_COLOR`), with an in-app `?` keymap on every page.
 - **Session grouping and tags**: flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
 - **Scrollback preview**: hit `Space` for a read-only peek at any session's saved scrollback, cycling windows and panes without attaching.
 - **Reboot-safe sessions**: starts the tmux server and restores structure, layout, working dirs, and ANSI scrollback after a reboot, optionally re-running per-pane commands via resume hooks. Replaces tmux-resurrect / tmux-continuum.
@@ -183,6 +181,8 @@ xctl alias list                      # list all aliases
 
 Register per-pane commands that re-execute automatically when a session is attached after a reboot. `hooks set` must be run from inside a tmux pane; `hooks rm` defaults to the current pane but accepts `--pane-key` to remove a hook for any pane (including ones that no longer exist).
 
+Hooks stay attached to a session even if you rename it, whether from the picker's `r` modal or an external `tmux rename-session`. A renamed session still re-runs its command after the next reboot.
+
 ```bash
 xctl hooks set --on-resume "npm start"            # register a resume hook
 xctl hooks rm --on-resume                         # remove the current pane's hook
@@ -190,12 +190,11 @@ xctl hooks rm --on-resume --pane-key 'sess:0.1'   # remove a specific entry (wor
 xctl hooks list                                   # list all hooks
 ```
 
-**When hooks fire:** Portal fires resume hooks ONLY when a pane is freshly recreated
-from saved state on reboot recovery: the tmux server has just been started fresh and
-Portal has restored sessions. Hooks do NOT fire on every detach / reattach within a
-single server lifetime. If a pane still exists, its hook process either already ran or
-was explicitly killed; firing again would double-launch long-running processes like
-`claude --resume`. This is deliberate.
+**When hooks fire:** resume hooks run only when Portal recreates a pane from saved state
+after a reboot, once the tmux server has started fresh. They do not run on an ordinary
+detach and reattach within the same server lifetime, because the pane and its process
+are still alive; re-running the hook then would launch a second copy of a long-running
+command such as a dev server.
 
 ### `xctl clean`
 
@@ -206,7 +205,7 @@ xctl clean              # prune stale projects + hooks (rotated logs preserved)
 xctl clean --logs       # also delete rotated portal.log.<date> files, keeping today's
 ```
 
-`xctl clean` preserves rotated logs by default; pass `--logs` to additionally sweep every rotated `portal.log.<date>` file (see [Logging](#logging)).
+Rotated logs are kept unless you pass `--logs` (see [Logging](#logging)).
 
 ### `xctl state`
 
@@ -243,7 +242,7 @@ portal init bash --cmd p
 
 ## TUI Keybindings
 
-Navigation is **arrows only**: there are no vim (`j`/`k`/`g`/`G`) or page-jump (`PgUp`/`Home`/…) aliases, and no uppercase bindings. Press **`?`** on any page for an in-app help modal listing that page's complete keymap.
+Navigation is **arrows only** (no vim or page-jump aliases). Press **`?`** on any page for an in-app help modal listing that page's complete keymap.
 
 | Key | Action |
 |---|---|
@@ -265,10 +264,9 @@ The TUI has three views: session list, project picker, and scrollback preview. I
 ### Scrollback Preview
 
 `Space` on the highlighted session opens a Quick Look-style preview of that
-session's saved scrollback so you can disambiguate similarly-named sessions
-without paying the attach/detach cost. The preview is read-only: opening and
-dismissing it leaves the session byte-identical (no hydration, no resume-hook
-firing, no tmux state mutation).
+session's saved scrollback, so you can tell similarly-named sessions apart
+without attaching. The preview is read-only: opening and closing it changes
+nothing about the session.
 
 | Key | Action |
 |---|---|
@@ -278,63 +276,56 @@ firing, no tmux state mutation).
 | `Enter` | Attach to this pane |
 | `Space` / `Esc` | Return to the sessions list |
 
-Each pane shows the last ~1000 lines of saved scrollback, anchored at the
-tail. Chrome shows the session name with `Window x/y · Pane x/y` and a footer
-of key hints, in a distinct cyan "peek mode" frame so a preview never looks
-like a live session. A pane that has no saved content yet (brand-new session,
-daemon hasn't ticked) renders `(no saved content)`.
+Each pane shows the last ~1000 lines of saved scrollback. The frame shows the session
+name, the current `Window x/y · Pane x/y`, and a footer of key hints, styled in a cyan
+"peek mode" so a preview never looks like a live session. A pane with no saved content
+yet renders `(no saved content)`.
 
 ## Session Grouping & Tags
 
 By default the session list is flat and alphabetical. Press **`s`** on the sessions
 list to cycle the view through three modes:
 
-- **Flat**: today's list, unchanged.
-- **By Project**: a heading per directory; each session appears once under its
-  project name. Valuable with zero setup.
-- **By Tag**: a heading per tag; a session appears under *each* tag its directory
-  carries. Untagged sessions collect under a pinned **Untagged** group.
+- **Flat**: a single alphabetical list.
+- **By Project**: a heading per directory, with each session listed once under its
+  project name. Useful with no setup at all.
+- **By Tag**: a heading per tag, with a session appearing under *each* tag its
+  directory carries. Untagged sessions collect under a pinned **Untagged** group.
 
-The cycle is unconditional (it always includes By Tag, even with no tags or no
-sessions) and the last-used mode is remembered across launches in `prefs.json`.
-Group headers are dimmed, non-selectable, and show a count; the cursor only ever
-lands on sessions. While the `/` filter is active the list flattens to matching
-sessions and the headers step aside, restoring when the filter clears.
+Portal remembers the last-used mode across launches in `prefs.json`. Group headers are
+dimmed, non-selectable, and show a count, and the cursor only ever lands on sessions.
+While the `/` filter is active the list flattens to matching sessions and the headers
+step aside, returning when the filter clears.
 
-**Tags live on directories (projects), not individual sessions.** Every session
-opened in a directory inherits that directory's tags via a live lookup, so there is
-nothing to tag per session. Tags are freeform and trimmed, but **case-sensitive**
-(`Work` and `work` are different tags; the text is stored exactly as typed);
-applying a tag to a second directory auto-joins that group, and removing the last
-use of a tag makes the group disappear. There is no tag registry and no `tags`
-CLI in v1.
+**Tags live on directories (projects), not individual sessions.** Every session opened
+in a directory inherits that directory's tags, so there is nothing to tag per session.
+Tags are freeform and trimmed, but **case-sensitive**: `Work` and `work` are different
+tags, and each is stored exactly as typed. Applying a tag to a second directory adds it
+to that group, and removing a tag's last use makes the group disappear.
 
-**Managing tags:** open the projects picker (`x`, then switch to projects with
-`x`), highlight a project, and edit it. The edit modal has **Name**, **Aliases**,
-and **Tags** fields. `Tab` (or `↑`/`↓`) moves between them and `←`/`→` between
-chips and the trailing `+ add` slot. To add a tag, land on `+ add` and press
-`Enter` (or `+`), type it, and `Enter` to save; press `x` on a chip to remove it.
-Every edit **saves immediately**: there is no separate confirm step, and `Esc`
-never discards saved work (it just backs out the current edit or closes the
-modal). Only directories already opened in Portal (i.e. known projects) are
-taggable, so open a directory once, then tag it.
+**Managing tags:** open the projects picker (press `x`, then `x` again to switch from
+sessions to projects), highlight a project, and edit it. The edit modal has **Name**,
+**Aliases**, and **Tags** fields. `Tab` (or `↑`/`↓`) moves between fields, and `←`/`→`
+moves between chips and the trailing `+ add` slot. To add a tag, land on `+ add`, press
+`Enter` (or `+`), type the tag, and press `Enter` to save; press `x` on a chip to remove
+it. Every edit saves immediately, with no separate confirm step, and `Esc` never
+discards saved work: it just backs out the current edit or closes the modal. Only
+directories already opened in Portal are taggable, so open a directory once before
+tagging it.
 
 ## Automatic Server Bootstrap & Restoration
 
-Portal automatically starts the tmux server if absent AND restores saved sessions
-in the same bootstrap step. After a reboot, your sessions return with structure,
-layout, zoom, working directories, and scrollback (including ANSI colour). On any
-tmux-needing command, Portal checks the server, starts it if missing, and re-creates
-saved sessions that aren't already live. Scrollback injects lazily when you attach.
-Resume hooks fire on freshly-recreated panes. The TUI shows a "Restoring sessions…"
-loading screen for at most ~1.2s; the CLI is silent.
+Whenever you run a command that needs tmux, Portal checks that the server is running and
+starts it if it is not. In the same step it re-creates any saved sessions that are not
+already live, so after a reboot your sessions come back with their structure, layout,
+zoom, and working directories intact. Scrollback (including ANSI colour) loads as you
+attach, and resume hooks run on the recreated panes.
 
-Replaces tmux-continuum / tmux-resurrect for session persistence. Uninstall those
-plugins if you have them (or set `@continuum-restore off` for tmux-resurrect/continuum)
-to avoid duplicate restoration.
+This replaces tmux-continuum and tmux-resurrect for session persistence. If you have
+either installed, remove it (or set `@continuum-restore off`) to avoid restoring twice.
 
-Pair this with [resume hooks](#xctl-hooks) to automatically re-run pane commands
-(dev servers, editors, etc.) after a reboot.
+Pair restoration with [resume hooks](#xctl-hooks) to re-run pane commands such as dev
+servers and editors after a reboot.
 
 ## Configuration
 
@@ -350,7 +341,7 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 
 Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
 
-**Appearance.** Portal paints its own light or dark canvas so its colours always sit on the surface they were tuned for. By default (`"appearance": "auto"`) it detects your terminal's background via an OSC 11 query and matches it, falling back to dark if the terminal doesn't answer. Set `"appearance": "light"` or `"dark"` in `prefs.json` to pin the canvas and skip detection (useful when detection misfires, e.g. under tmux passthrough). Setting `NO_COLOR` (to any non-empty value) disables the canvas entirely and renders colourlessly on your terminal's native colours.
+**Appearance.** Portal paints its own light or dark canvas so its colours always sit on the surface they were tuned for. By default (`"appearance": "auto"`) it detects your terminal's background and matches it, falling back to dark if the terminal doesn't answer. Set `"appearance": "light"` or `"dark"` in `prefs.json` to pin the canvas and skip detection, which helps when auto-detection misfires (for example under tmux passthrough). Setting `NO_COLOR` to any non-empty value disables the canvas and renders on your terminal's native colours.
 
 ## Logging
 
@@ -391,15 +382,14 @@ mode `0600`, directories `0700`.
 Two paths depending on whether you want to keep your saved state:
 
 - **Just remove the binary:** `brew uninstall portal` or `rm $(which portal)`.
-  The defensive `command -v portal` guard in the registered tmux hooks
-  short-circuits when the binary is gone, so tmux keeps running normally. Your
-  saved state is preserved; reinstalling Portal picks up where it left off.
-- **Explicit teardown:** run `portal state cleanup` (kills the daemon and
-  removes Portal's tmux hook entries), or `portal state cleanup --purge` to
-  also wipe saved state under `~/.config/portal/state/`. Then uninstall the
-  binary. Use `--purge` for a completely clean slate. Non-state config
-  (`hooks.json`, `projects.json`, `aliases`) is preserved either way; remove
-  manually if desired.
+  Portal's tmux hooks check for the binary before they run, so tmux keeps working
+  normally once it is gone. Your saved state is preserved, and reinstalling picks
+  up where it left off.
+- **Explicit teardown:** run `portal state cleanup` (kills the daemon and removes
+  Portal's tmux hook entries), or `portal state cleanup --purge` to also wipe saved
+  state under `~/.config/portal/state/`. Then uninstall the binary. Non-state config
+  (`hooks.json`, `projects.json`, `aliases`) is preserved either way; remove it
+  manually if you want.
 
 ## License
 

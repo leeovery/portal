@@ -109,14 +109,14 @@ func (r *recordingLogger) Handle(_ context.Context, rec slog.Record) error {
 // Compile-time assertion that recordingLogger satisfies slog.Handler.
 var _ slog.Handler = (*recordingLogger)(nil)
 
-// stubAllPaneLister returns canned panes/err pairs from ListAllPanes.
+// stubAllPaneLister returns canned panes/err pairs from ListAllPaneHookKeys.
 type stubAllPaneLister struct {
 	panes []string
 	err   error
 }
 
-// ListAllPanes returns the canned panes/err pair.
-func (s *stubAllPaneLister) ListAllPanes() ([]string, error) {
+// ListAllPaneHookKeys returns the canned panes/err pair.
+func (s *stubAllPaneLister) ListAllPaneHookKeys() ([]string, error) {
 	return s.panes, s.err
 }
 

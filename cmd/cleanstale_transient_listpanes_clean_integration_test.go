@@ -2,7 +2,7 @@
 
 // End-to-end integration coverage for the `portal clean` command's
 // hook-cleanup tail (cmd/clean.go ~lines 75-141) — now the sole
-// destructive consumer of ListAllPanes wired through runHookStaleCleanup
+// destructive consumer of ListAllPaneHookKeys wired through runHookStaleCleanup
 // (the former bootstrap-step callsite was removed when hooks stale-cleanup
 // left the orchestrator). This file drives cleanCmd.RunE so a regression
 // in that destructive call path fails loudly under the simulated tmux
@@ -12,7 +12,7 @@
 // the `portal clean` analogue:
 //
 //   - mode_a_list_panes_exit_nonzero — `list-panes -a` returns
-//     ("", err); RunE hits the err-from-ListAllPanes branch, emits the
+//     ("", err); RunE hits the err-from-ListAllPaneHookKeys branch, emits the
 //     propagated-error Warn, returns nil (silence-and-continue at the
 //     user boundary), and hooks.json is byte-identical. The entry-point
 //     Debug ("stale-hook cleanup counts ...") MUST be absent — the err
@@ -79,13 +79,13 @@ import (
 	"github.com/leeovery/portal/internal/transienttest"
 )
 
-// panickingPaneLister is an AllPaneLister whose ListAllPanes panics on
+// panickingPaneLister is an AllPaneLister whose ListAllPaneHookKeys panics on
 // invocation. Used by the persisted_empty_early_exit subtest to
 // structurally prove the early-exit branch never reaches the lister.
 type panickingPaneLister struct{}
 
-func (panickingPaneLister) ListAllPanes() ([]string, error) {
-	panic("ListAllPanes must not be invoked when persisted==0 (early-exit branch)")
+func (panickingPaneLister) ListAllPaneHookKeys() ([]string, error) {
+	panic("ListAllPaneHookKeys must not be invoked when persisted==0 (early-exit branch)")
 }
 
 // setupCleanTransientEnv is the portal-clean callsite's env-builder.
@@ -144,7 +144,7 @@ func assertNoStaleHookRemovalsOnStdout(t *testing.T, output string, seededKeys .
 }
 
 // TestPortalClean_TmuxTransient_DoesNotWipeHooks pins the `portal clean`
-// hook-cleanup tail — now the sole destructive consumer of ListAllPanes
+// hook-cleanup tail — now the sole destructive consumer of ListAllPaneHookKeys
 // (the former bootstrap-step callsite was removed when hooks stale-cleanup
 // left the orchestrator) — so a regression at this destructive site fails
 // loudly under tmux transient.
@@ -287,7 +287,7 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 		}
 
 		// Inject a panicking lister to structurally prove the
-		// early-exit branch never invokes ListAllPanes.
+		// early-exit branch never invokes ListAllPaneHookKeys.
 		installCleanDepsForLister(t, panickingPaneLister{})
 
 		// runPortalClean swallows panics in goroutines but a panic in

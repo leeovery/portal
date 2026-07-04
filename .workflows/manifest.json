@@ -146,6 +146,9 @@
     },
     "skip-bootstrap-when-warm": {
       "work_type": "feature"
+    },
+    "session-rename-orphans-resume-hook": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
