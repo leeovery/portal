@@ -148,7 +148,7 @@
     "review": {
       "items": {
         "skip-bootstrap-when-warm": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "skip-bootstrap-when-warm-1-1",
             "skip-bootstrap-when-warm-1-2",
