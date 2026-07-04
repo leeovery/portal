@@ -214,7 +214,10 @@ func TestEnsureSaverLiveness_LogsWarnWithUnderlyingErrorWhenReviveFails(t *testi
 
 	ensureSaverLiveness(tmux.NewClient(cmder), t.TempDir())
 
-	if n := countLines(sink, "WARN", "component=bootstrap", "abridged EnsureSaver", "error="); n != 1 {
+	// Assert the WARN carries the UNDERLYING cause, not merely some error attr:
+	// the failing revive op returns errors.New("create denied"), whose leaf text
+	// survives BootstrapPortalSaver's %w wrapping into the rendered error= value.
+	if n := countLines(sink, "WARN", "component=bootstrap", "abridged EnsureSaver", "error=", "create denied"); n != 1 {
 		t.Errorf("expected exactly one bootstrap-component WARN carrying the underlying error, got %d in:\n%s", n, sink.Body())
 	}
 
