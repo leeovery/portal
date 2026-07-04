@@ -39,9 +39,11 @@ Tests adequately verify requirements without over-testing. Branch selection, sof
 
 ## Recommendations
 
+> **Applied during the review session** (do not re-action): item **1** (all do-now doc edits) and item **4** (abridged-saver WARN assertion). Items **2**, **3**, **5**, **6** remain open and were **not** surfaced to inbox.
+
 ### Do now
 
-1. **Documentation staleness — post-10-step / signature-drop sweep** (all zero-risk doc edits)
+1. ✅ **Applied.** **Documentation staleness — post-10-step / signature-drop sweep** (all zero-risk doc edits)
    - `cmd/state_daemon.go:26-29` — struct header comment lists tick-mutable fields (`HashMap`, `PrevIndex`, `LastSaveAt`) but omits `lastCleanup`, which `maybeRunHookCleanup` rewrites each cadence; add it (Report 3-1)
    - `cmd/state_daemon.go:421` — `maybeRunHookCleanup` doc still says "here it is standalone"; task 3-3 shipped the gate at `:381`, so reword (e.g. "Placed on the tick's idle branch by task 3-3; independently unit-tested here.") (Report 3-2)
    - `cmd/bootstrap_production.go:5,7` — file-level doc block still lists "internal/hooks" in the wiring and dependency-free sentences; the file no longer references it (grep confirms comment-only), so drop "and internal/hooks" from both (Report 1-3)
@@ -55,7 +57,7 @@ Tests adequately verify requirements without over-testing. Branch selection, sof
    - Extract a shared `waitForDaemonGone(client, oldPID, budget) bool` — the daemon-death poll loop is duplicated with `concurrent_coldboot_integration_test.go:166-178` (lines 135-145) (Report 2-4)
    - Narrow `setupAbridgedEnv`'s return signature — all six callers discard `ts` and `envSlice` (lines 64, 97) (Report 2-4)
 3. `cmd/state_daemon.go:50` — rename `lastCleanup` → `LastCleanup` to match its exported loop-mutated sibling `LastSaveAt`; cosmetic on a package-private struct, touches refs at `:400/409/418/426/432/727/730` and `state_daemon_test.go:950/955` (Report 3-1)
-4. `cmd/abridged_saver_test.go:217` — the revive-failure WARN assertion matches only the `error=` key; add the underlying error's rendered content to the substrings so it proves the WARN carries the underlying cause (validate the substring against real render output, as the value may be wrapped by `createPortalSaverWithRetry`) (Report 5-2)
+4. ✅ **Applied.** `cmd/abridged_saver_test.go:217` — the revive-failure WARN assertion matches only the `error=` key; add the underlying error's rendered content to the substrings so it proves the WARN carries the underlying cause (validate the substring against real render output, as the value may be wrapped by `createPortalSaverWithRetry`) (Report 5-2)
 
 ### Ideas
 
