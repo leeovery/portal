@@ -26,7 +26,8 @@ import (
 //
 // HashMap and PrevIndex are mutable across ticks and updated by the loop —
 // HashMap by WriteScrollbackIfChanged, PrevIndex by captureAndCommit.
-// LastSaveAt is updated by tick when a capture-and-commit succeeds.
+// LastSaveAt is updated by tick when a capture-and-commit succeeds; lastCleanup
+// is rewritten by maybeRunHookCleanup each time the throttled cleanup fires.
 type daemonDeps struct {
 	Dir     string
 	Version string
@@ -418,7 +419,7 @@ func tick(ctx context.Context, deps *daemonDeps) {
 // lastCleanup is left untouched (there is nothing to throttle), so the capture
 // path is entirely undisturbed.
 //
-// Task 3-3 places this on the tick's idle branch; here it is standalone.
+// Placed on the tick's idle branch by task 3-3; independently unit-tested here.
 func maybeRunHookCleanup(deps *daemonDeps) {
 	if deps.HookStore == nil {
 		return

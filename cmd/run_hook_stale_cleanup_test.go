@@ -27,11 +27,8 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 )
 
-// newTempHooksStoreForHelper writes seed JSON to a fresh temp dir's
-// hooks.json and returns a real *hooks.Store pointed at that file plus
-// the absolute path. Mirrors the helper formerly used by the deleted
-// cleanStaleAdapterT mirror suite (newTempHooksStore) — re-declared here
-// so this file can stand on its own once cleanStaleAdapterT is removed.
+// TestRunHookStaleCleanup drives runHookStaleCleanup against a real
+// *hooks.Store (seeded via newTempHooksStore in bootstrap_production_test.go).
 func TestRunHookStaleCleanup(t *testing.T) {
 	// Post-migration terse messages (data lives in slog attrs):
 	const entryDebugFmt = "stale-hook cleanup counts"

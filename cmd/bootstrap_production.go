@@ -2,9 +2,9 @@ package cmd
 
 // Production-shape adapters that wire the bootstrap.Orchestrator step
 // interfaces to their concrete implementations across internal/tmux,
-// internal/restore, internal/state, and internal/hooks. Kept in cmd/
+// internal/restore, and internal/state. Kept in cmd/
 // (rather than cmd/bootstrap) so the bootstrap package stays free of
-// dependencies on internal/restore, internal/state, and internal/hooks
+// dependencies on internal/restore and internal/state
 // — the orchestrator owns ordering and the adapters own composition.
 //
 // Adapters split across two homes by reusability:
