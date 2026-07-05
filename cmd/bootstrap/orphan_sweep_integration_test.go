@@ -134,8 +134,8 @@ func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) 
 	//    multiple `portal state daemon` processes the orchestrator
 	//    must see and kill — while staying compatible with Component
 	//    C's singleton guarantee on the saver's state dir.
-	orphan1, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
-	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
+	orphan1, _ := portaltest.SpawnIsolatedDaemon(t, envSlice, sock.SocketPath())
+	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice, sock.SocketPath())
 
 	// 3. Precondition: pgrep -fxc must reach 3 before we invoke the
 	//    sweep. Without this barrier the sweep can race the orphan

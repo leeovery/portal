@@ -83,3 +83,69 @@ func owns(pids []int) map[int]bool {
 	}
 	return m
 }
+
+// TestPgrepSandbox_RegistryEnvActivatesCrossProcess proves the subprocess leg
+// of the safety property: a process with NO in-process registrations (a
+// test-spawned `portal` binary running its bootstrap sweep) is still
+// default-deny filtered when SandboxRegistryEnv is set. Ownership comes only
+// from the current daemon.pid of each state dir listed in the registry file;
+// an unregistered pid (the developer's real daemon) is dropped. Also pins the
+// two failure-shape defaults: env set + missing file → enabled with zero
+// owned (kill nothing), and env unset → pass-through.
+func TestPgrepSandbox_RegistryEnvActivatesCrossProcess(t *testing.T) {
+	t.Cleanup(ResetDaemonSandbox)
+	ResetDaemonSandbox() // simulate a fresh subprocess: no in-process state
+
+	const foreign = 999001
+	const dirPID = 999003
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "daemon.pid"), []byte(strconv.Itoa(dirPID)+"\n"), 0o600); err != nil {
+		t.Fatalf("seed daemon.pid: %v", err)
+	}
+	registry := filepath.Join(t.TempDir(), "sandbox-registry")
+	if err := os.WriteFile(registry, []byte(dir+"\n"), 0o600); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	t.Setenv(SandboxRegistryEnv, registry)
+
+	got := owns(sandboxFilterPgrep([]int{foreign, dirPID}))
+	if got[foreign] {
+		t.Fatalf("SANDBOX BREACH (cross-process): unregistered pid %d survived a registry-only filter; got=%v", foreign, got)
+	}
+	if !got[dirPID] {
+		t.Errorf("registry-owned pid %d wrongly dropped; got=%v", dirPID, got)
+	}
+
+	// Dynamic re-read: a dir appended AFTER the first enumeration (the
+	// SpawnIsolatedDaemon orphan case) is honoured on the next one.
+	dir2 := t.TempDir()
+	const dir2PID = 999005
+	if err := os.WriteFile(filepath.Join(dir2, "daemon.pid"), []byte(strconv.Itoa(dir2PID)+"\n"), 0o600); err != nil {
+		t.Fatalf("seed daemon.pid 2: %v", err)
+	}
+	f, err := os.OpenFile(registry, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open registry append: %v", err)
+	}
+	if _, err := f.WriteString(dir2 + "\n"); err != nil {
+		t.Fatalf("append registry: %v", err)
+	}
+	_ = f.Close()
+	got = owns(sandboxFilterPgrep([]int{foreign, dirPID, dir2PID}))
+	if !got[dir2PID] || got[foreign] {
+		t.Errorf("post-append enumeration wrong: want %d and %d owned, %d dropped; got=%v", dirPID, dir2PID, foreign, got)
+	}
+
+	// Env set but file missing → enabled, zero owned: nothing survives.
+	t.Setenv(SandboxRegistryEnv, filepath.Join(t.TempDir(), "does-not-exist"))
+	if got := sandboxFilterPgrep([]int{foreign, dirPID}); len(got) != 0 {
+		t.Fatalf("missing registry file must mean default-deny (zero owned); got=%v", got)
+	}
+
+	// Env unset + sandbox disabled → production pass-through.
+	t.Setenv(SandboxRegistryEnv, "")
+	if got := sandboxFilterPgrep([]int{foreign, dirPID}); len(got) != 2 {
+		t.Fatalf("unset env + disabled sandbox must be pass-through; got=%v", got)
+	}
+}

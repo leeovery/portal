@@ -233,7 +233,7 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	// all three daemons stay live long enough for pgrep to observe
 	// N=3. pgrep's argv match is system-wide, so all three still
 	// appear in `pgrep -fx '^portal state daemon( |$)'`.
-	orphan1, orphan1StateDir := portaltest.SpawnIsolatedDaemon(t, envSlice)
+	orphan1, orphan1StateDir := portaltest.SpawnIsolatedDaemon(t, envSlice, sock.SocketPath())
 	// Wait until orphan 1 writes daemon.pid in its OWN stateDir. This
 	// is the precondition for the next step: we cannot overwrite the
 	// legitimate stateDir's daemon.pid with orphan 1's PID until we
@@ -260,7 +260,7 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	// "recorded" orphan in the reporter scenario. Orphan 2 is the
 	// "second loose orphan" that Component B's pgrep sweep must
 	// independently observe and kill.
-	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
+	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice, sock.SocketPath())
 
 	// Step 8: pre-assertions. These prove the harness produces the
 	// documented preconditions before any consumer touches it. A

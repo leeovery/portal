@@ -1,3 +1,5 @@
+//go:build integration
+
 package tmux_test
 
 // Real-tmux integration tests for spec § Component F acceptance bullets

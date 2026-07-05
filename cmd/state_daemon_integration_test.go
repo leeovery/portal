@@ -1,3 +1,5 @@
+//go:build integration
+
 package cmd_test
 
 // Real-tmux integration test pinning Defect 2's daemon-responsiveness
@@ -47,6 +49,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/portalbintest"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -175,7 +178,9 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
 
-	stateDir := t.TempDir()
+	// Full isolation posture (HOME/XDG scrub + fingerprint backstop +
+	// sandbox registry riding os.Environ into the daemon subprocess).
+	_, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-daemon-sighup-")

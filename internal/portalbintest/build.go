@@ -12,7 +12,7 @@
 //   - ProjectRoot — repo-root resolver (walks up from CWD to find go.mod).
 //   - BuildPortalBinary — pure error-returning `go build .` wrapper.
 //   - StagePortalBinary — t.Helper-flavoured build + PATH-prepend +
-//     exec.LookPath composition used by default-lane real-tmux
+//     exec.LookPath composition used by real-tmux
 //     integration tests.
 //
 // Production code must not import this package.
@@ -73,7 +73,7 @@ func BuildPortalBinary(dir string) error {
 // directory holding the built binary.
 //
 // Skip semantics mirror the inlined preambles previously duplicated
-// across the default-lane real-tmux integration tests: a `go build`
+// across the real-tmux integration tests: a `go build`
 // failure (no `go` on PATH, compile error) is a clean t.Skipf, as is
 // a post-prepend exec.LookPath miss. Neither escalates to t.Fatal —
 // the invariants these tests pin are structural, not "build works".
@@ -99,13 +99,21 @@ func StagePortalBinary(t *testing.T) string {
 // by BuildPortalBinary and the integration-tagged wrappers in
 // restoretest (BuildPortalBinaryDir, BuildPortalBinaryStable) so the
 // underlying `go build` invocation lives in one place.
+//
+// -tags integration is LOAD-BEARING: it compiles the daemon-pgrep test
+// sandbox (internal/state/pgrep_sandbox.go) into the staged binary, so a
+// test-driven subprocess bootstrap's orphan sweep honours the
+// cross-process ownership registry (state.SandboxRegistryEnv, injected by
+// portaltest.IsolateStateForTest) and can never enumerate — and therefore
+// never SIGKILL — the developer's live `portal state daemon`. The shipped
+// release binary is built WITHOUT the tag and contains none of this.
 func buildPortalBinaryInto(dir string) error {
 	binary := filepath.Join(dir, "portal")
 	root, err := ProjectRoot()
 	if err != nil {
 		return fmt.Errorf("locate project root: %w", err)
 	}
-	cmd := exec.Command("go", "build", "-o", binary, ".")
+	cmd := exec.Command("go", "build", "-tags", "integration", "-o", binary, ".")
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("go build: %v\n%s", err, out)

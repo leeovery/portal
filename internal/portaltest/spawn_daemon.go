@@ -20,6 +20,7 @@ package portaltest
 // `go build .` for the main binary.
 
 import (
+	"os"
 	"os/exec"
 	"testing"
 
@@ -28,10 +29,18 @@ import (
 
 // SpawnIsolatedDaemon launches a `portal state daemon` subprocess with
 // the supplied envSlice plus a per-call PORTAL_STATE_DIR pinned to a
-// fresh t.TempDir(). Returns the started *exec.Cmd and the orphan's
-// stateDir. Registers a guaranteed Kill+reap cleanup via
-// RegisterSubprocessCleanup so the subprocess cannot leak across
-// tests.
+// fresh t.TempDir() and TMUX pinned to tmuxSocketPath (the caller's
+// per-test tmuxtest socket — REQUIRED, fatal if empty). Returns the
+// started *exec.Cmd and the orphan's stateDir. Registers a guaranteed
+// Kill+reap cleanup via RegisterSubprocessCleanup so the subprocess
+// cannot leak across tests.
+//
+// TMUX pinning is load-bearing isolation: the test process usually runs
+// inside the developer's real tmux, and a daemon inheriting that TMUX
+// (or falling back to the default socket) attaches to the REAL server —
+// ticking against, and capture-paning, the developer's live sessions.
+// Appending TMUX after envSlice wins (exec.Cmd env dedupe is last-wins),
+// overriding IsolateStateForTest's poison entry.
 //
 // The unqualified `"portal"` argv[0] is LOAD-BEARING. Darwin's ps
 // reports argv[0] as `comm` (truncated to 15 chars), and
@@ -54,11 +63,16 @@ import (
 // overwrites) should NOT use this helper — spawn directly so the
 // stateDir is controlled by the caller, then wrap the *exec.Cmd in
 // RegisterSubprocessCleanup.
-func SpawnIsolatedDaemon(t *testing.T, envSlice []string) (*exec.Cmd, string) {
+func SpawnIsolatedDaemon(t *testing.T, envSlice []string, tmuxSocketPath string) (*exec.Cmd, string) {
 	t.Helper()
+	if tmuxSocketPath == "" {
+		t.Fatalf("portaltest: SpawnIsolatedDaemon requires the test's tmux socket path — " +
+			"an orphan without one would attach to the developer's real tmux server")
+	}
 	stateDir := t.TempDir()
 	env := append([]string{}, envSlice...)
 	env = append(env, "PORTAL_STATE_DIR="+stateDir)
+	env = append(env, "TMUX="+tmuxSocketPath+",0,0")
 	cmd := exec.Command("portal", "state", "daemon")
 	cmd.Env = env
 	if err := cmd.Start(); err != nil {
@@ -71,7 +85,36 @@ func SpawnIsolatedDaemon(t *testing.T, envSlice []string) (*exec.Cmd, string) {
 	// daemon.pid) and the initial PID (belt). No-op in non-integration builds.
 	state.RegisterSandboxStateDir(stateDir)
 	state.RegisterSandboxDaemon(cmd.Process.Pid)
+	// Cross-process: append the orphan's state dir to the sandbox registry
+	// file (created by IsolateStateForTest) so subprocess enumerations —
+	// e.g. a test-driven `portal list` bootstrap whose orphan sweep must
+	// converge this orphan — can see it too. The file is re-read on every
+	// enumeration, so appending after subprocess env construction is fine.
+	appendSandboxRegistryDir(t, stateDir)
 	return cmd, stateDir
+}
+
+// appendSandboxRegistryDir appends dir to the cross-process sandbox
+// registry file named by state.SandboxRegistryEnv, when set (it is set by
+// IsolateStateForTest via t.Setenv; the daemon-spawning convention requires
+// that helper, so absence just means there is no registry to extend).
+func appendSandboxRegistryDir(t *testing.T, dir string) {
+	t.Helper()
+	path := os.Getenv(state.SandboxRegistryEnv)
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("portaltest: open sandbox registry for append: %v", err)
+	}
+	if _, err := f.WriteString(dir + "\n"); err != nil {
+		_ = f.Close()
+		t.Fatalf("portaltest: append sandbox registry: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("portaltest: close sandbox registry: %v", err)
+	}
 }
 
 // RegisterSubprocessCleanup arranges a guaranteed SIGKILL + reap for

@@ -1,3 +1,5 @@
+//go:build integration
+
 package cmd_test
 
 // Real-tmux integration regression test pinning the

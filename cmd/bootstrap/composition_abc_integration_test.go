@@ -144,8 +144,8 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 	//    comment for the full rationale (mirrors the 4-5 / orphan_sweep
 	//    pattern). pgrep's argv match is system-wide, so all three
 	//    daemons still appear in `pgrep -fx '^portal state daemon( |$)'`.
-	orphan1, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
-	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
+	orphan1, _ := portaltest.SpawnIsolatedDaemon(t, envSlice, sock.SocketPath())
+	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice, sock.SocketPath())
 
 	// 3. Pre-state barrier: pgrep -fx must reach 3 before bootstrap
 	//    fires. On timeout, surface a diagnostic citing all three PIDs

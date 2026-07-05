@@ -46,6 +46,17 @@ import (
 // (e.g. multiple daemons sharing one state dir, where daemon.pid holds only the
 // last writer). Enable + reset are driven by IsolateStateForTest.
 //
+// CROSS-PROCESS REGISTRY — the SandboxRegistryEnv env var (see
+// sandbox_registry.go) extends the same default-deny filter to *subprocess*
+// enumerations: a test-spawned `portal` binary (built with -tags integration
+// by portalbintest) runs its bootstrap orphan sweep in a fresh process where
+// the in-process registrations above do not exist. When the env var is set,
+// sandboxFilterPgrep treats the sandbox as enabled and additionally owns the
+// current daemon.pid of every state dir listed in the registry file (re-read
+// on every enumeration, so dirs appended after spawn are honoured). An env
+// var pointing at a missing/unreadable file means "enabled, zero owned" —
+// the subprocess sweep then kills nothing, which is the safe default.
+//
 // Concurrency: the daemon test suites use no t.Parallel (package convention), so
 // within a test binary these run sequentially; the mutex guards only the
 // theoretical case of a background goroutine calling PgrepPortalDaemons during a
@@ -129,14 +140,20 @@ func ResetDaemonSandbox() {
 func sandboxFilterPgrep(pids []int) []int {
 	sandboxMu.Lock()
 	defer sandboxMu.Unlock()
-	if !sandboxEnabled {
+	registryDirs, registryActive := registrySandboxDirs()
+	if !sandboxEnabled && !registryActive {
 		return pids
 	}
-	owned := make(map[int]bool, len(sandboxOwnedPID)+len(sandboxOwnedDirs))
+	owned := make(map[int]bool, len(sandboxOwnedPID)+len(sandboxOwnedDirs)+len(registryDirs))
 	for p := range sandboxOwnedPID {
 		owned[p] = true
 	}
 	for dir := range sandboxOwnedDirs {
+		if p, ok := readDaemonPIDFile(dir); ok {
+			owned[p] = true
+		}
+	}
+	for _, dir := range registryDirs {
 		if p, ok := readDaemonPIDFile(dir); ok {
 			owned[p] = true
 		}
@@ -153,6 +170,31 @@ func sandboxFilterPgrep(pids []int) []int {
 		}
 	}
 	return out
+}
+
+// registrySandboxDirs reads the cross-process ownership registry named by
+// SandboxRegistryEnv. Returns (dirs, true) when the env var is set — an
+// unreadable or missing file yields (nil, true), i.e. sandbox active with
+// zero registry-owned dirs (default-deny) — and (nil, false) when unset.
+// Re-read on every enumeration so state dirs appended after a subprocess
+// was spawned (SpawnIsolatedDaemon orphans) are honoured.
+func registrySandboxDirs() (dirs []string, active bool) {
+	path := os.Getenv(SandboxRegistryEnv)
+	if path == "" {
+		return nil, false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, true
+	}
+	for line := range strings.SplitSeq(string(b), "\n") {
+		dir := strings.TrimSpace(line)
+		if dir == "" {
+			continue
+		}
+		dirs = append(dirs, dir)
+	}
+	return dirs, true
 }
 
 // readDaemonPIDFile reads <stateDir>/daemon.pid and returns the parsed PID.

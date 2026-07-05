@@ -1,3 +1,5 @@
+//go:build integration
+
 package cmd_test
 
 import (
@@ -6,37 +8,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/portalbintest"
 )
 
+// buildPortalBinary delegates to the canonical portalbintest builder (which
+// compiles with -tags integration — see buildPortalBinaryInto) so every
+// test-staged binary carries the daemon-pgrep sandbox. The former inlined
+// `go build` here was the one build site the sandbox tag did not cover.
 func buildPortalBinary(t *testing.T) string {
 	t.Helper()
-	binary := filepath.Join(t.TempDir(), "portal")
-	cmd := exec.Command("go", "build", "-o", binary, ".")
-	cmd.Dir = filepath.Join(getProjectRoot(t))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to build portal binary: %v\n%s", err, out)
+	dir := t.TempDir()
+	if err := portalbintest.BuildPortalBinary(dir); err != nil {
+		t.Fatalf("failed to build portal binary: %v", err)
 	}
-	return binary
-}
-
-func getProjectRoot(t *testing.T) string {
-	t.Helper()
-	// Walk up from the test file to find go.mod
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not find project root (go.mod)")
-		}
-		dir = parent
-	}
+	return filepath.Join(dir, "portal")
 }
 
 func TestPortalBinaryTmuxMissing(t *testing.T) {

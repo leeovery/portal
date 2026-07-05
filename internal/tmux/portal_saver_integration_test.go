@@ -1,3 +1,5 @@
+//go:build integration
+
 package tmux_test
 
 // Real-tmux integration tests for the saver/daemon contract. This file
@@ -66,6 +68,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/portalbintest"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -147,7 +150,10 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 	// daemon" is exec'd inside the saver session.
 	_ = portalbintest.StagePortalBinary(t)
 
-	dir := t.TempDir()
+	// Full isolation posture (HOME/XDG scrub + dev-state-dir fingerprint
+	// backstop + sandbox registry) — this file previously isolated via
+	// PORTAL_STATE_DIR alone.
+	_, dir := portaltest.IsolateStateForTest(t)
 	// The daemon resolves its state directory via PORTAL_STATE_DIR.
 	// Setting it on the test process propagates to the tmux server
 	// (forked from this process) and onward to the daemon.
@@ -283,7 +289,7 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 	// shape used by TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle.
 	_ = portalbintest.StagePortalBinary(t)
 
-	dir := t.TempDir()
+	_, dir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
 	sock := tmuxtest.New(t, "ptl-aliveabsent-")
@@ -430,7 +436,7 @@ func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T)
 
 	_ = portalbintest.StagePortalBinary(t)
 
-	dir := t.TempDir()
+	_, dir := portaltest.IsolateStateForTest(t)
 	// PORTAL_STATE_DIR propagates to the tmux server (forked from this
 	// process) and onward to the daemon binary so AcquireDaemonLock
 	// contends against the SAME daemon.lock path the sentinel holds.
@@ -747,8 +753,12 @@ func dumpDiagnostics(t *testing.T, dir string, serverPID, priorPID, currentPID i
 	// match (no output, not an error here), 2+ = pgrep error. Treat
 	// the no-match case as "nothing to dump" rather than a test
 	// failure on top of the failure we're already reporting.
-	out, _ := exec.Command("pgrep", "-fl", "portal state daemon").CombinedOutput()
-	fmt.Fprintf(&b, "pgrep -fl 'portal state daemon':\n%s", string(out))
+	// Scoped to the test's own tmux server via -P (like
+	// countDaemonChildren) so the diagnostic never enumerates the
+	// developer's live daemon — test-isolation hygiene even for
+	// read-only output.
+	out, _ := exec.Command("pgrep", "-P", strconv.Itoa(serverPID), "-fl", "portal state daemon").CombinedOutput()
+	fmt.Fprintf(&b, "pgrep -P %d -fl 'portal state daemon':\n%s", serverPID, string(out))
 
 	t.Fatalf(format+"\n\nDiagnostics:\n%s", append(args, b.String())...)
 }

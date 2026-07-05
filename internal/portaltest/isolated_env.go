@@ -109,8 +109,40 @@ func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 	// non-integration builds.
 	state.RegisterSandboxStateDir(stateDir)
 
+	// Cross-process sandbox registry: subprocesses of this test (the built
+	// `portal` binary — always compiled with -tags integration by
+	// portalbintest) run their own PgrepPortalDaemons enumerations, where the
+	// in-process registration above does not exist. The registry file extends
+	// the same default-deny ownership across the process boundary: the env
+	// var (set via t.Setenv BEFORE the env slice is derived from os.Environ,
+	// so both the returned slice and any careless os.Environ-inheriting
+	// subprocess carry it) points at a file of owned state dirs that
+	// integration-built binaries consult on every enumeration.
+	// SpawnIsolatedDaemon appends each orphan's state dir to the same file.
+	registryPath := filepath.Join(tempDir, "sandbox-registry")
+	if err := os.WriteFile(registryPath, []byte(stateDir+"\n"), 0o600); err != nil {
+		t.Fatalf("portaltest: write sandbox registry: %v", err)
+	}
+	t.Setenv(state.SandboxRegistryEnv, registryPath)
+
 	env = filterXDGConfigHome(os.Environ())
 	env = append(env, "XDG_CONFIG_HOME="+configDir)
+
+	// TMUX POISON — default-deny for the tmux server, mirroring the
+	// TestMain PORTAL_*_FILE path-poison. Test processes usually run inside
+	// the developer's real tmux, so a subprocess inheriting the ambient
+	// TMUX silently attaches to the REAL server: a `portal state daemon`
+	// orphan then ticks against (and capture-panes!) the developer's live
+	// sessions — the systemic isolation breach + load-flakiness source
+	// found while de-flaking the kill-barrier test. Subprocesses that need
+	// a server MUST append their own TMUX=<test socket>,... (exec.Cmd
+	// dedupes env last-wins, so appending after this slice overrides
+	// cleanly; SpawnIsolatedDaemon does it via its socketPath parameter).
+	// A subprocess that forgets fails LOUDLY ("error connecting to
+	// /nonexistent/...") instead of silently reaching the real server via
+	// the ambient TMUX or the default-socket fallback.
+	env = filterEnvKeys(env, "TMUX", "TMUX_PANE")
+	env = append(env, "TMUX="+PoisonedTmuxSocket+",0,0")
 
 	// Backstop: on test exit, walk the dev state dir again and fail
 	// the host *testing.T if anything diverged from the pre-snapshot.
@@ -145,18 +177,38 @@ func installBackstopCleanup(t backstopT, devStateDir string, pre map[string]Fing
 	})
 }
 
+// PoisonedTmuxSocket is the deliberately-invalid tmux socket path baked
+// into IsolateStateForTest's returned env as `TMUX=<this>,0,0`. Any
+// subprocess that should talk to a test server must override TMUX with
+// its test socket (append after the slice — exec.Cmd env dedupe is
+// last-wins); one that forgets fails loudly at connect time instead of
+// silently reaching the developer's real server.
+const PoisonedTmuxSocket = "/nonexistent/portal-test-must-set-tmux-socket"
+
 // filterXDGConfigHome returns a copy of env with every entry whose
 // key equals XDG_CONFIG_HOME removed. Matches the empty-value edge
 // case (XDG_CONFIG_HOME="") because the prefix check uses the full
 // "KEY=" form.
 func filterXDGConfigHome(env []string) []string {
-	const prefix = "XDG_CONFIG_HOME="
+	return filterEnvKeys(env, "XDG_CONFIG_HOME")
+}
+
+// filterEnvKeys returns a copy of env with every entry whose key equals
+// one of keys removed. Matches empty-value entries (KEY=) because the
+// prefix check uses the full "KEY=" form.
+func filterEnvKeys(env []string, keys ...string) []string {
 	out := make([]string, 0, len(env))
 	for _, e := range env {
-		if strings.HasPrefix(e, prefix) {
-			continue
+		drop := false
+		for _, k := range keys {
+			if strings.HasPrefix(e, k+"=") {
+				drop = true
+				break
+			}
 		}
-		out = append(out, e)
+		if !drop {
+			out = append(out, e)
+		}
 	}
 	return out
 }

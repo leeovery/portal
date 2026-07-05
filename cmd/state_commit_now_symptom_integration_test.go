@@ -1,3 +1,5 @@
+//go:build integration
+
 package cmd_test
 
 // Real-tmux integration gate pinning the canonical end-to-end symptom
@@ -42,9 +44,11 @@ package cmd_test
 // though the test exercises a subprocess. t.Parallel is forbidden
 // across the portal test suite (see CLAUDE.md).
 //
-// Default-lane integration test (no `//go:build integration` tag),
-// matching cmd/state_commit_now_reentrancy_integration_test.go and
-// cmd/state_daemon_integration_test.go.
+// Integration-lane test (`//go:build integration`), matching
+// cmd/state_commit_now_reentrancy_integration_test.go and
+// cmd/state_daemon_integration_test.go — every test that spawns a real
+// daemon or execs the built binary lives behind the tag, where the
+// daemon-pgrep sandbox is compiled in.
 
 import (
 	"context"
@@ -59,6 +63,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/portalbintest"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -338,7 +343,16 @@ type symptomFixture struct {
 func newSymptomFixture(t *testing.T, binary, binDir, sockPrefix string) symptomFixture {
 	t.Helper()
 
-	stateDir := t.TempDir()
+	// Full isolation posture: HOME/XDG scrub, dev-state-dir fingerprint
+	// backstop, in-process pgrep sandbox, and — load-bearing for THIS fixture,
+	// which execs the real binary — the cross-process sandbox registry
+	// (state.SandboxRegistryEnv, t.Setenv'd so it rides os.Environ into every
+	// portal subprocess and the tmux server spawned below). Without the
+	// registry, the subprocess `portal list` bootstrap's orphan sweep
+	// enumerates machine-wide and would SIGKILL the developer's live daemon
+	// (proven by the canary harness during the fix; the sweep runs at step 4,
+	// before EnsureSaver, so its legitimate set is empty here).
+	_, stateDir := portaltest.IsolateStateForTest(t)
 
 	// t.Setenv("PORTAL_STATE_DIR", ...) BEFORE the tmux server is
 	// spawned so the server (forked by the first sock.Run below)
@@ -366,6 +380,13 @@ func newSymptomFixture(t *testing.T, binary, binDir, sockPrefix string) symptomF
 	t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(stateDir, "hooks.json"))
 	t.Setenv("PORTAL_PROJECTS_FILE", filepath.Join(stateDir, "projects.json"))
 	t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(stateDir, "aliases"))
+
+	// Teardown-race guard: registered HERE (after IsolateStateForTest,
+	// before tmuxtest.New) so LIFO runs it AFTER kill-server SIGHUPs the
+	// test's saver pane and BEFORE the stateDir TempDir RemoveAll — the
+	// saver's graceful shutdown flush and straggler session-closed hook
+	// subprocesses otherwise race the removal ("directory not empty").
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 
 	sock := tmuxtest.New(t, sockPrefix)
 

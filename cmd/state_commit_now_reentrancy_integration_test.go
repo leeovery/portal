@@ -1,3 +1,5 @@
+//go:build integration
+
 package cmd_test
 
 // Real-tmux integration gate for the killed-session-resurrects-within-
@@ -54,6 +56,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/portalbintest"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -148,12 +151,22 @@ func TestCommitNowFromSessionClosedHook_NoDeadlockUnderRealTmux(t *testing.T) {
 	// absence of any portal-authored files under the state dir.
 	_ = portalbintest.StagePortalBinary(t)
 
-	stateDir := t.TempDir()
+	// Full isolation posture (HOME/XDG scrub + fingerprint backstop +
+	// sandbox registry for the hook-spawned portal subprocesses) — this
+	// fixture previously set only PORTAL_STATE_DIR, the weakest posture of
+	// the real-binary-spawning tests.
+	_, stateDir := portaltest.IsolateStateForTest(t)
 	// commit-now resolves its state dir via state.EnsureDir which
 	// honours PORTAL_STATE_DIR. Setting it on the test process
 	// propagates to the tmux server (forked from this process by
 	// tmuxtest.New) and onward to every hook subprocess.
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
+
+	// Teardown-race guard (see RegisterStateDirTeardownGuard): straggler
+	// hook-spawned commit-now subprocesses must not race the stateDir
+	// TempDir RemoveAll. LIFO position: after IsolateStateForTest,
+	// before tmuxtest.New.
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 
 	sock := tmuxtest.New(t, "ptl-reentr-")
 	client := sock.Client()

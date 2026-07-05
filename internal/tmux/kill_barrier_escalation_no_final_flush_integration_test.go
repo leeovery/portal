@@ -1,3 +1,5 @@
+//go:build integration
+
 package tmux_test
 
 // Real-tmux integration test for spec § Component A acceptance bullet 4:
@@ -171,8 +173,17 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 	// `_portal-saver` session on this tmux server, the daemon's
 	// saver-membership probe returns false on every tick — the
 	// orphan is structurally divergent-view from the moment it
-	// starts. It will self-eject after 3 ticks (≈ 3 s); the test
-	// budget below fits comfortably inside that window.
+	// starts. It will self-eject after 3 ticks (≈ 3 s).
+	//
+	// LOAD-FLAKE GUARD: the .bin-emergence window below races that
+	// self-eject — under host load the orphan's cold start + first
+	// capture tick can lose to the 3-tick hysteresis, in which case
+	// the orphan exits before writing anything and the poll times
+	// out. That is a scheduling symptom, not the invariant under
+	// test, so a self-ejected-before-capture orphan is respawned
+	// (bounded attempts). An orphan that is still ALIVE after the
+	// window without writing a .bin is a genuine capture failure and
+	// fails immediately.
 	//
 	// Daemon spawn shares the isolated stateDir with the test rather
 	// than getting its own (the assertion below reads scrollback
@@ -183,36 +194,65 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 	// rationale lives in one place (see portaltest/spawn_daemon.go).
 	orphanEnv := append([]string{}, envSlice...)
 	orphanEnv = append(orphanEnv, "PORTAL_STATE_DIR="+stateDir)
-	orphan := exec.Command("portal", "state", "daemon")
-	orphan.Env = orphanEnv
-	if err := orphan.Start(); err != nil {
-		t.Fatalf("start orphan daemon: %v", err)
-	}
-	orphanPID := orphan.Process.Pid
-	reaped := portaltest.RegisterSubprocessCleanup(t, orphan)
-
-	// Force a tick to capture immediately rather than waiting up to
-	// maxGap = 30 s. The daemon's tick loop reads save.requested as
-	// a dirty flag and triggers a save on the very next ticker
-	// fire when it is present.
-	if err := state.TouchSaveRequested(stateDir); err != nil {
-		t.Fatalf("touch save.requested: %v", err)
-	}
-
-	// Wait for the orphan to write ≥1 .bin under scrollback/. This
-	// is the precondition for the equality assertion — without a
-	// non-empty pre-snapshot the test would silently green-pass on
-	// a no-op orphan, which is the exact failure mode the spec
-	// names ("snapshot never taken — orphan did not write
-	// scrollback within 3 s").
+	// Pin the orphan to the TEST server (overrides the poison TMUX in
+	// envSlice; last-wins). Without this the orphan inherited the ambient
+	// TMUX and captured the developer's REAL sessions — the root cause of
+	// both this test's load-flakiness (a first tick over the real
+	// 30-session server blew the 3s emergence window) and a real-system
+	// read breach (real scrollback bytes landing in the test state dir).
+	orphanEnv = append(orphanEnv, "TMUX="+sock.SocketPath()+",0,0")
 	scrollbackDir := state.ScrollbackDir(stateDir)
-	if !tmuxtest.PollUntil(t, scrollbackEmergenceTimeout, scrollbackEmergencePollTick, func() bool {
-		return countBinFiles(scrollbackDir) >= 1
-	}) {
-		t.Fatalf("snapshot never taken — orphan did not write scrollback within %s\n"+
-			"  scrollback dir: %s\n"+
-			"  contents: %v",
-			scrollbackEmergenceTimeout, scrollbackDir, listDirSafe(scrollbackDir))
+
+	const maxOrphanAttempts = 3
+	var orphanPID int
+	var reaped <-chan struct{}
+	for attempt := 1; ; attempt++ {
+		orphan := exec.Command("portal", "state", "daemon")
+		orphan.Env = orphanEnv
+		if err := orphan.Start(); err != nil {
+			t.Fatalf("start orphan daemon: %v", err)
+		}
+		orphanPID = orphan.Process.Pid
+		reaped = portaltest.RegisterSubprocessCleanup(t, orphan)
+
+		// Force a tick to capture immediately rather than waiting up
+		// to maxGap = 30 s. The daemon's tick loop reads
+		// save.requested as a dirty flag and triggers a save on the
+		// very next ticker fire when it is present. Re-touched per
+		// attempt: the previous orphan may have consumed the flag on
+		// a tick that self-ejected before capturing.
+		if err := state.TouchSaveRequested(stateDir); err != nil {
+			t.Fatalf("touch save.requested: %v", err)
+		}
+
+		// Wait for the orphan to write ≥1 .bin under scrollback/.
+		// This is the precondition for the equality assertion —
+		// without a non-empty pre-snapshot the test would silently
+		// green-pass on a no-op orphan, which is the exact failure
+		// mode the spec names.
+		if tmuxtest.PollUntil(t, scrollbackEmergenceTimeout, scrollbackEmergencePollTick, func() bool {
+			return countBinFiles(scrollbackDir) >= 1
+		}) {
+			break
+		}
+
+		select {
+		case <-reaped:
+			// Orphan exited without capturing — the self-eject won the
+			// race (host load). Respawn unless attempts are exhausted.
+			if attempt < maxOrphanAttempts {
+				t.Logf("attempt %d/%d: orphan %d self-ejected before first capture (host load); respawning",
+					attempt, maxOrphanAttempts, orphanPID)
+				continue
+			}
+			t.Fatalf("snapshot never taken — orphan self-ejected before first capture on all %d attempts "+
+				"(host under sustained load?)\n  scrollback dir: %s\n  contents: %v",
+				maxOrphanAttempts, scrollbackDir, listDirSafe(scrollbackDir))
+		default:
+			t.Fatalf("snapshot never taken — orphan %d is ALIVE but wrote no scrollback within %s "+
+				"(genuine capture failure, not load)\n  scrollback dir: %s\n  contents: %v",
+				orphanPID, scrollbackEmergenceTimeout, scrollbackDir, listDirSafe(scrollbackDir))
+		}
 	}
 
 	// LOAD-BEARING STEP 1: pre-SIGKILL snapshot. Captured at the
