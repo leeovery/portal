@@ -6,6 +6,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 // availableCommandNames parses Cobra help output and returns the set of names
@@ -232,6 +234,17 @@ func TestStateUserFacingSubcommandsExitZero(t *testing.T) {
 			// ErrStatusUnhealthy, since an empty TempDir is an unhealthy
 			// state surface (no daemon, stale save, recent warnings).
 			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
+			// tmux isolation is equally load-bearing: the real cleanup body
+			// builds tmux.DefaultClient() (ambient TMUX = the developer's
+			// REAL server when tests run inside tmux) and kill-sessions
+			// _portal-saver — this test used to SIGHUP the developer's live
+			// daemon on every `go test ./cmd`. Inject the seam AND poison
+			// TMUX so a missed client dies loudly against a dead socket.
+			t.Setenv("TMUX", "/nonexistent/portal-state-test,0,0")
+			installStateCleanupDeps(t, &StateCleanupDeps{
+				Client:     tmux.NewClient(&recordingCommander{}),
+				Unregister: func(*tmux.Client) error { return nil },
+			})
 			rootCmd.SetOut(outBuf)
 			rootCmd.SetErr(errBuf)
 			rootCmd.SetArgs(tt.args)

@@ -140,6 +140,10 @@ func TestBootstrapPortalSaver_CleanBootstrap_EndState(t *testing.T) {
 	// env is the propagation channel that reaches both.
 	_, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	// Teardown-race guard: the saver pane daemon's SIGHUP shutdown flush
+	// must not race the stateDir TempDir RemoveAll (LIFO: runs after
+	// kill-server, before RemoveAll).
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 
 	sock := tmuxtest.New(t, "ptl-cleanboot-")
 	client := sock.Client()
@@ -284,6 +288,10 @@ func TestBootstrapPortalSaver_LockLoser_NoNoSuchSessionLogNoise(t *testing.T) {
 
 	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	// Teardown-race guard: the saver pane daemon's SIGHUP shutdown flush
+	// must not race the stateDir TempDir RemoveAll (LIFO: runs after
+	// kill-server, before RemoveAll).
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 
 	sock := tmuxtest.New(t, "ptl-lockloser-")
 	client := sock.Client()
@@ -452,6 +460,10 @@ func TestBootstrapPortalSaver_EnvironmentInheritanceAcrossRespawn(t *testing.T) 
 
 	_, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	// Teardown-race guard: the saver pane daemon's SIGHUP shutdown flush
+	// must not race the stateDir TempDir RemoveAll (LIFO: runs after
+	// kill-server, before RemoveAll).
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 
 	sock := tmuxtest.New(t, "ptl-envparity-")
 	client := sock.Client()

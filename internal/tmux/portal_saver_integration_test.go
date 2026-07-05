@@ -158,6 +158,10 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 	// Setting it on the test process propagates to the tmux server
 	// (forked from this process) and onward to the daemon.
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	// Teardown-race guard: the saver pane daemon's SIGHUP shutdown flush
+	// must not race the stateDir TempDir RemoveAll (LIFO: runs after
+	// kill-server, before RemoveAll).
+	portaltest.RegisterStateDirTeardownGuard(t, dir)
 
 	sock := tmuxtest.New(t, "ptl-saver-")
 	client := sock.Client()
@@ -291,6 +295,10 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 
 	_, dir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	// Teardown-race guard: the saver pane daemon's SIGHUP shutdown flush
+	// must not race the stateDir TempDir RemoveAll (LIFO: runs after
+	// kill-server, before RemoveAll).
+	portaltest.RegisterStateDirTeardownGuard(t, dir)
 
 	sock := tmuxtest.New(t, "ptl-aliveabsent-")
 	client := sock.Client()
@@ -441,6 +449,10 @@ func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T)
 	// process) and onward to the daemon binary so AcquireDaemonLock
 	// contends against the SAME daemon.lock path the sentinel holds.
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	// Teardown-race guard: the saver pane daemon's SIGHUP shutdown flush
+	// must not race the stateDir TempDir RemoveAll (LIFO: runs after
+	// kill-server, before RemoveAll).
+	portaltest.RegisterStateDirTeardownGuard(t, dir)
 
 	// Sentinel: acquire daemon.lock BEFORE BootstrapPortalSaver so the
 	// spawned daemon process is guaranteed to lose the lock race. The

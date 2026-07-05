@@ -139,8 +139,33 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 			stub := &stubVersionChecker{}
 			installStubVersionChecker(t, stub)
 
+			// ISOLATION IS LOAD-BEARING HERE. These exempt commands Execute
+			// their REAL bodies (that is the point — prove the version
+			// checker is skipped on real dispatch), so every side-effect
+			// surface must be stubbed or poisoned. Incident of record: this
+			// test used to run the real `portal state cleanup` body against
+			// tmux.DefaultClient(), which honours the ambient TMUX — the
+			// developer's REAL server when tests run inside tmux — so every
+			// `go test ./cmd` KILLED the developer's live _portal-saver
+			// session (SIGHUP'ing the real daemon) and unregistered the real
+			// global hook table. The TMUX poison below is defence-in-depth:
+			// any future DefaultClient in an exempt command fails loudly
+			// against a dead socket instead of silently reaching the real
+			// server.
+			t.Setenv("TMUX", "/nonexistent/portal-version-guard-test,0,0")
+			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
 			t.Setenv("PORTAL_ALIASES_FILE", t.TempDir()+"/aliases")
 			t.Setenv("PORTAL_PROJECTS_FILE", t.TempDir()+"/projects.json")
+			t.Setenv("PORTAL_HOOKS_FILE", t.TempDir()+"/hooks.json")
+
+			// `portal clean` and `portal state cleanup` build tmux clients in
+			// their real bodies — inject their seams so no real client exists.
+			cleanDeps = &CleanDeps{AllPaneLister: &mockCleanPaneLister{}}
+			t.Cleanup(func() { cleanDeps = nil })
+			installStateCleanupDeps(t, &StateCleanupDeps{
+				Client:     tmux.NewClient(&recordingCommander{}),
+				Unregister: func(*tmux.Client) error { return nil },
+			})
 
 			// state daemon's RunE blocks on signal; stub the run-func so the
 			// command returns immediately for argv-only assertions.
