@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-07-05
+
+🔧 Changed
+- Once a server has fully bootstrapped, later commands (open, attach, etc.) now take a fast path that just checks the background saver is alive instead of re-running full startup — noticeably quicker warm-command startup.
+- Stale resume-hook entries are now pruned by the background daemon every ~10 seconds instead of during every command's startup sequence.
+
 ## [0.8.3] - 2026-07-01
 
 ✨ Added
