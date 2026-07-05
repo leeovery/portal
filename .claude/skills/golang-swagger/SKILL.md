@@ -6,7 +6,7 @@ license: MIT
 compatibility: Designed for Claude Code or similar AI coding agents. Requires go and swag CLI.
 metadata:
   author: samber
-  version: "1.0.1"
+  version: "1.0.2"
   openclaw:
     emoji: "📋"
     homepage: https://github.com/samber/cc-skills-golang
@@ -30,6 +30,7 @@ allowed-tools: Read Edit Write Glob Grep Bash(go:*) Bash(golangci-lint:*) Bash(g
 - **Audit** — reviewing existing swagger annotations for completeness, correctness, and security coverage.
 
 **Dependencies:**
+
 - swag: `go install github.com/swaggo/swag/cmd/swag@latest`
 
 ## Setup
@@ -222,6 +223,6 @@ type CreateUserRequest struct {
 - → See `samber/cc-skills-golang@golang-security` for securing the Swagger UI endpoint in production (disable or gate with auth middleware).
 - → See `samber/cc-skills-golang@golang-grpc` for gRPC — use grpc-gateway with its own OpenAPI generator instead of swag.
 
-This skill is not exhaustive. Refer to the swaggo/swag documentation and code examples for up-to-date API signatures and usage patterns. Context7 can help as a discoverability platform.
+This skill is not exhaustive. Refer to the swaggo/swag documentation and code examples for up-to-date API signatures and usage patterns. Context7 can help as a discoverability platform. For Go package docs, versions, symbols, and known vulnerabilities, → See `samber/cc-skills-golang@golang-pkg-go-dev` skill.
 
 If you encounter a bug or unexpected behavior in swag, open an issue at <https://github.com/swaggo/swag/issues>.

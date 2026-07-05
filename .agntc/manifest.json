@@ -477,8 +477,8 @@
     "constraint": "^0.5.0"
   },
   "samber/cc-skills-golang": {
-    "ref": "v1.5.1",
-    "commit": "2e24bfb3279751a4fae0194e184d99139b240619",
+    "ref": "v1.7.0",
+    "commit": "8b2d019212d6a5390d472a7660a8489109d7db49",
     "agents": [
       "claude"
     ],
@@ -712,6 +712,10 @@
       ".claude/skills/golang-performance/references/memory.md",
       ".claude/skills/golang-performance/references/observability.md",
       ".claude/skills/golang-performance/references/runtime.md",
+      ".claude/skills/golang-pkg-go-dev/",
+      ".claude/skills/golang-pkg-go-dev/SKILL.md",
+      ".claude/skills/golang-pkg-go-dev/references/",
+      ".claude/skills/golang-pkg-go-dev/references/sample-output.md",
       ".claude/skills/golang-popular-libraries/",
       ".claude/skills/golang-popular-libraries/SKILL.md",
       ".claude/skills/golang-popular-libraries/evals/",
@@ -897,7 +901,7 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/samber/cc-skills-golang.git",
-    "installedAt": "2026-06-14T17:40:48.775Z",
+    "installedAt": "2026-07-05T09:53:23.145Z",
     "constraint": "^1.5.1"
   }
 }
