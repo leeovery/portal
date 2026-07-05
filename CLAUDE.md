@@ -86,7 +86,7 @@ All logging flows through `internal/log` — bind a component logger once per pa
 
 ### DI / testing pattern
 
-All external dependencies use small interfaces (1-3 methods). Commands expose package-level `*Deps` structs (e.g., `bootstrapDeps`, `openDeps`, `hooksDeps`) — tests set these to mock implementations and restore via `t.Cleanup()`. Integration tests in `cmd/root_integration_test.go` build the binary and test via subprocess execution.
+All external dependencies use small interfaces (1-3 methods). Commands expose package-level `*Deps` structs (e.g., `bootstrapDeps`, `openDeps`, `hooksDeps`) — tests set these to mock implementations and restore via `t.Cleanup()`. A test that Executes a real command body MUST inject every tmux-touching `*Deps` seam (see the tmux boundary bullet under "Test isolation" — cmd's `TestMain` poisons `TMUX` and the `PORTAL_*` paths package-wide so a missed injection fails loudly). Integration-tagged tests that exec the built binary (e.g. `cmd/root_integration_test.go`, the commit-now suite) build it via `portalbintest` (never a hand-rolled `go build` — the `-tags integration` sandbox must not be dropped) and drive it as a subprocess.
 
 #### Test isolation for daemon-spawning tests
 
