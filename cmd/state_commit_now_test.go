@@ -394,6 +394,12 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 		NewClient:        func() state.CaptureClient { return client },
 		CaptureStructure: state.CaptureStructure,
 		Commit:           state.Commit,
+		// Must be injected: a nil IsRestoring falls through to the real
+		// IsRestoringSet(tmux.DefaultClient()) — a live query against
+		// whatever server the ambient TMUX names (caught by the TestMain
+		// TMUX poison, which turns the silent real-server read into a
+		// loud connect failure).
+		IsRestoring: func() (bool, error) { return false, nil },
 	}
 	t.Cleanup(func() { commitNowDeps = prev })
 

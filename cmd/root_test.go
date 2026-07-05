@@ -171,6 +171,25 @@ func TestTmuxDependentCommandsSucceedWithTmux(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// The invariant under test is that the tmux-availability
+			// precheck (CheckTmuxAvailable, which runs BEFORE any deps are
+			// consulted) passes when tmux is on PATH — NOT that the full
+			// production wiring runs. Everything downstream is injected:
+			// uninjected, this test ran a COMPLETE production bootstrap
+			// (hooks registration, orphan sweep, EnsureSaver) against the
+			// developer's REAL tmux server on every `go test ./cmd` — it
+			// was the creator of the phantom 0.8.3 saver daemons observed
+			// in the developer's portal.log.
+			stub := &stubVersionChecker{}
+			installStubVersionChecker(t, stub)
+			bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+			t.Cleanup(func() { bootstrapDeps = nil })
+			listDeps = &ListDeps{
+				Lister: &mockSessionLister{sessions: []tmux.Session{}},
+				IsTTY:  func() bool { return false },
+			}
+			t.Cleanup(func() { listDeps = nil })
+
 			resetRootCmd()
 			rootCmd.SetArgs(tt.args)
 			err := rootCmd.Execute()

@@ -38,5 +38,20 @@ func TestMain(m *testing.M) {
 	os.Setenv("PORTAL_HOOKS_FILE", "/nonexistent/portal-test-must-isolate-hooks.json")
 	os.Setenv("PORTAL_PROJECTS_FILE", "/nonexistent/portal-test-must-isolate-projects.json")
 	os.Setenv("PORTAL_ALIASES_FILE", "/nonexistent/portal-test-must-isolate-aliases")
+	// TMUX poison — the tmux-boundary counterpart of the path poisons above.
+	// Tests usually run inside the developer's real tmux, so any test that
+	// Executes a real command body whose production wiring builds
+	// tmux.DefaultClient() (state cleanup, clean, hooks, commit-now, daemon,
+	// signal-hydrate, hydrate, the production orchestrator) would otherwise
+	// inherit the ambient TMUX and operate on the REAL server. Incident of
+	// record: two tests ran the real `portal state cleanup` body uninjected
+	// and kill-sessioned the developer's live _portal-saver on every
+	// `go test ./cmd`. With the poison, a missed injection dials a dead
+	// socket and fails loudly. Tests that need a real server use tmuxtest's
+	// explicit per-test -S sockets (which override TMUX) and set their own
+	// TMUX for subprocesses; tests asserting inside/outside-tmux BEHAVIOUR
+	// must t.Setenv TMUX themselves (they already had to, to be runnable
+	// both inside and outside a tmux window).
+	os.Setenv("TMUX", "/nonexistent/portal-test-must-set-tmux-socket,0,0")
 	os.Exit(m.Run())
 }
