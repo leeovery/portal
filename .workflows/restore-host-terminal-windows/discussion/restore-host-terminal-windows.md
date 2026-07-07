@@ -35,12 +35,12 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (12 subtopics — 3 decided · 1 exploring · 8 pending)
+  Discussion Map — Restore Host Terminal Windows (12 subtopics — 4 decided · 8 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
   ├─ ✓ 3. Burst & partial-failure contract [F1] [decided]
-  ├─ ◐ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2] [exploring]
+  ├─ ✓ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2] [decided]
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
   ├─ ○ 6. Config schema & command representation [F9]
   ├─ ○ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX]
@@ -194,11 +194,11 @@ Behaviour across: in/out of tmux at trigger × selected session detached / attac
 - **Enter opens the marked set only.** The cursor/highlight at Enter time is irrelevant — a highlighted-but-unmarked row is **not** opened (marking is `m`, not Enter). Enter always commits the `m`-marked set.
 - **Which marked session the trigger window becomes: unspecified / impl-convenience.** Cosmetic in v1 (no Spaces placement — all N windows open on the current Space regardless), so not pinned.
 
-### Open bit — open order
+### Decision — open order: list order (selection is a set)
 
-Pick order (order `m` was pressed) vs list order (top-to-bottom in the picker)?
+Open in **list order** (top-to-bottom as shown), not pick order. The selection is a plain **set**, not an ordered list. Pick-order's only payoff is window arrangement/focus, which is OS/Ghostty-controlled and can't be reliably honoured; list order is predictable and matches the visual; and the future Spaces/workspace feature will record *explicit* placement rather than infer from tick-order, so capturing pick-order banks nothing. Trigger-window session left to implementation; focus left to the OS.
 
-*(exploring — matrix decided; open-order pending)*
+*(decided — matrix + open order resolved)*
 
 ---
 
@@ -218,6 +218,7 @@ Pick order (order `m` was pressed) vs list order (top-to-bottom in the picker)?
 - **#1 Spawn-Execution Architecture — decided** (Option B: shared reopen package + `portal reopen` subcommand, picker calls in-process; N−1 spawned, picker self-reuses for the Nth).
 - **#3 Burst & Partial-Failure — decided.** Best-effort; picker-orchestrated, self-attach-last; in-process; token-ack confirmation via `@portal-reopen-*` server option; spawn via `os.Executable()` (F3); sequential; N=1 degenerates to plain attach, N=0 exits multi-mode (F6). Skip-bootstrap latch verified sufficient.
 - **#2 Multi-Select Trigger & Keymap — decided.** `m` enters explicit (empty-able) multi-select mode; `m` toggles cursor row; `Space` stays preview; `Enter` opens marked set; `Esc` exits. Distinct mode colour + notice-band banner (design-phase visual). Sticky selection; filter/regroup live, kill/rename/page-toggle suppressed. Per-session only; group-select deferred to v2.
+- **#4 Trigger-Context Matrix — decided.** In/out-tmux reuse (switch-client / exec-attach), already-attached allowed, includes-self handled, vanished→best-effort. Enter opens the marked set only (cursor irrelevant). Selection is a **set**, opened in **list order**; trigger-window session + focus left to impl/OS.
 - Open coupling thread: #7 (terminal-identity detection) — also home to outstanding review findings F2 (headless reopen has no terminal) and F7 (detect-self package shape). F5 (reopen observability) still to place.
 
 ### Open Threads
