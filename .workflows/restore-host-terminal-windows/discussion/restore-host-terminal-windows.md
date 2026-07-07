@@ -35,12 +35,12 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (12 subtopics — 3 decided · 9 pending)
+  Discussion Map — Restore Host Terminal Windows (12 subtopics — 3 decided · 1 exploring · 8 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
   ├─ ✓ 3. Burst & partial-failure contract [F1] [decided]
-  ├─ ○ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2]
+  ├─ ◐ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2] [exploring]
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
   ├─ ○ 6. Config schema & command representation [F9]
   ├─ ○ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX]
@@ -176,6 +176,29 @@ The "self-attach to the Nth of N" rule is total:
 - **N=0** (nothing selected, Enter): a **no-op that exits multi-select mode**, dropping back to the standard picker (Portal stays open) — the same effect as pressing `Esc`. Nothing opens.
 
 *(decided — full partial-failure contract, token-ack confirmation, spawn-via-own-exe, sequential spawn, and N=0/N=1 boundary all resolved)*
+
+---
+
+## 4. Trigger-Context Matrix
+
+### Context
+
+Behaviour across: in/out of tmux at trigger × selected session detached / attached-elsewhere × selection includes the current context.
+
+### Decision — matrix (mostly consolidated from #1/#3)
+
+- **In vs out of tmux at trigger.** *Out* (bare-shell picker): trigger window reuses via `AttachConnector` (exec `tmux attach`); detection walks the picker's own process tree. *In* tmux: trigger window reuses via `SwitchConnector` (`switch-client`); detection takes the `list-clients` → client-PID hop. The **spawned N−1 are always fresh host windows running `portal attach` out of tmux**, independent of the picker's context; only the trigger-window reuse differs.
+- **Selected session already attached elsewhere** (this host or a remote/iPhone client): allowed — no dup guard (research); the token-ack confirms *our* new window regardless of other clients.
+- **Includes-self:** the trigger window becomes one attached session, the rest spawn; the marked origin session ends up attached either way.
+- **Selected session vanished** between picker-load and Enter: its spawn fails → best-effort report (#3).
+- **Enter opens the marked set only.** The cursor/highlight at Enter time is irrelevant — a highlighted-but-unmarked row is **not** opened (marking is `m`, not Enter). Enter always commits the `m`-marked set.
+- **Which marked session the trigger window becomes: unspecified / impl-convenience.** Cosmetic in v1 (no Spaces placement — all N windows open on the current Space regardless), so not pinned.
+
+### Open bit — open order
+
+Pick order (order `m` was pressed) vs list order (top-to-bottom in the picker)?
+
+*(exploring — matrix decided; open-order pending)*
 
 ---
 
