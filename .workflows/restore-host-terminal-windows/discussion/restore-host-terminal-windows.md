@@ -35,10 +35,10 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (12 subtopics — 2 decided · 1 exploring · 9 pending)
+  Discussion Map — Restore Host Terminal Windows (12 subtopics — 3 decided · 9 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
-  ├─ ◐ 2. Multi-select trigger & keymap coexistence [F7] [exploring]
+  ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
   ├─ ✓ 3. Burst & partial-failure contract [F1] [decided]
   ├─ ○ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2]
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
@@ -113,11 +113,11 @@ Research pencilled `M` as the trigger, but §12.2 deliberately dropped all upper
 - **Visually unmistakable mode**, modelled on filter mode (orange + a typable filter area): multi-select gets its **own mode colour + a banner** in the existing notice-band slot (single-slot arbiter — the multi-select banner owns the slot while in mode), e.g. `N selected · m toggle · space preview · ⏎ open · esc cancel`. Selected rows carry a **glyph marker + the mode colour**, never colour-only (MV's NO_COLOR / colourless-render rule). Exact colour token + banner copy are a **design-phase** call (MV token layer + fixture/visual-gate process); the *requirement* is "as obviously a distinct mode as filtering is."
 - **Live vs suppressed in mode (from the agreed #2.2 set):** `/` filter and `s` regroup stay **live** (so you can filter/regroup to find things to select); `k` kill, `x` page-toggle, `r` rename, and other row actions are **suppressed**. Selection is **sticky** across filtering, paging, and regrouping. Grouping `HeaderItem` rows are skipped (non-selectable).
 
-### Still open
+### Decision — granularity: per-session only (v1)
 
-- **Select-whole-group via a header?** A bulk "select all in this project/tag group" gesture — compelling for the per-Space/per-project rebuild scenario, but possibly a v2 refinement.
+Group-select (mark a whole project/tag group via its header) is **deferred to a v2 fast-follow**. Tempting — it maps onto the per-Space/per-project rebuild — but it requires letting the cursor land on the currently non-selectable `HeaderItem` rows (the `skipHeaderRow` invariant, itself a pagination-bug fix), and the research already accepts "manual re-selection per zone" as the v1 partial-win yardstick. v1 ships **per-session marking only**.
 
-*(exploring — interaction model decided; group-select granularity open)*
+*(decided — interaction model + per-session granularity resolved)*
 
 ---
 
@@ -194,6 +194,7 @@ The "self-attach to the Nth of N" rule is total:
 - Research foundation settled (see Context); 12 live subtopics seeded.
 - **#1 Spawn-Execution Architecture — decided** (Option B: shared reopen package + `portal reopen` subcommand, picker calls in-process; N−1 spawned, picker self-reuses for the Nth).
 - **#3 Burst & Partial-Failure — decided.** Best-effort; picker-orchestrated, self-attach-last; in-process; token-ack confirmation via `@portal-reopen-*` server option; spawn via `os.Executable()` (F3); sequential; N=1 degenerates to plain attach, N=0 exits multi-mode (F6). Skip-bootstrap latch verified sufficient.
+- **#2 Multi-Select Trigger & Keymap — decided.** `m` enters explicit (empty-able) multi-select mode; `m` toggles cursor row; `Space` stays preview; `Enter` opens marked set; `Esc` exits. Distinct mode colour + notice-band banner (design-phase visual). Sticky selection; filter/regroup live, kill/rename/page-toggle suppressed. Per-session only; group-select deferred to v2.
 - Open coupling thread: #7 (terminal-identity detection) — also home to outstanding review findings F2 (headless reopen has no terminal) and F7 (detect-self package shape). F5 (reopen observability) still to place.
 
 ### Open Threads
