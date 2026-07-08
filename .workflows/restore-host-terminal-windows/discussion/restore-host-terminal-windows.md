@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 5 decided · 8 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 6 decided · 7 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -44,7 +44,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
   ├─ ○ 6. Config schema & command representation [F9]
   ├─ ✓ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX] [decided]
-  ├─ ○ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking]
+  ├─ ✓ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking] [decided]
   ├─ ○ 9. Testing strategy & DI seam [F5]
   ├─ ○ 10. Daemon / state footprint of windows-only v1 [F10]
   ├─ ○ 11. Attach contention vs post-reboot hydration [F12]
@@ -234,6 +234,25 @@ Detection is a **separately-callable operation**, not buried in the spawn path �
 
 ---
 
+## 8. Adapter Contract Shape & Extensibility
+
+### Context
+
+Research settled: one operation per terminal (the "contract"); built-in Go adapters and user-config entries are two implementations; precedence config→native→unsupported; capability-based (spawn now, `introspect`/`place-on-space` later). #7 punted detect-self's placement here.
+
+### Decision — generic contract (B), detection separate, capability-based
+
+- **Detection is separate from the adapter.** Detect-self (the standalone op from #7) resolves *identity*; a resolver maps identity → adapter (config override → native bundle-id-family match → unsupported); the adapter is per-terminal and only opens windows. Detection is *not* an adapter method.
+- **Generic contract (B).** The adapter's single job is **open a new host window running a given command** (`OpenWindow(command)`), not "attach to a session." The **reopen layer composes the command** — `<os.Executable()> attach <session>` + the ack token — and hands it to the adapter. (Rejected (A) session-aware `OpenAttached(session)`: it would bake `portal attach` into every adapter and scatter the attach+ack composition.)
+  - Keeps adapters dumb + portable (one thing: open a window running a command); keeps the `portal attach`+ack composition in one place; and **future-proofs the adapter** (user's point) — the same open-window primitive can be handed *different* commands later (the workspace feature, other actions) without touching adapters.
+  - **Knock-on for #6:** the custom-terminal config placeholder is **`{command}`** (the thing to run), not `{session}`. Config expresses "how my terminal opens a window running `{command}`"; Portal fills in the attach.
+- **Capability-based extensibility.** v1 adapters implement exactly one capability (open-window-with-command). Future `introspect` / `place-on-space` slot in as *additive* optional capabilities (Go interface segregation, checked by type assertion) without touching existing adapters. v1 ships spawn-only; the mechanics are an implementation concern.
+- **Precedence (research, reaffirmed):** config override → native adapter → unsupported.
+
+*(decided — generic contract, detection-separate, capability-based extensibility, precedence)*
+
+---
+
 ## 13. Design in Paper (Page & Interactions)
 
 ### Context
@@ -271,6 +290,7 @@ Follows the project's reference-first visual workflow — export the Paper frame
 - **#2 Multi-Select Trigger & Keymap — decided.** `m` enters explicit (empty-able) multi-select mode; `m` toggles cursor row; `Space` stays preview; `Enter` opens marked set; `Esc` exits. Distinct mode colour + notice-band banner (design-phase visual). Sticky selection; filter/regroup live, kill/rename/page-toggle suppressed. Per-session only; group-select deferred to v2.
 - **#4 Trigger-Context Matrix — decided.** In/out-tmux reuse (switch-client / exec-attach), already-attached allowed, includes-self handled, vanished→best-effort. Enter opens the marked set only (cursor irrelevant). Selection is a **set**, opened in **list order**; trigger-window session + focus left to impl/OS.
 - **#7 Terminal-Identity UX — decided.** Display both `.app` name + bundle id; config accepts alias/`.app`-name/bundle-id/`*`-glob; detect-self standalone (F7); F2 headless dissolves (folds into NULL-bundle unsupported path). #1 "headless" wording trimmed.
+- **#8 Adapter Contract — decided.** Detection separate from adapter; generic contract `OpenWindow(command)` (reopen composes `<exe> attach <session>` + ack token); config placeholder becomes `{command}` (feeds #6); capability-based (introspect/place later); precedence config→native→unsupported.
 - **#13 Design in Paper** — deliverable tracked (multi-select page + interactions).
 - Outstanding review finding to place: **F5** (reopen observability / log component) — likely a new subtopic or folded into #10.
 
