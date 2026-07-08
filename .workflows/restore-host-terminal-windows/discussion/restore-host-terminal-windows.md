@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 4 decided · 1 exploring · 8 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 5 decided · 8 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -43,7 +43,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2] [decided]
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
   ├─ ○ 6. Config schema & command representation [F9]
-  ├─ ◐ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX] [exploring]
+  ├─ ✓ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX] [decided]
   ├─ ○ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking]
   ├─ ○ 9. Testing strategy & DI seam [F5]
   ├─ ○ 10. Daemon / state footprint of windows-only v1 [F10]
@@ -70,10 +70,10 @@ The decision is tighter than F6 implies. The **no-leftover-window** anti-require
 ### Options Considered
 
 **Option A — inline in the TUI.** The Bubble Tea process, on `Enter`, detects the host terminal and fires the spawns itself, then self-attaches.
-- Cons: spawn logic buried in the update loop is hard to unit-test; capability locked inside the TUI (no headless/scriptable reuse); no clean DI seam.
+- Cons: spawn logic buried in the update loop is hard to unit-test; capability locked inside the TUI (no CLI reuse for tests / `--detect` / the future workspace feature); no clean DI seam.
 
 **Option B — shared internal package + `portal reopen` subcommand (chosen).** Detection + adapter resolution + spawn live in an internal package; `portal reopen <sessions…>` is a thin CLI over it; the picker calls the **same package in-process** for the N−1, then self-attaches.
-- Pros: argv→effects boundary is unit-testable with a faked `Adapter` (command construction, detect-self resolution, precedence); `portal reopen` becomes a first-class headless command the deferred "remember-and-restore workspace" + Spaces follow-ons can reuse; matches the project's DI pattern.
+- Pros: argv→effects boundary is unit-testable with a faked `Adapter` (command construction, detect-self resolution, precedence); `portal reopen` is a first-class CLI seam — a `--detect` dry-run and the entry point the deferred "remember-and-restore workspace" + Spaces follow-ons reuse (always from a terminal context, not truly headless — see #7/F2); matches the project's DI pattern.
 - Cons: slightly more surface than A (a new subcommand + package).
 
 ### Journey
@@ -84,11 +84,11 @@ Considered detection placement as a complication (does the subcommand vs TUI cha
 
 Walked the concrete 3-session flow to confirm the model: (1) detect terminal → (2) one `osascript` call per N−1 window, each carrying `portal attach <session>` as its startup command → (3) exec self into the last session. **Order is load-bearing**: step 3 is a point of no return (exec replaces the picker), so the N−1 spawns must complete first. One spawn call per window (not one combined script) for failure isolation.
 
-In-process vs subprocess for the picker→reopen call: chose **in-process** so spawn errors surface back into the TUI where the user is looking; the `portal reopen` subprocess remains the headless/test front door. Both the "in-process vs subprocess" detail and "does the picker wait to confirm the N−1 spawned before it execs into the Nth?" are **coupled to #3** (partial-failure contract) — left open there.
+In-process vs subprocess for the picker→reopen call: chose **in-process** so spawn errors surface back into the TUI where the user is looking; the `portal reopen` subprocess remains the CLI front door (tests / `--detect` / future feature). Both the "in-process vs subprocess" detail and "does the picker wait to confirm the N−1 spawned before it execs into the Nth?" are **coupled to #3** (partial-failure contract) — left open there.
 
 ### Decision
 
-**Option B.** Build a shared internal reopen package (detection + adapter resolution + spawn), exposed two ways: called **in-process by the picker** for the N−1 spawns, and as a **`portal reopen <sessions…>` subcommand** for headless/scriptable/test use. Each spawned window runs the existing `portal attach <session>`; `portal reopen` is *not* what runs in the new windows. The picker self-attaches to the remaining session via its existing connector, reusing its own window (anti-leftover). Confidence: high.
+**Option B.** Build a shared internal reopen package (detection + adapter resolution + spawn), exposed two ways: called **in-process by the picker** for the N−1 spawns, and as a **`portal reopen <sessions…>` subcommand** — the CLI seam for tests, a `--detect` dry-run, and the future-feature entry point (always from a terminal context, never truly headless; see #7/F2). Each spawned window runs the existing `portal attach <session>`; `portal reopen` is *not* what runs in the new windows. The picker self-attaches to the remaining session via its existing connector, reusing its own window (anti-leftover). Confidence: high.
 
 - **Mental model:** one service, two callers — like a Laravel Service class reached from both an Artisan command and an HTTP controller.
 - **Coupled-out:** in-process-vs-subprocess + wait-for-spawn-confirmation → #3; full terminal-identity detection → #7.
@@ -226,11 +226,11 @@ Whatever Portal displayed, the user can paste it and it resolves. Internal *matc
 
 Detection is a **separately-callable operation**, not buried in the spawn path — because the banner must show identity *without* spawning anything. It backs the unsupported banner, a `portal reopen --detect` dry-run, and the deferred workspace-introspection. (Its exact package placement → #8.)
 
-### Open — F2: headless `portal reopen` with no terminal to detect
+### Decision — F2 dissolves: no headless story to build
 
-*(raised in discussion — see below)*
+`portal reopen` exists to *open terminal windows*, so it only runs from a terminal context — the picker is in one, a script is run in one, and even the future workspace feature triggers from you interacting with Portal in a terminal. There is no sensible v1 caller that runs it headlessly (cron/CI/no-display) — essentially chicken-and-egg. The review's "headless" concern reflected an **overstated Pro in #1's write-up** (now trimmed), not a real gap. So: **no special headless handling and no `--terminal` override** (YAGNI — no caller). If detection ever returns empty, it folds into the **same NULL-bundle path already decided** for remote/mosh clients → unsupported → clean error/banner. The `portal reopen` CLI's real value is the test seam, the `--detect` dry-run, and the future-feature entry point.
 
-*(exploring — display / config-keys / detect-self decided; F2 headless case open)*
+*(decided — display / config-keys / detect-self standalone / F2-dissolves all resolved)*
 
 ---
 
@@ -270,7 +270,9 @@ Follows the project's reference-first visual workflow — export the Paper frame
 - **#3 Burst & Partial-Failure — decided.** Best-effort; picker-orchestrated, self-attach-last; in-process; token-ack confirmation via `@portal-reopen-*` server option; spawn via `os.Executable()` (F3); sequential; N=1 degenerates to plain attach, N=0 exits multi-mode (F6). Skip-bootstrap latch verified sufficient.
 - **#2 Multi-Select Trigger & Keymap — decided.** `m` enters explicit (empty-able) multi-select mode; `m` toggles cursor row; `Space` stays preview; `Enter` opens marked set; `Esc` exits. Distinct mode colour + notice-band banner (design-phase visual). Sticky selection; filter/regroup live, kill/rename/page-toggle suppressed. Per-session only; group-select deferred to v2.
 - **#4 Trigger-Context Matrix — decided.** In/out-tmux reuse (switch-client / exec-attach), already-attached allowed, includes-self handled, vanished→best-effort. Enter opens the marked set only (cursor irrelevant). Selection is a **set**, opened in **list order**; trigger-window session + focus left to impl/OS.
-- Open coupling thread: #7 (terminal-identity detection) — also home to outstanding review findings F2 (headless reopen has no terminal) and F7 (detect-self package shape). F5 (reopen observability) still to place.
+- **#7 Terminal-Identity UX — decided.** Display both `.app` name + bundle id; config accepts alias/`.app`-name/bundle-id/`*`-glob; detect-self standalone (F7); F2 headless dissolves (folds into NULL-bundle unsupported path). #1 "headless" wording trimmed.
+- **#13 Design in Paper** — deliverable tracked (multi-select page + interactions).
+- Outstanding review finding to place: **F5** (reopen observability / log component) — likely a new subtopic or folded into #10.
 
 ### Open Threads
 
