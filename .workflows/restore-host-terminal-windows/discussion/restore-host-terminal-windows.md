@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (12 subtopics — 4 decided · 8 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 4 decided · 1 exploring · 8 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -43,12 +43,13 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2] [decided]
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
   ├─ ○ 6. Config schema & command representation [F9]
-  ├─ ○ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX]
+  ├─ ◐ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX] [exploring]
   ├─ ○ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking]
   ├─ ○ 9. Testing strategy & DI seam [F5]
   ├─ ○ 10. Daemon / state footprint of windows-only v1 [F10]
   ├─ ○ 11. Attach contention vs post-reboot hydration [F12]
-  └─ ○ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5]
+  ├─ ○ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5]
+  └─ ○ 13. Design in Paper — page + interactions (deliverable, this discussion) [pending]
 
 ---
 
@@ -199,6 +200,25 @@ Behaviour across: in/out of tmux at trigger × selected session detached / attac
 Open in **list order** (top-to-bottom as shown), not pick order. The selection is a plain **set**, not an ordered list. Pick-order's only payoff is window arrangement/focus, which is OS/Ghostty-controlled and can't be reliably honoured; list order is predictable and matches the visual; and the future Spaces/workspace feature will record *explicit* placement rather than infer from tick-order, so capturing pick-order banks nothing. Trigger-window session left to implementation; focus left to the OS.
 
 *(decided — matrix + open order resolved)*
+
+---
+
+## 13. Design in Paper (Page & Interactions)
+
+### Context
+
+A **deliverable**, tracked here at the user's request: this feature's UI must be designed in **Paper** — where the rest of Portal's Modern Vivid design system lives — as part of this discussion, feeding implementation. Not a decision subtopic; a required design artefact.
+
+### Scope of what to design
+
+- The **multi-select mode** on the Sessions page: the distinct mode affordance (own colour + notice-band banner, per #2 — the filter-mode analogue), row **selection marker** (glyph + mode colour, never colour-only), and the mode's states — empty, N-selected, and the **partial-failure report surface** (#3, "opened 11 of 14 …").
+- The **terminal-identity surfaces** (#7): the unsupported/unconfigured **banner** and whatever detect/identity display we land on.
+
+### Process
+
+Follows the project's reference-first visual workflow — export the Paper frame(s) to `reference/` before implementing, verify against `cmd/capturetool` fixtures. Exact colour tokens/copy are settled in the Paper design, consistent with the MV token layer.
+
+*(pending — design artefact to produce as part of this work)*
 
 ---
 
