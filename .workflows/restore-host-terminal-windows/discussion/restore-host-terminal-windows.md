@@ -203,6 +203,37 @@ Open in **list order** (top-to-bottom as shown), not pick order. The selection i
 
 ---
 
+## 7. Terminal-Identity UX
+
+### Context
+
+Research settled *detection* (`list-clients` → client-PID by highest `client_activity` → process-tree walk → macOS **bundle id**, matched as a *family*; remote/mosh → NULL → no-op) and that bundle id is the system-blessed identity. It explicitly deferred the **UX** to discussion: what Portal displays, what config accepts, whether detect-self is standalone (review F7), and the headless-no-terminal case (review F2).
+
+### Decision — display: both
+
+The unsupported/unconfigured **banner** and the **detect command** show **both** the friendly `.app` name (for reading) and the exact **bundle id** (the copy-paste config key). This solves the chicken-and-egg the research flagged: a custom-config user can't guess the key a priori, so Portal *shows* it — copy-paste, never guess.
+
+### Decision — config accepts: layered keys
+
+Custom config accepts, layered:
+
+- **Friendly alias** (`ghostty`, `warp`) — Portal-shipped, for *known* terminals; maps to the bundle-id family.
+- **`.app` name** / **raw bundle id** / **`*`-glob** — the escape hatch for custom/unknown terminals.
+
+Whatever Portal displayed, the user can paste it and it resolves. Internal *matching* stays on bundle-id families (precision, channel-aware); user-facing keys are the friendlier forms.
+
+### Decision — detect-self is a standalone operation (review F7)
+
+Detection is a **separately-callable operation**, not buried in the spawn path — because the banner must show identity *without* spawning anything. It backs the unsupported banner, a `portal reopen --detect` dry-run, and the deferred workspace-introspection. (Its exact package placement → #8.)
+
+### Open — F2: headless `portal reopen` with no terminal to detect
+
+*(raised in discussion — see below)*
+
+*(exploring — display / config-keys / detect-self decided; F2 headless case open)*
+
+---
+
 ## 13. Design in Paper (Page & Interactions)
 
 ### Context
