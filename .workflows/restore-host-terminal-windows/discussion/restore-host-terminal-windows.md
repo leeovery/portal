@@ -35,14 +35,14 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 6 decided · 7 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 7 decided · 6 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
   ├─ ✓ 3. Burst & partial-failure contract [F1] [decided]
   ├─ ✓ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2] [decided]
   ├─ ○ 5. TCC first-run Automation-permission flow [F4]
-  ├─ ○ 6. Config schema & command representation [F9]
+  ├─ ✓ 6. Config schema & command representation [F9] [decided]
   ├─ ✓ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX] [decided]
   ├─ ✓ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking] [decided]
   ├─ ○ 9. Testing strategy & DI seam [F5]
@@ -203,6 +203,37 @@ Open in **list order** (top-to-bottom as shown), not pick order. The selection i
 
 ---
 
+## 6. Config Schema & Command Representation
+
+### Context
+
+Research: v1 ships the user-config override/escape-hatch; *built-in* adapters (Ghostty) live in compiled Go, not config; layered representation (inline / script file); precedence config→native→unsupported. #8's generic contract fixes what config expresses: "how my terminal opens a window running `{command}`."
+
+### Decision
+
+- **Location + format:** `~/.config/portal/terminals.json` — Portal's JSON-store convention (`projects.json` / `hooks.json`), XDG-resolved via the existing `configFilePath`.
+- **Entry = identity-matcher → capability map.** Keyed by whatever #7 surfaces — a `.app` name, bundle id, `*`-glob, or a built-in alias (to override it).
+- **Capability nesting (mirrors #8):** entry → `commands` → `open` (the sole v1 key) → recipe. Future `introspect` / `place` are **additive sub-keys**, not a breaking schema change — config and adapter extend in lockstep.
+- **Recipe: explicit fields, not magic.** `argv` (inline argv-array template) **or** `script` (path to a file Portal runs). Chosen over research's "is it a path on disk?" auto-detection — clearer, no disk-probing surprise. Inline is an **argv array** (not a string) to sidestep shell-quoting hell.
+- **Placeholder `{command}`** — Portal substitutes `<os.Executable()> attach <session>` + the ack token (per #8). The inline field is named `argv` (not `command`) to avoid colliding with the placeholder.
+- **Precedence (reaffirmed):** config override → native adapter → unsupported. Config can override a built-in too (e.g. Ghostty + a resize).
+
+```json
+// ~/.config/portal/terminals.json
+{
+  "dev.warp.Warp-*": {
+    "commands": { "open": { "argv": ["osascript", "-e", "tell app \"Warp\" to create window with command \"{command}\""] } }
+  },
+  "com.example.MyTerm": {
+    "commands": { "open": { "script": "~/.config/portal/terminals/myterm.sh" } }
+  }
+}
+```
+
+*(decided — `terminals.json`; identity-matcher → `commands.open` → `argv`/`script`; `{command}` placeholder; precedence)*
+
+---
+
 ## 7. Terminal-Identity UX
 
 ### Context
@@ -291,6 +322,7 @@ Follows the project's reference-first visual workflow — export the Paper frame
 - **#4 Trigger-Context Matrix — decided.** In/out-tmux reuse (switch-client / exec-attach), already-attached allowed, includes-self handled, vanished→best-effort. Enter opens the marked set only (cursor irrelevant). Selection is a **set**, opened in **list order**; trigger-window session + focus left to impl/OS.
 - **#7 Terminal-Identity UX — decided.** Display both `.app` name + bundle id; config accepts alias/`.app`-name/bundle-id/`*`-glob; detect-self standalone (F7); F2 headless dissolves (folds into NULL-bundle unsupported path). #1 "headless" wording trimmed.
 - **#8 Adapter Contract — decided.** Detection separate from adapter; generic contract `OpenWindow(command)` (reopen composes `<exe> attach <session>` + ack token); config placeholder becomes `{command}` (feeds #6); capability-based (introspect/place later); precedence config→native→unsupported.
+- **#6 Config Schema — decided.** `~/.config/portal/terminals.json`; identity-matcher → `commands.open` → `argv`/`script` recipe; `{command}` placeholder; `commands` map mirrors #8's capability model; precedence config→native→unsupported.
 - **#13 Design in Paper** — deliverable tracked (multi-select page + interactions).
 - Outstanding review finding to place: **F5** (reopen observability / log component) — likely a new subtopic or folded into #10.
 
