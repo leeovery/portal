@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 9 decided · 4 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 10 decided · 3 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -46,7 +46,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX] [decided]
   ├─ ✓ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking] [decided]
   ├─ ✓ 9. Testing strategy & DI seam [F5] [decided]
-  ├─ ○ 10. Daemon / state footprint (windows-only) [F10]
+  ├─ ✓ 10. Daemon / state footprint (windows-only) [F10] [decided]
   ├─ ○ 11. Attach contention vs post-reboot hydration [F12]
   ├─ ○ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5]
   └─ ○ 13. Design in Paper — page + interactions (deliverable, this discussion) [pending]
@@ -316,6 +316,21 @@ The feature drives a real GUI terminal (`osascript` → Ghostty), hard to automa
 - **Irreducible manual/integration residue:** the real window actually opening + the TCC modal need a live Mac — covered by manual verification + the Paper visual gates (#13), not automated CI.
 
 *(decided — seam-based coverage; driver split into pure construct/map (unit) + thin exec (manual); live terminal only for the last inch)*
+
+---
+
+## 10. Daemon / State Footprint (windows-only)
+
+### Context
+
+review-F10 ("near-zero state change" asserted, not traced) + review-001 F5 (reopen observability / log component).
+
+### Decision — footprint traced + reopen instrumented
+
+- **State/daemon footprint (F10).** New *code* lands (an `internal/reopen` package, the terminal drivers, a `terminals.json` config store), but near-zero persistent *state*: **reads** `terminals.json` (user-authored, read-only at reopen time); **writes** only transient `@portal-reopen-*` tmux server options (self-cleaned per #3 — not files, not captured; the daemon's capture is structural sessions/panes, not a server-option dump); **does not touch** `sessions.json`, the daemon capture loop, `prefs.json`, or the restore machinery.
+- **Observability (F5).** The reopen flow gets its **own `reopen` log component** — a deliberate amendment to Portal's closed logging taxonomy (a 16th component), not a call-site invention. Closed event catalog, emitted from the reopen chokepoint: detection outcome (identity / unsupported / NULL-bundle), adapter resolution (config-override vs native), per-window spawn + ack outcome (confirmed / timeout / failed), `permission-required`, batch summary — **one INFO cycle-summary** ("reopen: opened 11/14") + **DEBUG per-window**, matching bootstrap/restore/daemon instrumentation. The driver's OS-specific detail rides up as an opaque `detail` attr so the closed vocabulary stays intact (honours #5's quarantine).
+
+*(decided — near-zero persistent state footprint traced; reopen instrumented with its own component + closed event catalog)*
 
 ---
 
