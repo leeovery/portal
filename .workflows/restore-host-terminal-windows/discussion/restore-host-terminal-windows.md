@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 8 decided · 5 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 9 decided · 4 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -45,7 +45,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 6. Config schema & command representation [F9] [decided]
   ├─ ✓ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX] [decided]
   ├─ ✓ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking] [decided]
-  ├─ ○ 9. Testing strategy & DI seam [F5]
+  ├─ ✓ 9. Testing strategy & DI seam [F5] [decided]
   ├─ ○ 10. Daemon / state footprint (windows-only) [F10]
   ├─ ○ 11. Attach contention vs post-reboot hydration [F12]
   ├─ ○ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5]
@@ -301,6 +301,24 @@ Research settled: one operation per terminal (the "contract"); built-in Go adapt
 
 ---
 
+## 9. Testing Strategy & DI Seam
+
+### Context
+
+The feature drives a real GUI terminal (`osascript` → Ghostty), hard to automate; Portal has deep test discipline (small-interface DI, faked in tests). review-F5.
+
+### Decision — seam-based; live terminal only for the last inch
+
+- **`Adapter` interface (#8) = primary seam.** A fake adapter records "would open a window running command X" without touching a real terminal → the entire reopen pipeline is unit-testable: adapter resolution + precedence (config→native→unsupported), `{command}` substitution, token-ack collection, partial-failure report logic.
+- **Detection reads behind small seams** (process-tree walk / `ps` / `lsappinfo` / `tmux list-clients` behind 1–3-method interfaces, Portal's existing pattern) → detect-self *resolution* (client-by-activity, walk-to-bundle-id, family match, NULL→unsupported) is unit-testable with fabricated data. The real walk is integration (real-tmux `tmuxtest` fixture) / manual.
+- **Each terminal driver split for testability:** pure command-construction (building the `osascript`/argv) + error-mapping (`-1712`/`-1743` → typed `permission-required`) are unit-tested (fabricated `osascript` outcome; assert the built command / mapped error); only the thin **exec boundary** (real `osascript` + TCC modal) is manual/integration-gated.
+- **Mode/keymap state machine (#2)** unit-tested as a Bubble Tea model (existing `internal/tui` pattern): enter / toggle / exit, sticky selection, suppressed keys.
+- **Irreducible manual/integration residue:** the real window actually opening + the TCC modal need a live Mac — covered by manual verification + the Paper visual gates (#13), not automated CI.
+
+*(decided — seam-based coverage; driver split into pure construct/map (unit) + thin exec (manual); live terminal only for the last inch)*
+
+---
+
 ## 13. Design in Paper (Page & Interactions)
 
 ### Context
@@ -341,6 +359,7 @@ Follows the project's reference-first visual workflow — export the Paper frame
 - **#8 Adapter Contract — decided.** Detection separate from adapter; generic contract `OpenWindow(command)` (reopen composes `<exe> attach <session>` + ack token); config placeholder becomes `{command}` (feeds #6); capability-based (introspect/place later); precedence config→native→unsupported.
 - **#6 Config Schema — decided.** `~/.config/portal/terminals.json`; identity-matcher → `commands.open` → `argv`/`script` recipe; `{command}` placeholder; `commands` map mirrors #8's capability model; precedence config→native→unsupported.
 - **#5 TCC Permission Flow — decided.** All terminal/OS specifics (AppleScript, `osascript`, `-1712`/`-1743`, TCC, deep-links) quarantined in the Ghostty driver, which returns a generic typed result (`permission-required`/`unsupported`/`spawn-failed`) — general code never sees OS specifics. Blocking-modal happy path; sequential grant unblocks the burst; typed permission-error → general actionable guidance. TCC-attribution (CLI vs host terminal) is a hard validation item (#12).
+- **#9 Testing & DI Seam — decided.** Fake `Adapter` makes the whole reopen pipeline unit-testable; detection reads behind small seams; each driver split into pure command-construction + error-mapping (unit) behind a thin exec boundary (manual). Live terminal + TCC modal only for the last inch (manual + Paper gates).
 - **#13 Design in Paper** — deliverable tracked (multi-select page + interactions).
 - Outstanding review finding to place: **F5** (reopen observability / log component) — likely a new subtopic or folded into #10.
 
