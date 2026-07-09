@@ -8,14 +8,14 @@ This feature lets the user reopen N sessions, each springing into its own host t
 
 ### Foundation already settled in research (not re-litigated here unless reopened)
 
-- **MVP shape:** a Sessions-page **multi-select mode** (proposed `M`) → select sessions → `Enter` → each springs open in its own host window, attached. Implemented as a *general selection mode* with spawn as its first action (future bulk ops can reuse it).
-- **Windows-only v1:** window-vs-tab fidelity dropped → removes the entire introspection requirement.
+- **Core shape:** a Sessions-page **multi-select mode** (proposed `M`) → select sessions → `Enter` → each springs open in its own host window, attached. Implemented as a *general selection mode* with spawn as its first action (future bulk ops can reuse it).
+- **Windows-only:** window-vs-tab fidelity dropped → removes the entire introspection requirement.
 - **Spawn command:** the N−1 new windows each run **`portal attach <session>`** (existing chokepoint connector); the **trigger window is reused** as one session via `switch-client`. Net window count = **N, not N+1** (no leftover empty picker window — a hard anti-requirement).
-- **Cross-terminal:** Ghostty-first; **dual configurability** (built-in Go adapters + user-config override/escape hatch), shipped in v1. Precedence: **config override → native adapter → unsupported**.
+- **Cross-terminal:** Ghostty-first; **dual configurability** (built-in Go adapters + user-config override/escape hatch), both shipped in this feature. Precedence: **config override → native adapter → unsupported**.
 - **Identity (feasibility-validated live):** detect the host terminal via **client-PID → process-tree walk → macOS bundle id**, matched as a **family** (e.g. `dev.warp.Warp-*`), with a **friendly alias** (`ghostty`) as the user-facing key. Client resolved by **highest `client_activity`** (`focused` is unreliable). Remote/mosh clients → NULL bundle id → honest no-op.
 - **Unsupported-terminal UX:** info **banner** (not modal) naming the detected identity.
 - **Duplicate-surface guard:** none — opening an already-attached session is a fine no-op (tmux synchronises both).
-- **Scope yardstick:** MVP is "collapse the attaching into one action per batch" — a **partial win** the user explicitly accepts. Remember-the-grouping + macOS Spaces placement are deferred follow-ons (Spaces already parked in inbox).
+- **Scope yardstick:** this feature is "collapse the attaching into one action per batch" — a **partial win** the user explicitly accepts. Remember-the-grouping + macOS Spaces placement are deliberately separate future features (Spaces already parked in inbox).
 
 ### References
 
@@ -35,18 +35,18 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 7 decided · 6 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 8 decided · 5 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the reopen runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
   ├─ ✓ 3. Burst & partial-failure contract [F1] [decided]
   ├─ ✓ 4. Trigger-context matrix (in/out tmux × attached × includes-self) [F2] [decided]
-  ├─ ○ 5. TCC first-run Automation-permission flow [F4]
+  ├─ ✓ 5. TCC first-run Automation-permission flow [F4] [decided]
   ├─ ✓ 6. Config schema & command representation [F9] [decided]
   ├─ ✓ 7. Terminal-identity UX — what we display & accept as config key [rv2-UX] [decided]
   ├─ ✓ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking] [decided]
   ├─ ○ 9. Testing strategy & DI seam [F5]
-  ├─ ○ 10. Daemon / state footprint of windows-only v1 [F10]
+  ├─ ○ 10. Daemon / state footprint (windows-only) [F10]
   ├─ ○ 11. Attach contention vs post-reboot hydration [F12]
   ├─ ○ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5]
   └─ ○ 13. Design in Paper — page + interactions (deliverable, this discussion) [pending]
@@ -114,9 +114,9 @@ Research pencilled `M` as the trigger, but §12.2 deliberately dropped all upper
 - **Visually unmistakable mode**, modelled on filter mode (orange + a typable filter area): multi-select gets its **own mode colour + a banner** in the existing notice-band slot (single-slot arbiter — the multi-select banner owns the slot while in mode), e.g. `N selected · m toggle · space preview · ⏎ open · esc cancel`. Selected rows carry a **glyph marker + the mode colour**, never colour-only (MV's NO_COLOR / colourless-render rule). Exact colour token + banner copy are a **design-phase** call (MV token layer + fixture/visual-gate process); the *requirement* is "as obviously a distinct mode as filtering is."
 - **Live vs suppressed in mode (from the agreed #2.2 set):** `/` filter and `s` regroup stay **live** (so you can filter/regroup to find things to select); `k` kill, `x` page-toggle, `r` rename, and other row actions are **suppressed**. Selection is **sticky** across filtering, paging, and regrouping. Grouping `HeaderItem` rows are skipped (non-selectable).
 
-### Decision — granularity: per-session only (v1)
+### Decision — granularity: per-session only
 
-Group-select (mark a whole project/tag group via its header) is **deferred to a v2 fast-follow**. Tempting — it maps onto the per-Space/per-project rebuild — but it requires letting the cursor land on the currently non-selectable `HeaderItem` rows (the `skipHeaderRow` invariant, itself a pagination-bug fix), and the research already accepts "manual re-selection per zone" as the v1 partial-win yardstick. v1 ships **per-session marking only**.
+Group-select (mark a whole project/tag group via its header) is **deferred as separate future work**. Tempting — it maps onto the per-Space/per-project rebuild — but it requires letting the cursor land on the currently non-selectable `HeaderItem` rows (the `skipHeaderRow` invariant, itself a pagination-bug fix), and the research already accepts "manual re-selection per zone" as the accepted partial-win yardstick. This feature ships **per-session marking only**.
 
 *(decided — interaction model + per-session granularity resolved)*
 
@@ -159,7 +159,7 @@ The contract falls out of one structural fact: once the picker self-execs into t
 
 ### Decision — sequential spawn
 
-Spawn the N−1 **sequentially** (one `osascript` completes before the next fires) for v1. The token ack already makes spawn *order* irrelevant to reporting, so the choice rests on: sidesteps the unverified Ghostty rapid-fire AppleScript throughput risk (#12), gives clean per-window cancellation points, and turns the per-window focus-steal into an orderly cascade rather than unpredictable thrash. Reversible — flip to parallel only if #12's validation shows it's both safe *and* meaningfully faster.
+Spawn the N−1 **sequentially** (one `osascript` completes before the next fires). The token ack already makes spawn *order* irrelevant to reporting, so the choice rests on: sidesteps the unverified Ghostty rapid-fire AppleScript throughput risk (#12), gives clean per-window cancellation points, and turns the per-window focus-steal into an orderly cascade rather than unpredictable thrash. Reversible — flip to parallel only if #12's validation shows it's both safe *and* meaningfully faster.
 
 ### Dependency verified — skip-bootstrap latch suffices
 
@@ -193,7 +193,7 @@ Behaviour across: in/out of tmux at trigger × selected session detached / attac
 - **Includes-self:** the trigger window becomes one attached session, the rest spawn; the marked origin session ends up attached either way.
 - **Selected session vanished** between picker-load and Enter: its spawn fails → best-effort report (#3).
 - **Enter opens the marked set only.** The cursor/highlight at Enter time is irrelevant — a highlighted-but-unmarked row is **not** opened (marking is `m`, not Enter). Enter always commits the `m`-marked set.
-- **Which marked session the trigger window becomes: unspecified / impl-convenience.** Cosmetic in v1 (no Spaces placement — all N windows open on the current Space regardless), so not pinned.
+- **Which marked session the trigger window becomes: unspecified / impl-convenience.** Cosmetic (no Spaces placement — all N windows open on the current Space regardless), so not pinned.
 
 ### Decision — open order: list order (selection is a set)
 
@@ -203,17 +203,34 @@ Open in **list order** (top-to-bottom as shown), not pick order. The selection i
 
 ---
 
+## 5. TCC First-Run Automation-Permission Flow
+
+### Context
+
+The first AppleScript call (Portal → Ghostty, open a window) triggers macOS's one-time **Automation permission** modal; deny → `-1743`, timeout → `-1712` (the deep-dive probe timed out on it). A first-run blocker (review-F4).
+
+### Decision — driver-quarantined error handling + blocking-modal flow
+
+- **Architectural boundary (the core decision).** All terminal/OS-specific concerns — the AppleScript, `osascript`, the `-1712`/`-1743` AppleEvent codes, TCC, any macOS deep-link — live **inside the Ghostty driver and nowhere else**. The driver translates them into a **generic typed result** — a small taxonomy (`permission-required` with guidance text / `unsupported` / `spawn-failed`). Portal's general reopen/report/UI code switches on the category and **never sees an AppleScript string or AppleEvent number**. Every future terminal driver gets the same clean contract. (Strengthens #8: adapters return typed errors, not OS specifics.)
+- **Happy path.** The first spawn's `osascript` **blocks on the Automation modal**; on Allow it proceeds. Because spawns are sequential (#3), the single persistent grant unblocks the rest of the burst. The blocking modal *is* the mechanism — no polling.
+- **Denied / timed-out.** The driver recognises its own `-1743`/`-1712`, returns `permission-required`; general code surfaces actionable guidance — names the target terminal and offers to open the Automation settings pane (the deep-link composed *in the driver*, handed up as opaque guidance). Grant persists; re-triggering works — the standard macOS permission model. Per-`(source, target)` pair: switching terminals re-prompts, handled identically.
+- **Validation item (→ #12).** TCC attributes Apple events by the source app's signature, and `portal` is a CLI (Homebrew, possibly unsigned), not a `.app`. Events from a CLI inside a terminal are often attributed to the **host terminal**, not the CLI — the prompt could read "Ghostty wants to control Ghostty." Must be verified on a real Mac before build: it decides the guidance copy and deep-link target.
+
+*(decided — error handling quarantined in the driver; blocking-modal flow; typed permission-error → general guidance; TCC-attribution validation flagged)*
+
+---
+
 ## 6. Config Schema & Command Representation
 
 ### Context
 
-Research: v1 ships the user-config override/escape-hatch; *built-in* adapters (Ghostty) live in compiled Go, not config; layered representation (inline / script file); precedence config→native→unsupported. #8's generic contract fixes what config expresses: "how my terminal opens a window running `{command}`."
+Research: this feature ships the user-config override/escape-hatch; *built-in* adapters (Ghostty) live in compiled Go, not config; layered representation (inline / script file); precedence config→native→unsupported. #8's generic contract fixes what config expresses: "how my terminal opens a window running `{command}`."
 
 ### Decision
 
 - **Location + format:** `~/.config/portal/terminals.json` — Portal's JSON-store convention (`projects.json` / `hooks.json`), XDG-resolved via the existing `configFilePath`.
 - **Entry = identity-matcher → capability map.** Keyed by whatever #7 surfaces — a `.app` name, bundle id, `*`-glob, or a built-in alias (to override it).
-- **Capability nesting (mirrors #8):** entry → `commands` → `open` (the sole v1 key) → recipe. Future `introspect` / `place` are **additive sub-keys**, not a breaking schema change — config and adapter extend in lockstep.
+- **Capability nesting (mirrors #8):** entry → `commands` → `open` (the only key in scope) → recipe. Future `introspect` / `place` are **additive sub-keys**, not a breaking schema change — config and adapter extend in lockstep.
 - **Recipe: explicit fields, not magic.** `argv` (inline argv-array template) **or** `script` (path to a file Portal runs). Chosen over research's "is it a path on disk?" auto-detection — clearer, no disk-probing surprise. Inline is an **argv array** (not a string) to sidestep shell-quoting hell.
 - **Placeholder `{command}`** — Portal substitutes `<os.Executable()> attach <session>` + the ack token (per #8). The inline field is named `argv` (not `command`) to avoid colliding with the placeholder.
 - **Precedence (reaffirmed):** config override → native adapter → unsupported. Config can override a built-in too (e.g. Ghostty + a resize).
@@ -259,7 +276,7 @@ Detection is a **separately-callable operation**, not buried in the spawn path �
 
 ### Decision — F2 dissolves: no headless story to build
 
-`portal reopen` exists to *open terminal windows*, so it only runs from a terminal context — the picker is in one, a script is run in one, and even the future workspace feature triggers from you interacting with Portal in a terminal. There is no sensible v1 caller that runs it headlessly (cron/CI/no-display) — essentially chicken-and-egg. The review's "headless" concern reflected an **overstated Pro in #1's write-up** (now trimmed), not a real gap. So: **no special headless handling and no `--terminal` override** (YAGNI — no caller). If detection ever returns empty, it folds into the **same NULL-bundle path already decided** for remote/mosh clients → unsupported → clean error/banner. The `portal reopen` CLI's real value is the test seam, the `--detect` dry-run, and the future-feature entry point.
+`portal reopen` exists to *open terminal windows*, so it only runs from a terminal context — the picker is in one, a script is run in one, and even the future workspace feature triggers from you interacting with Portal in a terminal. There is no sensible caller that runs it headlessly (cron/CI/no-display) — essentially chicken-and-egg. The review's "headless" concern reflected an **overstated Pro in #1's write-up** (now trimmed), not a real gap. So: **no special headless handling and no `--terminal` override** (YAGNI — no caller). If detection ever returns empty, it folds into the **same NULL-bundle path already decided** for remote/mosh clients → unsupported → clean error/banner. The `portal reopen` CLI's real value is the test seam, the `--detect` dry-run, and the future-feature entry point.
 
 *(decided — display / config-keys / detect-self standalone / F2-dissolves all resolved)*
 
@@ -277,7 +294,7 @@ Research settled: one operation per terminal (the "contract"); built-in Go adapt
 - **Generic contract (B).** The adapter's single job is **open a new host window running a given command** (`OpenWindow(command)`), not "attach to a session." The **reopen layer composes the command** — `<os.Executable()> attach <session>` + the ack token — and hands it to the adapter. (Rejected (A) session-aware `OpenAttached(session)`: it would bake `portal attach` into every adapter and scatter the attach+ack composition.)
   - Keeps adapters dumb + portable (one thing: open a window running a command); keeps the `portal attach`+ack composition in one place; and **future-proofs the adapter** (user's point) — the same open-window primitive can be handed *different* commands later (the workspace feature, other actions) without touching adapters.
   - **Knock-on for #6:** the custom-terminal config placeholder is **`{command}`** (the thing to run), not `{session}`. Config expresses "how my terminal opens a window running `{command}`"; Portal fills in the attach.
-- **Capability-based extensibility.** v1 adapters implement exactly one capability (open-window-with-command). Future `introspect` / `place-on-space` slot in as *additive* optional capabilities (Go interface segregation, checked by type assertion) without touching existing adapters. v1 ships spawn-only; the mechanics are an implementation concern.
+- **Capability-based extensibility.** Adapters implement exactly one capability (open-window-with-command). Future `introspect` / `place-on-space` slot in as *additive* optional capabilities (Go interface segregation, checked by type assertion) without touching existing adapters. The open capability is the only one in scope for this feature; the mechanics are an implementation concern.
 - **Precedence (research, reaffirmed):** config override → native adapter → unsupported.
 
 *(decided — generic contract, detection-separate, capability-based extensibility, precedence)*
@@ -318,11 +335,12 @@ Follows the project's reference-first visual workflow — export the Paper frame
 - Research foundation settled (see Context); 12 live subtopics seeded.
 - **#1 Spawn-Execution Architecture — decided** (Option B: shared reopen package + `portal reopen` subcommand, picker calls in-process; N−1 spawned, picker self-reuses for the Nth).
 - **#3 Burst & Partial-Failure — decided.** Best-effort; picker-orchestrated, self-attach-last; in-process; token-ack confirmation via `@portal-reopen-*` server option; spawn via `os.Executable()` (F3); sequential; N=1 degenerates to plain attach, N=0 exits multi-mode (F6). Skip-bootstrap latch verified sufficient.
-- **#2 Multi-Select Trigger & Keymap — decided.** `m` enters explicit (empty-able) multi-select mode; `m` toggles cursor row; `Space` stays preview; `Enter` opens marked set; `Esc` exits. Distinct mode colour + notice-band banner (design-phase visual). Sticky selection; filter/regroup live, kill/rename/page-toggle suppressed. Per-session only; group-select deferred to v2.
+- **#2 Multi-Select Trigger & Keymap — decided.** `m` enters explicit (empty-able) multi-select mode; `m` toggles cursor row; `Space` stays preview; `Enter` opens marked set; `Esc` exits. Distinct mode colour + notice-band banner (design-phase visual). Sticky selection; filter/regroup live, kill/rename/page-toggle suppressed. Per-session only; group-select deferred as separate work.
 - **#4 Trigger-Context Matrix — decided.** In/out-tmux reuse (switch-client / exec-attach), already-attached allowed, includes-self handled, vanished→best-effort. Enter opens the marked set only (cursor irrelevant). Selection is a **set**, opened in **list order**; trigger-window session + focus left to impl/OS.
 - **#7 Terminal-Identity UX — decided.** Display both `.app` name + bundle id; config accepts alias/`.app`-name/bundle-id/`*`-glob; detect-self standalone (F7); F2 headless dissolves (folds into NULL-bundle unsupported path). #1 "headless" wording trimmed.
 - **#8 Adapter Contract — decided.** Detection separate from adapter; generic contract `OpenWindow(command)` (reopen composes `<exe> attach <session>` + ack token); config placeholder becomes `{command}` (feeds #6); capability-based (introspect/place later); precedence config→native→unsupported.
 - **#6 Config Schema — decided.** `~/.config/portal/terminals.json`; identity-matcher → `commands.open` → `argv`/`script` recipe; `{command}` placeholder; `commands` map mirrors #8's capability model; precedence config→native→unsupported.
+- **#5 TCC Permission Flow — decided.** All terminal/OS specifics (AppleScript, `osascript`, `-1712`/`-1743`, TCC, deep-links) quarantined in the Ghostty driver, which returns a generic typed result (`permission-required`/`unsupported`/`spawn-failed`) — general code never sees OS specifics. Blocking-modal happy path; sequential grant unblocks the burst; typed permission-error → general actionable guidance. TCC-attribution (CLI vs host terminal) is a hard validation item (#12).
 - **#13 Design in Paper** — deliverable tracked (multi-select page + interactions).
 - Outstanding review finding to place: **F5** (reopen observability / log component) — likely a new subtopic or folded into #10.
 
