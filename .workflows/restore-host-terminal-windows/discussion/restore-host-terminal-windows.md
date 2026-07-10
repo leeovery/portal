@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 10 decided · 3 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 11 decided · 2 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the spawn runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -47,7 +47,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 8. Adapter contract shape & extensibility (capability-based) [fwd-looking] [decided]
   ├─ ✓ 9. Testing strategy & DI seam [F5] [decided]
   ├─ ✓ 10. Daemon / state footprint (windows-only) [F10] [decided]
-  ├─ ○ 11. Attach contention vs post-reboot hydration [F12]
+  ├─ ✓ 11. Attach contention vs post-reboot hydration [F12] [decided]
   ├─ ○ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5]
   └─ ○ 13. Design in Paper — page + interactions (deliverable, this discussion) [pending]
 
@@ -334,6 +334,22 @@ review-F10 ("near-zero state change" asserted, not traced) + review-001 F5 (spaw
 
 ---
 
+## 11. Attach Contention vs Post-Reboot Hydration
+
+### Context
+
+review-F12: N near-simultaneous `tmux attach` against a server maybe still hydrating post-reboot (`@portal-restoring`, the 1s capture tick, the self-supervising daemon) — racing it, or independent?
+
+### Decision — dissolves (no contention), for reasons already built in
+
+1. **The skip-bootstrap latch removed the big race (via F1).** Burst attaches take the abridged path — no full bootstrap per window — so N concurrent sweeps/restores/cleans against one server is gone.
+2. **The picker gates the burst to *after* hydration.** The cold+TUI path reaches the Sessions page (where multi-select lives) only on `BootstrapCompleteMsg` — after Restore + EagerSignalHydrate + `@portal-restoring` cleared. So the burst can't be triggered until hydration is done. (A direct `portal spawn` CLI as the first post-reboot command runs its own bootstrap synchronously first — same guarantee.)
+3. **Abridged attaches don't perturb capture.** A new client attaching adds a *client*, not session/window/pane structure — all the daemon captures — so the 1s tick and self-supervision are untouched.
+
+*(decided — no contention; dissolved by the latch + the picker's post-hydration gate + capture being structure-only)*
+
+---
+
 ## 13. Design in Paper (Page & Interactions)
 
 ### Context
@@ -371,6 +387,7 @@ Follows the project's reference-first visual workflow — export the Paper frame
 - **#6 Config Schema — decided.** `~/.config/portal/terminals.json`; identity-matcher → `commands.open` → `argv`/`script` recipe; `{command}` placeholder; `commands` map mirrors #8's capability model; precedence config→native→unsupported.
 - **#5 TCC Permission Flow — decided.** All terminal/OS specifics (AppleScript, `osascript`, `-1712`/`-1743`, TCC, deep-links) quarantined in the Ghostty driver, which returns a generic typed result (`permission-required`/`unsupported`/`spawn-failed`) — general code never sees OS specifics. Blocking-modal happy path; sequential grant unblocks the burst; typed permission-error → general actionable guidance. TCC-attribution (CLI vs host terminal) is a hard validation item (#12).
 - **#9 Testing & DI Seam — decided.** Fake `Adapter` makes the whole spawn pipeline unit-testable; detection reads behind small seams; each driver split into pure command-construction + error-mapping (unit) behind a thin exec boundary (manual). Live terminal + TCC modal only for the last inch (manual + Paper gates).
+- **#11 Attach Contention — decided (dissolves).** No contention: the skip-bootstrap latch removes the concurrent-bootstrap race; the picker gates the burst to after hydration (`BootstrapCompleteMsg`); abridged attaches add a client, not structure, so capture is untouched.
 - **#13 Design in Paper** — deliverable tracked (multi-select page + interactions).
 - Outstanding review finding to place: **F5** (spawn observability / log component) — likely a new subtopic or folded into #10.
 
