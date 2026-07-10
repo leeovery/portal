@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 12 decided · 1 delivered/in-review)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 13 decided)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the spawn runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -49,7 +49,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 10. Daemon / state footprint (windows-only) [F10] [decided]
   ├─ ✓ 11. Attach contention vs post-reboot hydration [F12] [decided]
   ├─ ✓ 12. Pre-build validation flags (validated live) [rv2-F4/F5] [decided]
-  └─ → 13. Design in Paper — page + interactions (3 frames delivered) [in review]
+  └─ ✓ 13. Design in Paper — page + interactions (3 frames delivered + approved) [decided]
 
 ---
 
@@ -419,7 +419,23 @@ Three frames, cloned from **Sessions — Modern Vivid v2** so they inherit the e
 
 Accent: **violet reused** as the selection accent; amber/red pulled from the existing palette for warning/error — no new tokens. Dark-mode; light-mode variants deferred unless requested. Open toss-up left for review: whether unselected rows carry a dim `○` (built clean — selected-only).
 
-*(delivered — pending user review in Paper)*
+### Reference frames (committed)
+
+Source of truth is the **Portal Paper file → Page 1** (frames *Sessions — Multi-Select (active)* / *(partial-failure report)* / *Unsupported terminal (banner)*). Committed 2× PNG exports for implementation reference:
+
+**Multi-select — active**
+
+![Sessions — Multi-Select active](../design/sessions-multi-select-active.png)
+
+**Partial-failure report**
+
+![Sessions — Multi-Select partial-failure report](../design/sessions-multi-select-partial-failure-report.png)
+
+**Unsupported terminal banner**
+
+![Sessions — Unsupported terminal banner](../design/sessions-unsupported-terminal.png)
+
+*(delivered — approved by the user; reference frames committed under `design/`. Implementation may reference these directly, or re-capture fresh frames via the `capturetool` / `vhs` harness once the feature is built — moving them to `testdata/vhs/reference/` when wiring the visual gate.)*
 
 ---
 
