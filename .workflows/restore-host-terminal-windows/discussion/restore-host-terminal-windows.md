@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 11 decided · 2 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 11 decided · 1 exploring · 1 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the spawn runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 9. Testing strategy & DI seam [F5] [decided]
   ├─ ✓ 10. Daemon / state footprint (windows-only) [F10] [decided]
   ├─ ✓ 11. Attach contention vs post-reboot hydration [F12] [decided]
-  ├─ ○ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5]
+  ├─ ◐ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5] [exploring]
   └─ ○ 13. Design in Paper — page + interactions (deliverable, this discussion) [pending]
 
 ---
@@ -278,7 +278,18 @@ Detection is a **separately-callable operation**, not buried in the spawn path �
 
 `portal spawn` exists to *open terminal windows*, so it only runs from a terminal context — the picker is in one, a script is run in one, and even the future workspace feature triggers from you interacting with Portal in a terminal. There is no sensible caller that runs it headlessly (cron/CI/no-display) — essentially chicken-and-egg. The review's "headless" concern reflected an **overstated Pro in #1's write-up** (now trimmed), not a real gap. So: **no special headless handling and no `--terminal` override** (YAGNI — no caller). If detection ever returns empty, it folds into the **same NULL-bundle path already decided** for remote/mosh clients → unsupported → clean error/banner. The `portal spawn` CLI's real value is the test seam, the `--detect` dry-run, and the future-feature entry point.
 
-*(decided — display / config-keys / detect-self standalone / F2-dissolves all resolved)*
+### Decision — detection model (refined by live validation)
+
+Live-probed against the real server (~33 clients, many lingering mosh/Blink). Findings: the identity walk (client_pid → process-tree → `.app` bundle via Info.plist) **cleanly separates local Ghostty from remote mosh (→ NULL)**; but `focused` and raw highest-`client_activity` are **unreliable across all clients** (a mosh client held `focused`; mosh clients had top activity). So the research's activity-centric framing is replaced:
+
+1. **Outside tmux (the primary flow — fresh terminal → picker):** the picker **self-walks its own process tree** → terminal (`picker → zsh → ghostty`), or uses the env fast-path (`GHOSTTY_*` / `__CFBundleIdentifier`, accurate outside tmux). Direct — no client list, no tiebreak.
+2. **Inside tmux:** take the current session's clients, **NULL-filter to local host clients** (drop mosh/remote/other-machine). The local client's app = the terminal.
+3. **`client_activity` demoted to a local-only tiebreak** — used *only* to choose among 2+ local clients on the same session (same session open twice on this Mac); the trigger keypress makes your window freshest, and the mosh noise is already filtered out, so it's robust in that narrow role. Never the primary cross-client signal.
+4. **Host-local principle (multi-machine).** Portal opens windows only on the machine it runs on, for local clients; other-machine access is a remote client → NULL → filtered (it literally can't open a window on the Mac Mini from here). A purely-remote trigger (no local client) → the honest "no host-local terminal" no-op — run Portal on that machine to spawn there.
+
+**Inside-tmux behaviour (reaffirms #1/#4):** the trigger window **switches** (`switch-client`) to one selected, N−1 spawn new — consistent with the outside-tmux exec-attach reuse. One mental model, inside or out.
+
+*(decided — display / config-keys / detect-self standalone / F2-dissolves / detection-model all resolved)*
 
 ---
 
@@ -350,6 +361,27 @@ review-F12: N near-simultaneous `tmux attach` against a server maybe still hydra
 
 ---
 
+## 12. Pre-Build Validation Flags
+
+### Context
+
+Consolidated checklist of feasibility items to verify on a real Mac. Several were **probed live during this discussion** (the right time — not during build).
+
+### Validated live (this discussion)
+
+- **✅ Ghostty AppleScript API (item 5).** On 1.3.1, `Ghostty.sdef` exposes `new window` + a `surface configuration` record with a **`command`** property ("Command to execute instead of the configured shell") + `wait after command`. Real shape: make a `surface configuration` with `command`, then `new window` with it (corrects the loose "create window with command" sketch). The API we depend on exists. *(Caveat unchanged: preview API, may churn in 1.4 — pin/watch.)*
+- **✅ Identity walk (item 3).** On this Mac: `ps -o comm=` returns full paths; the client_pid → process-tree walk cleanly separates local Ghostty (`→ login → /Applications/Ghostty.app/…/ghostty` → bundle id via Info.plist read) from remote mosh (`→ mosh-server` at ppid 1 → NULL). Read-only, no `osascript`/Apple-event needed. *(Still: confirm on ≥1 other macOS version; the Info.plist `defaults read` route works without `lsappinfo`, giving a clean fallback.)*
+- **✅ Which-client detection (item 2) — folded into #7's detection-model refinement.** Confirmed the fragility (mosh clients held `focused` + top activity), then designed around it: NULL-filter to local first, `activity` only a local tiebreak. No longer a blocker.
+
+### Still to validate (needs the live spawn — opens real windows + TCC modal)
+
+- **⏳ TCC attribution (item 1) — blocker.** How macOS attributes the Apple event from the `portal` CLI (Portal vs host terminal). Requires actually running `osascript` to open a Ghostty window and observing the permission prompt + which app it names.
+- **⏳ Ghostty rapid-fire throughput (item 4) — hardening.** Whether a burst of sequential `osascript` window-opens is fine, or needs pacing.
+
+*(exploring — items 2/3/5 validated live; items 1/4 pending the spawn test)*
+
+---
+
 ## 13. Design in Paper (Page & Interactions)
 
 ### Context
@@ -388,6 +420,8 @@ Follows the project's reference-first visual workflow — export the Paper frame
 - **#5 TCC Permission Flow — decided.** All terminal/OS specifics (AppleScript, `osascript`, `-1712`/`-1743`, TCC, deep-links) quarantined in the Ghostty driver, which returns a generic typed result (`permission-required`/`unsupported`/`spawn-failed`) — general code never sees OS specifics. Blocking-modal happy path; sequential grant unblocks the burst; typed permission-error → general actionable guidance. TCC-attribution (CLI vs host terminal) is a hard validation item (#12).
 - **#9 Testing & DI Seam — decided.** Fake `Adapter` makes the whole spawn pipeline unit-testable; detection reads behind small seams; each driver split into pure command-construction + error-mapping (unit) behind a thin exec boundary (manual). Live terminal + TCC modal only for the last inch (manual + Paper gates).
 - **#11 Attach Contention — decided (dissolves).** No contention: the skip-bootstrap latch removes the concurrent-bootstrap race; the picker gates the burst to after hydration (`BootstrapCompleteMsg`); abridged attaches add a client, not structure, so capture is untouched.
+- **#7 detection model refined + live-validated.** Self-context outside tmux; NULL-filter to local clients inside; `activity` demoted to a local-only tiebreak; host-local principle for multi-machine. Live probe confirmed the identity walk + the mosh-noise fragility it now designs around.
+- **#12 partially validated live.** Items 2/3/5 (which-client, identity walk, Ghostty API) validated on the real Mac; items 1/4 (TCC attribution, throughput) pending the live spawn test.
 - **#13 Design in Paper** — deliverable tracked (multi-select page + interactions).
 - Outstanding review finding to place: **F5** (spawn observability / log component) — likely a new subtopic or folded into #10.
 
