@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 11 decided · 1 exploring · 1 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 12 decided · 1 pending)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the spawn runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 9. Testing strategy & DI seam [F5] [decided]
   ├─ ✓ 10. Daemon / state footprint (windows-only) [F10] [decided]
   ├─ ✓ 11. Attach contention vs post-reboot hydration [F12] [decided]
-  ├─ ◐ 12. Pre-build validation flags (lsappinfo/ps stability, activity-bump timing) [rv2-F4/F5] [exploring]
+  ├─ ✓ 12. Pre-build validation flags (validated live) [rv2-F4/F5] [decided]
   └─ ○ 13. Design in Paper — page + interactions (deliverable, this discussion) [pending]
 
 ---
@@ -95,6 +95,7 @@ In-process vs subprocess for the picker→spawn call: chose **in-process** so sp
 - **Impl flag (review-002 F3, for spec):** spawned windows run `portal attach` as their startup command, so `portal`/`tmux` must be on `PATH` in Ghostty's launch context (not guaranteed a login shell).
 - **Bootstrap cost → external dependency (review-001 F1).** `attach` is not in `skipTmuxCheck`, so each spawned `portal attach` re-runs the full 11-step bootstrap orchestrator — a 14-window burst would fire 13 near-simultaneous full bootstraps against one server (a distinct concern from #11's tmux-attach race). We rejected the two workarounds (a hidden `--skip-bootstrap` flag; an internal bootstrap-exempt `portal state attach`-style command) — the latch belongs in bootstrap, not in a parallel attach path, and the awkward command name was the tell. Resolved by a **separate `warm-command-bootstrap-latch` feature** (logged to inbox `2026-06-30--warm-command-bootstrap-latch`): a once-per-server-lifetime tmux server-option latch (`@portal-bootstrapped`) set at end of bootstrap, so warm commands fast-skip the 11 steps. **This feature depends on that landing first**; spawn then spawns *plain* `portal attach` with no special-casing. This largely **subsumes #11** (attach contention).
 - **Spawn via the picker's own executable path (review-001 F3).** The N−1 windows spawn running `<os.Executable()> attach <session>`, **not** a bare `portal` PATH lookup. The warm-command latch is *version-gated* — satisfied only if stored version == running version (verified against the skip-bootstrap code: `state.BootstrappedLatchSatisfied`) — so a PATH-resolved spawn of a *different* portal version would read the latch unsatisfied and full-bootstrap per window, resurrecting the burst storm. The picker's own binary guarantees version parity → latch satisfied → burst stays abridged. Side-effect: `portal` no longer needs to be *on* PATH (only `tmux` does, since portal shells to it), dissolving half of review-002 F3.
+- **Spawned-window PATH (review-002 F3) — validated live & resolved.** Ghostty's `command` execs an **argv, not a shell**, in a **bare PATH** (`/usr/bin:/bin:/usr/sbin:/sbin` + Ghostty's bin — *no* Homebrew/login PATH), so `tmux` (and any other subprocess `portal` shells to) isn't found. Fix: the **adapter injects the picker's own PATH** into the spawned window's environment (Ghostty's `environment variables` property — an #8 adapter responsibility; each adapter owns its equivalent). Combined with the absolute-`portal` path above, both `portal` and `tmux` resolve. The command is a real argv (`<abs>/portal attach <session>`), never shell syntax.
 
 ---
 
@@ -216,7 +217,11 @@ The first AppleScript call (Portal → Ghostty, open a window) triggers macOS's 
 - **Denied / timed-out.** The driver recognises its own `-1743`/`-1712`, returns `permission-required`; general code surfaces actionable guidance — names the target terminal and offers to open the Automation settings pane (the deep-link composed *in the driver*, handed up as opaque guidance). Grant persists; re-triggering works — the standard macOS permission model. Per-`(source, target)` pair: switching terminals re-prompts, handled identically.
 - **Validation item (→ #12).** TCC attributes Apple events by the source app's signature, and `portal` is a CLI (Homebrew, possibly unsigned), not a `.app`. Events from a CLI inside a terminal are often attributed to the **host terminal**, not the CLI — the prompt could read "Ghostty wants to control Ghostty." Must be verified on a real Mac before build: it decides the guidance copy and deep-link target.
 
-*(decided — error handling quarantined in the driver; blocking-modal flow; typed permission-error → general guidance; TCC-attribution validation flagged)*
+### Validated (live) — TCC is self-exempt; no first-run gate
+
+Live-tested: reset `com.mitchellh.ghostty` AppleEvents grant → fresh spawn → **succeeded with no dialog and no TCC row recreated**. So **Ghostty-scripting-Ghostty via `osascript` is self-exempt.** And because detection always resolves to the terminal you're in and we spawn *that same* terminal, the AppleScript path is **always self→self → always exempt** — there's no design path to a genuine cross-app event. **So there is no TCC first-run prompt in the normal flow.** This **supersedes the "blocking-modal happy path" framing above**: the `-1743`/`-1712` handling stays as a **defensive net** (catch an unexpected denial → typed `permission-required` → guidance naming the host terminal) but is **not** a load-bearing first-run gate. Portal is never the TCC subject — the responsible process is the host terminal. *(Residual: iTerm2/Terminal.app self-scripting assumed same-exempt but unverified — a per-adapter check.)*
+
+*(decided — driver-quarantined error handling; TCC self-exempt (validated) so the modal flow is a defensive net, not a gate; typed permission-error → host-terminal-named guidance)*
 
 ---
 
@@ -373,12 +378,19 @@ Consolidated checklist of feasibility items to verify on a real Mac. Several wer
 - **✅ Identity walk (item 3).** On this Mac: `ps -o comm=` returns full paths; the client_pid → process-tree walk cleanly separates local Ghostty (`→ login → /Applications/Ghostty.app/…/ghostty` → bundle id via Info.plist read) from remote mosh (`→ mosh-server` at ppid 1 → NULL). Read-only, no `osascript`/Apple-event needed. *(Still: confirm on ≥1 other macOS version; the Info.plist `defaults read` route works without `lsappinfo`, giving a clean fallback.)*
 - **✅ Which-client detection (item 2) — folded into #7's detection-model refinement.** Confirmed the fragility (mosh clients held `focused` + top activity), then designed around it: NULL-filter to local first, `activity` only a local tiebreak. No longer a blocker.
 
-### Still to validate (needs the live spawn — opens real windows + TCC modal)
+### Validated live (completing the set)
 
-- **⏳ TCC attribution (item 1) — blocker.** How macOS attributes the Apple event from the `portal` CLI (Portal vs host terminal). Requires actually running `osascript` to open a Ghostty window and observing the permission prompt + which app it names.
-- **⏳ Ghostty rapid-fire throughput (item 4) — hardening.** Whether a burst of sequential `osascript` window-opens is fine, or needs pacing.
+- **✅ TCC attribution + prompt (item 1).** `tccutil reset` → fresh spawn → **no dialog, no TCC row recreated** → Ghostty-scripting-Ghostty is **self-exempt**. Since we always spawn the terminal we're in, the AppleScript path is always self→self → **no first-run prompt in the normal flow** (see #5). Portal is never the TCC subject; the responsible process is the host terminal.
+- **✅ Ghostty throughput (item 4).** 4 sequential `osascript` opens completed in ~1.05s (~260ms each), zero throttling → a 14-window sequential burst is ~3–4s of calls; no pacing needed.
+- **✅ Exec model + PATH (F3).** `command` execs an **argv, not a shell**; exec PATH is bare (no Homebrew/login PATH → `tmux`/`portal` not found). Resolved via absolute-`portal` + adapter PATH-injection (see #1).
 
-*(exploring — items 2/3/5 validated live; items 1/4 pending the spawn test)*
+### Residual (carried to build, not blockers)
+
+- iTerm2 / Terminal.app self-scripting assumed same TCC self-exemption — per-adapter check.
+- `ps -o comm=` / identity walk verified on this macOS only — confirm on ≥1 other version (Info.plist `defaults read` is a clean `lsappinfo`-free fallback).
+- Ghostty AppleScript is a preview API (may churn in 1.4) — pin/watch.
+
+*(decided — items 1–5 + F3 all validated live; residuals are build-time confirmations, not open questions)*
 
 ---
 
@@ -417,7 +429,8 @@ Follows the project's reference-first visual workflow — export the Paper frame
 - **#7 Terminal-Identity UX — decided.** Display both `.app` name + bundle id; config accepts alias/`.app`-name/bundle-id/`*`-glob; detect-self standalone (F7); F2 headless dissolves (folds into NULL-bundle unsupported path). #1 "headless" wording trimmed.
 - **#8 Adapter Contract — decided.** Detection separate from adapter; generic contract `OpenWindow(command)` (spawn composes `<exe> attach <session>` + ack token); config placeholder becomes `{command}` (feeds #6); capability-based (introspect/place later); precedence config→native→unsupported.
 - **#6 Config Schema — decided.** `~/.config/portal/terminals.json`; identity-matcher → `commands.open` → `argv`/`script` recipe; `{command}` placeholder; `commands` map mirrors #8's capability model; precedence config→native→unsupported.
-- **#5 TCC Permission Flow — decided.** All terminal/OS specifics (AppleScript, `osascript`, `-1712`/`-1743`, TCC, deep-links) quarantined in the Ghostty driver, which returns a generic typed result (`permission-required`/`unsupported`/`spawn-failed`) — general code never sees OS specifics. Blocking-modal happy path; sequential grant unblocks the burst; typed permission-error → general actionable guidance. TCC-attribution (CLI vs host terminal) is a hard validation item (#12).
+- **#5 TCC Permission Flow — decided.** OS/terminal specifics quarantined in the Ghostty driver (typed generic results out). **Live-validated: TCC is self-exempt for same-terminal spawns (the only case by design) → no first-run prompt;** the `-1712/-1743` handling is a defensive net, guidance names the host terminal (never Portal). Portal is never the TCC subject.
+- **#12 Pre-Build Validation — decided (validated live).** Items 1–5 + F3 all probed on the real Mac: TCC self-exempt; throughput ~260ms/open no-throttle; identity walk clean; Ghostty API shape confirmed (`command` = argv, not shell); exec PATH is bare → absolute-`portal` + adapter PATH-injection. Residuals (other-terminal TCC, other-macOS `ps`/walk, preview-API churn) are build-time confirmations, not open questions.
 - **#9 Testing & DI Seam — decided.** Fake `Adapter` makes the whole spawn pipeline unit-testable; detection reads behind small seams; each driver split into pure command-construction + error-mapping (unit) behind a thin exec boundary (manual). Live terminal + TCC modal only for the last inch (manual + Paper gates).
 - **#11 Attach Contention — decided (dissolves).** No contention: the skip-bootstrap latch removes the concurrent-bootstrap race; the picker gates the burst to after hydration (`BootstrapCompleteMsg`); abridged attaches add a client, not structure, so capture is untouched.
 - **#7 detection model refined + live-validated.** Self-context outside tmux; NULL-filter to local clients inside; `activity` demoted to a local-only tiebreak; host-local principle for multi-machine. Live probe confirmed the identity walk + the mosh-noise fragility it now designs around.
