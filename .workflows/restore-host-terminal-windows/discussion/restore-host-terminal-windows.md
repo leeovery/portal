@@ -35,7 +35,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
 
 ### Map
 
-  Discussion Map — Restore Host Terminal Windows (13 subtopics — 12 decided · 1 pending)
+  Discussion Map — Restore Host Terminal Windows (13 subtopics — 12 decided · 1 delivered/in-review)
 
   ┌─ ✓ 1. Spawn-execution architecture — where the spawn runs from [F6] [decided]
   ├─ ✓ 2. Multi-select trigger & keymap coexistence [F7] [decided]
@@ -49,7 +49,7 @@ A living index of subtopics tracked during the discussion. Grows as the conversa
   ├─ ✓ 10. Daemon / state footprint (windows-only) [F10] [decided]
   ├─ ✓ 11. Attach contention vs post-reboot hydration [F12] [decided]
   ├─ ✓ 12. Pre-build validation flags (validated live) [rv2-F4/F5] [decided]
-  └─ ○ 13. Design in Paper — page + interactions (deliverable, this discussion) [pending]
+  └─ → 13. Design in Paper — page + interactions (3 frames delivered) [in review]
 
 ---
 
@@ -409,7 +409,17 @@ A **deliverable**, tracked here at the user's request: this feature's UI must be
 
 Follows the project's reference-first visual workflow — export the Paper frame(s) to `reference/` before implementing, verify against `cmd/capturetool` fixtures. Exact colour tokens/copy are settled in the Paper design, consistent with the MV token layer.
 
-*(pending — design artefact to produce as part of this work)*
+### Delivered (Portal Paper file → Page 1, new row beneath the locked batch)
+
+Three frames, cloned from **Sessions — Modern Vivid v2** so they inherit the exact tokens/type/layout:
+
+1. **Sessions — Multi-Select (active)** — violet `3 selected` banner (filter-line analogue); violet `●` markers on selected rows incl. the cursor row; `Space` still preview; footer `↑↓ navigate · m toggle · ␣ preview · ⏎ open · esc cancel`.
+2. **Sessions — Multi-Select (partial-failure report)** — amber `⚠ opened 9 of 12 · 3 didn't come up`; failed rows amber `⚠` + red per-row reason (`spawn failed` / `session gone` / `timed out`); footer `↑↓ navigate · r retry · esc dismiss`.
+3. **Sessions — Unsupported terminal (banner)** — amber `⚠ unsupported terminal — Apple Terminal · com.apple.Terminal` + blue `see docs`, over the normal Sessions list/footer (names the detected identity for copy-paste, per #7).
+
+Accent: **violet reused** as the selection accent; amber/red pulled from the existing palette for warning/error — no new tokens. Dark-mode; light-mode variants deferred unless requested. Open toss-up left for review: whether unselected rows carry a dim `○` (built clean — selected-only).
+
+*(delivered — pending user review in Paper)*
 
 ---
 
