@@ -133,29 +133,29 @@ The motivating scenario is a *large* burst (rebuild ~14 windows post-crash), not
 
 ### Options Considered — partial-failure stance
 
-**All-or-nothing** — rejected. You can't un-spawn windows that already opened, and in a 14-window rebuild you want every one you can get.
+**Best-effort-with-report** — *initially chosen, then reversed (review-002 F3).* Open what you can, keep the successes, surface a report of the failures, then attach. Rejected on reflection: it means "show a failure, then proceed to attach," which is messy, and it drags in a report surface + `r retry` + a deferred-self-attach-after-report flow that never pins cleanly.
 
-**Best-effort-with-report** — chosen.
+**All-or-nothing (pre-flight + rollback)** — **chosen.** Either the whole batch opens or nothing does. The journey: we first picked best-effort (research's "you want every one you can get"), but the user pushed for "if it fails, fail completely," and a **pre-flight check** makes all-or-nothing genuinely clean rather than just relocating the mess.
 
-### Decision — best-effort, picker-orchestrated, self-attach-last
+### Decision — pre-flight + all-or-nothing; self-attach gated on all-succeeding
 
-The contract falls out of one structural fact: once the picker self-execs into the Nth session it is *gone* (can't report, summarise, or retry), and a *failed* spawn has no window of its own to show an error. So **the picker is the only sane reporting surface**, which fixes the shape:
-
-- Spawn the N−1 first, **collect confirmations**, and **self-attach LAST**, gated on having handled failures.
-- **Full success (common case): self-attach silently** — no "14/14 ✓" nag.
-- **Partial failure: the picker stays alive** as the report surface (*"opened 11 of 14 — S5/S9/S12 didn't come up, retry?"*), then attaches.
-- **Resolves the parked #1 coupling: in-process call wins** — the picker needs the spawn results to report them; a detached subprocess throws them away.
-- **Cancellation (review-001 F4):** self-exec being the *last* step makes cancellation clean — `Ctrl-C`/`Esc` *before* it stops the picker mid-loop and reports what opened; *after* it there's nothing to cancel (already attached). The point of no return being last is what buys this.
+- **Pre-flight validate on Enter.** Before opening a single window, verify every selected session still exists (quick `has-session` checks). The **dominant failure cause is a session killed between picker-load and Enter** — pre-flight catches exactly that: if any selected session is gone it **aborts atomically** — nothing spawns, no window opens, no self-attach — with a clean one-line error in the picker (*"'flowx-7UKPZH' is gone — nothing opened"*), and you stay put. Zero windows opened → no rollback, no flash. This *is* "fail completely," cleanly.
+- **Spawn, then self-attach LAST — gated on ALL N−1 confirming.** After pre-flight, sequentially spawn the N−1 and collect their acks. All confirm → the trigger window self-attaches silently (no "14/14 ✓" nag). Any fails → **roll back**: close the windows that opened (safe — it just detaches the client; the tmux sessions persist), skip the self-attach, show the same clean error; you're back in the picker to redo.
+- **Rare residual only.** A spawn failing *after* pre-flight passed is a transient `osascript`/Ghostty hiccup — genuinely rare (validation: spawn reliable, TCC self-exempt, PATH fixed). So rollback (and its brief flash) is the exception, not the norm.
+- **Dissolves the tangle.** No report surface, no `r retry`, no deferred-attach ambiguity — the whole thing the best-effort model dragged in is gone. In-process call from the picker still wins (it needs the acks to decide success/rollback).
+- **Trade-off accepted (reverses research's best-effort).** On a rare mid-rebuild failure you get nothing and re-select, rather than keeping the partial — the user accepts this for the cleaner model, given how rare post-pre-flight failure is.
+- **Cancellation (review-001 F4):** self-exec being the *last* step still makes cancellation clean — `Ctrl-C`/`Esc` before it aborts (roll back what opened); after it there's nothing to cancel (already attached).
 
 ### Decision — confirmation mechanism: token ack (not tmux-watching)
 
 `osascript` returning success is **shallow** — it only confirms "Ghostty accepted the request," not that the window rendered, `portal` ran, the session existed, or attach happened. We need a real "it came up" signal.
 
 - **Rejected — tmux client-watching** (snapshot `list-clients`, diff new clients per session). Handles a *static* pre-existing client via set-diff, but **fragile in this user's environment**: lingering/reconnecting mosh clients churn the client list during the exact burst window (research-documented), risking false confirms or masked failures. It infers from a shared, noisy registry.
-- **Chosen — explicit token ack.** The picker issues a batch id + per-window token, threads it into each spawned command (arg/env); the spawned `portal attach` **writes its token right before exec**; the picker watches for the token set with a **timeout**; missing tokens after the timeout = the report. A **direct signal from our own spawned process**, immune to how many other clients are attached (local/remote, stable/flapping) — this is what makes **spawning a session already attached elsewhere (e.g. the iPhone) confirm correctly**, satisfying the explicit "allow multi-client / cross-device spawn" requirement.
+- **Chosen — explicit token ack.** The picker issues a batch id + per-window token, threads it into each spawned command (arg/env); the spawned `portal attach` **writes its token right before exec**; the picker watches for the token set with a **timeout**; a missing token at timeout = a failed spawn → **abort + roll back** (not a report). A **direct signal from our own spawned process**, immune to how many other clients are attached (local/remote, stable/flapping) — this is what makes **spawning a session already attached elsewhere (e.g. the iPhone) confirm correctly**, satisfying the explicit "allow multi-client / cross-device spawn" requirement.
+- **Timeout is per-window, not global (review-002 F6).** Under sequential spawn the Nth window's `osascript` fires seconds after Enter and then runs its own abridged attach before writing its token, so a single global clock from Enter would over-report late windows as failed. Instead each window's ack timer starts when *its* spawn fires — the cumulative sequential delay never eats the budget.
 - **Honest boundary:** the ack fires at the last instant before exec (once `portal` execs into tmux it's replaced, so it can't ack *after* attaching). It confirms "window opened, `portal` ran, session found, attach handoff starting" — covering every real failure mode; the final tmux handoff is essentially guaranteed once there.
 - **Channel: namespaced `@portal-spawn-<batch>-<session>` tmux server option, behind a small ack seam** (write-token / collect-tokens interface — Portal DI shape). Code-verified safe: the only all-server-options enumerator, `ListSkeletonMarkers`, skips any name not prefixed `@portal-skeleton-` (`internal/state/markers.go:86`), so a distinct `@portal-spawn-` prefix is invisible to it; namespacing isolates sweeps in both directions; server options die with the server.
-- **Cleanup:** the picker self-cleans its batch markers before self-exec. Bounded, harmless leaks (a late-laggard ack, or a crashed picker) self-expire with the server and never collide (unique batch ids). A defensive `@portal-spawn-*` sweep mirroring `CleanStaleMarkers` (bootstrap step 9) is a drop-in if ever needed — **deferred**.
+- **Cleanup:** the picker self-cleans its batch markers before self-exec (and on abort/rollback). Bounded, harmless leaks (a late-laggard ack, or a crashed picker) self-expire with the server and never collide (unique batch ids). A defensive `@portal-spawn-*` sweep mirroring `CleanStaleMarkers` (bootstrap step 9) is a drop-in if ever needed — **deferred**.
 - **Pivot to the daemon (channel c) is additive, not a rewrite:** the daemon already ticks every second reading tmux state, so the future remember-and-restore-workspace feature just teaches it to *read the same markers* and record outcomes — no change to how the picker collects.
 
 ### Decision — sequential spawn
@@ -177,7 +177,7 @@ The "self-attach to the Nth of N" rule is total:
 - **N=1** (one selected, Enter): zero windows to spawn — the picker self-attaches to that one session, i.e. it **degenerates to a plain single attach** to the current window. No special-casing; selecting one in multi-mode and pressing Enter is just a normal attach.
 - **N=0** (nothing selected, Enter): a **no-op that exits multi-select mode**, dropping back to the standard picker (Portal stays open) — the same effect as pressing `Esc`. Nothing opens.
 
-*(decided — full partial-failure contract, token-ack confirmation, spawn-via-own-exe, sequential spawn, and N=0/N=1 boundary all resolved)*
+*(decided — pre-flight + all-or-nothing (rollback on the rare residual), token-ack confirmation (per-window timeout = failure), sequential spawn, spawn-via-own-exe, N=0/N=1 boundary all resolved; best-effort/report/retry model superseded per review-002 F3/F6)*
 
 ---
 
@@ -449,7 +449,7 @@ Source of truth is the **Portal Paper file → Page 1** (frames *Sessions — Mu
 
 - Research foundation settled (see Context); 12 live subtopics seeded.
 - **#1 Spawn-Execution Architecture — decided** (Option B: shared spawn package + `portal spawn` subcommand, picker calls in-process; N−1 spawned, picker self-reuses for the Nth).
-- **#3 Burst & Partial-Failure — decided.** Best-effort; picker-orchestrated, self-attach-last; in-process; token-ack confirmation via `@portal-spawn-*` server option; spawn via `os.Executable()` (F3); sequential; N=1 degenerates to plain attach, N=0 exits multi-mode (F6). Skip-bootstrap latch verified sufficient.
+- **#3 Burst & Partial-Failure — decided.** **Pre-flight + all-or-nothing** (review-002 F3): validate all selected sessions exist on Enter → atomic abort (nothing opens) if any gone; else spawn N−1, self-attach LAST gated on all confirming, else roll back the opened windows. Token-ack confirmation via `@portal-spawn-*` server option, per-window timeout=failure (F6); spawn via `os.Executable()`; sequential; N=1 degenerates to plain attach, N=0 exits multi-mode. Skip-bootstrap latch verified sufficient. (No report/retry surface — superseded.)
 - **#2 Multi-Select Trigger & Keymap — decided.** `m` enters explicit (empty-able) multi-select mode; `m` toggles cursor row; `Space` stays preview; `Enter` opens marked set; `Esc` exits. Distinct mode colour + notice-band banner (design-phase visual). Sticky selection; filter/regroup live, kill/rename/page-toggle suppressed. Per-session only; group-select deferred as separate work.
 - **#4 Trigger-Context Matrix — decided.** In/out-tmux reuse (switch-client / exec-attach), already-attached allowed, includes-self handled, vanished→best-effort. Enter opens the marked set only (cursor irrelevant). Selection is a **set**, opened in **list order**; trigger-window session + focus left to impl/OS.
 - **#7 Terminal-Identity UX — decided.** Display both `.app` name + bundle id; config accepts alias/`.app`-name/bundle-id/`*`-glob; detect-self standalone (F7); F2 headless dissolves (folds into NULL-bundle unsupported path). #1 "headless" wording trimmed.
