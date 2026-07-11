@@ -131,6 +131,58 @@ Group-select (marking a whole project/tag group via its header) is **deferred as
 
 ---
 
+## Burst & Partial-Failure Contract
+
+### Framing
+
+The motivating scenario is a *large* burst (rebuild ~14 windows post-crash), not the clean 3-window path. The "burst = N concurrent full bootstraps" concern is dissolved by the warm-command latch dependency (each attach takes the abridged fast-path). So this contract is about genuine **spawn/attach partial failure**, not bootstrap contention.
+
+### Stance: pre-flight + all-or-nothing
+
+Either the whole batch opens, or nothing does.
+
+**Pre-flight validate on Enter.** Before opening a single window, verify every selected session still exists (quick `has-session` checks). The dominant failure cause is a session killed between picker-load and Enter; pre-flight catches exactly that. If any selected session is gone:
+
+- **Abort atomically** — nothing spawns, no window opens, no self-attach.
+- Show a clean one-line error in the picker naming the gone session (design copy: `⚠ '<session>' is gone — nothing opened`), and stay put in multi-select mode with the remaining selections intact.
+- Zero windows opened → no rollback, no flash.
+
+**Spawn, then self-attach LAST — gated on ALL N−1 confirming.** After pre-flight passes, sequentially spawn the N−1 and collect their acks:
+
+- **All confirm** → the trigger window self-attaches silently (no "14/14 ✓" nag).
+- **Any fails** (a transient `osascript`/terminal hiccup *after* pre-flight passed — genuinely rare) → **roll back**: close the windows that opened (safe — it detaches the client; the tmux sessions persist), skip the self-attach, show the same clean error; back in the picker to redo.
+
+This deletes the report / `r retry` / deferred-attach tangle entirely. Trade-off accepted: on a rare mid-rebuild failure you get nothing and re-select, rather than keeping the partial.
+
+### Confirmation mechanism: explicit token ack
+
+`osascript` returning success is shallow — it only confirms "the terminal accepted the request," not that the window rendered, `portal` ran, the session existed, or attach happened.
+
+- **Rejected — tmux client-watching** (snapshot `list-clients`, diff new clients). Fragile here: lingering/reconnecting mosh clients churn the client list during the exact burst window, risking false confirms or masked failures.
+- **Chosen — explicit token ack.** The picker issues a **batch id + per-window token**, threads it into each spawned command (arg/env); the spawned `portal attach` **writes its token right before exec**; the picker watches for the token set with a **timeout**. A missing token at timeout = a failed spawn → abort + roll back. A direct signal from our own spawned process, immune to how many other clients are attached — this is what makes spawning a session **already attached elsewhere** (e.g. the iPhone) confirm correctly.
+
+**Ack channel.** A namespaced **`@portal-spawn-<batch>-<session>` tmux server option**, behind a small ack seam (write-token / collect-tokens interface). Code-verified safe: the only all-server-options enumerator, `ListSkeletonMarkers`, skips any name not prefixed `@portal-skeleton-` (`internal/state/markers.go`), so a distinct `@portal-spawn-` prefix is invisible to it; namespacing isolates sweeps in both directions; server options die with the server.
+
+**Timeout is per-window, not global.** Under sequential spawn the Nth window's `osascript` fires seconds after Enter and then runs its own abridged attach before writing its token; a single global clock from Enter would over-report late windows as failed. Each window's ack timer starts when *its* spawn fires — the cumulative sequential delay never eats the budget.
+
+**Honest boundary.** The ack fires at the last instant before exec (once `portal` execs into tmux it's replaced, so it can't ack *after* attaching). It confirms "window opened, `portal` ran, session found, attach handoff starting" — covering every real failure mode; the final tmux handoff is essentially guaranteed once there.
+
+**Cleanup.** The picker self-cleans its batch markers before self-exec (and on abort/rollback). Bounded, harmless leaks (a late-laggard ack, a crashed picker) self-expire with the server and never collide (unique batch ids). A defensive `@portal-spawn-*` sweep mirroring bootstrap's `CleanStaleMarkers` is a drop-in if ever needed — deferred.
+
+### Sequential spawn
+
+Spawn the N−1 **sequentially** (one adapter/`osascript` call completes before the next fires). The token ack already makes spawn *order* irrelevant to reporting, so the choice rests on: sidesteps the unverified rapid-fire AppleScript throughput risk, gives clean per-window cancellation points, and turns per-window focus-steal into an orderly cascade rather than thrash. (Validated: 4 sequential `osascript` opens ~1.05s / ~260ms each → a 14-window burst is ~3–4s, no pacing needed.) Reversible — flip to parallel only if a future validation shows it both safe and meaningfully faster.
+
+### Cancellation
+
+Self-exec being the *last* step keeps cancellation clean: `Ctrl-C`/`Esc` before it aborts (roll back what opened); after it there is nothing to cancel (already attached).
+
+### Deferred hardening (recorded, not built)
+
+Because the picker always bootstraps first (its own `PersistentPreRunE`) and stamps the latch to its own version, then spawns that same binary, the latch is always satisfied at burst time and no spawned window full-bootstraps. The only residual is a mid-picker-session in-place binary swap (negligible; a full bootstrap is a safe no-op). A conditional "if the first spawn triggers a full bootstrap, wait for its ack before firing the rest" — which would cap it at exactly one bootstrap — is **deferred as YAGNI**; the ack is the natural wait-signal if ever wanted.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
