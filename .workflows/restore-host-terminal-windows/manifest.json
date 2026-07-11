@@ -25,7 +25,7 @@
           "status": "in-progress",
           "sources": {
             "restore-host-terminal-windows": {
-              "status": "pending"
+              "status": "incorporated"
             }
           },
           "review_cycle": 0,

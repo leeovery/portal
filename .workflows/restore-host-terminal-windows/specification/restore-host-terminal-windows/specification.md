@@ -455,6 +455,36 @@ Follows the project's reference-first workflow: the committed `design/` frames a
 
 ---
 
+## Dependencies, Deferred Scope & Build-Time Residuals
+
+### Hard dependency (satisfied)
+
+`warm-command-bootstrap-latch` — the version-stamped `@portal-bootstrapped` server-option latch + abridged fast-path (`state.BootstrappedLatchSatisfied`). **Done and merged to `main` (verified 2026-07-11).** Spawn spawns plain `portal attach` with no bootstrap special-casing; the picker's own binary (`os.Executable()`) keeps the latch version-satisfied so each burst attach is abridged.
+
+### Deferred scope (not built by this feature)
+
+- **Group-select** — marking a whole project/tag group via its header (requires cursor on non-selectable `HeaderItem` rows).
+- **Remember-the-grouping + macOS Spaces placement** — the workspace-restore follow-on; Spaces already parked in inbox.
+- **Window arrangement / focus control** — OS/terminal-controlled; not honoured.
+- **Host-window introspection / window-vs-tab fidelity** — dropped from scope entirely.
+- **Additional adapter capabilities** — `introspect` / `place-on-space` slot in additively later.
+- **Truly headless `portal spawn` + `--terminal` override** — no sensible caller (YAGNI).
+- **Defensive `@portal-spawn-*` marker sweep** — a drop-in mirroring bootstrap's `CleanStaleMarkers` if ever needed.
+- **Parallel spawn** — sequential ships; flip only if a future validation proves it safe and meaningfully faster.
+- **"Detect-and-wait" one-bootstrap-cap hardening** — YAGNI given the latch; the ack is the natural wait-signal if ever wanted.
+
+### Build-time residuals (confirmations, not open questions)
+
+- **iTerm2 / Terminal.app self-scripting** assumed same TCC self-exemption — per-adapter check.
+- **`ps -o comm=` / identity walk** verified on this macOS only — confirm on ≥1 other version (the Info.plist `defaults read` route is a clean `lsappinfo`-free fallback).
+- **Ghostty AppleScript API** is a preview API (may churn in 1.4) — pin/watch. Real shape (validated on 1.3.1): make a `surface configuration` record with a `command` property, then `new window` with it.
+
+### Naming (provisional)
+
+CLI verb `portal spawn <sessions…>`, `internal/spawn` package, `spawn` log component, `@portal-spawn-*` markers. The logged `cli-verb-surface-redesign` idea may later rename the CLI verb; because the picker calls the spawn *package* in-process, the verb is a secondary surface and cheap to rename. Internal names follow the command name.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
