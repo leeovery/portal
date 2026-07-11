@@ -57,6 +57,13 @@ Mental model: one service reached from both a CLI command and the TUI.
 
 `portal spawn <sessions…>` mirrors the picker's commit exactly — same one-service package, same net-N invariant: it reuses its **calling terminal window** as one of the N (self-attach-last via `AttachConnector`/`SwitchConnector`, in or out of tmux) and spawns the **N−1** others, running the identical pre-flight → sequential spawn → per-window ack → self-attach-last flow. This keeps the CLI a faithful **test seam** for that exact flow. `portal spawn --detect` is a dry-run that only prints the detected terminal identity (friendly name + bundle id) and opens nothing. `portal spawn` with no session args and no `--detect` is a usage error.
 
+**Reporting & exit codes** (the CLI has no TUI, so the picker's in-band banners map to stderr + exit status — this is what tests assert on):
+
+- **Success** → the process **self-execs away** (replaced by the tmux attach); it never returns, so there is no success exit code.
+- **Pre-flight abort** (a selected session gone), **partial spawn failure**, and **unsupported/NULL terminal with N≥2** → **exit `1`** with the same one-line message the picker would show, on **stderr**; nothing self-execs.
+- **`permission-required`** (rare; native-adapter defensive path) → **exit `1`** with the permission guidance (target terminal + Automation-settings hint) on stderr.
+- **Usage error** (no sessions, no `--detect`; unknown flag) → **exit `2`**.
+
 ### The N vs N−1 split (anti-leftover rule)
 
 The **net-N-windows** anti-requirement forces the picker to own its own window reuse. The picker turns its *own* host window into one of the N selected sessions:
@@ -84,7 +91,7 @@ Side effect: `portal` no longer needs to be *on* `PATH` (only `tmux` does, since
 
 The host terminal launches the spawned command in a **bare environment**. (Validated on Ghostty: its `command` execs an **argv, not a shell**, in a bare `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin` plus Ghostty's bin — with no Homebrew/login `PATH`, so `tmux` and any subprocess `portal` shells to would not be found.)
 
-Fix: the picker builds the spawned command as an **env-self-sufficient argv** — it prefixes the required environment (`/usr/bin/env PATH=<picker's full PATH> [any other required vars]`) ahead of `<os.Executable()> attach <session>` (+ the ack flag), so `tmux` (and anything else `portal` shells to) resolves regardless of the bare environment the host terminal provides. This is a **single uniform mechanism** for both the native adapter and config recipes: the composed command carries its own env, so **no adapter needs a per-terminal env property and no `terminals.json` recipe needs an env slot** — the adapter/recipe just runs the composed command (`{command}`) verbatim. The command is a real **argv**, never shell syntax. (This supersedes the earlier per-adapter "each adapter injects the picker's PATH via its own env property" framing — env delivery is uniform, in the composed command.)
+Fix: the picker builds the spawned command as an **env-self-sufficient argv** — it prefixes a **minimal, explicit env** (`/usr/bin/env PATH=<picker's full PATH>`) ahead of `<os.Executable()> attach <session> --spawn-ack <batch>:<token>`, so `tmux` (and anything else `portal` shells to) resolves regardless of the bare environment the host terminal provides. **Inject the minimal set, not a snapshot of the picker's whole environment** — `PATH` is the only required var (any future addition is named explicitly, never a blanket copy). **Load-bearing invariant: `TMUX` (and `TMUX_PANE`) MUST NOT be propagated** into the spawned command — the spawned N−1 are fresh host windows that must run **out of tmux** (so their `portal attach` takes the fresh exec-attach path, not `switch-client`); a picker triggered from *inside* tmux therefore explicitly strips `TMUX`/`TMUX_PANE`. This is a **single uniform mechanism** for both the native adapter and config recipes: the composed command carries its own env, so **no adapter needs a per-terminal env property and no `terminals.json` recipe needs an env slot** — the adapter/recipe just runs the composed command (`{command}`) verbatim, a real **argv**, never shell syntax. (Supersedes the earlier per-adapter env-property framing — env delivery is uniform, in the composed command.)
 
 ---
 
@@ -128,10 +135,13 @@ Multi-select must be **as unmistakably a distinct mode as filtering is**, modell
 - Its own **mode colour** + a **banner** in the existing notice-band slot (single-slot arbiter — the multi-select banner owns the slot while in mode), reading e.g. `N selected · m toggle · space preview · ⏎ open · esc cancel`.
 - **Selected rows carry a glyph marker + the mode colour, never colour-only** (MV's NO_COLOR / colourless-render rule).
 - Exact colour token, glyph, and banner/footer copy are fixed by the delivered Paper design (see *Design References*): **violet** reused as the selection accent, `●` marker on selected rows, footer `↑↓ navigate · m toggle · ␣ preview · ⏎ open · esc cancel`. No new colour tokens.
+- **Notice-band precedence** (single slot, highest wins): filter line (filter focused) → in-burst `Opening n/N…` (burst pending) → transient error/guidance flash (pre-flight abort / spawn-failure / permission) → multi-select banner (in mode) → unsupported-terminal banner → no-tags signpost. On an unsupported terminal, entering multi-select shows the multi-select banner (the unsupported banner steps aside) and the unsupported warning re-asserts at the N≥2 Enter block.
 
 ### Granularity: per-session only
 
 Group-select (marking a whole project/tag group via its header) is **deferred as separate future work** — it would require letting the cursor land on the currently non-selectable `HeaderItem` rows. This feature ships **per-session marking only**.
+
+**Selection is keyed on session identity, not the list row.** By Tag mode renders a multi-tag session as multiple rows (one per tag heading — Pattern B). Marking is on the **underlying session**: `m`-toggling any one of its rows marks the *session*, so the `●` shows on **all** of that session's rows across headings, and the `N selected` banner counts **distinct sessions** (a multi-tag session counts once). The selection model is a set of session identities, so a mark survives regroup/filter/paging even though the session spans multiple list items.
 
 ---
 
@@ -164,9 +174,9 @@ This deletes the report / `r retry` / deferred-attach tangle entirely. Trade-off
 `osascript` returning success is shallow — it only confirms "the terminal accepted the request," not that the window rendered, `portal` ran, the session existed, or attach happened.
 
 - **Rejected — tmux client-watching** (snapshot `list-clients`, diff new clients). Fragile here: lingering/reconnecting mosh clients churn the client list during the exact burst window, risking false confirms or masked failures.
-- **Chosen — explicit token ack.** The picker issues a **batch id**, threads it into each spawned command (a `--spawn-ack <batch>` flag — see *Ack delivery & `portal attach` contract*); the spawned `portal attach` **writes its `@portal-spawn-<batch>-<session>` marker right before exec**; the picker watches for the marker set with a **timeout**. A missing marker at timeout = a failed spawn → that window is treated as failed (per the Stance above: skip the trigger self-attach, leave the other opened windows in place, report the failed window). A direct signal from our own spawned process, immune to how many other clients are attached — this is what makes spawning a session **already attached elsewhere** (e.g. the iPhone) confirm correctly.
+- **Chosen — explicit token ack.** The picker issues a **batch id + a per-window opaque token** (both option-name-safe ids, *not* the renameable session name), threads them into each spawned command (a `--spawn-ack <batch>:<token>` flag — see *Ack delivery & `portal attach` contract*); the spawned `portal attach` **writes its `@portal-spawn-<batch>-<token>` marker right before exec**; the picker watches for the marker set with a **timeout**. A missing marker at timeout = a failed spawn → that window is treated as failed (per the Stance above: skip the trigger self-attach, leave the other opened windows in place, report the failed window). A direct signal from our own spawned process, immune to how many other clients are attached — this is what makes spawning a session **already attached elsewhere** (e.g. the iPhone) confirm correctly.
 
-**Ack channel.** A namespaced **`@portal-spawn-<batch>-<session>` tmux server option**, behind a small ack seam (write-token / collect-tokens interface). Code-verified safe: the only all-server-options enumerator, `ListSkeletonMarkers`, skips any name not prefixed `@portal-skeleton-` (`internal/state/markers.go`), so a distinct `@portal-spawn-` prefix is invisible to it; namespacing isolates sweeps in both directions; server options die with the server. The server-option channel is also deliberately **daemon-readable**: the deferred remember-and-restore-workspace follow-on can teach the 1s-tick daemon to read the same `@portal-spawn-*` markers and record outcomes as an *additive* change — no rewrite of how the picker collects acks. (Forward-compat only; not built here.)
+**Ack channel.** A namespaced **`@portal-spawn-<batch>-<token>` tmux server option** — where `<batch>` and `<token>` are picker-generated **option-name-safe ids** (nanoid-style), deliberately **not** the renameable session name (a session name can contain characters invalid in a tmux option name, which would make `set-option` fail → no marker → a false ack-timeout). Behind a small ack seam (write-token / collect-tokens interface). Code-verified safe: the only all-server-options enumerator, `ListSkeletonMarkers`, skips any name not prefixed `@portal-skeleton-` (`internal/state/markers.go`), so a distinct `@portal-spawn-` prefix is invisible to it; namespacing isolates sweeps in both directions; server options die with the server. The server-option channel is also deliberately **daemon-readable**: the deferred remember-and-restore-workspace follow-on can teach the 1s-tick daemon to read the same `@portal-spawn-*` markers and record outcomes as an *additive* change — no rewrite of how the picker collects acks. (Forward-compat only; not built here.)
 
 **Timeout is per-window, not global.** Under sequential spawn the Nth window's `osascript` fires seconds after Enter and then runs its own abridged attach before writing its token; a single global clock from Enter would over-report late windows as failed. Each window's ack timer starts when *its* spawn fires — the cumulative sequential delay never eats the budget.
 
@@ -180,14 +190,15 @@ This deletes the report / `r retry` / deferred-attach tangle entirely. Trade-off
 
 The ack requires a small addition to the **existing** `portal attach` command (outside `internal/spawn`):
 
-- **Carrier: a flag** `--spawn-ack <batch>` on `portal attach`, part of the composed argv — so it flows through `{command}` and config recipes uniformly, needing no env slot (consistent with the env-self-sufficient command in *Spawn Architecture*). `attach` already knows `<session>` (its positional arg); the flag supplies the `<batch>` id and puts it in spawn-ack mode.
-- **Write point & ordering:** abridged bootstrap → confirm the session exists → **write `@portal-spawn-<batch>-<session>`** (value opaque; *presence* is the signal) → exec into tmux. The write is the last action before the exec handoff.
+- **Carrier: a flag** `--spawn-ack <batch>:<token>` on `portal attach`, part of the composed argv — so it flows through `{command}` and config recipes uniformly, needing no env slot (consistent with the env-self-sufficient command in *Spawn Architecture*). The `<batch>` and `<token>` are picker-generated option-name-safe ids; the flag puts `attach` in spawn-ack mode and tells it exactly which marker to write (no derivation from the session name).
+- **Write point & ordering:** abridged bootstrap → confirm the session exists → **write `@portal-spawn-<batch>-<token>`** (value opaque; *presence* is the signal) → exec into tmux. The write is the last action before the exec handoff.
 - **Best-effort:** `attach` still execs if the marker write fails — a failed write just means the picker times out and classifies that window failed (safe). A session that fails to resolve at attach time produces **no** marker → picker timeout → failed classification. This is exactly the "honest boundary" the ack depends on.
 
 ### In-picker execution model
 
 - **Async, non-blocking.** The picker runs the burst as an async `tea.Cmd` (goroutine) that streams progress + per-window ack results back to the model as `tea.Msg`s — the same pattern as the cold-path concurrent bootstrap. It never blocks the `Update` loop, so the TUI stays responsive and the cancellation points stay live during the multi-second burst (up to ~`spawnAckTimeout` per window).
 - **In-burst feedback.** While spawning and awaiting acks, the picker shows a pending affordance in the notice-band single-slot arbiter (e.g. `Opening n/N…`). *Design residual:* the delivered Paper set has no "spawning / awaiting acks" frame — capturing one (or accepting a minimal counter) is a design-phase deliverable for the visual gate.
+- **Input-locked while pending.** During the in-flight burst the picker is **inert to row actions** — `m` (mark), navigation, `Space` preview, `/`, `s`, and a second `Enter` are all **ignored**; only **cancel** (`Ctrl-C`/`Esc`) is live. This prevents any race between concurrent user input and the completion handler's selection mutation (below), so the "retry re-opens only what's missing" guarantee rests on a well-defined selection state at completion.
 - **Cancellation post-state.** `Ctrl-C`/`Esc` mid-burst **returns to the picker in multi-select mode** (it does not quit Portal), aborts the remaining spawns, leaves any already-opened windows in place, and self-cleans the batch markers. Selection follows the same rule as a partial failure: the sessions whose windows opened are unmarked, the rest stay marked, so a retry re-opens only what's missing.
 
 ### Sequential spawn
@@ -274,6 +285,7 @@ Whatever Portal displayed, the user can paste it and it resolves. Internal **mat
 - **Detect once, cached.** The host-terminal identity is invariant for the picker's lifetime, so detection runs **once per picker session** on Sessions-page entry and is cached — reused by the on-entry banner and the N≥2 Enter gate. `rebuildSessionList` (hit on `s`-toggle, refresh, filter, projects-edit return) must **not** re-walk; it reads the cached identity. Re-derived on the next picker launch.
 - **Off the first-paint path.** Detection runs asynchronously (the walk — `ps` / process-tree / Info.plist read — costs tens of ms); the banner appears when it resolves, so it never stalls the ~50ms appearance-gate first paint.
 - **Error vs clean NULL.** A clean NULL (remote/mosh → unsupported) and a *transient detection error* (a `ps` / `defaults read` failure) both resolve to the unsupported/no-op path; a transient error additionally emits a `spawn`-component WARN breadcrumb.
+- **In-flight at Enter.** Because detection is async, a fast N≥2 `Enter` can land before it resolves. The gate distinguishes **in-flight** (not yet set) from a **resolved NULL**: an in-flight identity is **awaited** (near-instant — detection began on page entry) and the burst proceeds once it resolves (supported → spawn; NULL/error → unsupported no-op). It is never treated as unsupported merely for being unresolved.
 
 ### Unsupported-terminal behaviour (banner + Enter)
 
@@ -358,7 +370,8 @@ The config-driven path gets the *same* execution guarantees the native Ghostty a
 
 - **Portal makes `{command}` self-sufficient, uniformly.** The picker (which has your full PATH) builds `{command}` as an **env-prefixed argv** (`/usr/bin/env PATH=<picker PATH> … <abs>/portal attach <session> --spawn-ack <batch>`; see *Spawn Architecture* → env self-sufficiency) — so recipe authors only ever describe "open a window running this command," never PATH/env plumbing, and no recipe needs an env slot.
 - **`{command}` substitutes as a single, already-resolved command string**, dropped literally into the recipe. Escaping it for an *embedding* context (e.g. inside an AppleScript string) is the recipe author's responsibility — they wrote that AppleScript. The `argv`-array form exists precisely so simple CLI terminals (kitty/wezterm) avoid quoting entirely.
-- **`script` recipes receive `{command}` as `$1`** (first positional arg) — the standard, obvious contract.
+- **`script` recipes receive `{command}` as `$1`** (first positional arg). Portal **expands a leading `~`** in the script path and **executes the file directly** (it must carry its exec bit + shebang — the standard for an executable escape-hatch script); a missing / non-executable script is an invalid entry (skipped + WARN, per *Validation & error handling*).
+- **Recipe failure classification.** A config recipe is a generic argv/script, so Portal cannot read AppleEvent codes from it: a **non-zero exit** of the recipe process maps to `spawn-failed`; otherwise the window's fate is decided by the **ack** (timeout → failed). `permission-required` is **native-adapter-only** — config recipes never produce it, so they never trigger the burst-stopping permission path (they fold into `spawn-failed` / timeout → leave-what-opened + report).
 
 ### Validation & error handling
 
@@ -374,6 +387,8 @@ Every rejection emits a `spawn`-component breadcrumb so a config typo is diagnos
 ### Precedence
 
 config override → native adapter → unsupported. Config can override a built-in (e.g. Ghostty + a resize).
+
+**Within config, most-specific wins** (a single identity can match several entries — a raw bundle id, a `.app` name, a friendly alias, and a `*`-glob). Deterministic order, highest first: **exact raw bundle id** → **exact `.app` name / friendly alias** → **`*`-glob** (a longer/more-specific glob beats a broader one; a bare `*` catch-all is lowest). So a user's specific override always beats their glob fallback, never the reverse.
 
 ---
 
@@ -432,7 +447,7 @@ The spawn flow gets its **own `spawn` log component** — a deliberate amendment
 
 Emission shape matches bootstrap/restore/daemon instrumentation: **one INFO cycle-summary** (e.g. `spawn: opened 11/14`) + **DEBUG per-window**. The driver's OS-specific detail rides up as an opaque `detail` attr so the closed vocabulary stays intact (honours the driver-quarantine rule).
 
-**Attr keys (closed set).** The `spawn` component introduces these spec-governed attr keys (not invented at call-site), consistent with how bootstrap/restore/daemon enumerate theirs: `batch` (batch id), `terminal` (friendly app name), `bundle_id` (matched bundle-id family), `resolution` (`config` | `native` | `unsupported`), `session`, `ack` (`confirmed` | `timeout` | `failed`), `opened` / `total` (batch-summary counts), and the opaque `detail` (driver OS-specific string).
+**Attr keys (closed set).** The `spawn` component introduces these spec-governed attr keys (not invented at call-site), consistent with how bootstrap/restore/daemon enumerate theirs: `batch` (batch id), `terminal` (friendly app name), `bundle_id` (matched bundle-id family), `resolution` (`config` | `native` | `unsupported`), `session`, `ack` (`confirmed` | `timeout` | `failed`), `opened` / `total` (batch-summary counts), and the opaque `detail` (driver OS-specific string). **Count semantics:** `total` = **N** (all sessions in the batch, including the trigger's self-attach target); `opened` = sessions **surfaced** — each acked spawn plus the trigger's self-attach when it occurs (full success = `opened N/N`; on the failure path the trigger self-attach is skipped and not counted).
 
 ---
 
