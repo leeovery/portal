@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-11
 cycle: 1
 phase: Gap Analysis
@@ -27,8 +27,8 @@ The word "rollback" is doing two incompatible jobs: (a) marker self-cleanup (whi
 **Proposed Addition**:
 Reconcile line 162 to the leave-what-opened contract, e.g.: "A missing token at timeout = a failed spawn → **leave-what-opened** (per *Stance*): the windows that opened stay in place, the trigger window's self-attach is skipped, the picker self-cleans its batch markers, and a one-line error names the failed window. No window teardown is attempted." Then replace "rollback" at lines 71, 170, and 412 with the disambiguated meaning — "marker self-cleanup" where marker cleanup is meant, and drop "all-or-nothing rollback" (line 71) since all-or-nothing lives only at the pre-flight gate.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. Reconciled all 6 stale sites: token-ack "abort + roll back" → "treated as failed (skip self-attach, leave others, report)"; "success/rollback" → "success/failure"; "all-or-nothing rollback clean" → "cancellation and failure handling clean"; "no rollback, no flash" → "nothing to undo, no flash"; "on abort/rollback" cleanup → "on a pre-flight abort or a reported spawn failure"; testing "abort/rollback logic" → "pre-flight abort + leave-what-opened".
 
 ---
 
@@ -51,8 +51,8 @@ This is the one edge branch of the primary flow with no described outcome; a pla
 **Proposed Addition**:
 Add a short subsection (e.g. under *Multi-Select Mode* or *Terminal Identity*) pinning: (a) detection runs on Sessions-page entry so the unsupported banner surfaces proactively; (b) `m`/multi-select remains available even when unsupported (so single-attach still works); (c) on `Enter` with **N=1**, self-attach proceeds regardless of detection (no adapter needed); (d) on `Enter` with **N≥2** on an unsupported/NULL terminal, abort atomically — nothing opens — and (re)assert the unsupported banner naming the detected identity (consistent with "honest no-op"). Confirm the N=1-still-works vs. N≥2-blocked asymmetry is the intended behaviour.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. Added an "Unsupported-terminal behaviour (banner + Enter)" subsection to Terminal Identity & Detection pinning all four points; the N=1-works / N≥2-blocked asymmetry is stated as intentional (only external-window spawning needs the adapter).
 
 ---
 
@@ -69,8 +69,8 @@ The ack mechanism hinges on a per-window timeout: "the picker watches for the to
 **Proposed Addition**:
 Specify a concrete per-window ack timeout as a named constant (e.g. `spawnAckTimeout`), with a value and a one-line derivation like the hysteresis constant (measured osascript-open ~260ms + abridged-attach headroom + a safety factor; suggest an initial ~8–10s, tunable). State that each window's timer starts when its own spawn fires (already stated) and that expiry classifies that window as a failed spawn (feeding the leave-what-opened path per Finding 1).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. **Judgment call (value):** picked `spawnAckTimeout` default ~8s per window with a one-line derivation (~260ms open + abridged-attach headroom + safety), marked tunable and build-confirmable. Within the agent's suggested 8–10s band; the concrete number is a build-time tunable, not a hard commitment.
 
 ---
 
@@ -94,8 +94,8 @@ Because a silently-dropped bad entry degrades to "unsupported" (a no-op the user
 **Proposed Addition**:
 Add a "Validation & error handling" paragraph to *Config Schema*: tolerant-decode the file consistent with Portal's other JSON stores (unreadable/malformed JSON → whole file ignored, fall through to native → unsupported, WARN under the `spawn` component); per-entry require **exactly one** of `argv`/`script` (neither or both → skip that entry with a WARN, fall through); ignore unknown capability sub-keys (forward-compat); and state the `{command}`-placeholder expectation for a valid recipe. Confirm these emit `spawn`-component breadcrumbs so a user's config typo is diagnosable.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. **Judgment call (policy):** added a "Validation & error handling" subsection — tolerant-decode (bad file ignored, fall through, WARN); per-entry exactly-one-of argv/script (else skip + WARN); missing-`{command}` → invalid/skip; unknown sub-keys ignored; all rejections emit `spawn` breadcrumbs. Chose skip-invalid-entry + fall-through over hard-error to match Portal's other stores.
 
 ---
 
@@ -112,7 +112,7 @@ On a rare post-pre-flight per-window failure, Portal "skips the trigger window's
 **Proposed Addition**:
 State the post-partial-failure selection state, e.g.: "Unmark the confirmed sessions (their windows are now open) and keep the failed/un-acked sessions marked, so a second `Enter` retries exactly the missing set." (Alternatively: clear all marks and require full re-selection — pick one; keep-failed-marked is the smoother retry and mirrors the pre-flight 'selections intact' behaviour.)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. **Judgment call:** chose keep-failed-marked (unmark the confirmed/opened sessions, keep failed/un-acked ones marked) so a second `Enter` retries exactly the missing set. Updated both the "Any fails" bullet and the trade-off sentence.
 
 ---

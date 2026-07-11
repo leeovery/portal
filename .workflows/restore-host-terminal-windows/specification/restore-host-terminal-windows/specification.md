@@ -48,7 +48,7 @@ Ships as `portal spawn <sessions…>`, internal package `internal/spawn`, `spawn
 
 Spawn logic lives in a shared internal package (`internal/spawn`): terminal detection, adapter resolution, and window spawning. It is reached two ways:
 
-- **In-process by the picker** — on `Enter`, the picker calls the spawn package directly to open the N−1 external windows, then self-attaches to the Nth. In-process (not a subprocess) so spawn errors surface back into the TUI where the user is looking, and so the picker can collect per-window acknowledgements to decide success/rollback (see *Burst & Partial-Failure Contract*).
+- **In-process by the picker** — on `Enter`, the picker calls the spawn package directly to open the N−1 external windows, then self-attaches to the Nth. In-process (not a subprocess) so spawn errors surface back into the TUI where the user is looking, and so the picker can collect per-window acknowledgements to decide success/failure (see *Burst & Partial-Failure Contract*).
 - **As `portal spawn <sessions…>`** — a thin CLI over the same package. This is the test seam, backs a `--detect` dry-run, and is the entry point the deferred workspace-restore/Spaces follow-ons reuse. It always runs from a terminal context, never truly headless.
 
 Mental model: one service reached from both a CLI command and the TUI.
@@ -68,7 +68,7 @@ So the picker **always self-attaches to exactly one** of the N; only the **N−1
 2. Spawn the N−1 windows (one adapter call per window — for failure isolation), collecting each window's ack.
 3. **Only after all N−1 confirm**, exec self into the Nth session.
 
-Step 3 is a point of no return (exec replaces the picker), so the N−1 spawns must complete first. This ordering is what makes cancellation and all-or-nothing rollback clean (see *Burst & Partial-Failure Contract*).
+Step 3 is a point of no return (exec replaces the picker), so the N−1 spawns must complete first. This ordering is what makes cancellation and failure handling clean — the trigger only commits once the N−1 have confirmed (see *Burst & Partial-Failure Contract*).
 
 ### Command composition — spawn via the picker's own executable
 
@@ -145,29 +145,31 @@ All-or-nothing applies at the **pre-flight gate** — if any marked session is g
 
 - **Abort atomically** — nothing spawns, no window opens, no self-attach.
 - Show a clean one-line error in the picker naming the gone session (design copy: `⚠ '<session>' is gone — nothing opened`), and stay put in multi-select mode with the remaining selections intact.
-- Zero windows opened → no rollback, no flash.
+- Zero windows opened → nothing to undo, no flash.
 
 **Spawn, then self-attach LAST — gated on ALL N−1 confirming.** After pre-flight passes, sequentially spawn the N−1 and collect their acks:
 
 - **All confirm** → the trigger window self-attaches silently (no "14/14 ✓" nag).
-- **Any fails** (a transient `osascript`/terminal hiccup *after* pre-flight passed — genuinely rare) → Portal does **not** try to close or undo the windows that already opened; it doesn't own those host windows and won't rely on untested teardown. It **leaves them in place** (they're working attached sessions), **skips the trigger window's self-attach** so you stay in the picker, and shows a clean one-line error naming the window that failed to come up. Re-select if you want to retry the missing one.
+- **Any fails** (a transient `osascript`/terminal hiccup *after* pre-flight passed — genuinely rare) → Portal does **not** try to close or undo the windows that already opened; it doesn't own those host windows and won't rely on untested teardown. It **leaves them in place** (they're working attached sessions), **skips the trigger window's self-attach** so you stay in the picker, and shows a clean one-line error naming the window that failed to come up. Portal **unmarks the sessions whose windows opened and keeps the failed/un-acked ones marked**, so a second `Enter` retries exactly the missing set.
 
-This deletes the report / `r retry` / deferred-attach tangle entirely. Trade-off accepted: on a rare post-pre-flight failure you keep the windows that opened and re-select the one that didn't, rather than a strict all-or-nothing teardown Portal can't cleanly perform.
+This deletes the report / `r retry` / deferred-attach tangle entirely. Trade-off accepted: on a rare post-pre-flight failure you keep the windows that opened and a second `Enter` retries just the one that didn't (still marked), rather than a strict all-or-nothing teardown Portal can't cleanly perform.
 
 ### Confirmation mechanism: explicit token ack
 
 `osascript` returning success is shallow — it only confirms "the terminal accepted the request," not that the window rendered, `portal` ran, the session existed, or attach happened.
 
 - **Rejected — tmux client-watching** (snapshot `list-clients`, diff new clients). Fragile here: lingering/reconnecting mosh clients churn the client list during the exact burst window, risking false confirms or masked failures.
-- **Chosen — explicit token ack.** The picker issues a **batch id + per-window token**, threads it into each spawned command (arg/env); the spawned `portal attach` **writes its token right before exec**; the picker watches for the token set with a **timeout**. A missing token at timeout = a failed spawn → abort + roll back. A direct signal from our own spawned process, immune to how many other clients are attached — this is what makes spawning a session **already attached elsewhere** (e.g. the iPhone) confirm correctly.
+- **Chosen — explicit token ack.** The picker issues a **batch id + per-window token**, threads it into each spawned command (arg/env); the spawned `portal attach` **writes its token right before exec**; the picker watches for the token set with a **timeout**. A missing token at timeout = a failed spawn → that window is treated as failed (per the Stance above: skip the trigger self-attach, leave the other opened windows in place, report the failed window). A direct signal from our own spawned process, immune to how many other clients are attached — this is what makes spawning a session **already attached elsewhere** (e.g. the iPhone) confirm correctly.
 
 **Ack channel.** A namespaced **`@portal-spawn-<batch>-<session>` tmux server option**, behind a small ack seam (write-token / collect-tokens interface). Code-verified safe: the only all-server-options enumerator, `ListSkeletonMarkers`, skips any name not prefixed `@portal-skeleton-` (`internal/state/markers.go`), so a distinct `@portal-spawn-` prefix is invisible to it; namespacing isolates sweeps in both directions; server options die with the server.
 
 **Timeout is per-window, not global.** Under sequential spawn the Nth window's `osascript` fires seconds after Enter and then runs its own abridged attach before writing its token; a single global clock from Enter would over-report late windows as failed. Each window's ack timer starts when *its* spawn fires — the cumulative sequential delay never eats the budget.
 
+**Timeout value.** A named `spawnAckTimeout` constant, **default ~8s per window** — generous headroom over the measured ~260ms `osascript` open plus the spawned window's own abridged `portal attach` (fast-path, no full bootstrap) before it writes its token. Each window's timer starts when *its* spawn fires; expiry classifies that window as a failed spawn (→ leave-what-opened). Tunable, and confirmed against real abridged-attach timing at build (same spirit as the documented self-supervision hysteresis constant).
+
 **Honest boundary.** The ack fires at the last instant before exec (once `portal` execs into tmux it's replaced, so it can't ack *after* attaching). It confirms "window opened, `portal` ran, session found, attach handoff starting" — covering every real failure mode; the final tmux handoff is essentially guaranteed once there.
 
-**Cleanup.** The picker self-cleans its batch markers before self-exec (and on abort/rollback). Bounded, harmless leaks (a late-laggard ack, a crashed picker) self-expire with the server and never collide (unique batch ids). A defensive `@portal-spawn-*` sweep mirroring bootstrap's `CleanStaleMarkers` is a drop-in if ever needed — deferred.
+**Cleanup.** The picker self-cleans its batch markers before self-exec (and on a pre-flight abort or a reported spawn failure). Bounded, harmless leaks (a late-laggard ack, a crashed picker) self-expire with the server and never collide (unique batch ids). A defensive `@portal-spawn-*` sweep mirroring bootstrap's `CleanStaleMarkers` is a drop-in if ever needed — deferred.
 
 ### Sequential spawn
 
@@ -248,6 +250,13 @@ Whatever Portal displayed, the user can paste it and it resolves. Internal **mat
 
 `portal spawn` exists to open terminal windows, so it only ever runs from a terminal context (the picker is in one; a script is run in one; the future workspace feature triggers from a terminal). There is no sensible headless caller — chicken-and-egg. So: **no special headless handling and no `--terminal` override**. If detection ever returns empty, it folds into the **same NULL-bundle path** already decided for remote/mosh → unsupported → clean error/banner.
 
+### Unsupported-terminal behaviour (banner + Enter)
+
+- **Detection runs on Sessions-page entry**, so the unsupported/unconfigured banner (naming the detected identity) surfaces **proactively** over the normal list — you know the terminal is unsupported before marking anything.
+- **Multi-select stays available** on an unsupported terminal — you can still enter mode and mark, because single-attach needs no adapter.
+- **`Enter` with N=1** proceeds regardless of detection: it is a plain self-attach via `AttachConnector`/`SwitchConnector` (reuses the current window, opens no host window, needs no adapter).
+- **`Enter` with N≥2** on an unsupported/NULL terminal is an **atomic no-op** — nothing opens (the N−1 external windows need an adapter that isn't available) — and the unsupported banner is (re)asserted naming the detected identity. Same "honest no-op" as remote/mosh. (The N=1-works vs N≥2-blocked asymmetry is intentional: only external-window spawning needs the adapter.)
+
 ---
 
 ## Adapter Contract & Extensibility
@@ -325,6 +334,17 @@ The config-driven path gets the *same* execution guarantees the native Ghostty a
 - **Portal makes `{command}` self-sufficient, uniformly.** This *refines* the per-adapter "inject the picker's PATH" rule: the picker (which has your full PATH) resolves what the spawn needs and threads it into `{command}` itself — so recipe authors only ever describe "open a window running this command," never PATH/env plumbing.
 - **`{command}` substitutes as a single, already-resolved command string**, dropped literally into the recipe. Escaping it for an *embedding* context (e.g. inside an AppleScript string) is the recipe author's responsibility — they wrote that AppleScript. The `argv`-array form exists precisely so simple CLI terminals (kitty/wezterm) avoid quoting entirely.
 - **`script` recipes receive `{command}` as `$1`** (first positional arg) — the standard, obvious contract.
+
+### Validation & error handling
+
+`terminals.json` is a shipped, user-authored escape hatch that drives command execution, so malformed input is expected and must degrade safely, never crash the picker. Consistent with Portal's other JSON stores (tolerant decode):
+
+- **Malformed / unreadable file** → the whole file is ignored; resolution falls through to native adapters → unsupported. A WARN breadcrumb is emitted under the `spawn` component.
+- **Per-entry recipe** must carry **exactly one** of `argv` / `script`. Neither or both → that entry is invalid and skipped (falls through to native → unsupported), with a WARN naming the entry key.
+- **A recipe template omitting `{command}`** → invalid entry, skipped with a WARN (a window with no `{command}` would never run the attach).
+- **Unknown capability sub-keys** (e.g. a future `introspect` / `place`) → ignored (forward-compat).
+
+Every rejection emits a `spawn`-component breadcrumb so a config typo is diagnosable rather than silently degrading to "unsupported."
 
 ### Precedence
 
@@ -409,7 +429,7 @@ A **fake adapter** records "would open a window running command X" without touch
 - adapter resolution + precedence (config → native → unsupported)
 - `{command}` substitution
 - token-ack collection
-- pre-flight + abort/rollback logic
+- pre-flight abort + leave-what-opened failure handling
 
 ### Detection behind small seams
 
