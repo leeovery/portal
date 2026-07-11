@@ -205,6 +205,51 @@ Open in **list order** (top-to-bottom as shown), not pick order. The selection i
 
 ---
 
+## Terminal Identity & Detection
+
+### Detection is a standalone operation
+
+Detection (detect-self) is a **separately-callable operation**, not buried in the spawn path — because the unsupported banner must show identity *without* spawning anything. It backs: the unsupported/unconfigured banner, the `portal spawn --detect` dry-run, and the deferred workspace-introspection. It is **not** an adapter method (a resolver maps identity → adapter — see *Adapter Contract*).
+
+### Detection model (refined by live validation)
+
+Live-probed against the real server (~33 clients, many lingering mosh/Blink). The identity walk cleanly separates local Ghostty from remote mosh (→ NULL); `focused` and raw highest-`client_activity` proved **unreliable across clients**. The model anchors on the triggering process's own context, not a shared registry:
+
+1. **Outside tmux (primary flow — fresh terminal → picker):** the picker **self-walks its own process tree** to the terminal (`picker → zsh → ghostty`), or uses the env fast-path (`GHOSTTY_*` / `__CFBundleIdentifier`, accurate outside tmux). Direct — no client list, no tiebreak.
+2. **Inside tmux:** take the current session's clients, **NULL-filter to local host clients** (drop mosh/remote/other-machine). The local client's app = the terminal.
+3. **`client_activity` demoted to a local-only tiebreak** — used *only* to choose among 2+ local clients on the same session. The trigger keypress makes your window freshest, and mosh noise is already filtered, so it is robust in that narrow role. Never the primary cross-client signal.
+4. **Host-local principle (multi-machine).** Portal opens windows only on the machine it runs on, for local clients; other-machine access is a remote client → NULL → filtered. A purely-remote trigger (no local client) → the honest "no host-local terminal" no-op — run Portal on that machine to spawn there.
+
+### Identity resolution: macOS bundle id, matched as a family
+
+The system-blessed identity is the terminal's macOS **bundle id**. The walk resolves `client_pid → process-tree → .app bundle` via an Info.plist read (`defaults read` of the bundle's Info.plist — a clean `lsappinfo`-free route). Matching is by **bundle-id family** (e.g. `dev.warp.Warp-*`), channel-aware. Remote/mosh clients resolve to a **NULL bundle id** → unsupported → honest no-op.
+
+Validated (this Mac): `ps -o comm=` returns full paths; the walk cleanly separates local Ghostty (`→ login → /Applications/Ghostty.app/…/ghostty` → bundle id) from remote mosh (`→ mosh-server` at ppid 1 → NULL). Read-only, no `osascript`/Apple-event needed. *(Build-time residual: confirm the walk on ≥1 other macOS version.)*
+
+### User-facing display: both
+
+The unsupported/unconfigured banner and the `--detect` command show **both**:
+
+- the friendly `.app` name (for reading), and
+- the exact **bundle id** (the copy-paste config key).
+
+This solves the chicken-and-egg the research flagged: a custom-config user cannot guess the key a priori, so Portal *shows* it — copy-paste, never guess. (Design copy example, from the delivered banner frame: `⚠ unsupported terminal — Apple Terminal · com.apple.Terminal` with a `see docs` link.)
+
+### Config keys accepted: layered
+
+Custom config accepts, layered (see *Config Schema*):
+
+- **Friendly alias** (`ghostty`, `warp`) — Portal-shipped, for *known* terminals; maps to the bundle-id family.
+- **`.app` name** / **raw bundle id** / **`*`-glob** — the escape hatch for custom/unknown terminals.
+
+Whatever Portal displayed, the user can paste it and it resolves. Internal **matching** stays on bundle-id families; user-facing keys are the friendlier forms.
+
+### No headless story
+
+`portal spawn` exists to open terminal windows, so it only ever runs from a terminal context (the picker is in one; a script is run in one; the future workspace feature triggers from a terminal). There is no sensible headless caller — chicken-and-egg. So: **no special headless handling and no `--terminal` override**. If detection ever returns empty, it folds into the **same NULL-bundle path** already decided for remote/mosh → unsupported → clean error/banner.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
