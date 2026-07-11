@@ -398,6 +398,41 @@ N near-simultaneous `tmux attach` against a server that may still be hydrating p
 
 ---
 
+## Testing Strategy & DI Seams
+
+Portal drives a real GUI terminal (`osascript` → Ghostty), hard to automate. The strategy is seam-based coverage with a live terminal only for the last inch.
+
+### Primary seam: the `Adapter` interface
+
+A **fake adapter** records "would open a window running command X" without touching a real terminal → the entire spawn pipeline is unit-testable:
+
+- adapter resolution + precedence (config → native → unsupported)
+- `{command}` substitution
+- token-ack collection
+- pre-flight + abort/rollback logic
+
+### Detection behind small seams
+
+Detection reads behind small (1–3-method) interfaces (process-tree walk / `ps` / `lsappinfo`-or-Info.plist / `tmux list-clients`), Portal's existing DI pattern → detect-self *resolution* (local-client NULL-filter, walk-to-bundle-id, family match, NULL→unsupported, the local-only activity tiebreak) is unit-testable with fabricated data. The real walk is integration (real-tmux `tmuxtest` fixture) / manual.
+
+### Driver split for testability
+
+Each terminal driver splits into:
+
+- **Pure command-construction** (building the `osascript`/argv) — unit-tested (assert the built command).
+- **Error-mapping** (`-1712`/`-1743` → typed `permission-required`) — unit-tested (fabricated `osascript` outcome; assert the mapped typed result).
+- **Thin exec boundary** (real `osascript` + TCC modal) — manual/integration-gated only.
+
+### Mode/keymap state machine
+
+The multi-select mode is unit-tested as a Bubble Tea model (existing `internal/tui` pattern): enter / toggle / exit, sticky selection, suppressed keys, filter-inside-multi-select, N=0/N=1 boundary.
+
+### Irreducible manual/integration residue
+
+The real window actually opening + the TCC modal need a live Mac — covered by manual verification + the Paper visual gates (see *Design References*), not automated CI.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
