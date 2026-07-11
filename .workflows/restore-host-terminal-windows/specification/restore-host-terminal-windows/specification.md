@@ -332,6 +332,38 @@ config override → native adapter → unsupported. Config can override a built-
 
 ---
 
+## Permissions & Error Quarantine (TCC)
+
+### Architectural boundary (the core decision)
+
+All terminal/OS-specific concerns — the AppleScript, `osascript`, the `-1712`/`-1743` AppleEvent codes, TCC, any macOS deep-link — live **inside the terminal driver and nowhere else**. The driver translates them into a **generic typed result** — a small taxonomy:
+
+- `permission-required` (with guidance text)
+- `unsupported`
+- `spawn-failed`
+
+Portal's general spawn/report/UI code switches on the category and **never sees an AppleScript string or AppleEvent number**. Every future terminal driver gets the same clean contract.
+
+### TCC is self-exempt — no first-run gate (validated live)
+
+Live-tested: reset `com.mitchellh.ghostty` AppleEvents grant → fresh spawn → **succeeded with no dialog and no TCC row recreated**. So **Ghostty-scripting-Ghostty via `osascript` is self-exempt**. Because detection always resolves to the terminal you are in and we spawn *that same* terminal, the AppleScript path is **always self→self → always exempt** — there is no design path to a genuine cross-app event.
+
+**Therefore there is no TCC first-run prompt in the normal flow.** Portal is never the TCC subject; the responsible process is the host terminal.
+
+### Defensive net (not a load-bearing gate)
+
+The `-1743` (denied) / `-1712` (timeout) handling stays as a **defensive net**, not a first-run gate:
+
+- The driver recognises its own `-1743`/`-1712`, returns `permission-required`.
+- General code surfaces actionable guidance — names the target terminal and offers to open the Automation settings pane (the deep-link composed *in the driver*, handed up as opaque guidance).
+- Grant persists; re-triggering works — the standard macOS permission model. Per-`(source, target)` pair: switching terminals re-prompts, handled identically.
+
+### Residual (build-time check)
+
+iTerm2 / Terminal.app self-scripting is **assumed** same-exempt but **unverified** — a per-adapter check at build time.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
