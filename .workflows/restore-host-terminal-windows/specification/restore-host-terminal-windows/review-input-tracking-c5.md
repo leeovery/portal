@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-11
 cycle: 5
 phase: Input Review
@@ -27,7 +27,7 @@ But §Adapter Contract → "Two implementations, same contract" (line 310) still
 **Proposed Addition**:
 (Pending — leave blank until discussed. Direction: remove the "injecting the picker's `PATH`/env into the spawned window" clause; adapters own only open-window-with-command + typed-result quarantine, with env carried uniformly in the composed `{command}` per §Spawn Architecture.)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. Reconciled §Adapter Contract line 310: dropped the "injecting the picker's PATH/env" clause; adapters now own only open-window-with-command + typed-result quarantine, with an explicit note that env/PATH is NOT an adapter concern (env-self-sufficient composed command). Residue from my own cycle-4 uniform-env edit that reconciled Spawn Architecture + Config Schema but missed Adapter Contract.
 
 ---

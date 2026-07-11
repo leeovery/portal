@@ -307,7 +307,7 @@ The adapter's single job is **open a new host window running a given command** �
 - **Built-in Go adapters** (Ghostty ships in this feature) — compiled in, not config.
 - **User-config entries** (`terminals.json`) — the escape hatch (see *Config Schema*).
 
-Each adapter owns its own terminal-specific concerns, including injecting the picker's `PATH`/env into the spawned window (see *Spawn Architecture*) and quarantining all OS/terminal specifics behind a typed result (see *Permissions & Error Quarantine*).
+Each adapter owns its own terminal-specific concerns: how it opens a window running the given command, and quarantining all OS/terminal specifics behind a typed result (see *Permissions & Error Quarantine*). Env/`PATH` is **not** an adapter concern — the composed command is env-self-sufficient (Portal builds it as an `env`-prefixed argv), so adapters and config recipes run it verbatim (see *Spawn Architecture* → env self-sufficiency).
 
 ### Capability-based extensibility
 
