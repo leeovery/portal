@@ -477,7 +477,7 @@ Follows the project's reference-first workflow: the committed `design/` frames a
 
 - **iTerm2 / Terminal.app self-scripting** assumed same TCC self-exemption — per-adapter check.
 - **`ps -o comm=` / identity walk** verified on this macOS only — confirm on ≥1 other version (the Info.plist `defaults read` route is a clean `lsappinfo`-free fallback).
-- **Ghostty AppleScript API** is a preview API (may churn in 1.4) — pin/watch. Real shape (validated on 1.3.1): make a `surface configuration` record with a `command` property, then `new window` with it.
+- **Ghostty AppleScript API** is a preview API (may churn in 1.4) — pin/watch. Real shape (validated on 1.3.1): make a `surface configuration` record with a `command` property (and a `wait after command` property governing whether the window persists after its command exits — the normal-detach window lifecycle for a spawned session), then `new window` with it.
 
 ### Naming (provisional)
 
