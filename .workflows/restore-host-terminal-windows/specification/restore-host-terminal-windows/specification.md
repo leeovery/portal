@@ -364,6 +364,30 @@ iTerm2 / Terminal.app self-scripting is **assumed** same-exempt but **unverified
 
 ---
 
+## Observability & State Footprint
+
+### State / daemon footprint (near-zero persistent state)
+
+New *code* lands (the `internal/spawn` package, terminal drivers, a `terminals.json` config store), but near-zero persistent *state*:
+
+- **Reads** `terminals.json` (user-authored, read-only at spawn time).
+- **Writes** only transient `@portal-spawn-*` tmux server options (self-cleaned per the ack contract — not files, not captured; the daemon's capture is structural sessions/panes, not a server-option dump).
+- **Does not touch** `sessions.json`, the daemon capture loop, `prefs.json`, or the restore machinery.
+
+### Observability (`spawn` log component)
+
+The spawn flow gets its **own `spawn` log component** — a deliberate amendment to Portal's closed logging taxonomy (a new spec-governed component, not a call-site invention). Closed event catalog, emitted from the spawn chokepoint:
+
+- detection outcome (identity / unsupported / NULL-bundle)
+- adapter resolution (config-override vs native)
+- per-window spawn + ack outcome (confirmed / timeout / failed)
+- `permission-required`
+- batch summary
+
+Emission shape matches bootstrap/restore/daemon instrumentation: **one INFO cycle-summary** (e.g. `spawn: opened 11/14`) + **DEBUG per-window**. The driver's OS-specific detail rides up as an opaque `detail` attr so the closed vocabulary stays intact (honours the driver-quarantine rule).
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
