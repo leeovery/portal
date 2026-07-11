@@ -183,6 +183,28 @@ Because the picker always bootstraps first (its own `PersistentPreRunE`) and sta
 
 ---
 
+## Trigger-Context Matrix & Open Order
+
+### Behaviour across trigger contexts
+
+- **In vs out of tmux at trigger.** *Out* (bare-shell picker): the trigger window reuses via `AttachConnector` (exec `tmux attach`); detection walks the picker's own process tree. *In* tmux: the trigger window reuses via `SwitchConnector` (`switch-client`); detection takes the `list-clients` → client-PID hop. The **spawned N−1 are always fresh host windows running `portal attach` out of tmux**, independent of the picker's context; only the trigger-window reuse differs. One mental model, inside or out.
+- **Selected session already attached elsewhere** (this host or a remote/iPhone client): allowed — no dup guard; the token ack confirms *our* new window regardless of other clients.
+- **Includes-self** (selection includes the current context's session): the trigger window becomes one attached session, the rest spawn; the marked origin session ends up attached either way.
+- **Selected session vanished** between picker-load and Enter: caught by the pre-flight check → atomic abort, nothing opens.
+
+### Enter opens the marked set only
+
+The cursor/highlight at Enter time is irrelevant — a highlighted-but-unmarked row is **not** opened (marking is `m`, not Enter). Enter always commits the `m`-marked set.
+
+### Open order: list order (selection is a set)
+
+Open in **list order** (top-to-bottom as shown), not pick order. The selection is a plain **set**, not an ordered list. Pick-order's only payoff would be window arrangement/focus, which is OS/terminal-controlled and can't be reliably honoured; list order is predictable and matches the visual. The future Spaces/workspace feature will record *explicit* placement rather than infer from tick-order, so capturing pick-order banks nothing.
+
+- **Which marked session the trigger window becomes: unspecified (implementation-convenience).** Cosmetic — no Spaces placement, so all N windows open on the current Space regardless. Not pinned.
+- **Window focus** is left to the OS.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
