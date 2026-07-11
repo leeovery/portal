@@ -22,10 +22,10 @@ The all-or-nothing contract is load-bearing: on a post-pre-flight spawn failure 
 The implied mechanism seems to be "detach the tmux client for each spawned session" (the `@portal-spawn-*` markers know which sessions were spawned), relying on the host window to close when its `portal attach → tmux attach` command exits on detach. But that cleanliness *depends on the terminal closing the window when the command exits* — if a terminal keeps the window open after command exit, rollback leaves a leftover window with a dead shell, violating the net-N-windows anti-requirement. This dependency is not stated. This is a blind spot in the sources, surfaced because it is a concrete build-time hole in a core contract (worth confirming rather than discovering during implementation).
 
 **Proposed Addition**:
-(Leave blank until discussed — likely: specify the rollback close mechanism, e.g. "the picker detaches the tmux client for each confirmed spawned session (targeting via the batch's `@portal-spawn-*` set); window teardown relies on the host terminal closing the window when its attach command exits," plus a note on the per-terminal close-on-command-exit assumption as a build-time residual.)
+Resolved by *removing* the teardown rather than specifying a close mechanism. The rollback bullet in `Burst & Partial-Failure Contract` is rewritten so that on a rare post-pre-flight spawn failure Portal does **not** close/undo the already-opened windows (it doesn't own them and won't rely on untested teardown): it leaves them in place, skips the trigger window's self-attach (you stay in the picker), and shows a clean error naming the failed window. The `Stance` intro and `Cancellation` paragraph were adjusted for consistency.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Adjusted
+**Notes**: User pushed back on the original "specify a close mechanism" direction as over-reach — closing host windows we don't own, relying on untested self-close, to tidy a rare hiccup. Reframed the fix as dropping the teardown entirely (leave-what-opened + report). This is a deliberate walk-back of the discussion's logged "roll back / close the windows" decision; the discussion §3 was updated with a Refinement note and the KB reindexed to keep them in sync. Pre-flight all-or-nothing (dominant failure) is unchanged.
 
 ---
 

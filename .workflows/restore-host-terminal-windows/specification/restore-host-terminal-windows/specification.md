@@ -139,7 +139,7 @@ The motivating scenario is a *large* burst (rebuild ~14 windows post-crash), not
 
 ### Stance: pre-flight + all-or-nothing
 
-Either the whole batch opens, or nothing does.
+All-or-nothing applies at the **pre-flight gate** — if any marked session is gone, nothing opens at all. Once past pre-flight, the batch opens; the only residual is a rare per-window spawn hiccup, handled by *leave-what-opened* (below) rather than a teardown.
 
 **Pre-flight validate on Enter.** Before opening a single window, verify every selected session still exists (quick `has-session` checks). The dominant failure cause is a session killed between picker-load and Enter; pre-flight catches exactly that. If any selected session is gone:
 
@@ -150,9 +150,9 @@ Either the whole batch opens, or nothing does.
 **Spawn, then self-attach LAST — gated on ALL N−1 confirming.** After pre-flight passes, sequentially spawn the N−1 and collect their acks:
 
 - **All confirm** → the trigger window self-attaches silently (no "14/14 ✓" nag).
-- **Any fails** (a transient `osascript`/terminal hiccup *after* pre-flight passed — genuinely rare) → **roll back**: close the windows that opened (safe — it detaches the client; the tmux sessions persist), skip the self-attach, show the same clean error; back in the picker to redo.
+- **Any fails** (a transient `osascript`/terminal hiccup *after* pre-flight passed — genuinely rare) → Portal does **not** try to close or undo the windows that already opened; it doesn't own those host windows and won't rely on untested teardown. It **leaves them in place** (they're working attached sessions), **skips the trigger window's self-attach** so you stay in the picker, and shows a clean one-line error naming the window that failed to come up. Re-select if you want to retry the missing one.
 
-This deletes the report / `r retry` / deferred-attach tangle entirely. Trade-off accepted: on a rare mid-rebuild failure you get nothing and re-select, rather than keeping the partial.
+This deletes the report / `r retry` / deferred-attach tangle entirely. Trade-off accepted: on a rare post-pre-flight failure you keep the windows that opened and re-select the one that didn't, rather than a strict all-or-nothing teardown Portal can't cleanly perform.
 
 ### Confirmation mechanism: explicit token ack
 
@@ -175,7 +175,7 @@ Spawn the N−1 **sequentially** (one adapter/`osascript` call completes before 
 
 ### Cancellation
 
-Self-exec being the *last* step keeps cancellation clean: `Ctrl-C`/`Esc` before it aborts (roll back what opened); after it there is nothing to cancel (already attached).
+Self-exec being the *last* step keeps cancellation clean: `Ctrl-C`/`Esc` before it aborts the remaining spawns and leaves any already-opened windows in place (nothing is torn down); after it there is nothing to cancel (already attached).
 
 ### Deferred hardening (recorded, not built)
 

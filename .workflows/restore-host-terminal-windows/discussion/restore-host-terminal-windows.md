@@ -185,7 +185,11 @@ The "self-attach to the Nth of N" rule is total:
 - **N=1** (one selected, Enter): zero windows to spawn — the picker self-attaches to that one session, i.e. it **degenerates to a plain single attach** to the current window. No special-casing; selecting one in multi-mode and pressing Enter is just a normal attach.
 - **N=0** (nothing selected, Enter): a **no-op that exits multi-select mode**, dropping back to the standard picker (Portal stays open) — the same effect as pressing `Esc`. Nothing opens.
 
-*(decided — pre-flight + all-or-nothing (rollback on the rare residual), token-ack confirmation (per-window timeout = failure), sequential spawn, spawn-via-own-exe, N=0/N=1 boundary all resolved; best-effort/report/retry model superseded per review-002 F3/F6)*
+### Refinement (specification phase, 2026-07-11) — post-pre-flight failure: leave-what-opened, not rollback
+
+During specification the "roll back: close the windows that opened" half of the all-or-nothing decision was walked back. Rationale: closing already-opened host windows means owning windows Portal never took a clean handle for and relying on untested terminal self-close behaviour — over-reach to tidy a genuinely rare hiccup. **Superseding decision:** on a rare post-pre-flight spawn failure Portal does **not** close or undo the windows that already opened (they are working attached sessions); it **leaves them in place**, **skips the trigger window's self-attach** (you stay in the picker), and shows a clean one-line error naming the window that failed. Re-select to retry the missing one. Pre-flight all-or-nothing (the dominant "session killed before Enter" case → nothing opens) is **unchanged** — only the post-open teardown is dropped. This also removes any dependency on a terminal closing its window on command exit. Supersedes the "roll back / close the windows / brief flash / you get nothing and re-select" phrasings above.
+
+*(decided — pre-flight all-or-nothing (dominant case → nothing opens), post-pre-flight failure = leave-what-opened + report (rollback/teardown dropped in the specification-phase refinement above), token-ack confirmation (per-window timeout = failure), sequential spawn, spawn-via-own-exe, N=0/N=1 boundary all resolved; best-effort/report/retry model superseded per review-002 F3/F6)*
 
 ---
 
