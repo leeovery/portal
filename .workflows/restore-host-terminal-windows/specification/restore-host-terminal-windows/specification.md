@@ -281,6 +281,57 @@ Adapters implement exactly one capability in scope: **open-window-with-command**
 
 ---
 
+## Config Schema (`terminals.json`)
+
+### Location & format
+
+`~/.config/portal/terminals.json` — Portal's JSON-store convention (like `projects.json` / `hooks.json`), XDG-resolved via the existing `configFilePath`. Read-only at spawn time; user-authored.
+
+### Structure
+
+Each **entry = identity-matcher → capability map**:
+
+- **Key** = whatever identity form the user pastes: a friendly alias (to override a built-in), a `.app` name, a raw bundle id, or a `*`-glob.
+- **Value** → `commands` → `open` (the only capability key in scope) → a **recipe**.
+- Future `introspect` / `place` are **additive sub-keys**, not a breaking schema change — config and adapter extend in lockstep.
+
+### Recipe: explicit fields, not magic
+
+The recipe is **`argv`** (inline argv-array template) **or** **`script`** (path to a file Portal runs) — chosen over auto-detecting "is it a path on disk?" (clearer, no disk-probing surprise):
+
+- **`argv`** is an **argv array** (not a string), to sidestep shell-quoting hell. The inline field is named `argv` (not `command`) to avoid colliding with the placeholder.
+- **`script`** is a path to a file Portal executes.
+
+### Placeholder `{command}`
+
+Portal substitutes `{command}` with `<os.Executable()> attach <session>` + the ack token. Config expresses only "how my terminal opens a window running `{command}`"; Portal fills in the attach.
+
+```json
+// ~/.config/portal/terminals.json
+{
+  "dev.warp.Warp-*": {
+    "commands": { "open": { "argv": ["osascript", "-e", "tell app \"Warp\" to create window with command \"{command}\""] } }
+  },
+  "com.example.MyTerm": {
+    "commands": { "open": { "script": "~/.config/portal/terminals/myterm.sh" } }
+  }
+}
+```
+
+### Recipe execution contract
+
+The config-driven path gets the *same* execution guarantees the native Ghostty adapter got, so a custom recipe never re-hits the PATH/exec fixes the native path already absorbed:
+
+- **Portal makes `{command}` self-sufficient, uniformly.** This *refines* the per-adapter "inject the picker's PATH" rule: the picker (which has your full PATH) resolves what the spawn needs and threads it into `{command}` itself — so recipe authors only ever describe "open a window running this command," never PATH/env plumbing.
+- **`{command}` substitutes as a single, already-resolved command string**, dropped literally into the recipe. Escaping it for an *embedding* context (e.g. inside an AppleScript string) is the recipe author's responsibility — they wrote that AppleScript. The `argv`-array form exists precisely so simple CLI terminals (kitty/wezterm) avoid quoting entirely.
+- **`script` recipes receive `{command}` as `$1`** (first positional arg) — the standard, obvious contract.
+
+### Precedence
+
+config override → native adapter → unsupported. Config can override a built-in (e.g. Ghostty + a resize).
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
