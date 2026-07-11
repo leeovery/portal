@@ -200,7 +200,7 @@ Behaviour across: in/out of tmux at trigger × selected session detached / attac
 - **In vs out of tmux at trigger.** *Out* (bare-shell picker): trigger window reuses via `AttachConnector` (exec `tmux attach`); detection walks the picker's own process tree. *In* tmux: trigger window reuses via `SwitchConnector` (`switch-client`); detection takes the `list-clients` → client-PID hop. The **spawned N−1 are always fresh host windows running `portal attach` out of tmux**, independent of the picker's context; only the trigger-window reuse differs.
 - **Selected session already attached elsewhere** (this host or a remote/iPhone client): allowed — no dup guard (research); the token-ack confirms *our* new window regardless of other clients.
 - **Includes-self:** the trigger window becomes one attached session, the rest spawn; the marked origin session ends up attached either way.
-- **Selected session vanished** between picker-load and Enter: its spawn fails → best-effort report (#3).
+- **Selected session vanished** between picker-load and Enter: caught by #3's **pre-flight check** → atomic abort, nothing opens (superseded the earlier best-effort-report framing).
 - **Enter opens the marked set only.** The cursor/highlight at Enter time is irrelevant — a highlighted-but-unmarked row is **not** opened (marking is `m`, not Enter). Enter always commits the `m`-marked set.
 - **Which marked session the trigger window becomes: unspecified / impl-convenience.** Cosmetic (no Spaces placement — all N windows open on the current Space regardless), so not pinned.
 
@@ -341,7 +341,7 @@ The feature drives a real GUI terminal (`osascript` → Ghostty), hard to automa
 
 ### Decision — seam-based; live terminal only for the last inch
 
-- **`Adapter` interface (#8) = primary seam.** A fake adapter records "would open a window running command X" without touching a real terminal → the entire spawn pipeline is unit-testable: adapter resolution + precedence (config→native→unsupported), `{command}` substitution, token-ack collection, partial-failure report logic.
+- **`Adapter` interface (#8) = primary seam.** A fake adapter records "would open a window running command X" without touching a real terminal → the entire spawn pipeline is unit-testable: adapter resolution + precedence (config→native→unsupported), `{command}` substitution, token-ack collection, pre-flight + abort/rollback logic.
 - **Detection reads behind small seams** (process-tree walk / `ps` / `lsappinfo` / `tmux list-clients` behind 1–3-method interfaces, Portal's existing pattern) → detect-self *resolution* (client-by-activity, walk-to-bundle-id, family match, NULL→unsupported) is unit-testable with fabricated data. The real walk is integration (real-tmux `tmuxtest` fixture) / manual.
 - **Each terminal driver split for testability:** pure command-construction (building the `osascript`/argv) + error-mapping (`-1712`/`-1743` → typed `permission-required`) are unit-tested (fabricated `osascript` outcome; assert the built command / mapped error); only the thin **exec boundary** (real `osascript` + TCC modal) is manual/integration-gated.
 - **Mode/keymap state machine (#2)** unit-tested as a Bubble Tea model (existing `internal/tui` pattern): enter / toggle / exit, sticky selection, suppressed keys.
@@ -418,7 +418,7 @@ A **deliverable**, tracked here at the user's request: this feature's UI must be
 
 ### Scope of what to design
 
-- The **multi-select mode** on the Sessions page: the distinct mode affordance (own colour + notice-band banner, per #2 — the filter-mode analogue), row **selection marker** (glyph + mode colour, never colour-only), and the mode's states — empty, N-selected, and the **partial-failure report surface** (#3, "opened 11 of 14 …").
+- The **multi-select mode** on the Sessions page: the distinct mode affordance (own colour + notice-band banner, per #2 — the filter-mode analogue), row **selection marker** (glyph + mode colour, never colour-only), and the mode's states — empty, N-selected, and the **pre-flight-abort state** (#3, all-or-nothing — "'X' is gone — nothing opened").
 - The **terminal-identity surfaces** (#7): the unsupported/unconfigured **banner** and whatever detect/identity display we land on.
 
 ### Process
@@ -437,7 +437,7 @@ Accent: **violet reused** as the selection accent; amber/red pulled from the exi
 
 ### Reference frames (committed)
 
-Source of truth is the **Portal Paper file → Page 1** (frames *Sessions — Multi-Select (active)* / *(partial-failure report)* / *Unsupported terminal (banner)*). Committed 2× PNG exports for implementation reference:
+Source of truth is the **Portal Paper file → Page 1** (frames *Sessions — Multi-Select (active)* / *(pre-flight abort)* / *Unsupported terminal (banner)*). Committed 2× PNG exports for implementation reference:
 
 **Multi-select — active**
 
@@ -459,31 +459,22 @@ Source of truth is the **Portal Paper file → Page 1** (frames *Sessions — Mu
 
 ### Key Insights
 
-*(captured as the discussion progresses)*
+1. **Feasibility was burned down *in* the discussion, on real hardware.** TCC self-exemption, the bare exec-PATH, the identity walk, throughput, and the Ghostty AppleScript API were all probed live against the running machine rather than deferred to build — turning "I have no idea if it's possible" into settled facts and reshaping several decisions (TCC modal → non-event; PATH → adapter env-injection; detection → NULL-filter model).
+2. **Don't infer "which terminal/client" from a shared, noisy registry.** `focused` and `client_activity` are unreliable in a device-hopping setup (lingering mosh clients hold both). The robust model anchors on the *triggering process's own context* (self-walk outside tmux) and **NULL-filters remote clients**; activity survives only as a rare local tiebreak.
+3. **Quarantine every OS/terminal specific in the driver.** AppleScript, AppleEvent codes, TCC, deep-links live only in the Ghostty driver, which hands the rest of Portal a tiny typed vocabulary (`permission-required` / `unsupported` / `spawn-failed`). This keeps the cross-terminal adapter system clean and each new terminal cheap.
+4. **All-or-nothing + pre-flight beats best-effort-with-report.** Catching the dominant failure (a session killed before Enter) *before opening any window* makes "fail completely" genuinely clean, and deletes the report / retry / deferred-attach tangle entirely.
+5. **The feature is a thin in-process spawn package** (with a `portal spawn` CLI face) on top of a *separate* prerequisite — the `warm-command-bootstrap-latch` feature — so warm attaches are cheap. Small surface, one hard dependency.
 
 ### Current State
 
-- Research foundation settled (see Context); 12 live subtopics seeded.
-- **#1 Spawn-Execution Architecture — decided** (Option B: shared spawn package + `portal spawn` subcommand, picker calls in-process; N−1 spawned, picker self-reuses for the Nth).
-- **#3 Burst & Partial-Failure — decided.** **Pre-flight + all-or-nothing** (review-002 F3): validate all selected sessions exist on Enter → atomic abort (nothing opens) if any gone; else spawn N−1, self-attach LAST gated on all confirming, else roll back the opened windows. Token-ack confirmation via `@portal-spawn-*` server option, per-window timeout=failure (F6); spawn via `os.Executable()`; sequential; N=1 degenerates to plain attach, N=0 exits multi-mode. Skip-bootstrap latch verified sufficient. (No report/retry surface — superseded.)
-- **#2 Multi-Select Trigger & Keymap — decided.** `m` enters explicit (empty-able) multi-select mode; `m` toggles cursor row; `Space` stays preview; `Enter` opens marked set; `Esc` exits. Distinct mode colour + notice-band banner (design-phase visual). Sticky selection; filter/regroup live, kill/rename/page-toggle suppressed. Per-session only; group-select deferred as separate work.
-- **#4 Trigger-Context Matrix — decided.** In/out-tmux reuse (switch-client / exec-attach), already-attached allowed, includes-self handled, vanished→best-effort. Enter opens the marked set only (cursor irrelevant). Selection is a **set**, opened in **list order**; trigger-window session + focus left to impl/OS.
-- **#7 Terminal-Identity UX — decided.** Display both `.app` name + bundle id; config accepts alias/`.app`-name/bundle-id/`*`-glob; detect-self standalone (F7); F2 headless dissolves (folds into NULL-bundle unsupported path). #1 "headless" wording trimmed.
-- **#8 Adapter Contract — decided.** Detection separate from adapter; generic contract `OpenWindow(command)` (spawn composes `<exe> attach <session>` + ack token); config placeholder becomes `{command}` (feeds #6); capability-based (introspect/place later); precedence config→native→unsupported.
-- **#6 Config Schema — decided.** `~/.config/portal/terminals.json`; identity-matcher → `commands.open` → `argv`/`script` recipe; `{command}` placeholder; `commands` map mirrors #8's capability model; precedence config→native→unsupported.
-- **#5 TCC Permission Flow — decided.** OS/terminal specifics quarantined in the Ghostty driver (typed generic results out). **Live-validated: TCC is self-exempt for same-terminal spawns (the only case by design) → no first-run prompt;** the `-1712/-1743` handling is a defensive net, guidance names the host terminal (never Portal). Portal is never the TCC subject.
-- **#12 Pre-Build Validation — decided (validated live).** Items 1–5 + F3 all probed on the real Mac: TCC self-exempt; throughput ~260ms/open no-throttle; identity walk clean; Ghostty API shape confirmed (`command` = argv, not shell); exec PATH is bare → absolute-`portal` + adapter PATH-injection. Residuals (other-terminal TCC, other-macOS `ps`/walk, preview-API churn) are build-time confirmations, not open questions.
-- **#9 Testing & DI Seam — decided.** Fake `Adapter` makes the whole spawn pipeline unit-testable; detection reads behind small seams; each driver split into pure command-construction + error-mapping (unit) behind a thin exec boundary (manual). Live terminal + TCC modal only for the last inch (manual + Paper gates).
-- **#11 Attach Contention — decided (dissolves).** No contention: the skip-bootstrap latch removes the concurrent-bootstrap race; the picker gates the burst to after hydration (`BootstrapCompleteMsg`); abridged attaches add a client, not structure, so capture is untouched.
-- **#7 detection model refined + live-validated.** Self-context outside tmux; NULL-filter to local clients inside; `activity` demoted to a local-only tiebreak; host-local principle for multi-machine. Live probe confirmed the identity walk + the mosh-noise fragility it now designs around.
-- **#12 partially validated live.** Items 2/3/5 (which-client, identity walk, Ghostty API) validated on the real Mac; items 1/4 (TCC attribution, throughput) pending the live spawn test.
-- **#13 Design in Paper** — deliverable tracked (multi-select page + interactions).
-- Outstanding review finding to place: **F5** (spawn observability / log component) — likely a new subtopic or folded into #10.
+**Complete — all 13 subtopics decided**, feasibility live-validated, Paper design delivered + approved (3 frames: multi-select active, pre-flight abort, unsupported-terminal banner), and both review cycles (review-001, review-002) fully incorporated.
+
+The feature is a shared **`internal/spawn` package + `portal spawn` CLI face**: `m` enters an explicit multi-select mode; `Enter` runs a **pre-flight check → all-or-nothing** spawn (N−1 host windows via bundle-id-resolved terminal adapters + the trigger window's own self-attach); detection anchors on the **triggering terminal** (self-walk outside tmux, NULL-filter local clients inside); cross-terminal via built-in adapters + `terminals.json`; TCC is a non-issue (self-exempt); OS/terminal specifics are quarantined in each driver behind a typed result; and the flow rides a new `spawn` log component. Nothing left unresolved — hands off to specification (gated behind the `warm-command-bootstrap-latch` prerequisite).
 
 ### Open Threads
 
 - **External dependency:** spawn depends on the `warm-command-bootstrap-latch` feature (inbox `2026-06-30--warm-command-bootstrap-latch`) landing first. The user will **not spec spawn until warm-command-bootstrap is done**; discussion proceeds assuming warm attaches are cheap by implementation time.
-- All review-001 findings incorporated (F1–F7 surfaced and resolved across #1/#3/#7/#10).
+- Both review cycles fully incorporated — review-001 (F1–F7, across #1/#3/#7/#10) and the final review-002 (config execution contract → #6, filter-inside-multi-select → #2, all-or-nothing pivot → #3, stale-detection-text reconciled, preview round-trip → #2).
 - **CLI command name provisional.** This feature ships the command as `portal spawn <sessions…>` — settled so build isn't blocked — but the logged **`cli-verb-surface-redesign`** idea (inbox `2026-07-09--cli-verb-surface-redesign`) may rename it. The picker calls the spawn *package* in-process, so the CLI verb is a secondary surface and cheap to rename. Internal names (`internal/spawn`, `spawn` log component, `@portal-spawn-*` markers) follow the command name.
 
 ## Triage
