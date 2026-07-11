@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-11
 cycle: 4
 phase: Gap Analysis
@@ -25,8 +25,8 @@ This is a real seam gap, not a wording nit. A config recipe's only substitution 
 **Proposed Addition**:
 Specify a single, uniform env-delivery mechanism and state how each path realises it. Recommended: define the composed command as **env-self-sufficient** — Portal builds `{command}` as an env-prefixed argv (`env PATH=<picker PATH> [other required vars] <os.Executable()> attach <session> <ack>`) so it resolves regardless of the spawn environment. Then state that the native Ghostty adapter MAY additionally use the terminal's env property but is not required to, and that config recipes need do nothing — running `{command}` verbatim is sufficient. Alternatively, if env must be delivered per-adapter, add an explicit env field to the recipe schema and define its substitution. Either way, pin one answer.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. **Judgment call (architecture):** picked the env-self-sufficient composed command — Portal builds `{command}` as an `env PATH=… <abs>/portal attach … --spawn-ack <batch>` argv, uniform across native + config, so no adapter env property and no recipe env slot. Reconciled the Spawn Architecture PATH-injection paragraph (superseded the per-adapter "Ghostty environment variables property" framing) and the Config recipe-execution bullet.
 
 ---
 
@@ -45,8 +45,8 @@ But `portal spawn <sessions…>` is a shipped surface (Naming section: "Ships as
 **Proposed Addition**:
 State the CLI's window model explicitly. Recommended for parity with the picker (and to keep the "net N" invariant uniform): `portal spawn <sessions…>` reuses its **calling terminal window** as one of the N (self-attach-last via the same connectors) and spawns the N−1 others, running the identical pre-flight → spawn → ack → self-attach flow. If instead the CLI is intended to spawn all N (no reuse), say so and explain how the net-N invariant is reconciled (or scoped out) for the CLI path. Note whether `portal spawn` with zero session args is `--detect`-only / an error.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. **Judgment call:** CLI mirrors the picker (net-N: reuse calling window as one, spawn N−1, same pre-flight→spawn→ack→self-attach). Added a "`portal spawn` CLI behaviour" subsection; `--detect` = dry-run prints identity; no args + no `--detect` = usage error.
 
 ---
 
@@ -67,8 +67,8 @@ The headline scenario is a *large* burst (~14 windows). The spec specifies order
 **Proposed Addition**:
 Specify (a) that the burst runs as an async `tea.Cmd` streaming progress/ack messages back to the model (not a blocking Update), consistent with the cold-path bootstrap pattern; (b) the exact cancel semantics — whether `Ctrl-C`/`Esc` mid-burst returns to the picker or quits, the resulting mode/selection state (recommend: same "leave opened, keep un-opened marked, stay in mode" rule as partial-failure), and whether markers are cleaned; and (c) the in-burst UI state — either a pending/progress affordance in the notice band while awaiting acks, or an explicit statement that self-exec/exit happens fast enough that no in-burst frame is needed (and confirm no design frame is required).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. **Judgment call (design):** added an "In-picker execution model" subsection — (a) async `tea.Cmd` streaming progress/ack msgs (cold-path bootstrap pattern); (b) `Ctrl-C`/`Esc` returns to picker (not quit), aborts remaining, leaves opened, self-cleans markers, same unmark-opened/keep-rest selection rule; (c) `Opening n/N…` notice-band affordance, with the "spawning/awaiting acks" Paper frame flagged as a design-phase residual for the visual gate.
 
 ---
 
@@ -89,8 +89,8 @@ The ack mechanism requires modifying the **existing** `portal attach` command (`
 **Proposed Addition**:
 Define the `portal attach` spawn-ack contract: the concrete carrier (recommend a flag, e.g. `--spawn-ack <batch>`, so it flows through `{command}`/config recipes uniformly), that attach writes `@portal-spawn-<batch>-<session>` immediately before the exec handoff and after the session is confirmed to exist, that the write is best-effort-but-attach-still-execs, and that a session that fails to resolve produces no marker (→ picker timeout → failed classification). State the marker value semantics (presence is the signal; value arbitrary).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. **Judgment call:** carrier is a flag `--spawn-ack <batch>` (flows through `{command}`/config recipes as argv, resolving arg-vs-env in favour of arg, dovetailing F1); attach confirms session exists → writes `@portal-spawn-<batch>-<session>` (presence = signal, value opaque) as last step before exec; best-effort (attach still execs; failed write → timeout → failed); unresolved session → no marker → failed. Added "Ack delivery & `portal attach` contract" subsection + updated the token-ack bullet.
 
 ---
 
@@ -107,8 +107,8 @@ The typed-result taxonomy has three categories: `permission-required`, `unsuppor
 **Proposed Addition**:
 State that within a burst a `permission-required` result is treated as a failed window for the leave-what-opened accounting (skip self-attach, leave opened windows, keep the affected session marked), AND additionally surfaces the permission guidance once for the batch (naming the target terminal), rather than the generic spawn-failed one-line error. Or, if simpler, fold `permission-required` into the same one-line failure report and rely on the standalone `--detect`/single-spawn path to surface guidance.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. Chose: within a burst, `permission-required` is accounted as a failed window AND stops the burst (sequential + per-(source,target) grant → all later windows hit the same wall), surfacing the permission guidance once for the batch (not the generic error); grant persists so retry proceeds. Appended to Permissions → Defensive net.
 
 ---
 
@@ -129,8 +129,8 @@ State that within a burst a `permission-required` result is treated as a failed 
 **Proposed Addition**:
 State that detection runs once per picker session (cached; re-used by the on-entry banner and by the N≥2 Enter gate), that it runs off the first-paint critical path (or is cheap enough to run inline — pick one), and that any detection error (as opposed to a clean remote/mosh NULL) also resolves to the unsupported/no-op path with a `spawn`-component WARN breadcrumb.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. Added a "Detection lifecycle" subsection: detect once per picker session on Sessions-page entry (cached; `rebuildSessionList` must not re-walk; reused by banner + N≥2 gate); async off the first-paint path; transient detection error folds to unsupported/no-op with a `spawn` WARN.
 
 ---
 
@@ -147,7 +147,7 @@ The project's logging taxonomy is closed: new components AND new attr keys "requ
 **Proposed Addition**:
 Enumerate the closed attr-key set the `spawn` component introduces (e.g. `batch`, `opened`, `total`, `terminal`, `bundle_id`, `resolution` = config|native, `ack` = confirmed|timeout|failed, plus the existing opaque `detail`), consistent with how bootstrap/restore/daemon components enumerate theirs.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. Enumerated the closed `spawn` attr-key set in Observability: `batch`, `terminal`, `bundle_id`, `resolution` (config|native|unsupported), `session`, `ack` (confirmed|timeout|failed), `opened`/`total`, `detail`.
 
 ---
