@@ -433,6 +433,28 @@ The real window actually opening + the TCC modal need a live Mac — covered by 
 
 ---
 
+## Design References
+
+The feature's UI is designed in **Paper** (where Portal's Modern Vivid design system lives). Three frames were delivered and **approved**, cloned from *Sessions — Modern Vivid v2* so they inherit the exact tokens/type/layout. Committed PNG exports under the feature's `design/` directory are the implementation reference:
+
+1. **Sessions — Multi-Select (active)** — `design/sessions-multi-select-active.png`. Violet `3 selected` banner (filter-line analogue); violet `●` markers on selected rows incl. the cursor row; `Space` still preview; footer `↑↓ navigate · m toggle · ␣ preview · ⏎ open · esc cancel`.
+2. **Sessions — Multi-Select (pre-flight abort)** — `design/sessions-multi-select-preflight-abort.png`. Red `⚠ '<session>' is gone — nothing opened`; the gone session flagged with a red `⚠` + `session gone`, other selections intact, the multi-select mode + footer unchanged (nothing opened). Reflects the all-or-nothing contract.
+3. **Sessions — Unsupported terminal (banner)** — `design/sessions-unsupported-terminal.png`. Amber `⚠ unsupported terminal — Apple Terminal · com.apple.Terminal` + blue `see docs`, over the normal Sessions list/footer (names the detected identity for copy-paste).
+
+### Tokens
+
+Accent: **violet** reused as the selection accent; amber/red pulled from the existing palette for warning/error — **no new tokens**. Dark-mode; light-mode variants deferred unless requested.
+
+### Open toss-up (settled)
+
+Whether unselected rows carry a dim `○` was left as a review toss-up; the delivered frames are built **clean (selected-only, no dim `○`)**.
+
+### Visual-gate process
+
+Follows the project's reference-first workflow: the committed `design/` frames are the implementation reference. Implementation may reference these directly, or re-capture fresh frames via the `capturetool` / `vhs` harness once the feature is built — moving them to `testdata/vhs/reference/` when wiring the visual gate.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
