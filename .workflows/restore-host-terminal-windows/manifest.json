@@ -18,6 +18,22 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "restore-host-terminal-windows": {
+          "status": "in-progress",
+          "sources": {
+            "restore-host-terminal-windows": {
+              "status": "pending"
+            }
+          },
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "construction_gate_mode": "gated",
+          "date": "2026-07-11"
+        }
+      }
     }
   }
 }
