@@ -144,7 +144,8 @@ All-or-nothing applies at the **pre-flight gate** — if any marked session is g
 **Pre-flight validate on Enter.** Before opening a single window, verify every selected session still exists (quick `has-session` checks). The dominant failure cause is a session killed between picker-load and Enter; pre-flight catches exactly that. If any selected session is gone:
 
 - **Abort atomically** — nothing spawns, no window opens, no self-attach.
-- Show a clean one-line error in the picker naming the gone session (design copy: `⚠ '<session>' is gone — nothing opened`), and stay put in multi-select mode with the remaining selections intact.
+- Show a clean one-line error in the picker naming the gone session(s) (design copy: `⚠ '<session>' is gone — nothing opened`).
+- **Prune the gone session(s) from the selection** (they can't be opened) and keep the surviving marks intact, so a second `Enter` proceeds with the survivors rather than re-aborting in a loop. You stay in multi-select mode. (This is the same prune-what's-gone rule as the sticky-selection preview round-trip.)
 - Zero windows opened → nothing to undo, no flash.
 
 **Spawn, then self-attach LAST — gated on ALL N−1 confirming.** After pre-flight passes, sequentially spawn the N−1 and collect their acks:

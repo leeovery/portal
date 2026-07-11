@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-11
 cycle: 2
 phase: Gap Analysis
@@ -28,9 +28,9 @@ Compounding this, §Sticky selection prunes a killed session's selection on the 
 Net: a planner must decide (a) whether a pre-flight abort removes the gone session from the selection or keeps it marked, and (b) how the user retries — auto-proceed with survivors, or manual-unmark-then-Enter. These produce materially different UX for the primary failure path, and the spec's own two references point in opposite directions.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Revised the pre-flight abort bullets in §Stance to specify: on abort, name the gone session(s) in the error, then **prune the gone session(s) from the selection** and keep surviving marks intact, so a second `Enter` proceeds with the survivors rather than re-aborting in a loop. Added an explicit note that this is the same prune-what's-gone rule as the sticky-selection preview round-trip — making the "consistent with the pre-flight rule" claim in §Sticky selection actually hold.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. **Judgment call:** chose auto-prune (gone session dropped from selection) over keep-marked, to avoid the re-abort loop and to unify with the sticky-selection preview-prune rule. Design frame 2's red `⚠ session gone` flag is the error presentation at the moment of abort; the pruned session drops from the marked set on the next rebuild. Survivors stay marked.
 
 ---
