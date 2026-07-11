@@ -250,6 +250,37 @@ Whatever Portal displayed, the user can paste it and it resolves. Internal **mat
 
 ---
 
+## Adapter Contract & Extensibility
+
+### Detection is separate from the adapter
+
+Detect-self resolves *identity*; a **resolver** maps identity → adapter via the precedence chain; the adapter is per-terminal and only opens windows. Detection is **not** an adapter method.
+
+### Resolution precedence
+
+**config override → native adapter → unsupported.** Config can override a built-in too (e.g. Ghostty + a resize). A NULL/unmatched identity → unsupported.
+
+### Generic contract: open a window running a command
+
+The adapter's single job is **open a new host window running a given command** — `OpenWindow(command)` — **not** "attach to a session." The **spawn layer composes the command** (`<os.Executable()> attach <session>` + the ack token) and hands it to the adapter.
+
+- Rejected: a session-aware `OpenAttached(session)` — it would bake `portal attach` into every adapter and scatter the attach+ack composition.
+- Keeps adapters dumb and portable (one thing: open a window running a command); keeps the `portal attach` + ack composition in one place; and future-proofs the adapter — the same open-window primitive can be handed *different* commands later (the workspace feature, other actions) without touching adapters.
+- Knock-on for config: the custom-terminal placeholder is **`{command}`** (the thing to run), not `{session}`.
+
+### Two implementations, same contract
+
+- **Built-in Go adapters** (Ghostty ships in this feature) — compiled in, not config.
+- **User-config entries** (`terminals.json`) — the escape hatch (see *Config Schema*).
+
+Each adapter owns its own terminal-specific concerns, including injecting the picker's `PATH`/env into the spawned window (see *Spawn Architecture*) and quarantining all OS/terminal specifics behind a typed result (see *Permissions & Error Quarantine*).
+
+### Capability-based extensibility
+
+Adapters implement exactly one capability in scope: **open-window-with-command**. Future `introspect` / `place-on-space` slot in as *additive* optional capabilities (Go interface segregation, checked by type assertion) without touching existing adapters. Only the open capability is in scope for this feature; the capability mechanics are an implementation concern.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
