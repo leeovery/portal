@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-11
 cycle: 4
 phase: Input Review
@@ -27,7 +27,7 @@ This is a load-bearing forward-compat rationale for a design choice, not decisio
 **Proposed Addition**:
 Append to the *Ack channel* paragraph (or add as a trailing sentence): "The server-option channel is also deliberately **daemon-readable**: the deferred remember-and-restore-workspace follow-on can teach the 1s-tick daemon to read the same `@portal-spawn-*` markers and record outcomes as an *additive* change — no rewrite of how the picker collects acks. (Forward-compat only; not built here.)"
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto. Appended the daemon-readable forward-compat sentence to the Ack channel paragraph, alongside the other three channel-safety grounds.
 
 ---
