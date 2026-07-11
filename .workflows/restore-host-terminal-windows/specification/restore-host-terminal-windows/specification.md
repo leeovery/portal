@@ -388,6 +388,16 @@ Emission shape matches bootstrap/restore/daemon instrumentation: **one INFO cycl
 
 ---
 
+## Concurrency & Post-Reboot Safety
+
+N near-simultaneous `tmux attach` against a server that may still be hydrating post-reboot is **not** a contention risk, for reasons already built in:
+
+1. **The skip-bootstrap latch removed the big race.** Burst attaches take the abridged path — no full bootstrap per window — so N concurrent sweeps/restores/cleans against one server is gone (see *Spawn Architecture* / dependency).
+2. **The picker gates the burst to *after* hydration.** The cold+TUI path reaches the Sessions page (where multi-select lives) only on `BootstrapCompleteMsg` — after Restore + EagerSignalHydrate + `@portal-restoring` cleared. So the burst cannot be triggered until hydration is done. (A direct `portal spawn` CLI as the first post-reboot command runs its own bootstrap synchronously first — same guarantee.)
+3. **Abridged attaches don't perturb capture.** A new client attaching adds a *client*, not session/window/pane structure — all the daemon captures — so the 1s capture tick and daemon self-supervision are untouched.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
