@@ -12,7 +12,7 @@ This feature lets the user spawn N sessions, each springing into its own host te
 - **Windows-only:** window-vs-tab fidelity dropped → removes the entire introspection requirement.
 - **Spawn command:** the N−1 new windows each run **`portal attach <session>`** (existing chokepoint connector); the **trigger window is reused** as one session via `switch-client`. Net window count = **N, not N+1** (no leftover empty picker window — a hard anti-requirement).
 - **Cross-terminal:** Ghostty-first; **dual configurability** (built-in Go adapters + user-config override/escape hatch), both shipped in this feature. Precedence: **config override → native adapter → unsupported**.
-- **Identity (feasibility-validated live):** detect the host terminal via **client-PID → process-tree walk → macOS bundle id**, matched as a **family** (e.g. `dev.warp.Warp-*`), with a **friendly alias** (`ghostty`) as the user-facing key. Client resolved by **highest `client_activity`** (`focused` is unreliable). Remote/mosh clients → NULL bundle id → honest no-op.
+- **Identity (feasibility-validated live):** detect the host terminal via **client-PID → process-tree walk → macOS bundle id**, matched as a **family** (e.g. `dev.warp.Warp-*`), with a **friendly alias** (`ghostty`) as the user-facing key. Remote/mosh clients → NULL bundle id → honest no-op. *(Which-client selection was **refined in #7** by live validation: NULL-filter to the local client(s) first, `client_activity` demoted to a local-only tiebreak — raw highest-activity and `focused` both proved unreliable across clients. Do not lift the activity-centric framing from research.)*
 - **Unsupported-terminal UX:** info **banner** (not modal) naming the detected identity.
 - **Duplicate-surface guard:** none — opening an already-attached session is a fine no-op (tmux synchronises both).
 - **Scope yardstick:** this feature is "collapse the attaching into one action per batch" — a **partial win** the user explicitly accepts. Remember-the-grouping + macOS Spaces placement are deliberately separate future features (Spaces already parked in inbox).
@@ -80,7 +80,7 @@ The decision is tighter than F6 implies. The **no-leftover-window** anti-require
 
 Started from F6's three-way framing (picker vs subcommand vs both). Realised the "both" tension mostly dissolves once you see the picker *must* keep ownership of its own window reuse (the anti-leftover rule), so the subcommand can never own the whole flow — it owns the N−1 spawns, the picker owns its self-attach. That reframes A-vs-B as purely "where does the reusable spawn logic live," which testability + the explicitly-deferred workspace-restore feature settle decisively for B.
 
-Considered detection placement as a complication (does the subcommand vs TUI change what env detect-self sees?) and concluded it doesn't fight the choice: detection's backbone is the process-tree walk (`list-clients` → client PID by highest `client_activity` → walk to terminal bundle id), a library call both callers can make; env vars are only an optional fast-path. Detection anchors on the **triggering picker process** — outside tmux it walks its *own* tree to the terminal; inside tmux it hops via `list-clients` to the host client and walks that (one extra hop, same destination). Full identity resolution is subtopic #7.
+Considered detection placement as a complication (does the subcommand vs TUI change what env detect-self sees?) and concluded it doesn't fight the choice: detection's backbone is the process-tree walk (from the triggering picker's own tree outside tmux, else via `list-clients` → the local client inside tmux → walk to terminal bundle id — see #7's refined model), a library call both callers can make; env vars are only an optional fast-path. Detection anchors on the **triggering picker process** — outside tmux it walks its *own* tree to the terminal; inside tmux it hops via `list-clients` to the host client and walks that (one extra hop, same destination). Full identity resolution is subtopic #7.
 
 Walked the concrete 3-session flow to confirm the model: (1) detect terminal → (2) one `osascript` call per N−1 window, each carrying `portal attach <session>` as its startup command → (3) exec self into the last session. **Order is load-bearing**: step 3 is a point of no return (exec replaces the picker), so the N−1 spawns must complete first. One spawn call per window (not one combined script) for failure isolation.
 
@@ -113,7 +113,15 @@ Research pencilled `M` as the trigger, but §12.2 deliberately dropped all upper
 - **`Enter` = open the selected set** (the #1/#3 flow). Enter stays "commit" in both modes — normal mode attaches the cursor row, multi-mode attaches the marked set. N=1 → plain single attach; N=0 Enter → exits mode (per #3 / F6).
 - **`Esc` = exit mode, clear selection.**
 - **Visually unmistakable mode**, modelled on filter mode (orange + a typable filter area): multi-select gets its **own mode colour + a banner** in the existing notice-band slot (single-slot arbiter — the multi-select banner owns the slot while in mode), e.g. `N selected · m toggle · space preview · ⏎ open · esc cancel`. Selected rows carry a **glyph marker + the mode colour**, never colour-only (MV's NO_COLOR / colourless-render rule). Exact colour token + banner copy are a **design-phase** call (MV token layer + fixture/visual-gate process); the *requirement* is "as obviously a distinct mode as filtering is."
-- **Live vs suppressed in mode (from the agreed #2.2 set):** `/` filter and `s` regroup stay **live** (so you can filter/regroup to find things to select); `k` kill, `x` page-toggle, `r` rename, and other row actions are **suppressed**. Selection is **sticky** across filtering, paging, and regrouping. Grouping `HeaderItem` rows are skipped (non-selectable).
+- **Live vs suppressed in mode (from the agreed #2.2 set):** `/` filter and `s` regroup stay **live** (so you can filter/regroup to find things to select); `k` kill, `x` page-toggle, `r` rename, and other row actions are **suppressed**. Selection is **sticky** across filtering, paging, regrouping, **and the `Space`-preview round-trip** (review-002 F5): the return refresh (`rebuildSessionList`) re-renders **in-mode with the selection intact**, pruning only a selection whose session was externally killed during the preview — consistent with #3's pre-flight (a gone session can't be opened). Grouping `HeaderItem` rows are skipped (non-selectable).
+
+### Decision — filter inside multi-select (review-002 F2)
+
+Filter is an **inner sub-state** of multi-select — the layering that already exists, nested:
+
+- **The focused input owns `Enter`/`Esc`.** While the filter is focused it keeps its normal meaning (`⏎`/`↓` commit-to-browse, `Esc` clear-filter); multi-select's `⏎` open-marked / `Esc` exit-mode apply **only when the filter isn't focused**. No new conflict — the filter already owns those keys whenever focused.
+- **The single header slot time-shares by focus:** filter-focused → orange filter line + filter footer; otherwise → violet "N selected" banner + multi-select footer. One claimant at a time.
+- **Selections persist underneath** (sticky): a selected row filtered out stays selected and reappears when the filter clears.
 
 ### Decision — granularity: per-session only
 
@@ -252,7 +260,15 @@ Research: this feature ships the user-config override/escape-hatch; *built-in* a
 }
 ```
 
-*(decided — `terminals.json`; identity-matcher → `commands.open` → `argv`/`script`; `{command}` placeholder; precedence)*
+### Decision — recipe execution contract (review-002 F1)
+
+The config-driven path gets the *same* execution guarantees the native Ghostty adapter got, so a custom recipe never re-hits the fixes (#1 F3 / #12) the native path already absorbed:
+
+- **Portal makes `{command}` self-sufficient, uniformly.** This *refines* #1's "each adapter injects the picker's PATH": instead, the picker (which has your full PATH) resolves what the spawn needs and threads it into `{command}` itself — so recipe authors only ever describe "open a window running this command," never PATH/env plumbing. A custom Warp recipe running `<abs>/portal attach <session>` just works.
+- **`{command}` substitutes as a single, already-resolved command string**, dropped literally into the recipe. Escaping it for an *embedding* context (e.g. inside an AppleScript string) is the recipe author's responsibility — they wrote that AppleScript. The `argv`-array form exists precisely so simple CLI terminals (kitty/wezterm) avoid quoting entirely.
+- **`script` recipes receive `{command}` as `$1`** (first positional arg) — the standard, obvious contract.
+
+*(decided — `terminals.json`; identity-matcher → `commands.open` → `argv`/`script`; `{command}` placeholder; precedence; recipe execution contract (F1) — Portal owns the environment so recipes never touch PATH, `{command}` is a resolved string, `script` gets `$1`)*
 
 ---
 
@@ -260,7 +276,7 @@ Research: this feature ships the user-config override/escape-hatch; *built-in* a
 
 ### Context
 
-Research settled *detection* (`list-clients` → client-PID by highest `client_activity` → process-tree walk → macOS **bundle id**, matched as a *family*; remote/mosh → NULL → no-op) and that bundle id is the system-blessed identity. It explicitly deferred the **UX** to discussion: what Portal displays, what config accepts, whether detect-self is standalone (review F7), and the headless-no-terminal case (review F2).
+Research settled *detection* (client-PID → process-tree walk → macOS **bundle id**, matched as a *family*; remote/mosh → NULL → no-op) and that bundle id is the system-blessed identity (the *which-client* selection is refined below, superseding research's activity-centric framing). It explicitly deferred the **UX** to discussion: what Portal displays, what config accepts, whether detect-self is standalone (review F7), and the headless-no-terminal case (review F2).
 
 ### Decision — display: both
 
@@ -414,7 +430,7 @@ Follows the project's reference-first visual workflow — export the Paper frame
 Three frames, cloned from **Sessions — Modern Vivid v2** so they inherit the exact tokens/type/layout:
 
 1. **Sessions — Multi-Select (active)** — violet `3 selected` banner (filter-line analogue); violet `●` markers on selected rows incl. the cursor row; `Space` still preview; footer `↑↓ navigate · m toggle · ␣ preview · ⏎ open · esc cancel`.
-2. **Sessions — Multi-Select (partial-failure report)** — amber `⚠ opened 9 of 12 · 3 didn't come up`; failed rows amber `⚠` + red per-row reason (`spawn failed` / `session gone` / `timed out`); footer `↑↓ navigate · r retry · esc dismiss`.
+2. **Sessions — Multi-Select (pre-flight abort)** — red `⚠ 'fab-flowx-explore' is gone — nothing opened`; the gone session flagged with a red `⚠` + `session gone`, other selections intact, the multi-select mode + footer unchanged (nothing opened). Reflects the all-or-nothing pivot (review-002 F3) — replaces the earlier partial-failure report.
 3. **Sessions — Unsupported terminal (banner)** — amber `⚠ unsupported terminal — Apple Terminal · com.apple.Terminal` + blue `see docs`, over the normal Sessions list/footer (names the detected identity for copy-paste, per #7).
 
 Accent: **violet reused** as the selection accent; amber/red pulled from the existing palette for warning/error — no new tokens. Dark-mode; light-mode variants deferred unless requested. Open toss-up left for review: whether unselected rows carry a dim `○` (built clean — selected-only).
@@ -427,9 +443,9 @@ Source of truth is the **Portal Paper file → Page 1** (frames *Sessions — Mu
 
 ![Sessions — Multi-Select active](../design/sessions-multi-select-active.png)
 
-**Partial-failure report**
+**Pre-flight abort (all-or-nothing)**
 
-![Sessions — Multi-Select partial-failure report](../design/sessions-multi-select-partial-failure-report.png)
+![Sessions — Multi-Select pre-flight abort](../design/sessions-multi-select-preflight-abort.png)
 
 **Unsupported terminal banner**
 
