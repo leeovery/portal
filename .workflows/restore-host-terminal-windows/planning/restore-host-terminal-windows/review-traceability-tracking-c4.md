@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-12
 cycle: 4
 phase: Traceability Review
@@ -44,7 +44,7 @@ The plan clearly chose `%s gone` for plural-safety (`'s2', 's4' gone` reads bett
 **Proposed** (Task 3.4 — Do bullet, the abort return):
 > - `return fmt.Errorf("spawn: %s %s gone — nothing opened", quoteJoin(gone), goneVerb(len(gone)))` where `quoteJoin` renders `'s2'` for one and `'s2', 's4'` for several and `goneVerb` returns `"is"` for one / `"are"` for several — so the one-line message is `spawn: 's2' is gone — nothing opened` (singular) / `spawn: 's2', 's4' are gone — nothing opened` (plural), the **same one-line message the picker shows** (spec *Reporting & exit codes*), matching the delivered design copy `⚠ '<session>' is gone — nothing opened` in the singular case. A plain, non-`UsageError`, non-silenced error → exit 1 on stderr.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Low severity (a single dropped verb), but it is a concrete divergence from a twice-stated approved design copy, it makes Task 6.7's Do inconsistent with its own Outcome + Acceptance Criterion, and it is compared against the delivered frame at the 6-11 visual gate. `goneVerb` can live wherever `quoteJoin` lives (shared `internal/spawn` helper, since both `cmd/spawn.go` and `internal/tui` already reference `quoteJoin`-style joining) so the picker and CLI stay in lockstep. No other spec/plan divergence was found this cycle.
 
 ---
