@@ -56,6 +56,10 @@ func resetRootCmd() {
 		_ = f.Value.Set("false")
 		f.Changed = false
 	}
+	if f := attachCmd.Flags().Lookup("spawn-ack"); f != nil { // reset attach spawn-ack flag
+		_ = f.Value.Set("")
+		f.Changed = false
+	}
 }
 
 func TestTmuxDependentCommandsFailWithoutTmux(t *testing.T) {
