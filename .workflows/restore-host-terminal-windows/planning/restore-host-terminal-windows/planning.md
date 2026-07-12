@@ -25,6 +25,18 @@ approved_at: 2026-07-12
 - [ ] `portal spawn` with no session args and no `--detect` exits `2` (usage error)
 - [ ] The `spawn` log component is registered in the closed taxonomy and emits the detection-outcome event (identity / unsupported / NULL-bundle) with the spec's attr keys
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| restore-host-terminal-windows-1-1 | Package scaffold + Identity model + bundle-id family matching | channel-suffixed bundle id matches its family glob (dev.warp.Warp-Stable → dev.warp.Warp-*); unknown bundle id → passthrough identity (raw id + derived name, not NULL); empty/absent bundle id → NULL identity |
+| restore-host-terminal-windows-1-2 | Process-tree walk to bundle id | ancestry reaches ppid-1/mosh-server with no .app → NULL; multi-hop walk (picker → zsh → ghostty); ps or `defaults read` failure → typed transient error distinct from clean NULL |
+| restore-host-terminal-windows-1-3 | Outside-tmux detection — env fast-path + walk fallback | __CFBundleIdentifier present → bundle id direct, no walk; GHOSTTY_* present without __CFBundleIdentifier; both env vars absent → walk fallback; empty/malformed env value → walk fallback |
+| restore-host-terminal-windows-1-4 | Inside-tmux detection — list-clients NULL-filter + local-only activity tiebreak | only remote/mosh clients → NULL (no host-local terminal); single local client → no tiebreak; 2+ local clients → highest client_activity wins; list-clients failure → typed transient error |
+| restore-host-terminal-windows-1-5 | Detect orchestrator + spawn log component | transient error folds to unsupported and emits a spawn WARN; clean NULL emits NULL-bundle outcome with no WARN; resolved identity emits terminal + bundle_id (+ opaque detail) |
+| restore-host-terminal-windows-1-6 | portal spawn command — --detect dry-run + usage-error gate | resolved terminal prints friendly .app name + exact bundle id; NULL (remote/mosh / no local client) prints the honest "no host-local terminal" line; no sessions and no --detect → UsageError exit 2; unknown flag → exit 2 |
+
 ### Phase 2: Spawn Execution Core — `portal spawn` Opens Windows & Self-Attaches
 status: approved
 approved_at: 2026-07-12
