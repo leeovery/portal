@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-12
 cycle: 2
 phase: Plan Integrity Review
@@ -200,7 +200,7 @@ And add a **Test** to task 6-2:
 **Proposed** (task 6-11, **Do** — replace that bullet):
   - `sessionsUnsupportedTerminalFixture()` — `initialDetection` = a **non-NULL, resolves-unsupported** identity `Name:"Apple Terminal"`, `BundleID:"com.apple.Terminal"` (the frame's identity — note it is NOT NULL; it is unsupported by *resolution*, so `WithInitialDetection` seeds `detectResolution = ResolutionUnsupported` and `DetectUnsupported()` is true, driving the banner); normal mode (no multi-select); `initialMode: prefs.ModeFlat`. Maps into `Deps.InitialDetection`.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---

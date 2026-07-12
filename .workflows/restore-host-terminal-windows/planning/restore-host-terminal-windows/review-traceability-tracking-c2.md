@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-12
 cycle: 2
 phase: Traceability Review
@@ -92,7 +92,7 @@ re-renders the Task 6-2 banner on the cached resolution.
 > - On a resolved **supported** identity (resolver returns `native`/`config`), no banner shows (standard header). (Being non-NULL is **not** sufficient — a non-NULL identity the resolver cannot drive is unsupported.)
 > - Add a test: `"it renders the named unsupported banner for a non-NULL recognised-but-undriven terminal (com.apple.Terminal)"`.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The banner render/copy is spec-grounded (design frame `Apple Terminal · com.apple.Terminal`; CLI Task 2-7's identical NULL-vs-named split). Moving the `Resolve` seam injection to Task 6-1 is the minimal way to give the *proactive* (pre-Enter) banner the resolution it needs; Task 6-3 then reuses the same injected seam (see Finding 2).
 
 ---
@@ -152,7 +152,7 @@ text (`unsupportedFlashText`) already distinguishes a named non-NULL identity fr
 > - N≥2 Enter on a **resolved-unsupported** terminal — whether NULL (remote/mosh) or a non-NULL recognised-but-undriven terminal (e.g. `com.apple.Terminal`) — opens nothing (no `burstProgressPipe`, no adapter `OpenWindow` call), does not self-attach (`Selected()==""`, no `tea.Quit`), and stays in multi-select mode with the selection intact.
 > - Add a test: `"it takes the atomic no-op on N>=2 Enter for a non-NULL recognised-but-undriven terminal (com.apple.Terminal), not a burst dispatch"`.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Mirrors the CLI's already-correct Task 2-7 gate (`resolution == spawn.ResolutionUnsupported`, explicitly listing `com.apple.Terminal`), satisfying the spec's "portal spawn mirrors the picker's commit exactly." Depends on the cached `detectResolution` from Finding 1 (or an equivalent resolve-once-at-Enter).
 
 ---
@@ -205,7 +205,7 @@ placement, window introspection, the daemon-readable ack follow-on, the defensiv
 are honoured. The `spawn` log component and closed attr set are introduced exactly as the
 spec governs, with Phase-1 attr-key scoping guards (1-5).
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Two coordinated findings, one root cause (picker "unsupported" = `IsNull()` instead of
 `resolution == unsupported`). The defect is a genuine miss from cycle 1 (which listed 6-1/6-2/6-9/2-7
 as covering unsupported behaviour without catching that only 2-7 gates on resolution). Fixes are
