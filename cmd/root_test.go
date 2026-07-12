@@ -52,6 +52,10 @@ func resetRootCmd() {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
+	if f := spawnCmd.Flags().Lookup("detect"); f != nil { // reset spawn detect flag
+		_ = f.Value.Set("false")
+		f.Changed = false
+	}
 }
 
 func TestTmuxDependentCommandsFailWithoutTmux(t *testing.T) {
