@@ -11,7 +11,8 @@ Adds a multi-select mode to the Sessions page of the Portal picker: mark N sessi
 ## Phases
 
 ### Phase 1: Terminal Detection & the `portal spawn --detect` Dry-Run
-status: draft
+status: approved
+approved_at: 2026-07-12
 
 **Goal**: Stand up the `internal/spawn` package with detect-self identity resolution — the process-tree/env/`list-clients` walk to a macOS bundle id — and expose it through a `portal spawn --detect` dry-run and the new `spawn` log component.
 
@@ -25,7 +26,8 @@ status: draft
 - [ ] The `spawn` log component is registered in the closed taxonomy and emits the detection-outcome event (identity / unsupported / NULL-bundle) with the spec's attr keys
 
 ### Phase 2: Spawn Execution Core — `portal spawn` Opens Windows & Self-Attaches
-status: draft
+status: approved
+approved_at: 2026-07-12
 
 **Goal**: Deliver a working `portal spawn <sessions…>` on Ghostty: resolve identity → native adapter, compose the env-self-sufficient attach command, sequentially spawn the N−1 external windows, and self-attach the calling window to the Nth.
 
@@ -39,7 +41,8 @@ status: draft
 - [ ] The full pipeline is exercised through the `Adapter` fake (records "would open command X") with no real terminal; the typed result taxonomy (`unsupported`/`spawn-failed`/`permission-required`) is defined and quarantines all OS-specific detail
 
 ### Phase 3: Confirmation & Partial-Failure Contract
-status: draft
+status: approved
+approved_at: 2026-07-12
 
 **Goal**: Complete the full `portal spawn` contract — pre-flight `has-session` gate, `@portal-spawn-*` token-ack confirmation (with `--spawn-ack` on `portal attach`), per-window timeout, leave-what-opened failure handling, and the permission burst-stop.
 
@@ -53,7 +56,8 @@ status: draft
 - [ ] Batch/token ids are option-name-safe nanoids (not the session name); the batch markers self-clean on success, pre-flight abort, and reported failure; a test proves `ListSkeletonMarkers` is blind to the `@portal-spawn-` prefix
 
 ### Phase 4: Config Escape Hatch — `terminals.json`
-status: draft
+status: approved
+approved_at: 2026-07-12
 
 **Goal**: Add the user-authored `terminals.json` config-override tier to the resolver — identity-matcher → `commands.open` recipes (`argv` / `script`), `{command}` substitution, within-config most-specific precedence, and tolerant validation with `spawn`-component WARNs.
 
@@ -67,7 +71,8 @@ status: draft
 - [ ] `terminals.json` resolves via the existing `configFilePath` XDG chain and is read-only at spawn time (no writes, no `sessions.json`/daemon interaction)
 
 ### Phase 5: Multi-Select TUI Mode
-status: draft
+status: approved
+approved_at: 2026-07-12
 
 **Goal**: Add the explicit multi-select mode to the Sessions page — `m` enter/toggle, `Enter` commit, `Esc` exit, session-identity selection, sticky selection, the violet banner + `●` markers, keymap coexistence, filter-as-inner-sub-state, and the N=0/N=1 commit boundary — without the N≥2 burst.
 
@@ -81,7 +86,8 @@ status: draft
 - [ ] N=0 Enter is a no-op that exits the mode (same effect as `Esc`); N=1 Enter degenerates to a plain single attach in the current window via the existing connector; both verified as Bubble Tea model tests
 
 ### Phase 6: Picker Burst Integration
-status: draft
+status: approved
+approved_at: 2026-07-12
 
 **Goal**: Wire the picker's N≥2 Enter to the in-process spawn service — the async burst `tea.Cmd`, the once-per-session cached detection lifecycle, the proactive unsupported banner + N≥2 gate, leave-what-opened selection mutation, in-burst feedback, and cancellation — completing the feature and its visual gates.
 
