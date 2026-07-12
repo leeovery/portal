@@ -38,7 +38,7 @@
     "planning": {
       "items": {
         "restore-host-terminal-windows": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
           "spec_commit": "0653739697a85fe975fdbf0a354624cab76b97a0",
           "task_list_gate_mode": "auto",
