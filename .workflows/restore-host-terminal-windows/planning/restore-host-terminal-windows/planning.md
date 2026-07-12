@@ -53,6 +53,20 @@ approved_at: 2026-07-12
 - [ ] N≥2 on an unsupported/NULL terminal is an atomic no-op exiting `1` with the one-line message on stderr; N=1 self-attaches regardless of terminal (no adapter needed)
 - [ ] The full pipeline is exercised through the `Adapter` fake (records "would open command X") with no real terminal; the typed result taxonomy (`unsupported`/`spawn-failed`/`permission-required`) is defined and quarantines all OS-specific detail
 
+#### Tasks
+status: approved
+approved_at: 2026-07-12
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| restore-host-terminal-windows-2-1 | Adapter interface, typed result taxonomy & fake adapter seam | OS-specific detail carried as opaque `detail` never leaked to general code; all four outcomes (success + unsupported/spawn-failed/permission-required) distinguishable; fake records the exact composed argv handed to it |
+| restore-host-terminal-windows-2-2 | Adapter resolver — identity → native Ghostty adapter / unsupported | channel-suffixed Ghostty bundle id resolves via family match; NULL identity → unsupported; known-but-no-native-adapter identity (e.g. com.apple.Terminal) → unsupported; passthrough/unknown identity → unsupported |
+| restore-host-terminal-windows-2-3 | Env-self-sufficient attach command composition | TMUX/TMUX_PANE stripped even when composed from inside tmux; only PATH injected (no whole-env snapshot); session name with spaces stays a discrete argv element (no shell quoting); os.Executable() error surfaced; --spawn-ack deferred to Phase 3 |
+| restore-host-terminal-windows-2-4 | Ghostty driver — pure osascript command construction | `wait after command` present (normal-detach window lifecycle); composed argv embedded with correct AppleScript-string escaping; asserts the built command without running osascript |
+| restore-host-terminal-windows-2-5 | Ghostty driver — thin exec boundary + outcome mapping (manual) | non-zero osascript exit → spawn-failed; success → success with opaque `detail`; real window actually opens (live-Mac manual, not automated); permission-code mapping (-1712/-1743 → permission-required) deferred to Phase 3 |
+| restore-host-terminal-windows-2-6 | portal spawn <sessions…> pipeline — sequential spawn N−1 + self-attach Nth | N=1 → zero spawns, direct self-attach regardless of terminal; inside-tmux self-attach via SwitchConnector vs outside via AttachConnector; sessions opened in list/arg order sequentially (one completes before the next); any adapter OpenWindow non-success → skip self-attach + exit 1 (detailed leave-what-opened deferred to Phase 3); success self-execs away (no success exit code) |
+| restore-host-terminal-windows-2-7 | N≥2 unsupported/NULL atomic no-op exit 1 | N≥2 unsupported → nothing spawns, exit 1, one-line message on stderr, no self-attach; check happens before any adapter call (atomic); N=1 on unsupported still self-attaches (only external-window spawning needs the adapter) |
+
 ### Phase 3: Confirmation & Partial-Failure Contract
 status: approved
 approved_at: 2026-07-12

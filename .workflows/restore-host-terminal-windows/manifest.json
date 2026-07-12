@@ -45,8 +45,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 1,
-          "task": "restore-host-terminal-windows-1-6",
+          "phase": 2,
+          "task": "restore-host-terminal-windows-2-1",
           "task_map": {
             "restore-host-terminal-windows-1": "tick-4b80f0",
             "restore-host-terminal-windows-1-1": "tick-b30354",
