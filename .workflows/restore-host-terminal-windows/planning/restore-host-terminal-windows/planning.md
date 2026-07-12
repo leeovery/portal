@@ -82,6 +82,20 @@ approved_at: 2026-07-12
 - [ ] A `permission-required` result stops the burst, surfaces the permission guidance once for the batch (target terminal + Automation-settings hint) on stderr, exits `1`, and leaves opened windows in place
 - [ ] Batch/token ids are option-name-safe nanoids (not the session name); the batch markers self-clean on success, pre-flight abort, and reported failure; a test proves `ListSkeletonMarkers` is blind to the `@portal-spawn-` prefix
 
+#### Tasks
+status: approved
+approved_at: 2026-07-12
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| restore-host-terminal-windows-3-1 | Option-safe batch/token ids + `@portal-spawn` marker-name derivation | ids restricted to tmux-option-name-safe charset (why session name is rejected); batch+token independent, collision-resistant across calls; marker name round-trips to (batch, token) with unambiguous delimiter; generator error propagates, never an empty/malformed id |
+| restore-host-terminal-windows-3-2 | `@portal-spawn` ack channel seam — write / collect / clean over tmux server options | collect returns only the given batch's tokens (ignores other batches + all `@portal-skeleton-` markers, both directions); `ListSkeletonMarkers` proven blind to the `@portal-spawn-` prefix; clean unsets every batch marker idempotently (already-absent not an error); enumerate/read failure surfaces as error, not false-empty collect |
+| restore-host-terminal-windows-3-3 | `--spawn-ack <batch>:<token>` flag on the existing `portal attach` | marker write failure still execs the attach (best-effort); malformed flag value (missing colon / empty batch or token) → usage error exit 2; session-not-found writes no marker, takes existing no-session path; flag absent leaves normal attach unchanged |
+| restore-host-terminal-windows-3-4 | Pre-flight `has-session` gate in the spawn orchestrator | multiple gone sessions all named in the one-line message; all-present proceeds unchanged; gone session with N=1 still aborts with no self-attach; `has-session` probe error handled conservatively (abort rather than risk a false open) |
+| restore-host-terminal-windows-3-5 | Token-ack self-attach gate + per-window `spawnAckTimeout` | per-window timer starts at its own spawn (cumulative sequential delay never eats a later window's budget — not one global clock); token arriving late but within timeout counts as confirmed; all-confirm self-attaches and cleans markers before the exec handoff; N=1 self-attaches immediately, no ack wait; `spawnAckTimeout` a named/documented/tunable constant (~8s default) |
+| restore-host-terminal-windows-3-6 | Leave-what-opened partial-failure handling | one window times out among many → named while others stay open (no teardown); ack-timeout and adapter `spawn-failed` both map to failed classification; self-attach skipped so trigger stays in its calling context; markers self-cleaned on the failure path; exit 1 with the one-line failed-window message on stderr |
+| restore-host-terminal-windows-3-7 | `permission-required` burst-stop | permission-required on window k stops windows k+1…N−1 (each hits the same per-(source,target) wall); guidance shown once for the batch (target terminal + Automation-settings hint), not the generic spawn-failed one-liner; windows opened before k left in place; markers self-cleaned |
+
 ### Phase 4: Config Escape Hatch — `terminals.json`
 status: approved
 approved_at: 2026-07-12
@@ -96,6 +110,19 @@ approved_at: 2026-07-12
 - [ ] A recipe with neither or both of `argv`/`script`, a recipe omitting `{command}`, or a malformed/unreadable file is skipped/ignored (falls through to native → unsupported) with a `spawn` WARN naming the entry; unknown capability sub-keys are ignored (forward-compat)
 - [ ] `script` recipes execute the file directly with `{command}` as `$1`, expanding a leading `~`; a missing/non-executable script is an invalid entry (skipped + WARN); a non-zero recipe exit maps to `spawn-failed` and config recipes never produce `permission-required`
 - [ ] `terminals.json` resolves via the existing `configFilePath` XDG chain and is read-only at spawn time (no writes, no `sessions.json`/daemon interaction)
+
+#### Tasks
+status: approved
+approved_at: 2026-07-12
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| restore-host-terminal-windows-4-1 | terminals.json store — load + tolerant decode | missing file → empty result, no WARN; malformed/unreadable file → whole file ignored + spawn-component WARN; unknown capability sub-keys (introspect/place) ignored; read-only (load never writes the file) |
+| restore-host-terminal-windows-4-2 | Recipe structural validation — exactly-one-of argv/script + {command} presence | neither argv nor script → invalid + WARN; both present → invalid + WARN; recipe template omits {command} → invalid + WARN; valid argv-only / valid script-only accepted |
+| restore-host-terminal-windows-4-3 | Identity match + within-config most-specific precedence | identity matches several entries → most-specific wins; friendly-alias key matches via bundle-id family; longer/more-specific *-glob beats broader; bare * catch-all lowest; no match → none (fall through) |
+| restore-host-terminal-windows-4-4 | Config argv recipe adapter | {command} dropped in as one literal string (never shell-split); surrounding argv elements pass through verbatim; non-zero recipe exit → spawn-failed; config recipe never returns permission-required |
+| restore-host-terminal-windows-4-5 | Config script recipe adapter | leading ~ expanded in script path; {command} delivered as $1; missing script → invalid + WARN (falls through); non-executable / no exec bit → invalid + WARN; non-zero exit → spawn-failed; never permission-required |
+| restore-host-terminal-windows-4-6 | Wire config tier into the resolver + resolution observability | config match returns config adapter ahead of a would-match native; no/invalid config entry falls through to native then unsupported; resolution=config vs native logged; no sessions.json/daemon interaction |
 
 ### Phase 5: Multi-Select TUI Mode
 status: approved
@@ -112,6 +139,21 @@ approved_at: 2026-07-12
 - [ ] The violet multi-select banner owns the notice-band single slot in mode with correct precedence; selected rows carry the `●` marker + mode colour (glyph-backed under NO_COLOR); the footer reads the delivered copy; the `sessions-multi-select-active` frame matches the Paper reference at the visual gate
 - [ ] N=0 Enter is a no-op that exits the mode (same effect as `Esc`); N=1 Enter degenerates to a plain single attach in the current window via the existing connector; both verified as Bubble Tea model tests
 
+#### Tasks
+status: approved
+approved_at: 2026-07-12
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| restore-host-terminal-windows-5-1 | Multi-select mode state machine + session-identity selection set | enter mode with zero selected; toggle same row twice (idempotent pair); multi-tag By-Tag session toggled via one row marks the underlying session once; `m` on a HeaderItem row is a no-op; `Esc` exits and clears the whole set; uppercase `M` stays retired |
+| restore-host-terminal-windows-5-2 | `●` selection markers on session rows | `●` on every row of a multi-tag By-Tag session; NO_COLOR (glyph survives, violet hue drops); cursor row also marked shows band + `●`; HeaderItem rows never carry `●`; no `●` when not in mode |
+| restore-host-terminal-windows-5-3 | Multi-select banner + notice-band single-slot precedence | counts distinct sessions once (multi-tag marked = 1 selected); transient flash outranks the banner; banner outranks the no-tags signpost; filter-focused → filter line owns the slot (banner steps aside); N=0 in-mode still shows "0 selected"; count updates live on toggle |
+| restore-host-terminal-windows-5-4 | Multi-select footer copy | exact delivered copy from the Paper design; filter-focused within mode renders the filter footer instead; narrow-width ellipsis degrade; NO_COLOR (glyphs survive, hue drops) |
+| restore-host-terminal-windows-5-5 | Keymap coexistence + filter-focus key routing | `k`/`x`/`r` no-op in mode; `Space`/`/`/`s` stay live in mode; `s`/`m` literal while the filter is focused; filter-focused Enter = commit-to-browse and Esc = clear-filter (multi-select Enter/Esc do not fire); `q`/`Ctrl+C` still quit; out-of-mode `k`/`x`/`r` unchanged |
+| restore-host-terminal-windows-5-6 | Sticky selection across filter/paging/regroup + Space-preview prune | marks survive `s`-regroup and paging; a filtered-out row stays selected and reappears on clear; preview round-trip returns in-mode with selection intact; externally-killed session pruned during preview (survivors kept); marked session that moves buckets on regroup stays marked |
+| restore-host-terminal-windows-5-7 | N=0 / N=1 Enter commit boundary (N≥2 no-op stub) | N=0 Enter exits mode with nothing opened; N=1 Enter attaches that one session via the existing connector (no special-casing); N≥2 Enter is a no-op leaving the mode intact (Phase 6 wires the burst); highlighted-but-unmarked cursor row irrelevant at Enter |
+| restore-host-terminal-windows-5-8 | Visual gate — `sessions-multi-select-active` capture fixture + reference | fixture matches the Paper frame (cursor row also marked); NO_COLOR variant renders glyph-backed without crashing; dark appearance only (light-mode variant deferred per spec) |
+
 ### Phase 6: Picker Burst Integration
 status: approved
 approved_at: 2026-07-12
@@ -126,3 +168,21 @@ approved_at: 2026-07-12
 - [ ] Full success self-attaches silently (net N windows, never N+1); a post-pre-flight partial failure leaves opened windows in place, skips the self-attach, unmarks the sessions whose windows opened, and keeps the failed/un-acked ones marked so a second Enter retries exactly the missing set
 - [ ] Pre-flight abort shows `⚠ '<session>' is gone — nothing opened` and prunes the gone session(s) keeping survivors marked; N≥2 on an unsupported/NULL terminal is an atomic no-op re-asserting the unsupported banner; `Ctrl-C`/`Esc` mid-burst returns to multi-select mode, aborts remaining spawns, leaves opened windows, and self-cleans the batch markers
 - [ ] The picker emits the `spawn` batch summary from the chokepoint (one INFO `opened N/N` with `batch`/`terminal`/`bundle_id`/`resolution`/`opened`/`total`; DEBUG per-window with `session`/`ack`); the `sessions-multi-select-preflight-abort` and `sessions-unsupported-terminal` frames match the Paper references at the visual gate
+
+#### Tasks
+status: approved
+approved_at: 2026-07-12
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| restore-host-terminal-windows-6-1 | Async terminal-detection lifecycle + caching | rebuild (s-toggle/refresh/filter/projects-edit return) never re-dispatches detection; transient detection error caches as unsupported (Phase-1 WARN already emitted); in-flight state distinct from resolved-NULL; direct warm Sessions entry (no loading page) also dispatches exactly once |
+| restore-host-terminal-windows-6-2 | Proactive unsupported/NULL banner + notice-band slot | detection in-flight → no banner; supported terminal → no banner; in multi-select mode the multi-select banner owns the slot (unsupported steps aside); NO_COLOR glyph-backed, never colour-only |
+| restore-host-terminal-windows-6-3 | N≥2 burst dispatch + async spawn tea.Cmd + streaming message protocol | Enter while detection in-flight → defer decision until resolved then branch; open in list order (selection is a set); trigger session excluded from the N−1 spawn set (net-N); cursor-but-unmarked row never opened; N=0/N=1 still handled by Phase 5 (untouched) |
+| restore-host-terminal-windows-6-4 | Full-success self-attach (net N) + marker self-clean | includes-self selection (trigger becomes one marked session); session already attached elsewhere (iPhone) confirmed via ack; no "N/N ✓" nag; trigger-window reuse via existing AttachConnector/SwitchConnector |
+| restore-host-terminal-windows-6-5 | Input-lock while pending + Opening n/N… feedback band | second Enter mid-burst ignored (no double-dispatch); m/nav/Space/`/`/`s` all ignored while pending; Ctrl-C/Esc stay live; counter advances with each per-window progress msg; Opening band precedence just below the filter line |
+| restore-host-terminal-windows-6-6 | Partial-failure leave-what-opened + selection mutation | permission-required stop (burst-stopped, guidance flash once for the batch naming target terminal + Automation-settings hint, affected session stays marked); retry re-opens only the still-marked missing set; opened windows never torn down; stays in multi-select mode |
+| restore-host-terminal-windows-6-7 | Pre-flight abort UI — gone flash + prune keeping survivors | multiple gone sessions named; zero windows opened → nothing to undo; survivor marks intact; same prune rule as the sticky-selection preview round-trip |
+| restore-host-terminal-windows-6-8 | Cancellation — Ctrl-C/Esc mid-burst | cancel before first spawn (nothing opened, all stay marked); cancel after some opened (opened unmarked, rest stay marked); Ctrl-C live even while input-locked; after self-exec there is nothing to cancel |
+| restore-host-terminal-windows-6-9 | N≥2 on unsupported/NULL — atomic no-op + re-asserted banner | detection in-flight at Enter → awaited then resolves NULL → no-op; transient-error identity treated as unsupported; N=1 self-attach unaffected (no adapter needed); stays in multi-select mode with selection intact |
+| restore-host-terminal-windows-6-10 | Spawn batch-summary observability from the chokepoint | full success → opened N/N (trigger self-attach counted); partial/permission failure → trigger self-attach skipped and not counted; unsupported no-op → resolution=unsupported; total=N includes the trigger self-attach target |
+| restore-host-terminal-windows-6-11 | Visual gates — capture + wire the remaining frames | the Opening n/N… frame is a new design residual (absent from the delivered Paper set); dark-mode only (light deferred); NO_COLOR glyph-backed variants; move references to testdata/vhs/reference when wiring |
