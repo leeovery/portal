@@ -65,8 +65,11 @@ func Init(stateDir, version, processRole string) error {
 // Log-level propagation verification). Emission order is fixed:
 //
 //  1. process: start — the FIRST record to the handler. Via the rotating sink's
-//     first-of-day open this is what triggers portal.log creation + the gated
-//     retention sweep; it must precede any other portal logging.
+//     first-of-day open this is what triggers portal.log creation, and its
+//     post-write fireDayRoll runs the first-of-day sweeps queued by the probe —
+//     so the sweep breadcrumbs land in portal.log through the configured
+//     handler, immediately after this line. It must precede any other portal
+//     logging.
 //  2. process: log-level resolved — immediately after start, declaring the
 //     resolved level and how it was resolved.
 //

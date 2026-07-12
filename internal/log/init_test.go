@@ -1,6 +1,7 @@
 package log
 
 import (
+	"errors"
 	"go/parser"
 	"go/token"
 	"os"
@@ -462,6 +463,110 @@ func TestInit_SecondInitReEmitsBothProcessLines(t *testing.T) {
 	if len(processLinesByMessage(lines, "log-level resolved")) != 1 {
 		t.Errorf("second Init must re-emit exactly one process:log-level resolved into the new dir")
 	}
+}
+
+// TestInit_MidnightRollWithRetentionDeletionDoesNotDeadlock is the regression
+// test for the 2026-07-06 live-daemon freeze: a long-lived process whose
+// logging crosses a calendar-day boundary while an aged-out rotated file is
+// deletable. The retention sweep's "deleted" breadcrumb re-enters the sink via
+// the configured handler; before the fix the sweeps fired under the sink mutex,
+// so that re-entry self-deadlocked — freezing every subsequent log call (and
+// the daemon's capture loop with it). This drives the EXACT production wiring
+// (Init's handler writing into Init's sink) and fails fast on a hang instead of
+// wedging the suite.
+func TestInit_MidnightRollWithRetentionDeletionDoesNotDeadlock(t *testing.T) {
+	snapshotInitState(t)
+	t.Setenv("PORTAL_LOG_RETENTION_DAYS", "30")
+	set := fixedClock(t, mustDate(2026, 5, 29))
+
+	dir := t.TempDir()
+	if err := Init(dir, "0.5.0", "daemon"); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Seed the aged-out file AFTER Init so the first-of-day sweep cannot consume
+	// it; it must survive until the midnight roll below. cutoff on 2026-05-30
+	// with 30-day retention is 2026-04-30; this predates it.
+	old := touchFile(t, dir, "portal.log.2026-01-01")
+
+	set(mustDate(2026, 5, 30))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		For("daemon").Info("cross-midnight tick")
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("cross-midnight log call deadlocked: retention breadcrumb re-entered the sink under its mutex")
+	}
+
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("aged file %s still present (stat err = %v); the midnight roll must run the retention sweep", filepath.Base(old), err)
+	}
+
+	// The crossing record and the deletion breadcrumb both land in the NEW
+	// day's file through the configured handler.
+	day2 := readDayFile(t, dir, "2026-05-30")
+	if !strings.Contains(day2, " daemon: cross-midnight tick ") {
+		t.Errorf("crossing record missing from day-two file:\n%s", day2)
+	}
+	if !strings.Contains(day2, " log-rotate: deleted ") {
+		t.Errorf("retention deletion breadcrumb missing from day-two file:\n%s", day2)
+	}
+
+	// Logging stays live after the roll — the pre-fix symptom was every
+	// subsequent call blocking forever on the wedged mutex.
+	For("daemon").Info("post-roll tick")
+	if !strings.Contains(readDayFile(t, dir, "2026-05-30"), " daemon: post-roll tick ") {
+		t.Error("post-roll record missing; logging did not stay live after the day roll")
+	}
+}
+
+// TestInit_FirstOfDaySweepBreadcrumbLandsInPortalLog pins the breadcrumb half
+// of the day-roll fix: the first-of-day sweep queued by Init's probe fires on
+// the FIRST record through the CONFIGURED handler (process: start), so its
+// deletion breadcrumb lands in portal.log. Before the fix the probe fired the
+// sweep before setHandler, routing the breadcrumb to the pre-Init stderr
+// default — the deletion audit trail never reached the file.
+func TestInit_FirstOfDaySweepBreadcrumbLandsInPortalLog(t *testing.T) {
+	snapshotInitState(t)
+	t.Setenv("PORTAL_LOG_RETENTION_DAYS", "30")
+	fixedClock(t, mustDate(2026, 5, 30))
+
+	dir := t.TempDir()
+	// cutoff on 2026-05-30 with 30-day retention is 2026-04-30; this predates it.
+	old := touchFile(t, dir, "portal.log.2026-01-01")
+
+	if err := Init(dir, "0.5.0", "tui"); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("aged file %s still present (stat err = %v); Init's first record must fire the queued first-of-day sweep", filepath.Base(old), err)
+	}
+
+	raw := readPortalLog(t, dir)
+	if !strings.Contains(raw, " log-rotate: deleted ") {
+		t.Errorf("deletion breadcrumb missing from portal.log (must route through the configured handler, not pre-Init stderr):\n%s", raw)
+	}
+	// process: start stays the FIRST record — the queued sweep fires after it.
+	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+	if len(lines) == 0 || !strings.Contains(lines[0], " process: start ") {
+		t.Errorf("first portal.log record = %q, want process: start (sweep fires after it)", lines[0])
+	}
+}
+
+// readDayFile reads the dated day file portal.log.<date> under dir, failing
+// the test if it is missing.
+func readDayFile(t *testing.T, dir, date string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "portal.log."+date))
+	if err != nil {
+		t.Fatalf("reading portal.log.%s under %s: %v", date, dir, err)
+	}
+	return string(b)
 }
 
 // processLinesByMessage returns the parsed process lines whose message equals msg.

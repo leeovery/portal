@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"syscall"
@@ -117,7 +118,7 @@ func TestRotatingSink_ReopensOnSameDayInodeMismatchWithoutSweeps(t *testing.T) {
 	t.Cleanup(func() { _ = s.close() })
 
 	sweeps := 0
-	s.dayRoll = func() { sweeps++ }
+	s.dayRoll = func(string) { sweeps++ }
 
 	if _, err := s.Write([]byte("before\n")); err != nil {
 		t.Fatalf("first Write: %v", err)
@@ -175,7 +176,7 @@ func TestRotatingSink_RecreatesDayFileWhenSymlinkTargetENOENT(t *testing.T) {
 	t.Cleanup(func() { _ = s.close() })
 
 	sweeps := 0
-	s.dayRoll = func() { sweeps++ }
+	s.dayRoll = func(string) { sweeps++ }
 
 	if _, err := s.Write([]byte("before\n")); err != nil {
 		t.Fatalf("first Write: %v", err)
@@ -217,7 +218,7 @@ func TestRotatingSink_OpensNewDayFileAndFlagsSweepsOnDateChange(t *testing.T) {
 	t.Cleanup(func() { _ = s.close() })
 
 	sweeps := 0
-	s.dayRoll = func() { sweeps++ }
+	s.dayRoll = func(string) { sweeps++ }
 
 	if _, err := s.Write([]byte("day-one\n")); err != nil {
 		t.Fatalf("day-one Write: %v", err)
@@ -524,6 +525,97 @@ func TestRotatingSink_FirstWriteCreatesNonExistentStateDir(t *testing.T) {
 	}
 	if filepath.Base(target) != "portal.log.2026-05-29" {
 		t.Errorf("symlink target = %q, want portal.log.2026-05-29", target)
+	}
+}
+
+// TestRotatingSink_DayRollFiresOutsideWriteCriticalSection pins the deadlock
+// fix (the 2026-07-06 daemon midnight freeze): the day-roll callback must run
+// AFTER Write's critical section, so a callback that re-enters Write — as the
+// real sweeps do via their rotateLogger breadcrumbs — completes instead of
+// self-deadlocking on s.mu. It also pins the callback's today argument and the
+// ordering guarantee: the record that triggered the roll lands in the new
+// day's file BEFORE the callback's re-entrant record.
+func TestRotatingSink_DayRollFiresOutsideWriteCriticalSection(t *testing.T) {
+	set := fixedClock(t, mustDate(2026, 5, 29))
+
+	dir := t.TempDir()
+	s := newRotatingSink(dir, defaultRotateSize)
+	t.Cleanup(func() { _ = s.close() })
+
+	var rolls []string
+	s.dayRoll = func(today string) {
+		rolls = append(rolls, today)
+		// Re-enter Write exactly as a sweep breadcrumb does through rotateLogger.
+		if _, err := s.Write([]byte("sweep-breadcrumb\n")); err != nil {
+			t.Errorf("re-entrant Write from dayRoll: %v", err)
+		}
+	}
+
+	// Each Write runs in a goroutine with a deadline so a regression (dayRoll
+	// fired under s.mu) fails fast instead of wedging the whole test binary.
+	write := func(line string) {
+		t.Helper()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if _, err := s.Write([]byte(line)); err != nil {
+				t.Errorf("Write %q: %v", line, err)
+			}
+		}()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("Write %q deadlocked: dayRoll must fire outside the sink mutex", line)
+		}
+	}
+
+	write("first-ever\n")
+	set(mustDate(2026, 5, 30))
+	write("cross-midnight\n")
+
+	if want := []string{"2026-05-29", "2026-05-30"}; !slices.Equal(rolls, want) {
+		t.Errorf("dayRoll fired with dates %v, want %v", rolls, want)
+	}
+
+	// The triggering record precedes the re-entrant sweep record in the new
+	// day's file: the roll fires only after the crossing write completes.
+	b, err := os.ReadFile(filepath.Join(dir, "portal.log.2026-05-30"))
+	if err != nil {
+		t.Fatalf("read day-two file: %v", err)
+	}
+	if got, want := string(b), "cross-midnight\nsweep-breadcrumb\n"; got != want {
+		t.Errorf("day-two file = %q, want %q (roll fires after the triggering write)", got, want)
+	}
+}
+
+// TestRotatingSink_ProbeQueuesFirstOfDayRollForFirstWrite pins the breadcrumb
+// half of the fix: probe (which Init runs BEFORE installing the configured
+// handler) must NOT fire the day-roll sweeps — it queues the roll, and the
+// first Write (process: start in production) fires it. Firing at probe time
+// would route the sweep breadcrumbs to the pre-Init stderr default and lose
+// them from portal.log.
+func TestRotatingSink_ProbeQueuesFirstOfDayRollForFirstWrite(t *testing.T) {
+	fixedClock(t, mustDate(2026, 5, 29))
+
+	dir := t.TempDir()
+	s := newRotatingSink(dir, defaultRotateSize)
+	t.Cleanup(func() { _ = s.close() })
+
+	var rolls []string
+	s.dayRoll = func(today string) { rolls = append(rolls, today) }
+
+	if err := s.probe(); err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if len(rolls) != 0 {
+		t.Fatalf("probe fired the day roll %d times; want 0 (queued for the first Write)", len(rolls))
+	}
+
+	if _, err := s.Write([]byte("process: start\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if want := []string{"2026-05-29"}; !slices.Equal(rolls, want) {
+		t.Errorf("first Write after probe fired the day roll with %v, want %v", rolls, want)
 	}
 }
 

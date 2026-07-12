@@ -26,7 +26,9 @@ var chmodFunc = os.Chmod
 
 // sealPastDayFiles implements step 2d of the rotation rule (Invariant 1:
 // rotated-file immutability). It is invoked from the sink's day-roll seam ONLY
-// when the calendar date advanced — never on a same-day inode-mismatch reopen.
+// when the calendar date advanced — never on a same-day inode-mismatch reopen —
+// and OUTSIDE the sink mutex, so the chmod-failure WARN below can safely
+// re-enter the sink's Write (see fireDayRoll).
 //
 // It lists ${stateDir}/portal.log.* and chmod 0400s every GENUINE past-day log
 // file: a sibling matching the strict portal.log.<YYYY-MM-DD>[.<N>] shape whose

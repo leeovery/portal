@@ -69,11 +69,25 @@ type rotatingSink struct {
 	// dayRoll is the day-roll sweep seam, fired ONLY when the calendar date
 	// advances (NOT on a same-day inode-mismatch reopen), AFTER the new day's
 	// file is open and the symlink is swung (so the sweeps observe today's file
-	// as already opened). Production wiring (newRotatingSink) composes the
-	// day-roll sweeps here; Task 2-5 seals past-day files and Task 2-8 will add
-	// the retention sweep to the same callback. Tests override it to count fires
-	// or inject their own sweep body.
-	dayRoll func()
+	// as already opened). The date advance is RECORDED under mu (pendingDayRoll)
+	// by reopen and the callback runs from Write only after the mutex is
+	// released: the sweeps log through rotateLogger, whose records re-enter this
+	// sink's Write, so firing them under mu self-deadlocks — the 2026-07-06
+	// incident that froze the live daemon at its first midnight with a
+	// retention-deletion candidate. today is the calendar key the roll opened,
+	// captured at reopen time. Production wiring (newRotatingSink) composes the
+	// day-roll sweeps here; tests override it to count fires or inject their own
+	// sweep body.
+	dayRoll func(today string)
+
+	// pendingDayRoll is the calendar key of a date advance whose day-roll sweeps
+	// have not yet fired, or "" when none is pending. Set under mu by reopen;
+	// drained by fireDayRoll outside mu. probe deliberately leaves it queued —
+	// probe runs before Init installs the configured handler, so firing there
+	// would route the sweep breadcrumbs to the pre-Init stderr default and lose
+	// them from portal.log; the first Write through the configured handler
+	// (process: start) fires it instead.
+	pendingDayRoll string
 }
 
 // newRotatingSink constructs a sink rooted at stateDir with rotateSize as the
@@ -85,24 +99,36 @@ type rotatingSink struct {
 // The dayRoll seam is wired to the day-roll sweep chain: on a real calendar-day
 // roll it seals all past-day files (Task 2-5, Invariant 1) AND runs the
 // single-winner retention sweep (Task 2-8) that bounds rotated history and emits
-// per-deletion breadcrumbs. The closure reads s.date, which reopen sets to
-// today's date BEFORE firing the callback, so both sweeps observe today's file as
-// already opened — the deletion INFO lines and the retention WARN land in today's
-// file, never in the file being aged out. seal-then-retention ordering is
-// arbitrary (both key off s.date == today); the seam stays composable.
+// per-deletion breadcrumbs. The closure receives today (captured at reopen time)
+// and runs outside the sink mutex, after the record that triggered the roll is
+// written, so both sweeps observe today's file as already opened — the deletion
+// INFO lines and the retention WARN land in today's file through the normal
+// logging path, never in the file being aged out. seal-then-retention ordering
+// is arbitrary (both key off today); the seam stays composable.
 func newRotatingSink(stateDir string, rotateSize int64) *rotatingSink {
 	s := &rotatingSink{stateDir: stateDir, rotateSize: rotateSize}
-	s.dayRoll = func() {
-		sealPastDayFiles(s.stateDir, s.date)
-		runRetentionSweep(s.stateDir, s.date, true)
+	s.dayRoll = func(today string) {
+		sealPastDayFiles(s.stateDir, today)
+		runRetentionSweep(s.stateDir, today, true)
 	}
 	return s
 }
 
 // Write runs the per-Handle fd-selection step then performs one unbuffered
-// write(2) of p to the now-current day file. The whole sequence holds the sink
-// mutex so a concurrent Write cannot observe a half-swapped fd.
+// write(2) of p to the now-current day file, all under the sink mutex so a
+// concurrent Write cannot observe a half-swapped fd. A date advance detected
+// inside the critical section is only RECORDED there; the day-roll sweeps fire
+// via fireDayRoll AFTER the mutex is released, because their own log records
+// re-enter this Write (see dayRoll).
 func (s *rotatingSink) Write(p []byte) (int, error) {
+	n, err := s.lockedWrite(p)
+	s.fireDayRoll()
+	return n, err
+}
+
+// lockedWrite is Write's critical section: fd selection (reuse / reopen), the
+// size-cap check, and the single unbuffered write(2), under s.mu.
+func (s *rotatingSink) lockedWrite(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -126,6 +152,26 @@ func (s *rotatingSink) Write(p []byte) (int, error) {
 	// kernel buffers, so a marker survives for a later reader without any
 	// Sync()/flush. Do NOT introduce a bufio.Writer here.
 	return s.file.Write(p)
+}
+
+// fireDayRoll drains a pending day roll and runs the sweep callback OUTSIDE the
+// sink mutex. Draining under mu guarantees exactly one firing per recorded date
+// advance even under concurrent Writes (whichever caller swaps the key out runs
+// the sweeps); running the callback after unlock is the deadlock fix — the
+// sweeps' rotateLogger records re-enter Write, which must be able to take mu
+// (the 2026-07-06 daemon midnight freeze). A re-entrant record's own
+// fireDayRoll finds pendingDayRoll empty and no-ops, so the recursion
+// terminates after one level.
+func (s *rotatingSink) fireDayRoll() {
+	s.mu.Lock()
+	today := s.pendingDayRoll
+	s.pendingDayRoll = ""
+	s.mu.Unlock()
+
+	if today == "" || s.dayRoll == nil {
+		return
+	}
+	s.dayRoll(today)
 }
 
 // rotateIfOverCap performs the size-cap check (rotation rule step 3) against the
@@ -335,10 +381,14 @@ func (s *rotatingSink) reopen(today string, dateChanged bool) error {
 	s.dev = dev
 	s.ino = ino
 
-	if dateChanged && s.dayRoll != nil {
-		// SEAM (Tasks 2-5 / 2-8 — day-roll sweeps): chmod past-day sweep and
-		// retention sweep run here, gated on the date having changed.
-		s.dayRoll()
+	if dateChanged {
+		// SEAM (Tasks 2-5 / 2-8 — day-roll sweeps): the chmod past-day sweep and
+		// retention sweep are NOT run here — reopen holds s.mu, and the sweeps
+		// log through this same sink, so a re-entrant Write would self-deadlock
+		// (the 2026-07-06 daemon midnight freeze). Record the roll; Write fires
+		// it via fireDayRoll once the mutex is released. probe leaves it queued
+		// for the first post-Init Write (see pendingDayRoll).
+		s.pendingDayRoll = today
 	}
 	return nil
 }
@@ -377,7 +427,12 @@ func openDayFile(stateDir, today string) (*os.File, uint64, uint64, error) {
 // probe eagerly opens today's file so a configuration failure (unwritable
 // stateDir) surfaces synchronously at Init rather than on the first record. The
 // probe-opened fd is retained for reuse by the next Write. It holds the sink
-// mutex for the open, mirroring Write's critical section.
+// mutex for the open, mirroring lockedWrite's critical section. The
+// first-of-day roll queued by the probe's reopen deliberately stays pending:
+// probe runs BEFORE Init installs the configured handler, so firing here would
+// route the sweep breadcrumbs to the pre-Init stderr default and lose them from
+// portal.log. The first record through the configured handler (process: start)
+// fires the queued roll instead.
 func (s *rotatingSink) probe() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

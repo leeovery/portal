@@ -25,9 +25,10 @@ var removeFunc = os.Remove
 // retention rule (spec § Retention policy and audit, Mechanical rule steps 0-3).
 //
 // It is invoked from the sink's day-roll seam on the first Handle of each
-// calendar date (dateChanged==true), AFTER today's file is opened, so every
-// breadcrumb (and the invalid-env WARN) lands in today's already-open file —
-// never in the file being aged out.
+// calendar date (dateChanged==true), AFTER today's file is opened and OUTSIDE
+// the sink mutex (its breadcrumbs re-enter the sink's Write — see
+// fireDayRoll), so every breadcrumb (and the invalid-env WARN) lands in
+// today's already-open file — never in the file being aged out.
 //
 // gated selects the single-winner discipline:
 //   - gated==true (the per-process-startup path): step 0 claims the day via an
