@@ -163,7 +163,37 @@ func spawnPipelineDeps(id spawn.Identity, resolution spawn.Resolution, adapter s
 		Connector: conn,
 		ExePath:   func() (string, error) { return spawnPipelineExe, nil },
 		Getenv:    func(string) string { return spawnPipelinePATH },
-		Logger:    logger,
+		// Exists defaults to all-present so the pipeline tests model the
+		// transparent pre-flight gate; the gone-session tests override it.
+		Exists: func(string) bool { return true },
+		Logger: logger,
+	}
+}
+
+// spyDetector is a TerminalDetector that counts Detect calls, letting a test
+// prove the pre-flight gate aborts BEFORE detect/resolve (calls stays 0).
+type spyDetector struct {
+	id    spawn.Identity
+	calls int
+}
+
+func (d *spyDetector) Detect() spawn.Identity {
+	d.calls++
+	return d.id
+}
+
+// goneExists returns an Exists predicate reporting every name in gone as absent
+// (false) and all others present. It models both a session killed between
+// picker-load and Enter and — since HasSession folds a probe fault to false — a
+// transient tmux probe failure.
+func goneExists(gone ...string) func(string) bool {
+	set := make(map[string]struct{}, len(gone))
+	for _, g := range gone {
+		set[g] = struct{}{}
+	}
+	return func(name string) bool {
+		_, missing := set[name]
+		return !missing
 	}
 }
 
@@ -499,6 +529,208 @@ func TestSpawnPipeline(t *testing.T) {
 		}
 		if !slices.Equal(conn.calls, []string{"s1"}) {
 			t.Errorf("self-attach targets = %#v, want exactly [s1] (N=1 self-attaches)", conn.calls)
+		}
+	})
+}
+
+func TestSpawnPreflight(t *testing.T) {
+	// nopRunner short-circuits PersistentPreRunE so no real tmux server is
+	// dialed; spawn is intentionally NOT in skipTmuxCheck, so this injection is
+	// load-bearing (TestMain poisons TMUX; a missed *Deps injection would fail
+	// loudly instead of reaching the developer's real server).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	t.Run("it aborts atomically naming the single gone session with no spawn, no self-attach, and never reaching detect", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		detector := &spyDetector{id: ghosttyIdentity()}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		deps := spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		deps.Detector = detector
+		deps.Exists = goneExists("s2")
+		spawnDeps = deps
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a plain error naming the gone session, got nil")
+		}
+		const want = "spawn: 's2' is gone — nothing opened"
+		if err.Error() != want {
+			t.Errorf("message = %q, want %q", err.Error(), want)
+		}
+		var usageErr *UsageError
+		if errors.As(err, &usageErr) {
+			t.Errorf("error is a *UsageError (%v); want a plain error (exit 1, not 2)", err)
+		}
+		if len(adapter.Calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0 (pre-flight aborts before any spawn)", len(adapter.Calls))
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (no self-attach on abort)", conn.calls)
+		}
+		if detector.calls != 0 {
+			t.Errorf("Detect called %d times, want 0 (pre-flight precedes detect/resolve)", detector.calls)
+		}
+	})
+
+	t.Run("it names every gone session in one line when several are missing", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		detector := &spyDetector{id: ghosttyIdentity()}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		deps := spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		deps.Detector = detector
+		deps.Exists = goneExists("s2", "s3")
+		spawnDeps = deps
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a plain error naming both gone sessions, got nil")
+		}
+		const want = "spawn: 's2', 's3' are gone — nothing opened"
+		if err.Error() != want {
+			t.Errorf("message = %q, want %q", err.Error(), want)
+		}
+		if len(adapter.Calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0", len(adapter.Calls))
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none", conn.calls)
+		}
+		if detector.calls != 0 {
+			t.Errorf("Detect called %d times, want 0", detector.calls)
+		}
+	})
+
+	t.Run("it aborts an N=1 batch whose sole session is gone with no self-attach", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		detector := &spyDetector{id: ghosttyIdentity()}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		deps := spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		deps.Detector = detector
+		deps.Exists = goneExists("s1")
+		spawnDeps = deps
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected the gone-session error for the N=1 abort, got nil")
+		}
+		const want = "spawn: 's1' is gone — nothing opened"
+		if err.Error() != want {
+			t.Errorf("message = %q, want %q", err.Error(), want)
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (pre-flight is not skipped for N=1)", conn.calls)
+		}
+		if detector.calls != 0 {
+			t.Errorf("Detect called %d times, want 0", detector.calls)
+		}
+	})
+
+	t.Run("it proceeds unchanged when all sessions are present", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		deps := spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		deps.Exists = goneExists() // none gone → transparent gate
+		spawnDeps = deps
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(adapter.Calls) != 2 {
+			t.Errorf("OpenWindow called %d times, want 2 (the N−1 externals) — the gate must be transparent", len(adapter.Calls))
+		}
+		if !slices.Equal(conn.calls, []string{"s3"}) {
+			t.Errorf("self-attach targets = %#v, want exactly [s3]", conn.calls)
+		}
+	})
+
+	t.Run("it aborts conservatively when a session probe fails (treats unprobeable as gone)", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		detector := &spyDetector{id: ghosttyIdentity()}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		deps := spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		deps.Detector = detector
+		// HasSession folds a transient tmux probe fault to false; modelling that
+		// as Exists→false for s2 must abort conservatively rather than risk a
+		// false open.
+		deps.Exists = goneExists("s2")
+		spawnDeps = deps
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a conservative abort on an unprobeable session, got nil")
+		}
+		if len(adapter.Calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0 (conservative abort on probe fault)", len(adapter.Calls))
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (conservative abort on probe fault)", conn.calls)
+		}
+		if detector.calls != 0 {
+			t.Errorf("Detect called %d times, want 0", detector.calls)
+		}
+	})
+
+	t.Run("it emits one INFO outcome line naming the gone session and no opened/total summary attrs", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, sink := newCaptureLoggerForComponent(t, "spawn")
+		deps := spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		deps.Exists = goneExists("s2")
+		spawnDeps = deps
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		if err := rootCmd.Execute(); err == nil {
+			t.Fatal("expected the gone-session error, got nil")
+		}
+
+		var outcomes []logtest.Record
+		for _, rec := range sink.Records() {
+			if rec.Level == slog.LevelInfo {
+				outcomes = append(outcomes, rec)
+			}
+			// Nothing was attempted, so no per-window/summary attrs may appear.
+			if rec.HasAttr("opened") || rec.HasAttr("total") || rec.HasAttr("ack") || rec.HasAttr("batch") {
+				t.Errorf("record %q carries a per-window/summary attr: keys=%v", rec.Msg, rec.Keys)
+			}
+		}
+		if len(outcomes) != 1 {
+			t.Fatalf("INFO outcome lines = %d, want exactly 1; body:\n%s", len(outcomes), sink.Body())
+		}
+		if got := outcomes[0].Msg; !strings.Contains(got, "'s2'") || !strings.Contains(got, "gone") {
+			t.Errorf("outcome msg = %q, want it to name 's2' as gone", got)
 		}
 	})
 }

@@ -47,6 +47,10 @@ type SpawnDeps struct {
 	// Getenv reads the environment (PATH) for attach-command composition.
 	// Defaults to os.Getenv.
 	Getenv func(string) string
+	// Exists probes whether a session still exists for the pre-flight gate.
+	// Defaults to tmuxClient(cmd).HasSession, which folds any tmux probe error
+	// to false — so an unprobeable session is conservatively treated as gone.
+	Exists func(name string) bool
 	// Logger receives the cycle summary and per-window detail. Defaults to the
 	// package-level spawnLogger.
 	Logger *slog.Logger
@@ -100,6 +104,20 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	// the calling window self-attaches to; the rest are externally spawned.
 	external := sessions[:n-1]
 	trigger := sessions[n-1]
+
+	// Pre-flight has-session gate (spec: pre-flight + all-or-nothing). Probe
+	// EVERY selected session — the external windows AND the trigger's self-attach
+	// target — before touching detect/resolve/spawn/self-attach. If any is gone,
+	// abort atomically: nothing opens, no self-attach. Runs FIRST — ahead of the
+	// N≥2 unsupported gate — so a gone session aborts with the more-actionable
+	// gone-session message even on an unsupported terminal (both exit 1). Runs
+	// for all N: an N=1 batch whose sole session is gone aborts here. Exists is
+	// HasSession, which folds a probe fault to false → gone → conservative abort.
+	// A plain (non-UsageError, non-silenced) error → exit 1 on stderr.
+	if gone := spawn.PreflightMissing(sessions, deps.Exists); len(gone) > 0 {
+		logSpawnGone(log.OrDiscard(deps.Logger), gone)
+		return fmt.Errorf("spawn: %s %s gone — nothing opened", spawn.QuoteJoin(gone), spawn.GoneVerb(len(gone)))
+	}
 
 	// Order is load-bearing: detect first, then resolve the adapter.
 	id := deps.Detector.Detect()
@@ -166,6 +184,13 @@ func unsupportedSpawnMessage(id spawn.Identity) string {
 	return fmt.Sprintf("spawn: unsupported terminal — %s · %s — nothing opened", id.Name, id.BundleID)
 }
 
+// logSpawnGone emits the single INFO outcome line for a pre-flight abort. The
+// message names the gone session(s); nothing was attempted (detect never ran),
+// so it carries no per-window records and no resolution/opened/total attrs.
+func logSpawnGone(logger *slog.Logger, gone []string) {
+	logger.Info(fmt.Sprintf("%s %s gone — nothing opened", spawn.QuoteJoin(gone), spawn.GoneVerb(len(gone))))
+}
+
 // logSpawnUnsupported emits the single INFO outcome line for the atomic no-op.
 // Nothing was attempted, so it carries only the closed resolution/terminal/
 // bundle_id attrs — no per-window records and no opened/total counts.
@@ -226,6 +251,9 @@ func buildSpawnDeps(cmd *cobra.Command) *SpawnDeps {
 	}
 	if deps.Getenv == nil {
 		deps.Getenv = os.Getenv
+	}
+	if deps.Exists == nil {
+		deps.Exists = tmuxClient(cmd).HasSession
 	}
 	if deps.Logger == nil {
 		deps.Logger = spawnLogger
