@@ -130,6 +130,14 @@ func ghosttyIdentity() spawn.Identity {
 	return spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}
 }
 
+// appleTerminalIdentity is a recognised-but-undriven host terminal: it has a
+// real friendly name and bundle id (so it is NOT the NULL identity), yet no
+// native adapter drives it, so ResolveAdapter classifies it unsupported. The
+// N≥2 atomic-no-op gate must name it in the one-line message.
+func appleTerminalIdentity() spawn.Identity {
+	return spawn.NewIdentity("com.apple.Terminal", "Apple Terminal")
+}
+
 // fakeSessionConnector records every self-attach target the pipeline routes
 // through it, standing in for the real Attach/Switch connectors so no unit test
 // exec-replaces the process or dials tmux. Connect returns err (nil by default).
@@ -343,6 +351,154 @@ func TestSpawnPipeline(t *testing.T) {
 		}
 		if got := summary.IntAttr(t, "total"); got != 3 {
 			t.Errorf("total attr = %d, want 3", got)
+		}
+	})
+
+	t.Run("it refuses an N>=2 batch on an unsupported terminal atomically with no adapter call", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		// The FakeAdapter is wired as the resolved adapter even though resolution
+		// is unsupported: the gate must short-circuit BEFORE any adapter call, so
+		// zero recorded OpenWindow calls proves the no-op is atomic.
+		spawnDeps = spawnPipelineDeps(appleTerminalIdentity(), spawn.ResolutionUnsupported, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a plain error for the N>=2 unsupported no-op, got nil")
+		}
+		if len(adapter.Calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0 (gate must precede any adapter call)", len(adapter.Calls))
+		}
+	})
+
+	t.Run("it does not self-attach on an N>=2 unsupported batch and exits 1", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(appleTerminalIdentity(), spawn.ResolutionUnsupported, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a plain error for the N>=2 unsupported no-op, got nil")
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (no adapter → no self-attach on N>=2)", conn.calls)
+		}
+		var usageErr *UsageError
+		if errors.As(err, &usageErr) {
+			t.Errorf("error is a *UsageError (%v); want a plain error (exit 1, not 2)", err)
+		}
+		if IsSilentExitError(err) {
+			t.Errorf("error %v is a silent-exit sentinel; the no-op line must print to stderr", err)
+		}
+	})
+
+	t.Run("it names the detected terminal (friendly name + bundle id) in the one-line message", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, sink := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(appleTerminalIdentity(), spawn.ResolutionUnsupported, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a plain error naming the detected terminal, got nil")
+		}
+		const want = "spawn: unsupported terminal — Apple Terminal · com.apple.Terminal — nothing opened"
+		if err.Error() != want {
+			t.Errorf("message = %q, want %q", err.Error(), want)
+		}
+
+		// One INFO outcome line carrying ONLY the closed resolution/terminal/
+		// bundle_id attrs — no per-window records, no opened/total/ack/batch.
+		var outcomes []logtest.Record
+		for _, rec := range sink.Records() {
+			if rec.Level == slog.LevelInfo {
+				outcomes = append(outcomes, rec)
+			}
+			if rec.HasAttr("opened") || rec.HasAttr("total") || rec.HasAttr("ack") || rec.HasAttr("batch") {
+				t.Errorf("record %q carries a per-window/summary attr: keys=%v", rec.Msg, rec.Keys)
+			}
+		}
+		if len(outcomes) != 1 {
+			t.Fatalf("INFO outcome lines = %d, want exactly 1; body:\n%s", len(outcomes), sink.Body())
+		}
+		outcome := outcomes[0]
+		if got := outcome.AttrString(t, "resolution"); got != "unsupported" {
+			t.Errorf("resolution attr = %q, want %q", got, "unsupported")
+		}
+		if got := outcome.AttrString(t, "terminal"); got != "Apple Terminal" {
+			t.Errorf("terminal attr = %q, want %q", got, "Apple Terminal")
+		}
+		if got := outcome.AttrString(t, "bundle_id"); got != "com.apple.Terminal" {
+			t.Errorf("bundle_id attr = %q, want %q", got, "com.apple.Terminal")
+		}
+	})
+
+	t.Run("it prints the honest no-host-local-terminal line for a NULL identity N>=2 batch", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		// NULL identity (remote/mosh / no host-local client) also resolves
+		// unsupported and folds to the same atomic no-op path.
+		spawnDeps = spawnPipelineDeps(spawn.Identity{}, spawn.ResolutionUnsupported, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected the honest no-host-local-terminal error, got nil")
+		}
+		const want = "spawn: no host-local terminal — nothing opened"
+		if err.Error() != want {
+			t.Errorf("message = %q, want %q", err.Error(), want)
+		}
+		if len(adapter.Calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0 for the NULL no-op", len(adapter.Calls))
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none for the NULL no-op", conn.calls)
+		}
+	})
+
+	t.Run("it still self-attaches for N=1 on an unsupported terminal", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		// A recognised-but-undriven terminal proves the N=1 asymmetry: single
+		// attach needs no adapter, so the gate is skipped and s1 self-attaches.
+		spawnDeps = spawnPipelineDeps(appleTerminalIdentity(), spawn.ResolutionUnsupported, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(adapter.Calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0 for N=1", len(adapter.Calls))
+		}
+		if !slices.Equal(conn.calls, []string{"s1"}) {
+			t.Errorf("self-attach targets = %#v, want exactly [s1] (N=1 self-attaches)", conn.calls)
 		}
 	})
 }

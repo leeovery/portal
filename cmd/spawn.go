@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -104,7 +105,15 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	id := deps.Detector.Detect()
 	adapter, resolution := deps.Resolve(id)
 
-	// (N>=2 unsupported/NULL atomic no-op gate — Task 2.7 inserts here.)
+	// Atomic no-op gate: an N≥2 batch (at least one external window) on an
+	// unsupported/NULL terminal cannot open its external windows — they need an
+	// adapter that isn't available. Refuse before touching any adapter so
+	// nothing opens and nothing self-attaches. N=1 (empty external set) skips
+	// this gate and self-attaches below: a single attach needs no adapter.
+	if len(external) >= 1 && resolution == spawn.ResolutionUnsupported {
+		logSpawnUnsupported(log.OrDiscard(deps.Logger), id)
+		return errors.New(unsupportedSpawnMessage(id))
+	}
 
 	outcomes, err := spawn.SpawnWindows(adapter, external, deps.ExePath, deps.Getenv)
 	if err != nil {
@@ -143,6 +152,29 @@ func tallyOutcomes(logger *slog.Logger, outcomes []spawn.SpawnOutcome) (opened i
 		}
 	}
 	return opened, failedSession
+}
+
+// unsupportedSpawnMessage composes the one-line user-facing message for the
+// N≥2 atomic no-op, naming the detected identity. A NULL identity (remote/mosh
+// / no host-local client) gets the honest no-host-local line; a recognised-but-
+// undriven identity names its friendly name and bundle id, separated by the
+// U+00B7 middle dot that mirrors the --detect echo and the design banner.
+func unsupportedSpawnMessage(id spawn.Identity) string {
+	if id.IsNull() {
+		return "spawn: no host-local terminal — nothing opened"
+	}
+	return fmt.Sprintf("spawn: unsupported terminal — %s · %s — nothing opened", id.Name, id.BundleID)
+}
+
+// logSpawnUnsupported emits the single INFO outcome line for the atomic no-op.
+// Nothing was attempted, so it carries only the closed resolution/terminal/
+// bundle_id attrs — no per-window records and no opened/total counts.
+func logSpawnUnsupported(logger *slog.Logger, id spawn.Identity) {
+	logger.Info("unsupported terminal — nothing opened",
+		"resolution", string(spawn.ResolutionUnsupported),
+		"terminal", id.Name,
+		"bundle_id", id.BundleID,
+	)
 }
 
 // logSpawnSummary emits the single INFO cycle summary. total is N (all sessions
