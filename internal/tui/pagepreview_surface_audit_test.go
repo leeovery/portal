@@ -316,7 +316,11 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		// spawn: added by the restore-host-terminal-windows feature (the
 		// shared terminal-detection + window-spawn service); unrelated to
 		// scrollback-preview, allow-listed per this audit's own guidance.
-		"spawn":         {},
+		"spawn": {},
+		// spawntest: test-only DI-seam helper (FakeAdapter) for the
+		// restore-host-terminal-windows feature; unrelated to
+		// scrollback-preview, allow-listed per this audit's own guidance.
+		"spawntest":     {},
 		"state":         {},
 		"statetest":     {},
 		"storelog":      {},
