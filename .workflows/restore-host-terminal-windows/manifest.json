@@ -42,12 +42,16 @@
           "format": "tick",
           "spec_commit": "0653739697a85fe975fdbf0a354624cab76b97a0",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "restore-host-terminal-windows-1-1",
-          "task_map": {}
+          "task": "restore-host-terminal-windows-1-2",
+          "task_map": {
+            "restore-host-terminal-windows-1": "tick-4b80f0",
+            "restore-host-terminal-windows-1-1": "tick-b30354"
+          },
+          "external_id": "tick-9d3e8a"
         }
       }
     }

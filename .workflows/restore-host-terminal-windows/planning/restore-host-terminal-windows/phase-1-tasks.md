@@ -4,7 +4,7 @@ phase_name: Terminal Detection & `portal spawn --detect` dry-run
 total: 6
 ---
 
-## restore-host-terminal-windows-1-1 | pending
+## restore-host-terminal-windows-1-1 | approved
 
 ### Task 1.1: Package scaffold + Identity model + bundle-id family matching
 
@@ -57,7 +57,7 @@ total: 6
 
 ---
 
-## restore-host-terminal-windows-1-2 | pending
+## restore-host-terminal-windows-1-2 | approved
 
 ### Task 1.2: Process-tree walk to bundle id
 
@@ -111,7 +111,7 @@ total: 6
 
 ---
 
-## restore-host-terminal-windows-1-3 | pending
+## restore-host-terminal-windows-1-3 | approved
 
 ### Task 1.3: Outside-tmux detection — env fast-path + walk fallback
 
@@ -158,7 +158,7 @@ total: 6
 
 ---
 
-## restore-host-terminal-windows-1-4 | pending
+## restore-host-terminal-windows-1-4 | approved
 
 ### Task 1.4: Inside-tmux detection — list-clients NULL-filter + local-only activity tiebreak
 
@@ -214,7 +214,7 @@ total: 6
 
 ---
 
-## restore-host-terminal-windows-1-5 | pending
+## restore-host-terminal-windows-1-5 | approved
 
 ### Task 1.5: Detect orchestrator + spawn log component
 
@@ -266,7 +266,7 @@ total: 6
 
 ---
 
-## restore-host-terminal-windows-1-6 | pending
+## restore-host-terminal-windows-1-6 | approved
 
 ### Task 1.6: portal spawn command — --detect dry-run + usage-error gate
 
