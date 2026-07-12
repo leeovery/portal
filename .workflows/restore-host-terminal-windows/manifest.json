@@ -46,10 +46,11 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "restore-host-terminal-windows-1-2",
+          "task": "restore-host-terminal-windows-1-3",
           "task_map": {
             "restore-host-terminal-windows-1": "tick-4b80f0",
-            "restore-host-terminal-windows-1-1": "tick-b30354"
+            "restore-host-terminal-windows-1-1": "tick-b30354",
+            "restore-host-terminal-windows-1-2": "tick-f27b19"
           },
           "external_id": "tick-9d3e8a"
         }
