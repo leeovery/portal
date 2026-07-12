@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-12
 cycle: 5
 phase: Plan Integrity Review
@@ -63,7 +63,7 @@ The core shared substring — `'<name>' is/are gone — nothing opened` / `... o
   - Current: `… + `fmt.Sprintf("%s %s gone — nothing opened", quoteJoin(msg.Gone), goneVerb(len(msg.Gone)))` … **Reuse the existing shared `internal/spawn` message helpers `quoteJoin` and `goneVerb` — both defined in Task 3.4 (`internal/spawn/message.go`); do NOT re-declare them here (a second `func goneVerb`/`quoteJoin` in `internal/spawn` is a duplicate-declaration compile error).** `goneVerb(n)` returns `"is"` for one …`
   - Proposed: `… + `fmt.Sprintf("%s %s gone — nothing opened", spawn.QuoteJoin(msg.Gone), spawn.GoneVerb(len(msg.Gone)))` … **Reuse the existing shared exported `internal/spawn` message helpers `spawn.QuoteJoin` and `spawn.GoneVerb` — both defined in Task 3.4 (`internal/spawn/message.go`); do NOT re-declare them (a second `func GoneVerb`/`QuoteJoin` in `internal/spawn` is a duplicate-declaration compile error).** `spawn.GoneVerb(n)` returns `"is"` for one …`
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
