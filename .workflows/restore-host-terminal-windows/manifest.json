@@ -40,7 +40,7 @@
         "restore-host-terminal-windows": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "1335932b50252aed3d770479193158c488ff8bc3",
+          "spec_commit": "0653739697a85fe975fdbf0a354624cab76b97a0",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
