@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-12
 cycle: 4
 phase: Plan Integrity Review
@@ -62,7 +62,7 @@ Task `restore-host-terminal-windows-6-7`, "Do" section, replace the abort-banner
   - The abort banner: set a transient abort state (reuse the `flashText`/`flashKind` mechanism with a red/warning kind, or a dedicated `abortBannerText` field) rendered at the section-header row via `func renderPreflightAbortHeader(message string, width int, mode theme.Mode, colourless bool) string` in `section_header.go` — a red `⚠` (`theme.MV.StateRed` — the existing error token) + `fmt.Sprintf("%s %s gone — nothing opened", quoteJoin(msg.Gone), goneVerb(len(msg.Gone)))`, right-anchored dim `esc dismiss` (`theme.MV.TextDetail`), through `renderSectionHeaderRow`. **Reuse the existing shared `internal/spawn` message helpers `quoteJoin` and `goneVerb` — both defined in Task 3.4 (`internal/spawn/message.go`); do NOT re-declare them here (a second `func goneVerb`/`quoteJoin` in `internal/spawn` is a duplicate-declaration compile error).** `goneVerb(n)` returns `"is"` for one / `"are"` for several, so a single gone session renders `⚠ 'fab-flowx-explore' is gone — nothing opened` — **byte-matching the delivered design copy `⚠ '<session>' is gone — nothing opened` and Task 6.7's own Outcome/Acceptance Criterion** — while several gone sessions render `⚠ 's2', 's4' are gone — nothing opened` (grammatical plural, preserving the plan's plural-safety). It sits above the multi-select banner in the section-header precedence (the transient flash/abort claimant, per the notice-band precedence).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
