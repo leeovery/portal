@@ -307,12 +307,16 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		// prefs: added by the session-tagging-and-grouping feature (mode
 		// persistence store); unrelated to scrollback-preview, allow-listed
 		// per this audit's own guidance.
-		"prefs":         {},
-		"project":       {},
-		"resolver":      {},
-		"restore":       {},
-		"restoretest":   {},
-		"session":       {},
+		"prefs":       {},
+		"project":     {},
+		"resolver":    {},
+		"restore":     {},
+		"restoretest": {},
+		"session":     {},
+		// spawn: added by the restore-host-terminal-windows feature (the
+		// shared terminal-detection + window-spawn service); unrelated to
+		// scrollback-preview, allow-listed per this audit's own guidance.
+		"spawn":         {},
 		"state":         {},
 		"statetest":     {},
 		"storelog":      {},
