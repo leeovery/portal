@@ -1,12 +1,19 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/spf13/cobra"
 )
+
+// spawnLogger binds the closed "spawn" log component once for the whole spawn
+// command (introduced in Phase 1). The pipeline emits its cycle summary and
+// per-window detail through it.
+var spawnLogger = log.For("spawn")
 
 // TerminalDetector resolves the host terminal's identity for the spawn
 // command's --detect dry-run. It is the seam that lets the command body be
@@ -19,9 +26,29 @@ type TerminalDetector interface {
 // real implementations are used.
 var spawnDeps *SpawnDeps
 
-// SpawnDeps allows injecting dependencies for testing.
+// SpawnDeps allows injecting dependencies for testing. Every field defaults to
+// its production implementation when unset (see buildSpawnDeps), so a test can
+// override exactly the seams it needs and drive the whole pipeline without a
+// real tmux server, osascript, or process handoff.
 type SpawnDeps struct {
+	// Detector resolves the host terminal identity (--detect and the pipeline's
+	// detect step). Defaults to the production process-tree detector.
 	Detector TerminalDetector
+	// Resolve maps an identity to its window-opening adapter plus the resolution
+	// classification. Defaults to spawn.ResolveAdapter.
+	Resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	// Connector performs the single self-attach to the Nth session. Defaults to
+	// buildSessionConnector, which branches on tmux.InsideTmux().
+	Connector SessionConnector
+	// ExePath resolves the picker's own binary for attach-command composition.
+	// Defaults to os.Executable.
+	ExePath spawn.ExecutableResolver
+	// Getenv reads the environment (PATH) for attach-command composition.
+	// Defaults to os.Getenv.
+	Getenv func(string) string
+	// Logger receives the cycle summary and per-window detail. Defaults to the
+	// package-level spawnLogger.
+	Logger *slog.Logger
 }
 
 var spawnCmd = &cobra.Command{
@@ -40,7 +67,7 @@ var spawnCmd = &cobra.Command{
 		}
 
 		if detect {
-			id := buildSpawnDeps(cmd).Detect()
+			id := spawnDetector(cmd).Detect()
 			if id.IsNull() {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), "no host-local terminal detected")
 				return err
@@ -55,22 +82,123 @@ var spawnCmd = &cobra.Command{
 			return NewUsageError("spawn: provide one or more sessions, or use --detect")
 		}
 
-		// Phase-1 placeholder: the spawn burst (pre-flight -> sequential spawn
-		// -> self-attach) arrives in Phase 2, which replaces this branch. A
-		// plain (non-usage) error keeps the increment honest without claiming
-		// an exit-2 usage failure.
-		return errors.New("spawn: opening sessions is not yet available")
+		return runSpawn(cmd, args, buildSpawnDeps(cmd))
 	},
 }
 
-// buildSpawnDeps returns the terminal detector for the spawn command. When
-// spawnDeps is set (testing), uses the injected detector. Otherwise builds the
-// production detector against the shared tmux client from cmd.Context().
-func buildSpawnDeps(cmd *cobra.Command) TerminalDetector {
-	if spawnDeps != nil {
+// runSpawn is the spawn burst: detect the host terminal, resolve its adapter,
+// open the N−1 external windows sequentially in list order, and — only if every
+// external spawn succeeds — self-attach the calling window to the Nth session
+// (net-N windows, never N+1). On any external failure it skips the self-attach
+// and returns a plain error naming the failed session (main maps it to exit 1);
+// the opaque Result.Detail goes to the log, never the user-facing message.
+func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
+	sessions := args
+	n := len(sessions)
+	// Split by the list-order convention: the trailing session is the trigger
+	// the calling window self-attaches to; the rest are externally spawned.
+	external := sessions[:n-1]
+	trigger := sessions[n-1]
+
+	// Order is load-bearing: detect first, then resolve the adapter.
+	id := deps.Detector.Detect()
+	adapter, resolution := deps.Resolve(id)
+
+	// (N>=2 unsupported/NULL atomic no-op gate — Task 2.7 inserts here.)
+
+	outcomes, err := spawn.SpawnWindows(adapter, external, deps.ExePath, deps.Getenv)
+	if err != nil {
+		// Executable resolution failed before any window opened; exit 1.
+		return err
+	}
+
+	logger := log.OrDiscard(deps.Logger)
+	opened, failedSession := tallyOutcomes(logger, outcomes)
+
+	if failedSession != "" {
+		logSpawnSummary(logger, id, resolution, opened, n)
+		return fmt.Errorf("spawn: failed to open window for %q", failedSession)
+	}
+
+	// Every external window opened (or there were none): the trigger self-attach
+	// is about to occur, so count it before the connector self-execs away (the
+	// outside-tmux path exec-replaces the process and never returns).
+	opened++
+	logSpawnSummary(logger, id, resolution, opened, n)
+	return deps.Connector.Connect(trigger)
+}
+
+// tallyOutcomes emits one DEBUG per external window (session + opaque detail)
+// and returns the count of successful external spawns plus the first failed
+// session name (empty when all succeeded).
+func tallyOutcomes(logger *slog.Logger, outcomes []spawn.SpawnOutcome) (opened int, failedSession string) {
+	for _, o := range outcomes {
+		logger.Debug("external window", "session", o.Session, "detail", o.Result.Detail)
+		if o.Result.OK() {
+			opened++
+			continue
+		}
+		if failedSession == "" {
+			failedSession = o.Session
+		}
+	}
+	return opened, failedSession
+}
+
+// logSpawnSummary emits the single INFO cycle summary. total is N (all sessions
+// including the trigger's self-attach target); opened counts each successful
+// external spawn plus the trigger's self-attach when it occurs.
+func logSpawnSummary(logger *slog.Logger, id spawn.Identity, resolution spawn.Resolution, opened, total int) {
+	logger.Info(fmt.Sprintf("opened %d/%d", opened, total),
+		"resolution", string(resolution),
+		"terminal", id.Name,
+		"bundle_id", id.BundleID,
+		"opened", opened,
+		"total", total,
+	)
+}
+
+// spawnDetector resolves the host-terminal detector, preferring an injected one
+// and otherwise building the production detector against the shared tmux client.
+// It is the single detector-resolution authority: the --detect dry-run uses it
+// directly (needing no other spawn deps), and buildSpawnDeps defaults its
+// Detector field through it.
+func spawnDetector(cmd *cobra.Command) TerminalDetector {
+	if spawnDeps != nil && spawnDeps.Detector != nil {
 		return spawnDeps.Detector
 	}
 	return spawn.NewDetector(tmuxClient(cmd))
+}
+
+// buildSpawnDeps returns a fully-populated SpawnDeps for the spawn pipeline:
+// injected fields (from spawnDeps in tests) are kept, and every unset field
+// falls back to its production default. The tmux-client-backed defaults
+// (Detector, Connector) resolve the shared client only when actually needed, so
+// this never panics for a caller that injected those seams.
+func buildSpawnDeps(cmd *cobra.Command) *SpawnDeps {
+	deps := &SpawnDeps{}
+	if spawnDeps != nil {
+		*deps = *spawnDeps
+	}
+	if deps.Detector == nil {
+		deps.Detector = spawnDetector(cmd)
+	}
+	if deps.Resolve == nil {
+		deps.Resolve = spawn.ResolveAdapter
+	}
+	if deps.Connector == nil {
+		deps.Connector = buildSessionConnector(tmuxClient(cmd))
+	}
+	if deps.ExePath == nil {
+		deps.ExePath = os.Executable
+	}
+	if deps.Getenv == nil {
+		deps.Getenv = os.Getenv
+	}
+	if deps.Logger == nil {
+		deps.Logger = spawnLogger
+	}
+	return deps
 }
 
 func init() {

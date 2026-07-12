@@ -5,10 +5,14 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/spawn"
+	"github.com/leeovery/portal/internal/spawntest"
 )
 
 // fakeTerminalDetector is a fake TerminalDetector that returns a fixed
@@ -110,4 +114,245 @@ func TestSpawnCommand(t *testing.T) {
 			t.Errorf("error %v (%T) does not match *cmd.UsageError", err, err)
 		}
 	})
+}
+
+// Fixed spawn-pipeline composition inputs: an injected ExePath and PATH so each
+// recorded OpenWindow argv is a deterministic, exact env-self-sufficient attach
+// command with no dependence on the running binary or the developer's PATH.
+const (
+	spawnPipelineExe  = "/opt/portal/bin/portal"
+	spawnPipelinePATH = "/opt/homebrew/bin:/usr/bin:/bin"
+)
+
+// ghosttyIdentity is the fixed supported host-terminal identity the pipeline
+// tests detect (a real native adapter would resolve for it in production).
+func ghosttyIdentity() spawn.Identity {
+	return spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}
+}
+
+// fakeSessionConnector records every self-attach target the pipeline routes
+// through it, standing in for the real Attach/Switch connectors so no unit test
+// exec-replaces the process or dials tmux. Connect returns err (nil by default).
+type fakeSessionConnector struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeSessionConnector) Connect(name string) error {
+	f.calls = append(f.calls, name)
+	return f.err
+}
+
+// spawnPipelineDeps assembles a fully-injected SpawnDeps for the pipeline: the
+// fabricated detector/resolver, the recording connector, the fixed
+// executable/PATH composition seams, and a capture logger — so the whole
+// detect -> resolve -> spawn -> self-attach flow runs with zero real tmux,
+// osascript, or process handoff.
+func spawnPipelineDeps(id spawn.Identity, resolution spawn.Resolution, adapter spawn.Adapter, conn SessionConnector, logger *slog.Logger) *SpawnDeps {
+	return &SpawnDeps{
+		Detector:  fakeTerminalDetector{id: id},
+		Resolve:   func(spawn.Identity) (spawn.Adapter, spawn.Resolution) { return adapter, resolution },
+		Connector: conn,
+		ExePath:   func() (string, error) { return spawnPipelineExe, nil },
+		Getenv:    func(string) string { return spawnPipelinePATH },
+		Logger:    logger,
+	}
+}
+
+// wantAttachArgv is the exact env-self-sufficient attach argv the pipeline must
+// compose for session under the fixed exe/PATH seams.
+func wantAttachArgv(session string) []string {
+	return []string{
+		"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
+		"PATH=" + spawnPipelinePATH,
+		spawnPipelineExe, "attach", session,
+	}
+}
+
+func TestSpawnPipeline(t *testing.T) {
+	// nopRunner short-circuits PersistentPreRunE so no real tmux server is
+	// dialed; spawn is intentionally NOT in skipTmuxCheck, so this injection is
+	// load-bearing (TestMain poisons TMUX; a missed *Deps injection would fail
+	// loudly instead of reaching the developer's real server).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	t.Run("it spawns N-1 windows in arg order and self-attaches the Nth", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(adapter.Calls) != 2 {
+			t.Fatalf("OpenWindow called %d times, want 2 (the N−1 externals)", len(adapter.Calls))
+		}
+		if got := adapter.Calls[0][len(adapter.Calls[0])-1]; got != "s1" {
+			t.Errorf("first spawn session = %q, want %q (arg order)", got, "s1")
+		}
+		if got := adapter.Calls[1][len(adapter.Calls[1])-1]; got != "s2" {
+			t.Errorf("second spawn session = %q, want %q (arg order)", got, "s2")
+		}
+		if !slices.Equal(conn.calls, []string{"s3"}) {
+			t.Errorf("self-attach targets = %#v, want exactly [s3] (the Nth)", conn.calls)
+		}
+	})
+
+	t.Run("it composes the env-self-sufficient attach command for each spawned window", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "alpha", "beta", "trigger"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(adapter.Calls) != 2 {
+			t.Fatalf("OpenWindow called %d times, want 2", len(adapter.Calls))
+		}
+		for i, session := range []string{"alpha", "beta"} {
+			want := wantAttachArgv(session)
+			if !slices.Equal(adapter.Calls[i], want) {
+				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.Calls[i], want)
+			}
+		}
+	})
+
+	t.Run("it self-attaches directly with zero spawns for N=1 regardless of terminal", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		// A NULL identity resolving to an unsupported adapter proves N=1 self-
+		// attaches directly regardless of the detected terminal.
+		spawnDeps = spawnPipelineDeps(spawn.Identity{}, spawn.ResolutionUnsupported, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "solo"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(adapter.Calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0 for N=1", len(adapter.Calls))
+		}
+		if !slices.Equal(conn.calls, []string{"solo"}) {
+			t.Errorf("self-attach targets = %#v, want exactly [solo]", conn.calls)
+		}
+	})
+
+	t.Run("it skips self-attach and exits 1 when any window fails to open", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{
+			Results: []spawn.Result{spawn.Success("ok"), spawn.SpawnFailed("osascript exited 1: -1743")},
+		}
+		conn := &fakeSessionConnector{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a plain error naming the failed session, got nil")
+		}
+		var usageErr *UsageError
+		if errors.As(err, &usageErr) {
+			t.Errorf("error is a *UsageError (%v); want a plain error (exit 1, not 2)", err)
+		}
+		if !strings.Contains(err.Error(), "s2") {
+			t.Errorf("error %q does not name the failed session %q", err.Error(), "s2")
+		}
+		if strings.Contains(err.Error(), "osascript") {
+			t.Errorf("error %q leaks the opaque Result.Detail; it must go to the log only", err.Error())
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (self-attach must be skipped on failure)", conn.calls)
+		}
+	})
+
+	t.Run("it routes self-attach through the inside/outside-tmux connector", func(t *testing.T) {
+		// The pipeline routes self-attach through the injected Connector, which
+		// in production is buildSessionConnector — branching on tmux.InsideTmux().
+		t.Setenv("TMUX", "/private/tmp/tmux-501/default,123,0")
+		if got := buildSessionConnector(nil); !isSwitchConnector(got) {
+			t.Errorf("inside tmux: buildSessionConnector = %T, want *SwitchConnector", got)
+		}
+		t.Setenv("TMUX", "")
+		if got := buildSessionConnector(nil); !isAttachConnector(got) {
+			t.Errorf("outside tmux: buildSessionConnector = %T, want *AttachConnector", got)
+		}
+	})
+
+	t.Run("it emits a spawn: opened N/N summary without ack or batch attrs", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		logger, sink := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var summaries []logtest.Record
+		for _, rec := range sink.Records() {
+			if rec.Level == slog.LevelInfo && strings.HasPrefix(rec.Msg, "opened") {
+				summaries = append(summaries, rec)
+			}
+			if rec.HasAttr("ack") || rec.HasAttr("batch") {
+				t.Errorf("record %q carries a Phase-3 attr (ack/batch): keys=%v", rec.Msg, rec.Keys)
+			}
+		}
+		if len(summaries) != 1 {
+			t.Fatalf("INFO spawn summaries = %d, want exactly 1; body:\n%s", len(summaries), sink.Body())
+		}
+		summary := summaries[0]
+		if summary.Msg != "opened 3/3" {
+			t.Errorf("summary msg = %q, want %q", summary.Msg, "opened 3/3")
+		}
+		if got := summary.AttrString(t, "resolution"); got != "native" {
+			t.Errorf("resolution attr = %q, want %q", got, "native")
+		}
+		if got := summary.AttrString(t, "terminal"); got != "Ghostty" {
+			t.Errorf("terminal attr = %q, want %q", got, "Ghostty")
+		}
+		if got := summary.AttrString(t, "bundle_id"); got != "com.mitchellh.ghostty" {
+			t.Errorf("bundle_id attr = %q, want %q", got, "com.mitchellh.ghostty")
+		}
+		if got := summary.IntAttr(t, "opened"); got != 3 {
+			t.Errorf("opened attr = %d, want 3", got)
+		}
+		if got := summary.IntAttr(t, "total"); got != 3 {
+			t.Errorf("total attr = %d, want 3", got)
+		}
+	})
+}
+
+func isSwitchConnector(c SessionConnector) bool {
+	_, ok := c.(*SwitchConnector)
+	return ok
+}
+
+func isAttachConnector(c SessionConnector) bool {
+	_, ok := c.(*AttachConnector)
+	return ok
 }
