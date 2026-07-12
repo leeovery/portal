@@ -45,7 +45,7 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 6,
+          "phase": 7,
           "task": "~",
           "task_map": {
             "restore-host-terminal-windows-1": "tick-4b80f0",
@@ -86,7 +86,19 @@
             "restore-host-terminal-windows-5-5": "tick-269129",
             "restore-host-terminal-windows-5-6": "tick-c7c428",
             "restore-host-terminal-windows-5-7": "tick-88df32",
-            "restore-host-terminal-windows-5-8": "tick-333179"
+            "restore-host-terminal-windows-5-8": "tick-333179",
+            "restore-host-terminal-windows-6": "tick-ca80f3",
+            "restore-host-terminal-windows-6-1": "tick-fceca5",
+            "restore-host-terminal-windows-6-2": "tick-7ff62e",
+            "restore-host-terminal-windows-6-3": "tick-ffe7d0",
+            "restore-host-terminal-windows-6-4": "tick-b0440e",
+            "restore-host-terminal-windows-6-5": "tick-409641",
+            "restore-host-terminal-windows-6-6": "tick-c636c2",
+            "restore-host-terminal-windows-6-7": "tick-7ea2f9",
+            "restore-host-terminal-windows-6-8": "tick-354353",
+            "restore-host-terminal-windows-6-9": "tick-96f412",
+            "restore-host-terminal-windows-6-10": "tick-2795f8",
+            "restore-host-terminal-windows-6-11": "tick-81596e"
           },
           "external_id": "tick-9d3e8a"
         }
