@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-12
 cycle: 1
 phase: Plan Integrity Review
@@ -78,7 +78,7 @@ Also in task 6-3, **Acceptance Criteria** — add:
 And add a corresponding **Test** to task 6-3:
 - `"it resolves the burst adapter through the config-aware terminals.json resolver, matching the CLI"`
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -127,7 +127,7 @@ Also in task 6-5, **Acceptance Criteria** — replace:
 And add a **Test** to task 6-5:
 - `"it holds the Opening denominator at N (marked-set size) across progress messages"`
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -157,7 +157,7 @@ edit explicit so the change is self-contained.
 **Proposed** (task 6-3, **Do** — replace that bullet):
 - Extend `spawn.Burster.Run` to `Run(ctx context.Context, external []string, progress func(done, total int)) (batch string, results []spawn.WindowResult, err error)` — an **additive** integration seam: call `progress(i+1, len(external))` after each window's ack classification (nil-tolerant, like restore's `Progress`), and check `ctx.Err()` between windows and inside the ack poll to abandon remaining spawns on cancellation (6-8 drives the cancel). Document the callback + ctx like restore's `Progress func(n, m int)`. **Because this changes the signature of an approved Phase-3 seam, update its existing call site in the same change: in `cmd/spawn.go` `runSpawn`, change `burster.Run(external)` to `burster.Run(context.Background(), external, nil)` — the nil progress + `context.Background()` preserve the exact Phase-2/3 CLI behaviour (no progress streaming, no cancellation).** Any Phase-3 `internal/spawn/burst_test.go` call sites that invoke `Run(external)` are updated the same way.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -185,7 +185,7 @@ live so both consumers reference one canonical declaration.
 **Proposed** (task 3-2, **Do** — replace that bullet):
 - Define the narrow **consumer** interfaces where they are used (Go idiom), or export them here for reuse: `type AckCollector interface { Collect(batch string) (map[string]struct{}, error) }`, `type AckCleaner interface { Clean(batch string) error }`, `type AckWriter interface { Write(batch, token string) error }`, and the combined `type AckChannelFull interface { AckCollector; AckCleaner }` — the `Collect`+`Clean` seam the burst orchestrators depend on (`SpawnDeps.Ack` in task 3-5 and `tui.Deps.AckChannel` in task 6-3 both reference `spawn.AckChannelFull`). `*ServerOptionAckChannel` satisfies all four; `spawntest.FakeAckChannel` satisfies `AckChannelFull`.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
