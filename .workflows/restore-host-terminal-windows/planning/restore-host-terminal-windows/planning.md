@@ -26,7 +26,8 @@ approved_at: 2026-07-12
 - [ ] The `spawn` log component is registered in the closed taxonomy and emits the detection-outcome event (identity / unsupported / NULL-bundle) with the spec's attr keys
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-12
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
