@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-12
 cycle: 3
 phase: Plan Integrity Review
@@ -40,7 +40,7 @@ Fix: update the Solution paragraph's gate description to the resolution-based `D
 **Proposed**:
 > **Solution**: Add `renderUnsupportedHeader(name, bundleID, width, mode, colourless) string` in `internal/tui/section_header.go` — an amber `⚠` + "unsupported terminal" (amber) + "— {name} · {bundleID}" (dim `text.detail`) left cluster, right-anchored blue `see docs`, composed through the shared `renderSectionHeaderRow`/`assembleRightAnchoredRow` geometry (same as the multi-select banner from Task 5.3). Insert it as a claimant in the Sessions-page section-header resolver (`applySectionHeader`, `internal/tui/model.go`) below the multi-select banner and above the standard section header, gated on `m.DetectUnsupported() && !m.multiSelectMode` — the resolution-based test (`detectResolved && detectResolution == ResolutionUnsupported`, true for a NULL remote/mosh identity **and** a non-NULL recognised-but-undriven identity like Apple Terminal), **not** `m.detectIdentity.IsNull()` (which would hide the banner for the design's own non-NULL `com.apple.Terminal` frame and fire only for NULL — see the Do section). Extend the `activeNoticeBand` gating (`internal/tui/notice_band.go`) so the By-Tag "No tags yet" signpost is also suppressed while the unsupported banner owns the section-header row (the banner outranks the signpost per the precedence).
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -63,7 +63,7 @@ Because `m.resolve` is referenced so prominently, an implementer would add the f
 **Proposed**:
 > - In `internal/tui/model.go` add `Model` fields: `detector TerminalDetector`, `resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)` (the config-aware resolve seam injected via the `build.go` bullet above — the single field the `terminalDetectedMsg` arm consumes and that Task 6.3's burst dispatch and Task 6.9's gate reuse; never re-injected downstream), `detectIdentity spawn.Identity`, `detectResolution spawn.Resolution`, `detectResolved bool`, `detectDispatched bool`. Add test accessors mirroring the existing convention: `func (m Model) DetectDispatched() bool`, `func (m Model) DetectResolved() bool`, `func (m Model) DetectedIdentity() spawn.Identity`, `func (m Model) DetectedResolution() spawn.Resolution`, and `func (m Model) DetectUnsupported() bool { return m.detectResolved && m.detectResolution == spawn.ResolutionUnsupported }` — the single "this terminal cannot spawn host windows" predicate, **true for a NULL remote/mosh identity AND a non-NULL recognised-but-undriven identity (e.g. Apple Terminal → `com.apple.Terminal`)**. This is the resolution-based unsupported test the proactive banner (6-2) and the N≥2 gate (6-3/6-9) share; `IsNull()` alone is NOT the unsupported test (a non-NULL undriven identity is unsupported by *resolution*, not by NULL-ness — same as CLI task 2-7).
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -96,7 +96,7 @@ Fix: make the named flash carry "— nothing opened" too, so both 6-9 flash bran
 > …(acceptance criterion)…
 > - [ ] A non-NULL undriven identity re-asserts `⚠ unsupported terminal — <name> · <bundleID> — nothing opened`; a bare-NULL identity re-asserts `⚠ no host-local terminal — nothing opened` (both flash branches carry the `— nothing opened` outcome; copy branches on `IsNull()`, gate branches on resolution — matching CLI Task 2.7).
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -130,7 +130,7 @@ Fix: add a leading `msg.Err != nil` guard to the completion arm that surfaces a 
 > …add to Tests…
 > - `"it surfaces a generic flash and leaves selection unchanged on a Burster.Run pre-spawn error"`
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
