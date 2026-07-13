@@ -1141,6 +1141,30 @@ func (m *Model) syncResolvedMode() {
 // options apply, so the first frame paints the correct canvas. Scope is the
 // foundation Sessions screen (per the canvas task); the projects screen's leaf
 // restyle is a later phase, and the outer fill in View() paints around it.
+// sessionDelegate constructs the SessionDelegate for the current model state: the
+// resolved canvas Mode + NO_COLOR carve-out, plus the §5 multi-select fields
+// (MultiSelect gate + the live selectedSessions set). It is the single source the
+// delegate is built from, so applyCanvasMode and refreshSessionDelegate cannot
+// drift on which fields the delegate carries.
+func (m *Model) sessionDelegate() SessionDelegate {
+	return SessionDelegate{
+		Mode:        m.canvasMode,
+		Colourless:  m.colourless,
+		MultiSelect: m.multiSelectMode,
+		Selected:    m.selectedSessions,
+	}
+}
+
+// refreshSessionDelegate re-sets ONLY the session list's delegate from the current
+// model state, without re-touching the footer/pagination/title styles. It is the
+// narrow update path the §5 multi-select handlers call after mutating the marked
+// set (enter / toggle / Esc exit) so the ● tracks the set on the next frame — the
+// list is constructed with a default MultiSelect==false delegate, so a mutation is
+// invisible until the delegate is re-pointed at the live set.
+func (m *Model) refreshSessionDelegate() {
+	m.sessionList.SetDelegate(m.sessionDelegate())
+}
+
 func (m *Model) applyCanvasMode() {
 	// NO_COLOR carve-out (§2.5): paint no canvas at all. The delegate drops its
 	// Background(canvas) leaf paint (Colourless), the footer help styles drop their
@@ -1150,7 +1174,7 @@ func (m *Model) applyCanvasMode() {
 	// state stays glyph-distinct (§2.2).
 	m.styleFilterInput()
 	if m.colourless {
-		m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode, Colourless: true})
+		m.sessionList.SetDelegate(m.sessionDelegate())
 		colourlessHelpStyles(&m.sessionList)
 		colourlessPaginationDots(&m.sessionList)
 		// PaddingBottom(1) is the §3.2 section-header BOTTOM gap (Sessions → first
@@ -1176,7 +1200,7 @@ func (m *Model) applyCanvasMode() {
 		m.applyProjectCanvasMode()
 		return
 	}
-	m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode})
+	m.sessionList.SetDelegate(m.sessionDelegate())
 	canvasHelpStyles(&m.sessionList, m.canvasMode)
 	canvasPaginationDots(&m.sessionList, m.canvasMode)
 	// Background the title bar so its leading left-pad cells (bubbles/list's
@@ -3130,6 +3154,10 @@ func (m Model) handleMultiSelectToggle() (tea.Model, tea.Cmd) {
 	if !m.multiSelectMode {
 		m.multiSelectMode = true
 		m.selectedSessions = map[string]struct{}{}
+		// Re-point the delegate at the (now non-nil) set and MultiSelect==true so the
+		// ● column arms from the next frame — the list was built with a default
+		// MultiSelect==false delegate.
+		(&m).refreshSessionDelegate()
 		return m, nil
 	}
 	si, ok := m.selectedSessionItem()
@@ -3145,6 +3173,9 @@ func (m Model) handleMultiSelectToggle() (tea.Model, tea.Cmd) {
 	} else {
 		m.selectedSessions[name] = struct{}{}
 	}
+	// Refresh so the delegate reflects the mutated set on the next frame (the map is
+	// aliased, but re-pointing keeps the wiring robust to a reallocated set).
+	(&m).refreshSessionDelegate()
 	return m, nil
 }
 
@@ -3155,6 +3186,9 @@ func (m Model) handleMultiSelectToggle() (tea.Model, tea.Cmd) {
 func (m Model) exitMultiSelect() Model {
 	m.multiSelectMode = false
 	m.selectedSessions = nil
+	// Re-point the delegate at MultiSelect==false so the ● column disarms and no row
+	// renders a marker after the exit.
+	(&m).refreshSessionDelegate()
 	return m
 }
 

@@ -26,6 +26,12 @@ const (
 	// column it occupies replaces the former "> " / "  " cursor prefix so the name
 	// keeps the same left edge whether or not the row is selected.
 	selectorBar = "▌"
+	// multiSelectMarker is the §5 multi-select selection glyph (U+25CF BLACK
+	// CIRCLE — the SAME bullet the attached badge uses). It renders in
+	// accent.violet at the far-left of a MARKED row, occupying the same fixed
+	// leftBarColumnWidth column the ▌ selector would and taking PRECEDENCE over it
+	// (a selected+marked cursor row shows ●, not ▌).
+	multiSelectMarker = "●"
 	// leftBarColumnWidth is the fixed 2-cell left-bar column (§3.3 "full 2-cell
 	// column"): the selector glyph at col 0 plus one trailing cell, so the name
 	// always starts two cells in. Unselected rows render two blank cells here,
@@ -189,6 +195,24 @@ type SessionDelegate struct {
 	// single colourless flag (applyCanvasMode), so the delegate inherits the one
 	// carve-out decision rather than re-deriving NO_COLOR.
 	Colourless bool
+	// MultiSelect gates the §5 selection ● marker: only while it is set does a
+	// marked row render the violet ● in the left-bar column. It is set from the
+	// model's multiSelectMode (applyCanvasMode), so the marker appears exactly
+	// while the Sessions page is in multi-select mode.
+	MultiSelect bool
+	// Selected is the marked set, keyed on Session.Name — the SAME identity the
+	// attach / selectedSessionItem path uses, so a multi-tag By-Tag session marked
+	// once shows the ● on every one of its rows. It is a live reference to the
+	// model's selectedSessions map (re-pointed on every toggle), nil-tolerant: a
+	// nil set marks nothing (isSelected).
+	Selected map[string]struct{}
+}
+
+// isSelected reports whether name is in the marked set. It is nil-safe: a nil set
+// (multi-select mode never entered, or exited) marks nothing.
+func isSelected(set map[string]struct{}, name string) bool {
+	_, ok := set[name]
+	return ok
 }
 
 // canvasBg is the structural-spacer style: the Background(canvas) for the
@@ -335,6 +359,20 @@ func renderLeftBarColumn(bg, selectorStyle lipgloss.Style, selected bool) string
 	return bg.Render(padTo("", leftBarColumnWidth))
 }
 
+// renderMarkedLeftBarColumn renders the §5 multi-select left-bar column for a
+// MARKED row: the violet ● at col 0 + a trailing cell, in the SAME fixed 2-cell
+// leftBarColumnWidth geometry as the ▌ selector, so the name keeps its left edge
+// and no downstream column shifts (§3.5 / §4.1). It takes PRECEDENCE over
+// renderLeftBarColumn's ▌ selector — a selected+marked cursor row shows the ●,
+// not the bar. markerStyle is the caller's rowToken(lipgloss.Style{},
+// AccentViolet, selected) result, so the ● carries the bg.selection tint on a
+// selected row and the canvas otherwise (and drops hue under NO_COLOR); bg is the
+// caller's rowBg result, so the trailing cell carries the same tint.
+func renderMarkedLeftBarColumn(bg, markerStyle lipgloss.Style) string {
+	return markerStyle.Render(multiSelectMarker) +
+		bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(multiSelectMarker)))
+}
+
 // rowBg delegates to the shared rowBgStyle free function, binding the
 // delegate's Mode and Colourless. Retained so the existing call sites keep their
 // terse d.rowBg(selected) form.
@@ -387,11 +425,21 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	}
 	indentCell := bg.Render(indent)
 
-	// Left-bar column (§3.3): the violet ▌ + a trailing cell on the selected row,
-	// two blank cells otherwise — a fixed 2-cell column that keeps the name at the
-	// same left edge whether or not the row is selected. Shared with the Project
-	// delegate via renderLeftBarColumn.
-	bar := renderLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true), selected)
+	// Left-bar column (§3.3 / §5): a MARKED multi-select row shows the violet ● at
+	// col 0 (taking precedence over the ▌ selector, so a selected+marked cursor row
+	// shows ●); otherwise the violet ▌ + a trailing cell on the selected row, two
+	// blank cells on an unselected row — the fixed 2-cell column keeps the name at
+	// the same left edge in every case. The ● style uses `selected` (not the bar's
+	// literal true) so it carries the bg.selection tint on a marked cursor row and
+	// the canvas on an unselected marked row (dropping hue under NO_COLOR). Shared
+	// with the Project delegate via renderLeftBarColumn for the unmarked case.
+	marked := d.MultiSelect && isSelected(d.Selected, it.Session.Name)
+	var bar string
+	if marked {
+		bar = renderMarkedLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, selected))
+	} else {
+		bar = renderLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true), selected)
+	}
 
 	// Name — text.primary (selected: text.on-selection), bold (§4.1).
 	nameTok := theme.MV.TextPrimary
