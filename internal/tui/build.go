@@ -63,7 +63,18 @@ type Deps struct {
 	// preview-bail path), so the fixture seeds the band directly to screenshot it.
 	// Empty (the production default) leaves no flash. Only the warning variant is
 	// seedable — the success variant is not separately captured.
-	InitialFlash   string
+	InitialFlash string
+	// InitialMultiSelect seeds the §5 multi-select mode on the first frame with the
+	// named sessions pre-marked (keyed on Session.Name). It exists for the offline
+	// capture harness: multi-select is otherwise entered by the `m` key, so the
+	// fixture seeds the mode directly to screenshot it. Empty (the production
+	// default) leaves the model in normal mode.
+	InitialMultiSelect []string
+	// InitialCursor seeds the §5 capture-only cursor anchor: the name of the session
+	// row the cursor lands on once the list loads. It exists so the multi-select
+	// capture can put the cursor on a marked (banded) row. Empty is a no-op;
+	// production never sets it (the live picker keeps the default index-0 cursor).
+	InitialCursor  string
 	Command        []string
 	ServerStarted  bool
 	InsideTmux     bool
@@ -147,6 +158,14 @@ func Build(deps Deps) Model {
 	// the production default). Applied as an Option so it is set before the
 	// armAppearanceDetection / first WindowSizeMsg resync reserves the band row.
 	opts = append(opts, WithInitialFlash(deps.InitialFlash))
+
+	// Seed the §5 multi-select mode + cursor anchor for the capture harness (both
+	// no-ops when empty, the production default). Applied as Options in the same
+	// window as WithInitialFlash — before armAppearanceDetection — so the marked-set
+	// delegate is armed on the first frame; the cursor anchor is applied later, once
+	// items ingest (evaluateDefaultPage), since it must survive the initial SetItems.
+	opts = append(opts, WithInitialMultiSelect(deps.InitialMultiSelect))
+	opts = append(opts, WithInitialCursor(deps.InitialCursor))
 
 	m := New(deps.Lister, opts...)
 	if len(deps.Command) > 0 {

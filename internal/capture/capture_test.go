@@ -722,6 +722,106 @@ func TestFixtureNamesIncludesPreviewScreen(t *testing.T) {
 	}
 }
 
+// TestSessionsMultiSelectActiveFixture verifies the §5 multi-select-active fixture:
+// it reuses the sessions-flat set (same 12 sessions, same order), opens in Flat
+// mode, and seeds the multi-select seed seam — three marked sessions
+// (agentic-workflows-codify / fab-flowx-explore / designlab-web-r8suyU) with the
+// cursor anchored on fab-flowx-explore (a marked, banded row per the delivered
+// frame). The render assertions (violet banner / ● markers / footer) live in the
+// visual gate; here the gate is that the fixture wires the seed seam through Deps.
+func TestSessionsMultiSelectActiveFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-multi-select-active")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-multi-select-active): %v", err)
+	}
+
+	// It reuses the sessions-flat set exactly (same names, order, window counts,
+	// attached flags) — determinism is the capture gate.
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	type want struct {
+		name     string
+		windows  int
+		attached bool
+	}
+	wants := []want{
+		{"agentic-workflows-code-based", 3, true},
+		{"agentic-workflows-codify", 2, false},
+		{"fab-flowx-explore", 1, false},
+		{"evvi webhooks and watchers", 4, false},
+		{"aviva-proxy-qNyfEO", 1, false},
+		{"designlab-web-r8suyU", 2, false},
+		{"evvi-sync-engine", 1, false},
+		{"fab-aws-migration", 5, false},
+		{"flow-v1-api-XkkhTN", 1, false},
+		{"flowx-7UKPZH", 2, false},
+		{"fabric-lk26UG", 1, false},
+		{"folio-Jiz4el", 1, false},
+	}
+	if len(sessions) != len(wants) {
+		t.Fatalf("sessions-multi-select-active has %d sessions, want %d (the sessions-flat set)", len(sessions), len(wants))
+	}
+	for i, w := range wants {
+		got := sessions[i]
+		if got.Name != w.name || got.Windows != w.windows || got.Attached != w.attached {
+			t.Errorf("session[%d] = {%q,%d,%t}, want {%q,%d,%t}", i, got.Name, got.Windows, got.Attached, w.name, w.windows, w.attached)
+		}
+	}
+
+	// The seed seam wires the three marked names + the cursor anchor through Deps.
+	deps := fx.Deps()
+	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	if len(deps.InitialMultiSelect) != len(wantMarked) {
+		t.Fatalf("Deps().InitialMultiSelect = %v, want %v", deps.InitialMultiSelect, wantMarked)
+	}
+	for i, w := range wantMarked {
+		if deps.InitialMultiSelect[i] != w {
+			t.Errorf("Deps().InitialMultiSelect[%d] = %q, want %q", i, deps.InitialMultiSelect[i], w)
+		}
+	}
+	if got, want := deps.InitialCursor, "fab-flowx-explore"; got != want {
+		t.Errorf("Deps().InitialCursor = %q, want %q (cursor on a marked, banded row)", got, want)
+	}
+
+	// It builds the production Sessions model in Flat multi-select mode with the
+	// three sessions marked.
+	m := tui.Build(deps)
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if got, want := m.SessionListTitle(), "Sessions"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (fixture opens in Flat mode)", got, want)
+	}
+	if !m.MultiSelectActive() {
+		t.Error("MultiSelectActive() = false, want true (the fixture must open in multi-select mode)")
+	}
+	if got := m.SelectedSessionCount(); got != len(wantMarked) {
+		t.Errorf("SelectedSessionCount() = %d, want %d", got, len(wantMarked))
+	}
+	for _, n := range wantMarked {
+		if !m.IsSessionSelected(n) {
+			t.Errorf("IsSessionSelected(%q) = false, want true", n)
+		}
+	}
+}
+
+// TestFixtureNamesIncludesMultiSelectActive pins the multi-select-active fixture
+// into the discoverable name list (the --fixture help + FixtureByName error share
+// this source).
+func TestFixtureNamesIncludesMultiSelectActive(t *testing.T) {
+	found := false
+	for _, n := range capture.FixtureNames() {
+		if n == "sessions-multi-select-active" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("FixtureNames() %v does not include sessions-multi-select-active", capture.FixtureNames())
+	}
+}
+
 // TestFakeSeamsAreInert verifies the mutating fakes are no-ops (the harness must
 // never mutate any tmux/server/config state) and the read seams return canned
 // data without touching a real tmux server.

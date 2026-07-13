@@ -267,19 +267,25 @@ type Model struct {
 	// constructed colourless). Foreground hue is stripped FREE by the Bubble Tea v2
 	// writer layer (colorprofile.Detect honours NO_COLOR), so state stays
 	// glyph-distinct (§2.2: ● attached, ▌ selector, spaced headers) + bold/dim.
-	colourless         bool
-	selected           string
-	sessionLister      SessionLister
-	sessionKiller      SessionKiller
-	sessionRenamer     SessionRenamer
-	projectStore       ProjectStore
-	projectEditor      ProjectEditor
-	aliasEditor        AliasEditor
-	sessionCreator     SessionCreator
-	cwd                string
-	activePage         page
-	projectList        list.Model
-	initialFilter      string
+	colourless     bool
+	selected       string
+	sessionLister  SessionLister
+	sessionKiller  SessionKiller
+	sessionRenamer SessionRenamer
+	projectStore   ProjectStore
+	projectEditor  ProjectEditor
+	aliasEditor    AliasEditor
+	sessionCreator SessionCreator
+	cwd            string
+	activePage     page
+	projectList    list.Model
+	initialFilter  string
+	// initialCursor is the capture-only cursor anchor (§5 visual gate): the name of
+	// the session row the cursor should land on once the list loads. It is applied
+	// (and cleared) in evaluateDefaultPage after items ingest, mirroring how
+	// initialFilter is applied there. Empty is a no-op — production never sets it
+	// (WithInitialCursor is wired only by the offline capture harness).
+	initialCursor      string
 	insideTmux         bool
 	currentSession     string
 	modal              modalState
@@ -893,6 +899,41 @@ func WithInitialFlash(text string) Option {
 		}
 		m.flashText = text
 		m.flashKind = flashWarning
+	}
+}
+
+// WithInitialMultiSelect seeds the §5 multi-select mode at construction with the
+// named sessions pre-marked — the capture-harness entry point for the otherwise
+// user-driven mode (production enters via the `m` key, never this option). It
+// mirrors handleMultiSelectToggle's enter step: set multiSelectMode, seed the
+// marked set keyed on Session.Name, and refresh the delegate so the ● column arms
+// from the first frame (the list is constructed with a default MultiSelect==false
+// delegate). A nil/empty slice is a no-op so omitting the option leaves the model
+// in normal mode. The names need not resolve to a loaded session yet — the marked
+// set is keyed by name and the delegate matches on name as rows ingest.
+func WithInitialMultiSelect(names []string) Option {
+	return func(m *Model) {
+		if len(names) == 0 {
+			return
+		}
+		m.multiSelectMode = true
+		m.selectedSessions = make(map[string]struct{}, len(names))
+		for _, n := range names {
+			m.selectedSessions[n] = struct{}{}
+		}
+		m.refreshSessionDelegate()
+	}
+}
+
+// WithInitialCursor seeds the §5 capture-only cursor anchor: the name of the
+// session row the cursor should land on once the list loads (evaluateDefaultPage
+// re-anchors by name after items ingest, mirroring the initial-filter apply). It
+// only STORES the name here — positioning happens after ingestion so it survives
+// the SetItems that would otherwise reset the cursor to index 0. An empty name is
+// a no-op; production never sets it (the live picker leaves the cursor at index 0).
+func WithInitialCursor(name string) Option {
+	return func(m *Model) {
+		m.initialCursor = name
 	}
 }
 
@@ -1713,10 +1754,17 @@ func (m *Model) evaluateDefaultPage() {
 		m.activePage = PageProjects
 	}
 
+	m.applyInitialFilter()
+	m.applyInitialCursor()
+}
+
+// applyInitialFilter commits the deferred initial filter (if any) onto the active
+// page's list once the default page is settled, then clears it so it applies at
+// most once. Empty is a no-op.
+func (m *Model) applyInitialFilter() {
 	if m.initialFilter == "" {
 		return
 	}
-
 	if m.activePage == PageSessions && !m.commandPending {
 		m.sessionList.SetFilterText(m.initialFilter)
 		m.sessionList.SetFilterState(list.FilterApplied)
@@ -1725,6 +1773,22 @@ func (m *Model) evaluateDefaultPage() {
 		m.projectList.SetFilterState(list.FilterApplied)
 	}
 	m.initialFilter = ""
+}
+
+// applyInitialCursor re-anchors the session-list cursor onto the seeded row name
+// (the §5 capture-only WithInitialCursor anchor) once items have ingested, then
+// clears it so it applies at most once. It runs AFTER applyInitialFilter so the
+// re-anchor operates on the post-filter visible set. Only the Sessions page has a
+// cursor anchor; empty is a no-op (the production default), so the live picker
+// keeps the default index-0 selection.
+func (m *Model) applyInitialCursor() {
+	if m.initialCursor == "" {
+		return
+	}
+	if m.activePage == PageSessions {
+		m.reanchorSessionCursor(m.initialCursor)
+	}
+	m.initialCursor = ""
 }
 
 // refreshSessionsAfterPreviewCmd builds the tea.Cmd that performs the live

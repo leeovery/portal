@@ -33,6 +33,14 @@ type Fixture struct {
 	projectEditor tui.ProjectEditor
 	aliasEditor   tui.AliasEditor
 	initialMode   prefs.SessionListMode
+	// initialMultiSelect seeds the §5 multi-select mode with the named sessions
+	// pre-marked (empty for every fixture that does not capture multi-select). It is
+	// the only way to render the otherwise user-driven mode in the inert harness.
+	initialMultiSelect []string
+	// initialCursor seeds the §5 cursor anchor: the session-row name the cursor lands
+	// on once the list loads (empty → default index 0). Paired with initialMultiSelect
+	// so the multi-select capture puts the cursor on a marked, banded row.
+	initialCursor string
 	// initialFlash seeds the §11.2 inline WARNING flash band on the first frame
 	// (empty for every fixture that does not capture the flash). It is the only way
 	// to render the otherwise-transient flash in the inert capture harness.
@@ -87,11 +95,13 @@ func (f *Fixture) Deps() tui.Deps {
 		// pre-stamped (Session.Dir set), so the lazy pane-read fallback never
 		// fires — and the harness has no tmux server to read panes from anyway.
 		// ModePersister is nil so an `s`-toggle during a capture writes nowhere.
-		InitialMode:   f.initialMode,
-		InitialFlash:  f.initialFlash,
-		Command:       f.command,
-		CWD:           "/home/user",
-		ServerStarted: f.serverStarted,
+		InitialMode:        f.initialMode,
+		InitialMultiSelect: f.initialMultiSelect,
+		InitialCursor:      f.initialCursor,
+		InitialFlash:       f.initialFlash,
+		Command:            f.command,
+		CWD:                "/home/user",
+		ServerStarted:      f.serverStarted,
 		// Wire the loading-screen progress receiver only when the fixture seeds
 		// events — it streams the seeded mid-restore sequence then blocks so the
 		// loading page never dismisses (no terminal BootstrapCompleteMsg). The
@@ -137,6 +147,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return sessionsPagedFixture(), nil
 	case "sessions-inline-flash":
 		return sessionsInlineFlashFixture(), nil
+	case "sessions-multi-select-active":
+		return sessionsMultiSelectActiveFixture(), nil
 	case "sessions-no-tags-signpost":
 		return sessionsNoTagsSignpostFixture(), nil
 	case "projects":
@@ -160,7 +172,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", "loading-error", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-multi-select-active", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", "loading-error", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -377,6 +389,34 @@ func sessionsInlineFlashFixture() *Fixture {
 		initialMode:  prefs.ModeFlat,
 		initialFlash: "folio-Jiz4el closed externally — list updated",
 	}
+}
+
+// sessionsMultiSelectActiveFixture builds the deterministic
+// "sessions-multi-select-active" fixture: the sessions-flat set (same 12 sessions,
+// same order) opened in Flat mode directly in §5 multi-select mode, mirroring the
+// delivered frame testdata/vhs/reference/sessions-multi-select-active-mv.png. Three
+// sessions are pre-marked — agentic-workflows-codify, fab-flowx-explore, and
+// designlab-web-r8suyU — so the violet `3 selected` banner + `esc cancel` and the
+// ● markers render, and the cursor is anchored on fab-flowx-explore so the marked
+// CURSOR row shows both the selection band and the ● (marker takes precedence over
+// the ▌ selector).
+//
+// Multi-select is otherwise user-driven (the `m` key), so it is seeded via the
+// InitialMultiSelect + InitialCursor seed seam — the only way to render the mode in
+// the inert harness (the same pattern as InitialFlash for the transient flash). It
+// reuses sessionsFlatFixture's session set verbatim; only the seed-seam fields and
+// the fixture name differ. Like the other fixtures it NEVER opens a tmux server or
+// touches ~/.config/portal.
+func sessionsMultiSelectActiveFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "sessions-multi-select-active"
+	fx.initialMultiSelect = []string{
+		"agentic-workflows-codify",
+		"fab-flowx-explore",
+		"designlab-web-r8suyU",
+	}
+	fx.initialCursor = "fab-flowx-explore"
+	return fx
 }
 
 // sessionsNoTagsSignpostFixture builds the deterministic
