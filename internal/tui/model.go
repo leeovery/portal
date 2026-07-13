@@ -3077,8 +3077,21 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case isRuneKey(msg, "q"):
 			return m, tea.Quit
 		case isRuneKey(msg, "k"):
+			// §5 Multi-select suppresses the row-action keys: k (kill) does not
+			// compose with a marked set, so it is a no-op in the mode. The arm stays
+			// PRESENT (gated, not deleted) so keymap_dispatch_guard_test.go's
+			// default-mode probe still sees k honoured.
+			if m.multiSelectMode {
+				return m, nil
+			}
 			return m.handleKillKey()
 		case isRuneKey(msg, "r"):
+			// §5 Multi-select suppresses r (rename) — a row action that does not
+			// compose with a marked set — as a no-op in the mode (arm kept for the
+			// default-mode dispatch-parity probe).
+			if m.multiSelectMode {
+				return m, nil
+			}
 			return m.handleRenameKey()
 		case isRuneKey(msg, "n"):
 			return m.handleNewInCWD()
@@ -3098,9 +3111,23 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// x is the sole Sessions↔Projects toggle (§12.2). The former p alias
 		// (Sessions → Projects) is dropped so each key has a single meaning.
 		case isRuneKey(msg, "x"):
+			// §5 Multi-select suppresses x (page-toggle) — a row-adjacent action that
+			// does not compose with a marked set — as a no-op in the mode (arm kept
+			// for the default-mode dispatch-parity probe).
+			if m.multiSelectMode {
+				return m, nil
+			}
 			m.activePage = PageProjects
 			return m, nil
 		case keyIsCode(msg, tea.KeyEnter):
+			// §5 Multi-select owns Enter while in the mode: it commits the marked set
+			// via handleMultiSelectEnter (the task-5.7 N=0/N=1/N≥2 boundary). This arm
+			// is reached only when the / filter is NOT focused — a focused-filter Enter
+			// is delegated to the list (commit-to-browse) by the SettingFilter break
+			// above — so multi-select open never fires while filtering.
+			if m.multiSelectMode {
+				return m.handleMultiSelectEnter()
+			}
 			return m.handleSessionListEnter()
 		}
 	}
@@ -3190,6 +3217,18 @@ func (m Model) exitMultiSelect() Model {
 	// renders a marker after the exit.
 	(&m).refreshSessionDelegate()
 	return m
+}
+
+// handleMultiSelectEnter commits the §5 multi-select marked set when Enter is
+// pressed in the mode (the / filter not focused — that Enter is delegated to the
+// list to commit-to-browse). It is dispatched from the updateSessionList Enter
+// mode-branch.
+//
+// Placeholder — the N=0/N=1/N≥2 commit boundary lands in Task 5.7. Until then
+// Enter in multi-select mode is a deliberate no-op that leaves the mode and the
+// selection intact.
+func (m Model) handleMultiSelectEnter() (tea.Model, tea.Cmd) {
+	return m, nil
 }
 
 func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
