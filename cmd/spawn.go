@@ -177,7 +177,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 		// skipped, and the batch markers were already Cleaned above. General code
 		// switches on Outcome alone: the opaque Result.Detail (never an AppleEvent
 		// number this layer interpreted) rides up only as the log detail attr.
-		if perm, ok := firstPermission(results); ok {
+		if perm, ok := spawn.FirstPermission(results); ok {
 			logSpawnPermission(logger, id, resolution, perm.Result.Detail)
 			return errors.New(perm.Result.Guidance)
 		}
@@ -204,37 +204,22 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 }
 
 // tallyWindowResults emits one DEBUG per external window (session + ack outcome +
-// opaque detail) and returns, in a single pass, the count of confirmed external
-// windows plus the session names of every window that did NOT confirm, in list
-// order. A window is "failed" when its Ack != AckConfirmed — unifying an adapter
-// spawn-failed (AckFailed) and an ack timeout (AckTimeout) into one classification
-// (the leave-what-opened report names them identically). The batch is
-// all-confirmed exactly when the returned failed slice is empty.
+// opaque detail) and returns the count of confirmed external windows plus the
+// session names of every window that did NOT confirm, in list order. The opened/
+// failed partition is derived from the shared spawn.PartitionResults (the single
+// count-semantics chokepoint) rather than a hand-rolled Ack loop, so this path and
+// the picker's cannot drift: a window is "failed" when it is not Confirmed() —
+// unifying an adapter spawn-failed (AckFailed) and an ack timeout (AckTimeout) into
+// one classification (the leave-what-opened report names them identically). The
+// batch is all-confirmed exactly when the returned failed slice is empty. The
+// per-window DEBUG loop stays here — it is the observability emit, not
+// classification.
 func tallyWindowResults(logger *slog.Logger, results []spawn.WindowResult) (opened int, failed []string) {
 	for _, r := range results {
 		logger.Debug("external window", "session", r.Session, "ack", string(r.Ack), "detail", r.Result.Detail)
-		if r.Ack == spawn.AckConfirmed {
-			opened++
-			continue
-		}
-		failed = append(failed, r.Session)
 	}
-	return opened, failed
-}
-
-// firstPermission returns the first WindowResult whose adapter Outcome is
-// permission-required, plus true — the burst-stop signal the orchestrator
-// surfaces before the generic not-all-confirmed branch. It switches on the
-// generic Outcome alone (never a driver detail string), keeping the
-// AppleEvent-quarantine boundary intact; the caller returns Result.Guidance
-// verbatim as the user-facing message.
-func firstPermission(results []spawn.WindowResult) (spawn.WindowResult, bool) {
-	for _, r := range results {
-		if r.Result.Outcome == spawn.OutcomePermissionRequired {
-			return r, true
-		}
-	}
-	return spawn.WindowResult{}, false
+	confirmed, failed := spawn.PartitionResults(results)
+	return len(confirmed), failed
 }
 
 // unsupportedSpawnMessage composes the one-line user-facing message for the

@@ -115,7 +115,7 @@
       "items": {
         "restore-host-terminal-windows": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
@@ -151,8 +151,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 6,
-          "current_task": "~",
+          "current_phase": 7,
+          "current_task": "restore-host-terminal-windows-7-2",
           "completed_tasks": [
             "restore-host-terminal-windows-1-1",
             "restore-host-terminal-windows-1-2",
@@ -198,7 +198,8 @@
             "restore-host-terminal-windows-6-8",
             "restore-host-terminal-windows-6-9",
             "restore-host-terminal-windows-6-10",
-            "restore-host-terminal-windows-6-11"
+            "restore-host-terminal-windows-6-11",
+            "restore-host-terminal-windows-7-1"
           ],
           "completed_phases": [
             1,

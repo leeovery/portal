@@ -34,11 +34,19 @@ const burstPreSpawnErrorFlash = "could not start opening windows"
 // multi-select mode), clears burst-pending, and surfaces one transient flash. No
 // opened window is torn down (spawn.Adapter has no close seam).
 func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) {
-	// §6-10: emit the batch summary from this chokepoint. The trigger self-attach is
-	// skipped on this arm, so it is NOT counted — opened = the confirmed external
-	// windows only (0 on a pre-spawn error with empty Results); total = N still (the
-	// external set + the one trigger). Prefer the msg's Identity/Resolution.
-	m.emitBurstSummary(msg.Batch, msg.Identity, msg.Resolution, msg.Results, false)
+	// §7-1: the permission-required outcome is its own closed-catalog event. Detect it
+	// via the shared spawn.FirstPermission (the single count-semantics chokepoint) and
+	// route it to emitPermission — the dedicated INFO with NO opened/total summary —
+	// matching cmd/spawn.go's logSpawnPermission branch, which skips logSpawnSummary.
+	// Every other non-all-confirmed outcome (a timeout / spawn-failed partial, or a
+	// pre-spawn Burster.Run error with empty Results) emits the generic batch summary:
+	// opened = the confirmed external windows only (the skipped trigger self-attach is
+	// NOT counted); total = N still (external set + the one trigger).
+	if perm, ok := spawn.FirstPermission(msg.Results); ok {
+		m.emitPermission(msg.Identity, msg.Resolution, perm.Result.Detail)
+	} else {
+		m.emitBurstSummary(msg.Batch, msg.Identity, msg.Resolution, msg.Results, false)
+	}
 
 	if msg.Err != nil {
 		// Pre-spawn abort from Burster.Run (os.Executable / ack-id failure) BEFORE any
@@ -52,15 +60,10 @@ func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) 
 		return m, nil
 	}
 
-	confirmed := make(map[string]struct{}, len(msg.Results))
-	var failed []string
-	for _, r := range msg.Results {
-		if r.Ack == spawn.AckConfirmed {
-			confirmed[r.Session] = struct{}{}
-			continue
-		}
-		failed = append(failed, r.Session)
-	}
+	// §7-1: derive the confirmed/failed partition from the shared spawn helper rather
+	// than a hand-rolled Ack loop, so the leave-what-opened mutation and the failed-
+	// window flash key off the same count-semantics rule the CLI does.
+	confirmed, failed := spawn.PartitionResults(msg.Results)
 
 	(&m).applyBurstSelectionMutation(confirmed)
 	// A user cancel (§6-8) converges here — same leave-what-opened mutation — but is
@@ -85,8 +88,8 @@ func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) 
 // happen and the trigger is never in the external set, so it stays marked too. The
 // delegate is refreshed so the ● clears from the unmarked rows and remains on the
 // still-marked set.
-func (m *Model) applyBurstSelectionMutation(confirmed map[string]struct{}) {
-	for name := range confirmed {
+func (m *Model) applyBurstSelectionMutation(confirmed []string) {
+	for _, name := range confirmed {
 		delete(m.selectedSessions, name)
 	}
 	m.refreshSessionDelegate()
@@ -104,10 +107,8 @@ func (m *Model) applyBurstSelectionMutation(confirmed map[string]struct{}) {
 // reaches the user (DEBUG log only, §6-10). The ⚠ glyph is added by the warning notice
 // band, so the message text carries none (formatSessionGoneFlash convention).
 func burstPartialFailureFlash(results []spawn.WindowResult, failed []string) string {
-	for _, r := range results {
-		if r.Result.Outcome == spawn.OutcomePermissionRequired {
-			return r.Result.Guidance
-		}
+	if perm, ok := spawn.FirstPermission(results); ok {
+		return perm.Result.Guidance
 	}
 	if len(failed) == 0 {
 		return ""

@@ -1204,6 +1204,29 @@ func TestSpawnPermissionRequired(t *testing.T) {
 	})
 }
 
+// wantPermissionBody is the exact rendered body cmd/spawn.go's logSpawnPermission
+// and the picker's emitPermission must BOTH produce for the same identity /
+// resolution / detail — the closed `spawn` permission event. The mirrored tui test
+// (internal/tui TestEmitPermission_ParityWithCLI) pins the picker side to this same
+// literal, so a drift in either emitter fails its own golden and the two paths stay
+// byte-identical (one-service lockstep).
+const wantPermissionBody = "INFO permission required — nothing self-attached resolution=native terminal=Ghostty bundle_id=com.mitchellh.ghostty detail=evt -1743"
+
+// TestLogSpawnPermission_ParityBody asserts the CLI's logSpawnPermission renders the
+// cross-caller golden body (message + closed resolution/terminal/bundle_id/detail
+// attr set) the picker's emitPermission must match verbatim. The bare (non-component-
+// bound) capture logger renders the same shape the picker test captures, so the two
+// bodies are directly comparable against the shared literal.
+func TestLogSpawnPermission_ParityBody(t *testing.T) {
+	logger, sink := logtest.NewCaptureLogger(t)
+
+	logSpawnPermission(logger, ghosttyIdentity(), spawn.ResolutionNative, "evt -1743")
+
+	if got := sink.Body(); got != wantPermissionBody {
+		t.Errorf("logSpawnPermission body =\n  %q\nwant\n  %q", got, wantPermissionBody)
+	}
+}
+
 func isSwitchConnector(c SessionConnector) bool {
 	_, ok := c.(*SwitchConnector)
 	return ok

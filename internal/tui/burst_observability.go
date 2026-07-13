@@ -45,7 +45,7 @@ func (m Model) emitBurstSummary(batch string, id spawn.Identity, resolution spaw
 	opened := 0
 	for _, r := range results {
 		logger.Debug("external window", "session", r.Session, "ack", string(r.Ack), "detail", r.Result.Detail)
-		if r.Ack == spawn.AckConfirmed {
+		if r.Confirmed() {
 			opened++
 		}
 	}
@@ -60,6 +60,24 @@ func (m Model) emitBurstSummary(batch string, id spawn.Identity, resolution spaw
 		"opened", opened,
 		"total", total,
 		"batch", batch,
+	)
+}
+
+// emitPermission emits the §7-1 permission-required outcome line from the burst
+// completion chokepoint — a distinct entry in the closed `spawn` event catalog. It
+// mirrors cmd/spawn.go's logSpawnPermission exactly: the closed resolution/terminal/
+// bundle_id attrs plus the opaque driver detail (never an AppleEvent number this
+// layer interpreted — the burst switched on the generic Outcome via
+// spawn.FirstPermission), and NO opened/total/batch summary attrs (the burst stopped
+// on the first wall, so there is no cycle summary to report). Routing the permission
+// arm here instead of emitBurstSummary is what makes the picker — the dominant real
+// path — emit the spec-catalogued permission event in production.
+func (m Model) emitPermission(id spawn.Identity, resolution spawn.Resolution, detail string) {
+	log.OrDiscard(m.spawnLogger).Info("permission required — nothing self-attached",
+		"resolution", string(resolution),
+		"terminal", id.Name,
+		"bundle_id", id.BundleID,
+		"detail", detail,
 	)
 }
 

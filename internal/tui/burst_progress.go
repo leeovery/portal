@@ -243,7 +243,7 @@ func (m Model) burstAllConfirmed(msg spawnCompleteMsg) bool {
 		return false
 	}
 	for _, r := range msg.Results {
-		if r.Ack != spawn.AckConfirmed {
+		if !r.Confirmed() {
 			return false
 		}
 	}

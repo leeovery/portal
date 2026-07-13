@@ -22,6 +22,7 @@ package tui
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/logtest"
@@ -333,6 +334,108 @@ func TestBurstObservability_OnlyClosedSpawnAttrKeys(t *testing.T) {
 		t.Fatal("precondition: the four paths must have emitted at least one record")
 	}
 	assertClosedSpawnKeys(t, sink)
+}
+
+// wantPermissionBody is the exact rendered body cmd/spawn.go's logSpawnPermission
+// and the picker's emitPermission must BOTH produce for the same identity /
+// resolution / detail — the closed `spawn` permission event. The mirrored cmd test
+// (TestLogSpawnPermission_ParityBody) pins the CLI side to this same literal, so a
+// drift in either emitter fails its own golden and the two paths stay byte-identical.
+const wantPermissionBody = "INFO permission required — nothing self-attached resolution=native terminal=Ghostty bundle_id=com.mitchellh.ghostty detail=evt -1743"
+
+// TestBurstObservability_PermissionRequiredEmitsPermissionEvent asserts a picker
+// permission-required burst emits exactly the emitPermission INFO event (closed
+// resolution/terminal/bundle_id/detail attrs) and NOT the generic opened/total
+// summary — matching the CLI's logSpawnPermission skip-the-summary branch.
+func TestBurstObservability_PermissionRequiredEmitsPermissionEvent(t *testing.T) {
+	m := newPendingBurstModel(t, []string{"alpha", "bravo", "charlie"}) // external=[alpha,bravo], trigger=charlie
+	logger, sink := logtest.NewCaptureLogger(t)
+	m.spawnLogger = logger
+
+	// alpha confirms; bravo hits the permission wall (AckFailed + OutcomePermissionRequired).
+	msg := spawnCompleteMsg{
+		Batch:      "batch-xyz",
+		Identity:   ghosttyIdentity(),
+		Resolution: spawn.ResolutionNative,
+		Results: []spawn.WindowResult{
+			{Session: "alpha", Ack: spawn.AckConfirmed, Result: spawn.Success("ok")},
+			{Session: "bravo", Ack: spawn.AckFailed, Result: spawn.PermissionRequired("evt -1743", "grant Automation for Ghostty")},
+		},
+	}
+	injectComplete(t, m, msg)
+
+	info := onlyInfoRecord(t, sink)
+	if info.Msg != "permission required — nothing self-attached" {
+		t.Errorf("INFO msg = %q, want the permission event", info.Msg)
+	}
+	if got := info.AttrString(t, "resolution"); got != "native" {
+		t.Errorf("resolution = %q, want native", got)
+	}
+	if got := info.AttrString(t, "terminal"); got != "Ghostty" {
+		t.Errorf("terminal = %q, want Ghostty", got)
+	}
+	if got := info.AttrString(t, "bundle_id"); got != "com.mitchellh.ghostty" {
+		t.Errorf("bundle_id = %q, want com.mitchellh.ghostty", got)
+	}
+	if got := info.AttrString(t, "detail"); got != "evt -1743" {
+		t.Errorf("detail = %q, want the opaque driver detail (evt -1743)", got)
+	}
+	// The permission event carries NO opened/total/batch summary attrs.
+	if info.HasAttr("opened") || info.HasAttr("total") || info.HasAttr("batch") {
+		t.Errorf("permission event must carry no opened/total/batch attrs: keys=%v", info.Keys)
+	}
+	// No generic opened summary INFO may be emitted on the permission arm.
+	for _, r := range sink.Records() {
+		if r.Level == slog.LevelInfo && strings.HasPrefix(r.Msg, "opened") {
+			t.Errorf("permission arm must NOT emit the generic %q summary", r.Msg)
+		}
+	}
+	assertClosedSpawnKeys(t, sink)
+}
+
+// TestBurstObservability_PartialFailureNoPermissionEmitsSummary asserts a partial
+// failure WITHOUT a permission wall still emits the generic emitBurstSummary
+// (opened k/N) and no permission event.
+func TestBurstObservability_PartialFailureNoPermissionEmitsSummary(t *testing.T) {
+	m := newPendingBurstModel(t, []string{"alpha", "bravo", "charlie"})
+	logger, sink := logtest.NewCaptureLogger(t)
+	m.spawnLogger = logger
+
+	// alpha confirms; bravo times out (no permission wall).
+	msg := spawnCompleteMsg{
+		Batch:      "batch-xyz",
+		Identity:   ghosttyIdentity(),
+		Resolution: spawn.ResolutionNative,
+		Results: []spawn.WindowResult{
+			{Session: "alpha", Ack: spawn.AckConfirmed, Result: spawn.Success("ok")},
+			{Session: "bravo", Ack: spawn.AckTimeout, Result: spawn.Success("")},
+		},
+	}
+	injectComplete(t, m, msg)
+
+	info := onlyInfoRecord(t, sink)
+	if info.Msg != "opened 1/3" {
+		t.Errorf("INFO msg = %q, want the generic opened k/N summary", info.Msg)
+	}
+	for _, r := range sink.Records() {
+		if strings.HasPrefix(r.Msg, "permission required") {
+			t.Errorf("a non-permission partial must NOT emit the permission event, got %q", r.Msg)
+		}
+	}
+}
+
+// TestEmitPermission_ParityWithCLI asserts the picker's emitPermission renders the
+// exact same body (message + closed attr set) as cmd/spawn.go's logSpawnPermission
+// for the same identity/resolution/detail — the cross-caller one-service lockstep.
+func TestEmitPermission_ParityWithCLI(t *testing.T) {
+	logger, sink := logtest.NewCaptureLogger(t)
+	m := Model{spawnLogger: logger}
+
+	m.emitPermission(ghosttyIdentity(), spawn.ResolutionNative, "evt -1743")
+
+	if got := sink.Body(); got != wantPermissionBody {
+		t.Errorf("emitPermission body =\n  %q\nwant\n  %q", got, wantPermissionBody)
+	}
 }
 
 // TestBurstObservability_TotalIncludesTriggerOnEveryPath asserts total == N (the
