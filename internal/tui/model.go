@@ -2463,18 +2463,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clean(batch) STRICTLY before emitting this terminal event), so by the time we
 		// issue tea.Quit they are unset — the spec's "self-clean before self-exec".
 		//
-		// Any non-all-confirmed outcome (partial / permission → task 6-6; pre-flight
-		// abort → task 6-7) keeps the §6-3 record-and-clear-pending behaviour: it does
-		// NOT self-attach and does NOT quit.
+		// Any non-all-confirmed outcome (a partial / permission result, OR a pre-spawn
+		// Burster.Run error) is the §6-6 leave-what-opened arm: it does NOT self-attach
+		// and does NOT quit — it leaves the opened windows in place, unmarks the
+		// confirmed sessions (keeping failed / un-acked / un-attempted marked for a
+		// retry), stays in multi-select mode, and surfaces one transient flash. The
+		// pre-flight abort (nothing spawned) is the separate spawnAbortMsg path (§6-7).
 		if m.burstAllConfirmed(msg) {
 			m.selected = m.burstTrigger
 			(&m).resetBurstState()
 			return m, tea.Quit
 		}
-		m.burstResults = msg.Results
-		m.burstBatch = msg.Batch
-		m.burstPending = false
-		return m, nil
+		return m.handleBurstPartialFailure(msg)
 	case spawnAbortMsg:
 		// §6-3 pre-flight abort: a selected session vanished between marking and Enter,
 		// so nothing spawned. Clear burst-pending; the abort UI is task 6-7.

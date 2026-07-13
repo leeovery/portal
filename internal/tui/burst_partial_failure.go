@@ -1,0 +1,95 @@
+package tui
+
+import (
+	"fmt"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/spawn"
+)
+
+// §6-6 partial-failure leave-what-opened + selection mutation.
+//
+// Once a burst is past pre-flight, a rare per-window hiccup can still occur — a
+// transient adapter spawn-failure, a token that never arrives (ack timeout), or the
+// native adapter's defensive permission-required path. On ANY non-all-confirmed
+// terminal outcome Portal must NOT tear down the windows that already opened (it does
+// not own those host windows — and there is deliberately no teardown seam), skip the
+// trigger's self-attach so the picker stays open, unmark the sessions whose windows
+// opened, and keep the failed / un-acked / un-attempted ones marked so a second Enter
+// retries exactly the still-missing set. The markers were already self-cleaned by the
+// burst goroutine on every terminal path (§6-3), so no clean happens here.
+
+// burstPreSpawnErrorFlash is the §6-6 generic flash for a Burster.Run pre-spawn error
+// (an os.Executable resolution failure or an ack-id generation failure) that occurred
+// BEFORE any window opened. The opaque error rides only to the DEBUG log (§6-10); the
+// user sees this fixed copy. The ⚠ glyph is added by the warning notice band
+// (statusGlyph), NOT the message text — matching the formatSessionGoneFlash /
+// formatWarningsFlash convention, so the band renders it exactly once.
+const burstPreSpawnErrorFlash = "could not start opening windows"
+
+// handleBurstPartialFailure completes the non-all-confirmed arm of the terminal
+// spawnCompleteMsg (§6-6): a pre-spawn Burster.Run error, or a post-flight burst where
+// at least one external window failed / timed out / hit the permission wall. It skips
+// the trigger self-attach (no m.selected / no tea.Quit — the picker stays in
+// multi-select mode), clears burst-pending, and surfaces one transient flash. No
+// opened window is torn down (spawn.Adapter has no close seam).
+func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) {
+	if msg.Err != nil {
+		// Pre-spawn abort from Burster.Run (os.Executable / ack-id failure) BEFORE any
+		// window opened → msg.Results is empty. Nothing opened → nothing to unmark, so
+		// the selection is left UNCHANGED (no degenerate empty-named "failed to open").
+		// The opaque msg.Err rides only to the DEBUG log (§6-10). This is the picker
+		// analogue of the CLI's `return err` on the same Burster.Run error, surfaced as
+		// a flash instead of an exit.
+		m.setFlash(burstPreSpawnErrorFlash)
+		(&m).resetBurstState()
+		return m, nil
+	}
+
+	confirmed := make(map[string]struct{}, len(msg.Results))
+	var failed []string
+	for _, r := range msg.Results {
+		if r.Ack == spawn.AckConfirmed {
+			confirmed[r.Session] = struct{}{}
+			continue
+		}
+		failed = append(failed, r.Session)
+	}
+
+	(&m).applyBurstSelectionMutation(confirmed)
+	m.setFlash(burstPartialFailureFlash(msg.Results, failed))
+	(&m).resetBurstState()
+	return m, nil
+}
+
+// applyBurstSelectionMutation implements the §6-6 leave-what-opened selection rule:
+// every session whose window CONFIRMED is unmarked (its host window opened, so a retry
+// must not re-open it); every other marked session — a failed / timed-out window, or
+// one never attempted after the burst stopped on a permission wall — stays marked, so
+// a second Enter retries exactly the still-missing set. The trigger self-attach did not
+// happen and the trigger is never in the external set, so it stays marked too. The
+// delegate is refreshed so the ● clears from the unmarked rows and remains on the
+// still-marked set.
+func (m *Model) applyBurstSelectionMutation(confirmed map[string]struct{}) {
+	for name := range confirmed {
+		delete(m.selectedSessions, name)
+	}
+	m.refreshSessionDelegate()
+}
+
+// burstPartialFailureFlash builds the §6-6 leave-what-opened flash. If ANY window hit
+// the permission wall its driver-composed Guidance is surfaced verbatim, once for the
+// batch — the burst already stopped on the first permission wall (§6-3), and every
+// later window (same source → same target) would hit the identical wall, so the
+// generic per-window failed-window copy would be misleading. Otherwise it names every
+// failed window via the shared spawn.QuoteJoin renderer. The opaque Result.Detail never
+// reaches the user (DEBUG log only, §6-10). The ⚠ glyph is added by the warning notice
+// band, so the message text carries none (formatSessionGoneFlash convention).
+func burstPartialFailureFlash(results []spawn.WindowResult, failed []string) string {
+	for _, r := range results {
+		if r.Result.Outcome == spawn.OutcomePermissionRequired {
+			return r.Result.Guidance
+		}
+	}
+	return fmt.Sprintf("%s failed to open — others left open", spawn.QuoteJoin(failed))
+}

@@ -250,12 +250,13 @@ func TestBurst_FullSuccess_ConfirmedWhileAttachedElsewhere(t *testing.T) {
 	}
 }
 
-// TestBurst_NotAllConfirmed_RecordsAndClearsPendingWithoutQuit guards the
-// unchanged §6-3 non-all-confirmed path: a single external spawn-failure (→
-// AckFailed, classified WITHOUT an ack wait so the test stays fast) records the
-// results, clears burst-pending, and does NOT self-attach or quit — the
-// partial-failure/abort behaviour is tasks 6-6/6-7.
-func TestBurst_NotAllConfirmed_RecordsAndClearsPendingWithoutQuit(t *testing.T) {
+// TestBurst_NotAllConfirmed_ClearsPendingWithoutQuit guards the end-to-end
+// non-all-confirmed path: a single external spawn-failure (→ AckFailed, classified
+// WITHOUT an ack wait so the test stays fast) clears burst-pending and does NOT
+// self-attach or quit. The full §6-6 leave-what-opened selection mutation + flash is
+// exercised in burst_partial_failure_test.go; this asserts only that the full-success
+// arm (Task 6.4) does NOT fire on a non-all-confirmed terminal event.
+func TestBurst_NotAllConfirmed_ClearsPendingWithoutQuit(t *testing.T) {
 	sessions := []tmux.Session{
 		{Name: "alpha", Windows: 1},
 		{Name: "bravo", Windows: 2},
@@ -294,10 +295,13 @@ func TestBurst_NotAllConfirmed_RecordsAndClearsPendingWithoutQuit(t *testing.T) 
 	if rm.BurstPending() {
 		t.Error("the non-all-confirmed path must still clear burst-pending")
 	}
-	if len(rm.burstResults) != 1 {
-		t.Errorf("burstResults must be recorded on the non-all-confirmed path; got %d", len(rm.burstResults))
+	// §6-6 leave-what-opened: the failed alpha stays marked (a retry re-opens it) and
+	// the picker stays in multi-select mode — the detailed mutation/flash coverage is
+	// in burst_partial_failure_test.go.
+	if !rm.IsSessionSelected("alpha") {
+		t.Error("the spawn-failed alpha must stay marked for a retry")
 	}
-	if rm.burstBatch == "" {
-		t.Error("burstBatch must be recorded on the non-all-confirmed path")
+	if !rm.MultiSelectActive() {
+		t.Error("a non-all-confirmed burst must stay in multi-select mode")
 	}
 }
