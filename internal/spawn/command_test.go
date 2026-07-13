@@ -14,10 +14,10 @@ func fixedExe(path string) ExecutableResolver {
 }
 
 func TestAttachCommand(t *testing.T) {
-	t.Run("it composes env -u TMUX -u TMUX_PANE PATH=<full> <exe> attach <session>", func(t *testing.T) {
+	t.Run("it composes env -u TMUX -u TMUX_PANE PATH=<full> <exe> attach <session> --spawn-ack <batch>:<token>", func(t *testing.T) {
 		getenv := mapGetenv(map[string]string{"PATH": "/opt/homebrew/bin:/usr/bin"})
 
-		got, err := AttachCommand("proj-abc123", fixedExe("/abs/portal"), getenv)
+		got, err := AttachCommand("proj-abc123", fixedExe("/abs/portal"), getenv, "b1", "t1")
 		if err != nil {
 			t.Fatalf("AttachCommand returned error: %v, want nil", err)
 		}
@@ -26,6 +26,7 @@ func TestAttachCommand(t *testing.T) {
 			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
 			"PATH=/opt/homebrew/bin:/usr/bin",
 			"/abs/portal", "attach", "proj-abc123",
+			"--spawn-ack", "b1:t1",
 		}
 		if !slices.Equal(got, want) {
 			t.Errorf("AttachCommand argv = %#v, want %#v", got, want)
@@ -42,7 +43,7 @@ func TestAttachCommand(t *testing.T) {
 			"TMUX_PANE": "%3",
 		})
 
-		got, err := AttachCommand("proj-abc123", fixedExe("/abs/portal"), getenv)
+		got, err := AttachCommand("proj-abc123", fixedExe("/abs/portal"), getenv, "b1", "t1")
 		if err != nil {
 			t.Fatalf("AttachCommand returned error: %v, want nil", err)
 		}
@@ -74,6 +75,7 @@ func TestAttachCommand(t *testing.T) {
 			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
 			"PATH=/opt/homebrew/bin:/usr/bin",
 			"/abs/portal", "attach", "proj-abc123",
+			"--spawn-ack", "b1:t1",
 		}
 		if !slices.Equal(got, want) {
 			t.Errorf("AttachCommand argv = %#v, want %#v", got, want)
@@ -83,13 +85,20 @@ func TestAttachCommand(t *testing.T) {
 	t.Run("it keeps a session name with spaces as a single unquoted argv element", func(t *testing.T) {
 		getenv := mapGetenv(map[string]string{"PATH": "/usr/bin"})
 
-		got, err := AttachCommand("my session", fixedExe("/abs/portal"), getenv)
+		got, err := AttachCommand("my session", fixedExe("/abs/portal"), getenv, "b1", "t1")
 		if err != nil {
 			t.Fatalf("AttachCommand returned error: %v, want nil", err)
 		}
 
-		if len(got) == 0 || got[len(got)-1] != "my session" {
-			t.Fatalf("tail argv element = %q, want a single unquoted %q; argv = %#v", got[len(got)-1], "my session", got)
+		// The session sits immediately after "attach"; it is a discrete argv
+		// element (no shell quoting) even though it is no longer the tail — the
+		// --spawn-ack flag follows it now.
+		attachIdx := slices.Index(got, "attach")
+		if attachIdx < 0 || attachIdx+1 >= len(got) {
+			t.Fatalf("no 'attach' element (or nothing after it) in argv %#v", got)
+		}
+		if session := got[attachIdx+1]; session != "my session" {
+			t.Fatalf("session argv element = %q, want a single unquoted %q; argv = %#v", session, "my session", got)
 		}
 		// No shell quoting is added anywhere: no element carries a stray quote.
 		for _, elem := range got {
@@ -102,7 +111,7 @@ func TestAttachCommand(t *testing.T) {
 	t.Run("it uses the resolved executable path rather than a bare portal lookup", func(t *testing.T) {
 		getenv := mapGetenv(map[string]string{"PATH": "/usr/bin"})
 
-		got, err := AttachCommand("s1", fixedExe("/usr/local/bin/portal-v2"), getenv)
+		got, err := AttachCommand("s1", fixedExe("/usr/local/bin/portal-v2"), getenv, "b1", "t1")
 		if err != nil {
 			t.Fatalf("AttachCommand returned error: %v, want nil", err)
 		}
@@ -126,7 +135,7 @@ func TestAttachCommand(t *testing.T) {
 		failExe := func() (string, error) { return "", sentinel }
 		getenv := mapGetenv(map[string]string{"PATH": "/usr/bin"})
 
-		got, err := AttachCommand("s1", failExe, getenv)
+		got, err := AttachCommand("s1", failExe, getenv, "b1", "t1")
 		if got != nil {
 			t.Errorf("argv = %#v, want nil on resolution error", got)
 		}
@@ -138,18 +147,27 @@ func TestAttachCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("it omits --spawn-ack in phase 2", func(t *testing.T) {
+	t.Run("it appends --spawn-ack <batch>:<token> as the final two argv elements", func(t *testing.T) {
 		getenv := mapGetenv(map[string]string{"PATH": "/usr/bin"})
 
-		got, err := AttachCommand("s1", fixedExe("/abs/portal"), getenv)
+		got, err := AttachCommand("s1", fixedExe("/abs/portal"), getenv, "batchA", "tokenB")
 		if err != nil {
 			t.Fatalf("AttachCommand returned error: %v, want nil", err)
 		}
 
-		for _, elem := range got {
-			if strings.Contains(elem, "--spawn-ack") {
-				t.Errorf("argv element %q contains --spawn-ack, want it deferred to Phase 3; argv = %#v", elem, got)
-			}
+		if len(got) < 2 {
+			t.Fatalf("argv too short to carry the ack flag: %#v", got)
+		}
+		if flag := got[len(got)-2]; flag != "--spawn-ack" {
+			t.Errorf("penultimate argv element = %q, want %q; argv = %#v", flag, "--spawn-ack", got)
+		}
+		if value := got[len(got)-1]; value != "batchA:tokenB" {
+			t.Errorf("final argv element = %q, want the %q ack value; argv = %#v", value, "batchA:tokenB", got)
+		}
+		// The ack flag is exactly two discrete argv elements — never a single
+		// "--spawn-ack=batchA:tokenB" joined element and never shell-quoted.
+		if slices.Contains(got[:len(got)-1], "--spawn-ack=batchA:tokenB") {
+			t.Errorf("argv carries a joined --spawn-ack=value element, want two discrete elements; argv = %#v", got)
 		}
 	})
 }

@@ -1,48 +1,179 @@
 package spawn
 
-// SpawnOutcome pairs a session with the Result of attempting to open its
-// external host-terminal window. SpawnWindows returns one per window it tried,
-// in list order, so the caller can report per-session detail and name the
-// failed session.
-type SpawnOutcome struct {
+import (
+	"time"
+
+	"github.com/leeovery/portal/internal/session"
+)
+
+// spawnAckTimeout is the per-window budget for a spawned window's token ack: the
+// wall-clock window the burster waits for one spawned window's
+// @portal-spawn-<batch>-<token> marker to appear before classifying that window
+// as a failed spawn.
+//
+// It must comfortably cover the whole spawn→confirm chain for a single window:
+//
+//	~260ms   the osascript open (measured: 4 sequential opens ~1.05s / ~260ms
+//	         each — see spec § Sequential vs parallel), plus
+//	         the spawned window's own abridged `portal attach` (warm-command
+//	         fast-path, NO full bootstrap) up to the point it writes its token
+//	         marker just before exec.
+//
+// ~8s gives generous headroom over that sub-second path — the same spirit as the
+// documented daemon self-supervision hysteresis constant (a build-time budget
+// confirmed against real abridged-attach timing, not a hard SLA). It is
+// deliberately per-window: each window's timer starts at ITS OWN spawn, so the
+// cumulative delay of earlier sequential windows never eats a later window's
+// budget (see awaitToken / Burster.Run). Tunable — changing this one constant
+// changes every window's ack budget.
+const spawnAckTimeout = 8 * time.Second
+
+// defaultAckPoll is the interval between ack-marker Collect probes while awaiting
+// a window's token. Small relative to spawnAckTimeout so a token that lands early
+// is confirmed promptly, but coarse enough to keep the poll count bounded.
+const defaultAckPoll = 75 * time.Millisecond
+
+// AckOutcome is the closed per-window confirmation vocabulary the burster tags
+// each spawned window with — exactly the spec's `ack` attr values.
+type AckOutcome string
+
+const (
+	// AckConfirmed — the window's token marker appeared within its budget.
+	AckConfirmed AckOutcome = "confirmed"
+	// AckTimeout — the window opened but its token never appeared before the
+	// per-window spawnAckTimeout elapsed (a missing marker at timeout = a failed
+	// spawn).
+	AckTimeout AckOutcome = "timeout"
+	// AckFailed — the adapter itself reported no window opened, so there is
+	// nothing to await.
+	AckFailed AckOutcome = "failed"
+)
+
+// WindowResult is the outcome of attempting one external window: the target
+// session, its opaque per-window ack Token, the adapter's Result, and the
+// resolved token-ack classification (Ack). The burster returns one per external
+// session, in list order.
+type WindowResult struct {
 	Session string
+	Token   string
 	Result  Result
+	Ack     AckOutcome
 }
 
-// SpawnWindows opens one host-terminal window per session, sequentially in list
-// order, each running the composed env-self-sufficient attach argv through
-// adapter.OpenWindow. It is the N−1 external half of the spawn burst; the Nth
-// self-attach is the caller's concern.
+// Burster is the N−1 external half of the spawn burst: it generates a batch id +
+// one opaque token per external window, opens each window sequentially through
+// Adapter, and confirms each by watching Ack for that window's token within a
+// per-window Timeout. The Nth self-attach is the caller's concern.
 //
-// The picker's own executable is resolved ONCE up front (via exe): an
-// unresolvable executable aborts the whole burst before any window opens
-// (return nil, err). PATH is likewise read once (via getenv) and each per-session
-// argv is composed from those two fixed values, so every window still runs the
-// exact env-self-sufficient attach form without re-resolving the executable.
-//
-// Iteration is strictly sequential — one OpenWindow completes before the next
-// fires — and stops on the first non-success Result, returning the outcomes
-// collected so far with the failed one last. An empty sessions slice (the N=1
-// external set) is a no-op returning (nil, nil) without resolving the executable.
-func SpawnWindows(adapter Adapter, sessions []string, exe ExecutableResolver, getenv func(string) string) ([]SpawnOutcome, error) {
-	if len(sessions) == 0 {
-		return nil, nil
-	}
+// Every seam is injectable so the whole flow is unit-testable under a fake clock
+// with no real time, tmux, or osascript: Ack (the read-side marker channel),
+// Exe/Getenv (attach-argv composition), NewID (raw id generator wrapped by
+// NewSpawnID per id), Timeout/Poll (the per-window ack budget + poll cadence),
+// and Now/Sleep (the clock). NewBurster applies production defaults.
+type Burster struct {
+	Adapter Adapter
+	Ack     AckCollector
+	Exe     ExecutableResolver
+	Getenv  func(string) string
+	NewID   func() (string, error)
+	Timeout time.Duration
+	Poll    time.Duration
+	Now     func() time.Time
+	Sleep   func(time.Duration)
+}
 
-	exePath, err := exe()
+// NewBurster wires a Burster to its adapter + ack channel + composition seams and
+// applies production defaults for the id generator, per-window timeout, poll
+// cadence, and clock. Production passes the resolved native adapter, the shared
+// server-option ack channel, os.Executable, and os.Getenv.
+func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, getenv func(string) string) *Burster {
+	return &Burster{
+		Adapter: adapter,
+		Ack:     ack,
+		Exe:     exe,
+		Getenv:  getenv,
+		NewID:   session.NewNanoIDGenerator(),
+		Timeout: spawnAckTimeout,
+		Poll:    defaultAckPoll,
+		Now:     time.Now,
+		Sleep:   time.Sleep,
+	}
+}
+
+// Run opens one external host-terminal window per session in external, in list
+// order, and returns the batch id plus one WindowResult per window.
+//
+// The picker's own executable is resolved ONCE up front (an unresolvable
+// executable aborts the whole burst before any window opens: return "", nil,
+// err). ALL ids are generated up front too — the batch id and one token per
+// external session — so a generation failure aborts before any window opens
+// (Task 3.1's "never an empty/malformed id" propagates here). Composing each
+// argv from the once-resolved exePath (via the pure composeAttachArgv builder,
+// not AttachCommand) keeps behaviour identical to resolving per window while
+// avoiding a redundant os.Executable read for every window.
+//
+// Each window is then, sequentially: composed, opened, and — if the adapter
+// reported success — awaited for its token via awaitToken (a per-window timer
+// starting at THIS window's spawn). A window the adapter could not open is
+// AckFailed and never awaited. The loop does not stop early on a failed or
+// timed-out window (every window that can open does open); the sole early-stop,
+// permission-required, is layered in a later task.
+func (b *Burster) Run(external []string) (batch string, results []WindowResult, err error) {
+	exePath, err := b.Exe()
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	path := getenv("PATH")
+	path := b.Getenv("PATH")
 
-	outcomes := make([]SpawnOutcome, 0, len(sessions))
-	for _, session := range sessions {
-		argv := composeAttachArgv(exePath, path, session)
-		result := adapter.OpenWindow(argv)
-		outcomes = append(outcomes, SpawnOutcome{Session: session, Result: result})
-		if !result.OK() {
-			break
+	batch, err = NewSpawnID(b.NewID)
+	if err != nil {
+		return "", nil, err
+	}
+	tokens := make([]string, len(external))
+	for i := range external {
+		token, terr := NewSpawnID(b.NewID)
+		if terr != nil {
+			return "", nil, terr
+		}
+		tokens[i] = token
+	}
+
+	results = make([]WindowResult, 0, len(external))
+	for i, sess := range external {
+		token := tokens[i]
+		argv := composeAttachArgv(exePath, path, sess, batch, token)
+		result := b.Adapter.OpenWindow(argv)
+
+		ack := AckFailed
+		if result.OK() {
+			ack = awaitToken(b, batch, token)
+		}
+		results = append(results, WindowResult{Session: sess, Token: token, Result: result, Ack: ack})
+	}
+	return batch, results, nil
+}
+
+// awaitToken polls b.Ack.Collect for token, returning AckConfirmed the moment it
+// appears and AckTimeout once b.Timeout elapses without it. The per-window timer
+// starts here (start := b.Now()), right after this window's OpenWindow — so the
+// cumulative sequential delay of earlier windows never eats this window's budget.
+//
+// A Collect error is treated as "token not present yet" (the loop is bounded by
+// the timer, so a persistently failing enumeration classifies as AckTimeout —
+// the same treatment as a genuinely missing marker). All timing flows through
+// the injected Now/Sleep/Poll/Timeout, so the loop is deterministic under a fake
+// clock.
+func awaitToken(b *Burster, batch, token string) AckOutcome {
+	start := b.Now()
+	for {
+		if tokens, cerr := b.Ack.Collect(batch); cerr == nil {
+			if _, ok := tokens[token]; ok {
+				return AckConfirmed
+			}
+		}
+		b.Sleep(b.Poll)
+		if b.Now().Sub(start) >= b.Timeout {
+			return AckTimeout
 		}
 	}
-	return outcomes, nil
 }

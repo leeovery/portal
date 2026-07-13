@@ -51,6 +51,15 @@ type SpawnDeps struct {
 	// Defaults to tmuxClient(cmd).HasSession, which folds any tmux probe error
 	// to false — so an unprobeable session is conservatively treated as gone.
 	Exists func(name string) bool
+	// Ack is the token-ack channel (Collect + Clean) the N≥2 gate uses: the
+	// burster polls Collect to confirm each spawned window, and runSpawn sweeps
+	// the batch markers via Clean before the self-attach exec handoff. Defaults
+	// to a spawn.NewServerOptionAckChannel over the shared tmux client.
+	Ack spawn.AckChannelFull
+	// NewBurster constructs the burst orchestrator for the N≥2 path from the
+	// resolved adapter. It is the seam that lets a test inject a fake ack channel
+	// + fake clock. Defaults to a production spawn.Burster (spawn.NewBurster).
+	NewBurster func(adapter spawn.Adapter) *spawn.Burster
 	// Logger receives the cycle summary and per-window detail. Defaults to the
 	// package-level spawnLogger.
 	Logger *slog.Logger
@@ -91,12 +100,14 @@ var spawnCmd = &cobra.Command{
 	},
 }
 
-// runSpawn is the spawn burst: detect the host terminal, resolve its adapter,
-// open the N−1 external windows sequentially in list order, and — only if every
-// external spawn succeeds — self-attach the calling window to the Nth session
-// (net-N windows, never N+1). On any external failure it skips the self-attach
-// and returns a plain error naming the failed session (main maps it to exit 1);
-// the opaque Result.Detail goes to the log, never the user-facing message.
+// runSpawn is the spawn burst: pre-flight the whole batch, then — for N≥2 —
+// detect the host terminal, resolve its adapter, open the N−1 external windows
+// sequentially, confirm each via its token ack, and only when EVERY external
+// window confirms self-attach the calling window to the Nth session (net-N
+// windows, never N+1), cleaning the batch markers first. N=1 (no external
+// windows) self-attaches immediately with no ack wait. On any not-all-confirmed
+// batch it skips the self-attach (the detailed leave-what-opened reporting is
+// Task 3.6); the opaque Result.Detail goes to the log, never the user message.
 func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	sessions := args
 	n := len(sessions)
@@ -119,57 +130,70 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 		return fmt.Errorf("spawn: %s %s gone — nothing opened", spawn.QuoteJoin(gone), spawn.GoneVerb(len(gone)))
 	}
 
-	// Order is load-bearing: detect first, then resolve the adapter.
+	// N=1 (empty external set): no external windows to spawn or confirm — a plain
+	// single attach. Self-attach immediately, no detector/adapter/burster/ack
+	// wait needed (spec's N=0/N=1 boundary: "no special-casing" beyond a plain
+	// attach).
+	if len(external) == 0 {
+		return deps.Connector.Connect(trigger)
+	}
+
+	// N≥2. Order is load-bearing: detect first, then resolve the adapter.
 	id := deps.Detector.Detect()
 	adapter, resolution := deps.Resolve(id)
 
-	// Atomic no-op gate: an N≥2 batch (at least one external window) on an
-	// unsupported/NULL terminal cannot open its external windows — they need an
-	// adapter that isn't available. Refuse before touching any adapter so
-	// nothing opens and nothing self-attaches. N=1 (empty external set) skips
-	// this gate and self-attaches below: a single attach needs no adapter.
-	if len(external) >= 1 && resolution == spawn.ResolutionUnsupported {
+	// Atomic no-op gate: an N≥2 batch on an unsupported/NULL terminal cannot open
+	// its external windows — they need an adapter that isn't available. Refuse
+	// before touching any adapter so nothing opens and nothing self-attaches.
+	if resolution == spawn.ResolutionUnsupported {
 		logSpawnUnsupported(log.OrDiscard(deps.Logger), id)
 		return errors.New(unsupportedSpawnMessage(id))
 	}
 
-	outcomes, err := spawn.SpawnWindows(adapter, external, deps.ExePath, deps.Getenv)
+	batch, results, err := deps.NewBurster(adapter).Run(external)
 	if err != nil {
-		// Executable resolution failed before any window opened; exit 1.
+		// Executable or ack-id resolution failed before any window opened; exit 1.
 		return err
 	}
+	// Clean the batch markers on every post-burst path (success or failure), and
+	// — critically — BEFORE the self-attach exec handoff (a point of no return).
+	// Best-effort: bounded, harmless leaks self-expire with the tmux server.
+	_ = deps.Ack.Clean(batch)
 
 	logger := log.OrDiscard(deps.Logger)
-	opened, failedSession := tallyOutcomes(logger, outcomes)
+	opened, allConfirmed := tallyWindowResults(logger, results)
 
-	if failedSession != "" {
-		logSpawnSummary(logger, id, resolution, opened, n)
-		return fmt.Errorf("spawn: failed to open window for %q", failedSession)
+	if !allConfirmed {
+		// Not-all-confirmed: leave the opened windows in place and skip the
+		// trigger self-attach. The detailed leave-what-opened reporting (naming
+		// the failed windows) and the permission-required burst-stop are Tasks
+		// 3.6/3.7; this task only guarantees no self-attach here.
+		logSpawnSummary(logger, id, resolution, opened, n, batch)
+		return errors.New("spawn: not all windows confirmed — self-attach skipped")
 	}
 
-	// Every external window opened (or there were none): the trigger self-attach
-	// is about to occur, so count it before the connector self-execs away (the
-	// outside-tmux path exec-replaces the process and never returns).
+	// Every external window confirmed: the trigger self-attach is about to occur,
+	// so count it before the connector self-execs away (the outside-tmux path
+	// exec-replaces the process and never returns).
 	opened++
-	logSpawnSummary(logger, id, resolution, opened, n)
+	logSpawnSummary(logger, id, resolution, opened, n, batch)
 	return deps.Connector.Connect(trigger)
 }
 
-// tallyOutcomes emits one DEBUG per external window (session + opaque detail)
-// and returns the count of successful external spawns plus the first failed
-// session name (empty when all succeeded).
-func tallyOutcomes(logger *slog.Logger, outcomes []spawn.SpawnOutcome) (opened int, failedSession string) {
-	for _, o := range outcomes {
-		logger.Debug("external window", "session", o.Session, "detail", o.Result.Detail)
-		if o.Result.OK() {
+// tallyWindowResults emits one DEBUG per external window (session + ack outcome +
+// opaque detail) and returns the count of confirmed external windows plus whether
+// every window confirmed.
+func tallyWindowResults(logger *slog.Logger, results []spawn.WindowResult) (opened int, allConfirmed bool) {
+	allConfirmed = true
+	for _, r := range results {
+		logger.Debug("external window", "session", r.Session, "ack", string(r.Ack), "detail", r.Result.Detail)
+		if r.Ack == spawn.AckConfirmed {
 			opened++
 			continue
 		}
-		if failedSession == "" {
-			failedSession = o.Session
-		}
+		allConfirmed = false
 	}
-	return opened, failedSession
+	return opened, allConfirmed
 }
 
 // unsupportedSpawnMessage composes the one-line user-facing message for the
@@ -203,15 +227,17 @@ func logSpawnUnsupported(logger *slog.Logger, id spawn.Identity) {
 }
 
 // logSpawnSummary emits the single INFO cycle summary. total is N (all sessions
-// including the trigger's self-attach target); opened counts each successful
-// external spawn plus the trigger's self-attach when it occurs.
-func logSpawnSummary(logger *slog.Logger, id spawn.Identity, resolution spawn.Resolution, opened, total int) {
+// including the trigger's self-attach target); opened counts each confirmed
+// external window plus the trigger's self-attach when it occurs. batch is the
+// burst's ack batch id (meaningful with the token-ack machinery).
+func logSpawnSummary(logger *slog.Logger, id spawn.Identity, resolution spawn.Resolution, opened, total int, batch string) {
 	logger.Info(fmt.Sprintf("opened %d/%d", opened, total),
 		"resolution", string(resolution),
 		"terminal", id.Name,
 		"bundle_id", id.BundleID,
 		"opened", opened,
 		"total", total,
+		"batch", batch,
 	)
 }
 
@@ -254,6 +280,18 @@ func buildSpawnDeps(cmd *cobra.Command) *SpawnDeps {
 	}
 	if deps.Exists == nil {
 		deps.Exists = tmuxClient(cmd).HasSession
+	}
+	if deps.Ack == nil {
+		client := tmuxClient(cmd)
+		deps.Ack = spawn.NewServerOptionAckChannel(client, client)
+	}
+	if deps.NewBurster == nil {
+		// Lazy closure: reads the (now-defaulted) Ack/ExePath/Getenv at burst
+		// time, so it never re-resolves the tmux client here and composes the
+		// same production burster the N≥2 path drives.
+		deps.NewBurster = func(adapter spawn.Adapter) *spawn.Burster {
+			return spawn.NewBurster(adapter, deps.Ack, deps.ExePath, deps.Getenv)
+		}
 	}
 	if deps.Logger == nil {
 		deps.Logger = spawnLogger

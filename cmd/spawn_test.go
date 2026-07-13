@@ -5,10 +5,12 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/spawn"
@@ -166,6 +168,11 @@ func spawnPipelineDeps(id spawn.Identity, resolution spawn.Resolution, adapter s
 		// Exists defaults to all-present so the pipeline tests model the
 		// transparent pre-flight gate; the gone-session tests override it.
 		Exists: func(string) bool { return true },
+		// A throwaway fake ack channel keeps buildSpawnDeps from defaulting Ack
+		// through tmuxClient (which panics without a client in context under
+		// nopRunner). Burster-reaching tests override it via withBurster; the
+		// N=1 / unsupported / pre-flight tests never touch it.
+		Ack:    &spawntest.FakeAckChannel{},
 		Logger: logger,
 	}
 }
@@ -198,13 +205,73 @@ func goneExists(gone ...string) func(string) bool {
 }
 
 // wantAttachArgv is the exact env-self-sufficient attach argv the pipeline must
-// compose for session under the fixed exe/PATH seams.
-func wantAttachArgv(session string) []string {
+// compose for session under the fixed exe/PATH seams, including the
+// --spawn-ack <batch>:<token> suffix.
+func wantAttachArgv(session, batch, token string) []string {
 	return []string{
 		"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
 		"PATH=" + spawnPipelinePATH,
 		spawnPipelineExe, "attach", session,
+		"--spawn-ack", batch + ":" + token,
 	}
+}
+
+// manualClock is the deterministic fake clock the burster-reaching pipeline
+// tests drive: now reads the current instant, sleep advances it. No real time
+// passes, so no real time.Sleep is ever invoked.
+type manualClock struct{ t time.Time }
+
+func (c *manualClock) now() time.Time        { return c.t }
+func (c *manualClock) sleep(d time.Duration) { c.t = c.t.Add(d) }
+
+// seqIDGen returns a deterministic id generator yielding "id1", "id2", … — the
+// first call is the batch id, each later call a per-window token. Option-safe
+// (alphanumeric) so NewSpawnID accepts them and distinct so no ids collide.
+func seqIDGen() func() (string, error) {
+	var n int
+	return func() (string, error) {
+		n++
+		return fmt.Sprintf("id%d", n), nil
+	}
+}
+
+// withBurster wires a fake ack channel + manual clock into deps and the fake
+// adapter so an N≥2 pipeline test drives the whole burst → confirm → self-attach
+// flow with zero real time, tmux, or osascript: deps.Ack and the adapter's Ack
+// share ack (the adapter writes each confirmed window's token, the burster's
+// Collect reads it), and deps.NewBurster builds a Burster on the manual clock
+// with the deterministic id generator.
+func withBurster(deps *SpawnDeps, adapter *spawntest.FakeAdapter, ack *spawntest.FakeAckChannel, clock *manualClock) {
+	deps.Ack = ack
+	adapter.Ack = ack
+	deps.NewBurster = func(a spawn.Adapter) *spawn.Burster {
+		return &spawn.Burster{
+			Adapter: a,
+			Ack:     ack,
+			Exe:     deps.ExePath,
+			Getenv:  deps.Getenv,
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second,
+			Poll:    75 * time.Millisecond,
+			Now:     clock.now,
+			Sleep:   clock.sleep,
+		}
+	}
+}
+
+// cleanOrderConnector is a SessionConnector that, on each Connect, snapshots how
+// many batches the shared ack channel has cleaned so far — letting a test prove
+// Clean(batch) ran BEFORE the self-attach Connect on the success path.
+type cleanOrderConnector struct {
+	ack           *spawntest.FakeAckChannel
+	calls         []string
+	cleanedBefore []int
+}
+
+func (c *cleanOrderConnector) Connect(name string) error {
+	c.calls = append(c.calls, name)
+	c.cleanedBefore = append(c.cleanedBefore, len(c.ack.Cleaned))
+	return nil
 }
 
 func TestSpawnPipeline(t *testing.T) {
@@ -215,11 +282,14 @@ func TestSpawnPipeline(t *testing.T) {
 	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
-	t.Run("it spawns N-1 windows in arg order and self-attaches the Nth", func(t *testing.T) {
+	t.Run("it self-attaches only after every external window's token is confirmed", func(t *testing.T) {
 		adapter := &spawntest.FakeAdapter{}
 		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
 		logger, _ := newCaptureLoggerForComponent(t, "spawn")
 		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
 		t.Cleanup(func() { spawnDeps = nil })
 
 		resetRootCmd()
@@ -232,22 +302,30 @@ func TestSpawnPipeline(t *testing.T) {
 		if len(adapter.Calls) != 2 {
 			t.Fatalf("OpenWindow called %d times, want 2 (the N−1 externals)", len(adapter.Calls))
 		}
-		if got := adapter.Calls[0][len(adapter.Calls[0])-1]; got != "s1" {
+		if got := adapter.Calls[0][len(adapter.Calls[0])-3]; got != "s1" {
 			t.Errorf("first spawn session = %q, want %q (arg order)", got, "s1")
 		}
-		if got := adapter.Calls[1][len(adapter.Calls[1])-1]; got != "s2" {
+		if got := adapter.Calls[1][len(adapter.Calls[1])-3]; got != "s2" {
 			t.Errorf("second spawn session = %q, want %q (arg order)", got, "s2")
 		}
+		// Only after both s1 and s2 confirmed does the trigger self-attach to s3.
 		if !slices.Equal(conn.calls, []string{"s3"}) {
-			t.Errorf("self-attach targets = %#v, want exactly [s3] (the Nth)", conn.calls)
+			t.Errorf("self-attach targets = %#v, want exactly [s3] (the Nth, only after all confirm)", conn.calls)
+		}
+		// The batch markers were swept exactly once.
+		if len(ack.Cleaned) != 1 {
+			t.Errorf("Clean called %d times, want exactly 1", len(ack.Cleaned))
 		}
 	})
 
-	t.Run("it composes the env-self-sufficient attach command for each spawned window", func(t *testing.T) {
+	t.Run("it composes the env-self-sufficient attach command with the ack flag for each spawned window", func(t *testing.T) {
 		adapter := &spawntest.FakeAdapter{}
 		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
 		logger, _ := newCaptureLoggerForComponent(t, "spawn")
 		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
 		t.Cleanup(func() { spawnDeps = nil })
 
 		resetRootCmd()
@@ -260,10 +338,14 @@ func TestSpawnPipeline(t *testing.T) {
 		if len(adapter.Calls) != 2 {
 			t.Fatalf("OpenWindow called %d times, want 2", len(adapter.Calls))
 		}
-		for i, session := range []string{"alpha", "beta"} {
-			want := wantAttachArgv(session)
-			if !slices.Equal(adapter.Calls[i], want) {
-				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.Calls[i], want)
+		// seqIDGen yields "id1" (batch), then "id2"/"id3" (per-window tokens).
+		wants := [][]string{
+			wantAttachArgv("alpha", "id1", "id2"),
+			wantAttachArgv("beta", "id1", "id3"),
+		}
+		for i := range wants {
+			if !slices.Equal(adapter.Calls[i], wants[i]) {
+				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.Calls[i], wants[i])
 			}
 		}
 	})
@@ -292,13 +374,79 @@ func TestSpawnPipeline(t *testing.T) {
 		}
 	})
 
-	t.Run("it skips self-attach and exits 1 when any window fails to open", func(t *testing.T) {
+	t.Run("it self-attaches immediately for N=1 with no ack wait", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// N=1: no external windows, so no burster runs and no ack machinery is
+		// exercised — the single session self-attaches straight away.
+		if len(adapter.Calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0 for N=1 (no ack wait)", len(adapter.Calls))
+		}
+		if len(ack.Cleaned) != 0 {
+			t.Errorf("Clean called %d times, want 0 for N=1 (no batch → no ack machinery)", len(ack.Cleaned))
+		}
+		if !slices.Equal(conn.calls, []string{"s1"}) {
+			t.Errorf("self-attach targets = %#v, want exactly [s1] (immediate)", conn.calls)
+		}
+	})
+
+	t.Run("it cleans the batch markers before the self-attach exec handoff", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		conn := &cleanOrderConnector{ack: ack}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !slices.Equal(conn.calls, []string{"s3"}) {
+			t.Fatalf("self-attach targets = %#v, want exactly [s3]", conn.calls)
+		}
+		if len(ack.Cleaned) != 1 {
+			t.Fatalf("Clean called %d times, want exactly 1", len(ack.Cleaned))
+		}
+		// The point of no return: Clean(batch) must have run before Connect(s3).
+		if conn.cleanedBefore[0] < 1 {
+			t.Errorf("at Connect(s3) the ack channel had %d cleaned batches, want >= 1 (Clean must precede the exec handoff)", conn.cleanedBefore[0])
+		}
+	})
+
+	t.Run("it skips self-attach and cleans markers when a window is not confirmed", func(t *testing.T) {
+		// s1 opens+confirms; s2's adapter reports spawn-failed → not confirmed.
+		// The naming of the failed window is Task 3.6's contract; Task 3.5 only
+		// guarantees no self-attach, a plain (non-Usage) error, no detail leak,
+		// and that the batch markers are still cleaned.
 		adapter := &spawntest.FakeAdapter{
 			Results: []spawn.Result{spawn.Success("ok"), spawn.SpawnFailed("osascript exited 1: -1743")},
 		}
 		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
 		logger, _ := newCaptureLoggerForComponent(t, "spawn")
 		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
 		t.Cleanup(func() { spawnDeps = nil })
 
 		resetRootCmd()
@@ -307,20 +455,20 @@ func TestSpawnPipeline(t *testing.T) {
 		err := rootCmd.Execute()
 
 		if err == nil {
-			t.Fatal("expected a plain error naming the failed session, got nil")
+			t.Fatal("expected a plain error when a window is not confirmed, got nil")
 		}
 		var usageErr *UsageError
 		if errors.As(err, &usageErr) {
 			t.Errorf("error is a *UsageError (%v); want a plain error (exit 1, not 2)", err)
 		}
-		if !strings.Contains(err.Error(), "s2") {
-			t.Errorf("error %q does not name the failed session %q", err.Error(), "s2")
-		}
 		if strings.Contains(err.Error(), "osascript") {
 			t.Errorf("error %q leaks the opaque Result.Detail; it must go to the log only", err.Error())
 		}
 		if len(conn.calls) != 0 {
-			t.Errorf("self-attach targets = %#v, want none (self-attach must be skipped on failure)", conn.calls)
+			t.Errorf("self-attach targets = %#v, want none (self-attach must be skipped when not all confirmed)", conn.calls)
+		}
+		if len(ack.Cleaned) != 1 {
+			t.Errorf("Clean called %d times, want exactly 1 (markers cleaned on the failure path too)", len(ack.Cleaned))
 		}
 	})
 
@@ -337,11 +485,14 @@ func TestSpawnPipeline(t *testing.T) {
 		}
 	})
 
-	t.Run("it emits a spawn: opened N/N summary without ack or batch attrs", func(t *testing.T) {
+	t.Run("it emits a spawn: opened N/N summary with the batch attr and a per-window ack attr", func(t *testing.T) {
 		adapter := &spawntest.FakeAdapter{}
 		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
 		logger, sink := newCaptureLoggerForComponent(t, "spawn")
 		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
 		t.Cleanup(func() { spawnDeps = nil })
 
 		resetRootCmd()
@@ -351,13 +502,13 @@ func TestSpawnPipeline(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		var summaries []logtest.Record
+		var summaries, windows []logtest.Record
 		for _, rec := range sink.Records() {
-			if rec.Level == slog.LevelInfo && strings.HasPrefix(rec.Msg, "opened") {
+			switch {
+			case rec.Level == slog.LevelInfo && strings.HasPrefix(rec.Msg, "opened"):
 				summaries = append(summaries, rec)
-			}
-			if rec.HasAttr("ack") || rec.HasAttr("batch") {
-				t.Errorf("record %q carries a Phase-3 attr (ack/batch): keys=%v", rec.Msg, rec.Keys)
+			case rec.Level == slog.LevelDebug && rec.HasAttr("ack"):
+				windows = append(windows, rec)
 			}
 		}
 		if len(summaries) != 1 {
@@ -381,6 +532,20 @@ func TestSpawnPipeline(t *testing.T) {
 		}
 		if got := summary.IntAttr(t, "total"); got != 3 {
 			t.Errorf("total attr = %d, want 3", got)
+		}
+		// Phase 3: the summary now carries the batch id, meaningful with the ack
+		// machinery.
+		if got := summary.AttrString(t, "batch"); got == "" {
+			t.Errorf("summary batch attr = %q, want a non-empty batch id", got)
+		}
+		// One DEBUG per external window, each carrying its confirmed ack outcome.
+		if len(windows) != 2 {
+			t.Fatalf("per-window DEBUG lines with an ack attr = %d, want 2; body:\n%s", len(windows), sink.Body())
+		}
+		for _, w := range windows {
+			if got := w.AttrString(t, "ack"); got != "confirmed" {
+				t.Errorf("per-window ack attr = %q, want %q", got, "confirmed")
+			}
 		}
 	})
 
@@ -647,9 +812,12 @@ func TestSpawnPreflight(t *testing.T) {
 	t.Run("it proceeds unchanged when all sessions are present", func(t *testing.T) {
 		adapter := &spawntest.FakeAdapter{}
 		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
 		logger, _ := newCaptureLoggerForComponent(t, "spawn")
 		deps := spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
 		deps.Exists = goneExists() // none gone → transparent gate
+		withBurster(deps, adapter, ack, clock)
 		spawnDeps = deps
 		t.Cleanup(func() { spawnDeps = nil })
 
