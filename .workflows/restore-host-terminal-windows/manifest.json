@@ -108,8 +108,8 @@
       "items": {
         "restore-host-terminal-windows": {
           "status": "in-progress",
-          "task_gate_mode": "auto",
-          "fix_gate_mode": "auto",
+          "task_gate_mode": "gated",
+          "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
