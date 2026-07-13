@@ -66,8 +66,9 @@ type keymapEntry struct {
 //
 // Descriptor order follows the §8.5 help reference
 // (testdata/vhs/reference/sessions-help-modal-mv.png), which lists the rows
-// nav-first: ↑/↓ → ^↑/↓ (page) → ⏎ → / → ␣ → s → n → r → k → q → x, then
-// a right-aligned ? help last. The help modal renders every entry in this order.
+// nav-first: ↑/↓ → ^↑/↓ (page) → ⏎ → / → ␣ → s → m → n → r → k → q → x, then
+// a right-aligned ? help last (the §5 m multi-select entry is help-only, slotted
+// after s). The help modal renders every entry in this order.
 //
 // The footer is UNAFFECTED by this order: it renders only the Core entries in
 // descriptor order, and the Core relative order is preserved here as
@@ -93,6 +94,7 @@ func sessionsKeymap() []keymapEntry {
 		{Key: "/", Action: "filter", HelpAction: "Filter sessions", Core: true},
 		{Key: "␣", HelpKey: "␣", Action: "preview", HelpAction: "Preview scrollback", Core: true},
 		{Key: "s", Action: "switch view", HelpAction: "Switch view — flat / project / tag", Core: true},
+		{Key: "m", Action: "multi-select", HelpAction: "Multi-select mode"},
 		{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
 		{Key: "r", Action: "rename", HelpAction: "Rename session"},
 		{Key: "k", Action: "kill", HelpAction: "Kill session", Destructive: true},

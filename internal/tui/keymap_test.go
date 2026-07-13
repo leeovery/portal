@@ -13,7 +13,8 @@ func TestSessionsKeymap(t *testing.T) {
 
 	t.Run("it enumerates exactly the §12.1 Sessions bindings in the reference help order", func(t *testing.T) {
 		// Reference help order (testdata/vhs/reference/sessions-help-modal-mv.png):
-		// ↑/↓ → ^↑/↓ (page) → ⏎ → / → ␣ → s → n → r → k → q → x, then ? last.
+		// ↑/↓ → ^↑/↓ (page) → ⏎ → / → ␣ → s → m → n → r → k → q → x, then ? last
+		// (the §5 m multi-select entry is help-only, slotted after s).
 		// Post the §3.4 footer-glyph switch the footer reads the glyph Key forms
 		// (nav "↑↓", attach "⏎", preview "␣"); the help body keeps the slashed nav
 		// via the HelpKey override "↑/↓" while page reads its Key "^↑/↓" directly.
@@ -25,6 +26,7 @@ func TestSessionsKeymap(t *testing.T) {
 			{Key: "/", Action: "filter", HelpAction: "Filter sessions", Core: true},
 			{Key: "␣", HelpKey: "␣", Action: "preview", HelpAction: "Preview scrollback", Core: true},
 			{Key: "s", Action: "switch view", HelpAction: "Switch view — flat / project / tag", Core: true},
+			{Key: "m", Action: "multi-select", HelpAction: "Multi-select mode"},
 			{Key: "n", Action: "new in cwd", HelpAction: "New session in cwd"},
 			{Key: "r", Action: "rename", HelpAction: "Rename session"},
 			{Key: "k", Action: "kill", HelpAction: "Kill session", Destructive: true},

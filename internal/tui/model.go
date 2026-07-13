@@ -418,6 +418,16 @@ type Model struct {
 	// moment the mode leaves ByTag or any tag appears.
 	byTagSignpost bool
 
+	// §5 Multi-select mode state. multiSelectMode is true while the Sessions page
+	// is in multi-select mode (entered by `m` from the normal list, exited by Esc
+	// or the task-5.7 N=0 commit). selectedSessions is the marked set keyed on
+	// Session.Name — the SAME identity the attach / selectedSessionItem path uses —
+	// so a multi-tag session that spans several By-Tag rows is marked exactly once.
+	// The map is LAZILY initialised (on mode entry / first insert), so a zero-value
+	// model needs no constructor change; exitMultiSelect nils it back out.
+	multiSelectMode  bool
+	selectedSessions map[string]struct{}
+
 	// Data loading tracking
 	sessionsLoaded       bool
 	projectsLoaded       bool
@@ -490,6 +500,22 @@ func (m Model) SessionListVisibleItems() []list.Item {
 // SessionListFilterValue returns the current filter text, for testing.
 func (m Model) SessionListFilterValue() string {
 	return m.sessionList.FilterValue()
+}
+
+// MultiSelectActive reports whether the Sessions page is in §5 multi-select mode, for testing.
+func (m Model) MultiSelectActive() bool {
+	return m.multiSelectMode
+}
+
+// IsSessionSelected reports whether the named session is in the multi-select set, for testing.
+func (m Model) IsSessionSelected(name string) bool {
+	_, ok := m.selectedSessions[name]
+	return ok
+}
+
+// SelectedSessionCount returns the number of sessions marked in multi-select mode, for testing.
+func (m Model) SelectedSessionCount() int {
+	return len(m.selectedSessions)
 }
 
 // SetSessionListFilter sets the filter text and applies it on the session list, for testing.
@@ -3011,6 +3037,13 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch {
 		case keyIsCode(msg, tea.KeyEscape):
+			// §5 Multi-select: Esc exits the mode and clears the whole set. This
+			// LEADING branch is reachable only when the / filter is not focused
+			// (the SettingFilter guard above already routed a focused-filter Esc to
+			// the list), so it is checked BEFORE the progressive-back filter check.
+			if m.multiSelectMode {
+				return m.exitMultiSelect(), nil
+			}
 			// Progressive back: if filter is active, let the list clear it;
 			// otherwise quit.
 			if m.sessionList.FilterState() == list.FilterApplied {
@@ -3032,6 +3065,12 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// focused. Do NOT hoist this case above that guard.
 		case isRuneKey(msg, "s"):
 			return m.handleSwitchViewKey()
+		// m enters / toggles §5 multi-select mode. Like s, this case MUST stay
+		// inside this rune switch, below the `if m.sessionList.SettingFilter()
+		// { break }` guard above — that guard makes m a literal filter character
+		// while the / filter input is focused. Do NOT hoist above that guard.
+		case isRuneKey(msg, "m"):
+			return m.handleMultiSelectToggle()
 		// x is the sole Sessions↔Projects toggle (§12.2). The former p alias
 		// (Sessions → Projects) is dropped so each key has a single meaning.
 		case isRuneKey(msg, "x"):
@@ -3078,6 +3117,45 @@ func (m Model) handleSwitchViewKey() (tea.Model, tea.Cmd) {
 		_ = m.modePersister.Save(m.sessionListMode)
 	}
 	return m, cmd
+}
+
+// handleMultiSelectToggle drives the §5 multi-select `m` key. The first press
+// from the normal list ENTERS the mode with an empty selection (enter-only, no
+// implicit mark). Every subsequent press toggles the highlighted session row's
+// Session.Name in the marked set — inserting if absent, deleting if present. A
+// press while the highlighted row is a non-selectable HeaderItem (or the list is
+// empty / has no highlighted row) is a no-op that leaves the set untouched. It
+// returns (tea.Model, tea.Cmd) to match the updateSessionList dispatch arms.
+func (m Model) handleMultiSelectToggle() (tea.Model, tea.Cmd) {
+	if !m.multiSelectMode {
+		m.multiSelectMode = true
+		m.selectedSessions = map[string]struct{}{}
+		return m, nil
+	}
+	si, ok := m.selectedSessionItem()
+	if !ok {
+		return m, nil
+	}
+	if m.selectedSessions == nil {
+		m.selectedSessions = map[string]struct{}{}
+	}
+	name := si.Session.Name
+	if _, marked := m.selectedSessions[name]; marked {
+		delete(m.selectedSessions, name)
+	} else {
+		m.selectedSessions[name] = struct{}{}
+	}
+	return m, nil
+}
+
+// exitMultiSelect leaves §5 multi-select mode and clears the whole marked set. It
+// is the shared exit path — Esc invokes it here and the task-5.7 N=0 commit
+// reuses it — so it is a reusable method returning the updated model rather than
+// an inline reset.
+func (m Model) exitMultiSelect() Model {
+	m.multiSelectMode = false
+	m.selectedSessions = nil
+	return m
 }
 
 func (m Model) handleKillKey() (tea.Model, tea.Cmd) {

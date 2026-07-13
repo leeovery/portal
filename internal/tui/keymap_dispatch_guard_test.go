@@ -139,6 +139,12 @@ func TestSessionsDescriptorDispatchParity(t *testing.T) {
 			m = pressSession(t, m, tea.KeyPressMsg{Code: 's', Text: "s"})
 			return m.activePage == PageSessions && m.sessionListMode != before
 		}},
+		// m multi-select — the first m enters §5 multi-select mode.
+		"m": {press: tea.KeyPressMsg{Code: 'm', Text: "m"}, honour: func(t *testing.T) bool {
+			m := sessionsGuardModel(t)
+			m = pressSession(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
+			return m.MultiSelectActive()
+		}},
 		// n new in cwd — routes to handleNewInCWD (no modal, stays on Sessions,
 		// emits a createSession cmd via the wired creator).
 		"n": {press: tea.KeyPressMsg{Code: 'n', Text: "n"}, honour: func(t *testing.T) bool {
