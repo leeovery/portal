@@ -382,6 +382,9 @@ func (m Model) decideBurst(ordered []string) (Model, tea.Cmd) {
 	m.pendingBurstEnter = false
 	m.pendingBurstOrdered = nil
 	if m.DetectUnsupported() {
+		// §6-10: emit the unsupported outcome line (resolution=unsupported, no
+		// per-window records — nothing was attempted).
+		m.emitUnsupportedNoop(m.detectIdentity)
 		m.setFlash(unsupportedFlashText(m.detectIdentity))
 		return m, nil
 	}

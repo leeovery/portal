@@ -34,6 +34,12 @@ const burstPreSpawnErrorFlash = "could not start opening windows"
 // multi-select mode), clears burst-pending, and surfaces one transient flash. No
 // opened window is torn down (spawn.Adapter has no close seam).
 func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) {
+	// §6-10: emit the batch summary from this chokepoint. The trigger self-attach is
+	// skipped on this arm, so it is NOT counted — opened = the confirmed external
+	// windows only (0 on a pre-spawn error with empty Results); total = N still (the
+	// external set + the one trigger). Prefer the msg's Identity/Resolution.
+	m.emitBurstSummary(msg.Batch, msg.Identity, msg.Resolution, msg.Results, false)
+
 	if msg.Err != nil {
 		// Pre-spawn abort from Burster.Run (os.Executable / ack-id failure) BEFORE any
 		// window opened → msg.Results is empty. Nothing opened → nothing to unmark, so

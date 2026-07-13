@@ -38,6 +38,10 @@ import (
 // survivors keep their ● and the gone row shows the red flag. No adapter, connector,
 // or self-attach is touched (the goroutine aborted before spawning — §6-3).
 func (m Model) handlePreflightAbort(msg spawnAbortMsg) Model {
+	// §6-10: emit the pre-flight abort outcome line naming the gone session(s) — no
+	// per-window records (nothing was spawned).
+	m.emitPreflightAbort(msg.Gone)
+
 	m.abortBannerText = fmt.Sprintf(
 		"%s %s gone — nothing opened",
 		spawn.QuoteJoin(msg.Gone),

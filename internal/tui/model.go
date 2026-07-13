@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"log/slog"
 	"slices"
 	"sort"
 	"strings"
@@ -477,6 +478,12 @@ type Model struct {
 	ackChannel    spawn.AckChannelFull
 	spawnExe      spawn.ExecutableResolver
 	spawnGetenv   func(string) string
+	// spawnLogger is the §6-10 spawn-component logger the burst completion
+	// chokepoint emits its batch summary + per-window detail through
+	// (log.For("spawn") in production, a logtest.Sink-backed logger in tests, nil in
+	// the offline capture harness). Wrapped in log.OrDiscard at emit time so a nil
+	// never panics.
+	spawnLogger *slog.Logger
 
 	// Burst lifecycle state. burstPending is true from dispatch until the terminal
 	// spawnCompleteMsg/spawnAbortMsg lands; burstPipe/burstCancel own the goroutine's
@@ -2495,6 +2502,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// racing a burst that just finished): Ctrl-C/Esc must return to the picker, not
 		// attach. handleBurstPartialFailure then suppresses the flash on the cancel path.
 		if m.burstAllConfirmed(msg) && !m.burstCancelled {
+			// §6-10: emit the batch summary before the tea.Quit self-attach handoff —
+			// opened N/N with the trigger self-attach counted, total = N. Prefer the
+			// msg's Identity/Resolution (the goroutine carries them on the complete path).
+			m.emitBurstSummary(msg.Batch, msg.Identity, msg.Resolution, msg.Results, true)
 			m.selected = m.burstTrigger
 			(&m).resetBurstState()
 			return m, tea.Quit

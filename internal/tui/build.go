@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"log/slog"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resolver"
@@ -60,6 +62,11 @@ type Deps struct {
 	AckChannel    spawn.AckChannelFull
 	SpawnExe      spawn.ExecutableResolver
 	SpawnGetenv   func(string) string
+	// SpawnLogger is the §6-10 spawn-component logger the burst completion chokepoint
+	// emits its batch summary + per-window detail through. Injected by cmd/open.go
+	// (log.For("spawn")) and nil in the offline capture harness. Nil-tolerant: the
+	// emit methods route through log.OrDiscard, so a nil logger silently discards.
+	SpawnLogger *slog.Logger
 
 	// Scalar configuration.
 	CWD         string
@@ -184,6 +191,9 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithAckChannel(deps.AckChannel))
 	opts = append(opts, WithSpawnExe(deps.SpawnExe))
 	opts = append(opts, WithSpawnGetenv(deps.SpawnGetenv))
+	// §6-10 spawn batch-summary logger. Always injected via the nil-tolerant option —
+	// a nil logger (the capture harness) leaves emission discarded.
+	opts = append(opts, WithSpawnLogger(deps.SpawnLogger))
 
 	// Seed the §11.2 inline warning flash for the capture harness (no-op when empty,
 	// the production default). Applied as an Option so it is set before the

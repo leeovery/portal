@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -357,10 +358,14 @@ type tuiConfig struct {
 	// CLI's SpawnDeps: client.HasSession / a shared server-option ack channel /
 	// os.Executable / os.Getenv) and threaded into tui.Deps. The burst REUSES the
 	// resolve seam above (the cached resolution + a re-resolve for the adapter).
-	sessionExists  func(string) bool
-	ackChannel     spawn.AckChannelFull
-	spawnExe       spawn.ExecutableResolver
-	spawnGetenv    func(string) string
+	sessionExists func(string) bool
+	ackChannel    spawn.AckChannelFull
+	spawnExe      spawn.ExecutableResolver
+	spawnGetenv   func(string) string
+	// spawnLogger is the §6-10 spawn-component logger the picker burst's completion
+	// chokepoint emits its batch summary + per-window detail through (log.For("spawn")
+	// in production; the parallel to cmd/spawn.go's package-level spawnLogger).
+	spawnLogger    *slog.Logger
 	cwd            string
 	insideTmux     bool
 	currentSession string
@@ -424,6 +429,7 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		AckChannel:       cfg.ackChannel,
 		SpawnExe:         cfg.spawnExe,
 		SpawnGetenv:      cfg.spawnGetenv,
+		SpawnLogger:      cfg.spawnLogger,
 	})
 }
 
@@ -593,6 +599,9 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		ackChannel:    spawn.NewServerOptionAckChannel(client, client),
 		spawnExe:      os.Executable,
 		spawnGetenv:   os.Getenv,
+		// §6-10: the picker burst's spawn-component logger — the TUI parallel to
+		// cmd/spawn.go's package-level spawnLogger = log.For("spawn").
+		spawnLogger: log.For("spawn"),
 		// NO_COLOR carve-out (§2.5): read the env ONCE here (cmd layer) so
 		// internal/tui stays env-free. The single colourless flag flows through
 		// tui.Deps.NoColor and is inherited by every canvas-dependent surface.
