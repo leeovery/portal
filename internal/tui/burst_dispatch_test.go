@@ -128,7 +128,10 @@ func TestBurstDispatch_OpensExternalInListOrder(t *testing.T) {
 		t.Errorf("BurstExternal() = %v, want [alpha bravo] (net-N: marked minus trigger)", got)
 	}
 
-	m = drainBatchToModel(t, m, cmd)
+	// Drive the async pipe to the terminal event (NOT past it: the §6-4 full-success
+	// arm self-attaches + resets the burst lifecycle state, so the post-reset model
+	// can no longer witness the mid-burst counters).
+	mBefore, term := driveBurstToTerminal(t, m, cmd)
 
 	if len(adapter.Calls) != 2 {
 		t.Fatalf("OpenWindow called %d times, want 2 (N-1 external, never the trigger)", len(adapter.Calls))
@@ -143,18 +146,24 @@ func TestBurstDispatch_OpensExternalInListOrder(t *testing.T) {
 			t.Error("the trigger (charlie) must NEVER be opened as an external window")
 		}
 	}
-	if m.BurstPending() {
-		t.Error("burst must clear pending once the terminal spawnCompleteMsg lands")
-	}
 	// Regression (§6-3 review fix): burstTotal is N (recorded once at dispatch) and
 	// must stay N for the WHOLE burst — the streamed progress events carry the
-	// external count (N-1) and must NOT overwrite it. Sampled AFTER the pipe is fully
-	// drained, so a progress-driven overwrite would surface here as N-1.
-	if m.BurstTotal() != 3 {
-		t.Errorf("BurstTotal() = %d after draining, want 3 (N must stay N across the burst, not be overwritten by the N-1 external count)", m.BurstTotal())
+	// external count (N-1) and must NOT overwrite it. Sampled AT the terminal event,
+	// BEFORE the §6-4 full-success reset, so a progress-driven overwrite would
+	// surface here as N-1.
+	if mBefore.BurstTotal() != 3 {
+		t.Errorf("BurstTotal() = %d at the terminal event, want 3 (N must stay N across the burst, not be overwritten by the N-1 external count)", mBefore.BurstTotal())
 	}
 	if len(ack.Cleaned) != 1 {
-		t.Errorf("the ack channel must self-clean the batch exactly once, got %d Clean calls", len(ack.Cleaned))
+		t.Errorf("the ack channel must self-clean the batch exactly once before the terminal event, got %d Clean calls", len(ack.Cleaned))
+	}
+
+	// Applying the terminal full-success message self-attaches to the trigger and
+	// clears burst-pending.
+	updated, _ := mBefore.Update(term)
+	m = updated.(Model)
+	if m.BurstPending() {
+		t.Error("burst must clear pending once the terminal spawnCompleteMsg lands")
 	}
 }
 
@@ -319,10 +328,13 @@ func TestBurstDispatch_StreamsProgressThenComplete(t *testing.T) {
 			seq = append(seq, "complete")
 			updated, f := m.Update(msg)
 			m = updated.(Model)
-			follow = f
-			if follow != nil {
-				t.Error("the receiver must STOP on the terminal complete event (no re-issue)")
+			// §6-4: full success self-attaches — the terminal complete returns
+			// tea.Quit, NOT a receiver re-issue, so the receive loop stops here (no
+			// next spawnProgressMsg is pulled).
+			if !isQuitCmd(f) {
+				t.Error("the terminal complete event must return tea.Quit (self-attach), not a receiver re-issue")
 			}
+			follow = nil
 		default:
 			t.Fatalf("unexpected burst message %T", msg)
 		}

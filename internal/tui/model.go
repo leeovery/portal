@@ -2453,9 +2453,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.burstPipe.receiver()
 	case spawnCompleteMsg:
-		// §6-3 terminal burst outcome: record the batch + per-window results and clear
-		// burst-pending. The self-attach to the trigger + the selection mutation are
-		// tasks 6-4/6-6; this task lands the streaming + outcome capture only.
+		// §6-4 terminal burst outcome. On FULL success — the pre-flight passed and
+		// every external window confirmed its token ack — the trigger window
+		// self-attaches SILENTLY to its one marked session via the picker's existing
+		// m.selected+tea.Quit→processTUIResult connector path (AttachConnector outside
+		// tmux / SwitchConnector inside), giving net N windows (never N+1) with NO
+		// "N/N ✓" nag and NO spawn-adapter call. The @portal-spawn-<batch>-* markers
+		// are already self-cleaned by the burst goroutine (burstRunner.run calls
+		// Clean(batch) STRICTLY before emitting this terminal event), so by the time we
+		// issue tea.Quit they are unset — the spec's "self-clean before self-exec".
+		//
+		// Any non-all-confirmed outcome (partial / permission → task 6-6; pre-flight
+		// abort → task 6-7) keeps the §6-3 record-and-clear-pending behaviour: it does
+		// NOT self-attach and does NOT quit.
+		if m.burstAllConfirmed(msg) {
+			m.selected = m.burstTrigger
+			(&m).resetBurstState()
+			return m, tea.Quit
+		}
 		m.burstResults = msg.Results
 		m.burstBatch = msg.Batch
 		m.burstPending = false

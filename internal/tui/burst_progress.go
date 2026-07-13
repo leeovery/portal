@@ -211,6 +211,39 @@ func WithSpawnGetenv(fn func(string) string) Option {
 	return func(m *Model) { m.spawnGetenv = fn }
 }
 
+// burstAllConfirmed reports whether a terminal spawnCompleteMsg represents a
+// FULL-success burst (§6-4): the pre-flight passed (msg.Err == nil), every
+// external window produced a result (len == the external set), and every result
+// confirmed its token ack. Only then does the trigger window self-attach; any
+// other outcome is partial/permission (§6-6) or would be an abort (§6-7). An
+// empty external set cannot reach here — N=1 is task 5-7 — so the length check
+// never has to reason about a vacuous all-confirmed.
+func (m Model) burstAllConfirmed(msg spawnCompleteMsg) bool {
+	if msg.Err != nil || len(msg.Results) != len(m.burstExternal) {
+		return false
+	}
+	for _, r := range msg.Results {
+		if r.Ack != spawn.AckConfirmed {
+			return false
+		}
+	}
+	return true
+}
+
+// resetBurstState clears the burst lifecycle fields after a terminal outcome: it
+// exits burst-pending, releases the goroutine's pipe + cancel references, and
+// zeroes the progress counters + captured results. Used by the §6-4 full-success
+// self-attach arm before the tea.Quit handoff.
+func (m *Model) resetBurstState() {
+	m.burstPending = false
+	m.burstPipe = nil
+	m.burstCancel = nil
+	m.burstTotal = 0
+	m.burstDone = 0
+	m.burstResults = nil
+	m.burstBatch = ""
+}
+
 // BurstPending reports whether an async §6 spawn burst is in flight — dispatched
 // but not yet terminal (spawnCompleteMsg/spawnAbortMsg) — for testing.
 func (m Model) BurstPending() bool { return m.burstPending }
