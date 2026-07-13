@@ -1,13 +1,10 @@
 package spawn
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
-	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/resolver"
 )
 
@@ -32,24 +29,13 @@ type execRecipeRunner struct{}
 
 var _ recipeRunner = execRecipeRunner{}
 
-// Run execs the recipe argv through log.CombinedOutputWithContext (the
-// stderr-preserving boundary helper) and derives exitCode from an
-// *exec.ExitError. A clean run returns (stdout, 0, nil); a non-zero (or signal)
-// exit returns the combined output plus the exit code with a nil err (it ran
-// but failed); a non-exit failure (binary missing on PATH — no exit status)
-// surfaces as err so the mapping folds it to spawn-failed.
+// Run execs the recipe argv through the shared exec boundary (runArgvCombined),
+// which maps a clean run to (stdout, 0, nil), a non-zero exit to (combined
+// output, code, nil), and a non-exit failure to a surfaced err. The recipeRunner
+// seam stays separate from osascriptRunner — only the identical plumbing behind
+// them is shared.
 func (execRecipeRunner) Run(argv []string) (string, int, error) {
-	cmd := exec.Command(argv[0], argv[1:]...)
-	out, err := log.CombinedOutputWithContext(cmd)
-	if err == nil {
-		return string(out), 0, nil
-	}
-
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return combineOutput(out, err), exitErr.ExitCode(), nil
-	}
-	return string(out), 0, err
+	return runArgvCombined(argv)
 }
 
 // substituteCommand renders the recipe's final argv by dropping commandStr into
@@ -83,21 +69,11 @@ func mapRecipeResult(out string, exitCode int, err error) Result {
 	return SpawnFailed(recipeFailureDetail(out, exitCode, err))
 }
 
-// recipeFailureDetail is the opaque Detail for a non-clean recipe exit: the
-// combined output and/or execution-error text, falling back to the bare exit
-// code so Detail is never empty.
+// recipeFailureDetail is the opaque Detail for a non-clean recipe exit: it
+// delegates to the shared execFailureDetail formatter, supplying only the
+// recipe-specific never-empty fallback label.
 func recipeFailureDetail(out string, exitCode int, err error) string {
-	detail := strings.TrimSpace(out)
-	if err != nil {
-		if detail == "" {
-			return err.Error()
-		}
-		return detail + ": " + err.Error()
-	}
-	if detail == "" {
-		return fmt.Sprintf("recipe exit %d", exitCode)
-	}
-	return detail
+	return execFailureDetail(out, exitCode, err, "recipe exit %d")
 }
 
 // argvRecipeAdapter is the config-escape-hatch Adapter for a validated argv

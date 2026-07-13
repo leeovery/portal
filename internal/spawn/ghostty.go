@@ -1,12 +1,8 @@
 package spawn
 
 import (
-	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
-
-	"github.com/leeovery/portal/internal/log"
 )
 
 // ghosttyScriptTemplate is the validated (Ghostty 1.3.1) AppleScript that opens
@@ -69,40 +65,13 @@ type execOsascriptRunner struct{}
 
 var _ osascriptRunner = execOsascriptRunner{}
 
-// Run execs the osascript argv through log.CombinedOutputWithContext (the
-// stderr-preserving boundary helper) and derives exitCode from an
-// *exec.ExitError. A clean run returns (stdout, 0, nil); a non-zero (or
-// signal) exit returns the combined output plus the exit code with a nil err
-// (it ran but failed); a non-exit failure (binary missing on PATH — no exit
-// status) surfaces as err so the mapping folds it to spawn-failed.
+// Run execs the osascript argv through the shared exec boundary
+// (runArgvCombined), which maps a clean run to (stdout, 0, nil), a non-zero
+// exit to (combined output, code, nil), and a non-exit failure to a surfaced
+// err. The osascriptRunner seam stays separate from recipeRunner — only the
+// identical plumbing behind them is shared.
 func (execOsascriptRunner) Run(argv []string) (string, int, error) {
-	cmd := exec.Command(argv[0], argv[1:]...)
-	out, err := log.CombinedOutputWithContext(cmd)
-	if err == nil {
-		return string(out), 0, nil
-	}
-
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return combineOutput(out, err), exitErr.ExitCode(), nil
-	}
-	return string(out), 0, err
-}
-
-// combineOutput folds captured stdout and the boundary helper's wrapped error
-// (which embeds the child's stderr) into one opaque combined-output string —
-// honouring the runner seam's out = stdout+stderr contract, since
-// CombinedOutputWithContext keeps stderr inside the wrapped error rather than
-// merging it into stdout.
-func combineOutput(stdout []byte, wrapErr error) string {
-	parts := make([]string, 0, 2)
-	if s := strings.TrimSpace(string(stdout)); s != "" {
-		parts = append(parts, s)
-	}
-	if wrapErr != nil {
-		parts = append(parts, wrapErr.Error())
-	}
-	return strings.Join(parts, "\n")
+	return runArgvCombined(argv)
 }
 
 // ghosttyAdapter is the native window-spawning driver for the Ghostty terminal.
@@ -168,21 +137,11 @@ func successDetail(out string) string {
 	return "ghostty osascript exit 0"
 }
 
-// failureDetail is the opaque Detail for a non-clean exit: the combined output
-// and/or execution-error text, falling back to the bare exit code so Detail is
-// never empty.
+// failureDetail is the opaque Detail for a non-clean Ghostty exit: it delegates
+// to the shared execFailureDetail formatter, supplying only the Ghostty-specific
+// never-empty fallback label.
 func failureDetail(out string, exitCode int, err error) string {
-	detail := strings.TrimSpace(out)
-	if err != nil {
-		if detail == "" {
-			return err.Error()
-		}
-		return detail + ": " + err.Error()
-	}
-	if detail == "" {
-		return fmt.Sprintf("ghostty osascript exit %d", exitCode)
-	}
-	return detail
+	return execFailureDetail(out, exitCode, err, "ghostty osascript exit %d")
 }
 
 // Compile-time assertion that *ghosttyAdapter satisfies the Adapter contract.
