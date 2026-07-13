@@ -3229,6 +3229,21 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// §6-5 input-lock: while an N≥2 spawn burst is in flight the picker is INERT
+		// to row actions so no concurrent user input can race the completion handler's
+		// selection mutation. A second Enter, m, navigation, Space, /, s, and every
+		// other key are SWALLOWED; only cancellation (Ctrl-C / Esc) stays live, routed
+		// to cancelBurst (task 6-8 wires the ctx-cancel + teardown; the stub is a
+		// no-op). This MUST precede the flash-clear, the SettingFilter guard, and the
+		// rune switch so no handler fires while pending. A burst starts from Enter on
+		// the Sessions page with no modal open, so this sits safely after the modal
+		// check at the top of updateSessionList.
+		if m.burstPending {
+			if keyIsCtrlC(msg) || keyIsCode(msg, tea.KeyEscape) {
+				return m.cancelBurst()
+			}
+			return m, nil
+		}
 		// Spec § Inline flash > Clear conditions, § Flash interaction with
 		// filter input: an actionable KeyMsg with an active flash clears
 		// the flash as a side effect and the keystroke continues to its
@@ -4603,6 +4618,27 @@ func (m Model) unsupportedBannerActive() bool {
 func (m Model) applySectionHeader(listView string) string {
 	if m.sessionList.FilterState() == list.Filtering {
 		return listView
+	}
+	// §6-5 in-burst Opening band: while an N≥2 spawn burst is in flight swap in the
+	// `Opening n/N…` pending affordance — the HIGHEST section-header claimant (just
+	// below the live filter input), so it OUTRANKS the multi-select banner, the
+	// unsupported banner, the locked query header, and the standard header. The
+	// transient flash lives in the §11 notice band (a separate row); this owns the
+	// section-header row. burstDone/burstTotal are the dispatch-time N and the streamed
+	// per-window counter (6-3).
+	if m.burstPending {
+		header := renderOpeningBand(
+			m.burstDone,
+			m.burstTotal,
+			m.contentWidth(),
+			m.canvasMode,
+			m.colourless,
+		)
+		idx := strings.IndexByte(listView, '\n')
+		if idx < 0 {
+			return header
+		}
+		return header + listView[idx:]
 	}
 	// §5 multi-select mode owns the section-header row (a filter-line analogue): swap
 	// in the `N selected` / `esc cancel` banner in place of the standard `Sessions`

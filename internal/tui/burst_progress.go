@@ -260,6 +260,21 @@ func (m Model) BurstTrigger() string { return m.burstTrigger }
 // target — recorded at dispatch, for testing.
 func (m Model) BurstTotal() int { return m.burstTotal }
 
+// BurstDone returns the in-burst per-window confirm counter — how many external
+// windows have acked so far, folded from the streamed spawnProgressMsg events — for
+// testing. It advances 0…N-1 (never reaching N: the trigger self-attaches silently,
+// so the `Opening n/N…` band never nags an N/N frame).
+func (m Model) BurstDone() int { return m.burstDone }
+
+// cancelBurst handles a Ctrl-C / Esc pressed while a spawn burst is in flight: the
+// §6-5 input-lock routes cancellation here (the only keys that stay live while
+// pending). Task 6-8 wires the real teardown — cancelling the burst context and
+// cleaning the in-flight batch — so for now this is a minimal stub that leaves the
+// model unchanged.
+func (m Model) cancelBurst() (tea.Model, tea.Cmd) {
+	return m, nil
+}
+
 // orderedMarkedSessions walks the session list top-to-bottom and returns the
 // marked session names in list order, DE-DUPED by name so a multi-tag By-Tag
 // session (which spans one row per tag) appears exactly once at its first list

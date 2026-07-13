@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -121,6 +122,26 @@ func renderMultiSelectHeader(count, width int, mode theme.Mode, colourless bool)
 	left := headerStyle(theme.MV.AccentViolet, mode, colourless).Render(strconv.Itoa(count) + " selected")
 	hint := headerStyle(theme.MV.TextDetail, mode, colourless).Render(multiSelectCancelHint)
 	return renderRightAnchoredSectionRow(left, hint, width, mode, colourless)
+}
+
+// renderOpeningBand renders the §6.5 in-burst `Opening n/N…` pending affordance in
+// the section-header row position — the HIGHEST section-header claimant (just below
+// the live filter input) while an N≥2 spawn burst is in flight. It is a left cluster
+// `Opening <done>/<total>…` in accent.violet (the mode accent — no new token; the
+// U+2026 horizontal ellipsis signals the burst is still awaiting per-window token
+// acks), composed through the SAME right-anchor core the standard section headers and
+// the §5 multi-select banner use — with NO right hint, so the empty hint pads the
+// whole right side with the canvas. Its right-alignment, the canvas-painted flex
+// spacer, and the §2.7 narrow degrade therefore match those headers EXACTLY. NO `▌`
+// left-bar (it is a section-header variant, not a §11 notice band). The single
+// rendered row is exactly one line.
+//
+// Under the NO_COLOR carve-out (§2.5) every hue and the canvas drop; the `Opening
+// n/N…` text survives on the terminal's native fg/bg.
+func renderOpeningBand(done, total, width int, mode theme.Mode, colourless bool) string {
+	left := headerStyle(theme.MV.AccentViolet, mode, colourless).
+		Render(fmt.Sprintf("Opening %d/%d…", done, total))
+	return renderRightAnchoredSectionRow(left, "", width, mode, colourless)
 }
 
 // renderUnsupportedHeader renders the §6.2 proactive unsupported/NULL terminal
