@@ -436,6 +436,18 @@ type Model struct {
 	multiSelectMode  bool
 	selectedSessions map[string]struct{}
 
+	// §6-7 pre-flight abort state (restore-host-terminal-windows). When an N≥2 Enter
+	// pre-flight finds a marked session gone, the burst aborts atomically (nothing
+	// spawned): abortBannerText holds the red `'<session>' is gone — nothing opened`
+	// section-header banner (the ⚠ glyph is added by renderPreflightAbortHeader), and
+	// goneFlagged is the transient set of gone session names the delegate draws the
+	// red ⚠ + `session gone` badge for. Both are cleared on dismiss (any actionable
+	// key / Esc) or a refresh; the picker stays in multi-select mode with the
+	// survivors kept marked. Distinct from the §11 flashText notice band — the abort
+	// banner is a section-header claimant (applySectionHeader), not a ▌-barred band.
+	abortBannerText string
+	goneFlagged     map[string]struct{}
+
 	// Async host-terminal detection lifecycle (restore-host-terminal-windows §6).
 	// detector runs the process-tree/client-walk identity detection off the Update
 	// path (a tea.Cmd on the command goroutine); resolve is the SAME config-aware
@@ -1243,15 +1255,16 @@ func (m *Model) syncResolvedMode() {
 // restyle is a later phase, and the outer fill in View() paints around it.
 // sessionDelegate constructs the SessionDelegate for the current model state: the
 // resolved canvas Mode + NO_COLOR carve-out, plus the §5 multi-select fields
-// (MultiSelect gate + the live selectedSessions set). It is the single source the
-// delegate is built from, so applyCanvasMode and refreshSessionDelegate cannot
-// drift on which fields the delegate carries.
+// (MultiSelect gate + the live selectedSessions set) and the §6-7 goneFlagged set.
+// It is the single source the delegate is built from, so applyCanvasMode and
+// refreshSessionDelegate cannot drift on which fields the delegate carries.
 func (m *Model) sessionDelegate() SessionDelegate {
 	return SessionDelegate{
 		Mode:        m.canvasMode,
 		Colourless:  m.colourless,
 		MultiSelect: m.multiSelectMode,
 		Selected:    m.selectedSessions,
+		GoneFlagged: m.goneFlagged,
 	}
 }
 
@@ -2476,10 +2489,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.handleBurstPartialFailure(msg)
 	case spawnAbortMsg:
-		// §6-3 pre-flight abort: a selected session vanished between marking and Enter,
-		// so nothing spawned. Clear burst-pending; the abort UI is task 6-7.
-		m.burstPending = false
-		return m, nil
+		// §6-7 pre-flight abort: a marked session vanished between marking and Enter, so
+		// the burst aborted BEFORE spawning (the goroutine returned before Burster.Run —
+		// nothing opened, no self-attach). Render the red abort banner, flag the gone
+		// rows, prune the gone session(s) keeping survivors marked, and stay in
+		// multi-select mode.
+		return m.handlePreflightAbort(msg), nil
 	case burstChannelClosedMsg:
 		// The burst channel drained and closed — the post-terminal sentinel. No-op:
 		// the terminal spawnCompleteMsg/spawnAbortMsg already cleared pending.
@@ -3243,6 +3258,25 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.cancelBurst()
 			}
 			return m, nil
+		}
+		// §6-7 abort-banner dismissal: while the red pre-flight abort banner is shown,
+		// an actionable key dismisses it — clearing the banner + the gone-row flags and
+		// refreshing the delegate (the red ⚠/badge clear; the survivors keep their ●) —
+		// and STAYS in multi-select mode. Esc dismisses the banner WITHOUT falling
+		// through to the §5.1 mode-exit Esc branch, so a first Esc clears the banner and
+		// a SECOND Esc (no banner) exits the mode as normal. Every OTHER actionable key
+		// clears the banner then continues to its handler ("one key, one intent", like
+		// the flash-clear below) — so a second Enter proceeds with the pruned survivors.
+		// Placed after the burst-pending guard: burstPending is already false once the
+		// abort landed, so this Esc path is reachable.
+		if m.abortBannerText != "" && isActionableKey(msg) {
+			dismissEsc := keyIsCode(msg, tea.KeyEscape)
+			(&m).clearAbortBanner()
+			if dismissEsc {
+				return m, nil
+			}
+			// Deliberate fall-through for non-Esc keys: the keystroke continues to its
+			// normal handler below.
 		}
 		// Spec § Inline flash > Clear conditions, § Flash interaction with
 		// filter input: an actionable KeyMsg with an active flash clears
@@ -4630,6 +4664,27 @@ func (m Model) applySectionHeader(listView string) string {
 		header := renderOpeningBand(
 			m.burstDone,
 			m.burstTotal,
+			m.contentWidth(),
+			m.canvasMode,
+			m.colourless,
+		)
+		idx := strings.IndexByte(listView, '\n')
+		if idx < 0 {
+			return header
+		}
+		return header + listView[idx:]
+	}
+	// §6-7 pre-flight abort banner: an N≥2 Enter found a marked session gone, so the
+	// burst aborted before spawning. Swap in the red `⚠ '<session>' is gone — nothing
+	// opened` error with a right-aligned dim `esc dismiss`. It is the transient
+	// error/guidance-flash claimant in the notice-band precedence, realised at the
+	// section-header row per the delivered frame — ABOVE the multi-select `N selected`
+	// banner (the abort banner owns the row over it) but below the Opening band (a
+	// burst that aborted is no longer pending, so the two never co-render). Cleared on
+	// dismiss (any actionable key / Esc) or a refresh.
+	if m.abortBannerText != "" {
+		header := renderPreflightAbortHeader(
+			m.abortBannerText,
 			m.contentWidth(),
 			m.canvasMode,
 			m.colourless,

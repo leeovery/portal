@@ -62,6 +62,14 @@ const (
 // keeping the bullets column-aligned down the list.
 const attachedMarker = "● attached"
 
+// goneBadge is the §6.7 pre-flight abort badge text, rendered in state.red in place
+// of the attached badge on a GONE-flagged row (the session vanished between marking
+// and Enter). It is exactly attachedSlotWidth + rowRightMargin cells wide, so it
+// fills the SAME fixed trailing region (attached slot + right margin) with no
+// padding — the row width stays byte-unchanged and the badge's left edge aligns with
+// the attached ● column.
+const goneBadge = "session gone"
+
 // attachedSlotWidth is the FIXED width of the attached trailing slot, derived
 // from the marker text so the empty (unattached) slot matches it exactly.
 var attachedSlotWidth = lipgloss.Width(attachedMarker)
@@ -206,6 +214,14 @@ type SessionDelegate struct {
 	// model's selectedSessions map (re-pointed on every toggle), nil-tolerant: a
 	// nil set marks nothing (isSelected).
 	Selected map[string]struct{}
+	// GoneFlagged is the §6.7 pre-flight abort set, keyed on Session.Name — the
+	// sessions that vanished between marking and Enter (spawn.PreflightMissing). A
+	// flagged row renders the red ⚠ in the left-bar column (in place of the ●/▌) and
+	// the red `session gone` badge (in place of the attached badge), taking
+	// PRECEDENCE over the ● marker. It is a transient set the model clears on
+	// dismiss/refresh; nil-tolerant like Selected. Propagated via the single
+	// sessionDelegate() chokepoint (like Selected).
+	GoneFlagged map[string]struct{}
 }
 
 // isSelected reports whether name is in the marked set. It is nil-safe: a nil set
@@ -373,6 +389,21 @@ func renderMarkedLeftBarColumn(bg, markerStyle lipgloss.Style) string {
 		bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(multiSelectMarker)))
 }
 
+// renderGoneLeftBarColumn renders the §6.7 pre-flight abort left-bar column for a
+// GONE-flagged row: the red ⚠ (the shared flashWarningGlyph) at col 0 + a trailing
+// cell, in the SAME fixed 2-cell leftBarColumnWidth geometry as the ▌ selector and
+// the ● marker, so the name keeps its left edge and no downstream column shifts
+// (§3.5 / §4.1). It takes PRECEDENCE over BOTH the ● marker and the ▌ selector — a
+// gone row shows the ⚠, never a ●/▌. markerStyle is the caller's rowToken(
+// lipgloss.Style{}, StateRed, selected) result, so the ⚠ carries the bg.selection
+// tint on the cursor/banded row and the canvas otherwise (and drops hue under
+// NO_COLOR); bg is the caller's rowBg result, so the trailing cell carries the same
+// tint.
+func renderGoneLeftBarColumn(bg, markerStyle lipgloss.Style) string {
+	return markerStyle.Render(flashWarningGlyph) +
+		bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(flashWarningGlyph)))
+}
+
 // rowBg delegates to the shared rowBgStyle free function, binding the
 // delegate's Mode and Colourless. Retained so the existing call sites keep their
 // terse d.rowBg(selected) form.
@@ -433,11 +464,18 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	// literal true) so it carries the bg.selection tint on a marked cursor row and
 	// the canvas on an unselected marked row (dropping hue under NO_COLOR). Shared
 	// with the Project delegate via renderLeftBarColumn for the unmarked case.
+	// A §6.7 GONE-flagged row (pre-flight abort — the session vanished between marking
+	// and Enter) draws the red ⚠ in the left-bar column, taking PRECEDENCE over both
+	// the ● marker and the ▌ selector.
+	goneRow := isSelected(d.GoneFlagged, it.Session.Name)
 	marked := d.MultiSelect && isSelected(d.Selected, it.Session.Name)
 	var bar string
-	if marked {
+	switch {
+	case goneRow:
+		bar = renderGoneLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, theme.MV.StateRed, selected))
+	case marked:
 		bar = renderMarkedLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, selected))
-	} else {
+	default:
 		bar = renderLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, theme.MV.AccentViolet, true), selected)
 	}
 
@@ -481,21 +519,33 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	count := d.rowToken(lipgloss.Style{}, countTok, selected).Render(countText) +
 		bg.Render(padTo("", countSlotWidth-lipgloss.Width(countText)))
 
-	// Attached marker — a fixed-width slot right of the count. "● attached" in
-	// state.green when attached (the single state.green token clears the floor on
-	// both the canvas and the bg.selection tint, so the selected row keeps the same
-	// green — no per-context override), an EMPTY slot of the SAME width when not, so
-	// the bullets and the counts stay column-aligned regardless of name length (§4.1).
-	attached := bg.Render(padTo("", attachedSlotWidth))
-	if it.Session.Attached {
-		attached = d.rowToken(lipgloss.Style{}, theme.MV.StateGreen, selected).Render(attachedMarker) +
-			bg.Render(padTo("", attachedSlotWidth-lipgloss.Width(attachedMarker)))
+	// Trailing region — the fixed (attachedSlotWidth + rowRightMargin) cells right of
+	// the count. On a §6.7 GONE-flagged row the red `session gone` badge REPLACES both
+	// the attached slot AND the right margin: "session gone" is exactly that width, so
+	// it fills the region with no padding, keeping the row width byte-unchanged and its
+	// left edge aligned with the attached ● column. Otherwise the attached badge slot
+	// + the right margin render as before.
+	var trailing string
+	if goneRow {
+		badge := d.rowToken(lipgloss.Style{}, theme.MV.StateRed, selected).Render(goneBadge)
+		trailing = badge + bg.Render(padTo("", attachedSlotWidth+rowRightMargin-lipgloss.Width(goneBadge)))
+	} else {
+		// Attached marker — a fixed-width slot right of the count. "● attached" in
+		// state.green when attached (the single state.green token clears the floor on
+		// both the canvas and the bg.selection tint, so the selected row keeps the same
+		// green — no per-context override), an EMPTY slot of the SAME width when not, so
+		// the bullets and the counts stay column-aligned regardless of name length (§4.1).
+		attached := bg.Render(padTo("", attachedSlotWidth))
+		if it.Session.Attached {
+			attached = d.rowToken(lipgloss.Style{}, theme.MV.StateGreen, selected).Render(attachedMarker) +
+				bg.Render(padTo("", attachedSlotWidth-lipgloss.Width(attachedMarker)))
+		}
+		// The right margin insets the trailing columns from the content edge (§4.1) so
+		// the attached bullet does not sit flush against the edge (matching the design).
+		rightMargin := bg.Render(padTo("", rowRightMargin))
+		trailing = attached + rightMargin
 	}
-
-	// The right margin insets the trailing columns from the content edge (§4.1) so
-	// the attached bullet does not sit flush against the edge (matching the design).
-	rightMargin := bg.Render(padTo("", rowRightMargin))
-	row := indentCell + bar + name + namePad + gap + count + attached + rightMargin
+	row := indentCell + bar + name + namePad + gap + count + trailing
 
 	// Safety clamp (§2.7 / §3.5): the trailing slots are a FIXED 25 cells (bar +
 	// gap + count + attached + indent); at pathological narrow widths the flex name

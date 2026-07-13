@@ -73,6 +73,12 @@ const (
 	// the dim identity reads ` — Apple Terminal · com.apple.Terminal`.
 	unsupportedIdentityDash   = " — "
 	unsupportedIdentityMiddot = " · "
+
+	// preflightAbortDismissHint is the §6.7 pre-flight abort banner's right-aligned
+	// hint — `esc dismiss` in text.detail (the SAME dim chrome token the standard
+	// `/ to filter` / `esc cancel` hints use), signalling Esc clears the abort banner
+	// while STAYING in multi-select mode. Single source of the wording.
+	preflightAbortDismissHint = "esc dismiss"
 )
 
 // renderSectionHeader renders the §3.2 / §4.2 Sessions section header for the
@@ -177,6 +183,33 @@ func renderUnsupportedHeader(name, bundleID string, width int, mode theme.Mode, 
 	if bundleID != "" {
 		hint = headerStyle(theme.MV.AccentBlue, mode, colourless).Render(unsupportedDocsHint)
 	}
+	return renderRightAnchoredSectionRow(left, hint, width, mode, colourless)
+}
+
+// renderPreflightAbortHeader renders the §6.7 pre-flight abort banner in the
+// section-header row position — a red one-line error naming the gone session(s)
+// after an N≥2 Enter found a marked session vanished (nothing spawned, no window
+// opened, no self-attach). The left cluster is the `⚠` glyph (the shared
+// flashWarningGlyph, so the two warning surfaces stay glyph-consistent) + a space +
+// the message, all in state.red (the existing error accent — no new token); the
+// right hint is a dim `esc dismiss` in text.detail. The message is pre-composed by
+// the caller (spawn.QuoteJoin + spawn.GoneVerb), so a single gone session reads
+// `⚠ '<session>' is gone — nothing opened` and several read `⚠ 's2', 's4' are gone
+// — nothing opened`.
+//
+// It routes through the SAME right-anchor core (renderRightAnchoredSectionRow) the
+// standard Sessions/Projects section headers and the §5 multi-select banner use, so
+// its right-alignment, the canvas-painted flex spacer, and the §2.7 narrow degrade
+// match those headers EXACTLY. NO `▌` left-bar (it is a section-header variant, not
+// a §11 notice band). The single rendered row is exactly one line.
+//
+// Under the NO_COLOR carve-out (§2.5) every hue and the canvas drop; the `⚠`, the
+// message, and `esc dismiss` survive on the terminal's native fg/bg (glyph-backed,
+// never colour-only).
+func renderPreflightAbortHeader(message string, width int, mode theme.Mode, colourless bool) string {
+	left := headerStyle(theme.MV.StateRed, mode, colourless).
+		Render(flashWarningGlyph + " " + message)
+	hint := headerStyle(theme.MV.TextDetail, mode, colourless).Render(preflightAbortDismissHint)
 	return renderRightAnchoredSectionRow(left, hint, width, mode, colourless)
 }
 
