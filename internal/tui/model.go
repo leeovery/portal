@@ -4479,6 +4479,18 @@ func (m Model) renderHeader() string {
 	return renderHeaderBlock(m.contentWidth(), m.canvasMode, m.colourless)
 }
 
+// unsupportedBannerActive reports whether the §6.2 proactive unsupported-terminal
+// banner owns the Sessions section-header row: detection has resolved to an
+// unsupported resolution (a NULL remote/mosh identity OR a non-NULL undriven
+// identity like com.apple.Terminal — the resolution-based DetectUnsupported test,
+// NOT IsNull) AND multi-select mode is not active (the §5 `N selected` banner
+// outranks it). It is the SINGLE predicate both applySectionHeader (which swaps in
+// the banner) and activeNoticeBand (which suppresses the By-Tag signpost while the
+// banner owns the row) read, so the two can never drift.
+func (m Model) unsupportedBannerActive() bool {
+	return m.DetectUnsupported() && !m.multiSelectMode
+}
+
 // applySectionHeader swaps the §3.2 / §4.2 restyled section header in place of the
 // plain bubbles/list title line (the FIRST line of listView). Because the title
 // row already occupies exactly one line in the list's height budget, replacing its
@@ -4510,6 +4522,27 @@ func (m Model) applySectionHeader(listView string) string {
 	if m.multiSelectMode {
 		header := renderMultiSelectHeader(
 			len(m.selectedSessions),
+			m.contentWidth(),
+			m.canvasMode,
+			m.colourless,
+		)
+		idx := strings.IndexByte(listView, '\n')
+		if idx < 0 {
+			return header
+		}
+		return header + listView[idx:]
+	}
+	// §6.2 proactive unsupported/NULL banner: once detection has resolved to an
+	// unsupported resolution, swap in the `⚠ unsupported terminal — <name> ·
+	// <bundleID>` (named) / `⚠ no host-local terminal` (NULL) banner. This PRECEDES
+	// the FilterApplied branch (a committed filter WHILE unsupported still shows the
+	// banner) but FOLLOWS multi-select (the `N selected` banner outranks it — the
+	// gate is unsupportedBannerActive, false in the mode). An in-flight detection
+	// (not yet resolved) leaves DetectUnsupported false, so the standard header shows.
+	if m.unsupportedBannerActive() {
+		header := renderUnsupportedHeader(
+			m.detectIdentity.Name,
+			m.detectIdentity.BundleID,
 			m.contentWidth(),
 			m.canvasMode,
 			m.colourless,

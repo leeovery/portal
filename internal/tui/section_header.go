@@ -51,6 +51,27 @@ const (
 	// `/ to filter` hint uses), signalling Esc leaves the mode. It is the single
 	// source of the wording.
 	multiSelectCancelHint = "esc cancel"
+
+	// unsupportedLabel is the §6.2 named-identity warning label — `unsupported
+	// terminal` in accent.orange (amber) — shown when detection resolves a non-NULL
+	// but undriven host terminal (e.g. com.apple.Terminal). It reads before the dim
+	// identity string.
+	unsupportedLabel = "unsupported terminal"
+	// unsupportedNullLabel is the §6.2 NULL-identity honest label — `no host-local
+	// terminal` in accent.orange — shown when detection resolves the NULL identity
+	// (remote/mosh, bundleID == ""). Matches CLI task 2-7's IsNull copy branch; it
+	// carries NO identity string and NO `see docs` hint.
+	unsupportedNullLabel = "no host-local terminal"
+	// unsupportedDocsHint is the §6.2 right-anchored blue link hint — `see docs` in
+	// accent.blue — shown only on the named (non-NULL) banner. It is the single
+	// source of the wording.
+	unsupportedDocsHint = "see docs"
+	// unsupportedIdentityDash / unsupportedIdentityMiddot are the §6.2 identity
+	// separators, matching the delivered frame EXACTLY: a spaced em-dash (U+2014)
+	// before the friendly name and a spaced middot (U+00B7) before the bundle id, so
+	// the dim identity reads ` — Apple Terminal · com.apple.Terminal`.
+	unsupportedIdentityDash   = " — "
+	unsupportedIdentityMiddot = " · "
 )
 
 // renderSectionHeader renders the §3.2 / §4.2 Sessions section header for the
@@ -100,6 +121,60 @@ func renderMultiSelectHeader(count, width int, mode theme.Mode, colourless bool)
 	left := headerStyle(theme.MV.AccentViolet, mode, colourless).Render(strconv.Itoa(count) + " selected")
 	hint := headerStyle(theme.MV.TextDetail, mode, colourless).Render(multiSelectCancelHint)
 	return renderRightAnchoredSectionRow(left, hint, width, mode, colourless)
+}
+
+// renderUnsupportedHeader renders the §6.2 proactive unsupported/NULL terminal
+// banner in the section-header row position — a filter-line analogue that REPLACES
+// the standard `Sessions ··· N` section header when detection has resolved the host
+// terminal to an unsupported resolution. It branches on the identity shape (NULL
+// via bundleID == ""):
+//
+//   - NAMED (non-NULL, bundleID != ""): a left cluster of the `⚠` glyph +
+//     `unsupported terminal` in accent.orange (amber — the existing warning accent,
+//     no new token), then ` — <name> · <bundleID>` in text.detail (the dim identity
+//     string, the copy-paste key), with a right-anchored `see docs` hint in
+//     accent.blue.
+//   - NULL (bundleID == "", remote/mosh): the honest `⚠ no host-local terminal`
+//     line in accent.orange — NO identity, NO `see docs` hint (matching CLI task
+//     2-7's IsNull copy branch). The empty hint routes through the same assembler,
+//     padding the whole right side with the canvas.
+//
+// It routes through the SAME right-anchor core (renderRightAnchoredSectionRow) the
+// standard Sessions/Projects section headers and the §5 multi-select banner use, so
+// its right-alignment, the canvas-painted flex spacer, and the §2.7 narrow degrade
+// match those headers EXACTLY. NO `▌` left-bar (it is a section-header variant, not
+// a §11 notice band). The single rendered row is exactly one line.
+//
+// Under the NO_COLOR carve-out (§2.5) every hue and the canvas drop; the `⚠`, the
+// label, the identity string, and `see docs` survive on the terminal's native fg/bg
+// (glyph-backed, never colour-only).
+func renderUnsupportedHeader(name, bundleID string, width int, mode theme.Mode, colourless bool) string {
+	left := unsupportedLeftCluster(name, bundleID, mode, colourless)
+	// The `see docs` hint is shown only for a named (non-NULL) identity; the NULL
+	// branch carries no hint (its empty right pads to width through the assembler).
+	var hint string
+	if bundleID != "" {
+		hint = headerStyle(theme.MV.AccentBlue, mode, colourless).Render(unsupportedDocsHint)
+	}
+	return renderRightAnchoredSectionRow(left, hint, width, mode, colourless)
+}
+
+// unsupportedLeftCluster renders the §6.2 banner's left cluster flush at the
+// content's left edge (mirroring sectionLeftCluster — no leading indent). For a
+// NULL identity (bundleID == "") it is the honest `⚠ no host-local terminal` label
+// in accent.orange with no identity string. For a named identity it is the amber
+// `⚠ unsupported terminal` label followed by the dim ` — <name> · <bundleID>`
+// identity in text.detail. The `⚠` glyph is shared with the §11.2 warning flash
+// (flashWarningGlyph) so the two warning surfaces stay glyph-consistent.
+func unsupportedLeftCluster(name, bundleID string, mode theme.Mode, colourless bool) string {
+	amber := headerStyle(theme.MV.AccentOrange, mode, colourless)
+	if bundleID == "" {
+		return amber.Render(flashWarningGlyph + " " + unsupportedNullLabel)
+	}
+	label := amber.Render(flashWarningGlyph + " " + unsupportedLabel)
+	identity := headerStyle(theme.MV.TextDetail, mode, colourless).
+		Render(unsupportedIdentityDash + name + unsupportedIdentityMiddot + bundleID)
+	return lipgloss.JoinHorizontal(lipgloss.Top, label, identity)
 }
 
 // renderSectionHeaderRow lays out a pre-rendered left cluster and the standard

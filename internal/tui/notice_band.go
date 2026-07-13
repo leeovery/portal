@@ -349,9 +349,13 @@ func (m Model) activeNoticeBand() (role noticeBandRole, message string, ok bool)
 		return flashBandRole(m.flashKind), m.flashText, true
 	}
 	// §5 multi-select mode replaces the section header with the `N selected` banner
-	// and owns the row region; the persistent By-Tag signpost is suppressed for the
-	// mode's duration (a transient flash, handled above, still wins the slot).
-	if m.byTagSignpost && !m.multiSelectMode {
+	// and §6.2 the resolved-unsupported terminal replaces it with the `⚠ unsupported
+	// terminal` banner; both own the section-header row, so the persistent By-Tag
+	// signpost is suppressed while either does (a transient flash, handled above,
+	// still wins the slot). unsupportedBannerActive is the SAME predicate
+	// applySectionHeader's §6.2 claimant reads, so the suppression and the swap can
+	// never drift.
+	if m.byTagSignpost && !m.multiSelectMode && !m.unsupportedBannerActive() {
 		return bandInfo, byTagSignpostText, true
 	}
 	// No active band: ok=false, so the role is don't-care (callers gate on ok); the
