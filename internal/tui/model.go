@@ -3253,13 +3253,33 @@ func (m Model) exitMultiSelect() Model {
 // handleMultiSelectEnter commits the §5 multi-select marked set when Enter is
 // pressed in the mode (the / filter not focused — that Enter is delegated to the
 // list to commit-to-browse). It is dispatched from the updateSessionList Enter
-// mode-branch.
+// mode-branch. The cursor/highlight is irrelevant — only the marked set commits.
 //
-// Placeholder — the N=0/N=1/N≥2 commit boundary lands in Task 5.7. Until then
-// Enter in multi-select mode is a deliberate no-op that leaves the mode and the
-// selection intact.
+// The N-count boundary (spec Multi-Select Mode → N=0 / N=1 boundary):
+//   - N=0: no-op EXIT — reuse exitMultiSelect so Portal stays open with nothing
+//     opened (same effect as Esc; NOT a quit).
+//   - N=1: degenerates to a plain single attach — set m.selected to the one
+//     marked name and quit, byte-identical in effect to handleSessionListEnter,
+//     so the cmd layer's existing self-attach connector opens it in the current
+//     window (no special-casing, no adapter).
+//   - N≥2: the spawn-burst boundary, which is Phase 6 — a deliberate no-op stub
+//     until then.
 func (m Model) handleMultiSelectEnter() (tea.Model, tea.Cmd) {
-	return m, nil
+	switch len(m.selectedSessions) {
+	case 0:
+		m = m.exitMultiSelect()
+		return m, nil
+	case 1:
+		var name string
+		for name = range m.selectedSessions {
+		}
+		m.selected = name
+		return m, tea.Quit
+	default:
+		// Phase 6 wires the N≥2 spawn burst (internal/spawn) here; until then N≥2
+		// Enter is a deliberate no-op leaving the mode + selection intact.
+		return m, nil
+	}
 }
 
 func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
