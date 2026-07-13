@@ -511,13 +511,13 @@ type Model struct {
 	// clears it on every terminal path.
 	burstCancelled bool
 
-	// pendingBurstEnter + pendingBurstOrdered stash a deferred N≥2 Enter pressed
-	// while detection is still in flight (detectResolved false). The
-	// terminalDetectedMsg arm re-runs the branch decision from the snapshot once
-	// detection resolves, so the burst is never lost and never fires before the
-	// host terminal is known.
-	pendingBurstEnter   bool
-	pendingBurstOrdered []string
+	// pendingBurstEnter flags a deferred N≥2 Enter pressed while detection is still
+	// in flight (detectResolved false). The terminalDetectedMsg arm re-derives the
+	// marked set LIVE from selectedSessions and re-runs the branch decision once
+	// detection resolves (§7-5) — no Enter-time snapshot is stashed, so a mark toggle
+	// during the (input-lock-free) defer window is honoured. The burst is never lost
+	// and never fires before the host terminal is known.
+	pendingBurstEnter bool
 
 	// Data loading tracking
 	sessionsLoaded       bool
@@ -2462,9 +2462,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// §6-3: a deferred N≥2 Enter (pressed while detection was in flight) resolves
 		// its branch decision now that the terminal is known — supported → dispatch the
 		// burst, unsupported → the atomic no-op. Without this the deferred Enter would
-		// wait forever.
+		// wait forever. The spawned set is RE-DERIVED live from selectedSessions here
+		// (§7-5), not replayed from a stale Enter-time snapshot: the defer window does
+		// not engage the burst input-lock (burstPending is still false), so a mark
+		// toggle between the Enter and this reply must be honoured — decideBurst no-ops
+		// if that leaves the live set empty.
 		if m.pendingBurstEnter {
-			return m.decideBurst(m.pendingBurstOrdered)
+			return m.decideBurst(m.orderedMarkedSessions())
 		}
 		return m, nil
 	case spawnProgressMsg:

@@ -361,15 +361,16 @@ func (m Model) orderedMarkedSessions() []string {
 
 // beginBurst starts the §6-3 N≥2 spawn burst from the list-ordered marked set. It
 // gates on the async terminal detection (§6-1): while detection is still in flight
-// it DEFERS — stashing the ordered snapshot so the terminalDetectedMsg arm resolves
+// it DEFERS — flagging pendingBurstEnter so the terminalDetectedMsg arm resolves
 // the branch — and, if detection was never even dispatched, dispatches it now so
 // the defer can actually resolve (otherwise a warm Projects-landing → x → Sessions
-// → mark → Enter would defer forever). Once detection has resolved it branches
-// immediately via decideBurst.
+// → mark → Enter would defer forever). The deferred branch stashes NO snapshot: the
+// marked set is re-derived live from selectedSessions when detection resolves (§7-5),
+// so a mark toggle during the defer window is honoured. Once detection has resolved
+// it branches immediately via decideBurst.
 func (m Model) beginBurst(ordered []string) (Model, tea.Cmd) {
 	if !m.detectResolved {
 		m.pendingBurstEnter = true
-		m.pendingBurstOrdered = ordered
 		// Dispatch detection now if it was never kicked off, so the deferred burst
 		// resolves rather than hanging. maybeDispatchDetectionCmd is a no-op (nil) when
 		// detection is already dispatched or unwired.
@@ -397,7 +398,15 @@ func (m Model) beginBurst(ordered []string) (Model, tea.Cmd) {
 // pendingBurstEnter branch) — so the atomic no-op + flash lands on either path.
 func (m Model) decideBurst(ordered []string) (Model, tea.Cmd) {
 	m.pendingBurstEnter = false
-	m.pendingBurstOrdered = nil
+	// §7-5: ordered is re-derived live from selectedSessions at this decision point
+	// (both entry points now pass the live set), so a mark toggle during the
+	// pre-detection defer window is honoured. If every session was unmarked during
+	// that window the set is empty — no-op here rather than dispatching an empty
+	// burst (dispatchBurst would panic indexing ordered[len-1]). Nothing was spawned,
+	// so the picker stays exactly as the user left it (still in multi-select mode).
+	if len(ordered) == 0 {
+		return m, nil
+	}
 	if m.DetectUnsupported() {
 		// §6-10: emit the unsupported outcome line (resolution=unsupported, no
 		// per-window records — nothing was attempted).
