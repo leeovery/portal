@@ -46,6 +46,11 @@ const (
 	// filterable session/project view (§3.2 / §4.2 / §6). The `s switch view` hint
 	// is the footer's responsibility and is deliberately NOT duplicated here.
 	sectionFilterHint = "/ to filter"
+	// multiSelectCancelHint is the §5 multi-select banner's right-aligned hint —
+	// `esc cancel` in text.detail (the SAME dim chrome token the standard
+	// `/ to filter` hint uses), signalling Esc leaves the mode. It is the single
+	// source of the wording.
+	multiSelectCancelHint = "esc cancel"
 )
 
 // renderSectionHeader renders the §3.2 / §4.2 Sessions section header for the
@@ -76,20 +81,53 @@ func renderProjectsSectionHeader(count, width int, canvasMode theme.Mode, colour
 	return renderSectionHeaderRow(left, width, canvasMode, colourless)
 }
 
-// renderSectionHeaderRow lays out a pre-rendered left cluster and the shared
-// right-aligned `/ to filter` hint into the single section-header row, always
-// exactly width cells wide: the cluster and the hint are separated by a
-// canvas-painted flex spacer. Below the width at which the cluster + a spacer + the
-// hint no longer fit, the right hint drops rather than overflow (§2.7). It is the
-// single layout core both the Sessions and Projects section headers route through,
-// so their right-alignment and narrow degrade can never drift.
+// renderMultiSelectHeader renders the §5 multi-select banner in the section-header
+// row position: a left cluster — `N selected` in accent.violet — with a
+// right-aligned `esc cancel` hint (text.detail) on the same row, the gap filled
+// with a canvas-painted flex spacer to the content width. It REPLACES the standard
+// `Sessions ··· N` section header while multi-select mode is active — a filter-line
+// analogue carrying NO `▌` left-bar (it is a section-header variant, not a §11
+// notice band).
+//
+// It routes through the SAME right-anchor core (renderRightAnchoredSectionRow) the
+// standard Sessions/Projects section headers use, so its right-alignment, the
+// canvas-painted flex spacer, and the §2.7 narrow degrade match those headers
+// EXACTLY — only the left cluster (violet `N selected`) and the right hint (`esc
+// cancel`) differ. Under the NO_COLOR carve-out (§2.5) every hue and the canvas
+// drop; the `N selected` / `esc cancel` text renders intact on the terminal's
+// native fg/bg. The single rendered row is exactly one line.
+func renderMultiSelectHeader(count, width int, mode theme.Mode, colourless bool) string {
+	left := headerStyle(theme.MV.AccentViolet, mode, colourless).Render(strconv.Itoa(count) + " selected")
+	hint := headerStyle(theme.MV.TextDetail, mode, colourless).Render(multiSelectCancelHint)
+	return renderRightAnchoredSectionRow(left, hint, width, mode, colourless)
+}
+
+// renderSectionHeaderRow lays out a pre-rendered left cluster and the standard
+// right-aligned `/ to filter` hint into the single section-header row via the
+// shared right-anchor core (renderRightAnchoredSectionRow). It is the entry point
+// both the Sessions and Projects section headers route through, so their
+// right-alignment and §2.7 narrow degrade can never drift from each other or from
+// the §5 multi-select banner (which shares the same core).
 func renderSectionHeaderRow(left string, width int, canvasMode theme.Mode, colourless bool) string {
+	// The standard section header's fixed `/ to filter` right hint; the shared core
+	// (renderRightAnchoredSectionRow) owns the flex-spacer geometry and the §2.7
+	// degrade, so it is passed the rendered hint.
+	hint := headerStyle(theme.MV.TextDetail, canvasMode, colourless).Render(sectionFilterHint)
+	return renderRightAnchoredSectionRow(left, hint, width, canvasMode, colourless)
+}
+
+// renderRightAnchoredSectionRow lays out a pre-rendered left cluster and a
+// pre-rendered right hint into the single section-header row, always exactly width
+// cells wide: the cluster and the hint are separated by a canvas-painted flex
+// spacer. Below the width at which the cluster + a spacer + the hint no longer fit,
+// the right hint drops rather than overflow (§2.7). It is the shared right-anchor
+// core BOTH the standard Sessions/Projects section headers (`/ to filter` hint, via
+// renderSectionHeaderRow) and the §5 multi-select banner (`esc cancel` hint, via
+// renderMultiSelectHeader) route through, so their right-alignment, flex spacer, and
+// narrow degrade can never drift — only the left cluster and the hint text differ.
+func renderRightAnchoredSectionRow(left, hint string, width int, canvasMode theme.Mode, colourless bool) string {
 	w := headerWidthOrFallback(width)
 	leftWidth := lipgloss.Width(left)
-
-	// Rendered eagerly so we can measure hintWidth for the degrade decision below;
-	// the `leftWidth >= w` branch discards it (cheap — runs once per frame).
-	hint := headerStyle(theme.MV.TextDetail, canvasMode, colourless).Render(sectionFilterHint)
 	hintWidth := lipgloss.Width(hint)
 
 	// Narrow degrade (§2.7): the left cluster already meets/exceeds the row, OR the

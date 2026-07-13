@@ -4297,6 +4297,24 @@ func (m Model) applySectionHeader(listView string) string {
 	if m.sessionList.FilterState() == list.Filtering {
 		return listView
 	}
+	// §5 multi-select mode owns the section-header row (a filter-line analogue): swap
+	// in the `N selected` / `esc cancel` banner in place of the standard `Sessions`
+	// header. This PRECEDES the FilterApplied branch, so a committed/applied filter
+	// WHILE in the mode shows the banner (the mode affordance), not the locked query
+	// header — the live filter INPUT (Filtering, above) still steps the banner aside.
+	if m.multiSelectMode {
+		header := renderMultiSelectHeader(
+			len(m.selectedSessions),
+			m.contentWidth(),
+			m.canvasMode,
+			m.colourless,
+		)
+		idx := strings.IndexByte(listView, '\n')
+		if idx < 0 {
+			return header
+		}
+		return header + listView[idx:]
+	}
 	if m.sessionList.FilterState() == list.FilterApplied {
 		header := renderFilterQueryHeader(
 			m.sessionList.FilterValue(),

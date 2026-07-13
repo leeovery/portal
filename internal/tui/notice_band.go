@@ -336,7 +336,9 @@ func noticeBandPadRight(seg string, segWidth, w int, tint theme.Token, mode them
 //
 //   - flashText != ""  → the transient flash takes the slot; its flashKind selects
 //     the warning (bandWarning) or success (bandSuccess) styling (§11.2).
-//   - byTagSignpost     → the persistent no-tags info band (bandInfo) — §11.3.
+//   - byTagSignpost     → the persistent no-tags info band (bandInfo) — §11.3 —
+//     UNLESS §5 multi-select mode is active, which replaces the section header with
+//     the `N selected` banner and suppresses the signpost (a flash still wins).
 //
 // At most one is ever returned, so the two independent band sources collapse to a
 // single arbitrated insert (no double-band). The role/message the arbiter returns
@@ -346,7 +348,10 @@ func (m Model) activeNoticeBand() (role noticeBandRole, message string, ok bool)
 	if m.flashText != "" {
 		return flashBandRole(m.flashKind), m.flashText, true
 	}
-	if m.byTagSignpost {
+	// §5 multi-select mode replaces the section header with the `N selected` banner
+	// and owns the row region; the persistent By-Tag signpost is suppressed for the
+	// mode's duration (a transient flash, handled above, still wins the slot).
+	if m.byTagSignpost && !m.multiSelectMode {
 		return bandInfo, byTagSignpostText, true
 	}
 	// No active band: ok=false, so the role is don't-care (callers gate on ok); the
