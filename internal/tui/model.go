@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui/theme"
 )
@@ -433,6 +434,24 @@ type Model struct {
 	// model needs no constructor change; exitMultiSelect nils it back out.
 	multiSelectMode  bool
 	selectedSessions map[string]struct{}
+
+	// Async host-terminal detection lifecycle (restore-host-terminal-windows §6).
+	// detector runs the process-tree/client-walk identity detection off the Update
+	// path (a tea.Cmd on the command goroutine); resolve is the SAME config-aware
+	// identity→adapter/resolution seam the spawn CLI uses (loaded once from
+	// terminals.json at construction). Both are injected together (nil in the
+	// capture harness). Reaching PageSessions dispatches Detect() exactly once
+	// (detectDispatched latch); the terminalDetectedMsg arm caches the identity and
+	// its resolution (detectIdentity/detectResolution, detectResolved=true). Caching
+	// the Resolution — not just IsNull() — is load-bearing: a recognised-but-undriven
+	// terminal is non-NULL yet resolves unsupported. A later burst REUSES this cache;
+	// no rebuild re-detects or re-resolves.
+	detector         TerminalDetector
+	resolve          func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	detectIdentity   spawn.Identity
+	detectResolution spawn.Resolution
+	detectResolved   bool
+	detectDispatched bool
 
 	// Data loading tracking
 	sessionsLoaded       bool
@@ -2156,7 +2175,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.sessionsLoaded = true
 		m.evaluateDefaultPage()
-		return m, cmd
+		// §6 warm direct Sessions entry: once evaluateDefaultPage has landed
+		// PageSessions, dispatch the async host-terminal detection exactly once (the
+		// detectDispatched latch + the PageSessions guard inside
+		// maybeDispatchDetectionCmd make this a no-op on the loading/refetch
+		// re-entries and on a Projects landing). On the cold route this arm
+		// early-returned above while PageLoading, so detection is dispatched by the
+		// loading→Sessions transition arms instead.
+		return m, tea.Batch(cmd, m.maybeDispatchDetectionCmd())
 	case LoadingMinElapsedMsg:
 		m.minElapsed = true
 		// §10.5: once a fatal aborted the boot the model is parked in the error
@@ -2170,8 +2196,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// §10.2 Part-B: re-enumerate sessions on the concurrent cold-boot
 			// route so the picker reflects post-restore tmux state, not the
 			// stale Init snapshot (no-op on the warm route). Batched with the
-			// warnings-surface cmd so neither is dropped.
-			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore())
+			// warnings-surface cmd so neither is dropped. §6: also dispatch the
+			// async host-terminal detection here (the cold/warm loading→Sessions
+			// transition), guarded once via the detectDispatched latch.
+			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
 		}
 		return m, nil
 	case BootstrapProgressMsg:
@@ -2210,8 +2238,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.transitionFromLoading()
 			// §10.2 Part-B: see the LoadingMinElapsedMsg arm — re-fetch sessions
 			// on the concurrent route so the post-transition picker reflects
-			// post-restore tmux state (no-op on the warm route).
-			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore())
+			// post-restore tmux state (no-op on the warm route). §6: also dispatch
+			// the async host-terminal detection here, guarded once via the
+			// detectDispatched latch (the LoadingMinElapsedMsg arm is a no-op when
+			// this one fired first, and vice versa).
+			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
 		}
 		return m, nil
 	case BootstrapFatalMsg:
@@ -2351,6 +2382,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Gen == m.flashGen {
 			m.clearFlash()
 		}
+		return m, nil
+	case terminalDetectedMsg:
+		// §6 async host-terminal detection resolved on the command goroutine. Cache
+		// the identity AND its resolution via the injected config-aware resolve seam.
+		// Caching the Resolution (not just IsNull()) is load-bearing: a
+		// recognised-but-undriven terminal is non-NULL yet resolves unsupported. A
+		// later picker burst reuses this cache; no rebuild re-detects or re-resolves.
+		m.detectIdentity = msg.identity
+		_, m.detectResolution = m.resolve(msg.identity)
+		m.detectResolved = true
 		return m, nil
 	}
 

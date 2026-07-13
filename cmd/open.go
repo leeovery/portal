@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
@@ -345,10 +346,17 @@ type tuiConfig struct {
 	initialMode     prefs.SessionListMode
 	appearance      prefs.Appearance
 	modePersister   tui.ModePersister
-	cwd             string
-	insideTmux      bool
-	currentSession  string
-	serverStarted   bool
+	// detector + resolve are the §6 async host-terminal detection seams. Built
+	// once at TUI construction (detector over the shared *tmux.Client; resolve from
+	// the config-aware buildResolver, terminals.json loaded once) and threaded into
+	// tui.Deps. This is the SINGLE injection site — the picker burst reuses the
+	// model's cached resolution and never re-injects.
+	detector       tui.TerminalDetector
+	resolve        func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	cwd            string
+	insideTmux     bool
+	currentSession string
+	serverStarted  bool
 	// progressReceiver is the §10.2 concurrent cold-boot route's channel-receive
 	// tea.Cmd. Set only on the cold + TUI path (where bootstrap was deferred to a
 	// goroutine); nil on every synchronous path, leaving the model's today
@@ -402,6 +410,8 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		CurrentSession:   cfg.currentSession,
 		NoColor:          cfg.noColor,
 		ProgressReceiver: cfg.progressReceiver,
+		Detector:         cfg.detector,
+		Resolve:          cfg.resolve,
 	})
 }
 
@@ -556,6 +566,13 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		appearance:    appearance,
 		cwd:           cwd,
 		serverStarted: serverStarted,
+		// §6 async host-terminal detection seams, built once here: the detector over
+		// the shared *tmux.Client, and the config-aware resolver's Resolve (buildResolver
+		// loads terminals.json once, degrading to an empty native-only config on a
+		// configFilePath error). Detection runs off the Update path as a tea.Cmd; the
+		// resolution is cached on the model and reused by the later picker burst.
+		detector: spawn.NewDetector(client),
+		resolve:  buildResolver().Resolve,
 		// NO_COLOR carve-out (§2.5): read the env ONCE here (cmd layer) so
 		// internal/tui stays env-free. The single colourless flag flows through
 		// tui.Deps.NoColor and is inherited by every canvas-dependent surface.

@@ -5,6 +5,7 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/spawn"
 )
 
 // Deps is the compiler-enforced seam set from which Build assembles a Model.
@@ -42,6 +43,13 @@ type Deps struct {
 	DirReader       session.PaneCurrentPathReader
 	DirRunner       resolver.CommandRunner
 	ModePersister   ModePersister
+	// Detector + Resolve are the async host-terminal detection seams (§6). Both are
+	// injected together by cmd/open.go (Detector = spawn.NewDetector(client), Resolve
+	// = the config-aware resolver's Resolve, loaded once from terminals.json) and
+	// nil in the offline capture harness. Nil-tolerant: a nil Detector leaves
+	// detection unwired.
+	Detector TerminalDetector
+	Resolve  func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
 
 	// Scalar configuration.
 	CWD         string
@@ -153,6 +161,11 @@ func Build(deps Deps) Model {
 	if deps.ModePersister != nil {
 		opts = append(opts, WithModePersister(deps.ModePersister))
 	}
+	// Async host-terminal detection seams (§6). Always injected via nil-tolerant
+	// options — a nil Detector/Resolve leaves detection unwired, mirroring the
+	// capture harness (which passes neither).
+	opts = append(opts, WithTerminalDetector(deps.Detector))
+	opts = append(opts, WithResolve(deps.Resolve))
 
 	// Seed the §11.2 inline warning flash for the capture harness (no-op when empty,
 	// the production default). Applied as an Option so it is set before the
