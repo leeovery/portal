@@ -14,6 +14,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
@@ -367,16 +368,41 @@ func (m Model) beginBurst(ordered []string) (Model, tea.Cmd) {
 // decideBurst runs the post-detection branch of the N≥2 Enter (detection
 // resolved). A supported native/config resolution dispatches the async burst; an
 // unsupported resolution is the §6-9 atomic no-op — this terminal cannot open host
-// windows, so nothing spawns and the mode + selection stay intact (6-9 adds the
-// re-asserted banner). It branches on the cached RESOLUTION, not IsNull(): a
-// recognised-but-undriven terminal is non-NULL yet unsupported.
+// windows, so it constructs NO pipe, resolves NO adapter, calls NO adapter method,
+// sets no m.selected and does not tea.Quit. It stays in multi-select mode with the
+// selection left INTACT (nothing was gone, only unsupported — so no prune) and
+// re-asserts the unsupported warning as a transient flash naming the identity. It
+// branches on the cached RESOLUTION, not IsNull(): a recognised-but-undriven
+// terminal is non-NULL yet unsupported.
+//
+// Both entry points route here — the direct N≥2 Enter (handleMultiSelectEnter →
+// beginBurst) and the deferred-Enter resolution (the terminalDetectedMsg arm's
+// pendingBurstEnter branch) — so the atomic no-op + flash lands on either path.
 func (m Model) decideBurst(ordered []string) (Model, tea.Cmd) {
 	m.pendingBurstEnter = false
 	m.pendingBurstOrdered = nil
 	if m.DetectUnsupported() {
+		m.setFlash(unsupportedFlashText(m.detectIdentity))
 		return m, nil
 	}
 	return m.dispatchBurst(ordered)
+}
+
+// unsupportedFlashText composes the §6-9 re-asserted-banner flash for the N≥2 Enter
+// atomic no-op, naming the resolved identity. The copy branches on IsNull() (the
+// gate itself branches on the RESOLUTION — DetectUnsupported): a NULL identity
+// (remote/mosh, or a transient detection error folded to Identity{}) gets the honest
+// no-host-local line; a recognised-but-undriven identity names its friendly name and
+// bundle id, U+00B7 middot-separated. Both carry the `— nothing opened` RESPONSE
+// suffix — distinct from the 6-2 proactive persistent banner, which omits it. This
+// mirrors cmd/spawn.go's unsupportedSpawnMessage WITHOUT its `spawn:` prefix and
+// WITHOUT a literal ⚠ (the warning notice band prepends the ⚠ via statusGlyph, per
+// the formatSessionGoneFlash / burstPartialFailureFlash convention).
+func unsupportedFlashText(id spawn.Identity) string {
+	if id.IsNull() {
+		return "no host-local terminal — nothing opened"
+	}
+	return fmt.Sprintf("unsupported terminal — %s · %s — nothing opened", id.Name, id.BundleID)
 }
 
 // dispatchBurst launches the async spawn burst for the list-ordered marked set: it
