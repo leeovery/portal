@@ -1458,7 +1458,38 @@ func (m Model) filteredSessions() []tmux.Session {
 // both handlers inherit the correct title without a call-site rewrite.
 func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 	m.sessions = sessions
+	// §5 sticky selection: drop any marked session that vanished from the
+	// refreshed list (e.g. externally killed during the Space preview) BEFORE
+	// the delegate re-render below, so the pruned-and-refreshed set feeds the ●.
+	m.pruneSelectionToLiveSessions()
 	return m.rebuildSessionList()
+}
+
+// pruneSelectionToLiveSessions drops from the §5 multi-select set any marked
+// session name no longer present in m.sessions — the "prune what's gone" rule
+// shared with the pre-flight gate (spec § Multi-Select Mode → Sticky selection;
+// § Burst & Partial-Failure Contract → Pre-flight). Called from the applySessions
+// refresh chokepoint (notably the post-preview-dismiss refresh) so a session
+// externally killed during the Space preview leaves the selection while every
+// survivor is kept. Marks are keyed on Session.Name, so this is a pure
+// set-difference against the refreshed slice; deleting the aliased set's keys
+// re-renders the ● off the pruned rows on the next frame (the delegate references
+// the same set). A nil/empty set short-circuits, so the non-multi-select refresh
+// paths (the SessionsMsg / kill / rename refreshes) pay nothing. Kept a reusable
+// method so Task 5.7 / the Phase-6 pre-flight prune reuse the identical rule.
+func (m *Model) pruneSelectionToLiveSessions() {
+	if len(m.selectedSessions) == 0 {
+		return
+	}
+	live := make(map[string]struct{}, len(m.sessions))
+	for i := range m.sessions {
+		live[m.sessions[i].Name] = struct{}{}
+	}
+	for name := range m.selectedSessions {
+		if _, ok := live[name]; !ok {
+			delete(m.selectedSessions, name)
+		}
+	}
 }
 
 // rebuildSessionList is the single mode-aware re-render core for the session
