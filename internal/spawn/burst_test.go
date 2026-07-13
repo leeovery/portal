@@ -309,6 +309,44 @@ func TestBurster_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("it stops the burst on permission-required so later windows are never spawned", func(t *testing.T) {
+		clock := &manualClock{}
+		ack := newDelayingAck(clock.now, 0)
+		// Window 2 (of five) hits the permission wall. The macOS Automation grant
+		// is per-(source, target), so every later window would hit the identical
+		// wall — the burst must STOP at window 2 (the sole early-stop), never
+		// composing or handing windows 3,4,5 to the adapter.
+		adapter := &writingAdapter{ack: ack, results: []Result{Success(""), PermissionRequired("evt -1743", "grant Automation for Ghostty")}}
+		b := &Burster{
+			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
+			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+
+		batch, results, err := b.Run([]string{"w1", "w2", "w3", "w4", "w5"})
+		if err != nil {
+			t.Fatalf("Run error = %v, want nil", err)
+		}
+		if len(adapter.calls) != 2 {
+			t.Fatalf("OpenWindow called %d times, want 2 (windows 3,4,5 never spawned after the permission wall)", len(adapter.calls))
+		}
+		if len(results) != 2 {
+			t.Fatalf("results len = %d, want 2 (only windows 1,2 recorded before the stop)", len(results))
+		}
+		if results[1].Result.Outcome != OutcomePermissionRequired {
+			t.Errorf("window 2 Outcome = %v, want OutcomePermissionRequired", results[1].Result.Outcome)
+		}
+		// The two earlier windows were attempted, in order (windows 1 and 2).
+		for i, session := range []string{"w1", "w2"} {
+			want := composeAttachArgv(testBurstExe, testBurstPath, session, batch, results[i].Token)
+			if !slices.Equal(adapter.calls[i], want) {
+				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.calls[i], want)
+			}
+		}
+	})
+
 	t.Run("it aborts before opening any window when the executable cannot be resolved", func(t *testing.T) {
 		clock := &manualClock{}
 		sentinel := errors.New("os.Executable: readlink /proc/self/exe: no such file")

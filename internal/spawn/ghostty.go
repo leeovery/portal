@@ -129,17 +129,34 @@ func (g *ghosttyAdapter) OpenWindow(command []string) Result {
 
 // mapGhosttyResult is the pure outcome mapping from a raw osascript outcome to
 // the generic typed Result. A clean run (no execution error and a zero exit)
-// is Success; every other outcome is SpawnFailed, carrying the opaque combined
-// output / error text in Detail.
+// is Success; an AppleEvent permission signal (-1743 not-permitted/denied or
+// -1712 timeout) in the output is PermissionRequired, carrying the opaque
+// output as Detail plus the driver-composed Guidance; every other non-clean
+// outcome is SpawnFailed, carrying the opaque combined output / error text in
+// Detail.
 //
-// Phase-2 scope: there is deliberately NO -1743/-1712 → permission-required
-// branch here — the AppleEvent-code mapping is Phase 3, so in Phase 2 every
-// non-clean exit is spawn-failed.
+// The -1743/-1712 recognition is quarantined HERE, in the driver: general code
+// switches on the generic Outcome alone and never sees an AppleEvent number.
 func mapGhosttyResult(out string, exitCode int, err error) Result {
 	if err == nil && exitCode == 0 {
 		return Success(successDetail(out))
 	}
+	if strings.Contains(out, "-1743") || strings.Contains(out, "-1712") {
+		return PermissionRequired(out, ghosttyPermissionGuidance())
+	}
 	return SpawnFailed(failureDetail(out, exitCode, err))
+}
+
+// ghosttyPermissionGuidance is the driver-composed, user-readable guidance for a
+// Ghostty Automation-permission wall. It names the target terminal (Ghostty) and
+// the macOS Automation-settings location plus deep-link, so the orchestrator can
+// surface it verbatim without ever parsing the AppleEvent code or the deep-link —
+// the whole string is opaque above the driver boundary.
+func ghosttyPermissionGuidance() string {
+	return "Ghostty needs permission to open new windows. Grant it under " +
+		"System Settings → Privacy & Security → Automation " +
+		"(x-apple.systempreferences:com.apple.preference.security?Privacy_Automation), " +
+		"then try again."
 }
 
 // successDetail is the opaque Detail for a clean exit: the trimmed osascript

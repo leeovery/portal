@@ -116,8 +116,10 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 // reported success — awaited for its token via awaitToken (a per-window timer
 // starting at THIS window's spawn). A window the adapter could not open is
 // AckFailed and never awaited. The loop does not stop early on a failed or
-// timed-out window (every window that can open does open); the sole early-stop,
-// permission-required, is layered in a later task.
+// timed-out window (every window that can open does open); the SOLE early-stop
+// is permission-required — the macOS Automation grant is per-(source, target),
+// so once window k hits the wall every later window would hit the identical
+// wall, and windows k+1…N−1 are never composed or handed to the adapter.
 func (b *Burster) Run(external []string) (batch string, results []WindowResult, err error) {
 	exePath, err := b.Exe()
 	if err != nil {
@@ -149,6 +151,13 @@ func (b *Burster) Run(external []string) (batch string, results []WindowResult, 
 			ack = awaitToken(b, batch, token)
 		}
 		results = append(results, WindowResult{Session: sess, Token: token, Result: result, Ack: ack})
+
+		// The sole early-stop: a permission wall on this window means every later
+		// window (same source → same target) would hit it too, so stop rather than
+		// grind through k+1…N−1. Timeout / spawn-failed do NOT break (Task 3.6).
+		if result.Outcome == OutcomePermissionRequired {
+			break
+		}
 	}
 	return batch, results, nil
 }

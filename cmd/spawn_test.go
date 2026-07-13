@@ -1095,6 +1095,80 @@ func TestSpawnPartialFailure(t *testing.T) {
 	})
 }
 
+// TestSpawnPermissionRequired covers the permission-required burst-stop
+// (Task 3.7): a permission-required window k stops the burst (windows k+1…N−1
+// never spawned), leaves the earlier-opened windows in place, skips the trigger
+// self-attach, cleans the batch markers, and surfaces the driver's guidance
+// verbatim ONCE — not the generic failed-window one-liner — exiting 1.
+func TestSpawnPermissionRequired(t *testing.T) {
+	// nopRunner short-circuits PersistentPreRunE so no real tmux server is
+	// dialed; spawn is intentionally NOT in skipTmuxCheck, so this injection is
+	// load-bearing (TestMain poisons TMUX; a missed *Deps injection would fail
+	// loudly instead of reaching the developer's real server).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	t.Run("it stops the burst, surfaces the guidance once, and skips the self-attach on permission-required", func(t *testing.T) {
+		const guidance = "grant Automation for Ghostty, then try again"
+		// External = s1,s2,s3,s4 (trigger s5). Window 2 (s2) hits the permission
+		// wall → the burst stops; windows s3,s4 are never spawned and s5 never
+		// self-attaches. The opaque detail ("evt -1743") stays out of the message.
+		adapter := &spawntest.FakeAdapter{
+			Results: []spawn.Result{spawn.Success("ok"), spawn.PermissionRequired("evt -1743", guidance)},
+		}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3", "s4", "s5"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a permission-required error, got nil")
+		}
+		// The driver's guidance is surfaced verbatim, ONCE — not the generic
+		// failed-window one-liner.
+		if err.Error() != guidance {
+			t.Errorf("error = %q, want the driver guidance %q (shown once)", err.Error(), guidance)
+		}
+		if strings.Contains(err.Error(), "failed to open window(s)") {
+			t.Errorf("error %q leaks the generic spawn-failed one-liner; want only the guidance", err.Error())
+		}
+		// Windows s3,s4 never spawned and s5 never self-attached: the burst
+		// stopped at s2, so only s1,s2 were handed to the adapter.
+		if len(adapter.Calls) != 2 {
+			t.Errorf("OpenWindow called %d times, want 2 (windows 3,4,5 never spawned after the permission wall)", len(adapter.Calls))
+		}
+		// No self-attach: the trigger stays in its calling context.
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (self-attach skipped on permission-required)", conn.calls)
+		}
+		// The batch markers were still cleaned on the permission path.
+		if len(ack.Cleaned) != 1 {
+			t.Errorf("Clean called %d times, want exactly 1 (markers cleaned on the permission path)", len(ack.Cleaned))
+		}
+		// Plain error → exit 1 (not a *cmd.UsageError's exit 2, not a silenced exit).
+		var usageErr *UsageError
+		if errors.As(err, &usageErr) {
+			t.Errorf("error is a *UsageError (%v); want a plain error (exit 1)", err)
+		}
+		if IsSilentExitError(err) {
+			t.Errorf("error %v is a silent-exit sentinel; the guidance must print to stderr", err)
+		}
+		// Driver-quarantine: the orchestrator switches on Outcome/Guidance alone,
+		// so the AppleEvent number never reaches the user-facing message.
+		if strings.Contains(err.Error(), "-1743") {
+			t.Errorf("error %q leaks an AppleEvent number; the orchestrator must switch on Outcome/Guidance alone", err.Error())
+		}
+	})
+}
+
 func isSwitchConnector(c SessionConnector) bool {
 	_, ok := c.(*SwitchConnector)
 	return ok
