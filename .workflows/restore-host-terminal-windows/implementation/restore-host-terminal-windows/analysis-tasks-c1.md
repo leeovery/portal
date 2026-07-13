@@ -6,7 +6,7 @@ total_proposed: 6
 # Analysis Tasks: restore-host-terminal-windows (Cycle 1)
 
 ## Task 1: Hoist result classification into internal/spawn and add the missing picker permission event
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -36,7 +36,7 @@ sources: architecture
 - Cross-caller parity: assert the CLI `logSpawnPermission` and picker `emitPermission` produce the same rendered body + attr set for the same identity/resolution/detail.
 
 ## Task 2: Extract shared gone-session / unsupported-terminal message renderers into internal/spawn/message.go
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -64,7 +64,7 @@ sources: duplication
 - Regression: existing CLI pre-flight-gone and unsupported-noop message assertions and the picker flash/banner assertions pass unchanged (byte-identical copy).
 
 ## Task 3: Extract the shared exec-boundary and failure-detail helpers for the two spawn adapters
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -91,7 +91,7 @@ sources: duplication
 - Regression: existing ghostty + configadapter adapter tests pass unchanged.
 
 ## Task 4: Remove or unexport the dead spawn.AttachCommand public API
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -117,7 +117,7 @@ sources: architecture
 - If unexported instead of removed: a unit test exercises the retained helper so it is no longer dead.
 
 ## Task 5: Re-derive the marked set at burst decision time so a deferred N≥2 Enter cannot open a stale selection
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -142,7 +142,7 @@ sources: architecture
 - Regression: the already-resolved `beginBurst`→`decideBurst` path and existing burst dispatch tests pass unchanged.
 
 ## Task 6: Resolve the spawn-failure/permission flash vs multi-select banner notice-slot precedence
-status: pending
+status: approved
 severity: low
 sources: standards
 

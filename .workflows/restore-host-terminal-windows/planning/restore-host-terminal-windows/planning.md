@@ -186,3 +186,18 @@ approved_at: 2026-07-12
 | restore-host-terminal-windows-6-9 | N≥2 on unsupported/NULL — atomic no-op + re-asserted banner | detection in-flight at Enter → awaited then resolves NULL → no-op; transient-error identity treated as unsupported; N=1 self-attach unaffected (no adapter needed); stays in multi-select mode with selection intact |
 | restore-host-terminal-windows-6-10 | Spawn batch-summary observability from the chokepoint | full success → opened N/N (trigger self-attach counted); partial/permission failure → trigger self-attach skipped and not counted; unsupported no-op → resolution=unsupported; total=N includes the trigger self-attach target |
 | restore-host-terminal-windows-6-11 | Visual gates — capture + wire the remaining frames | the Opening n/N… frame is a new design residual (absent from the delivered Paper set); dark-mode only (light deferred); NO_COLOR glyph-backed variants; move references to testdata/vhs/reference when wiring |
+
+### Phase 7: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| restore-host-terminal-windows-7-1 | Hoist result classification into internal/spawn and add the missing picker permission event | permission-required picker burst emits the dedicated `spawn: permission required` INFO, not the generic `opened 0/N` summary; `PartitionResults` preserves list order and folds `AckFailed`+`AckTimeout` into failed; `FirstPermission` returns the first permission window / false when none; `Confirmed()` truth table; non-permission outcomes + CLI/picker parity unchanged (byte-identical) |
+| restore-host-terminal-windows-7-2 | Extract shared gone-session / unsupported-terminal message renderers into internal/spawn/message.go | `GoneMessage` one vs ≥2 names (is/are verb agreement); `UnsupportedNoopMessage` IsNull vs named identity (name + bundle-id U+00B7 middot); `spawn:` prefix applied at CLI sites only; ⚠ glyph still added once by the notice band, not the returned body; output byte-identical at all seven sites |
+| restore-host-terminal-windows-7-3 | Extract the shared exec-boundary and failure-detail helpers for the two spawn adapters | `runArgvCombined` over clean exit (out,0,nil) / non-zero exit (combined out + code, nil err) / missing-binary non-exit failure (err surfaced); `execFailureDetail` never-empty fallback per label; the two runner interfaces + Adapter types stay distinct (no seam merge) |
+| restore-host-terminal-windows-7-4 | Remove or unexport the dead spawn.AttachCommand public API | no production caller (only a doc-comment + spawntest comment reference); removal preferred, unexport only if a real caller remains; `ExecutableResolver` + `composeAttachArgv` unchanged; go build + spawn tests green, no dangling reference to the removed symbol |
+| restore-host-terminal-windows-7-5 | Re-derive the marked set at burst decision time so a deferred N≥2 Enter cannot open a stale selection | mark toggle between a deferred Enter and `terminalDetectedMsg` honoured (unmarked NOT opened, newly marked IS opened); already-resolved non-deferred path unchanged; `pendingBurstOrdered` removed or no longer the source of the spawned set |
+| restore-host-terminal-windows-7-6 | Resolve the spawn-failure/permission flash vs multi-select banner notice-slot precedence | decision-first: two-row (document) vs strict single-slot (suppress banner); if suppression, flash presents alone with the retry set still marked + mode intact; if documentation, no behavioural change + a seam comment referencing the spec precedence clause and the pre-flight-abort sibling |

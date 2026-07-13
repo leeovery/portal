@@ -98,7 +98,14 @@
             "restore-host-terminal-windows-6-8": "tick-354353",
             "restore-host-terminal-windows-6-9": "tick-96f412",
             "restore-host-terminal-windows-6-10": "tick-2795f8",
-            "restore-host-terminal-windows-6-11": "tick-81596e"
+            "restore-host-terminal-windows-6-11": "tick-81596e",
+            "restore-host-terminal-windows-7": "tick-a6277b",
+            "restore-host-terminal-windows-7-1": "tick-81e59a",
+            "restore-host-terminal-windows-7-2": "tick-e2fb18",
+            "restore-host-terminal-windows-7-3": "tick-473b1a",
+            "restore-host-terminal-windows-7-4": "tick-160e87",
+            "restore-host-terminal-windows-7-5": "tick-be06d5",
+            "restore-host-terminal-windows-7-6": "tick-cc1ad5"
           },
           "external_id": "tick-9d3e8a"
         }
@@ -110,7 +117,7 @@
           "status": "in-progress",
           "task_gate_mode": "gated",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,
