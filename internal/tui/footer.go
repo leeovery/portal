@@ -108,6 +108,119 @@ func commandPendingFooterEntries() []filterFooterEntry {
 	return entries
 }
 
+// The §5 multi-select mode footer copy — the spec-exact entry glyphs + labels fixed
+// by the delivered Paper frame (design/sessions-multi-select-active.png) and the spec
+// (Multi-Select Mode → Mode affordance):
+//
+//	↑↓ navigate · m toggle · ␣ preview · ⏎ open · esc cancel
+//
+// Sourced once here as named constants (mirroring commandBandText) so the wording
+// can't drift from a paraphrase. The glyphs are the codebase canon: nav ↑↓, preview ␣
+// (U+2423) and open ⏎ (U+23CE) match the sessionsKeymap Key forms. Unlike the
+// standard/filter footers this footer carries NO right-aligned `? help` anchor — the
+// delivered frame has none.
+const (
+	multiSelectNavGlyph     = "↑↓"
+	multiSelectNavLabel     = "navigate"
+	multiSelectToggleGlyph  = "m"
+	multiSelectToggleLabel  = "toggle"
+	multiSelectPreviewGlyph = "␣" // U+2423, the sessionsKeymap preview glyph
+	multiSelectPreviewLabel = "preview"
+	multiSelectOpenGlyph    = "⏎" // U+23CE, the sessionsKeymap enter/attach glyph
+	multiSelectOpenLabel    = "open"
+	multiSelectCancelGlyph  = "esc"
+	multiSelectCancelLabel  = "cancel"
+)
+
+// multiSelectFooterText is the spec-exact §5 mode-footer copy assembled from the
+// per-entry constants above (separators the shared footerEntrySeparator ` · `). It is
+// the single source of truth the copy-pin test asserts the render against.
+const multiSelectFooterText = multiSelectNavGlyph + footerKeyLabelGap + multiSelectNavLabel +
+	footerEntrySeparator + multiSelectToggleGlyph + footerKeyLabelGap + multiSelectToggleLabel +
+	footerEntrySeparator + multiSelectPreviewGlyph + footerKeyLabelGap + multiSelectPreviewLabel +
+	footerEntrySeparator + multiSelectOpenGlyph + footerKeyLabelGap + multiSelectOpenLabel +
+	footerEntrySeparator + multiSelectCancelGlyph + footerKeyLabelGap + multiSelectCancelLabel
+
+// multiSelectFooterEntries returns the §5 multi-select mode footer entries in frame
+// order. Every key glyph is accent.blue and every label text.detail — the standard MV
+// footer colour convention (§3.4). It mirrors filteringFooterEntries' entry-list shape
+// so the cluster renders through the shared renderFilterCluster machinery.
+func multiSelectFooterEntries() []filterFooterEntry {
+	return []filterFooterEntry{
+		{Key: []keyGlyph{{multiSelectNavGlyph, theme.MV.AccentBlue}}, Label: multiSelectNavLabel},
+		{Key: []keyGlyph{{multiSelectToggleGlyph, theme.MV.AccentBlue}}, Label: multiSelectToggleLabel},
+		{Key: []keyGlyph{{multiSelectPreviewGlyph, theme.MV.AccentBlue}}, Label: multiSelectPreviewLabel},
+		{Key: []keyGlyph{{multiSelectOpenGlyph, theme.MV.AccentBlue}}, Label: multiSelectOpenLabel},
+		{Key: []keyGlyph{{multiSelectCancelGlyph, theme.MV.AccentBlue}}, Label: multiSelectCancelLabel},
+	}
+}
+
+// renderMultiSelectFooter renders the §5 multi-select mode footer: the five spec-exact
+// entries as a dot-separated left cluster over the shared 1px border.footer top rule,
+// with NO right-aligned `? help` anchor (the delivered frame has none). It reuses
+// renderFilterCluster (via fitFilterCluster) for the cluster body so the dot
+// separators, canvas-painted gaps, and NO_COLOR carve-out match the other footers
+// byte-for-byte, and hands the width-pad to assembleRightAnchoredRow with an EMPTY
+// right segment (the §2.7 pad-to-width path — no anchor). At a narrow width
+// fitFilterCluster drops trailing entries with an ellipsis so the row degrades on ONE
+// line without wrapping. Two rows (rule + entry row), height-neutral against the
+// reserved sessionFooterHeight budget. It does NOT route through
+// renderFilterFooter/filterFooterRow (those hardcode the sessionsKeymap `? help`
+// anchor).
+func renderMultiSelectFooter(width int, mode theme.Mode, colourless bool) string {
+	w := headerWidthOrFallback(width)
+	rule := footerTopRule(w, mode, colourless)
+	left, leftWidth := fitFilterCluster(multiSelectFooterEntries(), w, mode, colourless)
+	row := assembleRightAnchoredRow(left, leftWidth, "", 0, w, mode, colourless)
+	return lipgloss.JoinVertical(lipgloss.Left, rule, row)
+}
+
+// fitFilterCluster renders the given filter-footer entries as a dot-separated left
+// cluster that fits within w cells, greedily including entries in order and, when the
+// full cluster does not fit, dropping trailing entries and appending an ellipsis
+// marker so the row degrades on ONE line without wrapping (§2.7). It mirrors
+// fitLeftCluster (the keymap-descriptor footer's fitter) for the per-glyph
+// filterFooterEntry cluster path — the multi-select footer has no right anchor, so the
+// full width is the budget. Returns the rendered cluster and its exact rendered width
+// (always ≤ w).
+func fitFilterCluster(entries []filterFooterEntry, w int, mode theme.Mode, colourless bool) (string, int) {
+	// Try the full cluster first (the common, wide-terminal case).
+	if full := renderFilterCluster(entries, mode, colourless); lipgloss.Width(full) <= w {
+		return full, lipgloss.Width(full)
+	}
+
+	// Narrow degrade (§2.7): include as many leading entries as fit, then append an
+	// ellipsis marker. Find the largest prefix whose rendered width (with the ellipsis
+	// appended) still fits w.
+	ellipsis := renderFooterDetail(footerEllipsis, mode, colourless)
+	sep := renderFooterDetail(footerEntrySeparator, mode, colourless)
+	ellipsisWidth := lipgloss.Width(ellipsis)
+	sepWidth := lipgloss.Width(sep)
+
+	best := ""
+	bestWidth := 0
+	for n := 1; n <= len(entries); n++ {
+		cluster := renderFilterCluster(entries[:n], mode, colourless)
+		// Width of "<cluster> · …": the cluster, a separator, then the ellipsis.
+		candidateWidth := lipgloss.Width(cluster) + sepWidth + ellipsisWidth
+		if candidateWidth > w {
+			break
+		}
+		best = lipgloss.JoinHorizontal(lipgloss.Top, cluster, sep, ellipsis)
+		bestWidth = candidateWidth
+	}
+	if best != "" {
+		return best, bestWidth
+	}
+
+	// Not even one entry + ellipsis fits: render just the ellipsis if it fits, else an
+	// empty cluster (the row degrades to blank canvas at extreme narrowness, §2.7).
+	if ellipsisWidth <= w {
+		return ellipsis, ellipsisWidth
+	}
+	return "", 0
+}
+
 // renderCondensedFooter is the shared §3.4 / §6.3 condensed-footer renderer for a
 // per-page keymap descriptor: the descriptor's Core entries form the dot-separated
 // left cluster and the single right-aligned entry (the ? help hint) is pinned to

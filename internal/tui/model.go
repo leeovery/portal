@@ -4256,9 +4256,19 @@ func (m Model) renderSessionsFooterForFilterState() string {
 	if m.sessionListEmpty() {
 		return renderEmptySessionsFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	}
-	switch m.sessionList.FilterState() {
-	case list.Filtering:
+	// §5 multi-select mode owns the footer (takes over the standard footer) but yields
+	// to the focused filter footer: while the `/` input is focused (FilterState ==
+	// Filtering) the input-active filter footer renders and the mode footer steps
+	// aside (the filter is an inner sub-state). Otherwise — unfiltered OR
+	// FilterApplied-in-mode — the multi-select footer renders. So Filtering is checked
+	// FIRST, then the mode, then the plain FilterApplied/standard footers.
+	if m.sessionList.FilterState() == list.Filtering {
 		return renderFilteringFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	}
+	if m.multiSelectMode {
+		return renderMultiSelectFooter(m.contentWidth(), m.canvasMode, m.colourless)
+	}
+	switch m.sessionList.FilterState() {
 	case list.FilterApplied:
 		return renderFilterAppliedFooter(m.contentWidth(), m.canvasMode, m.colourless)
 	default:
