@@ -5,7 +5,7 @@ package tui
 //
 // These white-box (package tui) tests drive the §6-5 behaviour: while burstPending
 // the picker is INERT to row actions (a second Enter, m, navigation, Space, /, s
-// are swallowed) and only Ctrl-C / Esc stay live (routed to the cancelBurst stub);
+// are swallowed) and only Ctrl-C / Esc stay live (routed to cancelBurst — §6-8);
 // each streamed spawnProgressMsg advances the Opening counter while the denominator
 // holds at N; and the `Opening n/N…` band owns the section-header row with
 // precedence just below the live filter input (above the multi-select and
@@ -132,9 +132,11 @@ func TestBurstInputLock_IgnoresRowActions(t *testing.T) {
 }
 
 // TestBurstInputLock_CtrlCAndEscStayLive covers the cancellation carve-out: Ctrl-C
-// and Esc reach cancelBurst (the 6-8 stub returns m, nil) while pending — Ctrl-C
-// does NOT quit and Esc does NOT exit multi-select mode, so they are intercepted by
-// the input-lock rather than falling through to the normal quit / exit handlers.
+// and Esc reach cancelBurst while pending — Ctrl-C does NOT quit and Esc does NOT exit
+// multi-select mode, so they are intercepted by the input-lock rather than falling
+// through to the normal quit / exit handlers. cancelBurst KEEPS burstPending true
+// (§6-8: it stays locked until the goroutine's terminal event lands); the full cancel
+// lifecycle (ctx cancel + selection mutation) is covered in burst_cancel_test.go.
 func TestBurstInputLock_CtrlCAndEscStayLive(t *testing.T) {
 	t.Run("Ctrl-C routes to cancelBurst (does not quit)", func(t *testing.T) {
 		m, _ := burstPendingModel(t, "alpha", "bravo")
@@ -144,7 +146,7 @@ func TestBurstInputLock_CtrlCAndEscStayLive(t *testing.T) {
 			t.Error("Ctrl-C while burst-pending must route to cancelBurst, NOT tea.Quit")
 		}
 		if !m.BurstPending() {
-			t.Error("the cancelBurst stub must leave the burst pending (6-8 wires teardown)")
+			t.Error("cancelBurst must keep the burst pending until the terminal event lands")
 		}
 	})
 
@@ -162,7 +164,7 @@ func TestBurstInputLock_CtrlCAndEscStayLive(t *testing.T) {
 			t.Error("Esc while burst-pending must route to cancelBurst, NOT exitMultiSelect")
 		}
 		if !m.BurstPending() {
-			t.Error("the cancelBurst stub must leave the burst pending (6-8 wires teardown)")
+			t.Error("cancelBurst must keep the burst pending until the terminal event lands")
 		}
 	})
 }

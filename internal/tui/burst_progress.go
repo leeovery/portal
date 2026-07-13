@@ -23,8 +23,10 @@ import (
 // burstProgressBufferSize bounds the burst progress channel. A burst emits one
 // non-terminal event per external window plus a single terminal event; a
 // generous-but-bounded buffer means a fast burster never blocks on a slow render,
-// while the bound prevents an unbounded backlog. The send is ctx-guarded so a
-// cancelled burst (Task 6-8) never wedges the goroutine on a full channel.
+// while the bound prevents an unbounded backlog. 64 comfortably exceeds any realistic
+// marked-set (the N-1 progress events + 1 terminal), so the terminal event's naked
+// send always finds buffer space or a waiting receiver (see send). Progress sends are
+// ctx-guarded so a cancelled burst (Task 6-8) never wedges the goroutine on them.
 const burstProgressBufferSize = 64
 
 // burstProgress is the event shape carried on the picker-burst progress channel,
@@ -95,10 +97,10 @@ func newBurstProgressPipe() *burstProgressPipe {
 }
 
 // start launches the burst goroutine. run is the goroutine body (built by
-// burstRunner.run): it receives an emit func that ctx-guards each send. start
-// closes the channel on return — on the pre-flight abort, the burst outcome, OR a
-// cancellation — so the receiver always observes a close and never leaks a blocked
-// receive.
+// burstRunner.run): it receives an emit func that delegates to send (naked for the
+// terminal event, ctx-guarded for progress). start closes the channel on return — on
+// the pre-flight abort, the burst outcome, OR a cancellation — so the receiver always
+// observes a close and never leaks a blocked receive.
 func (p *burstProgressPipe) start(ctx context.Context, run func(ctx context.Context, emit func(burstProgress))) {
 	go func() {
 		defer close(p.ch)
@@ -106,14 +108,31 @@ func (p *burstProgressPipe) start(ctx context.Context, run func(ctx context.Cont
 	}()
 }
 
-// send delivers one burst event, abandoning the send if ctx is cancelled (Task
-// 6-8) — mirroring bootstrapProgressPipe.send. On cancellation the event is
-// dropped; the receiver is no longer consuming, so the drop is benign and the
-// goroutine always returns.
+// send delivers one burst event, splitting on the terminal-vs-progress distinction
+// (Task 6-8):
+//
+//   - The TERMINAL event (ev.Done) carries the confirmed/failed results the model
+//     needs to run its selection mutation and clear burst-pending, so it MUST be
+//     delivered — a NAKED, unconditional send. It cannot leak or wedge the goroutine:
+//     it is always the LAST send before the deferred close, and on the cancel path
+//     cancelBurst returns m.burstPipe.receiver(), so a receiver is actively
+//     consuming; every prior progress event was drained as it arrived, so the bounded
+//     buffer (burstProgressBufferSize, comfortably larger than any realistic
+//     marked-set) has space and/or a waiting receiver — the send completes at once.
+//     Dropping the terminal event (the previous ctx-guarded send) raced ctx.Done on
+//     cancel and left the picker permanently input-locked (~50% of cancels).
+//
+//   - A PROGRESS event (advisory DoneCount/Total counters) keeps the ctx-guarded
+//     select — droppable on cancel, since the receiver may have moved on and the
+//     counter is only a UI nicety. On cancellation the goroutine still returns.
 func (p *burstProgressPipe) send(ctx context.Context, ev burstProgress) {
+	if ev.Done {
+		p.ch <- ev // terminal outcome: MUST be delivered (buffer + consuming receiver → no block/leak)
+		return
+	}
 	select {
 	case p.ch <- ev:
-	case <-ctx.Done():
+	case <-ctx.Done(): // progress: droppable on cancel
 	}
 }
 
@@ -231,9 +250,11 @@ func (m Model) burstAllConfirmed(msg spawnCompleteMsg) bool {
 }
 
 // resetBurstState clears the burst lifecycle fields after a terminal outcome: it
-// exits burst-pending, releases the goroutine's pipe + cancel references, and
-// zeroes the progress counters + captured results. Used by the §6-4 full-success
-// self-attach arm before the tea.Quit handoff.
+// exits burst-pending, releases the goroutine's pipe + cancel references, zeroes the
+// progress counters + captured results, and clears the cancel flag. Used by the §6-4
+// full-success self-attach arm before the tea.Quit handoff, and by every §6-6/6-7/6-8
+// terminal arm — the single reset chokepoint, so burstCancelled never leaks past a
+// terminal event.
 func (m *Model) resetBurstState() {
 	m.burstPending = false
 	m.burstPipe = nil
@@ -242,6 +263,7 @@ func (m *Model) resetBurstState() {
 	m.burstDone = 0
 	m.burstResults = nil
 	m.burstBatch = ""
+	m.burstCancelled = false
 }
 
 // BurstPending reports whether an async §6 spawn burst is in flight — dispatched
@@ -268,11 +290,28 @@ func (m Model) BurstDone() int { return m.burstDone }
 
 // cancelBurst handles a Ctrl-C / Esc pressed while a spawn burst is in flight: the
 // §6-5 input-lock routes cancellation here (the only keys that stay live while
-// pending). Task 6-8 wires the real teardown — cancelling the burst context and
-// cleaning the in-flight batch — so for now this is a minimal stub that leaves the
-// model unchanged.
+// pending). It cancels the goroutine's context — so Burster.Run stops before opening
+// the next window and abandons the current ack poll (the ctx.Err() checks from §6-3),
+// leaving every already-opened host window in place (there is no teardown seam) — and
+// then flags burstCancelled so the terminal spawnCompleteMsg arm treats the outcome as
+// a user cancel: it skips the self-exec quit (Portal stays open in multi-select mode,
+// NOT tea.Quit) and suppresses the failed-window flash, applying only the same
+// leave-what-opened selection mutation as a partial failure (§6-6).
+//
+// burstPending is deliberately KEPT true: the goroutine still runs Clean(batch) and
+// sends its terminal event carrying the windows confirmed so far, so the picker stays
+// input-locked until that event lands. The re-issued receiver drains it — and because
+// the terminal send is naked (see send), it is delivered reliably even though the ctx
+// is now cancelled, so burstPending is always cleared and the picker never wedges.
 func (m Model) cancelBurst() (tea.Model, tea.Cmd) {
-	return m, nil
+	if m.burstCancel != nil {
+		m.burstCancel()
+	}
+	m.burstCancelled = true
+	if m.burstPipe == nil {
+		return m, nil
+	}
+	return m, m.burstPipe.receiver()
 }
 
 // orderedMarkedSessions walks the session list top-to-bottom and returns the

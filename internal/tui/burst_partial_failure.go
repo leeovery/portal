@@ -57,7 +57,16 @@ func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) 
 	}
 
 	(&m).applyBurstSelectionMutation(confirmed)
-	m.setFlash(burstPartialFailureFlash(msg.Results, failed))
+	// A user cancel (§6-8) converges here — same leave-what-opened mutation — but is
+	// SILENT: cancellation is user-initiated, so no failed-window flash. A non-cancel
+	// partial surfaces the flash, guarded so the degenerate empty-`failed` case (no
+	// failed window, no permission wall — burstPartialFailureFlash returns "") renders
+	// no band. resetBurstState clears burstCancelled on the way out.
+	if !m.burstCancelled {
+		if text := burstPartialFailureFlash(msg.Results, failed); text != "" {
+			m.setFlash(text)
+		}
+	}
 	(&m).resetBurstState()
 	return m, nil
 }
@@ -81,8 +90,11 @@ func (m *Model) applyBurstSelectionMutation(confirmed map[string]struct{}) {
 // the permission wall its driver-composed Guidance is surfaced verbatim, once for the
 // batch — the burst already stopped on the first permission wall (§6-3), and every
 // later window (same source → same target) would hit the identical wall, so the
-// generic per-window failed-window copy would be misleading. Otherwise it names every
-// failed window via the shared spawn.QuoteJoin renderer. The opaque Result.Detail never
+// generic per-window failed-window copy would be misleading. With no permission wall
+// and no failed window (a degenerate partial — e.g. a burst that stopped early with
+// every attempted window confirmed) it returns "" so the caller renders NO band,
+// avoiding the leading-space "  failed to open …". Otherwise it names every failed
+// window via the shared spawn.QuoteJoin renderer. The opaque Result.Detail never
 // reaches the user (DEBUG log only, §6-10). The ⚠ glyph is added by the warning notice
 // band, so the message text carries none (formatSessionGoneFlash convention).
 func burstPartialFailureFlash(results []spawn.WindowResult, failed []string) string {
@@ -90,6 +102,9 @@ func burstPartialFailureFlash(results []spawn.WindowResult, failed []string) str
 		if r.Result.Outcome == spawn.OutcomePermissionRequired {
 			return r.Result.Guidance
 		}
+	}
+	if len(failed) == 0 {
+		return ""
 	}
 	return fmt.Sprintf("%s failed to open — others left open", spawn.QuoteJoin(failed))
 }

@@ -496,6 +496,13 @@ type Model struct {
 	burstResults    []spawn.WindowResult
 	burstIdentity   spawn.Identity
 	burstResolution spawn.Resolution
+	// burstCancelled records that the in-flight burst's terminal event is the result
+	// of a user Ctrl-C/Esc (Task 6-8): cancelBurst sets it before returning the
+	// receiver, and the terminal spawnCompleteMsg arm reads it to suppress BOTH the
+	// self-exec quit (return to the picker, never attach) and the generic
+	// failed-window flash (cancellation is user-initiated → silent). resetBurstState
+	// clears it on every terminal path.
+	burstCancelled bool
 
 	// pendingBurstEnter + pendingBurstOrdered stash a deferred N≥2 Enter pressed
 	// while detection is still in flight (detectResolved false). The
@@ -2482,7 +2489,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// confirmed sessions (keeping failed / un-acked / un-attempted marked for a
 		// retry), stays in multi-select mode, and surfaces one transient flash. The
 		// pre-flight abort (nothing spawned) is the separate spawnAbortMsg path (§6-7).
-		if m.burstAllConfirmed(msg) {
+		//
+		// A user cancel (§6-8, m.burstCancelled) is ALSO routed to that arm — never the
+		// self-exec — even if the terminal event happens to be all-confirmed (a cancel
+		// racing a burst that just finished): Ctrl-C/Esc must return to the picker, not
+		// attach. handleBurstPartialFailure then suppresses the flash on the cancel path.
+		if m.burstAllConfirmed(msg) && !m.burstCancelled {
 			m.selected = m.burstTrigger
 			(&m).resetBurstState()
 			return m, tea.Quit
@@ -3248,8 +3260,9 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// to row actions so no concurrent user input can race the completion handler's
 		// selection mutation. A second Enter, m, navigation, Space, /, s, and every
 		// other key are SWALLOWED; only cancellation (Ctrl-C / Esc) stays live, routed
-		// to cancelBurst (task 6-8 wires the ctx-cancel + teardown; the stub is a
-		// no-op). This MUST precede the flash-clear, the SettingFilter guard, and the
+		// to cancelBurst (task 6-8: cancels the burst ctx and returns to the picker in
+		// multi-select mode — the already-opened windows are left in place, there is no
+		// teardown seam). This MUST precede the flash-clear, the SettingFilter guard, and the
 		// rune switch so no handler fires while pending. A burst starts from Enter on
 		// the Sessions page with no modal open, so this sits safely after the modal
 		// check at the top of updateSessionList.
