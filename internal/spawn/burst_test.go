@@ -276,6 +276,39 @@ func TestBurster_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("it continues spawning the remaining windows after a middle window fails (no early stop)", func(t *testing.T) {
+		clock := &manualClock{}
+		ack := newDelayingAck(clock.now, 0)
+		// Window 2 (the middle of three) fails to open; windows 1 and 3 open cleanly.
+		// This proves the burst never short-circuits on a failed middle window — the
+		// leave-what-opened contract needs every window that can open to open.
+		adapter := &writingAdapter{ack: ack, results: []Result{Success(""), SpawnFailed("osascript: -1743"), Success("")}}
+		b := &Burster{
+			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
+			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+
+		_, results, err := b.Run([]string{"w1", "w2", "w3"})
+		if err != nil {
+			t.Fatalf("Run error = %v, want nil", err)
+		}
+		if len(adapter.calls) != 3 {
+			t.Fatalf("OpenWindow called %d times, want 3 (no early stop when a middle window fails)", len(adapter.calls))
+		}
+		if results[0].Ack != AckConfirmed {
+			t.Errorf("window 1 Ack = %q, want %q", results[0].Ack, AckConfirmed)
+		}
+		if results[1].Ack != AckFailed {
+			t.Errorf("window 2 Ack = %q, want %q (adapter reported no window)", results[1].Ack, AckFailed)
+		}
+		if results[2].Ack != AckConfirmed {
+			t.Errorf("window 3 Ack = %q, want %q (spawned despite the middle window's failure)", results[2].Ack, AckConfirmed)
+		}
+	})
+
 	t.Run("it aborts before opening any window when the executable cannot be resolved", func(t *testing.T) {
 		clock := &manualClock{}
 		sentinel := errors.New("os.Executable: readlink /proc/self/exe: no such file")

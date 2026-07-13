@@ -106,8 +106,10 @@ var spawnCmd = &cobra.Command{
 // window confirms self-attach the calling window to the Nth session (net-N
 // windows, never N+1), cleaning the batch markers first. N=1 (no external
 // windows) self-attaches immediately with no ack wait. On any not-all-confirmed
-// batch it skips the self-attach (the detailed leave-what-opened reporting is
-// Task 3.6); the opaque Result.Detail goes to the log, never the user message.
+// batch it leaves the opened windows in place (no teardown), skips the
+// self-attach, and returns a plain error naming every failed window (an adapter
+// spawn-failed or an ack timeout, unified); the opaque Result.Detail goes to the
+// log, never the user message.
 func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	sessions := args
 	n := len(sessions)
@@ -161,15 +163,22 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	_ = deps.Ack.Clean(batch)
 
 	logger := log.OrDiscard(deps.Logger)
-	opened, allConfirmed := tallyWindowResults(logger, results)
+	opened, failed := tallyWindowResults(logger, results)
 
-	if !allConfirmed {
-		// Not-all-confirmed: leave the opened windows in place and skip the
-		// trigger self-attach. The detailed leave-what-opened reporting (naming
-		// the failed windows) and the permission-required burst-stop are Tasks
-		// 3.6/3.7; this task only guarantees no self-attach here.
+	if len(failed) > 0 {
+		// (permission-required burst-stop routes here first — Task 3.7)
+		//
+		// Leave-what-opened: a post-pre-flight per-window hiccup (an adapter
+		// spawn-failed or an ack timeout — both surfaced by tallyWindowResults as
+		// a non-confirmed window) leaves every opened window in place. Portal does
+		// not own the host windows and has no teardown path, so there is nothing
+		// to close; the trigger self-attach is simply skipped (the trigger stays
+		// in its calling context, never self-execs). The batch markers were
+		// already Cleaned above, on every post-burst path. The opaque Result.Detail
+		// for each failure went only to the DEBUG log (tallyWindowResults), never
+		// the user-facing message below.
 		logSpawnSummary(logger, id, resolution, opened, n, batch)
-		return errors.New("spawn: not all windows confirmed — self-attach skipped")
+		return fmt.Errorf("spawn: failed to open window(s) for %s — others left open", spawn.QuoteJoin(failed))
 	}
 
 	// Every external window confirmed: the trigger self-attach is about to occur,
@@ -181,19 +190,22 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 }
 
 // tallyWindowResults emits one DEBUG per external window (session + ack outcome +
-// opaque detail) and returns the count of confirmed external windows plus whether
-// every window confirmed.
-func tallyWindowResults(logger *slog.Logger, results []spawn.WindowResult) (opened int, allConfirmed bool) {
-	allConfirmed = true
+// opaque detail) and returns, in a single pass, the count of confirmed external
+// windows plus the session names of every window that did NOT confirm, in list
+// order. A window is "failed" when its Ack != AckConfirmed — unifying an adapter
+// spawn-failed (AckFailed) and an ack timeout (AckTimeout) into one classification
+// (the leave-what-opened report names them identically). The batch is
+// all-confirmed exactly when the returned failed slice is empty.
+func tallyWindowResults(logger *slog.Logger, results []spawn.WindowResult) (opened int, failed []string) {
 	for _, r := range results {
 		logger.Debug("external window", "session", r.Session, "ack", string(r.Ack), "detail", r.Result.Detail)
 		if r.Ack == spawn.AckConfirmed {
 			opened++
 			continue
 		}
-		allConfirmed = false
+		failed = append(failed, r.Session)
 	}
-	return opened, allConfirmed
+	return opened, failed
 }
 
 // unsupportedSpawnMessage composes the one-line user-facing message for the

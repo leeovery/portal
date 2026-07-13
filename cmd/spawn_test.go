@@ -903,6 +903,198 @@ func TestSpawnPreflight(t *testing.T) {
 	})
 }
 
+// TestSpawnPartialFailure covers the leave-what-opened partial-failure contract
+// (Task 3.6): a post-pre-flight per-window hiccup (adapter spawn-failed or ack
+// timeout) leaves the opened windows in place, skips the trigger self-attach,
+// cleans the batch markers, and returns a plain error naming every failed window
+// — without leaking the opaque Result.Detail.
+func TestSpawnPartialFailure(t *testing.T) {
+	// nopRunner short-circuits PersistentPreRunE so no real tmux server is
+	// dialed; spawn is intentionally NOT in skipTmuxCheck, so this injection is
+	// load-bearing (TestMain poisons TMUX; a missed *Deps injection would fail
+	// loudly instead of reaching the developer's real server).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	t.Run("it leaves already-opened windows in place when one window times out among many", func(t *testing.T) {
+		// External = s1,s2,s3 (trigger s4). s1,s3 confirm; s2's token never arrives
+		// (Confirm[1]=false) → ack timeout. Every external window must still spawn.
+		adapter := &spawntest.FakeAdapter{Confirm: []bool{true, false, true}}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3", "s4"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a partial-failure error, got nil")
+		}
+		// All three external windows spawned — no early stop on the timeout, and no
+		// teardown seam exists, so the opened windows (s1, s3) are simply left.
+		if len(adapter.Calls) != 3 {
+			t.Errorf("OpenWindow called %d times, want 3 (no early stop; opened windows left in place)", len(adapter.Calls))
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (opened windows left; trigger not self-attached)", conn.calls)
+		}
+	})
+
+	t.Run("it continues spawning the remaining windows after a spawn-failed window (no early stop)", func(t *testing.T) {
+		// s2's adapter reports spawn-failed; s3 must still be spawned afterwards.
+		adapter := &spawntest.FakeAdapter{
+			Results: []spawn.Result{spawn.Success("ok"), spawn.SpawnFailed("osascript exited 1: -1743"), spawn.Success("ok")},
+		}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3", "s4"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a partial-failure error, got nil")
+		}
+		if len(adapter.Calls) != 3 {
+			t.Errorf("OpenWindow called %d times, want 3 (no early stop after a spawn-failed window)", len(adapter.Calls))
+		}
+		const want = "spawn: failed to open window(s) for 's2' — others left open"
+		if err.Error() != want {
+			t.Errorf("message = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("it classifies an ack timeout and an adapter spawn-failed identically as failed", func(t *testing.T) {
+		// External = s1,s2,s3 (trigger s4). s1 confirms; s2 is an adapter spawn-
+		// failed; s3 opens but times out (Confirm[2]=false). Both s2 and s3 are
+		// "failed" and must be named together, in list order.
+		adapter := &spawntest.FakeAdapter{
+			Results: []spawn.Result{spawn.Success("ok"), spawn.SpawnFailed("osascript exited 1: -1743"), spawn.Success("ok")},
+			Confirm: []bool{true, false, false},
+		}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3", "s4"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a partial-failure error naming both failed windows, got nil")
+		}
+		const want = "spawn: failed to open window(s) for 's2', 's3' — others left open"
+		if err.Error() != want {
+			t.Errorf("message = %q, want %q (spawn-failed and timeout both named, in list order)", err.Error(), want)
+		}
+	})
+
+	t.Run("it skips the trigger self-attach on a partial failure and stays in the calling context", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{
+			Results: []spawn.Result{spawn.Success("ok"), spawn.SpawnFailed("osascript exited 1: -1743"), spawn.Success("ok")},
+		}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3", "s4"})
+
+		if err := rootCmd.Execute(); err == nil {
+			t.Fatal("expected a partial-failure error, got nil")
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (trigger stays in its calling context on partial failure)", conn.calls)
+		}
+	})
+
+	t.Run("it cleans the batch markers on the failure path", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{
+			Results: []spawn.Result{spawn.Success("ok"), spawn.SpawnFailed("osascript exited 1: -1743"), spawn.Success("ok")},
+		}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3", "s4"})
+
+		if err := rootCmd.Execute(); err == nil {
+			t.Fatal("expected a partial-failure error, got nil")
+		}
+		if len(ack.Cleaned) != 1 {
+			t.Errorf("Clean called %d times, want exactly 1 (markers cleaned on the failure path too)", len(ack.Cleaned))
+		}
+	})
+
+	t.Run("it returns exit 1 with a one-line message naming the failed window(s) on stderr", func(t *testing.T) {
+		adapter := &spawntest.FakeAdapter{
+			Results: []spawn.Result{spawn.Success("ok"), spawn.SpawnFailed("osascript exited 1: -1743"), spawn.Success("ok")},
+		}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3", "s4"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a plain partial-failure error, got nil")
+		}
+		// Plain error → exit 1 (not a *cmd.UsageError's exit 2, not a silenced exit).
+		var usageErr *UsageError
+		if errors.As(err, &usageErr) {
+			t.Errorf("error is a *UsageError (%v); want a plain error (exit 1, not 2)", err)
+		}
+		if IsSilentExitError(err) {
+			t.Errorf("error %v is a silent-exit sentinel; the failed-window line must print to stderr", err)
+		}
+		// One line — no embedded newline.
+		if strings.Contains(err.Error(), "\n") {
+			t.Errorf("message %q spans multiple lines, want a single line", err.Error())
+		}
+		// Names the failed window.
+		if !strings.Contains(err.Error(), "'s2'") {
+			t.Errorf("message %q does not name the failed window 's2'", err.Error())
+		}
+		// The opaque Result.Detail must never reach the user-facing message.
+		if strings.Contains(err.Error(), "osascript") || strings.Contains(err.Error(), "-1743") {
+			t.Errorf("message %q leaks the opaque Result.Detail; it must go to the DEBUG log only", err.Error())
+		}
+	})
+}
+
 func isSwitchConnector(c SessionConnector) bool {
 	_, ok := c.(*SwitchConnector)
 	return ok
