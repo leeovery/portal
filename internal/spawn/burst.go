@@ -109,9 +109,9 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 // err). ALL ids are generated up front too — the batch id and one token per
 // external session — so a generation failure aborts before any window opens
 // (Task 3.1's "never an empty/malformed id" propagates here). Composing each
-// argv from the once-resolved exePath (via the pure composeAttachArgv builder,
-// not AttachCommand) keeps behaviour identical to resolving per window while
-// avoiding a redundant os.Executable read for every window.
+// argv from the once-resolved exePath via the pure composeAttachArgv builder
+// keeps behaviour identical to resolving per window while avoiding a redundant
+// os.Executable read for every window.
 //
 // Each window is then, sequentially: composed, opened, and — if the adapter
 // reported success — awaited for its token via awaitToken (a per-window timer

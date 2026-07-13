@@ -88,7 +88,7 @@ func (f *FakeAdapter) confirmed(i int) bool {
 
 // parseSpawnAck finds the --spawn-ack <value> pair in an argv and splits its
 // value back into (batch, token) via the real spawn.ParseSpawnAckFlag, so the
-// fake stays honest to the exact wire format AttachCommand produced.
+// fake stays honest to the exact wire format composeAttachArgv produces.
 func parseSpawnAck(argv []string) (batch, token string, ok bool) {
 	for i := 0; i+1 < len(argv); i++ {
 		if argv[i] == "--spawn-ack" {

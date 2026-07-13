@@ -1,26 +1,20 @@
 package spawn
 
 import (
-	"errors"
 	"slices"
 	"strings"
 	"testing"
 )
 
 // fixedExe builds an ExecutableResolver that always resolves to path with no
-// error — the happy-path seam for command composition tests.
+// error — the happy-path seam for the burster's command-composition tests.
 func fixedExe(path string) ExecutableResolver {
 	return func() (string, error) { return path, nil }
 }
 
-func TestAttachCommand(t *testing.T) {
+func TestComposeAttachArgv(t *testing.T) {
 	t.Run("it composes env -u TMUX -u TMUX_PANE PATH=<full> <exe> attach <session> --spawn-ack <batch>:<token>", func(t *testing.T) {
-		getenv := mapGetenv(map[string]string{"PATH": "/opt/homebrew/bin:/usr/bin"})
-
-		got, err := AttachCommand("proj-abc123", fixedExe("/abs/portal"), getenv, "b1", "t1")
-		if err != nil {
-			t.Fatalf("AttachCommand returned error: %v, want nil", err)
-		}
+		got := composeAttachArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", "proj-abc123", "b1", "t1")
 
 		want := []string{
 			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
@@ -29,24 +23,15 @@ func TestAttachCommand(t *testing.T) {
 			"--spawn-ack", "b1:t1",
 		}
 		if !slices.Equal(got, want) {
-			t.Errorf("AttachCommand argv = %#v, want %#v", got, want)
+			t.Errorf("composeAttachArgv argv = %#v, want %#v", got, want)
 		}
 	})
 
-	t.Run("it injects only PATH and strips TMUX/TMUX_PANE even when composed inside tmux", func(t *testing.T) {
-		// A live TMUX / TMUX_PANE in the picker's env (the composed-from-inside-
-		// tmux case) must never ride into the argv as an assignment — only the
-		// explicit -u unsets strip them, and PATH is the sole injected var.
-		getenv := mapGetenv(map[string]string{
-			"PATH":      "/opt/homebrew/bin:/usr/bin",
-			"TMUX":      "/private/tmp/tmux-501/default,12345,0",
-			"TMUX_PANE": "%3",
-		})
-
-		got, err := AttachCommand("proj-abc123", fixedExe("/abs/portal"), getenv, "b1", "t1")
-		if err != nil {
-			t.Fatalf("AttachCommand returned error: %v, want nil", err)
-		}
+	t.Run("it injects only PATH and strips TMUX/TMUX_PANE via explicit -u unsets", func(t *testing.T) {
+		// The strip is structural: the argv carries the -u TMUX / -u TMUX_PANE
+		// unsets and its ONLY env assignment is PATH= — never a TMUX=/TMUX_PANE=
+		// assignment, so a picker composing from inside tmux cannot leak them.
+		got := composeAttachArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", "proj-abc123", "b1", "t1")
 
 		var pathAssignments, tmuxAssignments, tmuxPaneAssignments int
 		for _, elem := range got {
@@ -68,27 +53,13 @@ func TestAttachCommand(t *testing.T) {
 		if tmuxPaneAssignments != 0 {
 			t.Errorf("TMUX_PANE= assignment count = %d, want 0 (only the -u unset); argv = %#v", tmuxPaneAssignments, got)
 		}
-
-		// The full argv is deterministic: the live TMUX/TMUX_PANE values are
-		// nowhere in it — the argv is byte-identical to the no-TMUX case.
-		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
-			"PATH=/opt/homebrew/bin:/usr/bin",
-			"/abs/portal", "attach", "proj-abc123",
-			"--spawn-ack", "b1:t1",
-		}
-		if !slices.Equal(got, want) {
-			t.Errorf("AttachCommand argv = %#v, want %#v", got, want)
+		if !slices.Contains(got, "-u") {
+			t.Errorf("argv missing the -u unset flag; argv = %#v", got)
 		}
 	})
 
 	t.Run("it keeps a session name with spaces as a single unquoted argv element", func(t *testing.T) {
-		getenv := mapGetenv(map[string]string{"PATH": "/usr/bin"})
-
-		got, err := AttachCommand("my session", fixedExe("/abs/portal"), getenv, "b1", "t1")
-		if err != nil {
-			t.Fatalf("AttachCommand returned error: %v, want nil", err)
-		}
+		got := composeAttachArgv("/abs/portal", "/usr/bin", "my session", "b1", "t1")
 
 		// The session sits immediately after "attach"; it is a discrete argv
 		// element (no shell quoting) even though it is no longer the tail — the
@@ -108,16 +79,11 @@ func TestAttachCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("it uses the resolved executable path rather than a bare portal lookup", func(t *testing.T) {
-		getenv := mapGetenv(map[string]string{"PATH": "/usr/bin"})
-
-		got, err := AttachCommand("s1", fixedExe("/usr/local/bin/portal-v2"), getenv, "b1", "t1")
-		if err != nil {
-			t.Fatalf("AttachCommand returned error: %v, want nil", err)
-		}
+	t.Run("it uses the provided executable path rather than a bare portal lookup", func(t *testing.T) {
+		got := composeAttachArgv("/usr/local/bin/portal-v2", "/usr/bin", "s1", "b1", "t1")
 
 		// The exe element sits immediately before "attach"; it must be the
-		// resolved absolute path, never a bare "portal" PATH lookup.
+		// provided absolute path, never a bare "portal" PATH lookup.
 		attachIdx := slices.Index(got, "attach")
 		if attachIdx < 1 {
 			t.Fatalf("no 'attach' element (or nothing before it) in argv %#v", got)
@@ -126,34 +92,12 @@ func TestAttachCommand(t *testing.T) {
 			t.Errorf("executable argv element = %q, want %q", exe, "/usr/local/bin/portal-v2")
 		}
 		if slices.Contains(got, "portal") {
-			t.Errorf("argv contains bare %q element, want the resolved absolute path only; argv = %#v", "portal", got)
-		}
-	})
-
-	t.Run("it surfaces an os.Executable resolution error", func(t *testing.T) {
-		sentinel := errors.New("os.Executable: readlink /proc/self/exe: no such file")
-		failExe := func() (string, error) { return "", sentinel }
-		getenv := mapGetenv(map[string]string{"PATH": "/usr/bin"})
-
-		got, err := AttachCommand("s1", failExe, getenv, "b1", "t1")
-		if got != nil {
-			t.Errorf("argv = %#v, want nil on resolution error", got)
-		}
-		if err == nil {
-			t.Fatal("AttachCommand error = nil, want a non-nil wrapped error")
-		}
-		if !errors.Is(err, sentinel) {
-			t.Errorf("errors.Is(err, sentinel) = false, want true; err = %v", err)
+			t.Errorf("argv contains bare %q element, want the provided absolute path only; argv = %#v", "portal", got)
 		}
 	})
 
 	t.Run("it appends --spawn-ack <batch>:<token> as the final two argv elements", func(t *testing.T) {
-		getenv := mapGetenv(map[string]string{"PATH": "/usr/bin"})
-
-		got, err := AttachCommand("s1", fixedExe("/abs/portal"), getenv, "batchA", "tokenB")
-		if err != nil {
-			t.Fatalf("AttachCommand returned error: %v, want nil", err)
-		}
+		got := composeAttachArgv("/abs/portal", "/usr/bin", "s1", "batchA", "tokenB")
 
 		if len(got) < 2 {
 			t.Fatalf("argv too short to carry the ack flag: %#v", got)
