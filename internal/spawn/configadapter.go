@@ -3,10 +3,12 @@ package spawn
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/resolver"
 )
 
 // recipeRunner is the 1-method DI seam over a real recipe exec, so a config
@@ -119,3 +121,58 @@ func (a *argvRecipeAdapter) OpenWindow(command []string) Result {
 
 // Compile-time assertion that *argvRecipeAdapter satisfies the Adapter contract.
 var _ Adapter = (*argvRecipeAdapter)(nil)
+
+// newScriptRecipeAdapter builds a script-recipe Adapter for a matched script
+// entry, applying the resolution-time validity gate a script recipe needs (an
+// argv recipe's validation is purely structural — Task 4.2 — and needs no
+// filesystem access; a script recipe additionally requires the file to exist and
+// be executable, which can only be checked here at resolve time).
+//
+// It expands a leading ~ via resolver.ExpandTilde (the single source of truth for
+// tilde expansion), then stats the resolved path. A missing OR non-executable
+// script is an invalid entry: it emits exactly one spawn-component WARN naming
+// the entry key (the key + reason ride in the opaque `detail` attr — the closed
+// spawn attr set has no dedicated entry-key attr) and returns ok=false, so the
+// resolver falls through to native (Task 4.6). Per spec the escape-hatch script
+// carries its OWN exec bit + shebang and Portal execs it DIRECTLY (never via
+// `sh <path>`), so a file with no exec bit could never run and is rejected here;
+// the check is a Perm() mode-bit test, not an access probe, so it is root-safe.
+func newScriptRecipeAdapter(key, rawPath string, runner recipeRunner) (Adapter, bool) {
+	p := resolver.ExpandTilde(rawPath)
+	info, err := os.Stat(p)
+	if err != nil {
+		detectLogger.Warn("terminals.json entry rejected", "detail", fmt.Sprintf("%q: script %q not found: %v", key, p, err))
+		return nil, false
+	}
+	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+		detectLogger.Warn("terminals.json entry rejected", "detail", fmt.Sprintf("%q: script %q is not executable", key, p))
+		return nil, false
+	}
+	return &scriptRecipeAdapter{scriptPath: p, runner: runner}, true
+}
+
+// scriptRecipeAdapter is the config-escape-hatch Adapter for a validated script
+// recipe: Portal execs the user's script file DIRECTLY (the resolved path is
+// argv[0], carrying its own shebang + exec bit) with the composed attach command
+// delivered structurally as the single positional arg $1 — never an embedded
+// {command} token. The constructor wiring (matchConfig winner + RecipeScript →
+// newScriptRecipeAdapter) lives in the resolver (Task 4.6).
+type scriptRecipeAdapter struct {
+	scriptPath string
+	runner     recipeRunner
+}
+
+// OpenWindow renders the composed attach argv to the {command} string
+// (renderCommandString, the same space-join the argv recipe and native path
+// use), delivers it as the single positional arg $1 after the script path, runs
+// the final argv through the runner seam, and maps the outcome to a generic typed
+// Result. mapRecipeResult never yields PermissionRequired — permission-required
+// stays native-adapter-only.
+func (a *scriptRecipeAdapter) OpenWindow(command []string) Result {
+	final := []string{a.scriptPath, renderCommandString(command)}
+	out, code, err := a.runner.Run(final)
+	return mapRecipeResult(out, code, err)
+}
+
+// Compile-time assertion that *scriptRecipeAdapter satisfies the Adapter contract.
+var _ Adapter = (*scriptRecipeAdapter)(nil)
