@@ -51,6 +51,16 @@ type Deps struct {
 	Detector TerminalDetector
 	Resolve  func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
 
+	// §6-3 N≥2 picker-burst seams. Injected together by cmd/open.go (defaults
+	// client.HasSession / a shared server-option ack channel / os.Executable /
+	// os.Getenv) and nil in the offline capture harness. Nil-tolerant: a nil field
+	// leaves that capability unwired, matching an omitted With* option. The RESOLVE
+	// seam the burst needs is Resolve above (reused), not re-injected here.
+	SessionExists func(string) bool
+	AckChannel    spawn.AckChannelFull
+	SpawnExe      spawn.ExecutableResolver
+	SpawnGetenv   func(string) string
+
 	// Scalar configuration.
 	CWD         string
 	InitialMode prefs.SessionListMode
@@ -166,6 +176,14 @@ func Build(deps Deps) Model {
 	// capture harness (which passes neither).
 	opts = append(opts, WithTerminalDetector(deps.Detector))
 	opts = append(opts, WithResolve(deps.Resolve))
+
+	// §6-3 N≥2 picker-burst seams. Always injected via nil-tolerant options — a nil
+	// seam leaves the burst unwired, mirroring the capture harness (which passes
+	// none). Production supplies all four via cmd/open.go's buildTUIModel.
+	opts = append(opts, WithSessionExists(deps.SessionExists))
+	opts = append(opts, WithAckChannel(deps.AckChannel))
+	opts = append(opts, WithSpawnExe(deps.SpawnExe))
+	opts = append(opts, WithSpawnGetenv(deps.SpawnGetenv))
 
 	// Seed the §11.2 inline warning flash for the capture harness (no-op when empty,
 	// the production default). Applied as an Option so it is set before the

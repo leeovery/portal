@@ -271,11 +271,14 @@ func TestMultiSelectQuitKeys(t *testing.T) {
 	}
 }
 
-// TestMultiSelectEnterRoutesToStub covers the Enter mode-branch: with the filter
-// NOT focused, Enter in multi-select mode routes to handleMultiSelectEnter (the
-// task-5.7 stub — a no-op for N≥2) rather than the single-attach
-// handleSessionListEnter. The N≥2 selection is left intact.
-func TestMultiSelectEnterRoutesToStub(t *testing.T) {
+// TestMultiSelectEnterRoutesToBurstArm covers the Enter mode-branch: with the
+// filter NOT focused, Enter in multi-select mode routes to handleMultiSelectEnter
+// (the §6-3 N≥2 burst arm) rather than the single-attach handleSessionListEnter.
+// With host-terminal detection UNWIRED here, the burst arm defers on the
+// unresolved detection, so the mode + N≥2 selection are left intact and nothing
+// attaches. (A resolved-supported terminal dispatches the burst — see
+// burst_dispatch_test.go.)
+func TestMultiSelectEnterRoutesToBurstArm(t *testing.T) {
 	m := NewModelWithSessions(twoFlatSessions())
 	m = enterMultiSelect(t, m)
 	m = pressSession(t, m, pressM) // mark alpha (index 0)
@@ -295,10 +298,10 @@ func TestMultiSelectEnterRoutesToStub(t *testing.T) {
 		t.Errorf("Enter in multi-select mode must not perform a single attach; selected = %q, want empty", mm.selected)
 	}
 	if !mm.MultiSelectActive() {
-		t.Errorf("the N>=2 Enter stub must leave the mode intact")
+		t.Errorf("the deferred N>=2 Enter (detection unwired) must leave the mode intact")
 	}
 	if got := mm.SelectedSessionCount(); got != 2 {
-		t.Errorf("the N>=2 Enter stub must leave the selection intact; count = %d, want 2", got)
+		t.Errorf("the deferred N>=2 Enter (detection unwired) must leave the selection intact; count = %d, want 2", got)
 	}
 }
 

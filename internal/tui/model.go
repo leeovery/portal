@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"image/color"
 	"slices"
@@ -452,6 +453,45 @@ type Model struct {
 	detectResolution spawn.Resolution
 	detectResolved   bool
 	detectDispatched bool
+
+	// §6-3 N≥2 picker-burst seams + lifecycle (restore-host-terminal-windows). The
+	// seams mirror the spawn CLI's SpawnDeps: sessionExists is the pre-flight
+	// has-session probe, ackChannel is the token-ack Collect+Clean channel, spawnExe
+	// resolves the picker's own binary, and spawnGetenv reads PATH — all injected
+	// together (nil in the capture harness / unit tests that never drive a burst).
+	// The RESOLVE seam is REUSED from the detection block above (m.resolve), never
+	// re-injected.
+	sessionExists func(string) bool
+	ackChannel    spawn.AckChannelFull
+	spawnExe      spawn.ExecutableResolver
+	spawnGetenv   func(string) string
+
+	// Burst lifecycle state. burstPending is true from dispatch until the terminal
+	// spawnCompleteMsg/spawnAbortMsg lands; burstPipe/burstCancel own the goroutine's
+	// channel + cancel (task 6-8 drives the cancel). burstTrigger/burstExternal are
+	// the net-N split (trigger = self-attach target, external = the N-1 opened
+	// windows); burstTotal is N (incl. the trigger). burstDone/burstBatch/burstResults
+	// accumulate the streamed outcome (self-attach + selection mutation land in
+	// 6-4/6-6). burstIdentity/burstResolution snapshot the resolved terminal.
+	burstPending    bool
+	burstPipe       *burstProgressPipe
+	burstCancel     context.CancelFunc
+	burstTrigger    string
+	burstExternal   []string
+	burstTotal      int
+	burstDone       int
+	burstBatch      string
+	burstResults    []spawn.WindowResult
+	burstIdentity   spawn.Identity
+	burstResolution spawn.Resolution
+
+	// pendingBurstEnter + pendingBurstOrdered stash a deferred N≥2 Enter pressed
+	// while detection is still in flight (detectResolved false). The
+	// terminalDetectedMsg arm re-runs the branch decision from the snapshot once
+	// detection resolves, so the burst is never lost and never fires before the
+	// host terminal is known.
+	pendingBurstEnter   bool
+	pendingBurstOrdered []string
 
 	// Data loading tracking
 	sessionsLoaded       bool
@@ -2392,6 +2432,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detectIdentity = msg.identity
 		_, m.detectResolution = m.resolve(msg.identity)
 		m.detectResolved = true
+		// §6-3: a deferred N≥2 Enter (pressed while detection was in flight) resolves
+		// its branch decision now that the terminal is known — supported → dispatch the
+		// burst, unsupported → the atomic no-op. Without this the deferred Enter would
+		// wait forever.
+		if m.pendingBurstEnter {
+			return m.decideBurst(m.pendingBurstOrdered)
+		}
+		return m, nil
+	case spawnProgressMsg:
+		// §6-3 non-terminal burst progress: record the per-window counter and re-issue
+		// the receiver so the next channel event is pulled (mirroring
+		// BootstrapProgressMsg). A nil pipe (defensive: a stray progress msg) stops the
+		// loop rather than re-issuing nil. burstTotal is NOT touched here: it is N
+		// (incl. the trigger), set once at dispatch, whereas msg.Total is the external
+		// count (N-1) — overwriting would wrongly shrink BurstTotal() mid-burst.
+		m.burstDone = msg.Done
+		if m.burstPipe == nil {
+			return m, nil
+		}
+		return m, m.burstPipe.receiver()
+	case spawnCompleteMsg:
+		// §6-3 terminal burst outcome: record the batch + per-window results and clear
+		// burst-pending. The self-attach to the trigger + the selection mutation are
+		// tasks 6-4/6-6; this task lands the streaming + outcome capture only.
+		m.burstResults = msg.Results
+		m.burstBatch = msg.Batch
+		m.burstPending = false
+		return m, nil
+	case spawnAbortMsg:
+		// §6-3 pre-flight abort: a selected session vanished between marking and Enter,
+		// so nothing spawned. Clear burst-pending; the abort UI is task 6-7.
+		m.burstPending = false
+		return m, nil
+	case burstChannelClosedMsg:
+		// The burst channel drained and closed — the post-terminal sentinel. No-op:
+		// the terminal spawnCompleteMsg/spawnAbortMsg already cleared pending.
 		return m, nil
 	}
 
@@ -3367,8 +3443,9 @@ func (m Model) exitMultiSelect() Model {
 //     marked name and quit, byte-identical in effect to handleSessionListEnter,
 //     so the cmd layer's existing self-attach connector opens it in the current
 //     window (no special-casing, no adapter).
-//   - N≥2: the spawn-burst boundary, which is Phase 6 — a deliberate no-op stub
-//     until then.
+//   - N≥2: the §6-3 spawn-burst boundary — build the list-ordered marked set and
+//     hand it to beginBurst, which gates on the async terminal detection and
+//     dispatches the async host-window burst (or defers until detection resolves).
 func (m Model) handleMultiSelectEnter() (tea.Model, tea.Cmd) {
 	switch len(m.selectedSessions) {
 	case 0:
@@ -3381,9 +3458,7 @@ func (m Model) handleMultiSelectEnter() (tea.Model, tea.Cmd) {
 		m.selected = name
 		return m, tea.Quit
 	default:
-		// Phase 6 wires the N≥2 spawn burst (internal/spawn) here; until then N≥2
-		// Enter is a deliberate no-op leaving the mode + selection intact.
-		return m, nil
+		return m.beginBurst(m.orderedMarkedSessions())
 	}
 }
 

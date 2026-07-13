@@ -1,6 +1,7 @@
 package spawn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -136,7 +137,7 @@ func TestBurster_Run(t *testing.T) {
 		}
 		sessions := []string{"s1", "s2", "s3"}
 
-		batch, results, err := b.Run(sessions)
+		batch, results, err := b.Run(context.Background(), sessions, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -195,7 +196,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run([]string{"w1", "w2"})
+		_, results, err := b.Run(context.Background(), []string{"w1", "w2"}, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -228,7 +229,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run([]string{"w1"})
+		_, results, err := b.Run(context.Background(), []string{"w1"}, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -257,7 +258,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run([]string{"w1", "w2"})
+		_, results, err := b.Run(context.Background(), []string{"w1", "w2"}, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -291,7 +292,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run([]string{"w1", "w2", "w3"})
+		_, results, err := b.Run(context.Background(), []string{"w1", "w2", "w3"}, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -325,7 +326,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run([]string{"w1", "w2", "w3", "w4", "w5"})
+		batch, results, err := b.Run(context.Background(), []string{"w1", "w2", "w3", "w4", "w5"}, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -360,7 +361,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run([]string{"s1", "s2"})
+		batch, results, err := b.Run(context.Background(), []string{"s1", "s2"}, nil)
 		if batch != "" {
 			t.Errorf("batch = %q, want empty on executable-resolution failure", batch)
 		}
@@ -388,7 +389,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run([]string{"s1", "s2"})
+		batch, results, err := b.Run(context.Background(), []string{"s1", "s2"}, nil)
 		if batch != "" {
 			t.Errorf("batch = %q, want empty on id-generation failure", batch)
 		}
@@ -400,6 +401,85 @@ func TestBurster_Run(t *testing.T) {
 		}
 		if len(adapter.calls) != 0 {
 			t.Errorf("OpenWindow called %d times, want 0 when an id cannot be generated", len(adapter.calls))
+		}
+	})
+}
+
+func TestBurster_Run_Progress(t *testing.T) {
+	t.Run("it reports (i+1, len(external)) progress after each window in list order", func(t *testing.T) {
+		clock := &manualClock{}
+		ack := newDelayingAck(clock.now, 0)
+		adapter := &writingAdapter{ack: ack}
+		b := &Burster{
+			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
+			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+
+		var got [][2]int
+		_, _, err := b.Run(context.Background(), []string{"w1", "w2", "w3"}, func(done, total int) {
+			got = append(got, [2]int{done, total})
+		})
+		if err != nil {
+			t.Fatalf("Run error = %v, want nil", err)
+		}
+		want := [][2]int{{1, 3}, {2, 3}, {3, 3}}
+		if !slices.Equal(got, want) {
+			t.Errorf("progress calls = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("it tolerates a nil progress callback (Phase-2/3 CLI parity)", func(t *testing.T) {
+		clock := &manualClock{}
+		ack := newDelayingAck(clock.now, 0)
+		adapter := &writingAdapter{ack: ack}
+		b := &Burster{
+			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
+			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+
+		_, results, err := b.Run(context.Background(), []string{"w1", "w2"}, nil)
+		if err != nil {
+			t.Fatalf("Run error = %v, want nil", err)
+		}
+		if len(results) != 2 || len(adapter.calls) != 2 {
+			t.Fatalf("nil progress must not alter the burst: results=%d calls=%d, want 2/2", len(results), len(adapter.calls))
+		}
+	})
+
+	t.Run("it stops iterating when the context is cancelled between windows", func(t *testing.T) {
+		clock := &manualClock{}
+		ack := newDelayingAck(clock.now, 0)
+		adapter := &writingAdapter{ack: ack}
+		ctx, cancel := context.WithCancel(context.Background())
+		b := &Burster{
+			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
+			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+
+		// Cancel after the first window's progress fires: the between-windows ctx
+		// check must stop the loop before window 2 is composed or opened.
+		_, results, err := b.Run(ctx, []string{"w1", "w2", "w3"}, func(done, _ int) {
+			if done == 1 {
+				cancel()
+			}
+		})
+		if err != nil {
+			t.Fatalf("Run error = %v, want nil (cancel returns what was collected)", err)
+		}
+		if len(adapter.calls) != 1 {
+			t.Fatalf("OpenWindow called %d times, want 1 (cancel stops before window 2)", len(adapter.calls))
+		}
+		if len(results) != 1 {
+			t.Errorf("results len = %d, want 1 (only the pre-cancel window)", len(results))
 		}
 	})
 }

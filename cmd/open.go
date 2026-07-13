@@ -351,8 +351,16 @@ type tuiConfig struct {
 	// the config-aware buildResolver, terminals.json loaded once) and threaded into
 	// tui.Deps. This is the SINGLE injection site — the picker burst reuses the
 	// model's cached resolution and never re-injects.
-	detector       tui.TerminalDetector
-	resolve        func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	detector tui.TerminalDetector
+	resolve  func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	// §6-3 N≥2 picker-burst seams. Built once here (defaults mirroring the spawn
+	// CLI's SpawnDeps: client.HasSession / a shared server-option ack channel /
+	// os.Executable / os.Getenv) and threaded into tui.Deps. The burst REUSES the
+	// resolve seam above (the cached resolution + a re-resolve for the adapter).
+	sessionExists  func(string) bool
+	ackChannel     spawn.AckChannelFull
+	spawnExe       spawn.ExecutableResolver
+	spawnGetenv    func(string) string
 	cwd            string
 	insideTmux     bool
 	currentSession string
@@ -412,6 +420,10 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		ProgressReceiver: cfg.progressReceiver,
 		Detector:         cfg.detector,
 		Resolve:          cfg.resolve,
+		SessionExists:    cfg.sessionExists,
+		AckChannel:       cfg.ackChannel,
+		SpawnExe:         cfg.spawnExe,
+		SpawnGetenv:      cfg.spawnGetenv,
 	})
 }
 
@@ -573,6 +585,14 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		// resolution is cached on the model and reused by the later picker burst.
 		detector: spawn.NewDetector(client),
 		resolve:  buildResolver().Resolve,
+		// §6-3 N≥2 picker-burst seams — defaults mirror the spawn CLI's SpawnDeps: the
+		// pre-flight has-session probe folds a probe fault to gone (conservative), the
+		// shared server-option ack channel confirms/cleans spawned windows, and the
+		// exe/PATH seams compose each spawned attach argv.
+		sessionExists: client.HasSession,
+		ackChannel:    spawn.NewServerOptionAckChannel(client, client),
+		spawnExe:      os.Executable,
+		spawnGetenv:   os.Getenv,
 		// NO_COLOR carve-out (§2.5): read the env ONCE here (cmd layer) so
 		// internal/tui stays env-free. The single colourless flag flows through
 		// tui.Deps.NoColor and is inherited by every canvas-dependent surface.

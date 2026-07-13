@@ -1,6 +1,7 @@
 package spawn
 
 import (
+	"context"
 	"time"
 
 	"github.com/leeovery/portal/internal/session"
@@ -120,7 +121,16 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 // is permission-required — the macOS Automation grant is per-(source, target),
 // so once window k hits the wall every later window would hit the identical
 // wall, and windows k+1…N−1 are never composed or handed to the adapter.
-func (b *Burster) Run(external []string) (batch string, results []WindowResult, err error) {
+//
+// progress (nil-tolerant) is invoked as progress(i+1, len(external)) after each
+// window's ack classification — the picker burst pipe streams it to the loading
+// UI, while the CLI passes nil for byte-identical Phase-2/3 behaviour. ctx is
+// checked between windows AND inside awaitToken's poll loop (Task 6.8 drives the
+// cancel): on cancellation the burst stops iterating and returns what it has
+// collected so far (a nil error — a cancelled burst is a shutdown, not a
+// failure). A context.Background() ctx never cancels, so the CLI path is
+// unchanged.
+func (b *Burster) Run(ctx context.Context, external []string, progress func(done, total int)) (batch string, results []WindowResult, err error) {
 	exePath, err := b.Exe()
 	if err != nil {
 		return "", nil, err
@@ -142,15 +152,24 @@ func (b *Burster) Run(external []string) (batch string, results []WindowResult, 
 
 	results = make([]WindowResult, 0, len(external))
 	for i, sess := range external {
+		// Between-windows cancel check (Task 6.8): a cancelled burst stops before
+		// composing or opening the next window.
+		if ctx.Err() != nil {
+			break
+		}
 		token := tokens[i]
 		argv := composeAttachArgv(exePath, path, sess, batch, token)
 		result := b.Adapter.OpenWindow(argv)
 
 		ack := AckFailed
 		if result.OK() {
-			ack = awaitToken(b, batch, token)
+			ack = awaitToken(ctx, b, batch, token)
 		}
 		results = append(results, WindowResult{Session: sess, Token: token, Result: result, Ack: ack})
+
+		if progress != nil {
+			progress(i+1, len(external))
+		}
 
 		// The sole early-stop: a permission wall on this window means every later
 		// window (same source → same target) would hit it too, so stop rather than
@@ -172,9 +191,17 @@ func (b *Burster) Run(external []string) (batch string, results []WindowResult, 
 // the same treatment as a genuinely missing marker). All timing flows through
 // the injected Now/Sleep/Poll/Timeout, so the loop is deterministic under a fake
 // clock.
-func awaitToken(b *Burster, batch, token string) AckOutcome {
+//
+// It also honours ctx cancellation (Task 6.8): a cancelled context ends the poll
+// immediately as AckTimeout (the caller's between-windows check then stops the
+// burst). A context.Background() ctx never cancels, so the CLI path polls exactly
+// as before.
+func awaitToken(ctx context.Context, b *Burster, batch, token string) AckOutcome {
 	start := b.Now()
 	for {
+		if ctx.Err() != nil {
+			return AckTimeout
+		}
 		if tokens, cerr := b.Ack.Collect(batch); cerr == nil {
 			if _, ok := tokens[token]; ok {
 				return AckConfirmed

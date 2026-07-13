@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -153,7 +154,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 		return errors.New(unsupportedSpawnMessage(id))
 	}
 
-	batch, results, err := deps.NewBurster(adapter).Run(external)
+	batch, results, err := deps.NewBurster(adapter).Run(context.Background(), external, nil)
 	if err != nil {
 		// Executable or ack-id resolution failed before any window opened; exit 1.
 		return err

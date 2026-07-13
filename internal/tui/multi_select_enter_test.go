@@ -107,10 +107,13 @@ func TestMultiSelectEnterN1IgnoresCursor(t *testing.T) {
 	}
 }
 
-// TestMultiSelectEnterN2Stub covers the N≥2 boundary: Enter is an explicit
-// Phase-6 no-op stub that leaves the mode and the selection intact — it opens
-// nothing and does not quit (the spawn burst is wired in Phase 6).
-func TestMultiSelectEnterN2Stub(t *testing.T) {
+// TestMultiSelectEnterN2DetectionUnwired covers the N≥2 boundary when host-terminal
+// detection is UNWIRED (no detector — every existing test model and the offline
+// capture harness): the §6-3 burst arm DEFERS on the unresolved detection and,
+// with no detector to dispatch, never resolves — so the mode and the selection stay
+// intact, nothing opens, and Enter does not quit. (A resolved-supported terminal
+// dispatches the async burst instead — see burst_dispatch_test.go.)
+func TestMultiSelectEnterN2DetectionUnwired(t *testing.T) {
 	m := NewModelWithSessions([]tmux.Session{
 		{Name: "alpha", Windows: 1},
 		{Name: "bravo", Windows: 2},
@@ -127,6 +130,9 @@ func TestMultiSelectEnterN2Stub(t *testing.T) {
 
 	m, cmd := pressEnter(t, m)
 
+	if m.BurstPending() {
+		t.Errorf("N≥2 Enter with detection unwired must DEFER, not dispatch a burst")
+	}
 	if !m.MultiSelectActive() {
 		t.Errorf("N≥2 Enter must leave multi-select mode intact")
 	}
@@ -137,6 +143,6 @@ func TestMultiSelectEnterN2Stub(t *testing.T) {
 		t.Errorf("N≥2 Enter must open nothing; Selected() = %q, want \"\"", got)
 	}
 	if isQuitCmd(cmd) {
-		t.Errorf("N≥2 Enter must NOT quit (Phase-6 stub)")
+		t.Errorf("N≥2 Enter must NOT quit")
 	}
 }
