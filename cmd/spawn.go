@@ -36,7 +36,8 @@ type SpawnDeps struct {
 	// detect step). Defaults to the production process-tree detector.
 	Detector TerminalDetector
 	// Resolve maps an identity to its window-opening adapter plus the resolution
-	// classification. Defaults to spawn.ResolveAdapter.
+	// classification. Defaults to buildResolver().Resolve — the config-aware
+	// resolver loaded from terminals.json (config → native → unsupported).
 	Resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
 	// Connector performs the single self-attach to the Nth session. Defaults to
 	// buildSessionConnector, which branches on tmux.InsideTmux().
@@ -321,7 +322,7 @@ func buildSpawnDeps(cmd *cobra.Command) *SpawnDeps {
 		deps.Detector = spawnDetector(cmd)
 	}
 	if deps.Resolve == nil {
-		deps.Resolve = spawn.ResolveAdapter
+		deps.Resolve = buildResolver().Resolve
 	}
 	if deps.Connector == nil {
 		deps.Connector = buildSessionConnector(tmuxClient(cmd))
@@ -351,6 +352,24 @@ func buildSpawnDeps(cmd *cobra.Command) *SpawnDeps {
 		deps.Logger = spawnLogger
 	}
 	return deps
+}
+
+// buildResolver constructs the config-aware host-terminal adapter resolver: it
+// resolves the terminals.json path through the XDG configFilePath chain, loads
+// the escape-hatch config once via TerminalsStore, and wraps it in a
+// spawn.Resolver (config override → native → unsupported).
+//
+// It FAILS SAFE: an undeterminable home/XDG path (a rare configFilePath error)
+// degrades to an EMPTY config — native-only resolution — rather than aborting the
+// spawn command, so a broken environment never disables the whole feature.
+// TerminalsStore.Load is itself tolerant (missing/unreadable/malformed →
+// empty config), so this reads terminals.json without ever crashing the pipeline.
+func buildResolver() *spawn.Resolver {
+	cfg := spawn.TerminalsConfig{}
+	if path, err := configFilePath("PORTAL_TERMINALS_FILE", "terminals.json"); err == nil {
+		cfg = spawn.NewTerminalsStore(path).Load()
+	}
+	return spawn.NewResolver(cfg)
 }
 
 func init() {

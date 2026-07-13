@@ -27,6 +27,12 @@ var configFileComponents = map[string]string{
 	// suppressed. The entry is explicit (rather than relying on the unmapped ->
 	// "" default) so the intent is visible in the map itself.
 	"prefs.json": "",
+	// terminals.json is the read-only host-terminal escape hatch. Like prefs.json
+	// it is NOT part of the state-mutation audit-trail set, and it has NO
+	// old-macOS-path predecessor, so its one-shot migrate is a guaranteed no-op
+	// and its breadcrumb is suppressed via the empty component (mirrors the
+	// prefs.json precedent).
+	"terminals.json": "",
 }
 
 // migrateConfigFile moves a config file from oldPath to newPath if oldPath

@@ -549,6 +549,41 @@ func TestSpawnPipeline(t *testing.T) {
 		}
 	})
 
+	t.Run("it logs resolution=config for a config-resolved batch summary", func(t *testing.T) {
+		// A config-tier resolution (ResolutionConfig) must flow through the existing
+		// Phase 2/3 batch summary as resolution=config with no new emission code. The
+		// injected fake adapter + fake resolver keep this fully hermetic — no real
+		// terminals.json read and no real recipe exec.
+		adapter := &spawntest.FakeAdapter{}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, sink := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionConfig, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var summaries []logtest.Record
+		for _, rec := range sink.Records() {
+			if rec.Level == slog.LevelInfo && strings.HasPrefix(rec.Msg, "opened") {
+				summaries = append(summaries, rec)
+			}
+		}
+		if len(summaries) != 1 {
+			t.Fatalf("INFO spawn summaries = %d, want exactly 1; body:\n%s", len(summaries), sink.Body())
+		}
+		if got := summaries[0].AttrString(t, "resolution"); got != "config" {
+			t.Errorf("resolution attr = %q, want %q (ResolutionConfig flows through the summary)", got, "config")
+		}
+	})
+
 	t.Run("it refuses an N>=2 batch on an unsupported terminal atomically with no adapter call", func(t *testing.T) {
 		adapter := &spawntest.FakeAdapter{}
 		conn := &fakeSessionConnector{}

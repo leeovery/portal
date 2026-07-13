@@ -144,8 +144,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 4,
-          "current_task": "restore-host-terminal-windows-4-6",
+          "current_phase": 5,
+          "current_task": "restore-host-terminal-windows-5-1",
           "completed_tasks": [
             "restore-host-terminal-windows-1-1",
             "restore-host-terminal-windows-1-2",
@@ -171,12 +171,14 @@
             "restore-host-terminal-windows-4-2",
             "restore-host-terminal-windows-4-3",
             "restore-host-terminal-windows-4-4",
-            "restore-host-terminal-windows-4-5"
+            "restore-host-terminal-windows-4-5",
+            "restore-host-terminal-windows-4-6"
           ],
           "completed_phases": [
             1,
             2,
-            3
+            3,
+            4
           ]
         }
       }
