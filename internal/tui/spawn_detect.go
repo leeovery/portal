@@ -44,6 +44,28 @@ func WithResolve(fn func(spawn.Identity) (spawn.Adapter, spawn.Resolution)) Opti
 	}
 }
 
+// WithInitialDetection seeds the §6 host-terminal detection cache at construction
+// with the given identity already resolved — the capture-harness entry point for
+// the otherwise async detection lifecycle (production reaches PageSessions and
+// dispatches Detect(), never this option). It marks detection resolved, caches the
+// identity, AND resolves the resolution by running the identity through the
+// zero-config spawn.ResolveAdapter — seeding the Resolution (not just IsNull) is
+// load-bearing so DetectUnsupported() is true for a non-NULL recognised-but-undriven
+// terminal (e.g. com.apple.Terminal) and the proactive §6.2 banner renders from the
+// first frame. A nil identity is a no-op so omitting the option leaves detection
+// unresolved.
+func WithInitialDetection(id *spawn.Identity) Option {
+	return func(m *Model) {
+		if id == nil {
+			return
+		}
+		_, resolution := spawn.ResolveAdapter(*id)
+		m.detectIdentity = *id
+		m.detectResolution = resolution
+		m.detectResolved = true
+	}
+}
+
 // maybeDispatchDetectionCmd returns the async detection command exactly once,
 // guarded by the detectDispatched latch. It returns nil — dispatching nothing —
 // when detection is unwired (nil detector), already dispatched, or the model is

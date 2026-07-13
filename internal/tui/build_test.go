@@ -1,9 +1,13 @@
 package tui_test
 
 import (
+	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -105,6 +109,77 @@ func TestBuild(t *testing.T) {
 
 		if got, want := m.InitialFilter(), "myapp"; got != want {
 			t.Errorf("InitialFilter() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("initial detection seeds the resolved unsupported cache", func(t *testing.T) {
+		id := spawn.Identity{Name: "Apple Terminal", BundleID: "com.apple.Terminal"}
+		m := tui.Build(tui.Deps{
+			Lister:           &mockSessionLister{},
+			InitialMode:      prefs.ModeFlat,
+			InitialDetection: &id,
+		})
+
+		if !m.DetectResolved() {
+			t.Fatal("DetectResolved() = false, want true")
+		}
+		if !m.DetectUnsupported() {
+			t.Error("DetectUnsupported() = false, want true (non-NULL Apple Terminal resolves unsupported)")
+		}
+	})
+
+	t.Run("initial gone-flagged seeds the abort banner over a multi-select model", func(t *testing.T) {
+		m := tui.Build(tui.Deps{
+			Lister: &mockSessionLister{sessions: []tmux.Session{
+				{Name: "agentic-workflows-codify", Windows: 1},
+				{Name: "fab-flowx-explore", Windows: 2},
+				{Name: "designlab-web-r8suyU", Windows: 3},
+			}},
+			InitialMode:        prefs.ModeFlat,
+			Appearance:         prefs.AppearanceDark,
+			InitialMultiSelect: []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"},
+			InitialGoneFlagged: []string{"fab-flowx-explore"},
+		})
+
+		if !m.MultiSelectActive() {
+			t.Error("MultiSelectActive() = false, want true (survivors stay marked)")
+		}
+
+		// Size + ingest the sessions so the section-header row renders (a refresh does
+		// NOT clear the abort banner — only an actionable key / Esc does).
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{
+			{Name: "agentic-workflows-codify", Windows: 1},
+			{Name: "fab-flowx-explore", Windows: 2},
+			{Name: "designlab-web-r8suyU", Windows: 3},
+		}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{})
+
+		visible := ansi.Strip(model.(tui.Model).View().Content)
+		if !strings.Contains(visible, "'fab-flowx-explore' is gone — nothing opened") {
+			t.Errorf("view missing the abort banner:\n%s", visible)
+		}
+		if !strings.Contains(visible, "session gone") {
+			t.Errorf("view missing the gone-row badge:\n%s", visible)
+		}
+	})
+
+	t.Run("initial burst opening seeds the pending Opening band", func(t *testing.T) {
+		m := tui.Build(tui.Deps{
+			Lister:              &mockSessionLister{},
+			InitialMode:         prefs.ModeFlat,
+			InitialBurstOpening: [2]int{2, 3},
+		})
+
+		if !m.BurstPending() {
+			t.Fatal("BurstPending() = false, want true")
+		}
+		if got, want := m.BurstDone(), 2; got != want {
+			t.Errorf("BurstDone() = %d, want %d", got, want)
+		}
+		if got, want := m.BurstTotal(), 3; got != want {
+			t.Errorf("BurstTotal() = %d, want %d", got, want)
 		}
 	})
 }

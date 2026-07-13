@@ -65,6 +65,35 @@ func (m Model) handlePreflightAbort(msg spawnAbortMsg) Model {
 	return m
 }
 
+// WithInitialGoneFlagged seeds the §6-7 pre-flight abort state at construction —
+// the capture-harness entry point for the otherwise Enter-driven abort (production
+// reaches it only when an N≥2 pre-flight finds a marked session gone, never this
+// option). It seeds the transient goneFlagged set the delegate draws the red ⚠ +
+// `session gone` badge for, composes the red section-header abort banner text the
+// SAME way handlePreflightAbort does (spawn.QuoteJoin + spawn.GoneVerb, so the seed
+// names sessions identically to the live path), and refreshes the delegate so the
+// gone flag renders on the first frame. It is applied over an already-seeded
+// multi-select model (WithInitialMultiSelect runs first), so survivors keep their
+// ● while the gone row shows the red flag. A nil/empty slice is a no-op so omitting
+// the option leaves no abort banner.
+func WithInitialGoneFlagged(names []string) Option {
+	return func(m *Model) {
+		if len(names) == 0 {
+			return
+		}
+		m.abortBannerText = fmt.Sprintf(
+			"%s %s gone — nothing opened",
+			spawn.QuoteJoin(names),
+			spawn.GoneVerb(len(names)),
+		)
+		m.goneFlagged = make(map[string]struct{}, len(names))
+		for _, name := range names {
+			m.goneFlagged[name] = struct{}{}
+		}
+		m.refreshSessionDelegate()
+	}
+}
+
 // clearAbortBanner dismisses the §6-7 pre-flight abort banner: it clears the banner
 // text and the gone-row flags, then refreshes the delegate so the red ⚠/badge clear
 // from the (former) gone row on the next frame while every surviving mark keeps its

@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -41,6 +42,21 @@ type Fixture struct {
 	// on once the list loads (empty → default index 0). Paired with initialMultiSelect
 	// so the multi-select capture puts the cursor on a marked, banded row.
 	initialCursor string
+	// initialDetection seeds the §6.2 host-terminal detection cache with a resolved
+	// identity (nil for every fixture that does not capture the proactive banner). It
+	// is the only way to render the otherwise async-resolved detection in the inert
+	// harness — used by the unsupported-terminal fixture to seed a non-NULL Apple
+	// Terminal identity (which resolves unsupported).
+	initialDetection *spawn.Identity
+	// initialGoneFlagged seeds the §6.7 pre-flight abort state — the gone-row set + the
+	// red abort banner text (empty for every fixture that does not capture the abort).
+	// Paired with initialMultiSelect so survivors keep their ● while the gone row shows
+	// the red flag.
+	initialGoneFlagged []string
+	// initialBurstOpening seeds the §6.5 in-burst Opening band as (done, total) (the
+	// zero value for every fixture that does not capture the band). Paired with
+	// initialMultiSelect so the marked rows show their ● beneath the Opening band.
+	initialBurstOpening [2]int
 	// initialFlash seeds the §11.2 inline WARNING flash band on the first frame
 	// (empty for every fixture that does not capture the flash). It is the only way
 	// to render the otherwise-transient flash in the inert capture harness.
@@ -95,13 +111,16 @@ func (f *Fixture) Deps() tui.Deps {
 		// pre-stamped (Session.Dir set), so the lazy pane-read fallback never
 		// fires — and the harness has no tmux server to read panes from anyway.
 		// ModePersister is nil so an `s`-toggle during a capture writes nowhere.
-		InitialMode:        f.initialMode,
-		InitialMultiSelect: f.initialMultiSelect,
-		InitialCursor:      f.initialCursor,
-		InitialFlash:       f.initialFlash,
-		Command:            f.command,
-		CWD:                "/home/user",
-		ServerStarted:      f.serverStarted,
+		InitialMode:         f.initialMode,
+		InitialMultiSelect:  f.initialMultiSelect,
+		InitialCursor:       f.initialCursor,
+		InitialDetection:    f.initialDetection,
+		InitialGoneFlagged:  f.initialGoneFlagged,
+		InitialBurstOpening: f.initialBurstOpening,
+		InitialFlash:        f.initialFlash,
+		Command:             f.command,
+		CWD:                 "/home/user",
+		ServerStarted:       f.serverStarted,
 		// Wire the loading-screen progress receiver only when the fixture seeds
 		// events — it streams the seeded mid-restore sequence then blocks so the
 		// loading page never dismisses (no terminal BootstrapCompleteMsg). The
@@ -149,6 +168,12 @@ func FixtureByName(name string) (*Fixture, error) {
 		return sessionsInlineFlashFixture(), nil
 	case "sessions-multi-select-active":
 		return sessionsMultiSelectActiveFixture(), nil
+	case "sessions-unsupported-terminal":
+		return sessionsUnsupportedTerminalFixture(), nil
+	case "sessions-multi-select-preflight-abort":
+		return sessionsMultiSelectPreflightAbortFixture(), nil
+	case "sessions-burst-opening":
+		return sessionsBurstOpeningFixture(), nil
 	case "sessions-no-tags-signpost":
 		return sessionsNoTagsSignpostFixture(), nil
 	case "projects":
@@ -172,7 +197,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-multi-select-active", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", "loading-error", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-multi-select-active", "sessions-unsupported-terminal", "sessions-multi-select-preflight-abort", "sessions-burst-opening", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", "loading-error", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -416,6 +441,84 @@ func sessionsMultiSelectActiveFixture() *Fixture {
 		"designlab-web-r8suyU",
 	}
 	fx.initialCursor = "fab-flowx-explore"
+	return fx
+}
+
+// sessionsUnsupportedTerminalFixture builds the deterministic
+// "sessions-unsupported-terminal" fixture: the sessions-flat set (same 12 sessions,
+// same order) opened in Flat mode in the NORMAL list (no multi-select), with the §6.2
+// host-terminal detection cache seeded to a non-NULL Apple Terminal identity. Because
+// com.apple.Terminal is a recognised-but-undriven terminal, spawn.ResolveAdapter
+// resolves it UNSUPPORTED (non-NULL yet undriven), so DetectUnsupported() is true and
+// the proactive amber `⚠ unsupported terminal — Apple Terminal · com.apple.Terminal`
+// banner (+ blue `see docs`) REPLACES the standard `Sessions ··· N` section header —
+// mirroring the delivered frame testdata/vhs/reference/sessions-unsupported-terminal-mv.png.
+//
+// Detection is otherwise an async lifecycle dispatched on reaching PageSessions, so it
+// is seeded via the InitialDetection seed seam — the only way to render the resolved
+// banner in the inert harness. It reuses sessionsFlatFixture's session set verbatim;
+// only the seed-seam field and the fixture name differ. Like the other fixtures it
+// NEVER opens a tmux server or touches ~/.config/portal.
+func sessionsUnsupportedTerminalFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "sessions-unsupported-terminal"
+	fx.initialDetection = &spawn.Identity{Name: "Apple Terminal", BundleID: "com.apple.Terminal"}
+	return fx
+}
+
+// sessionsMultiSelectPreflightAbortFixture builds the deterministic
+// "sessions-multi-select-preflight-abort" fixture: the sessions-flat set (same 12
+// sessions, same order) opened in Flat multi-select mode with three sessions marked —
+// agentic-workflows-codify, fab-flowx-explore, designlab-web-r8suyU — the cursor
+// anchored on the gone row fab-flowx-explore, and the §6.7 pre-flight abort seeded on
+// fab-flowx-explore. So the red `⚠ 'fab-flowx-explore' is gone — nothing opened` banner
+// (+ dim `esc dismiss`) owns the section-header row, the gone row shows the red ⚠ +
+// `session gone` badge (the delegate gives goneFlagged precedence over the ● marker),
+// and the two survivors keep their violet ● — mirroring the delivered frame
+// testdata/vhs/reference/sessions-multi-select-preflight-abort-mv.png.
+//
+// The abort is otherwise reached only when an N≥2 Enter finds a marked session gone,
+// so it is seeded via the InitialMultiSelect + InitialCursor + InitialGoneFlagged seed
+// seams — the only way to render the frame in the inert harness. It reuses
+// sessionsFlatFixture's session set verbatim; only the seed-seam fields and the fixture
+// name differ. Like the other fixtures it NEVER opens a tmux server or touches
+// ~/.config/portal.
+func sessionsMultiSelectPreflightAbortFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "sessions-multi-select-preflight-abort"
+	fx.initialMultiSelect = []string{
+		"agentic-workflows-codify",
+		"fab-flowx-explore",
+		"designlab-web-r8suyU",
+	}
+	fx.initialCursor = "fab-flowx-explore"
+	fx.initialGoneFlagged = []string{"fab-flowx-explore"}
+	return fx
+}
+
+// sessionsBurstOpeningFixture builds the deterministic "sessions-burst-opening"
+// fixture: the sessions-flat set (same 12 sessions, same order) opened in Flat
+// multi-select mode with the same three sessions marked, and the §6.5 in-burst Opening
+// band seeded as (2, 3). So the `Opening 2/3…` band (accent.violet — the HIGHEST
+// section-header claimant) owns the section-header row while the three marked rows keep
+// their violet ● beneath it. This frame is a design RESIDUAL (no delivered Paper
+// oracle), so this capture becomes the new reference.
+//
+// The burst is otherwise driven by dispatchBurst + its progress goroutine, so it is
+// seeded via the InitialMultiSelect + InitialBurstOpening seed seams — the only way to
+// render the band in the inert harness (no goroutine, pipe, or cancel is wired). It
+// reuses sessionsFlatFixture's session set verbatim; only the seed-seam fields and the
+// fixture name differ. Like the other fixtures it NEVER opens a tmux server or touches
+// ~/.config/portal.
+func sessionsBurstOpeningFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "sessions-burst-opening"
+	fx.initialMultiSelect = []string{
+		"agentic-workflows-codify",
+		"fab-flowx-explore",
+		"designlab-web-r8suyU",
+	}
+	fx.initialBurstOpening = [2]int{2, 3}
 	return fx
 }
 

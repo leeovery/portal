@@ -267,6 +267,24 @@ func (m *Model) resetBurstState() {
 	m.burstCancelled = false
 }
 
+// WithInitialBurstOpening seeds the §6-5 in-burst Opening band at construction —
+// the capture-harness entry point for the otherwise dispatch-driven burst
+// (production sets these fields only inside dispatchBurst, never this option). It
+// marks the burst pending and seeds the streamed `Opening <done>/<total>…` counters
+// so the highest section-header claimant renders on the first frame; no goroutine,
+// pipe, or cancel is wired (the harness is inert). The zero value ([0,0] → done and
+// total both zero) is a no-op so omitting the option leaves the burst unwired.
+func WithInitialBurstOpening(done, total int) Option {
+	return func(m *Model) {
+		if done == 0 && total == 0 {
+			return
+		}
+		m.burstPending = true
+		m.burstDone = done
+		m.burstTotal = total
+	}
+}
+
 // BurstPending reports whether an async §6 spawn burst is in flight — dispatched
 // but not yet terminal (spawnCompleteMsg/spawnAbortMsg) — for testing.
 func (m Model) BurstPending() bool { return m.burstPending }

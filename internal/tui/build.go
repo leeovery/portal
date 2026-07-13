@@ -99,11 +99,34 @@ type Deps struct {
 	// row the cursor lands on once the list loads. It exists so the multi-select
 	// capture can put the cursor on a marked (banded) row. Empty is a no-op;
 	// production never sets it (the live picker keeps the default index-0 cursor).
-	InitialCursor  string
-	Command        []string
-	ServerStarted  bool
-	InsideTmux     bool
-	CurrentSession string
+	InitialCursor string
+	// InitialDetection seeds the §6 host-terminal detection cache on the first frame
+	// with the given identity already resolved (via spawn.ResolveAdapter, so a
+	// non-NULL Apple Terminal resolves unsupported and the proactive §6.2 banner
+	// renders). It exists for the offline capture harness: detection is otherwise an
+	// async lifecycle dispatched on reaching PageSessions, so the fixture seeds the
+	// resolved cache directly to screenshot the banner. Nil (the production default)
+	// leaves detection unwired.
+	InitialDetection *spawn.Identity
+	// InitialGoneFlagged seeds the §6-7 pre-flight abort state on the first frame: the
+	// gone-row set (the delegate draws the red ⚠ + `session gone` badge for it) plus
+	// the red section-header abort banner text, composed identically to
+	// handlePreflightAbort. It exists for the offline capture harness: the abort is
+	// otherwise reached only when an N≥2 Enter finds a marked session gone, so the
+	// fixture seeds it directly (over an in-multi-select model) to screenshot the
+	// frame. Empty (the production default) leaves no abort banner.
+	InitialGoneFlagged []string
+	// InitialBurstOpening seeds the §6-5 in-burst Opening band on the first frame as
+	// (done, total): a non-zero pair marks the burst pending and seeds the `Opening
+	// done/total…` counters. It exists for the offline capture harness: the burst is
+	// otherwise driven by dispatchBurst + its progress goroutine, so the fixture seeds
+	// the band directly to screenshot it. The zero value ([0,0]) is a no-op (not
+	// pending), the production default.
+	InitialBurstOpening [2]int
+	Command             []string
+	ServerStarted       bool
+	InsideTmux          bool
+	CurrentSession      string
 	// ProgressReceiver is the §10.2 concurrent cold-boot route's channel-receive
 	// tea.Cmd. cmd/open.go sets it only on the cold + TUI path (bootstrap deferred
 	// to a goroutine); nil on every synchronous path. When set, Build wires
@@ -207,6 +230,16 @@ func Build(deps Deps) Model {
 	// items ingest (evaluateDefaultPage), since it must survive the initial SetItems.
 	opts = append(opts, WithInitialMultiSelect(deps.InitialMultiSelect))
 	opts = append(opts, WithInitialCursor(deps.InitialCursor))
+
+	// Seed the §6 picker-burst capture-only frames (all no-ops when unset, the
+	// production default). WithInitialGoneFlagged is applied AFTER WithInitial
+	// MultiSelect so its delegate refresh observes the seeded marked set (survivors
+	// keep their ●, the gone row shows the red flag). WithInitialDetection seeds the
+	// resolved detection cache for the proactive unsupported banner; WithInitialBurst
+	// Opening seeds the in-burst Opening band. Production never sets any of these.
+	opts = append(opts, WithInitialDetection(deps.InitialDetection))
+	opts = append(opts, WithInitialGoneFlagged(deps.InitialGoneFlagged))
+	opts = append(opts, WithInitialBurstOpening(deps.InitialBurstOpening[0], deps.InitialBurstOpening[1]))
 
 	m := New(deps.Lister, opts...)
 	if len(deps.Command) > 0 {

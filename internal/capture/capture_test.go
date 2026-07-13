@@ -2,6 +2,7 @@ package capture_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -820,6 +821,195 @@ func TestFixtureNamesIncludesMultiSelectActive(t *testing.T) {
 	if !found {
 		t.Errorf("FixtureNames() %v does not include sessions-multi-select-active", capture.FixtureNames())
 	}
+}
+
+// flatFixtureWants is the ordered sessions-flat set (names / window counts /
+// attached flags) the §6 picker-burst fixtures reuse verbatim, asserted so a fixture
+// that silently drifts from the shared set fails loudly.
+type flatFixtureWant struct {
+	name     string
+	windows  int
+	attached bool
+}
+
+func flatFixtureWants() []flatFixtureWant {
+	return []flatFixtureWant{
+		{"agentic-workflows-code-based", 3, true},
+		{"agentic-workflows-codify", 2, false},
+		{"fab-flowx-explore", 1, false},
+		{"evvi webhooks and watchers", 4, false},
+		{"aviva-proxy-qNyfEO", 1, false},
+		{"designlab-web-r8suyU", 2, false},
+		{"evvi-sync-engine", 1, false},
+		{"fab-aws-migration", 5, false},
+		{"flow-v1-api-XkkhTN", 1, false},
+		{"flowx-7UKPZH", 2, false},
+		{"fabric-lk26UG", 1, false},
+		{"folio-Jiz4el", 1, false},
+	}
+}
+
+func assertFlatFixtureSet(t *testing.T, fx *capture.Fixture) {
+	t.Helper()
+	sessions, err := fx.Lister.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	wants := flatFixtureWants()
+	if len(sessions) != len(wants) {
+		t.Fatalf("fixture has %d sessions, want %d (the sessions-flat set)", len(sessions), len(wants))
+	}
+	for i, w := range wants {
+		got := sessions[i]
+		if got.Name != w.name || got.Windows != w.windows || got.Attached != w.attached {
+			t.Errorf("session[%d] = {%q,%d,%t}, want {%q,%d,%t}", i, got.Name, got.Windows, got.Attached, w.name, w.windows, w.attached)
+		}
+	}
+}
+
+func assertFixtureNameListed(t *testing.T, name string) {
+	t.Helper()
+	if !slices.Contains(capture.FixtureNames(), name) {
+		t.Errorf("FixtureNames() %v does not include %s", capture.FixtureNames(), name)
+	}
+}
+
+// TestSessionsUnsupportedTerminalFixture verifies the §6.2 proactive
+// unsupported-terminal fixture: it reuses the sessions-flat set (NORMAL mode, no
+// multi-select) and seeds the detection cache with a non-NULL Apple Terminal
+// identity, so the built model resolves unsupported and DetectUnsupported() is true
+// (the proactive amber banner renders). The banner render assertion lives in
+// internal/tui; here the gate is that the fixture wires the identity through Deps.
+func TestSessionsUnsupportedTerminalFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-unsupported-terminal")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-unsupported-terminal): %v", err)
+	}
+
+	assertFlatFixtureSet(t, fx)
+
+	deps := fx.Deps()
+	if deps.InitialDetection == nil {
+		t.Fatal("Deps().InitialDetection = nil, want a seeded Apple Terminal identity")
+	}
+	if got, want := deps.InitialDetection.Name, "Apple Terminal"; got != want {
+		t.Errorf("Deps().InitialDetection.Name = %q, want %q", got, want)
+	}
+	if got, want := deps.InitialDetection.BundleID, "com.apple.Terminal"; got != want {
+		t.Errorf("Deps().InitialDetection.BundleID = %q, want %q", got, want)
+	}
+	// It must NOT be in multi-select mode — the banner is proactive over the normal list.
+	if len(deps.InitialMultiSelect) != 0 {
+		t.Errorf("Deps().InitialMultiSelect = %v, want empty (NORMAL mode)", deps.InitialMultiSelect)
+	}
+
+	m := tui.Build(deps)
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if !m.DetectUnsupported() {
+		t.Error("DetectUnsupported() = false, want true (Apple Terminal resolves unsupported → the banner renders)")
+	}
+	if m.MultiSelectActive() {
+		t.Error("MultiSelectActive() = true, want false (the unsupported banner is proactive over the normal list)")
+	}
+}
+
+// TestFixtureNamesIncludesUnsupportedTerminal pins the unsupported-terminal fixture
+// into the discoverable name list.
+func TestFixtureNamesIncludesUnsupportedTerminal(t *testing.T) {
+	assertFixtureNameListed(t, "sessions-unsupported-terminal")
+}
+
+// TestSessionsMultiSelectPreflightAbortFixture verifies the §6.7 pre-flight abort
+// fixture: it reuses the sessions-flat set, opens in multi-select mode with the three
+// marked sessions, anchors the cursor on fab-flowx-explore (the gone row), and seeds
+// the gone-flag on fab-flowx-explore so the red abort banner + gone-row badge render
+// while the survivors keep their ●. The render assertions live in the visual gate;
+// here the gate is that the fixture wires the seed seams through Deps.
+func TestSessionsMultiSelectPreflightAbortFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-multi-select-preflight-abort")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-multi-select-preflight-abort): %v", err)
+	}
+
+	assertFlatFixtureSet(t, fx)
+
+	deps := fx.Deps()
+	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	if len(deps.InitialMultiSelect) != len(wantMarked) {
+		t.Fatalf("Deps().InitialMultiSelect = %v, want %v", deps.InitialMultiSelect, wantMarked)
+	}
+	for i, w := range wantMarked {
+		if deps.InitialMultiSelect[i] != w {
+			t.Errorf("Deps().InitialMultiSelect[%d] = %q, want %q", i, deps.InitialMultiSelect[i], w)
+		}
+	}
+	if got, want := deps.InitialCursor, "fab-flowx-explore"; got != want {
+		t.Errorf("Deps().InitialCursor = %q, want %q (cursor on the gone row)", got, want)
+	}
+	wantGone := []string{"fab-flowx-explore"}
+	if len(deps.InitialGoneFlagged) != len(wantGone) || deps.InitialGoneFlagged[0] != wantGone[0] {
+		t.Errorf("Deps().InitialGoneFlagged = %v, want %v", deps.InitialGoneFlagged, wantGone)
+	}
+
+	m := tui.Build(deps)
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if !m.MultiSelectActive() {
+		t.Error("MultiSelectActive() = false, want true (survivors stay marked)")
+	}
+}
+
+// TestFixtureNamesIncludesMultiSelectPreflightAbort pins the pre-flight abort fixture
+// into the discoverable name list.
+func TestFixtureNamesIncludesMultiSelectPreflightAbort(t *testing.T) {
+	assertFixtureNameListed(t, "sessions-multi-select-preflight-abort")
+}
+
+// TestSessionsBurstOpeningFixture verifies the §6.5 in-burst Opening fixture: it
+// reuses the sessions-flat set, opens in multi-select mode with the three marked
+// sessions, and seeds the in-burst Opening band as (2, 3) so the built model renders
+// the `Opening 2/3…` band (BurstPending with the done/total counters). The band
+// render assertion lives in internal/tui; here the gate is that the fixture wires the
+// seed seam through Deps.
+func TestSessionsBurstOpeningFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-burst-opening")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-burst-opening): %v", err)
+	}
+
+	assertFlatFixtureSet(t, fx)
+
+	deps := fx.Deps()
+	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	if len(deps.InitialMultiSelect) != len(wantMarked) {
+		t.Fatalf("Deps().InitialMultiSelect = %v, want %v", deps.InitialMultiSelect, wantMarked)
+	}
+	if got, want := deps.InitialBurstOpening, [2]int{2, 3}; got != want {
+		t.Errorf("Deps().InitialBurstOpening = %v, want %v (Opening 2/3…)", got, want)
+	}
+
+	m := tui.Build(deps)
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if !m.BurstPending() {
+		t.Error("BurstPending() = false, want true (the Opening band must render)")
+	}
+	if got, want := m.BurstDone(), 2; got != want {
+		t.Errorf("BurstDone() = %d, want %d", got, want)
+	}
+	if got, want := m.BurstTotal(), 3; got != want {
+		t.Errorf("BurstTotal() = %d, want %d", got, want)
+	}
+}
+
+// TestFixtureNamesIncludesBurstOpening pins the in-burst Opening fixture into the
+// discoverable name list.
+func TestFixtureNamesIncludesBurstOpening(t *testing.T) {
+	assertFixtureNameListed(t, "sessions-burst-opening")
 }
 
 // TestFakeSeamsAreInert verifies the mutating fakes are no-ops (the harness must
