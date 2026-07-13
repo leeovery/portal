@@ -13,8 +13,6 @@ package tui
 // no self-attach — so there is deliberately no adapter/connector/tea.Quit path here.
 
 import (
-	"fmt"
-
 	"github.com/leeovery/portal/internal/spawn"
 )
 
@@ -22,10 +20,10 @@ import (
 // spawnAbortMsg. The msg.Gone slice (list order, from spawn.PreflightMissing) drives:
 //
 //   - the red section-header abort banner (abortBannerText) naming the gone
-//     session(s), composed via the shared spawn.QuoteJoin + spawn.GoneVerb helpers so
-//     the picker names sessions identically to the CLI — a single gone session reads
-//     `'<session>' is gone — nothing opened`, several read `'s2', 's4' are gone —
-//     nothing opened` (the ⚠ glyph is added by renderPreflightAbortHeader);
+//     session(s), rendered through the shared spawn.GoneMessage so the picker names
+//     sessions identically to the CLI — a single gone session reads `'<session>' is
+//     gone — nothing opened`, several read `'s2', 's4' are gone — nothing opened`
+//     (the ⚠ glyph is added by renderPreflightAbortHeader);
 //   - the transient gone-row flags (goneFlagged) the delegate consults to draw the
 //     red ⚠ + `session gone` badge in place of the ●/attached badge;
 //   - the prune-keeping-survivors selection mutation — the SAME prune-what's-gone
@@ -42,11 +40,7 @@ func (m Model) handlePreflightAbort(msg spawnAbortMsg) Model {
 	// per-window records (nothing was spawned).
 	m.emitPreflightAbort(msg.Gone)
 
-	m.abortBannerText = fmt.Sprintf(
-		"%s %s gone — nothing opened",
-		spawn.QuoteJoin(msg.Gone),
-		spawn.GoneVerb(len(msg.Gone)),
-	)
+	m.abortBannerText = spawn.GoneMessage(msg.Gone)
 
 	// Flag the gone rows (transient; cleared on dismiss/refresh) and prune them from
 	// the selection, keeping every survivor marked.
@@ -70,7 +64,7 @@ func (m Model) handlePreflightAbort(msg spawnAbortMsg) Model {
 // reaches it only when an N≥2 pre-flight finds a marked session gone, never this
 // option). It seeds the transient goneFlagged set the delegate draws the red ⚠ +
 // `session gone` badge for, composes the red section-header abort banner text the
-// SAME way handlePreflightAbort does (spawn.QuoteJoin + spawn.GoneVerb, so the seed
+// SAME way handlePreflightAbort does (the shared spawn.GoneMessage, so the seed
 // names sessions identically to the live path), and refreshes the delegate so the
 // gone flag renders on the first frame. It is applied over an already-seeded
 // multi-select model (WithInitialMultiSelect runs first), so survivors keep their
@@ -81,11 +75,7 @@ func WithInitialGoneFlagged(names []string) Option {
 		if len(names) == 0 {
 			return
 		}
-		m.abortBannerText = fmt.Sprintf(
-			"%s %s gone — nothing opened",
-			spawn.QuoteJoin(names),
-			spawn.GoneVerb(len(names)),
-		)
+		m.abortBannerText = spawn.GoneMessage(names)
 		m.goneFlagged = make(map[string]struct{}, len(names))
 		for _, name := range names {
 			m.goneFlagged[name] = struct{}{}

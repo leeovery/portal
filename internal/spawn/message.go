@@ -1,6 +1,9 @@
 package spawn
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // QuoteJoin single-quotes each name and joins them with ", " — rendering 's2'
 // for one name and 's2', 's4' for several. It is the shared renderer for the
@@ -24,4 +27,32 @@ func GoneVerb(n int) string {
 		return "is"
 	}
 	return "are"
+}
+
+// GoneMessage is the single renderer for the pre-flight gone-session outcome
+// sentence — "'s2' is gone — nothing opened" for one name, "'s2', 's4' are gone
+// — nothing opened" for several — composed from the shared QuoteJoin + GoneVerb
+// primitives. Every caller (the CLI abort error and outcome log, the picker
+// outcome log, the picker abort banner, and the capture-harness seed banner)
+// renders through it so a copy edit lands in exactly one place. The body carries
+// no "spawn:" prefix and no ⚠ glyph: the CLI adds the prefix at its call sites
+// and the notice band prepends the glyph via statusGlyph.
+func GoneMessage(names []string) string {
+	return fmt.Sprintf("%s %s gone — nothing opened", QuoteJoin(names), GoneVerb(len(names)))
+}
+
+// UnsupportedNoopMessage is the single renderer for the N≥2 unsupported-terminal
+// atomic no-op outcome sentence. A NULL identity (remote/mosh, or a transient
+// detection error folded to Identity{}) gets the honest "no host-local terminal
+// — nothing opened" line; a recognised-but-undriven identity names its friendly
+// name and bundle id, separated by the U+00B7 middle dot that mirrors the
+// --detect echo and the design banner. Both callers (the CLI unsupported message
+// and the picker's re-asserted flash) render through it. The body carries no
+// "spawn:" prefix and no ⚠ glyph: the CLI adds the prefix and the notice band
+// prepends the glyph via statusGlyph.
+func UnsupportedNoopMessage(id Identity) string {
+	if id.IsNull() {
+		return "no host-local terminal — nothing opened"
+	}
+	return fmt.Sprintf("unsupported terminal — %s · %s — nothing opened", id.Name, id.BundleID)
 }

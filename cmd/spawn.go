@@ -131,7 +131,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	// A plain (non-UsageError, non-silenced) error → exit 1 on stderr.
 	if gone := spawn.PreflightMissing(sessions, deps.Exists); len(gone) > 0 {
 		logSpawnGone(log.OrDiscard(deps.Logger), gone)
-		return fmt.Errorf("spawn: %s %s gone — nothing opened", spawn.QuoteJoin(gone), spawn.GoneVerb(len(gone)))
+		return fmt.Errorf("spawn: %s", spawn.GoneMessage(gone))
 	}
 
 	// N=1 (empty external set): no external windows to spawn or confirm — a plain
@@ -228,17 +228,14 @@ func tallyWindowResults(logger *slog.Logger, results []spawn.WindowResult) (open
 // undriven identity names its friendly name and bundle id, separated by the
 // U+00B7 middle dot that mirrors the --detect echo and the design banner.
 func unsupportedSpawnMessage(id spawn.Identity) string {
-	if id.IsNull() {
-		return "spawn: no host-local terminal — nothing opened"
-	}
-	return fmt.Sprintf("spawn: unsupported terminal — %s · %s — nothing opened", id.Name, id.BundleID)
+	return "spawn: " + spawn.UnsupportedNoopMessage(id)
 }
 
 // logSpawnGone emits the single INFO outcome line for a pre-flight abort. The
 // message names the gone session(s); nothing was attempted (detect never ran),
 // so it carries no per-window records and no resolution/opened/total attrs.
 func logSpawnGone(logger *slog.Logger, gone []string) {
-	logger.Info(fmt.Sprintf("%s %s gone — nothing opened", spawn.QuoteJoin(gone), spawn.GoneVerb(len(gone))))
+	logger.Info(spawn.GoneMessage(gone))
 }
 
 // logSpawnUnsupported emits the single INFO outcome line for the atomic no-op.

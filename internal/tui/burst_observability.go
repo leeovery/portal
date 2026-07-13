@@ -98,5 +98,5 @@ func (m Model) emitUnsupportedNoop(id spawn.Identity) {
 // and carries no per-window records and no resolution/opened/total attrs. Mirrors
 // cmd/spawn.go's logSpawnGone.
 func (m Model) emitPreflightAbort(gone []string) {
-	log.OrDiscard(m.spawnLogger).Info(fmt.Sprintf("%s %s gone — nothing opened", spawn.QuoteJoin(gone), spawn.GoneVerb(len(gone))))
+	log.OrDiscard(m.spawnLogger).Info(spawn.GoneMessage(gone))
 }

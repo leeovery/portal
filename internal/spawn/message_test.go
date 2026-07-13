@@ -41,3 +41,36 @@ func TestGoneVerb(t *testing.T) {
 		}
 	})
 }
+
+func TestGoneMessage(t *testing.T) {
+	t.Run("it renders the singular gone body for one name", func(t *testing.T) {
+		const want = "'s2' is gone — nothing opened"
+		if got := GoneMessage([]string{"s2"}); got != want {
+			t.Errorf("GoneMessage([s2]) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it renders the plural gone body for several names", func(t *testing.T) {
+		const want = "'s2', 's4' are gone — nothing opened"
+		if got := GoneMessage([]string{"s2", "s4"}); got != want {
+			t.Errorf("GoneMessage([s2 s4]) = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestUnsupportedNoopMessage(t *testing.T) {
+	t.Run("it renders the honest no-host-local body for a NULL identity", func(t *testing.T) {
+		const want = "no host-local terminal — nothing opened"
+		if got := UnsupportedNoopMessage(Identity{}); got != want {
+			t.Errorf("UnsupportedNoopMessage(NULL) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it names the terminal and bundle id for a recognised identity", func(t *testing.T) {
+		const want = "unsupported terminal — Apple Terminal · com.apple.Terminal — nothing opened"
+		id := Identity{Name: "Apple Terminal", BundleID: "com.apple.Terminal"}
+		if got := UnsupportedNoopMessage(id); got != want {
+			t.Errorf("UnsupportedNoopMessage(id) = %q, want %q", got, want)
+		}
+	})
+}

@@ -14,7 +14,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
@@ -409,21 +408,17 @@ func (m Model) decideBurst(ordered []string) (Model, tea.Cmd) {
 	return m.dispatchBurst(ordered)
 }
 
-// unsupportedFlashText composes the §6-9 re-asserted-banner flash for the N≥2 Enter
-// atomic no-op, naming the resolved identity. The copy branches on IsNull() (the
-// gate itself branches on the RESOLUTION — DetectUnsupported): a NULL identity
-// (remote/mosh, or a transient detection error folded to Identity{}) gets the honest
-// no-host-local line; a recognised-but-undriven identity names its friendly name and
-// bundle id, U+00B7 middot-separated. Both carry the `— nothing opened` RESPONSE
-// suffix — distinct from the 6-2 proactive persistent banner, which omits it. This
-// mirrors cmd/spawn.go's unsupportedSpawnMessage WITHOUT its `spawn:` prefix and
-// WITHOUT a literal ⚠ (the warning notice band prepends the ⚠ via statusGlyph, per
-// the formatSessionGoneFlash / burstPartialFailureFlash convention).
+// unsupportedFlashText is the §6-9 re-asserted-banner flash for the N≥2 Enter
+// atomic no-op, naming the resolved identity. It renders through the shared
+// spawn.UnsupportedNoopMessage — the single source of the copy the CLI's
+// unsupportedSpawnMessage also renders — so the picker flash and the CLI message
+// cannot drift. The bare body carries no `spawn:` prefix (CLI-only) and no literal
+// ⚠ (the warning notice band prepends the ⚠ via statusGlyph, per the
+// formatSessionGoneFlash / burstPartialFailureFlash convention); the `— nothing
+// opened` RESPONSE suffix distinguishes it from the 6-2 proactive persistent
+// banner, which omits it.
 func unsupportedFlashText(id spawn.Identity) string {
-	if id.IsNull() {
-		return "no host-local terminal — nothing opened"
-	}
-	return fmt.Sprintf("unsupported terminal — %s · %s — nothing opened", id.Name, id.BundleID)
+	return spawn.UnsupportedNoopMessage(id)
 }
 
 // dispatchBurst launches the async spawn burst for the list-ordered marked set: it
