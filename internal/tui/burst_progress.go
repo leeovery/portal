@@ -473,8 +473,11 @@ func unsupportedFlashText(id spawn.Identity) string {
 // no-op — mirroring decideBurst's unsupported branch (emit the outcome + re-assert
 // the flash) — so a nil adapter can never reach spawn.NewBurster / OpenWindow.
 func (m Model) dispatchBurst(ordered []string) (Model, tea.Cmd) {
-	trigger := ordered[len(ordered)-1]
-	external := ordered[:len(ordered)-1]
+	// Derive the net-N split through spawn.SplitNetN — the single computation the
+	// CLI (runSpawn) also uses — so the "net N, never N+1" invariant can't drift
+	// between the two callers. Safe here: decideBurst's empty-ordered guard
+	// guarantees len(ordered) >= 1 before dispatch.
+	external, trigger := spawn.SplitNetN(ordered)
 
 	adapter, resolution := m.detectAdapter, m.detectResolution
 	if adapter == nil {

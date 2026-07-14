@@ -480,6 +480,35 @@ func TestBurstDispatch_DetectionNeverDispatched_DefersThenResolves(t *testing.T)
 	}
 }
 
+// TestBurstDispatch_SplitDerivesFromSplitNetN is the cross-caller drift guard for
+// the net-N split: the picker's dispatched BurstExternal/BurstTrigger for a shared
+// fixture are byte-identical to spawn.SplitNetN's output — the SAME single
+// computation the CLI's runSpawn derives its split through — so the "net N, never
+// N+1" split cannot diverge between the two callers.
+func TestBurstDispatch_SplitDerivesFromSplitNetN(t *testing.T) {
+	fixture := []string{"alpha", "bravo", "charlie"}
+	m, _, _ := markedSupportedBurstModel(t, fixture)
+
+	m, cmd := pressEnter(t, m)
+
+	if !m.BurstPending() {
+		t.Fatal("precondition: N≥2 Enter on a resolved-supported terminal must enter burst-pending")
+	}
+
+	// Recorded at dispatch (before any terminal reset): the picker's split must equal
+	// the shared helper's output for the identical fixture.
+	wantExternal, wantTrigger := spawn.SplitNetN(fixture)
+	if got := m.BurstExternal(); !slices.Equal(got, wantExternal) {
+		t.Errorf("BurstExternal() = %v, want %v (must derive from spawn.SplitNetN)", got, wantExternal)
+	}
+	if got := m.BurstTrigger(); got != wantTrigger {
+		t.Errorf("BurstTrigger() = %q, want %q (must derive from spawn.SplitNetN)", got, wantTrigger)
+	}
+
+	// Drain the async pipe so the burst goroutine completes (no lingering goroutine).
+	drainBatchToModel(t, m, cmd)
+}
+
 // TestBurstDispatch_ConfigResolveUsesConfigAdapter is the regression guard for the
 // picker's config-aware resolve seam: an identity matching a config entry resolves
 // to the config adapter + ResolutionConfig, and the picker burst opens its windows

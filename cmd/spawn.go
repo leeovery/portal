@@ -117,9 +117,12 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	sessions := args
 	n := len(sessions)
 	// Split by the list-order convention: the trailing session is the trigger
-	// the calling window self-attaches to; the rest are externally spawned.
-	external := sessions[:n-1]
-	trigger := sessions[n-1]
+	// the calling window self-attaches to; the rest are externally spawned. The
+	// split is derived through spawn.SplitNetN — the single computation the picker
+	// (dispatchBurst) also uses — so the "net N, never N+1" invariant can't drift
+	// between the two callers. Safe here: the empty-args usage gate guarantees
+	// n >= 1 before this point.
+	external, trigger := spawn.SplitNetN(sessions)
 
 	// Pre-flight has-session gate (spec: pre-flight + all-or-nothing). Probe
 	// EVERY selected session — the external windows AND the trigger's self-attach
