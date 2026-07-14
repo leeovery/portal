@@ -251,7 +251,7 @@ func (m Model) burstAllConfirmed(msg spawnCompleteMsg) bool {
 
 // resetBurstState clears the burst lifecycle fields after a terminal outcome: it
 // exits burst-pending, releases the goroutine's pipe + cancel references, zeroes the
-// progress counters + captured results, and clears the cancel flag. Used by the §6-4
+// progress counters, and clears the cancel flag. Used by the §6-4
 // full-success self-attach arm before the tea.Quit handoff, and by every §6-6/6-7/6-8
 // terminal arm — the single reset chokepoint, so burstCancelled never leaks past a
 // terminal event.
@@ -261,8 +261,6 @@ func (m *Model) resetBurstState() {
 	m.burstCancel = nil
 	m.burstTotal = 0
 	m.burstDone = 0
-	m.burstResults = nil
-	m.burstBatch = ""
 	m.burstCancelled = false
 }
 
@@ -474,8 +472,6 @@ func (m Model) dispatchBurst(ordered []string) (Model, tea.Cmd) {
 	m.burstExternal = external
 	m.burstTotal = len(ordered)
 	m.burstDone = 0
-	m.burstIdentity = m.detectIdentity
-	m.burstResolution = resolution
 
 	runner := burstRunner{
 		burster:       burster,

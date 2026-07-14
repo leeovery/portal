@@ -489,20 +489,16 @@ type Model struct {
 	// spawnCompleteMsg/spawnAbortMsg lands; burstPipe/burstCancel own the goroutine's
 	// channel + cancel (task 6-8 drives the cancel). burstTrigger/burstExternal are
 	// the net-N split (trigger = self-attach target, external = the N-1 opened
-	// windows); burstTotal is N (incl. the trigger). burstDone/burstBatch/burstResults
-	// accumulate the streamed outcome (self-attach + selection mutation land in
-	// 6-4/6-6). burstIdentity/burstResolution snapshot the resolved terminal.
-	burstPending    bool
-	burstPipe       *burstProgressPipe
-	burstCancel     context.CancelFunc
-	burstTrigger    string
-	burstExternal   []string
-	burstTotal      int
-	burstDone       int
-	burstBatch      string
-	burstResults    []spawn.WindowResult
-	burstIdentity   spawn.Identity
-	burstResolution spawn.Resolution
+	// windows); burstTotal is N (incl. the trigger). burstDone accumulates the
+	// streamed progress count. The resolved terminal outcome (batch, results,
+	// identity, resolution) travels on spawnCompleteMsg, never on the model.
+	burstPending  bool
+	burstPipe     *burstProgressPipe
+	burstCancel   context.CancelFunc
+	burstTrigger  string
+	burstExternal []string
+	burstTotal    int
+	burstDone     int
 	// burstCancelled records that the in-flight burst's terminal event is the result
 	// of a user Ctrl-C/Esc (Task 6-8): cancelBurst sets it before returning the
 	// receiver, and the terminal spawnCompleteMsg arm reads it to suppress BOTH the
