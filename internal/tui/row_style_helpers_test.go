@@ -125,6 +125,50 @@ func TestRenderLeftBarColumn_MatchesPreRefactorGolden(t *testing.T) {
 	}
 }
 
+// preGlyphColumn reproduces the ORIGINAL glyph-column block verbatim — the
+// byte-identical shape shared by renderLeftBarColumn's selected branch (▌),
+// renderMarkedLeftBarColumn (●), and renderGoneLeftBarColumn (⚠). It is the
+// golden the extracted renderLeftBarGlyphColumn helper must preserve.
+func preGlyphColumn(glyph string, glyphStyle, bg lipgloss.Style) string {
+	return glyphStyle.Render(glyph) +
+		bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(glyph)))
+}
+
+// TestRenderLeftBarGlyphColumn_MatchesPreRefactorGolden asserts the extracted
+// renderLeftBarGlyphColumn helper reproduces the original glyph-column block
+// byte-for-byte for each of the three glyphs that fold into it — the ● marker,
+// the ⚠ gone flag, and the ▌ selector — across both modes, selected/unselected,
+// and colourless true/false, for representative role tokens. The fixed 2-cell
+// leftBarColumnWidth geometry (glyph at col 0 + correct pad) is what keeps the
+// name's left edge fixed regardless of which glyph occupies col 0.
+func TestRenderLeftBarGlyphColumn_MatchesPreRefactorGolden(t *testing.T) {
+	glyphs := []struct {
+		name  string
+		glyph string
+		tok   theme.Token
+	}{
+		{"marker", multiSelectMarker, theme.MV.AccentViolet},
+		{"gone", flashWarningGlyph, theme.MV.StateRed},
+		{"selector", selectorBar, theme.MV.AccentViolet},
+	}
+	for _, g := range glyphs {
+		for _, mode := range []theme.Mode{theme.Dark, theme.Light} {
+			for _, selected := range []bool{false, true} {
+				for _, colourless := range []bool{false, true} {
+					bg := rowBgStyle(mode, selected, colourless)
+					glyphStyle := rowTokenStyle(lipgloss.Style{}, g.tok, mode, selected, colourless)
+					want := preGlyphColumn(g.glyph, glyphStyle, bg)
+					got := renderLeftBarGlyphColumn(g.glyph, glyphStyle, bg)
+					if got != want {
+						t.Errorf("renderLeftBarGlyphColumn(%s mode=%v sel=%v col=%v) = %q, want %q",
+							g.name, mode, selected, colourless, got, want)
+					}
+				}
+			}
+		}
+	}
+}
+
 // sessionRowGoldens / projectRowGoldens are the EXACT bytes the PRE-refactor
 // delegates emitted for a selected (cursor on row 0) and an unselected (cursor
 // on row 0, render row 1) row at width 80, captured from a throwaway generator

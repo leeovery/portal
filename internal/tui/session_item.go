@@ -369,10 +369,24 @@ func rowTokenStyle(base lipgloss.Style, fg theme.Token, mode theme.Mode, selecte
 // for both delegates.
 func renderLeftBarColumn(bg, selectorStyle lipgloss.Style, selected bool) string {
 	if selected {
-		return selectorStyle.Render(selectorBar) +
-			bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(selectorBar)))
+		return renderLeftBarGlyphColumn(selectorBar, selectorStyle, bg)
 	}
 	return bg.Render(padTo("", leftBarColumnWidth))
+}
+
+// renderLeftBarGlyphColumn renders the SHARED single-glyph left-bar column: a
+// glyph at col 0 in glyphStyle + a trailing cell in bg, in the fixed 2-cell
+// leftBarColumnWidth geometry. It is the one home of the
+// `glyphStyle.Render(glyph) + bg.Render(padTo("", leftBarColumnWidth-width))`
+// shape that the ▌ selector (renderLeftBarColumn's selected branch), the ●
+// multi-select marker (renderMarkedLeftBarColumn), and the ⚠ gone flag
+// (renderGoneLeftBarColumn) all render identically. Folding them here keeps the
+// 2-cell width — which fixes the name's left edge regardless of which glyph
+// occupies col 0 (§3.3 / §3.5 / §4.1) — in exactly one place; the callers own
+// only the glyph, its role-token style, and the precedence between them.
+func renderLeftBarGlyphColumn(glyph string, glyphStyle, bg lipgloss.Style) string {
+	return glyphStyle.Render(glyph) +
+		bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(glyph)))
 }
 
 // renderMarkedLeftBarColumn renders the §5 multi-select left-bar column for a
@@ -385,8 +399,7 @@ func renderLeftBarColumn(bg, selectorStyle lipgloss.Style, selected bool) string
 // selected row and the canvas otherwise (and drops hue under NO_COLOR); bg is the
 // caller's rowBg result, so the trailing cell carries the same tint.
 func renderMarkedLeftBarColumn(bg, markerStyle lipgloss.Style) string {
-	return markerStyle.Render(multiSelectMarker) +
-		bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(multiSelectMarker)))
+	return renderLeftBarGlyphColumn(multiSelectMarker, markerStyle, bg)
 }
 
 // renderGoneLeftBarColumn renders the §6.7 pre-flight abort left-bar column for a
@@ -400,8 +413,7 @@ func renderMarkedLeftBarColumn(bg, markerStyle lipgloss.Style) string {
 // NO_COLOR); bg is the caller's rowBg result, so the trailing cell carries the same
 // tint.
 func renderGoneLeftBarColumn(bg, markerStyle lipgloss.Style) string {
-	return markerStyle.Render(flashWarningGlyph) +
-		bg.Render(padTo("", leftBarColumnWidth-lipgloss.Width(flashWarningGlyph)))
+	return renderLeftBarGlyphColumn(flashWarningGlyph, markerStyle, bg)
 }
 
 // rowBg delegates to the shared rowBgStyle free function, binding the
