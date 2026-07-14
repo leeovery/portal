@@ -9,6 +9,7 @@ import (
 
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/spawn"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -261,37 +262,95 @@ func spawnDetector(cmd *cobra.Command) TerminalDetector {
 	return spawn.NewDetector(tmuxClient(cmd))
 }
 
+// productionSpawnSeams bundles the shared production spawn dependencies that
+// both the spawn CLI (buildSpawnDeps) and the picker (openTUI's tuiConfig
+// population) wire from the same *tmux.Client. Constructing them in one place
+// keeps the two paths from silently diverging: because SpawnDeps and tuiConfig
+// are distinct struct shapes, the compiler cannot catch a seam that is added,
+// swapped, or re-constructed on only one side — this bundle is the single
+// source both read.
+type productionSpawnSeams struct {
+	Detector *spawn.Detector
+	Resolve  func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	Ack      spawn.AckChannelFull
+	Exe      spawn.ExecutableResolver
+	Getenv   func(string) string
+	Exists   func(string) bool
+	Logger   *slog.Logger
+}
+
+// buildProductionSpawnSeams constructs the shared production spawn seams from
+// the resolved tmux client: the host-terminal detector, the config-aware
+// resolver's Resolve (terminals.json loaded once via buildResolver), the
+// server-option ack channel, the executable/env composition seams, the
+// has-session pre-flight probe, and the spawn-component logger. It is the single
+// construction site the CLI and picker both read, so their production wiring
+// cannot drift.
+func buildProductionSpawnSeams(client *tmux.Client) productionSpawnSeams {
+	return productionSpawnSeams{
+		Detector: spawn.NewDetector(client),
+		Resolve:  buildResolver().Resolve,
+		Ack:      spawn.NewServerOptionAckChannel(client, client),
+		Exe:      os.Executable,
+		Getenv:   os.Getenv,
+		Exists:   client.HasSession,
+		Logger:   log.For("spawn"),
+	}
+}
+
 // buildSpawnDeps returns a fully-populated SpawnDeps for the spawn pipeline:
 // injected fields (from spawnDeps in tests) are kept, and every unset field
-// falls back to its production default. The tmux-client-backed defaults
-// (Detector, Connector) resolve the shared client only when actually needed, so
-// this never panics for a caller that injected those seams.
+// falls back to its production default. The six shared production seams (Resolve,
+// Ack, ExePath, Getenv, Exists, Logger) come from the single
+// buildProductionSpawnSeams bundle that the picker also reads. That bundle is
+// built at most once and only when a shared field actually needs defaulting, so
+// a fully-injected caller (the spawn pipeline suite) never resolves the tmux
+// client (there is none in context under nopRunner) nor loads terminals.json —
+// exactly as before. The Detector default deliberately routes through
+// spawnDetector — the standalone --detect authority — so its resolution stays
+// byte-for-byte unchanged, and Connector / the lazy NewBurster remain CLI-only.
 func buildSpawnDeps(cmd *cobra.Command) *SpawnDeps {
 	deps := &SpawnDeps{}
 	if spawnDeps != nil {
 		*deps = *spawnDeps
 	}
+
+	// Lazily memoise the shared production seams: consulted only for genuinely
+	// unset fields (the injected-field precedence above always wins), and built
+	// at most once so buildResolver / NewServerOptionAckChannel run no more often
+	// than they did as inline defaults.
+	var (
+		seams      productionSpawnSeams
+		seamsBuilt bool
+	)
+	sharedSeams := func() productionSpawnSeams {
+		if !seamsBuilt {
+			seams = buildProductionSpawnSeams(tmuxClient(cmd))
+			seamsBuilt = true
+		}
+		return seams
+	}
+
 	if deps.Detector == nil {
 		deps.Detector = spawnDetector(cmd)
 	}
 	if deps.Resolve == nil {
-		deps.Resolve = buildResolver().Resolve
+		deps.Resolve = sharedSeams().Resolve
 	}
 	if deps.Connector == nil {
 		deps.Connector = buildSessionConnector(tmuxClient(cmd))
 	}
 	if deps.ExePath == nil {
-		deps.ExePath = os.Executable
+		deps.ExePath = sharedSeams().Exe
 	}
 	if deps.Getenv == nil {
-		deps.Getenv = os.Getenv
+		deps.Getenv = sharedSeams().Getenv
 	}
 	if deps.Exists == nil {
-		deps.Exists = tmuxClient(cmd).HasSession
+		deps.Exists = sharedSeams().Exists
 	}
 	if deps.Ack == nil {
-		client := tmuxClient(cmd)
-		deps.Ack = spawn.NewServerOptionAckChannel(client, client)
+		deps.Ack = sharedSeams().Ack
 	}
 	if deps.NewBurster == nil {
 		// Lazy closure: reads the (now-defaulted) Ack/ExePath/Getenv at burst
@@ -302,7 +361,7 @@ func buildSpawnDeps(cmd *cobra.Command) *SpawnDeps {
 		}
 	}
 	if deps.Logger == nil {
-		deps.Logger = spawnLogger
+		deps.Logger = sharedSeams().Logger
 	}
 	return deps
 }
