@@ -455,8 +455,9 @@ type Model struct {
 	// identity→adapter/resolution seam the spawn CLI uses (loaded once from
 	// terminals.json at construction). Both are injected together (nil in the
 	// capture harness). Reaching PageSessions dispatches Detect() exactly once
-	// (detectDispatched latch); the terminalDetectedMsg arm caches the identity and
-	// its resolution (detectIdentity/detectResolution, detectResolved=true). Caching
+	// (detectDispatched latch); the terminalDetectedMsg arm caches the identity, the
+	// resolved Adapter, AND its Resolution (detectIdentity/detectAdapter/
+	// detectResolution, detectResolved=true) from a SINGLE resolve. Caching
 	// the Resolution — not just IsNull() — is load-bearing: a recognised-but-undriven
 	// terminal is non-NULL yet resolves unsupported. A later burst REUSES this cache;
 	// no rebuild re-detects or re-resolves.
@@ -464,6 +465,15 @@ type Model struct {
 	resolve          func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
 	detectIdentity   spawn.Identity
 	detectResolution spawn.Resolution
+	// detectAdapter is the Adapter half of the SAME single resolve that produced
+	// detectResolution, cached in lockstep so the burst's gate decision
+	// (DetectUnsupported, keyed off the resolution) and the adapter it dispatches
+	// through can never disagree. dispatchBurst reads it instead of re-resolving: a
+	// second resolve is NOT deterministic for the config-*script* recipe
+	// (spawn.newScriptRecipeAdapter re-stats the script on every call), so a script
+	// removed between detection and Enter would resolve (nil, unsupported) on the
+	// second call and nil-panic the un-recovered burst goroutine.
+	detectAdapter    spawn.Adapter
 	detectResolved   bool
 	detectDispatched bool
 
@@ -2448,12 +2458,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case terminalDetectedMsg:
 		// §6 async host-terminal detection resolved on the command goroutine. Cache
-		// the identity AND its resolution via the injected config-aware resolve seam.
-		// Caching the Resolution (not just IsNull()) is load-bearing: a
-		// recognised-but-undriven terminal is non-NULL yet resolves unsupported. A
-		// later picker burst reuses this cache; no rebuild re-detects or re-resolves.
+		// the identity, the resolved Adapter, AND its Resolution from ONE resolve via
+		// the injected config-aware seam. Retaining the Adapter half (§10-1) is
+		// load-bearing: dispatchBurst reads m.detectAdapter rather than re-resolving,
+		// so the gate (off the cached resolution) and the adapter can never disagree —
+		// a config-script re-stat between detection and Enter can no longer flip the
+		// second resolve to (nil, unsupported) and nil-panic the burst. Caching the
+		// Resolution (not just IsNull()) is load-bearing too: a recognised-but-undriven
+		// terminal is non-NULL yet resolves unsupported. A later picker burst reuses
+		// this cache; no rebuild re-detects or re-resolves.
 		m.detectIdentity = msg.identity
-		_, m.detectResolution = m.resolve(msg.identity)
+		m.detectAdapter, m.detectResolution = m.resolve(msg.identity)
 		m.detectResolved = true
 		// §6-3: a deferred N≥2 Enter (pressed while detection was in flight) resolves
 		// its branch decision now that the terminal is known — supported → dispatch the

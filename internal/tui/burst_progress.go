@@ -453,15 +453,35 @@ func unsupportedFlashText(id spawn.Identity) string {
 
 // dispatchBurst launches the async spawn burst for the list-ordered marked set: it
 // splits net-N (trigger = self-attach target = the last row; external = the N-1
-// opened windows), resolves the adapter from the cached identity (guaranteed
-// non-nil on a supported resolution), builds the burster + progress pipe, records
-// the burst lifecycle state, launches the goroutine, and returns the receiver
-// tea.Cmd the Update loop blocks on.
+// opened windows), READS the adapter/resolution from the detection-time cache (the
+// SINGLE resolve the terminalDetectedMsg arm performed — §10-1, NOT a fresh
+// re-resolve), builds the burster + progress pipe, records the burst lifecycle
+// state, launches the goroutine, and returns the receiver tea.Cmd the Update loop
+// blocks on.
+//
+// Re-resolving here was a TOCTOU nil-adapter panic: the config-*script* recipe
+// re-stats its script on every resolve (spawn.newScriptRecipeAdapter), so a script
+// deleted between page-entry detection and Enter would resolve (nil, unsupported) on
+// the second call — bypassing the DetectUnsupported gate (still reading the cached
+// supported resolution) and building spawn.NewBurster(nil, …), which nil-panicked
+// the un-recovered burst goroutine. Reading the cache makes the gate and the adapter
+// derive from one resolve. A cached (stale) adapter whose script vanished mid-session
+// fails cleanly through the existing partial-failure path rather than nil-panicking.
+//
+// The nil-adapter guard is belt-and-braces for an inconsistent/undriven resolve (a
+// supported resolution paired with a nil adapter): it routes to the unsupported
+// no-op — mirroring decideBurst's unsupported branch (emit the outcome + re-assert
+// the flash) — so a nil adapter can never reach spawn.NewBurster / OpenWindow.
 func (m Model) dispatchBurst(ordered []string) (Model, tea.Cmd) {
 	trigger := ordered[len(ordered)-1]
 	external := ordered[:len(ordered)-1]
 
-	adapter, resolution := m.resolve(m.detectIdentity)
+	adapter, resolution := m.detectAdapter, m.detectResolution
+	if adapter == nil {
+		m.emitUnsupportedNoop(m.detectIdentity)
+		m.setFlash(unsupportedFlashText(m.detectIdentity))
+		return m, nil
+	}
 	burster := spawn.NewBurster(adapter, m.ackChannel, m.spawnExe, m.spawnGetenv)
 
 	ctx, cancel := context.WithCancel(context.Background())
