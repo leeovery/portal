@@ -20,15 +20,21 @@ type Adapter interface {
 
 // Outcome is the generic, terminal-agnostic classification of an OpenWindow
 // attempt. General code switches on Outcome and never inspects the OS-specific
-// Detail/Guidance text to decide what happened. The four members are the whole
+// Detail/Guidance text to decide what happened. The three members are the whole
 // closed taxonomy fixed by the spec's Permissions & Error Quarantine boundary.
+//
+// "Unsupported" is deliberately NOT an Outcome: whether a host terminal has a
+// driver is a resolution-tier decision (Resolver.Resolve returns
+// ResolutionUnsupported when no adapter matches — see resolver.go), taken before
+// any OpenWindow call. OpenWindow only ever runs on a resolved, supported
+// adapter, so it must never report "unsupported"; the resolution tier owns that
+// outcome and its atomic no-op handling. A future driver author must return one
+// of the three members below.
 type Outcome int
 
 const (
 	// OutcomeSuccess — the host window opened cleanly.
 	OutcomeSuccess Outcome = iota
-	// OutcomeUnsupported — no driver is available for this host terminal.
-	OutcomeUnsupported
 	// OutcomeSpawnFailed — a driver was available but the window failed to
 	// open (e.g. a non-zero osascript exit).
 	OutcomeSpawnFailed
@@ -54,11 +60,6 @@ type Result struct {
 // Success builds an OutcomeSuccess result carrying the opaque detail.
 func Success(detail string) Result {
 	return Result{Outcome: OutcomeSuccess, Detail: detail}
-}
-
-// Unsupported builds an OutcomeUnsupported result carrying the opaque detail.
-func Unsupported(detail string) Result {
-	return Result{Outcome: OutcomeUnsupported, Detail: detail}
 }
 
 // SpawnFailed builds an OutcomeSpawnFailed result carrying the opaque detail.

@@ -2,27 +2,25 @@ package spawn
 
 import "testing"
 
-func TestResultOutcomes_AllFourDistinct(t *testing.T) {
-	// "it distinguishes all four outcomes with distinct enum values"
+func TestResultOutcomes_AllThreeDistinct(t *testing.T) {
+	// "it distinguishes all three outcomes with distinct enum values"
+	// ("unsupported" is a resolution-tier outcome, not an Adapter Outcome — see
+	// adapter.go; OpenWindow only ever reports these three.)
 	seen := map[Outcome]bool{}
 	for _, r := range []Result{
 		Success("s"),
-		Unsupported("u"),
 		SpawnFailed("f"),
 		PermissionRequired("p", "g"),
 	} {
 		seen[r.Outcome] = true
 	}
-	if len(seen) != 4 {
-		t.Fatalf("expected 4 distinct Outcome values, got %d: %v", len(seen), seen)
+	if len(seen) != 3 {
+		t.Fatalf("expected 3 distinct Outcome values, got %d: %v", len(seen), seen)
 	}
 
 	// Each constructor stamps its designated Outcome constant.
 	if got := Success("").Outcome; got != OutcomeSuccess {
 		t.Errorf("Success().Outcome = %v, want OutcomeSuccess", got)
-	}
-	if got := Unsupported("").Outcome; got != OutcomeUnsupported {
-		t.Errorf("Unsupported().Outcome = %v, want OutcomeUnsupported", got)
 	}
 	if got := SpawnFailed("").Outcome; got != OutcomeSpawnFailed {
 		t.Errorf("SpawnFailed().Outcome = %v, want OutcomeSpawnFailed", got)
@@ -38,7 +36,6 @@ func TestResultOK_TrueOnlyForSuccess(t *testing.T) {
 		t.Errorf("Success(...).OK() = false, want true")
 	}
 	for _, r := range []Result{
-		Unsupported("u"),
 		SpawnFailed("f"),
 		PermissionRequired("p", "g"),
 	} {
@@ -67,7 +64,6 @@ func TestResult_RoundTripsDetailAndGuidance(t *testing.T) {
 	}{
 		{"Success", Success("clean exit 0"), "clean exit 0"},
 		{"SpawnFailed", SpawnFailed("AppleScript error body"), "AppleScript error body"},
-		{"Unsupported", Unsupported("no native adapter"), "no native adapter"},
 	} {
 		if tc.got.Detail != tc.detail {
 			t.Errorf("%s Detail = %q, want %q", tc.name, tc.got.Detail, tc.detail)
