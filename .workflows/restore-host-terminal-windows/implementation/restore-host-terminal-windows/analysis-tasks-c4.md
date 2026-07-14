@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: restore-host-terminal-windows (Cycle 4)
 
 ## Task 1: Cache the burst Adapter at detection time so dispatchBurst cannot re-resolve to a nil adapter and panic
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -40,7 +40,7 @@ Assessment (requested — is this a REAL reachable defect or theoretical?): It i
 - Regression: existing N≥2 burst self-attach, partial-failure, permission, cancel, and deferred-Enter (`pendingBurstEnter`) suites pass unchanged.
 
 ## Task 2: Extract one shared production spawn-seam builder for the CLI and picker
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -68,7 +68,7 @@ sources: duplication
 - Regression: existing `cmd/spawn` deps-defaulting tests and the picker-burst wiring tests pass unchanged; the CLI and picker resolve the same adapter/logger/ack seams (a parity assertion that both paths' shared seams originate from the one builder).
 
 ## Task 3: Centralize the net-N split behind a shared spawn.SplitNetN helper
-status: pending
+status: approved
 severity: low
 sources: architecture
 

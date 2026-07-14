@@ -122,7 +122,11 @@
             "restore-host-terminal-windows-9-5": "tick-e27f08",
             "restore-host-terminal-windows-9-6": "tick-284b53",
             "restore-host-terminal-windows-9-7": "tick-04f9fa",
-            "restore-host-terminal-windows-9-8": "tick-c4daec"
+            "restore-host-terminal-windows-9-8": "tick-c4daec",
+            "restore-host-terminal-windows-10": "tick-05038c",
+            "restore-host-terminal-windows-10-1": "tick-7314d9",
+            "restore-host-terminal-windows-10-2": "tick-5ae99f",
+            "restore-host-terminal-windows-10-3": "tick-52302e"
           },
           "external_id": "tick-9d3e8a"
         }

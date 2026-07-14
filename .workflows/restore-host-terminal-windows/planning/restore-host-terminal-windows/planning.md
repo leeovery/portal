@@ -234,3 +234,15 @@ approved_at: 2026-07-12
 | restore-host-terminal-windows-9-6 | Derive burstAllConfirmed from the shared PartitionResults chokepoint | derived from `spawn.PartitionResults` `failed == empty` (no residual `!r.Confirmed()` loop); true only for error-free full-length all-`AckConfirmed` `spawnCompleteMsg`; false on any `AckTimeout`/`AckFailed`, `msg.Err`, or length mismatch; CLI/picker cross-path parity against `PartitionResults`/`FirstPermission` |
 | restore-host-terminal-windows-9-7 | Route the spawn-ack write-failure DEBUG through the enumerated detail attr | DEBUG carries `detail` (= error text) + `session`/`batch`, no `error` attr on the `spawn`-component line; stays DEBUG, best-effort, non-fatal (falls through to `Connect`); message string unchanged; any test asserting old `error` key updated to `detail` |
 | restore-host-terminal-windows-9-8 | Fix the --spawn-ack flag help text delimiter label | help names the marker `@portal-spawn-<batch>-<token>` (hyphen, matching `SpawnMarkerName`), no longer implies a colon in the marker name; flag-value delimiter `<batch>:<token>` (colon) distinguished; flag name, default (`""`), and `FormatSpawnAckFlag` parsing unchanged; text-only, no behavioural assertion |
+
+### Phase 10: Analysis (Cycle 4)
+
+**Goal**: Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| restore-host-terminal-windows-10-1 | Cache the burst Adapter at detection time so dispatchBurst cannot re-resolve to a nil adapter and panic | config-script terminal whose script is deleted / exec-bit-cleared between detection and Enter → no panic (cached adapter fails cleanly through partial-failure, or nil-adapter guard routes to the unsupported no-op); `m.resolve` invoked exactly once per detection; nil `detectAdapter` (undriven capture-harness model) routes to unsupported no-op; native/argv/config-script bursts unchanged for the un-mutated case; redundant second `os.Stat` eliminated |
+| restore-host-terminal-windows-10-2 | Extract one shared production spawn-seam builder for the CLI and picker | seven shared seams (detector/resolve/ack/exe/getenv/exists/logger) built in one helper read by both `buildSpawnDeps` and `openConfig`; CLI test-injection via `spawnDeps` still overrides every shared field (builder consulted only for unset); `--detect` dry-run detector resolution unchanged; CLI-only `Connector` + lazy `NewBurster` and picker-only non-spawn fields unchanged; no extra client / terminals.json resolution; byte-for-byte seam equivalence on both paths |
+| restore-host-terminal-windows-10-3 | Centralize the net-N split behind a shared spawn.SplitNetN helper | single computation of the external/trigger split used by `runSpawn` and `dispatchBurst`; single-element slice → empty external + that element as trigger; empty-set / N=1 guards preserved (no zero-length slice passed in); byte-identical to the two prior inline slice expressions; sync/async control-flow ordering untouched |
