@@ -84,6 +84,7 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
 - **Session grouping and tags**: flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
 - **Scrollback preview**: hit `Space` for a read-only peek at any session's saved scrollback, cycling windows and panes without attaching.
 - **Reboot-safe sessions**: starts the tmux server and restores structure, layout, working dirs, and ANSI scrollback after a reboot, optionally re-running per-pane commands via resume hooks. Replaces tmux-resurrect / tmux-continuum.
+- **Multi-window spawn**: mark several sessions with `m` and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
 - **Fast open**: jump to a project by path, alias, or zoxide (`x work`), with git-root resolution and project memory built in.
 
 ## Shell Integration
@@ -143,6 +144,21 @@ Attach to an existing tmux session by name.
 ```bash
 xctl attach myproject
 ```
+
+### `xctl spawn`
+
+Open one or more sessions, each in its own host-terminal window — the command-line form of the picker's [multi-select mode](#multi-select-mode). Portal reuses the calling window for one session and spawns the rest as fresh host windows (net **N** windows for **N** sessions). Needs a supported terminal (Ghostty natively, others via [`terminals.json`](#configuration)).
+
+```bash
+xctl spawn --detect                  # print the detected terminal + bundle id, open nothing
+xctl spawn work api db               # open three sessions across three windows
+```
+
+| Flag | Description |
+|---|---|
+| `--detect` | Dry run: print the detected host terminal (friendly name + bundle id) and exit without opening anything |
+
+`--detect` names the terminal so you can copy its bundle id into `terminals.json`. Without it, at least one session name is required. Exit codes: a pre-flight failure (a marked session is gone), a partial spawn failure, or two-or-more sessions on an unsupported terminal exit `1` with a one-line reason on stderr; a usage error (no sessions and no `--detect`, or an unknown flag) exits `2`.
 
 ### `xctl list`
 
@@ -252,6 +268,7 @@ Navigation is **arrows only** (no vim or page-jump aliases). Press **`?`** on an
 | `Space` | Preview scrollback of highlighted session (sessions list only) |
 | `/` | Filter mode (fuzzy search) |
 | `s` | Switch view: cycle Flat → By Project → By Tag (sessions list only) |
+| `m` | Multi-select mode: enter, then toggle the highlighted session's mark (sessions list only) |
 | `x` | Toggle between Sessions and Projects |
 | `r` | Rename session |
 | `k` | Kill session |
@@ -280,6 +297,36 @@ Each pane shows the last ~1000 lines of saved scrollback. The frame shows the se
 name, the current `Window x/y · Pane x/y`, and a footer of key hints, styled in a cyan
 "peek mode" so a preview never looks like a live session. A pane with no saved content
 yet renders `(no saved content)`.
+
+### Multi-Select Mode
+
+Press **`m`** on the sessions list to enter multi-select mode, then `m` again on any row
+to mark or unmark it (you can also sit in the mode with nothing selected). Press **`Enter`**
+to open every marked session at once — each springs open attached in its own host-terminal
+window. The result is **N windows for N sessions**: the picker reuses its own window for one
+of them and spawns the rest as fresh host windows, so there is never a leftover empty picker
+window. `Esc` cancels and clears the selection.
+
+| Key | Action |
+|---|---|
+| `m` | Enter mode / toggle the highlighted session's mark |
+| `↑` / `↓` | Move between sessions (marks persist) |
+| `Space` | Preview the highlighted session's scrollback |
+| `/` | Filter (marks persist underneath) |
+| `Enter` | Open every marked session (one marked → a plain attach in place) |
+| `Esc` | Cancel and clear the selection |
+
+Marks are sticky across filtering, paging, regrouping, and the `Space`-preview round-trip;
+a session killed elsewhere while you were in the mode drops out of the selection.
+
+Spawning host windows needs a supported terminal. **Ghostty** works out of the box; other
+terminals are configured via [`terminals.json`](#configuration). On an unsupported terminal
+(or a remote/mosh client with no local window) Portal shows a banner naming the detected
+terminal and its bundle id, and opening two or more marked sessions is a no-op — a single
+marked session still attaches in the current window, which needs no host-window support. Run
+`xctl spawn --detect` to see what Portal detects. If a spawn only partially succeeds, Portal
+leaves the windows that did open in place and keeps the failed sessions marked, so pressing
+`Enter` again retries just those.
 
 ## Session Grouping & Tags
 
@@ -337,15 +384,32 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
 | `hooks.json` | Per-pane resume hooks (pane → event → command) | `PORTAL_HOOKS_FILE` |
 | `prefs.json` | UI preferences: last-used session-list grouping mode and the owned-canvas `appearance` (`auto`/`light`/`dark`) | `PORTAL_PREFS_FILE` |
+| `terminals.json` | Host-terminal spawn recipes for [multi-select](#multi-select-mode) / `xctl spawn` on custom terminals (Ghostty is built in). User-authored, read-only. | `PORTAL_TERMINALS_FILE` |
 | `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
 
 **Appearance.** Portal paints its own light or dark canvas so its colours always sit on the surface they were tuned for. By default (`"appearance": "auto"`) it detects your terminal's background and matches it, falling back to dark if the terminal doesn't answer. Set `"appearance": "light"` or `"dark"` in `prefs.json` to pin the canvas and skip detection, which helps when auto-detection misfires (for example under tmux passthrough). Setting `NO_COLOR` to any non-empty value disables the canvas and renders on your terminal's native colours.
 
+**Custom terminals (`terminals.json`).** Portal spawns host windows natively on Ghostty. For any other terminal, add a recipe keyed by the identity Portal shows you (run `xctl spawn --detect`, or read the unsupported banner — a friendly `.app` name, a raw bundle id, or a `*`-glob). Each recipe describes how that terminal opens a window running a command, with `{command}` as the placeholder Portal fills in:
+
+```json
+// ~/.config/portal/terminals.json
+{
+  "dev.warp.Warp-*": {
+    "commands": { "open": { "argv": ["osascript", "-e", "tell app \"Warp\" to create window with command \"{command}\""] } }
+  },
+  "com.example.MyTerm": {
+    "commands": { "open": { "script": "~/.config/portal/terminals/myterm.sh" } }
+  }
+}
+```
+
+A recipe is either an `argv` array (Portal substitutes `{command}` into one element) **or** a `script` path (Portal runs the file with the command as `$1`) — exactly one of the two. The file is tolerant: a malformed or invalid entry is skipped with a `spawn:` log breadcrumb and Portal falls back to the native adapter. `{command}` already carries its own PATH/environment, so recipes never need env plumbing.
+
 ## Logging
 
-Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_STATE_DIR`). It is human-readable text with a `subsystem:` prefix on every line, so `grep "daemon:" portal.log` (or `restore:`, `saver:`, `hydrate:`, …) reconstructs what any subsystem did. `portal.log` is a symlink to a calendar-daily file (`portal.log.<date>`), so `tail -f portal.log` always follows today's log.
+Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_STATE_DIR`). It is human-readable text with a `subsystem:` prefix on every line, so `grep "daemon:" portal.log` (or `restore:`, `saver:`, `hydrate:`, `spawn:`, …) reconstructs what any subsystem did. `portal.log` is a symlink to a calendar-daily file (`portal.log.<date>`), so `tail -f portal.log` always follows today's log.
 
 - **Rotation:** a new file each local day; older files are kept read-only. A size-cap safety valve rolls over to `portal.log.<date>.N` if a single day ever grows huge.
 - **Retention:** rotated files older than 30 days are deleted automatically (one breadcrumb logged per deletion). `xctl clean --logs` sweeps them on demand.
