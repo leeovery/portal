@@ -393,6 +393,11 @@ func (m Model) beginBurst(ordered []string) (Model, tea.Cmd) {
 // branches on the cached RESOLUTION, not IsNull(): a recognised-but-undriven
 // terminal is non-NULL yet unsupported.
 //
+// §8-3: pre-flight runs BEFORE the unsupported no-op, mirroring cmd/spawn.go's
+// preflight-then-unsupported sequence — so a gone session on an unsupported terminal
+// surfaces the gone message and is pruned (handlePreflightAbort) rather than the
+// unsupported banner re-asserting over a stale selection.
+//
 // Both entry points route here — the direct N≥2 Enter (handleMultiSelectEnter →
 // beginBurst) and the deferred-Enter resolution (the terminalDetectedMsg arm's
 // pendingBurstEnter branch) — so the atomic no-op + flash lands on either path.
@@ -408,6 +413,21 @@ func (m Model) decideBurst(ordered []string) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.DetectUnsupported() {
+		// §8-3: pre-flight the whole marked set BEFORE the unsupported no-op, mirroring
+		// cmd/spawn.go's runSpawn ordering (pre-flight FIRST, then the N≥2 unsupported
+		// gate). A session killed between marking and Enter surfaces the more-actionable
+		// gone message and is pruned from the selection even on an unsupported terminal
+		// — the same handlePreflightAbort arm the supported path reaches asynchronously —
+		// rather than the unsupported banner masking a gone session it never prunes. The
+		// supported path is untouched: it keeps its async goroutine pre-flight (dispatchBurst
+		// → burstRunner.run). Uses m.sessionExists — the SAME has-session probe burstRunner.run
+		// uses (production: client.HasSession) — and is nil-guarded to honour the
+		// WithSessionExists nil-tolerance (an unwired capture-harness model never bursts).
+		if m.sessionExists != nil {
+			if gone := spawn.PreflightMissing(ordered, m.sessionExists); len(gone) > 0 {
+				return m.handlePreflightAbort(spawnAbortMsg{Gone: gone}), nil
+			}
+		}
 		// §6-10: emit the unsupported outcome line (resolution=unsupported, no
 		// per-window records — nothing was attempted).
 		m.emitUnsupportedNoop(m.detectIdentity)
