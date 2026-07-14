@@ -64,7 +64,7 @@ type SpawnDeps struct {
 	// + fake clock. Defaults to a production spawn.Burster (spawn.NewBurster).
 	NewBurster func(adapter spawn.Adapter) *spawn.Burster
 	// Logger receives the cycle summary and per-window detail. Defaults to the
-	// package-level spawnLogger.
+	// spawn-component logger (log.For("spawn")) built by buildProductionSpawnSeams.
 	Logger *slog.Logger
 }
 

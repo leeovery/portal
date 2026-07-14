@@ -17,8 +17,9 @@ package tui
 //     quit — the partial-failure/abort behaviour is tasks 6-6/6-7).
 //
 // The seam helpers (wireBurstSeams, allPresent, resolveDetection, markRow,
-// spawnedSession, ghosttyIdentity) live in burst_dispatch_test.go. No t.Parallel:
-// consistent with the rest of the tui test surface.
+// spawnedSession, ghosttyIdentity, markedSupportedBurstModel) live in
+// burst_dispatch_test.go. No t.Parallel: consistent with the rest of the tui test
+// surface.
 
 import (
 	"testing"

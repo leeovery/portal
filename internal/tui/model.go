@@ -3564,6 +3564,8 @@ func (m Model) handleMultiSelectEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 	case 1:
 		var name string
+		// len == 1, so this ranges once and binds name to the sole key of the
+		// guaranteed one-element selection set.
 		for name = range m.selectedSessions {
 		}
 		m.selected = name

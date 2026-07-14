@@ -59,6 +59,10 @@ func TestUnsupportedHeader_NamedIdentityAmberDimSeeDocs(t *testing.T) {
 			if !strings.Contains(ansi.Strip(header), "see docs") {
 				t.Errorf("banner missing the %q hint:\n%s", "see docs", ansi.Strip(header))
 			}
+			// It is a section-header analogue, not a §11 notice band: NO `▌` left-bar.
+			if strings.Contains(ansi.Strip(header), noticeBarGlyph) {
+				t.Errorf("banner must not carry the %q notice-bar glyph:\n%s", noticeBarGlyph, ansi.Strip(header))
+			}
 
 			// The `⚠ unsupported terminal` label run is accent.orange (amber).
 			amberRun := headerStyle(theme.MV.AccentOrange, tc.mode, false).Render(flashWarningGlyph + " " + "unsupported terminal")

@@ -394,6 +394,11 @@ func TestBurstPreflightAbort_EscDismissesWithoutExitingMode(t *testing.T) {
 	if !am.IsSessionSelected("agentic-workflows-codify") {
 		t.Error("the survivor must stay marked after dismissal")
 	}
+	// AC6: the multi-select footer is unchanged after dismissal (still in mode).
+	am.termWidth = 120
+	if footer := footerVisible(am.renderSessionsFooterForFilterState()); !strings.Contains(footer, "m toggle") {
+		t.Errorf("after dismissal the multi-select footer must render (missing 'm toggle'):\n%s", footer)
+	}
 
 	// A second Esc (no abort banner) exits the mode as normal (Task 5.1).
 	after2, _ := am.updateSessionList(tea.KeyPressMsg{Code: tea.KeyEscape})

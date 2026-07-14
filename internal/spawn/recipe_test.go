@@ -102,6 +102,11 @@ func TestValidRecipeForEntry(t *testing.T) {
 		if !strings.Contains(detail, key) {
 			t.Errorf("WARN detail = %q, want it to name the entry key %q", detail, key)
 		}
+		// The breadcrumb's stated purpose is diagnosability, so it must also carry
+		// the rejection reason, not just the entry key.
+		if !strings.Contains(detail, "both argv and script") {
+			t.Errorf("WARN detail = %q, want it to name the rejection reason %q", detail, "both argv and script")
+		}
 	})
 
 	t.Run("it skips an entry with no open capability without warning (forward-compat)", func(t *testing.T) {

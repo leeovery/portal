@@ -210,6 +210,7 @@ func TestHelpModalContent(t *testing.T) {
 			"New session in cwd",    // n — help-only
 			"Rename session",        // r — help-only
 			"Kill session",          // k — help-only
+			"Multi-select mode",     // m — help-only
 			"Quit",                  // q — help-only
 		} {
 			if !strings.Contains(view, action) {

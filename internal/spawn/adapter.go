@@ -20,8 +20,11 @@ type Adapter interface {
 
 // Outcome is the generic, terminal-agnostic classification of an OpenWindow
 // attempt. General code switches on Outcome and never inspects the OS-specific
-// Detail/Guidance text to decide what happened. The three members are the whole
-// closed taxonomy fixed by the spec's Permissions & Error Quarantine boundary.
+// Detail/Guidance text to decide what happened. The three real members (Success,
+// SpawnFailed, PermissionRequired) are the whole closed taxonomy fixed by the
+// spec's Permissions & Error Quarantine boundary; OutcomeUnknown is the excluded
+// zero-value sentinel (see the const block below), not a fourth outcome a driver
+// may return.
 //
 // "Unsupported" is deliberately NOT an Outcome: whether a host terminal has a
 // driver is a resolution-tier decision (Resolver.Resolve returns

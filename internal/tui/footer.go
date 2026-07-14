@@ -197,25 +197,25 @@ func fitFilterCluster(entries []filterFooterEntry, w int, mode theme.Mode, colou
 
 // fitClusterToWidth is the shared §2.7 narrow-degrade fitter behind both the standard
 // keymap footer (fitLeftCluster) and the per-glyph filter footer (fitFilterCluster).
-// Given the entry count, the width budget w, a renderCluster closure that renders the
+// Given the entry count, the width budget, a renderCluster closure that renders the
 // first n entries (returning the cluster string and its exact rendered width), and the
 // pre-rendered separator + ellipsis chrome runs, it returns the widest fitting cluster
-// and its rendered width (always ≤ w). The algorithm is unchanged from the two former
+// and its rendered width (always ≤ budget). The algorithm is unchanged from the two former
 // per-caller copies: try the full cluster first (the common, wide-terminal case), then
 // greedily grow a leading prefix appending a `<cluster> · …` separator+ellipsis, then
 // fall back to the bare ellipsis, then an empty cluster at extreme narrowness. Only this
 // try-full-then-greedy-prefix-with-ellipsis loop is shared — the per-type cluster
 // renderers (renderFooterCluster / renderFilterCluster) and each caller's budget
 // computation (full width vs right-anchor-reserved) stay caller-owned.
-func fitClusterToWidth(count, w int, renderCluster func(n int) (string, int), sep, ellipsis string) (string, int) {
+func fitClusterToWidth(count, budget int, renderCluster func(n int) (string, int), sep, ellipsis string) (string, int) {
 	// Try the full cluster first (the common, wide-terminal case).
-	if full, fullWidth := renderCluster(count); fullWidth <= w {
+	if full, fullWidth := renderCluster(count); fullWidth <= budget {
 		return full, fullWidth
 	}
 
 	// Narrow degrade (§2.7): include as many leading entries as fit, then append an
 	// ellipsis marker. Find the largest prefix whose rendered width (with the separator
-	// + ellipsis appended) still fits w.
+	// + ellipsis appended) still fits the budget.
 	ellipsisWidth := lipgloss.Width(ellipsis)
 	sepWidth := lipgloss.Width(sep)
 
@@ -225,7 +225,7 @@ func fitClusterToWidth(count, w int, renderCluster func(n int) (string, int), se
 		cluster, clusterWidth := renderCluster(n)
 		// Width of "<cluster> · …": the cluster, a separator, then the ellipsis.
 		candidateWidth := clusterWidth + sepWidth + ellipsisWidth
-		if candidateWidth > w {
+		if candidateWidth > budget {
 			break
 		}
 		best = lipgloss.JoinHorizontal(lipgloss.Top, cluster, sep, ellipsis)
@@ -238,7 +238,7 @@ func fitClusterToWidth(count, w int, renderCluster func(n int) (string, int), se
 	// Not even one entry + ellipsis fits: render just the ellipsis if it fits, else an
 	// empty cluster (the row degrades to blank canvas / the surviving right anchor at
 	// extreme narrowness, §2.7).
-	if ellipsisWidth <= w {
+	if ellipsisWidth <= budget {
 		return ellipsis, ellipsisWidth
 	}
 	return "", 0

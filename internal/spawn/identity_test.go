@@ -134,6 +134,12 @@ func TestMatchesFamily(t *testing.T) {
 			pattern:  "dev.warp.Warp-*",
 			want:     false,
 		},
+		{
+			name:     "it treats a malformed glob pattern as a non-match, not a failure",
+			bundleID: "com.apple.Terminal",
+			pattern:  "[", // path.ErrBadPattern
+			want:     false,
+		},
 	}
 
 	for _, tt := range tests {

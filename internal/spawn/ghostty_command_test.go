@@ -77,7 +77,7 @@ func TestGhosttyOpenScript(t *testing.T) {
 		}
 	})
 
-	t.Run("it is pure — identical output for the same input and no I/O", func(t *testing.T) {
+	t.Run("it is pure — identical output for the same input", func(t *testing.T) {
 		cmd := realAttachArgv()
 
 		if a, b := ghosttyOpenScript(cmd), ghosttyOpenScript(cmd); a != b {

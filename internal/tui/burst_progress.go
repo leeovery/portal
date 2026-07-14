@@ -327,6 +327,10 @@ func (m Model) cancelBurst() (tea.Model, tea.Cmd) {
 		m.burstCancel()
 	}
 	m.burstCancelled = true
+	// Defensive/unreachable in production: dispatchBurst always pairs burstPending
+	// with a live burstPipe, so a cancel only lands while a pipe exists. Only the
+	// input-inert WithInitialBurstOpening capture harness sets pending without a
+	// pipe; guard against a wedge there rather than dereference a nil pipe.
 	if m.burstPipe == nil {
 		return m, nil
 	}

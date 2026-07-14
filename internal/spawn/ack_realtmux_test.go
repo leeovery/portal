@@ -19,6 +19,7 @@ package spawn_test
 // tests. Carries //go:build integration per CLAUDE.md's lane rule (real tmux).
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/leeovery/portal/internal/spawn"
@@ -32,12 +33,13 @@ func hasToken(set map[string]struct{}, token string) bool {
 	return ok
 }
 
-// sortedSet returns the keys of a set for diagnostic messages.
+// sortedSet returns the sorted keys of a set for deterministic diagnostic messages.
 func sortedSet(m map[string]struct{}) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 	return keys
 }
 

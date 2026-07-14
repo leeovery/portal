@@ -59,6 +59,12 @@ func TestSpawnCommand(t *testing.T) {
 		if !strings.Contains(out, "com.mitchellh.ghostty") {
 			t.Errorf("output %q missing bundle id %q", out, "com.mitchellh.ghostty")
 		}
+		// Lock the exact U+00B7 middot separator (the design-copy echo of the
+		// banner's "Apple Terminal · com.apple.Terminal") so a separator regression
+		// is caught, not just the two fields in isolation.
+		if !strings.Contains(out, "Ghostty · com.mitchellh.ghostty") {
+			t.Errorf("output %q missing the exact %q middot-separated form", out, "Ghostty · com.mitchellh.ghostty")
+		}
 	})
 
 	t.Run("it prints the honest no-host-local-terminal line on --detect for a NULL identity", func(t *testing.T) {

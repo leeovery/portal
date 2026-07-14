@@ -95,8 +95,8 @@ func walkToBundle(startPID int, walker ProcessWalker, reader BundleReader) (Iden
 // transient tags cause as an ErrDetectTransient failure while preserving it in
 // the chain, so callers can errors.Is either the sentinel or the underlying
 // `ps`/`defaults` cause.
-func transient(context string, cause error) error {
-	return fmt.Errorf("%s: %w: %w", context, ErrDetectTransient, cause)
+func transient(what string, cause error) error {
+	return fmt.Errorf("%s: %w: %w", what, ErrDetectTransient, cause)
 }
 
 // appBundlePath reports whether command lives inside a macOS `.app` bundle and,

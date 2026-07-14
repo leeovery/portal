@@ -27,9 +27,9 @@ package tui
 // drive a REAL burst goroutine and cancel it, exercising the send path under -race.
 //
 // Shared seam helpers (wireBurstSeams, allPresent, resolveDetection, markRow,
-// ghosttyIdentity, newPendingBurstModel, injectComplete, isQuitCmd) live in the
-// sibling burst test files. No t.Parallel: consistent with the rest of the tui test
-// surface.
+// ghosttyIdentity, newPendingBurstModel, injectComplete, isQuitCmd, sessionsFromNames)
+// live in the sibling burst test files. No t.Parallel: consistent with the rest of the
+// tui test surface.
 
 import (
 	"testing"
