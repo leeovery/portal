@@ -1,6 +1,9 @@
 package spawn
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestMatchConfig(t *testing.T) {
 	tests := []struct {
@@ -119,7 +122,7 @@ func TestMatchConfig_ReturnsWinningEntry(t *testing.T) {
 	if gotEntry.Commands.Open == nil {
 		t.Fatal("winning entry Commands.Open is nil, want the ghostty recipe")
 	}
-	if got := gotEntry.Commands.Open.Argv; !equalStrings(got, want.Commands.Open.Argv) {
+	if got := gotEntry.Commands.Open.Argv; !slices.Equal(got, want.Commands.Open.Argv) {
 		t.Errorf("winning entry argv = %v, want %v", got, want.Commands.Open.Argv)
 	}
 }

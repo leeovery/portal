@@ -134,6 +134,36 @@ func TestDetectorDetect(t *testing.T) {
 		}
 	})
 
+	t.Run("it folds a current-session read error to NULL and emits a spawn WARN", func(t *testing.T) {
+		logger, sink := logtest.NewCaptureLogger(t)
+		sessionFailure := errors.New("display-message: no current session")
+		d := &Detector{
+			insideTmux:     func() bool { return true },
+			currentSession: func() (string, error) { return "", sessionFailure },
+			// The session read fails first, so the client-walk seams must never run.
+			lister: &fakeClientLister{},
+			walker: failWalker{t},
+			reader: failReader{t},
+			logger: logger,
+		}
+
+		got := d.Detect()
+
+		if !got.IsNull() {
+			t.Fatalf("identity = %+v, want NULL folded from the current-session read error", got)
+		}
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelWarn {
+			t.Errorf("record level = %v, want WARN", rec.Level)
+		}
+		if rec.Msg != wantMsgTransient {
+			t.Errorf("record message = %q, want %q", rec.Msg, wantMsgTransient)
+		}
+		if detail := rec.AttrString(t, "detail"); !strings.Contains(detail, sessionFailure.Error()) {
+			t.Errorf("WARN detail = %q, want it to carry the underlying error %q", detail, sessionFailure.Error())
+		}
+	})
+
 	t.Run("it emits only the terminal, bundle_id and detail attr keys in phase 1", func(t *testing.T) {
 		walker, reader := localWalkSeams()
 		scenarios := []struct {

@@ -1,6 +1,7 @@
 package spawn
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -142,7 +143,7 @@ func TestValidRecipeForEntry(t *testing.T) {
 			t.Errorf("kind = %d, want RecipeArgv (%d)", kind, RecipeArgv)
 		}
 		wantArgv := []string{"kitty", "{command}"}
-		if !equalStrings(recipe.Argv, wantArgv) {
+		if !slices.Equal(recipe.Argv, wantArgv) {
 			t.Errorf("recipe.Argv = %v, want %v", recipe.Argv, wantArgv)
 		}
 

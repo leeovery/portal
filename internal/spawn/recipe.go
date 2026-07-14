@@ -80,7 +80,7 @@ func validRecipeForEntry(key string, e TerminalEntry) (Recipe, RecipeKind, bool)
 	}
 	kind, err := validateRecipe(*e.Commands.Open)
 	if err != nil {
-		detectLogger.Warn("terminals.json entry rejected", "detail", fmt.Sprintf("%q: %v", key, err))
+		spawnLogger.Warn("terminals.json entry rejected", "detail", fmt.Sprintf("%q: %v", key, err))
 		return Recipe{}, 0, false
 	}
 	return *e.Commands.Open, kind, true

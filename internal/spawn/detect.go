@@ -8,7 +8,7 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// detectLogger is the spawn-component-bound package logger. Binding it once at
+// spawnLogger is the spawn-component-bound package logger. Binding it once at
 // package init via log.For introduces the new `spawn` component into Portal's
 // closed logging taxonomy (a spec-governed amendment, not a call-site
 // invention) and routes every record through the shared handler indirection so
@@ -18,7 +18,7 @@ import (
 // function-parameter name and a package var of that name invites shadowing.
 // internal/spawn may import internal/log (internal/log never imports
 // internal/spawn), so this binding is cycle-free.
-var detectLogger = log.For("spawn")
+var spawnLogger = log.For("spawn")
 
 // spawn detection-outcome message strings — the Phase-1 slice of the `spawn`
 // closed event catalog (detection outcome: identity / NULL-bundle / transient).
@@ -70,7 +70,7 @@ func NewDetector(client *tmux.Client) *Detector {
 		reader:         realBundleReader{},
 		lister:         tmuxClientLister{c: client},
 		currentSession: client.CurrentSessionName,
-		logger:         detectLogger,
+		logger:         spawnLogger,
 	}
 }
 

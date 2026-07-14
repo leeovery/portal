@@ -160,6 +160,10 @@ func TestNewSpawnID_IndependentRealGeneratorIDs(t *testing.T) {
 		t.Fatalf("NewSpawnID(real) second call error: %v", err)
 	}
 
+	if first == second {
+		t.Errorf("NewSpawnID(real) returned the same id twice (%q) — ids must be independent, not cached", first)
+	}
+
 	for _, id := range []string{first, second} {
 		if id == "" {
 			t.Fatalf("NewSpawnID(real) produced an empty id")

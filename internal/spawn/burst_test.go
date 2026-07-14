@@ -54,6 +54,20 @@ func (d *delayingAck) Collect(batch string) (map[string]struct{}, error) {
 	return out, nil
 }
 
+// erroringAck is an ack double whose Collect ALWAYS returns an error (a persistently
+// failing show-options enumeration). Write is a no-op reporting success, so the window
+// "writes" its marker yet awaitToken can never read it back — exercising the safe-
+// direction contract that a failing Collect classifies the window as AckTimeout rather
+// than a false confirm or a panic.
+type erroringAck struct{ collectCalls int }
+
+func (e *erroringAck) Write(batch, token string) error { return nil }
+
+func (e *erroringAck) Collect(batch string) (map[string]struct{}, error) {
+	e.collectCalls++
+	return nil, errors.New("show-options: server not found")
+}
+
 // writingAdapter records each composed argv (in call order) and replays a
 // scripted Result per call (defaulting to Success once the script is exhausted).
 // On a success Result whose per-window confirm flag is true (nil confirm ⇒ all
@@ -213,6 +227,36 @@ func TestBurster_Run(t *testing.T) {
 		// the confirm above.
 		if clock.elapsed() < b.Timeout {
 			t.Fatalf("clock advanced only %v, want >= Timeout %v so the global-clock independence proof is meaningful", clock.elapsed(), b.Timeout)
+		}
+	})
+
+	t.Run("it times out a window when the ack enumeration persistently fails", func(t *testing.T) {
+		// awaitToken treats a Collect error as "token not present yet"; a persistently
+		// failing enumeration must therefore classify the window as AckTimeout — never a
+		// false AckConfirmed, never a panic — even though the window wrote its marker.
+		clock := &manualClock{}
+		ack := &erroringAck{}
+		adapter := &writingAdapter{ack: ack} // confirm nil ⇒ the window "writes" its token
+		b := &Burster{
+			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
+			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			NewID:   seqIDGen(),
+			Timeout: 750 * time.Millisecond, Poll: 100 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+
+		_, results, err := b.Run(context.Background(), []string{"w1"}, nil)
+		if err != nil {
+			t.Fatalf("Run error = %v, want nil (a failing Collect must not surface as a Run error)", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("results len = %d, want 1", len(results))
+		}
+		if results[0].Ack != AckTimeout {
+			t.Errorf("window Ack = %q, want %q (a persistently erroring Collect must time out, not confirm)", results[0].Ack, AckTimeout)
+		}
+		if ack.collectCalls == 0 {
+			t.Error("Collect was never polled; the erroring branch was not exercised")
 		}
 	})
 

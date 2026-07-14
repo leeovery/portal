@@ -117,11 +117,11 @@ func newScriptRecipeAdapter(key, rawPath string, runner recipeRunner) (Adapter, 
 	p := resolver.ExpandTilde(rawPath)
 	info, err := os.Stat(p)
 	if err != nil {
-		detectLogger.Warn("terminals.json entry rejected", "detail", fmt.Sprintf("%q: script %q not found: %v", key, p, err))
+		spawnLogger.Warn("terminals.json entry rejected", "detail", fmt.Sprintf("%q: script %q not found: %v", key, p, err))
 		return nil, false
 	}
 	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
-		detectLogger.Warn("terminals.json entry rejected", "detail", fmt.Sprintf("%q: script %q is not executable", key, p))
+		spawnLogger.Warn("terminals.json entry rejected", "detail", fmt.Sprintf("%q: script %q is not executable", key, p))
 		return nil, false
 	}
 	return &scriptRecipeAdapter{scriptPath: p, runner: runner}, true

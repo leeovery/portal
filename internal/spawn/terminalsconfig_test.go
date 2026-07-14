@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/leeovery/portal/internal/log"
@@ -12,7 +13,7 @@ import (
 
 // installSpawnCapture swaps a fresh logtest.Sink into the process-wide log
 // indirection for the duration of the test so the package-level spawn-component
-// detectLogger (log.For("spawn")) routes its WARN records into the sink.
+// spawnLogger (log.For("spawn")) routes its WARN records into the sink.
 func installSpawnCapture(t *testing.T) *logtest.Sink {
 	t.Helper()
 	sink := &logtest.Sink{}
@@ -122,7 +123,7 @@ func TestTerminalsStoreLoad(t *testing.T) {
 			t.Fatal("Commands.Open is nil, want the parsed open recipe")
 		}
 		wantArgv := []string{"kitty", "{command}"}
-		if got := entry.Commands.Open.Argv; !equalStrings(got, wantArgv) {
+		if got := entry.Commands.Open.Argv; !slices.Equal(got, wantArgv) {
 			t.Errorf("open argv = %v, want %v", got, wantArgv)
 		}
 		if got := warnRecords(sink); len(got) != 0 {
@@ -188,14 +189,3 @@ func writeFile(t *testing.T, path, contents string) {
 	}
 }
 
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}

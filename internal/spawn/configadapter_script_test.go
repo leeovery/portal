@@ -127,6 +127,30 @@ func TestNewScriptRecipeAdapter(t *testing.T) {
 		}
 	})
 
+	t.Run("it skips a directory path with a WARN and no adapter", func(t *testing.T) {
+		sink := installSpawnCapture(t)
+		// A directory exists AND carries exec bits (t.TempDir is 0o700), so only the
+		// IsDir() arm of the validity gate can reject it — pinning that half distinctly
+		// from the no-exec-bit half above.
+		dirPath := t.TempDir()
+
+		adapter, ok := newScriptRecipeAdapter(key, dirPath, &fakeRecipeRunner{})
+
+		if ok {
+			t.Fatal("newScriptRecipeAdapter accepted a directory path, want ok=false")
+		}
+		if adapter != nil {
+			t.Errorf("adapter = %#v, want nil for a directory path", adapter)
+		}
+		warns := warnRecords(sink)
+		if len(warns) != 1 {
+			t.Fatalf("emitted %d WARN records for a directory path, want exactly 1: %+v", len(warns), warns)
+		}
+		if detail := warns[0].AttrString(t, "detail"); !strings.Contains(detail, key) {
+			t.Errorf("WARN detail = %q, want it to name the entry key %q", detail, key)
+		}
+	})
+
 	t.Run("it maps a clean exit to success and a non-zero exit to spawn-failed", func(t *testing.T) {
 		scriptPath := filepath.Join(t.TempDir(), "s.sh")
 		writeExecutableScript(t, scriptPath)

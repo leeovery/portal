@@ -65,13 +65,13 @@ func (s *TerminalsStore) Load() TerminalsConfig {
 		if errors.Is(err, os.ErrNotExist) {
 			return TerminalsConfig{}
 		}
-		detectLogger.Warn("terminals.json unreadable", "detail", err.Error())
+		spawnLogger.Warn("terminals.json unreadable", "detail", err.Error())
 		return TerminalsConfig{}
 	}
 
 	var cfg TerminalsConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		detectLogger.Warn("terminals.json malformed", "detail", err.Error())
+		spawnLogger.Warn("terminals.json malformed", "detail", err.Error())
 		return TerminalsConfig{}
 	}
 

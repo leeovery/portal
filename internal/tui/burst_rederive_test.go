@@ -80,10 +80,7 @@ func TestBurstDispatch_RederivesLiveMarkedSetOnDeferredResolve(t *testing.T) {
 		t.Fatalf("OpenWindow called %d times, want 1 (external = [bravo])", len(adapter.Calls))
 	}
 	if got := spawnedSession(t, adapter.Calls[0]); got != "bravo" {
-		t.Errorf("deferred burst opened %q, want bravo (the newly-marked live external)", got)
-	}
-	if got := spawnedSession(t, adapter.Calls[0]); got == "alpha" {
-		t.Error("the unmarked-during-window session alpha must NOT open")
+		t.Errorf("deferred burst opened %q, want bravo (the newly-marked live external); alpha (unmarked in the window) must NOT open", got)
 	}
 }
 
