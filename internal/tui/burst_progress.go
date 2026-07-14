@@ -237,16 +237,19 @@ func WithSpawnGetenv(fn func(string) string) Option {
 // other outcome is partial/permission (§6-6) or would be an abort (§6-7). An
 // empty external set cannot reach here — N=1 is task 5-7 — so the length check
 // never has to reason about a vacuous all-confirmed.
+//
+// The all-confirmed verdict is DERIVED from spawn.PartitionResults — the single
+// count-semantics chokepoint — rather than a hand-rolled !r.Confirmed() loop: a
+// batch is all-confirmed precisely when the returned failed slice is empty (§9-6).
+// The partition is total (every result lands in confirmed OR failed, keyed off the
+// shared Confirmed() predicate), so len(failed) == 0 iff every result confirmed —
+// exactly the relationship the CLI's runSpawn (cmd/spawn.go) gates on, so the two
+// orchestrations cannot drift. The msg.Err and length guards remain: a pre-spawn
+// error or an arity mismatch (including the vacuous N=1-here case, where the length
+// guard fires) yields false regardless of the partition.
 func (m Model) burstAllConfirmed(msg spawnCompleteMsg) bool {
-	if msg.Err != nil || len(msg.Results) != len(m.burstExternal) {
-		return false
-	}
-	for _, r := range msg.Results {
-		if !r.Confirmed() {
-			return false
-		}
-	}
-	return true
+	_, failed := spawn.PartitionResults(msg.Results)
+	return msg.Err == nil && len(msg.Results) == len(m.burstExternal) && len(failed) == 0
 }
 
 // resetBurstState clears the burst lifecycle fields after a terminal outcome: it
