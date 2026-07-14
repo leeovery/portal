@@ -6,7 +6,7 @@ total_proposed: 8
 # Analysis Tasks: restore-host-terminal-windows (Cycle 3)
 
 ## Task 1: Extract the section-header line-0 splice into one shared helper
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -33,7 +33,7 @@ sources: duplication, architecture
 - Regression: the existing Opening-band / abort-banner / multi-select-banner / unsupported-banner / filter-query / standard-header and Projects section-header render assertions pass unchanged (byte-identical output).
 
 ## Task 2: Delete the four dead burst-outcome fields on Model
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -61,7 +61,7 @@ sources: architecture
 - Build/compile: `go build ./...` green after removal.
 
 ## Task 3: Extract the left-bar single-glyph column renderer
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -87,7 +87,7 @@ sources: duplication
 - Regression: existing session-row render assertions for marked, gone, and selected rows pass unchanged.
 
 ## Task 4: Unify the footer narrow-degrade fitter across the standard and multi-select footers
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -113,7 +113,7 @@ sources: duplication
 - Regression: existing standard-footer, Projects-footer, and multi-select-footer narrow-degrade assertions pass unchanged.
 
 ## Task 5: Give Outcome a zero sentinel so a zero-value Result is not silently a success
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -140,7 +140,7 @@ sources: architecture
 - Regression: existing adapter, classify, and burster tests pass unchanged.
 
 ## Task 6: Derive burstAllConfirmed from the shared PartitionResults chokepoint
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -165,7 +165,7 @@ sources: architecture
 - Regression: existing burst full-success self-attach and partial-failure suites pass unchanged.
 
 ## Task 7: Route the spawn-ack write-failure DEBUG through the enumerated `detail` attr
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -190,7 +190,7 @@ sources: standards
 - Regression: existing attach ack-path tests pass unchanged.
 
 ## Task 8: Fix the `--spawn-ack` flag help text delimiter label
-status: pending
+status: approved
 severity: low
 sources: standards
 
