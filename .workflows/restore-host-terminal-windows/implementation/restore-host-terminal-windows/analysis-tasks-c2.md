@@ -6,7 +6,7 @@ total_proposed: 7
 # Analysis Tasks: restore-host-terminal-windows (Cycle 2)
 
 ## Task 1: Extract the spawn log-emission shapes into internal/spawn shared helpers
-status: pending
+status: approved
 severity: high
 sources: duplication
 
@@ -39,7 +39,7 @@ sources: duplication
 - Regression: existing `cmd/spawn.go` and `internal/tui` burst-observability log assertions pass unchanged.
 
 ## Task 2: Suppress `n` (new-session-in-cwd) while in multi-select mode
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -64,7 +64,7 @@ sources: standards
 - Regression: `n` outside multi-select still dispatches `createSessionInCWD` and quits.
 
 ## Task 3: Run pre-flight before the unsupported gate on the picker burst path
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -92,7 +92,7 @@ sources: architecture
 - Regression: supported-terminal burst dispatch and existing unsupported-no-op tests pass unchanged.
 
 ## Task 4: Extract the shared partial-failure "leave-what-opened" message renderer into internal/spawn/message.go
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -119,7 +119,7 @@ sources: architecture
 - Regression: existing CLI partial-failure and picker partial-failure-flash assertions, updated to the single canonical wording, pass.
 
 ## Task 5: Extract the shared burst test-model construction prefix helper
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -145,7 +145,7 @@ sources: duplication
 - The shared helpers are exercised by all four constructors (no dead helper).
 
 ## Task 6: Promote the nanoid alphabet to a single shared constant referenced by spawn and session
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -172,7 +172,7 @@ sources: duplication
 - Build: `go build ./...` green (no import cycle).
 
 ## Task 7: Remove (or document) the unreachable OutcomeUnsupported Result taxonomy member
-status: pending
+status: approved
 severity: low
 sources: architecture
 

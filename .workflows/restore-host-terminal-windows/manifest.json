@@ -105,7 +105,15 @@
             "restore-host-terminal-windows-7-3": "tick-473b1a",
             "restore-host-terminal-windows-7-4": "tick-160e87",
             "restore-host-terminal-windows-7-5": "tick-be06d5",
-            "restore-host-terminal-windows-7-6": "tick-cc1ad5"
+            "restore-host-terminal-windows-7-6": "tick-cc1ad5",
+            "restore-host-terminal-windows-8": "tick-fcc411",
+            "restore-host-terminal-windows-8-1": "tick-6f32ac",
+            "restore-host-terminal-windows-8-2": "tick-407482",
+            "restore-host-terminal-windows-8-3": "tick-3b522a",
+            "restore-host-terminal-windows-8-4": "tick-25d2a8",
+            "restore-host-terminal-windows-8-5": "tick-86f3c7",
+            "restore-host-terminal-windows-8-6": "tick-9c20d0",
+            "restore-host-terminal-windows-8-7": "tick-c5bcee"
           },
           "external_id": "tick-9d3e8a"
         }
