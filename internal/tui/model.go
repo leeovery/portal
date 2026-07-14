@@ -3398,6 +3398,14 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.handleRenameKey()
 		case isRuneKey(msg, "n"):
+			// §5 Multi-select suppresses n (new-session-in-cwd): it is not in the
+			// closed live-set (Space/ / /s) and, unlike the browse keys, it would
+			// createSessionInCWD → quit the picker, silently discarding the marked
+			// set. Gated as a no-op in the mode, mirroring the sibling k/r/x arms
+			// (arm kept PRESENT for the default-mode dispatch-parity probe).
+			if m.multiSelectMode {
+				return m, nil
+			}
 			return m.handleNewInCWD()
 		// s cycles the session-list grouping mode (Flat → By Project → By Tag
 		// → Flat). This case MUST stay inside this rune switch, which sits below

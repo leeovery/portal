@@ -28,6 +28,10 @@ var (
 	keyCtrlC = tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	keySpace = tea.KeyPressMsg{Code: tea.KeySpace}
 	keySlash = tea.KeyPressMsg{Code: '/', Text: "/"}
+	// keyN is the create-new-session-in-cwd press. §5 multi-select suppresses it
+	// so a stray n cannot fire createSessionInCWD (which creates a session, quits
+	// the picker, and silently discards the marked set) mid-selection.
+	keyN = tea.KeyPressMsg{Code: 'n', Text: "n"}
 )
 
 // enterMultiSelect drives a fresh Sessions model into §5 multi-select mode via a
@@ -97,6 +101,83 @@ func TestMultiSelectSuppressesRowActions(t *testing.T) {
 			t.Errorf("r must not exit multi-select mode")
 		}
 	})
+}
+
+// TestMultiSelectSuppressesNewInCWD covers the in-mode suppression of n
+// (new-session-in-cwd): n is a no-op while in multi-select mode — it dispatches no
+// command, creates no session, does not quit the picker, and leaves the marked set
+// and the mode intact. Without the gate, n → handleNewInCWD → createSessionInCWD
+// would create a session and (via the fed-back SessionCreatedMsg) quit, silently
+// discarding the whole marked set. Out-of-mode n is unchanged
+// (TestOutOfModeNewInCWDUnchanged).
+func TestMultiSelectSuppressesNewInCWD(t *testing.T) {
+	m := NewModelWithSessions(twoFlatSessions())
+	creator := &recordingCreator{}
+	m.sessionCreator = creator
+	m.cwd = "/home/user/mydir"
+	m = enterMultiSelect(t, m)
+	m = pressSession(t, m, pressM) // mark alpha (highlighted row 0)
+	if m.SelectedSessionCount() != 1 {
+		t.Fatalf("precondition: expected one marked session before n, got %d", m.SelectedSessionCount())
+	}
+
+	updated, cmd := m.updateSessionList(keyN)
+	mm := updated.(Model)
+
+	// n must dispatch nothing: no create cmd (which would feed back a
+	// SessionCreatedMsg and quit) — running any leaked cmd surfaces the create.
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			t.Errorf("n in multi-select mode dispatched a command producing %T; want no command", msg)
+		}
+	}
+	if creator.dir != "" {
+		t.Errorf("n must not create a session in multi-select mode; CreateFromDir called with dir %q", creator.dir)
+	}
+	if got := mm.SelectedSessionCount(); got != 1 {
+		t.Errorf("n must preserve the marked set; count = %d, want 1", got)
+	}
+	if !mm.MultiSelectActive() {
+		t.Errorf("n must not exit multi-select mode")
+	}
+	if mm.activePage != PageSessions {
+		t.Errorf("n must not leave the Sessions page; active page = %d, want PageSessions", mm.activePage)
+	}
+}
+
+// TestOutOfModeNewInCWDUnchanged covers the parity requirement: outside multi-select
+// mode n still dispatches createSessionInCWD (creating a session in the cwd) and the
+// resulting SessionCreatedMsg quits the picker — unchanged by the in-mode gate.
+func TestOutOfModeNewInCWDUnchanged(t *testing.T) {
+	m := NewModelWithSessions(twoFlatSessions())
+	creator := &recordingCreator{}
+	m.sessionCreator = creator
+	m.cwd = "/home/user/mydir"
+
+	updated, cmd := m.updateSessionList(keyN)
+	mm := updated.(Model)
+
+	if cmd == nil {
+		t.Fatalf("out of mode, n must dispatch createSessionInCWD; got nil cmd")
+	}
+	created, ok := cmd().(SessionCreatedMsg)
+	if !ok {
+		t.Fatalf("out of mode, n must produce a SessionCreatedMsg")
+	}
+	if creator.dir != "/home/user/mydir" {
+		t.Errorf("out of mode, n must create in the cwd; CreateFromDir dir = %q, want %q", creator.dir, "/home/user/mydir")
+	}
+
+	// Feeding the SessionCreatedMsg back through Update quits the picker with the
+	// created session selected.
+	final, quitCmd := mm.Update(created)
+	fm := final.(Model)
+	if !isQuitCmd(quitCmd) {
+		t.Errorf("out of mode, the SessionCreatedMsg must quit the picker")
+	}
+	if fm.selected != created.SessionName {
+		t.Errorf("selected session = %q, want %q", fm.selected, created.SessionName)
+	}
 }
 
 // TestMultiSelectKeepsCoexistingKeysLive covers the keys that STAY live in the
