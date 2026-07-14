@@ -5,8 +5,12 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"testing"
+
+	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 )
 
 // mockSessionConnector records Connect calls for testing. When order is
@@ -235,6 +239,57 @@ func TestAttachSpawnAck(t *testing.T) {
 		if len(ackWriter.calls) != 1 {
 			t.Errorf("Write call count = %d, want 1", len(ackWriter.calls))
 		}
+		if connector.connectedTo != "s1" {
+			t.Errorf("Connect called with %q, want %q (best-effort must still exec)", connector.connectedTo, "s1")
+		}
+	})
+
+	t.Run("it routes the write-failure DEBUG through the enumerated detail attr", func(t *testing.T) {
+		connector := &mockSessionConnector{}
+		validator := &mockSessionValidator{sessions: map[string]bool{"s1": true}}
+		ackWriter := &mockAckWriter{err: fmt.Errorf("set-option failed")}
+		attachDeps = &AttachDeps{Connector: connector, Validator: validator, AckWriter: ackWriter}
+		t.Cleanup(func() { attachDeps = nil })
+
+		sink := &logtest.Sink{}
+		log.SetTestHandler(t, sink)
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"attach", "s1", "--spawn-ack", "b1:t1"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("expected no error on best-effort write failure, got %v", err)
+		}
+
+		var rec *logtest.Record
+		for _, r := range sink.Records() {
+			if r.Level == slog.LevelDebug && r.Msg == "spawn-ack marker write failed" {
+				rec = &r
+				break
+			}
+		}
+		if rec == nil {
+			t.Fatalf("no DEBUG %q record captured in:\n%s", "spawn-ack marker write failed", sink.Body())
+		}
+
+		// It rides the closed spawn attr set: session/batch/detail, and the
+		// detail attr carries the opaque OS-specific write-failure payload.
+		if got := rec.AttrString(t, "session"); got != "s1" {
+			t.Errorf("session attr = %q, want %q", got, "s1")
+		}
+		if got := rec.AttrString(t, "batch"); got != "b1" {
+			t.Errorf("batch attr = %q, want %q", got, "b1")
+		}
+		if got := rec.AttrString(t, "detail"); got != "set-option failed" {
+			t.Errorf("detail attr = %q, want %q", got, "set-option failed")
+		}
+		// The non-enumerated cross-component error key must NOT appear on this
+		// spawn-component line ("never invent at call-site").
+		if rec.HasAttr("error") {
+			t.Errorf("spawn-ack write-failure DEBUG carries a non-enumerated error attr: %+v", rec.Attrs)
+		}
+
+		// Best-effort: the write failure still falls through to Connect.
 		if connector.connectedTo != "s1" {
 			t.Errorf("Connect called with %q, want %q (best-effort must still exec)", connector.connectedTo, "s1")
 		}

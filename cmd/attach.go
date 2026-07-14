@@ -64,7 +64,7 @@ var attachCmd = &cobra.Command{
 				spawnLogger.Debug("spawn-ack marker write failed",
 					"session", name,
 					"batch", ackBatch,
-					"error", err,
+					"detail", err.Error(),
 				)
 			}
 		}
