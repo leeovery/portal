@@ -164,8 +164,22 @@ func TestNewSpawnID_IndependentRealGeneratorIDs(t *testing.T) {
 		if id == "" {
 			t.Fatalf("NewSpawnID(real) produced an empty id")
 		}
-		if strings.IndexFunc(id, func(r rune) bool { return !strings.ContainsRune(spawnIDAlphabet, r) }) >= 0 {
+		if strings.IndexFunc(id, func(r rune) bool { return !strings.ContainsRune(session.NanoIDAlphabet, r) }) >= 0 {
 			t.Errorf("NewSpawnID(real) produced a non-option-safe id %q", id)
 		}
+	}
+}
+
+func TestIsOptionSafeID_GovernedBySharedNanoIDAlphabet(t *testing.T) {
+	// The spawn ack-id option-safety check must be governed by exactly the one
+	// shared session.NanoIDAlphabet — no more, no less. The whole shared alphabet
+	// is option-safe; any char outside it (here the load-bearing "-") is rejected.
+	// This pins the ack-id vocabulary to the single shared constant and guards
+	// against a silent re-divergence of the charset.
+	if !isOptionSafeID(session.NanoIDAlphabet) {
+		t.Errorf("isOptionSafeID(NanoIDAlphabet) = false, want true (the whole shared alphabet must be option-safe)")
+	}
+	if isOptionSafeID(session.NanoIDAlphabet + "-") {
+		t.Errorf("isOptionSafeID accepted a hyphen; its charset must be exactly session.NanoIDAlphabet, which excludes %q", "-")
 	}
 }

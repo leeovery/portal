@@ -3,6 +3,8 @@ package spawn
 import (
 	"fmt"
 	"strings"
+
+	"github.com/leeovery/portal/internal/session"
 )
 
 // SpawnMarkerPrefix is the tmux server-option name prefix used to key each
@@ -11,12 +13,11 @@ import (
 // server-option enumerators are blind to each other's markers.
 const SpawnMarkerPrefix = "@portal-spawn-"
 
-// spawnIDAlphabet is the option-name-safe charset for ack ids — identical to
-// the session package's nanoid alphabet: no ".", no ":", no space, and
-// crucially no "-". The absence of "-" is load-bearing: it makes the
-// "<batch>-<token>" marker name split on its single hyphen delimiter
-// unambiguous (see SpawnMarkerName / ParseSpawnMarkerName).
-const spawnIDAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+// The option-name-safe charset for ack ids is the single shared
+// session.NanoIDAlphabet: no ".", no ":", no space, and crucially no "-". The
+// absence of "-" is load-bearing: it makes the "<batch>-<token>" marker name
+// split on its single hyphen delimiter unambiguous (see SpawnMarkerName /
+// ParseSpawnMarkerName).
 
 // NewSpawnID produces an option-name-safe ack id from gen. It exists so batch
 // and per-window token ids are drawn from one vocabulary and are never the
@@ -24,7 +25,7 @@ const spawnIDAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012
 //
 // A generator error is wrapped and propagated — it never collapses to an empty
 // id. On success the result is defensively verified to be non-empty and wholly
-// within spawnIDAlphabet; a non-option-safe value yields an error and an empty
+// within session.NanoIDAlphabet; a non-option-safe value yields an error and an empty
 // id rather than a marker name that set-option would reject. Production callers
 // pass session.NewNanoIDGenerator(); batch and each per-window token are
 // independent NewSpawnID calls (independent → collision-resistant).
@@ -40,10 +41,10 @@ func NewSpawnID(gen func() (string, error)) (string, error) {
 }
 
 // isOptionSafeID reports whether s is non-empty and every rune is in
-// spawnIDAlphabet.
+// session.NanoIDAlphabet.
 func isOptionSafeID(s string) bool {
 	return s != "" && strings.IndexFunc(s, func(r rune) bool {
-		return !strings.ContainsRune(spawnIDAlphabet, r)
+		return !strings.ContainsRune(session.NanoIDAlphabet, r)
 	}) < 0
 }
 

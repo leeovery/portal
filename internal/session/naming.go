@@ -10,8 +10,15 @@ import (
 const (
 	maxRetries = 10
 	suffixLen  = 6
-	alphabet   = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )
+
+// NanoIDAlphabet is the single shared option-name-safe charset used both for
+// session-name nanoid suffixes and for the spawn package's ack ids
+// (internal/spawn/ackid.go). It contains lowercase, uppercase, and digits only:
+// no ".", ":", or space, and crucially no "-" — the absence of "-" keeps the
+// "<batch>-<token>" spawn-marker split unambiguous. Change it here and both
+// consumers observe it in lockstep.
+const NanoIDAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 // IDGenerator produces a random string suitable for use as a session name suffix.
 type IDGenerator func() (string, error)
@@ -56,7 +63,7 @@ func NewNanoIDGenerator() IDGenerator {
 			return "", fmt.Errorf("failed to read random bytes: %w", err)
 		}
 		for i := range bytes {
-			bytes[i] = alphabet[int(bytes[i])%len(alphabet)]
+			bytes[i] = NanoIDAlphabet[int(bytes[i])%len(NanoIDAlphabet)]
 		}
 		return string(bytes), nil
 	}
