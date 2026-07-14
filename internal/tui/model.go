@@ -4427,29 +4427,19 @@ func (m Model) applyProjectsSectionHeader(listView string) string {
 		return listView
 	}
 	if m.projectList.FilterState() == list.FilterApplied {
-		header := renderFilterQueryHeader(
+		return replaceHeaderLine(listView, renderFilterQueryHeader(
 			m.projectList.FilterValue(),
 			m.contentWidth(),
 			m.canvasMode,
 			m.colourless,
-		)
-		idx := strings.IndexByte(listView, '\n')
-		if idx < 0 {
-			return header
-		}
-		return header + listView[idx:]
+		))
 	}
-	header := renderProjectsSectionHeader(
+	return replaceHeaderLine(listView, renderProjectsSectionHeader(
 		m.visibleProjectRowCount(),
 		m.contentWidth(),
 		m.canvasMode,
 		m.colourless,
-	)
-	idx := strings.IndexByte(listView, '\n')
-	if idx < 0 {
-		return header
-	}
-	return header + listView[idx:]
+	))
 }
 
 // visibleProjectRowCount is the §6 / §3.2 count source for the Projects section
@@ -4666,6 +4656,22 @@ func (m Model) unsupportedBannerActive() bool {
 	return m.DetectUnsupported() && !m.multiSelectMode
 }
 
+// replaceHeaderLine swaps header in for the FIRST line of listView (a
+// bubbles/list view), keeping the tail from the first newline onward. It is the
+// single home of the section-header line-0 splice idiom shared by every
+// applySectionHeader / applyProjectsSectionHeader branch: replacing the title
+// row's CONTENT — rather than inserting a row — keeps the one-row-per-delegate
+// pagination invariant (§3.5) exact. The degenerate no-newline listView (the
+// whole view is one line, or empty) has no tail to keep, so header is returned
+// bare. Any future tweak to the contract lives here, once.
+func replaceHeaderLine(listView, header string) string {
+	idx := strings.IndexByte(listView, '\n')
+	if idx < 0 {
+		return header
+	}
+	return header + listView[idx:]
+}
+
 // applySectionHeader swaps the §3.2 / §4.2 restyled section header in place of the
 // plain bubbles/list title line (the FIRST line of listView). Because the title
 // row already occupies exactly one line in the list's height budget, replacing its
@@ -4697,18 +4703,13 @@ func (m Model) applySectionHeader(listView string) string {
 	// section-header row. burstDone/burstTotal are the dispatch-time N and the streamed
 	// per-window counter (6-3).
 	if m.burstPending {
-		header := renderOpeningBand(
+		return replaceHeaderLine(listView, renderOpeningBand(
 			m.burstDone,
 			m.burstTotal,
 			m.contentWidth(),
 			m.canvasMode,
 			m.colourless,
-		)
-		idx := strings.IndexByte(listView, '\n')
-		if idx < 0 {
-			return header
-		}
-		return header + listView[idx:]
+		))
 	}
 	// §6-7 pre-flight abort banner: an N≥2 Enter found a marked session gone, so the
 	// burst aborted before spawning. Swap in the red `⚠ '<session>' is gone — nothing
@@ -4723,17 +4724,12 @@ func (m Model) applySectionHeader(listView string) string {
 	// than replacing it — see the precedence-seam note in activeNoticeBand. Cleared on
 	// dismiss (any actionable key / Esc) or a refresh.
 	if m.abortBannerText != "" {
-		header := renderPreflightAbortHeader(
+		return replaceHeaderLine(listView, renderPreflightAbortHeader(
 			m.abortBannerText,
 			m.contentWidth(),
 			m.canvasMode,
 			m.colourless,
-		)
-		idx := strings.IndexByte(listView, '\n')
-		if idx < 0 {
-			return header
-		}
-		return header + listView[idx:]
+		))
 	}
 	// §5 multi-select mode owns the section-header row (a filter-line analogue): swap
 	// in the `N selected` / `esc cancel` banner in place of the standard `Sessions`
@@ -4741,17 +4737,12 @@ func (m Model) applySectionHeader(listView string) string {
 	// WHILE in the mode shows the banner (the mode affordance), not the locked query
 	// header — the live filter INPUT (Filtering, above) still steps the banner aside.
 	if m.multiSelectMode {
-		header := renderMultiSelectHeader(
+		return replaceHeaderLine(listView, renderMultiSelectHeader(
 			len(m.selectedSessions),
 			m.contentWidth(),
 			m.canvasMode,
 			m.colourless,
-		)
-		idx := strings.IndexByte(listView, '\n')
-		if idx < 0 {
-			return header
-		}
-		return header + listView[idx:]
+		))
 	}
 	// §6.2 proactive unsupported/NULL banner: once detection has resolved to an
 	// unsupported resolution, swap in the `⚠ unsupported terminal — <name> ·
@@ -4761,33 +4752,23 @@ func (m Model) applySectionHeader(listView string) string {
 	// gate is unsupportedBannerActive, false in the mode). An in-flight detection
 	// (not yet resolved) leaves DetectUnsupported false, so the standard header shows.
 	if m.unsupportedBannerActive() {
-		header := renderUnsupportedHeader(
+		return replaceHeaderLine(listView, renderUnsupportedHeader(
 			m.detectIdentity.Name,
 			m.detectIdentity.BundleID,
 			m.contentWidth(),
 			m.canvasMode,
 			m.colourless,
-		)
-		idx := strings.IndexByte(listView, '\n')
-		if idx < 0 {
-			return header
-		}
-		return header + listView[idx:]
+		))
 	}
 	if m.sessionList.FilterState() == list.FilterApplied {
-		header := renderFilterQueryHeader(
+		return replaceHeaderLine(listView, renderFilterQueryHeader(
 			m.sessionList.FilterValue(),
 			m.contentWidth(),
 			m.canvasMode,
 			m.colourless,
-		)
-		idx := strings.IndexByte(listView, '\n')
-		if idx < 0 {
-			return header
-		}
-		return header + listView[idx:]
+		))
 	}
-	header := renderSectionHeader(
+	return replaceHeaderLine(listView, renderSectionHeader(
 		m.sessionListMode,
 		m.insideTmux,
 		m.currentSession,
@@ -4795,12 +4776,7 @@ func (m Model) applySectionHeader(listView string) string {
 		m.contentWidth(),
 		m.canvasMode,
 		m.colourless,
-	)
-	idx := strings.IndexByte(listView, '\n')
-	if idx < 0 {
-		return header
-	}
-	return header + listView[idx:]
+	))
 }
 
 // visibleSessionRowCount is the §3.2 count source: the number of VISIBLE session
