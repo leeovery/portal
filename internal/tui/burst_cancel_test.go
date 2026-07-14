@@ -37,7 +37,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // cancellablePendingModel builds a marked multi-select model forced into
@@ -96,14 +95,10 @@ func driveCancelToTerminal(t *testing.T, m Model, cmd tea.Cmd) Model {
 // the receiver cmd, and the ack channel.
 func realCancellableBurst(t *testing.T, names ...string) (Model, tea.Cmd, *spawntest.FakeAckChannel) {
 	t.Helper()
-	sessions := make([]tmux.Session, len(names))
-	for i, n := range names {
-		sessions[i] = tmux.Session{Name: n, Windows: i + 1}
-	}
 	ack := &spawntest.FakeAckChannel{}
 	confirm := make([]bool, len(names)) // all false → no window ever confirms
 	adapter := &spawntest.FakeAdapter{Ack: ack, Confirm: confirm}
-	m := NewModelWithSessions(sessions)
+	m := NewModelWithSessions(sessionsFromNames(names))
 	m.termWidth = 80
 	m.termHeight = 24
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)

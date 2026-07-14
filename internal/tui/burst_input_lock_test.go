@@ -35,22 +35,9 @@ import (
 // a swallowed key proves the input-lock intercepts ahead of every handler.
 func burstPendingModel(t *testing.T, names ...string) (Model, *spawntest.FakeAdapter) {
 	t.Helper()
-	sessions := make([]tmux.Session, len(names))
-	for i, n := range names {
-		sessions[i] = tmux.Session{Name: n, Windows: i + 1}
-	}
-	ack := &spawntest.FakeAckChannel{}
-	adapter := &spawntest.FakeAdapter{Ack: ack}
-	m := NewModelWithSessions(sessions)
+	m, adapter, _ := markedSupportedBurstModel(t, names)
 	m.termWidth = 80
 	m.termHeight = 24
-	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
-	m = resolveDetection(t, m, ghosttyIdentity())
-
-	m = pressSession(t, m, pressM)
-	for i := range names {
-		m = markRow(t, m, i)
-	}
 	m.sessionList.Select(0)
 	m.burstPending = true
 	return m, adapter

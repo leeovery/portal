@@ -36,20 +36,7 @@ import (
 // and the ack channel for post-drain assertions.
 func setupConfirmingBurst(t *testing.T, names []string) (Model, *spawntest.FakeAdapter, *spawntest.FakeAckChannel) {
 	t.Helper()
-	sessions := make([]tmux.Session, len(names))
-	for i, n := range names {
-		sessions[i] = tmux.Session{Name: n, Windows: i + 1}
-	}
-	ack := &spawntest.FakeAckChannel{}
-	adapter := &spawntest.FakeAdapter{Ack: ack}
-	m := NewModelWithSessions(sessions)
-	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
-	m = resolveDetection(t, m, ghosttyIdentity())
-
-	m = pressSession(t, m, pressM)
-	for i := range names {
-		m = markRow(t, m, i)
-	}
+	m, adapter, ack := markedSupportedBurstModel(t, names)
 	if m.SelectedSessionCount() != len(names) {
 		t.Fatalf("precondition: %d marked, got %d", len(names), m.SelectedSessionCount())
 	}

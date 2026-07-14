@@ -49,11 +49,7 @@ import (
 // ack timeout, no background goroutine).
 func newPendingBurstModel(t *testing.T, names []string) Model {
 	t.Helper()
-	sessions := make([]tmux.Session, len(names))
-	for i, n := range names {
-		sessions[i] = tmux.Session{Name: n, Windows: i + 1}
-	}
-	m := NewModelWithSessions(sessions)
+	m := NewModelWithSessions(sessionsFromNames(names))
 	m = pressSession(t, m, pressM)
 	for i := range names {
 		m = markRow(t, m, i)

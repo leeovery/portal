@@ -87,6 +87,39 @@ func countName(names []string, name string) int {
 	return n
 }
 
+// sessionsFromNames builds the burst-suite's []tmux.Session from a names slice,
+// stamping each with the canonical Windows: i+1 index convention. It is the single
+// place that convention lives, so the four burst-model constructors cannot drift it.
+func sessionsFromNames(names []string) []tmux.Session {
+	sessions := make([]tmux.Session, len(names))
+	for i, n := range names {
+		sessions[i] = tmux.Session{Name: n, Windows: i + 1}
+	}
+	return sessions
+}
+
+// markedSupportedBurstModel builds a resolved-supported multi-select model with
+// every named session marked: a DEFAULT confirm-all FakeAdapter + FakeAckChannel,
+// the §6 burst seams wired, detection resolved to a ghostty identity, multi-select
+// entered, and every row marked top-to-bottom. It is the shared
+// wire→resolve→enter→mark-all prefix the confirm-all burst-model constructors layer
+// their distinct tail onto (force burstPending / precondition check / …). A
+// constructor needing a non-default adapter (e.g. an all-false Confirm) wires its own
+// seams and only reuses sessionsFromNames.
+func markedSupportedBurstModel(t *testing.T, names []string) (Model, *spawntest.FakeAdapter, *spawntest.FakeAckChannel) {
+	t.Helper()
+	ack := &spawntest.FakeAckChannel{}
+	adapter := &spawntest.FakeAdapter{Ack: ack}
+	m := NewModelWithSessions(sessionsFromNames(names))
+	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
+	m = resolveDetection(t, m, ghosttyIdentity())
+	m = pressSession(t, m, pressM)
+	for i := range names {
+		m = markRow(t, m, i)
+	}
+	return m, adapter, ack
+}
+
 // TestBurstDispatch_OpensExternalInListOrder is the core dispatch assertion: N=3
 // marked on a resolved-supported terminal enters burst-pending and opens the N-1
 // external sessions in list order (top-to-bottom), never the trigger, streaming to
