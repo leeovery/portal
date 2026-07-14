@@ -178,31 +178,53 @@ func renderMultiSelectFooter(width int, mode theme.Mode, colourless bool) string
 // fitFilterCluster renders the given filter-footer entries as a dot-separated left
 // cluster that fits within w cells, greedily including entries in order and, when the
 // full cluster does not fit, dropping trailing entries and appending an ellipsis
-// marker so the row degrades on ONE line without wrapping (§2.7). It mirrors
-// fitLeftCluster (the keymap-descriptor footer's fitter) for the per-glyph
-// filterFooterEntry cluster path — the multi-select footer has no right anchor, so the
-// full width is the budget. Returns the rendered cluster and its exact rendered width
-// (always ≤ w).
+// marker so the row degrades on ONE line without wrapping (§2.7). It owns only the
+// per-glyph filterFooterEntry cluster renderer + its budget (the multi-select footer
+// has no right anchor, so the full width is the budget), delegating the shared
+// try-full-then-greedy-prefix-with-ellipsis loop to fitClusterToWidth — the SAME loop
+// fitLeftCluster (the keymap-descriptor footer's fitter) uses, so the two can never
+// drift. Returns the rendered cluster and its exact rendered width (always ≤ w).
 func fitFilterCluster(entries []filterFooterEntry, w int, mode theme.Mode, colourless bool) (string, int) {
+	// The multi-select footer has no right anchor, so the full width is the budget.
+	sep := renderFooterDetail(footerEntrySeparator, mode, colourless)
+	ellipsis := renderFooterDetail(footerEllipsis, mode, colourless)
+	renderCluster := func(n int) (string, int) {
+		cluster := renderFilterCluster(entries[:n], mode, colourless)
+		return cluster, lipgloss.Width(cluster)
+	}
+	return fitClusterToWidth(len(entries), w, renderCluster, sep, ellipsis)
+}
+
+// fitClusterToWidth is the shared §2.7 narrow-degrade fitter behind both the standard
+// keymap footer (fitLeftCluster) and the per-glyph filter footer (fitFilterCluster).
+// Given the entry count, the width budget w, a renderCluster closure that renders the
+// first n entries (returning the cluster string and its exact rendered width), and the
+// pre-rendered separator + ellipsis chrome runs, it returns the widest fitting cluster
+// and its rendered width (always ≤ w). The algorithm is unchanged from the two former
+// per-caller copies: try the full cluster first (the common, wide-terminal case), then
+// greedily grow a leading prefix appending a `<cluster> · …` separator+ellipsis, then
+// fall back to the bare ellipsis, then an empty cluster at extreme narrowness. Only this
+// try-full-then-greedy-prefix-with-ellipsis loop is shared — the per-type cluster
+// renderers (renderFooterCluster / renderFilterCluster) and each caller's budget
+// computation (full width vs right-anchor-reserved) stay caller-owned.
+func fitClusterToWidth(count, w int, renderCluster func(n int) (string, int), sep, ellipsis string) (string, int) {
 	// Try the full cluster first (the common, wide-terminal case).
-	if full := renderFilterCluster(entries, mode, colourless); lipgloss.Width(full) <= w {
-		return full, lipgloss.Width(full)
+	if full, fullWidth := renderCluster(count); fullWidth <= w {
+		return full, fullWidth
 	}
 
 	// Narrow degrade (§2.7): include as many leading entries as fit, then append an
-	// ellipsis marker. Find the largest prefix whose rendered width (with the ellipsis
-	// appended) still fits w.
-	ellipsis := renderFooterDetail(footerEllipsis, mode, colourless)
-	sep := renderFooterDetail(footerEntrySeparator, mode, colourless)
+	// ellipsis marker. Find the largest prefix whose rendered width (with the separator
+	// + ellipsis appended) still fits w.
 	ellipsisWidth := lipgloss.Width(ellipsis)
 	sepWidth := lipgloss.Width(sep)
 
 	best := ""
 	bestWidth := 0
-	for n := 1; n <= len(entries); n++ {
-		cluster := renderFilterCluster(entries[:n], mode, colourless)
+	for n := 1; n <= count; n++ {
+		cluster, clusterWidth := renderCluster(n)
 		// Width of "<cluster> · …": the cluster, a separator, then the ellipsis.
-		candidateWidth := lipgloss.Width(cluster) + sepWidth + ellipsisWidth
+		candidateWidth := clusterWidth + sepWidth + ellipsisWidth
 		if candidateWidth > w {
 			break
 		}
@@ -214,7 +236,8 @@ func fitFilterCluster(entries []filterFooterEntry, w int, mode theme.Mode, colou
 	}
 
 	// Not even one entry + ellipsis fits: render just the ellipsis if it fits, else an
-	// empty cluster (the row degrades to blank canvas at extreme narrowness, §2.7).
+	// empty cluster (the row degrades to blank canvas / the surviving right anchor at
+	// extreme narrowness, §2.7).
 	if ellipsisWidth <= w {
 		return ellipsis, ellipsisWidth
 	}
@@ -317,8 +340,10 @@ func splitFooterEntries(entries []keymapEntry) (core []keymapEntry, right *keyma
 // (rightWidth, plus one spacer cell). It greedily includes entries in priority
 // order (descriptor order — navigate is highest priority, projects lowest) and, if
 // the full cluster does not fit, drops trailing entries and appends an ellipsis
-// marker so the row truncates on ONE line without wrapping (§2.7). Returns the
-// rendered cluster and its exact rendered width (always ≤ w).
+// marker so the row truncates on ONE line without wrapping (§2.7). It owns only the
+// keymapEntry cluster renderer + its right-anchor-reserved budget, delegating the
+// shared narrow-degrade loop to fitClusterToWidth (the SAME loop fitFilterCluster
+// uses). Returns the rendered cluster and its exact rendered width (always ≤ w).
 func fitLeftCluster(core []keymapEntry, w, rightWidth int, mode theme.Mode, colourless bool) (string, int) {
 	// The budget the left cluster may occupy: the full width minus the reserved
 	// right anchor and one spacer cell. When there is no right anchor the cluster
@@ -331,41 +356,13 @@ func fitLeftCluster(core []keymapEntry, w, rightWidth int, mode theme.Mode, colo
 		budget = 0
 	}
 
-	// Try the full cluster first (the common, wide-terminal case).
-	if full := renderFooterCluster(core, mode, colourless); lipgloss.Width(full) <= budget {
-		return full, lipgloss.Width(full)
-	}
-
-	// Narrow degrade (§2.7): include as many leading entries as fit, then append an
-	// ellipsis marker. Find the largest prefix whose rendered width (with the
-	// ellipsis appended) still fits the budget.
-	ellipsis := renderFooterDetail(footerEllipsis, mode, colourless)
 	sep := renderFooterDetail(footerEntrySeparator, mode, colourless)
-	ellipsisWidth := lipgloss.Width(ellipsis)
-	sepWidth := lipgloss.Width(sep)
-
-	best := ""
-	bestWidth := 0
-	for n := 1; n <= len(core); n++ {
+	ellipsis := renderFooterDetail(footerEllipsis, mode, colourless)
+	renderCluster := func(n int) (string, int) {
 		cluster := renderFooterCluster(core[:n], mode, colourless)
-		// Width of "<cluster> · …": the cluster, a separator, then the ellipsis.
-		candidateWidth := lipgloss.Width(cluster) + sepWidth + ellipsisWidth
-		if candidateWidth > budget {
-			break
-		}
-		best = lipgloss.JoinHorizontal(lipgloss.Top, cluster, sep, ellipsis)
-		bestWidth = candidateWidth
+		return cluster, lipgloss.Width(cluster)
 	}
-	if best != "" {
-		return best, bestWidth
-	}
-
-	// Not even one entry + ellipsis fits: render just the ellipsis if it fits, else
-	// an empty cluster (the row degrades to the ? help anchor alone, §2.7).
-	if ellipsisWidth <= budget {
-		return ellipsis, ellipsisWidth
-	}
-	return "", 0
+	return fitClusterToWidth(len(core), budget, renderCluster, sep, ellipsis)
 }
 
 // renderFooterCluster renders the given Core entries joined by the dot separator
