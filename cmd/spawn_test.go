@@ -1204,6 +1204,58 @@ func TestSpawnPermissionRequired(t *testing.T) {
 	})
 }
 
+// TestSpawnPermission_CLIEmitsPerWindowDebugsThenPermission locks the CLI permission
+// path's emission SET (not just its message): the CLI emits one DEBUG per external
+// window that was attempted BEFORE the burst stopped, then the single permission INFO —
+// and NO generic `opened` summary. This is the deliberate CLI/picker asymmetry (the
+// picker's permission arm emits ONLY the permission INFO, no per-window DEBUGs); the
+// shared spawn.LogWindowResults / spawn.LogPermission split preserves it.
+func TestSpawnPermission_CLIEmitsPerWindowDebugsThenPermission(t *testing.T) {
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	// External = s1,s2,s3 (trigger s4). Window 2 (s2) hits the permission wall → the
+	// burst stops after s2, so only s1,s2 were attempted → exactly 2 per-window records.
+	adapter := &spawntest.FakeAdapter{
+		Results: []spawn.Result{spawn.Success("ok"), spawn.PermissionRequired("evt -1743", "grant Automation")},
+	}
+	conn := &fakeSessionConnector{}
+	ack := &spawntest.FakeAckChannel{}
+	clock := &manualClock{}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+	withBurster(spawnDeps, adapter, ack, clock)
+	t.Cleanup(func() { spawnDeps = nil })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"spawn", "s1", "s2", "s3", "s4"})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected a permission-required error, got nil")
+	}
+
+	var debugs, perms, summaries []logtest.Record
+	for _, rec := range sink.Records() {
+		switch {
+		case rec.Level == slog.LevelDebug && rec.Msg == "external window":
+			debugs = append(debugs, rec)
+		case rec.Level == slog.LevelInfo && rec.Msg == "permission required — nothing self-attached":
+			perms = append(perms, rec)
+		case rec.Level == slog.LevelInfo && strings.HasPrefix(rec.Msg, "opened"):
+			summaries = append(summaries, rec)
+		}
+	}
+	if len(debugs) != 2 {
+		t.Errorf("per-window DEBUG records = %d, want 2 (the CLI emits per-window detail on the permission path); body:\n%s", len(debugs), sink.Body())
+	}
+	if len(perms) != 1 {
+		t.Errorf("permission INFO records = %d, want exactly 1; body:\n%s", len(perms), sink.Body())
+	}
+	if len(summaries) != 0 {
+		t.Errorf("generic opened-summary records = %d, want 0 (the permission path skips the batch summary); body:\n%s", len(summaries), sink.Body())
+	}
+}
+
 // wantPermissionBody is the exact rendered body cmd/spawn.go's logSpawnPermission
 // and the picker's emitPermission must BOTH produce for the same identity /
 // resolution / detail — the closed `spawn` permission event. The mirrored tui test

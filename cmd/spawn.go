@@ -130,7 +130,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	// HasSession, which folds a probe fault to false → gone → conservative abort.
 	// A plain (non-UsageError, non-silenced) error → exit 1 on stderr.
 	if gone := spawn.PreflightMissing(sessions, deps.Exists); len(gone) > 0 {
-		logSpawnGone(log.OrDiscard(deps.Logger), gone)
+		logSpawnGone(deps.Logger, gone)
 		return fmt.Errorf("spawn: %s", spawn.GoneMessage(gone))
 	}
 
@@ -150,7 +150,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	// its external windows — they need an adapter that isn't available. Refuse
 	// before touching any adapter so nothing opens and nothing self-attaches.
 	if resolution == spawn.ResolutionUnsupported {
-		logSpawnUnsupported(log.OrDiscard(deps.Logger), id)
+		logSpawnUnsupported(deps.Logger, id)
 		return errors.New(unsupportedSpawnMessage(id))
 	}
 
@@ -164,8 +164,15 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	// Best-effort: bounded, harmless leaks self-expire with the tmux server.
 	_ = deps.Ack.Clean(batch)
 
-	logger := log.OrDiscard(deps.Logger)
-	opened, failed := tallyWindowResults(logger, results)
+	logger := deps.Logger
+	// The confirmed/failed partition drives both the branch decision and the
+	// leave-what-opened error message; it derives from the shared count-semantics
+	// chokepoint so this path and the picker's cannot drift. A window is "failed"
+	// when it is not Confirmed() — unifying an adapter spawn-failed (AckFailed) and
+	// an ack timeout (AckTimeout). The batch is all-confirmed exactly when failed is
+	// empty. The opened count for the summary is derived inside logSpawnSummary from
+	// the same chokepoint.
+	_, failed := spawn.PartitionResults(results)
 
 	if len(failed) > 0 {
 		// Permission-required is the burst-stop and takes precedence over the
@@ -178,48 +185,32 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 		// switches on Outcome alone: the opaque Result.Detail (never an AppleEvent
 		// number this layer interpreted) rides up only as the log detail attr.
 		if perm, ok := spawn.FirstPermission(results); ok {
+			// The CLI emits the per-window DEBUG detail before the permission INFO
+			// (the picker's permission arm deliberately does not — that asymmetry is
+			// preserved per caller). The batch summary is skipped: the burst stopped,
+			// so there is no cycle summary to report.
+			spawn.LogWindowResults(logger, results)
 			logSpawnPermission(logger, id, resolution, perm.Result.Detail)
 			return errors.New(perm.Result.Guidance)
 		}
 
 		// Leave-what-opened: a post-pre-flight per-window hiccup (an adapter
-		// spawn-failed or an ack timeout — both surfaced by tallyWindowResults as
-		// a non-confirmed window) leaves every opened window in place. Portal does
-		// not own the host windows and has no teardown path, so there is nothing
-		// to close; the trigger self-attach is simply skipped (the trigger stays
-		// in its calling context, never self-execs). The batch markers were
-		// already Cleaned above, on every post-burst path. The opaque Result.Detail
-		// for each failure went only to the DEBUG log (tallyWindowResults), never
-		// the user-facing message below.
-		logSpawnSummary(logger, id, resolution, opened, n, batch)
+		// spawn-failed or an ack timeout — both a non-confirmed window) leaves every
+		// opened window in place. Portal does not own the host windows and has no
+		// teardown path, so there is nothing to close; the trigger self-attach is
+		// simply skipped (the trigger stays in its calling context, never self-execs).
+		// The batch markers were already Cleaned above, on every post-burst path. The
+		// opaque Result.Detail for each failure went only to the DEBUG log (the summary
+		// emits its per-window loop), never the user-facing message below.
+		logSpawnSummary(logger, id, resolution, results, n, false, batch)
 		return fmt.Errorf("spawn: failed to open window(s) for %s — others left open", spawn.QuoteJoin(failed))
 	}
 
-	// Every external window confirmed: the trigger self-attach is about to occur,
-	// so count it before the connector self-execs away (the outside-tmux path
-	// exec-replaces the process and never returns).
-	opened++
-	logSpawnSummary(logger, id, resolution, opened, n, batch)
+	// Every external window confirmed: the trigger self-attach is about to occur, so
+	// it is counted (triggerAttached=true) before the connector self-execs away (the
+	// outside-tmux path exec-replaces the process and never returns).
+	logSpawnSummary(logger, id, resolution, results, n, true, batch)
 	return deps.Connector.Connect(trigger)
-}
-
-// tallyWindowResults emits one DEBUG per external window (session + ack outcome +
-// opaque detail) and returns the count of confirmed external windows plus the
-// session names of every window that did NOT confirm, in list order. The opened/
-// failed partition is derived from the shared spawn.PartitionResults (the single
-// count-semantics chokepoint) rather than a hand-rolled Ack loop, so this path and
-// the picker's cannot drift: a window is "failed" when it is not Confirmed() —
-// unifying an adapter spawn-failed (AckFailed) and an ack timeout (AckTimeout) into
-// one classification (the leave-what-opened report names them identically). The
-// batch is all-confirmed exactly when the returned failed slice is empty. The
-// per-window DEBUG loop stays here — it is the observability emit, not
-// classification.
-func tallyWindowResults(logger *slog.Logger, results []spawn.WindowResult) (opened int, failed []string) {
-	for _, r := range results {
-		logger.Debug("external window", "session", r.Session, "ack", string(r.Ack), "detail", r.Result.Detail)
-	}
-	confirmed, failed := spawn.PartitionResults(results)
-	return len(confirmed), failed
 }
 
 // unsupportedSpawnMessage composes the one-line user-facing message for the
@@ -231,52 +222,31 @@ func unsupportedSpawnMessage(id spawn.Identity) string {
 	return "spawn: " + spawn.UnsupportedNoopMessage(id)
 }
 
-// logSpawnGone emits the single INFO outcome line for a pre-flight abort. The
-// message names the gone session(s); nothing was attempted (detect never ran),
-// so it carries no per-window records and no resolution/opened/total attrs.
+// logSpawnGone emits the pre-flight abort outcome line via the shared
+// spawn.LogGone renderer (the closed message lives in internal/spawn, not here).
 func logSpawnGone(logger *slog.Logger, gone []string) {
-	logger.Info(spawn.GoneMessage(gone))
+	spawn.LogGone(logger, gone)
 }
 
-// logSpawnUnsupported emits the single INFO outcome line for the atomic no-op.
-// Nothing was attempted, so it carries only the closed resolution/terminal/
-// bundle_id attrs — no per-window records and no opened/total counts.
+// logSpawnUnsupported emits the atomic-no-op outcome line via the shared
+// spawn.LogUnsupported renderer.
 func logSpawnUnsupported(logger *slog.Logger, id spawn.Identity) {
-	logger.Info("unsupported terminal — nothing opened",
-		"resolution", string(spawn.ResolutionUnsupported),
-		"terminal", id.Name,
-		"bundle_id", id.BundleID,
-	)
+	spawn.LogUnsupported(logger, id)
 }
 
-// logSpawnPermission emits the single INFO outcome line for the permission-
-// required burst-stop. It carries the closed resolution/terminal/bundle_id attrs
-// plus the opaque driver detail — never an AppleEvent number this layer
-// interpreted (the orchestrator switched on the generic Outcome alone). No
-// opened/total/batch summary attrs: the burst stopped, so there is no cycle
-// summary to report.
+// logSpawnPermission emits the permission-required outcome line via the shared
+// spawn.LogPermission renderer.
 func logSpawnPermission(logger *slog.Logger, id spawn.Identity, resolution spawn.Resolution, detail string) {
-	logger.Info("permission required — nothing self-attached",
-		"resolution", string(resolution),
-		"terminal", id.Name,
-		"bundle_id", id.BundleID,
-		"detail", detail,
-	)
+	spawn.LogPermission(logger, id, resolution, detail)
 }
 
-// logSpawnSummary emits the single INFO cycle summary. total is N (all sessions
-// including the trigger's self-attach target); opened counts each confirmed
-// external window plus the trigger's self-attach when it occurs. batch is the
-// burst's ack batch id (meaningful with the token-ack machinery).
-func logSpawnSummary(logger *slog.Logger, id spawn.Identity, resolution spawn.Resolution, opened, total int, batch string) {
-	logger.Info(fmt.Sprintf("opened %d/%d", opened, total),
-		"resolution", string(resolution),
-		"terminal", id.Name,
-		"bundle_id", id.BundleID,
-		"opened", opened,
-		"total", total,
-		"batch", batch,
-	)
+// logSpawnSummary emits the batch cycle summary via the shared spawn.LogBatchSummary
+// renderer: the per-window DEBUG loop plus one INFO `opened <opened>/<total>`. total
+// is N (all sessions including the trigger self-attach target); opened is derived
+// inside the shared helper from spawn.PartitionResults (confirmed windows) plus the
+// trigger self-attach when triggerAttached. batch is the burst's ack batch id.
+func logSpawnSummary(logger *slog.Logger, id spawn.Identity, resolution spawn.Resolution, results []spawn.WindowResult, total int, triggerAttached bool, batch string) {
+	spawn.LogBatchSummary(logger, id, resolution, results, total, triggerAttached, batch)
 }
 
 // spawnDetector resolves the host-terminal detector, preferring an injected one
