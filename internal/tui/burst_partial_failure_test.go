@@ -139,7 +139,11 @@ func TestBurstPartialFailure_LeavesOpenedWindowsAndSkipsSelfAttach(t *testing.T)
 	if !rm.IsSessionSelected("charlie") {
 		t.Error("the trigger charlie must stay marked (its self-attach did not happen)")
 	}
-	if want := "'alpha' failed to open — others left open"; rm.flashText != want {
+	// Assert through the shared renderer: the picker's bare flash body IS
+	// spawn.PartialFailureMessage (the CLI carries the same body under its "spawn:"
+	// prefix), so the spec's "same one-line message" parity is structural. The ⚠ is
+	// added by the warning band, not this body.
+	if want := spawn.PartialFailureMessage([]string{"alpha"}); rm.flashText != want {
 		t.Errorf("flashText = %q, want %q (names the failed window; ⚠ added by the warning band)", rm.flashText, want)
 	}
 	if rm.flashKind != flashWarning {
@@ -242,7 +246,7 @@ func TestBurstPartialFailure_AckTimeoutAndSpawnFailedClassifyIdentically(t *test
 	if !rm.IsSessionSelected("charlie") {
 		t.Error("the spawn-failed charlie must classify as failed and stay marked")
 	}
-	if want := "'bravo', 'charlie' failed to open — others left open"; rm.flashText != want {
+	if want := spawn.PartialFailureMessage([]string{"bravo", "charlie"}); rm.flashText != want {
 		t.Errorf("flashText = %q, want %q (both failed windows named)", rm.flashText, want)
 	}
 }

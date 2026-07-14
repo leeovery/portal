@@ -1005,7 +1005,11 @@ func TestSpawnPartialFailure(t *testing.T) {
 		if len(adapter.Calls) != 3 {
 			t.Errorf("OpenWindow called %d times, want 3 (no early stop after a spawn-failed window)", len(adapter.Calls))
 		}
-		const want = "spawn: failed to open window(s) for 's2' — others left open"
+		// Canonical wording lives in spawn.PartialFailureMessage; the CLI only adds
+		// its "spawn: " prefix. Asserting through the shared renderer proves the CLI
+		// body IS the picker's body (spec: "same one-line message the picker would
+		// show") and cannot drift.
+		want := "spawn: " + spawn.PartialFailureMessage([]string{"s2"})
 		if err.Error() != want {
 			t.Errorf("message = %q, want %q", err.Error(), want)
 		}
@@ -1035,7 +1039,7 @@ func TestSpawnPartialFailure(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected a partial-failure error naming both failed windows, got nil")
 		}
-		const want = "spawn: failed to open window(s) for 's2', 's3' — others left open"
+		want := "spawn: " + spawn.PartialFailureMessage([]string{"s2", "s3"})
 		if err.Error() != want {
 			t.Errorf("message = %q, want %q (spawn-failed and timeout both named, in list order)", err.Error(), want)
 		}
@@ -1172,7 +1176,7 @@ func TestSpawnPermissionRequired(t *testing.T) {
 		if err.Error() != guidance {
 			t.Errorf("error = %q, want the driver guidance %q (shown once)", err.Error(), guidance)
 		}
-		if strings.Contains(err.Error(), "failed to open window(s)") {
+		if strings.Contains(err.Error(), "failed to open") {
 			t.Errorf("error %q leaks the generic spawn-failed one-liner; want only the guidance", err.Error())
 		}
 		// Windows s3,s4 never spawned and s5 never self-attached: the burst

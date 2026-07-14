@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/spawn"
 )
@@ -113,5 +111,5 @@ func burstPartialFailureFlash(results []spawn.WindowResult, failed []string) str
 	if len(failed) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s failed to open — others left open", spawn.QuoteJoin(failed))
+	return spawn.PartialFailureMessage(failed)
 }

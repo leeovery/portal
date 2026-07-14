@@ -203,7 +203,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 		// opaque Result.Detail for each failure went only to the DEBUG log (the summary
 		// emits its per-window loop), never the user-facing message below.
 		logSpawnSummary(logger, id, resolution, results, n, false, batch)
-		return fmt.Errorf("spawn: failed to open window(s) for %s — others left open", spawn.QuoteJoin(failed))
+		return fmt.Errorf("spawn: %s", spawn.PartialFailureMessage(failed))
 	}
 
 	// Every external window confirmed: the trigger self-attach is about to occur, so

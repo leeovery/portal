@@ -41,6 +41,20 @@ func GoneMessage(names []string) string {
 	return fmt.Sprintf("%s %s gone — nothing opened", QuoteJoin(names), GoneVerb(len(names)))
 }
 
+// PartialFailureMessage is the single renderer for the leave-what-opened
+// partial-failure outcome sentence — "'s2' failed to open — others left open"
+// for one name, "'s2', 's3' failed to open — others left open" for several —
+// composed from the shared QuoteJoin primitive. Both callers (the CLI's exit-1
+// error and the picker's re-asserted flash) render through it so the spec's
+// "same one-line message the picker would show" contract holds and a copy edit
+// lands in exactly one place. The body needs no count-aware verb: "failed to
+// open" agrees with a single name and with several. The body carries no
+// "spawn:" prefix and no ⚠ glyph: the CLI adds the prefix at its call site and
+// the notice band prepends the glyph via statusGlyph.
+func PartialFailureMessage(failed []string) string {
+	return fmt.Sprintf("%s failed to open — others left open", QuoteJoin(failed))
+}
+
 // UnsupportedNoopMessage is the single renderer for the N≥2 unsupported-terminal
 // atomic no-op outcome sentence. A NULL identity (remote/mosh, or a transient
 // detection error folded to Identity{}) gets the honest "no host-local terminal

@@ -1,6 +1,9 @@
 package spawn
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestQuoteJoin(t *testing.T) {
 	t.Run("it single-quotes a single name", func(t *testing.T) {
@@ -54,6 +57,32 @@ func TestGoneMessage(t *testing.T) {
 		const want = "'s2', 's4' are gone — nothing opened"
 		if got := GoneMessage([]string{"s2", "s4"}); got != want {
 			t.Errorf("GoneMessage([s2 s4]) = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestPartialFailureMessage(t *testing.T) {
+	t.Run("it renders the bare leave-what-opened body for one failed name", func(t *testing.T) {
+		const want = "'s2' failed to open — others left open"
+		if got := PartialFailureMessage([]string{"s2"}); got != want {
+			t.Errorf("PartialFailureMessage([s2]) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it names every failed window in list order for several names", func(t *testing.T) {
+		const want = "'s2', 's3' failed to open — others left open"
+		if got := PartialFailureMessage([]string{"s2", "s3"}); got != want {
+			t.Errorf("PartialFailureMessage([s2 s3]) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it carries no spawn prefix and no glyph", func(t *testing.T) {
+		got := PartialFailureMessage([]string{"s2"})
+		if strings.HasPrefix(got, "spawn:") {
+			t.Errorf("PartialFailureMessage body = %q, want no \"spawn:\" prefix", got)
+		}
+		if strings.ContainsRune(got, '⚠') {
+			t.Errorf("PartialFailureMessage body = %q, want no ⚠ glyph", got)
 		}
 	})
 }
