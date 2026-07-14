@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-14
+
+✨ Added
+- `portal spawn` opens multiple restored sessions in separate host-terminal windows on supported terminals, with `--detect` to check what's supported.
+- Multi-select mode on the sessions list (`m` to mark rows, `Enter` to open) lets you launch several sessions at once, spawning extras in new host windows and attaching the last one in place.
+- Ghostty is natively supported for host-window spawning, with a `terminals.json` escape hatch to configure custom recipes for other terminals.
+- A proactive banner warns when the host terminal doesn't support spawning extra windows, before you try to use it.
+
+🔧 Changed
+- `portal attach` gained an internal `--spawn-ack` flag used by spawned windows to confirm they came up.
+
+🐛 Fixed
+- A spawn burst that partially fails now leaves already-opened windows alone and keeps the failed sessions marked so you can retry, instead of losing track of them.
+- Canceling a spawn in progress (Ctrl-C/Esc) now reliably returns you to the picker instead of occasionally locking up input.
+
 ## [0.8.5] - 2026-07-12
 
 🐛 Fixed
