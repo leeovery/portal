@@ -45,6 +45,20 @@ func TestResultOK_TrueOnlyForSuccess(t *testing.T) {
 	}
 }
 
+func TestResultZeroValue_IsUnknownNotSuccess(t *testing.T) {
+	// The zero value of Outcome must be the invalid/unset sentinel
+	// OutcomeUnknown, mirroring RecipeKind's zero-invalid treatment — so a
+	// bare Result{} is never silently classified as a success that could gate
+	// a self-attach.
+	var zero Outcome
+	if zero != OutcomeUnknown {
+		t.Errorf("zero Outcome = %v, want OutcomeUnknown", zero)
+	}
+	if (Result{}).OK() {
+		t.Errorf("Result{}.OK() = true, want false (zero value must not be success)")
+	}
+}
+
 func TestResult_RoundTripsDetailAndGuidance(t *testing.T) {
 	// "it round-trips opaque detail and guidance without interpretation"
 	r := PermissionRequired("evt -1743", "grant Automation for Ghostty")

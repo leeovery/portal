@@ -33,8 +33,15 @@ type Adapter interface {
 type Outcome int
 
 const (
+	// OutcomeUnknown is the invalid/unset zero-value sentinel: a bare
+	// Result{} carries it, so a zero-value Result fails OK() and is never
+	// silently mistaken for a success (which would wrongly gate a
+	// self-attach). It mirrors RecipeKind's zero-invalid treatment in
+	// recipe.go. OpenWindow must NEVER return it — a driver reports exactly
+	// one of the three real members below.
+	OutcomeUnknown Outcome = iota
 	// OutcomeSuccess — the host window opened cleanly.
-	OutcomeSuccess Outcome = iota
+	OutcomeSuccess
 	// OutcomeSpawnFailed — a driver was available but the window failed to
 	// open (e.g. a non-zero osascript exit).
 	OutcomeSpawnFailed
