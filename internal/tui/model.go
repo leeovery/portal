@@ -4708,7 +4708,11 @@ func (m Model) applySectionHeader(listView string) string {
 	// error/guidance-flash claimant in the notice-band precedence, realised at the
 	// section-header row per the delivered frame — ABOVE the multi-select `N selected`
 	// banner (the abort banner owns the row over it) but below the Opening band (a
-	// burst that aborted is no longer pending, so the two never co-render). Cleared on
+	// burst that aborted is no longer pending, so the two never co-render). Its
+	// spawn-failure / permission SIBLINGS in the same spec flash tier are DIFFERENT:
+	// they route through setFlash → the §11 notice band (activeNoticeBand), a SEPARATE
+	// row that deliberately CO-RENDERS with the `N selected` banner (two rows) rather
+	// than replacing it — see the precedence-seam note in activeNoticeBand. Cleared on
 	// dismiss (any actionable key / Esc) or a refresh.
 	if m.abortBannerText != "" {
 		header := renderPreflightAbortHeader(

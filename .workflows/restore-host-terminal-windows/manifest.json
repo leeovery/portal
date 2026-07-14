@@ -152,7 +152,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 7,
-          "current_task": "restore-host-terminal-windows-7-6",
+          "current_task": "~",
           "completed_tasks": [
             "restore-host-terminal-windows-1-1",
             "restore-host-terminal-windows-1-2",
@@ -203,7 +203,8 @@
             "restore-host-terminal-windows-7-2",
             "restore-host-terminal-windows-7-3",
             "restore-host-terminal-windows-7-4",
-            "restore-host-terminal-windows-7-5"
+            "restore-host-terminal-windows-7-5",
+            "restore-host-terminal-windows-7-6"
           ],
           "completed_phases": [
             1,
@@ -211,7 +212,8 @@
             3,
             4,
             5,
-            6
+            6,
+            7
           ]
         }
       }

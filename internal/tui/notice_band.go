@@ -345,6 +345,19 @@ func noticeBandPadRight(seg string, segWidth, w int, tint theme.Token, mode them
 // are consumed by viewSessionList's single insertion step; the on-band text token
 // is selected at the render site so each band keeps its existing on-band colour.
 func (m Model) activeNoticeBand() (role noticeBandRole, message string, ok bool) {
+	// §6-6 precedence seam — do NOT collapse to strict single-slot. This flash arm
+	// takes the §11 band slot REGARDLESS of m.multiSelectMode, so the spawn-failure /
+	// permission flash (setFlash from handleBurstPartialFailure) deliberately
+	// CO-RENDERS with the `N selected` multi-select banner across TWO physical rows —
+	// this §11 band under the title separator, the banner on the section-header row
+	// (applySectionHeader). This is informative by design: the user sees the failure
+	// AND that they remain in multi-select with the retry set still marked. It is the
+	// intended reading of the spec's "Notice-band precedence (single slot, highest
+	// wins)" clause (§ Mode affordance) for this flash tier — decision recorded during
+	// implementation analysis, 2026-07-14. Its pre-flight-abort SIBLING in the same
+	// spec flash tier is DIFFERENT by design: that one is a section-header claimant
+	// (applySectionHeader's abortBannerText branch) that DOES replace the banner. A
+	// later reader must NOT add `&& !m.multiSelectMode` here to force a single row.
 	if m.flashText != "" {
 		return flashBandRole(m.flashKind), m.flashText, true
 	}
