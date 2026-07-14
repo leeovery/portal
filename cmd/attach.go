@@ -90,6 +90,6 @@ func buildAttachDeps(cmd *cobra.Command) (SessionConnector, SessionValidator, sp
 }
 
 func init() {
-	attachCmd.Flags().String("spawn-ack", "", "internal: write the @portal-spawn-<batch>:<token> ack marker before attaching")
+	attachCmd.Flags().String("spawn-ack", "", "internal: <batch>:<token> — write the @portal-spawn-<batch>-<token> ack marker before attaching")
 	rootCmd.AddCommand(attachCmd)
 }
