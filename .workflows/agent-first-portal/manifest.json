@@ -69,6 +69,9 @@
       "items": {
         "agent-state": {
           "status": "in-progress"
+        },
+        "agent-state-surfacing": {
+          "status": "in-progress"
         }
       }
     }
