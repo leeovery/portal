@@ -257,7 +257,7 @@ func TestBurst_NotAllConfirmed_ClearsPendingWithoutQuit(t *testing.T) {
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
 	m = resolveDetection(t, m, ghosttyIdentity())
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 

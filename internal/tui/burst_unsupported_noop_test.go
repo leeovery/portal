@@ -40,7 +40,7 @@ func wireUnsupportedBurstSeams(m *Model, adapter spawn.Adapter, ack spawn.AckCha
 // markTwo enters multi-select and marks the first two rows top-to-bottom.
 func markTwo(t *testing.T, m Model) Model {
 	t.Helper()
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 	if m.SelectedSessionCount() != 2 {

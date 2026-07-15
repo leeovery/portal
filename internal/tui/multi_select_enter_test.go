@@ -25,8 +25,8 @@ func TestMultiSelectEnterN0(t *testing.T) {
 		{Name: "bravo", Windows: 2},
 	})
 
-	// Enter the mode with zero marked.
-	m = pressSession(t, m, pressM)
+	// Enter the mode and clear the auto-marked row (double-`m`) → zero marked.
+	m = enterMultiSelectEmpty(t, m)
 	if !m.MultiSelectActive() || m.SelectedSessionCount() != 0 {
 		t.Fatalf("precondition: expected in-mode with zero marked; active=%v count=%d",
 			m.MultiSelectActive(), m.SelectedSessionCount())
@@ -57,8 +57,7 @@ func TestMultiSelectEnterN1(t *testing.T) {
 		{Name: "bravo", Windows: 2},
 	})
 
-	// Enter mode and mark the highlighted row (alpha, index 0).
-	m = pressSession(t, m, pressM)
+	// Enter mode: mark-on-entry marks the highlighted row (alpha, index 0).
 	m = pressSession(t, m, pressM)
 	if !m.IsSessionSelected("alpha") || m.SelectedSessionCount() != 1 {
 		t.Fatalf("precondition: expected exactly alpha marked; count=%d", m.SelectedSessionCount())
@@ -83,16 +82,19 @@ func TestMultiSelectEnterN1IgnoresCursor(t *testing.T) {
 		{Name: "bravo", Windows: 2},
 	})
 
-	// Enter mode (cursor on alpha, index 0), move to bravo (index 1) and mark it.
+	// Enter mode (cursor on alpha, index 0 — mark-on-entry marks alpha), move to
+	// bravo (index 1) and mark it, then unmark the auto-marked alpha so exactly bravo
+	// remains marked.
 	m = pressSession(t, m, pressM)
 	m.sessionList.Select(1)
-	m = pressSession(t, m, pressM)
+	m = pressSession(t, m, pressM) // mark bravo
+	m.sessionList.Select(0)
+	m = pressSession(t, m, pressM) // unmark the auto-marked alpha
 	if !m.IsSessionSelected("bravo") || m.SelectedSessionCount() != 1 {
 		t.Fatalf("precondition: expected exactly bravo marked; count=%d", m.SelectedSessionCount())
 	}
 
-	// Move the cursor back to alpha — highlighted but unmarked.
-	m.sessionList.Select(0)
+	// The cursor rests on alpha — highlighted but unmarked.
 	if si, ok := m.selectedSessionItem(); !ok || si.Session.Name != "alpha" {
 		t.Fatalf("precondition: cursor must be on the unmarked alpha row")
 	}
@@ -119,9 +121,8 @@ func TestMultiSelectEnterN2DetectionUnwired(t *testing.T) {
 		{Name: "bravo", Windows: 2},
 	})
 
-	// Enter mode and mark BOTH rows.
+	// Enter mode (mark-on-entry marks alpha at index 0) and mark bravo too.
 	m = pressSession(t, m, pressM)
-	m = pressSession(t, m, pressM) // marks alpha (cursor at index 0)
 	m.sessionList.Select(1)
 	m = pressSession(t, m, pressM) // marks bravo
 	if m.SelectedSessionCount() != 2 {

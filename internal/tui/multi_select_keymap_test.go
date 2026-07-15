@@ -35,12 +35,34 @@ var (
 )
 
 // enterMultiSelect drives a fresh Sessions model into §5 multi-select mode via a
-// single `m` press, asserting the mode actually engaged.
+// single `m` press, asserting the mode actually engaged. Mark-on-entry marks the
+// currently-highlighted row, so callers that need a specific set should place the
+// cursor before calling (or use enterMultiSelectEmpty for a clean empty start).
 func enterMultiSelect(t *testing.T, m Model) Model {
 	t.Helper()
 	m = pressSession(t, m, pressM)
 	if !m.MultiSelectActive() {
 		t.Fatalf("precondition: model must be in multi-select mode after m")
+	}
+	return m
+}
+
+// enterMultiSelectEmpty enters §5 multi-select and toggles the auto-marked entry row
+// back off, leaving an empty in-mode set — the double-`m` "zero selected" path (spec:
+// zero-selected stays reachable). It reproduces the pre-mark-on-entry starting point
+// the multi-mark setups build on, so their subsequent per-row markRow calls compose
+// the intended set unchanged. (If mark-on-entry regressed to enter-with-zero, the
+// second press would mark the highlighted row instead and this precondition would
+// fail loudly.)
+func enterMultiSelectEmpty(t *testing.T, m Model) Model {
+	t.Helper()
+	m = pressSession(t, m, pressM) // enter + mark-on-entry
+	m = pressSession(t, m, pressM) // toggle the auto-marked row back off
+	if !m.MultiSelectActive() {
+		t.Fatalf("precondition: model must be in multi-select mode after m")
+	}
+	if got := m.SelectedSessionCount(); got != 0 {
+		t.Fatalf("precondition: enter-then-clear must yield an empty set, got %d", got)
 	}
 	return m
 }
@@ -115,8 +137,7 @@ func TestMultiSelectSuppressesNewInCWD(t *testing.T) {
 	creator := &recordingCreator{}
 	m.sessionCreator = creator
 	m.cwd = "/home/user/mydir"
-	m = enterMultiSelect(t, m)
-	m = pressSession(t, m, pressM) // mark alpha (highlighted row 0)
+	m = enterMultiSelect(t, m) // mark-on-entry marks alpha (highlighted row 0)
 	if m.SelectedSessionCount() != 1 {
 		t.Fatalf("precondition: expected one marked session before n, got %d", m.SelectedSessionCount())
 	}
@@ -231,7 +252,9 @@ func TestMultiSelectKeepsCoexistingKeysLive(t *testing.T) {
 // the query and do NOT regroup / toggle-mark.
 func TestMultiSelectFilterFocusedLiteralKeys(t *testing.T) {
 	m := NewModelWithSessions(twoFlatSessions())
-	m = enterMultiSelect(t, m)
+	// Start from an empty in-mode set (double-`m`) so the literal-m assertion below
+	// cleanly proves a filter-focused m marks NOTHING (count stays 0).
+	m = enterMultiSelectEmpty(t, m)
 	m = pressSession(t, m, keySlash)
 	if !m.sessionList.SettingFilter() {
 		t.Fatalf("precondition: filter input not focused after /")
@@ -300,8 +323,7 @@ func TestMultiSelectFilterFocusedEnterEsc(t *testing.T) {
 
 	t.Run("Esc clears the filter and does not exit the mode", func(t *testing.T) {
 		m := NewModelWithSessions(twoFlatSessions())
-		m = enterMultiSelect(t, m)
-		m = pressSession(t, m, pressM) // mark alpha (highlighted row 0)
+		m = enterMultiSelect(t, m) // mark-on-entry marks alpha (highlighted row 0)
 		if m.SelectedSessionCount() != 1 {
 			t.Fatalf("precondition: expected one marked session before filtering")
 		}
@@ -361,8 +383,7 @@ func TestMultiSelectQuitKeys(t *testing.T) {
 // burst_dispatch_test.go.)
 func TestMultiSelectEnterRoutesToBurstArm(t *testing.T) {
 	m := NewModelWithSessions(twoFlatSessions())
-	m = enterMultiSelect(t, m)
-	m = pressSession(t, m, pressM) // mark alpha (index 0)
+	m = enterMultiSelect(t, m) // mark-on-entry marks alpha (index 0)
 	m.sessionList.Select(1)
 	m = pressSession(t, m, pressM) // mark bravo (index 1)
 	if m.SelectedSessionCount() != 2 {

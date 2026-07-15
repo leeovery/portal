@@ -41,7 +41,7 @@ func TestBurstDispatch_RederivesLiveMarkedSetOnDeferredResolve(t *testing.T) {
 	m.detectDispatched = true
 
 	// Mark alpha + bravo → snapshot-at-Enter would be external=[alpha], trigger=bravo.
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 
@@ -99,7 +99,7 @@ func TestBurstDispatch_AllUnmarkedDuringDefer_NoOp(t *testing.T) {
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
 	m.detectDispatched = true
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 

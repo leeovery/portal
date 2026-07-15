@@ -34,9 +34,10 @@ var (
 // leaves the cursor on the second marked row.
 func markTwoFlatSessions(t *testing.T, m Model, idxA, idxB int) Model {
 	t.Helper()
-	m = enterMultiSelect(t, m)
+	// Land the cursor on idxA BEFORE entering so mark-on-entry marks it, then mark
+	// idxB — yielding exactly {idxA, idxB}. Leaves the cursor on the second marked row.
 	m.sessionList.Select(idxA)
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelect(t, m)
 	m.sessionList.Select(idxB)
 	m = pressSession(t, m, pressM)
 	if got := m.SelectedSessionCount(); got != 2 {
@@ -125,12 +126,15 @@ func TestMultiSelectFilteredOutSessionStaysMarked(t *testing.T) {
 		{Name: "alpha", Windows: 1},
 		{Name: "bravo", Windows: 2},
 	})
-	// Enter mode and mark bravo (index 1).
-	m = enterMultiSelect(t, m)
+	// Enter mode with the cursor on bravo (index 1) so mark-on-entry marks bravo
+	// only — the test needs bravo to be the ONLY marked row.
 	m.sessionList.Select(1)
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelect(t, m)
 	if !m.IsSessionSelected("bravo") {
 		t.Fatalf("precondition: bravo must be marked")
+	}
+	if m.IsSessionSelected("alpha") {
+		t.Fatalf("precondition: only bravo must be marked (alpha must stay unmarked)")
 	}
 	if !strings.Contains(ansi.Strip(m.sessionList.View()), multiSelectMarker) {
 		t.Fatalf("precondition: marked bravo must render a ● before filtering")
@@ -274,14 +278,13 @@ func TestMultiSelectMarkedSessionSurvivesBucketMove(t *testing.T) {
 
 	m := newSwitchViewTestModel(prefs.ModeByProject, nil, sessions, projects)
 
-	// Enter mode, land the cursor on the (single) session row, and mark it.
-	m = enterMultiSelect(t, m)
+	// Land the cursor on the (single) session row, then enter so mark-on-entry marks it.
 	rows := sessionRowIndices(m.sessionList.Items())
 	if len(rows) != 1 {
 		t.Fatalf("precondition: expected 1 session row, got %d", len(rows))
 	}
 	m.sessionList.Select(rows[0])
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelect(t, m)
 	if !m.IsSessionSelected("portal-abc") {
 		t.Fatalf("precondition: portal-abc must be marked")
 	}

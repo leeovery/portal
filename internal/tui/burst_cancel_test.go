@@ -103,7 +103,7 @@ func realCancellableBurst(t *testing.T, names ...string) (Model, tea.Cmd, *spawn
 	m.termHeight = 24
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
 	m = resolveDetection(t, m, ghosttyIdentity())
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	for i := range names {
 		m = markRow(t, m, i)
 	}

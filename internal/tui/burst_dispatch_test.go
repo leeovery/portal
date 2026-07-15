@@ -113,7 +113,7 @@ func markedSupportedBurstModel(t *testing.T, names []string) (Model, *spawntest.
 	m := NewModelWithSessions(sessionsFromNames(names))
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
 	m = resolveDetection(t, m, ghosttyIdentity())
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	for i := range names {
 		m = markRow(t, m, i)
 	}
@@ -137,7 +137,7 @@ func TestBurstDispatch_OpensExternalInListOrder(t *testing.T) {
 	m = resolveDetection(t, m, ghosttyIdentity())
 
 	// Enter multi-select and mark all three, top-to-bottom.
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 	m = markRow(t, m, 2)
@@ -234,7 +234,7 @@ func TestBurstDispatch_MultiTagDedup(t *testing.T) {
 	}
 
 	// Mark BOTH sessions (portal-abc via its first row).
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	rows := sessionRowIndices(m.sessionList.Items())
 	for _, idx := range rows {
 		if si, _ := m.sessionList.Items()[idx].(SessionItem); si.Session.Name == "portal-abc" {
@@ -292,7 +292,7 @@ func TestBurstDispatch_CursorUnmarkedNeverOpened(t *testing.T) {
 	m = resolveDetection(t, m, ghosttyIdentity())
 
 	// Mark alpha (0) and charlie (2); leave the cursor on the UNMARKED bravo (1).
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 2)
 	m.sessionList.Select(1)
@@ -337,7 +337,7 @@ func TestBurstDispatch_StreamsProgressThenComplete(t *testing.T) {
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
 	m = resolveDetection(t, m, ghosttyIdentity())
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 	m = markRow(t, m, 2)
@@ -396,7 +396,7 @@ func TestBurstDispatch_DefersWhileDetectionInFlight(t *testing.T) {
 	// Detection dispatched but not yet resolved (in-flight).
 	m.detectDispatched = true
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 
@@ -446,7 +446,7 @@ func TestBurstDispatch_DetectionNeverDispatched_DefersThenResolves(t *testing.T)
 		t.Fatal("precondition: detection must be neither dispatched nor resolved")
 	}
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 
@@ -529,7 +529,7 @@ func TestBurstDispatch_ConfigResolveUsesConfigAdapter(t *testing.T) {
 		t.Fatalf("precondition: resolution must cache as config, got %q", m.DetectedResolution())
 	}
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 

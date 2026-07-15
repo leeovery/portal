@@ -209,9 +209,9 @@ func TestApplySectionHeader_MultiSelectShowsBanner(t *testing.T) {
 	}
 }
 
-// TestApplySectionHeader_MultiSelectZero asserts the N=0 case: entering the mode
-// with an empty set still swaps in the `0 selected` banner (the banner shows even
-// with an empty selection).
+// TestApplySectionHeader_MultiSelectZero asserts the N=0 case: a zero-selected set
+// (reachable via double-`m` or Esc-then-reenter) still swaps in the `0 selected`
+// banner (the banner shows even with an empty selection).
 func TestApplySectionHeader_MultiSelectZero(t *testing.T) {
 	m := multiSelectBannerModel(nil, "alpha", "bravo")
 
@@ -272,16 +272,22 @@ func TestApplySectionHeader_CountUpdatesLive(t *testing.T) {
 	m.termWidth = 80
 	m.termHeight = 24
 
-	// Enter the mode: 0 selected.
-	m = pressSession(t, m, pressM)
-	if got := ansi.Strip(bannerFirstLine(m)); !strings.Contains(got, "0 selected") {
-		t.Fatalf("after entering the mode the banner must read %q:\n%s", "0 selected", got)
-	}
-
-	// Toggle the highlighted row (alpha) ON: 1 selected.
+	// Enter the mode on a session row: mark-on-entry marks the highlighted alpha → 1 selected.
 	m = pressSession(t, m, pressM)
 	if got := ansi.Strip(bannerFirstLine(m)); !strings.Contains(got, "1 selected") {
-		t.Errorf("after one toggle the banner must read %q:\n%s", "1 selected", got)
+		t.Fatalf("after entering on a session row the banner must read %q:\n%s", "1 selected", got)
+	}
+
+	// Toggle the highlighted alpha OFF (double-`m`): 0 selected.
+	m = pressSession(t, m, pressM)
+	if got := ansi.Strip(bannerFirstLine(m)); !strings.Contains(got, "0 selected") {
+		t.Errorf("after unmarking the banner must read %q:\n%s", "0 selected", got)
+	}
+
+	// Toggle alpha back ON: 1 selected.
+	m = pressSession(t, m, pressM)
+	if got := ansi.Strip(bannerFirstLine(m)); !strings.Contains(got, "1 selected") {
+		t.Errorf("after re-marking the banner must read %q:\n%s", "1 selected", got)
 	}
 
 	// Move to bravo and toggle it ON: 2 selected.
@@ -311,9 +317,10 @@ func TestApplySectionHeader_ByTagMultiMembershipCountsOnce(t *testing.T) {
 		t.Fatalf("precondition: multi-tag session must span 2 rows; got %d", len(rows))
 	}
 
-	m = pressSession(t, m, pressM) // enter mode
+	// Enter with the cursor on the first of the two rows: mark-on-entry marks the
+	// multi-tag session once (keyed on Session.Name).
 	m.sessionList.Select(rows[0])
-	m = pressSession(t, m, pressM) // mark the multi-tag session via its first row
+	m = pressSession(t, m, pressM)
 
 	if got := ansi.Strip(bannerFirstLine(m)); !strings.Contains(got, "1 selected") {
 		t.Errorf("a multi-tag session marked once must count as 1 in the banner:\n%s", got)

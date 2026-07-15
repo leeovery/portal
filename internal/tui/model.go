@@ -3494,16 +3494,28 @@ func (m Model) handleSwitchViewKey() (tea.Model, tea.Cmd) {
 }
 
 // handleMultiSelectToggle drives the §5 multi-select `m` key. The first press
-// from the normal list ENTERS the mode with an empty selection (enter-only, no
-// implicit mark). Every subsequent press toggles the highlighted session row's
-// Session.Name in the marked set — inserting if absent, deleting if present. A
-// press while the highlighted row is a non-selectable HeaderItem (or the list is
-// empty / has no highlighted row) is a no-op that leaves the set untouched. It
-// returns (tea.Model, tea.Cmd) to match the updateSessionList dispatch arms.
+// from the normal list ENTERS the mode and marks the currently-highlighted session
+// as the first selection (mark-on-entry) — the common "I'm looking at this session
+// and want it in the set" case. When the highlighted row is a non-selectable
+// HeaderItem (or the list is empty / has no highlighted row) entry marks nothing and
+// the mode opens with zero selected. Every subsequent press toggles the highlighted
+// session row's Session.Name in the marked set — inserting if absent, deleting if
+// present (so a double-`m` on the auto-marked row returns to zero selected). A press
+// while the highlighted row is a non-selectable HeaderItem (or the list is empty /
+// has no highlighted row) is a no-op that leaves the set untouched. It returns
+// (tea.Model, tea.Cmd) to match the updateSessionList dispatch arms.
 func (m Model) handleMultiSelectToggle() (tea.Model, tea.Cmd) {
 	if !m.multiSelectMode {
 		m.multiSelectMode = true
 		m.selectedSessions = map[string]struct{}{}
+		// Mark-on-entry: seed the set with the currently-highlighted session so the
+		// common case (enter the mode on the row you want) needs a single press. The
+		// mark is keyed on Session.Name, identical to the toggle branch below.
+		// selectedSessionItem returns ok=false on a non-selectable HeaderItem / empty
+		// list, so entry on a group header cleanly opens with zero — no special-casing.
+		if si, ok := m.selectedSessionItem(); ok {
+			m.selectedSessions[si.Session.Name] = struct{}{}
+		}
 		// Re-point the delegate at the (now non-nil) set and MultiSelect==true so the
 		// ● column arms from the next frame — the list was built with a default
 		// MultiSelect==false delegate.

@@ -183,11 +183,10 @@ func TestMultiSelectMarkerReflectsSetLive(t *testing.T) {
 		t.Fatalf("precondition: no ● should render before multi-select mode")
 	}
 
-	// Enter mode, then toggle the highlighted row (alpha) ON.
-	m = pressSession(t, m, pressM)
+	// Enter mode: mark-on-entry marks the highlighted row (alpha).
 	m = pressSession(t, m, pressM)
 	if !m.IsSessionSelected("alpha") {
-		t.Fatalf("precondition: alpha should be marked after the toggle")
+		t.Fatalf("precondition: alpha should be marked after entering")
 	}
 	if !strings.Contains(ansi.Strip(m.sessionList.View()), multiSelectMarker) {
 		t.Errorf("marking a session must render the ● (delegate not refreshed): %q", ansi.Strip(m.sessionList.View()))

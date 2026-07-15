@@ -58,7 +58,7 @@ func TestBurstPreflightAbort_AbortsAtomicallyNoAdapterNoSelfAttach(t *testing.T)
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, exists, ack)
 	m = resolveDetection(t, m, ghosttyIdentity())
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 	m = markRow(t, m, 2)

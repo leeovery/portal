@@ -50,7 +50,7 @@ import (
 func newPendingBurstModel(t *testing.T, names []string) Model {
 	t.Helper()
 	m := NewModelWithSessions(sessionsFromNames(names))
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	for i := range names {
 		m = markRow(t, m, i)
 	}
@@ -92,7 +92,7 @@ func TestBurstPartialFailure_LeavesOpenedWindowsAndSkipsSelfAttach(t *testing.T)
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
 	m = resolveDetection(t, m, ghosttyIdentity())
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 	m = markRow(t, m, 2)
@@ -268,7 +268,7 @@ func TestBurstPartialFailure_PermissionGuidanceOnceAffectedStaysMarked(t *testin
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
 	m = resolveDetection(t, m, ghosttyIdentity())
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	m = markRow(t, m, 0)
 	m = markRow(t, m, 1)
 	m = markRow(t, m, 2)
@@ -323,7 +323,7 @@ func TestBurstPartialFailure_UnattemptedPostPermissionStayMarked(t *testing.T) {
 	wireBurstSeams(&m, adapter, spawn.ResolutionNative, allPresent, ack)
 	m = resolveDetection(t, m, ghosttyIdentity())
 
-	m = pressSession(t, m, pressM)
+	m = enterMultiSelectEmpty(t, m)
 	for i := range sessions {
 		m = markRow(t, m, i)
 	}
