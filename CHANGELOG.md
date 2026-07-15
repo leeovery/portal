@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-07-15
+
+✨ Added
+- Multi-window spawn — mark several sessions with `m` in the picker and press `Enter` to open each in its own host-terminal window, rebuilding a full window layout in one action.
+- `xctl spawn` command — the CLI form of multi-select, with a `--detect` flag to print the host terminal Portal detects (useful for writing `terminals.json` recipes).
+- `terminals.json` config — teach Portal how to spawn windows on terminals other than Ghostty via a user-authored recipe file.
+
+🔧 Changed
+- Entering multi-select mode with `m` now marks the currently-highlighted session immediately, so opening just that one session takes a single press instead of two.
+
 ## [0.9.0] - 2026-07-14
 
 ✨ Added
