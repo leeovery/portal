@@ -4,13 +4,24 @@
 
 Portal's CLI grew by accretion — commands were added as they were needed, without a holistic design pass. The symptom that surfaced this: even the author is now fuzzy on the difference between `open` and `attach`. When the person who built it can't cleanly recall which verb does what, the surface has drifted past coherent.
 
-The current shape:
+The current shape (verified against the codebase at discussion start — the seed's inventory was incomplete):
 
-- `portal open` — no args launches the TUI picker; one arg resolves a path/query through path → alias → zoxide → session, then attaches in place
+**Session verbs:**
+- `portal open [-e cmd] [destination] [-- cmd args...]` — no args launches the TUI picker; one arg resolves a path/query through path → alias → zoxide → session, then attaches in place; can carry a command to run in the new session
 - `portal attach <session>` — attaches in place to a named session (also carries the internal `--spawn-ack` flag used by spawned windows)
-- `x` — alias (for `open`)
-- `portal spawn <sessions…>` — provisionally named; opens each session in its own host-terminal window (`--detect` dry-run)
-- Utility commands: `hooks`, `clean`, `init`, `state`, `alias`, `version`
+- `portal spawn [sessions...]` — provisionally named; opens each session in its own host-terminal window (`--detect` dry-run)
+- `portal kill [name]` — kill a tmux session
+- `portal list` — list running tmux sessions
+
+**Utility commands:**
+- `portal alias {set,rm,list}` — path aliases
+- `portal hooks {set,rm,list}` — resume hooks
+- `portal clean [--logs]` — remove stale projects / sweep logs
+- `portal state {status,cleanup}` — user-facing; plus six **hidden** internal subcommands (`daemon`, `hydrate`, `signal-hydrate`, `notify`, `commit-now`, `migrate-rename`)
+- `portal init [shell] [--cmd name]` — shell integration
+- `portal version`, `portal completion` (cobra built-in)
+
+**Shell layer (from `portal init`):** `x` is not a cobra alias — it's a shell function `x() { portal open "$@" }`, paired with `xctl() { portal "$@" }`. So a two-tier surface already exists: `x` = the launcher (hardwired to `open`), `xctl` = the full control plane. `--cmd` renames the pair.
 
 The core problem: overlapping, blurry verbs with illegible input domains (path/query vs single session name vs multi-session). Bolting `spawn` on in isolation just lengthens an organically-grown list without fixing the underlying incoherence.
 
