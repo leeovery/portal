@@ -149,6 +149,9 @@
     },
     "session-rename-orphans-resume-hook": {
       "work_type": "bugfix"
+    },
+    "m-marks-highlighted-on-entry": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
