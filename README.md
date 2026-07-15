@@ -268,7 +268,7 @@ Navigation is **arrows only** (no vim or page-jump aliases). Press **`?`** on an
 | `Space` | Preview scrollback of highlighted session (sessions list only) |
 | `/` | Filter mode (fuzzy search) |
 | `s` | Switch view: cycle Flat → By Project → By Tag (sessions list only) |
-| `m` | Multi-select mode: enter, then toggle the highlighted session's mark (sessions list only) |
+| `m` | Multi-select mode: enter marks the highlighted session, then toggle any row's mark (sessions list only) |
 | `x` | Toggle between Sessions and Projects |
 | `r` | Rename session |
 | `k` | Kill session |
@@ -300,8 +300,10 @@ yet renders `(no saved content)`.
 
 ### Multi-Select Mode
 
-Press **`m`** on the sessions list to enter multi-select mode, then `m` again on any row
-to mark or unmark it (you can also sit in the mode with nothing selected). Press **`Enter`**
+Press **`m`** on the sessions list to enter multi-select mode, which marks the
+currently-highlighted session as your first selection. Press `m` again on any row to mark or
+unmark it — you can also sit in the mode with nothing selected (toggle the auto-marked row off,
+or enter while the cursor is on a group header). Press **`Enter`**
 to open every marked session at once — each springs open attached in its own host-terminal
 window. The result is **N windows for N sessions**: the picker reuses its own window for one
 of them and spawns the rest as fresh host windows, so there is never a leftover empty picker
@@ -309,7 +311,7 @@ window. `Esc` cancels and clears the selection.
 
 | Key | Action |
 |---|---|
-| `m` | Enter mode / toggle the highlighted session's mark |
+| `m` | Enter mode marking the highlighted session / toggle a row's mark |
 | `↑` / `↓` | Move between sessions (marks persist) |
 | `Space` | Preview the highlighted session's scrollback |
 | `/` | Filter (marks persist underneath) |

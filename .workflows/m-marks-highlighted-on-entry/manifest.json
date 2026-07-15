@@ -80,9 +80,13 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 1,
-          "current_task": "m-marks-highlighted-on-entry-1-2",
+          "current_task": "~",
           "completed_tasks": [
-            "m-marks-highlighted-on-entry-1-1"
+            "m-marks-highlighted-on-entry-1-1",
+            "m-marks-highlighted-on-entry-1-2"
+          ],
+          "completed_phases": [
+            1
           ]
         }
       }
