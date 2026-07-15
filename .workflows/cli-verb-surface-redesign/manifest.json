@@ -4,7 +4,15 @@
   "status": "in-progress",
   "created": "2026-07-15",
   "description": "Intentional one-pass redesign of Portal's full CLI verb surface — reconciling open/attach/spawn and auditing every command, with a back-compat/deprecation story",
-  "phases": {},
+  "phases": {
+    "discussion": {
+      "items": {
+        "cli-verb-surface-redesign": {
+          "status": "in-progress"
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-07-09-cli-verb-surface-redesign.md",
