@@ -140,4 +140,24 @@ The permission-wall branch (returns the driver Guidance) and the degenerate empt
 
 ---
 
+## Testing & Validation Requirements
+
+**Mandatory live validation (merge-gating, load-bearing).** The absence of live validation is what let this ship, so the fix is **not "done"** until, on a live Mac inside Ghostty:
+1. `go test -tags manual -run TestManual_OpenWindow_OpensRealGhosttyWindow ./internal/spawn/` passes (a real Ghostty window opens and runs the command).
+2. A real ≥3-session picker multi-select burst confirms `opened 3/3`, the token acks land, and the trigger self-attaches.
+
+Compile-only validation is **insufficient** — it proves the script parses, not that a window opens and runs its command. This live gate blocks the merge.
+
+**Automated tests (added/updated in lockstep with the fixes):**
+- **Prevention compile-check** (Fix 4): the new `ghosttycompile`-tagged test compiles `ghosttyOpenScript(...)` output via `osacompile` and asserts a zero exit; skips cleanly when not macOS / Ghostty absent.
+- **Rider #1** (`logemit` / `logtest.Sink`): assert a **failed, non-permission** `WindowResult` emits `external window failed` at **WARN** carrying `session`/`ack`/`detail`; a **confirmed** window emits `external window` at **DEBUG**; and a **permission-required** window does **not** emit the WARN (its detail is carried by the permission INFO event).
+- **Rider #2 parity** (extend the existing `message_test.go` + `burst_partial_failure_test.go`, byte-identical across CLI and picker):
+  - Total failure (`othersOpened == false`) renders `… failed to open — nothing opened` with **no** "others left open".
+  - Genuine partial (`othersOpened == true`) still renders `… failed to open — others left open`.
+  - The permission-wall and degenerate empty-`failed` branches are unaffected.
+
+**Existing lanes stay green.** `go test ./...` (unit) and `go test -tags integration -p 1 ./...` (integration) must both pass; the `manual` and `ghosttycompile` tags remain excluded from both.
+
+---
+
 ## Working Notes

@@ -18,7 +18,7 @@
           "status": "in-progress",
           "sources": {
             "ghostty-spawn-zero-windows": {
-              "status": "pending"
+              "status": "incorporated"
             }
           },
           "review_cycle": 0,
