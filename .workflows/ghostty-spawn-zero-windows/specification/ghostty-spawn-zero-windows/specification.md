@@ -25,4 +25,28 @@ Ghostty 1.3.1's scripting dictionary has **no `make` command** and **no `with pr
 
 ---
 
+## Fix 1 — Correct the Ghostty AppleScript template
+
+**File:** `internal/spawn/ghostty.go`
+
+Replace the invalid two-statement `make new … with properties {…}` template (`ghosttyScriptTemplate`) with the single-statement, sdef-correct form that passes a `surface configuration` record literal directly to `new window`'s `with configuration` parameter:
+
+```applescript
+tell application "Ghostty"
+	new window with configuration {command:"%s", wait after command:true}
+end tell
+```
+
+Requirements:
+
+- The single `%s` remains the `ghosttyEmbed`-escaped, space-joined composed argv, supplied as a `fmt.Sprintf` format argument (a `%` in the payload stays inert).
+- The record literal carries exactly the two fields the sdef defines on `surface configuration`: `command` (text) and `wait after command` (boolean `true` — keeps the window up after its command exits, the normal-detach lifecycle for a spawned session).
+- No `make`, no `with properties`, no intermediate `set surfaceConfig` variable.
+- Correct the false "validated (Ghostty 1.3.1)" comment so it no longer claims validation the template never had; the comment should describe the actual sdef-correct `new window with configuration` form.
+- Re-verify `ghosttyEmbed` escaping holds under the relocated `%s`: the payload now sits inside the record literal's double-quoted `command:"…"` string — the same double-quoted AppleScript string context as before — so the backslash-before-quote escape order is expected to be unchanged. Confirm, don't assume.
+
+Everything downstream of the template is correct and stays unchanged: `ghosttyOpenScript` / `ghosttyOpenArgv` (script → `osascript -e` argv), the `osascriptRunner` exec seam, and `mapGhosttyResult`'s outcome mapping (`-1743`/`-1712` → PermissionRequired; other non-zero exit → SpawnFailed; clean exit → Success). Once the template compiles and opens a window, a clean exit maps to Success and the burst proceeds normally (acks land, trigger self-attaches).
+
+---
+
 ## Working Notes
