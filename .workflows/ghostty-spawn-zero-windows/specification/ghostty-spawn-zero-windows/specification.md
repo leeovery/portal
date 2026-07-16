@@ -101,4 +101,21 @@ The permission-wall branch (returns the driver Guidance) and the degenerate empt
 
 ---
 
+## Fix 4 (Prevention) — Compile-check regression guard
+
+**New test** in `internal/spawn` (a new `//go:build`-gated file). Prevents recurrence of a template-terminology regression.
+
+**Why.** The root "why it shipped" is that the only test exercising the real osascript boundary is `//go:build manual` — a test nobody ran before tagging 0.9.1. Process-discipline-only prevention (option a) was **rejected**: it is the exact guard that already failed once. Instead, add an **automated** compile-check that catches a wrong AppleScript template without a human in the loop.
+
+**What it does.** Feed `ghosttyOpenScript(<representative composed argv>)` through a **compile-only** osascript path (`osacompile`, which resolves the `tell application "Ghostty"` terminology against the installed Ghostty scripting dictionary and **opens no window / runs nothing**) and assert a **zero exit**. The current broken template fails this with the observed `-2741` compile error; the corrected `new window with configuration {…}` form compiles clean. The representative argv mirrors the shape the spawn layer composes (an env-self-sufficient `/usr/bin/env -u TMUX -u TMUX_PANE …` argv) so the template and `ghosttyEmbed` escaping are exercised together.
+
+**Gating.** It **cannot** be hermetic (it needs a real Mac + Ghostty installed), so it is fenced out of both default lanes:
+
+- A **dedicated build tag** (proposed name **`ghosttycompile`**), so it compiles into neither `go test ./...` (unit) nor `go test -tags integration ./...` (integration), and is separable from the window-opening `manual` test. It runs via `go test -tags ghosttycompile ./internal/spawn/`.
+- **Within** the test, `t.Skip` when not macOS or when `Ghostty.app` is not present, so invoking the tag on a machine without Ghostty skips cleanly rather than hard-failing.
+
+**Accepted limitation.** The compile-check proves the emitted script **compiles** against the installed dictionary — it does **not** prove a window opens and runs the command. It is the automated regression tripwire for terminology drift; the functional proof remains the mandatory live validation (see Testing & Validation Requirements). The two are complementary, not substitutes.
+
+---
+
 ## Working Notes
