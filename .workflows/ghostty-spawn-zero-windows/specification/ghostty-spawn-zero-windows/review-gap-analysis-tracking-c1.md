@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-16
 cycle: 1
 phase: Gap Analysis
@@ -101,7 +101,7 @@ In the copy table, the `othersOpened == true` row is annotated "(unchanged; sing
 **Proposed Addition**:
 Annotate the total-failure row "(single and multiple names)" to match the partial row, and have the Rider #2 test matrix name both a single-name and multi-name total-failure case explicitly.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Annotated the total-failure copy row with the single-name case (N=2 burst example) and updated the Rider #2 test matrix to assert both single-name and multi-name total-failure cases.
 
 ---

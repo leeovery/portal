@@ -158,7 +158,7 @@ Compile-only validation is **insufficient** — it proves the script parses, not
 - **Prevention compile-check** (Fix 4): the new `ghosttycompile`-tagged test compiles `ghosttyOpenScript(...)` output via `osacompile` and asserts a zero exit; skips cleanly when not macOS / Ghostty absent.
 - **Rider #1** (`logemit` / `logtest.Sink`): assert an **`AckFailed` (open-failure)** window emits `external window failed` at **WARN** carrying `session`/`ack=failed`/`detail`; an **`AckTimeout`-after-`OutcomeSuccess`** window also emits `external window failed` at **WARN** carrying `ack=timeout` (and the benign success `detail`); a **confirmed** window emits `external window` at **DEBUG**; and a **permission-required** window does **not** emit the WARN (its detail is carried by the permission INFO event).
 - **Rider #2 parity** (extend the existing `message_test.go` + `burst_partial_failure_test.go`, byte-identical across CLI and picker):
-  - Total failure (`othersOpened == false`) renders `… failed to open — nothing opened` with **no** "others left open".
+  - Total failure (`othersOpened == false`) renders `… failed to open — nothing opened` with **no** "others left open" — assert both a **single-name** (`'s2' failed to open — nothing opened`) and a **multi-name** case.
   - Genuine partial (`othersOpened == true`) still renders `… failed to open — others left open`.
   - The permission-wall and degenerate empty-`failed` branches are unaffected.
 
