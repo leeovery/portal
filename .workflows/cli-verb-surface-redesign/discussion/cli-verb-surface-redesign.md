@@ -60,9 +60,9 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  ├─ ✓ Arg resolution (universal, atomic pre-flight, create-on-miss) [decided]
   │  ├─ ✓ Domain-pinning flags (--session / --path) [decided]
   │  └─ ○ --detect home [pending]
-  ├─ ✓ attach disposition (retired — open --session + hidden ack flag) [decided]
+  ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
   ├─ ○ Utility command audit (kill, list, hooks, clean, state, alias, init) [pending]
-  └─ ○ Back-compat & deprecation story (aliases, muscle memory, scripts) [pending]
+  └─ ✓ Back-compat & deprecation story (none — deliberate reversal of the seed) [decided]
 
 ---
 
@@ -214,8 +214,28 @@ The initial proposal was A, argued on two grounds: the spawn exec target needs a
 - Spawned host windows exec `portal open --session <name> --<ack-flag> <batch>:<token>`.
 - **Pinned-domain contract:** `--session` (and `--path`) invocations hard-fail on unresolvable, **never** fall back to the TUI picker — a spawned window or script must not pop a TUI. `--session` never creates (a bare name has no directory to create from); `--path` keeps create-on-miss.
 - **Burst determinism preserved:** session vanished mid-burst ⇒ pinned open hard-fails ⇒ no ack written ⇒ the burst classifies that window failed, exactly as today.
-- The ack flag is hidden (today's `--spawn-ack` semantics; its name may drop the "spawn" word — spec-level detail; internal names like `internal/spawn` and the `spawn` log component are out of this redesign's scope, which governs the public verb surface).
-- Whether the literal `portal attach` string keeps working is purely a back-compat question (compat alias), decided in that subtopic — not a design keystone.
+- **The ack flag is `--ack <batch>:<token>`, marked hidden via Cobra `MarkHidden`** (decided; the user asked about private-flag conventions — there is no `---`/underscore convention; hiding is the mechanism, spelling stays plain. Today's `--spawn-ack` is only *labelled* "internal:" in help text, not actually hidden — the redesign hides it properly. It remains visible in `ps` when a spawned window runs; acceptable — internal, not secret.) Rejected: `--on-open` (reads as a hook trigger, collides with `--on-resume` hooks vocabulary); `--open-ack` (redundant on `open`); `--receipt` (unusual CLI vocabulary). What it does: the burst generates a `<batch>:<token>` per window and bakes it into the spawned command; the spawned Portal process, as its last act before exec'ing into tmux, writes `@portal-spawn-<batch>-<token>` as a tmux server option — a delivery receipt the parent polls for (~8s/window); no receipt ⇒ window classified failed. Internal names (`internal/spawn` package, `spawn` log component, `@portal-spawn-*` marker prefix) are out of this redesign's scope.
+- `portal attach` is **deleted outright** — see Back-Compat & Deprecation Story: the user explicitly wants no compat surface.
+
+Confidence: high.
+
+---
+
+## Back-Compat & Deprecation Story
+
+### Context
+
+The seed called for a compatibility/deprecation story (back-compat aliases) because `open`/`attach`/`spawn` live in muscle memory and scripts. The synthesis's T4 tension (permanent silent aliases vs deprecated-with-sunset) sat here.
+
+### Decision
+
+**There is no back-compat story — deliberately.** User, verbatim intent: "I'm not interested in backwards compatibility here." Consistent with their earlier frame: "I don't care about the impacts of the rename; if the rename is the right thing to do, we do it — that's the whole point of this task."
+
+- `attach` and `spawn` are **removed**, not aliased, not deprecated-with-warning.
+- Broken scripts are the owner's to fix (single-digit user base; the author owns the known scripts).
+- The `x`/`xctl` shell functions re-emit from `portal init` and keep working untouched (`x` already maps to `portal open`).
+- This is a **deliberate reversal of the seed's assumption**, not an omission — recorded so specification doesn't reintroduce aliases.
+- Synthesis T4 (alias lifecycle) is moot: no aliases exist to have a lifecycle.
 
 Confidence: high.
 
@@ -256,12 +276,12 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 - `--detect`'s new home (spawn verb retiring).
 - Bare `portal` (no subcommand) behaviour — related to but distinct from the settled picker placement.
 - Stay-put multi-open flag — deliberately deferred scope.
-- Utility command audit; back-compat/deprecation story (synthesis T4 — alias lifecycle — feeds this).
+- Utility command audit.
 - Background review findings (5 gaps, 2 questions) queued for surfacing at breaks.
 
 ### Current State
 
-- Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags, picker at no-args); `open` name kept on portal-metaphor semantic grounds; `spawn` retired; `attach` retired (open --session + hidden ack flag; compat alias TBD in back-compat).
+- Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
 - Exploring: (none — next up: --detect home, utility audit, back-compat).
 
 ## Triage
