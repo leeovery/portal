@@ -39,4 +39,4 @@ Shaping decision: the user brought two spawn-area bugs from the inbox together (
 
 ## Conclusion
 
-(none)
+Routed to investigation.
