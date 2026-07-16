@@ -226,6 +226,10 @@ Journey: the user's first instinct was fail, but they liked the filter mechanic 
 - **`-a` accepts key globs** (alias keys are a finite Portal-owned namespace, same shape as session names — `-a 'workflow-*'`).
 - **Zoxide has no glob support** (ordered-keyword/subsequence scoring; last term weighted to the final path component). It does have `zoxide query --list` (all matches, ranked) — multi-match zoxide ("mint sessions for everything frecency-matching *skill*") is **deferred**: a shotgun that mints N sessions for possibly-stale dirs; not designed now.
 
+### Wrong-Guess Feedback — tmux is the receipt
+
+Review finding F2 asked what the user sees when resolution guesses wrong — sharpened by the dichotomy, since a wrong zoxide guess silently *mints a session*. Decided: **no dedicated confirmation surface.** A receipt line has nowhere reliable to live (outside tmux, `open` exec-replaces itself and pre-exec output is swallowed by the alternate screen; inside tmux it lands in the pane you switched away from). What the user reliably sees is tmux itself: the status bar shows the `{project}-{nanoid}` session name — which encodes the resolver's choice — plus the pane cwd. User: "no different to how zoxide works now outside of portal — if the user meant something different they will realise the misstep and fix it themselves." Wrong guess = self-announcing at the destination; recovery = `kill` + retry with a pin. Mitigations already in place: pin flags for determinism, hard-fail on total miss, atomic pre-flight on bursts. One cheap addition locked: **the resolver logs its decision** (`resolve: 'blog' → zoxide → ~/Code/blog`) under the existing log taxonomy, so a confusing guess is reconstructable from `portal.log`. (Multi-open per-target echo considered and not pursued.)
+
 ### Command Passthrough (`-e` / `--`) — mint-only
 
 `open -e cmd` / `open <target> -- cmd args…` runs a command in the newly created session (the "open this project with claude running" mechanism, fed to `CreateFromDir`/`QuickStart` as the pane's shell-command). The attach-vs-mint dichotomy places it (review finding F1):
@@ -330,12 +334,12 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 - Bare `portal` (no subcommand) behaviour — related to but distinct from the settled picker placement.
 - Stay-put multi-open flag — deliberately deferred scope.
 - Utility command audit.
-- Remaining review findings queued: wrong-guess feedback (F2, in flight), kill/list resolution scope (F4), completion UX (F5), bare-portal vs xctl (F7).
+- Remaining review findings queued: kill/list resolution scope (F4, in flight), completion UX (F5), bare-portal vs xctl (F7).
 
 ### Current State
 
 - Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
-- Exploring: wrong-guess feedback surface (review F2).
+- Exploring: resolution scope for kill/list (review F4) — bridges into the utility audit.
 
 ## Triage
 
