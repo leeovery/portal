@@ -118,4 +118,26 @@ The permission-wall branch (returns the driver Guidance) and the degenerate empt
 
 ---
 
+## Scope & Non-Goals
+
+**In scope** — four coordinated changes, all within `internal/spawn` and its CLI/picker seams:
+1. Correct the native Ghostty AppleScript template (primary fix).
+2. Surface per-window failure reason at WARN (rider #1).
+3. Honest total-failure banner copy (rider #2).
+4. Compile-check regression guard (prevention).
+
+**Out of scope / unchanged (the failure is isolated to the emitted osascript):**
+- **The config `terminals.json` adapter path.** Adapter precedence is config → native Ghostty → unsupported, so a user with a `terminals.json` Ghostty recipe never reaches the broken native template. That path is not the defect and is not touched.
+- **Detection, pre-flight `has-session` gating, the token-ack channel, selection mutation, notice-band arbitration** — all verified correct in the investigation. No changes.
+- **Single-session `portal open` / `portal attach`** — no osascript involved.
+- **No new terminal adapters** and no broadening of terminal support — the fix restores the native Ghostty adapter to working order, nothing more.
+
+**Verify-during-fix (not new work, but must be confirmed):**
+- `ghosttyEmbed` escaping still holds under the relocated `%s` (same double-quoted string context; expected unchanged) — confirm as part of Fix 1.
+- Riders #1 and #2 are separate defects surfaced by, not caused by, the template bug; both are in scope above.
+
+**Release posture.** Regular release, not an urgency hotfix — the feature is new and was never functional, so nothing regresses relative to a working prior state. It should land promptly, with the mandatory live validation (next topic) **gating the merge**.
+
+---
+
 ## Working Notes
