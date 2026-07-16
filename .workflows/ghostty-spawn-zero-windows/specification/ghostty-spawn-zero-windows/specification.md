@@ -84,7 +84,7 @@ Rationale for the exclusions:
 
 On a **total** failure (every external window failed, nothing confirmed) the "others left open" clause is false — nothing opened, and the trigger self-attach is always skipped on partial failure. The observed banner `'portal-EfVRkk', 'portal-agent-first-3' failed to open — others left open` was emitted with `opened=0`.
 
-**Change.** Make the suffix conditional on whether any **other external window** actually opened. The renderer gains a signal for "did any other window open"; both callers derive it from the shared `spawn.PartitionResults` chokepoint (`othersOpened = len(confirmed) > 0`, confirmed = external windows whose ack landed). The trigger self-attach is never in the confirmed set and is skipped on partial failure, so it never counts as an "other".
+**Change.** Make the suffix conditional on whether any **other external window** actually opened. The renderer gains a signal for "did any other window open" — the intended signature is `PartialFailureMessage(failed []string, othersOpened bool) string`. Both callers derive `othersOpened` from the shared `spawn.PartitionResults` chokepoint (`othersOpened = len(confirmed) > 0`, confirmed = external windows whose ack landed). The trigger self-attach is never in the confirmed set and is skipped on partial failure, so it never counts as an "other".
 
 Exact copy (single-sourced in `PartialFailureMessage`):
 

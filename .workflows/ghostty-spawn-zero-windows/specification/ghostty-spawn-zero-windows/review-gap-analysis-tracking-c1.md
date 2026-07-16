@@ -84,8 +84,8 @@ The spec is exhaustively precise about the output copy (exact suffix strings, th
 **Proposed Addition**:
 State the intended signature (e.g. `PartialFailureMessage(failed []string, othersOpened bool) string`) so callers and the parity tests key off a fixed shape.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Pinned the intended signature `PartialFailureMessage(failed []string, othersOpened bool) string` in Fix 3's Change paragraph.
 
 ---
 

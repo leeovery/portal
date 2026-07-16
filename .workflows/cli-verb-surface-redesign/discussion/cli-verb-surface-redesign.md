@@ -225,7 +225,15 @@ Journey: the user's first instinct was fail, but they liked the filter mechanic 
 - **`-a` accepts key globs** (alias keys are a finite Portal-owned namespace, same shape as session names — `-a 'workflow-*'`).
 - **Zoxide has no glob support** (ordered-keyword/subsequence scoring; last term weighted to the final path component). It does have `zoxide query --list` (all matches, ranked) — multi-match zoxide ("mint sessions for everything frecency-matching *skill*") is **deferred**: a shotgun that mints N sessions for possibly-stale dirs; not designed now.
 
-Fine print still open: `--detect`'s new home; `-e`/`--` command passthrough under the merged verb (review F1, being raised).
+### Command Passthrough (`-e` / `--`) — mint-only
+
+`open -e cmd` / `open <target> -- cmd args…` runs a command in the newly created session (the "open this project with claude running" mechanism, fed to `CreateFromDir`/`QuickStart` as the pane's shell-command). The attach-vs-mint dichotomy places it (review finding F1):
+
+- **`-e`/`--` are mint-only** — a command only means something on the mint branch; attaching to an existing session with `-e vim` is semantically void (the session already has its processes).
+- Valid when **every** resolved target is directory-domain (path / alias / zoxide / `-p` / `-z` / `-a`). Any session-domain target (exact name, glob, `-s`) or `-f` combined with a command ⇒ **usage error at the atomic pre-flight** — "any target that can't accept the command ⇒ nothing opens", consistent with the unresolvable rule.
+- **Multi-target: the command runs in every minted session.** `x ~/Code/skill* -- claude` (shell-expanded paths) = N new sessions each running claude, in N windows — useful composition that falls out of the rules, not a special case. (Rejected: restricting `-e`/`--` to single-target.)
+
+Fine print still open: `--detect`'s new home.
 
 ---
 
