@@ -57,8 +57,11 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ Input domain legibility (universal target resolution) [decided]
   ├─ ✓ Verb naming (open stays — portal metaphor; verb B name dissolved) [decided]
   ├─ ✓ The open fold (spawn absorbed; absorb/net-N as rule) [decided]
-  │  ├─ ✓ Arg resolution (universal, atomic pre-flight, create-on-miss) [decided]
-  │  ├─ ✓ Domain-pinning flags (--session / --path) [decided]
+  │  ├─ ✓ Arg resolution (universal, atomic pre-flight) [decided]
+  │  ├─ ✓ Attach-vs-mint dichotomy (session=attach, dir=always new) [decided]
+  │  ├─ ✓ Miss handling (fallback stripped — hard fail; -f explicit) [decided]
+  │  ├─ ✓ Domain-pinning flags (-s/-p/-z/-a/-f) [decided]
+  │  ├─ ✓ Glob targets (session-domain; shell globs paths; -a globs) [decided]
   │  └─ ○ --detect home [pending]
   ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
   ├─ ○ Utility command audit (kill, list, hooks, clean, state, alias, init) [pending]
@@ -173,15 +176,56 @@ With naming under discussion, the user pushed the shape further: "It's doing not
 **`portal open` is the single public session verb.**
 
 - `portal open` → picker
-- `portal open <target>` → resolve (session → path → alias → zoxide), create-on-miss for directory-shaped targets, connect this terminal
+- `portal open <target>` → resolve (session → path → alias → zoxide), connect this terminal
 - `portal open <t1> <t2> … <tN>` → N portals; this terminal becomes one of them (absorb/net-N rule), N−1 host windows spawn
-- `--session <name>` / `--path <dir>` → pin the input domain; no guessing; script-safe
+- Domain-pinning flags (see below) → no guessing; script-safe
 - Atomic resolution pre-flight for multi-target: any target unresolvable ⇒ nothing opens
 - Stay-put multi-open: future explicit flag, deliberately deferred scope (not designed here)
 - `spawn` retired as a public verb; `kill`, `list`, utilities unchanged by this decision
 - Picker placement (formerly its own open question) is settled by the same sentence: no parameters → the picker is how you choose the destination
 
-Confidence: high on the shape. Fine print still open: `--detect`'s new home; `attach`'s exact disposition (next subtopic).
+Confidence: high on the shape.
+
+### The Attach-vs-Mint Dichotomy (second axiom)
+
+Code verification (`internal/session/quickstart.go:72-76`, `create.go`) corrected an earlier mis-statement in this doc ("creates when the target is directory-shaped and no session exists" — implied find-or-create). The real model, confirmed and **locked as the design's second axiom**:
+
+- **Session-domain hit** (exact name, glob) → **attach to an existing session**
+- **Directory-domain hit** (path, alias, zoxide) → **mint a brand-new session there, always**
+
+There is no find-or-create: `GenerateSessionName` guarantees a fresh `{project}-{nanoid}` name and the former `new-session -A` attach-to-existing was deliberately removed as unreachable. Multiple sessions per project is the designed workflow. The precedence chain is therefore semantic, not just disambiguation: "is this an existing session I should surface, or a place I should open a new portal to?"
+
+**Accepted consequence (ruled on explicitly):** bare project shorthand does *not* reattach — `open api` never exactly-matches `api-x7Kd9a`, falls to zoxide → dir → new session, even while an `api-*` session runs. Existing sessions are reached via the picker, a glob (`'api-*'`), or `-s`. **Rejected alternative:** project-prefix session matching (`api` attaches to the sole `api-*` session) — reintroduces attach-vs-create guessing with an ambiguity cliff the moment a second `api-*` session exists.
+
+### Miss Handling & the Filter Flag
+
+**Total miss ⇒ hard fail, every arity, every form.** The TUI-fallback-with-filter (today's terminal step of the chain) is **stripped**. The error message suggests the escape hatch (`nothing resolved for 'blog' — try -f blog`).
+
+Journey: the user's first instinct was fail, but they liked the filter mechanic and floated an alternative — a total-miss target opens a *filtered picker in its surface* (uniform across arities: "every unresolvable target becomes a filtered picker"). Pushback killed it on three grounds: (1) **interactive-vs-scripted** — scripts are the CLI multi-open's constituency, and `open` can't know its context; a picker quietly waiting in window 3 of a scripted burst is the surprise scripts can't tolerate; (2) **the ack machinery breaks** — a picker-window writes no `--ack` receipt (nothing attaches until a human picks), so the burst misclassifies it failed and a retry opens a second picker; (3) **the user's own rarity observation** — with zoxide installed nearly every token resolves to something, so the implicit fallback is "a lottery you occasionally lose into", not a dependable feature (user: seen it a couple of times; the attempts to use it deliberately failed because zoxide ate the word). The explicit flag is what makes the filter mechanic *reliable* for the first time. User reversed with conviction.
+
+- **`-f/--filter <text>`** → skips resolution entirely; opens the picker with the filter pre-filled. Mutually exclusive with positional targets and with other pin flags (usage error).
+
+### Domain-Pinning Flags (locked set)
+
+| Flag | Pins to | Semantics on that domain |
+|---|---|---|
+| `-s/--session <name-or-glob>` | exact session / session glob | attach; hard fail on miss; never mints |
+| `-p/--path <dir>` | directory path | mint new session; dir must exist |
+| `-z/--zoxide <query>` | zoxide best match | mint at matched dir; hard fail on no match; **explicit error if zoxide not installed** (pinned ≠ silently skipped — unlike the guessing chain, where zoxide absence just falls through: `resolver/zoxide.go` `ErrZoxideNotInstalled`, `query.go` treats any zoxide error as continue) |
+| `-a/--alias <key-or-glob>` | alias key / key glob | mint at aliased dir; hard fail on unknown key |
+| `-f/--filter <text>` | (none) | picker, pre-filtered |
+
+`-a` was added for symmetry (the fourth resolution domain; also the only way to reach an alias shadowed by a same-named session). User rationale for the full set: open-source project — flags earn their keep for scripting and other users even where the author won't use them personally. "The fact that portal open is multi-dextrous allows us to keep the same command but focus its intent." Note `-e` is already taken by open's existing run-command flag.
+
+### Glob Targets
+
+- **A bare target containing glob metacharacters (`*`, `?`, `[…]`) is session-domain by construction** — patterns match against the finite set of live session names and skip path/alias/zoxide entirely. Expansion produces K targets that join the target list (`open 'agentic-workflows-*' blog` → K+1 surfaces; absorb rule unchanged). **Zero matches ⇒ unresolvable ⇒ atomic hard fail** — no special case. Glob, not regex.
+- **Shell-quoting caveat (accepted, documented):** unquoted `*` is expanded by the shell against cwd files first — so session globs are typed quoted (`x 'api-*'`). Same wart as git/docker pattern args.
+- **The quote is the domain switch — path globs are already free:** *unquoted* `x ~/Code/skill*` is expanded by the shell into N path args before Portal sees them → N minted sessions in N windows, zero Portal code. This answers "why couldn't globs work for paths?" — they do, via the shell, today.
+- **`-a` accepts key globs** (alias keys are a finite Portal-owned namespace, same shape as session names — `-a 'workflow-*'`).
+- **Zoxide has no glob support** (ordered-keyword/subsequence scoring; last term weighted to the final path component). It does have `zoxide query --list` (all matches, ranked) — multi-match zoxide ("mint sessions for everything frecency-matching *skill*") is **deferred**: a shotgun that mints N sessions for possibly-stale dirs; not designed now.
+
+Fine print still open: `--detect`'s new home; `-e`/`--` command passthrough under the merged verb (review F1, being raised).
 
 ---
 
@@ -212,7 +256,7 @@ The initial proposal was A, argued on two grounds: the spawn exec target needs a
 **`attach` is retired from the design.** Option B:
 
 - Spawned host windows exec `portal open --session <name> --<ack-flag> <batch>:<token>`.
-- **Pinned-domain contract:** `--session` (and `--path`) invocations hard-fail on unresolvable, **never** fall back to the TUI picker — a spawned window or script must not pop a TUI. `--session` never creates (a bare name has no directory to create from); `--path` keeps create-on-miss.
+- **Pinned-domain contract:** `--session` (and `--path`) invocations hard-fail on unresolvable, **never** fall back to the TUI picker — a spawned window or script must not pop a TUI. `--session` never mints (a bare name has no directory to mint from); `--path` mints per the attach-vs-mint dichotomy.
 - **Burst determinism preserved:** session vanished mid-burst ⇒ pinned open hard-fails ⇒ no ack written ⇒ the burst classifies that window failed, exactly as today.
 - **The ack flag is `--ack <batch>:<token>`, marked hidden via Cobra `MarkHidden`** (decided; the user asked about private-flag conventions — there is no `---`/underscore convention; hiding is the mechanism, spelling stays plain. Today's `--spawn-ack` is only *labelled* "internal:" in help text, not actually hidden — the redesign hides it properly. It remains visible in `ps` when a spawned window runs; acceptable — internal, not secret.) Rejected: `--on-open` (reads as a hook trigger, collides with `--on-resume` hooks vocabulary); `--open-ack` (redundant on `open`); `--receipt` (unusual CLI vocabulary). What it does: the burst generates a `<batch>:<token>` per window and bakes it into the spawned command; the spawned Portal process, as its last act before exec'ing into tmux, writes `@portal-spawn-<batch>-<token>` as a tmux server option — a delivery receipt the parent polls for (~8s/window); no receipt ⇒ window classified failed. Internal names (`internal/spawn` package, `spawn` log component, `@portal-spawn-*` marker prefix) are out of this redesign's scope.
 - `portal attach` is **deleted outright** — see Back-Compat & Deprecation Story: the user explicitly wants no compat surface.
@@ -277,12 +321,12 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 - Bare `portal` (no subcommand) behaviour — related to but distinct from the settled picker placement.
 - Stay-put multi-open flag — deliberately deferred scope.
 - Utility command audit.
-- Background review findings (5 gaps, 2 questions) queued for surfacing at breaks.
+- Remaining review findings queued: -e/-- passthrough (F1, in flight), wrong-guess feedback (F2), kill/list resolution scope (F4), completion UX (F5), bare-portal vs xctl (F7).
 
 ### Current State
 
 - Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
-- Exploring: (none — next up: --detect home, utility audit, back-compat).
+- Exploring: open's remaining flag surface (-e/-- passthrough).
 
 ## Triage
 
