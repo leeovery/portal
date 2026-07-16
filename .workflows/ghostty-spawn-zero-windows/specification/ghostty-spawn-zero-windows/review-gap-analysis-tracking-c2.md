@@ -36,10 +36,10 @@ A secondary instance of the same omission: Fix 2 (Rider #1) moves an `AckTimeout
 The corrective note is small: the Testing section should call out that existing assertions invalidated by the template/level changes must be updated in lockstep — concretely, `TestGhosttyOpenScript` should drop/replace the `surface configuration` expectation with the corrected terminology (e.g. `new window`, `with configuration`, and the still-present `command:` / `wait after command`), and the `logemit_test` timeout case must move to WARN. Without this, the "lanes stay green" acceptance criterion is unachievable as written.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Added a "Lockstep updates to existing tests" bullet to Testing & Validation Requirements naming both invalidated tests and the exact assertions to change: `TestGhosttyOpenScript` (drop `surface configuration`, assert `new window`/`with configuration`/`command:`/`wait after command`) and `logemit_test.go` (`TestLogWindowResults_OneDebugPerWindow` + `TestLogBatchSummary` mixed-slice: timeout/failed → WARN `external window failed`, confirmed → DEBUG `external window`). Reworded "Existing lanes stay green" to be inclusive of these updates.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Verified against code — `ghostty_command_test.go:45` asserts `"surface configuration"` and `logemit_test.go:159` asserts `DEBUG external window … ack=timeout`; both break under Fixes 1/2 and are now listed as lockstep edits.
 
 ---
 

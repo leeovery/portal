@@ -161,8 +161,11 @@ Compile-only validation is **insufficient** — it proves the script parses, not
   - Total failure (`othersOpened == false`) renders `… failed to open — nothing opened` with **no** "others left open" — assert both a **single-name** (`'s2' failed to open — nothing opened`) and a **multi-name** case.
   - Genuine partial (`othersOpened == true`) still renders `… failed to open — others left open`.
   - The permission-wall and degenerate empty-`failed` branches are unaffected.
+- **Lockstep updates to existing tests** — the template and log-level changes invalidate existing assertions that MUST be updated in the same change, or the unit lane cannot stay green:
+  - `internal/spawn/ghostty_command_test.go` (`TestGhosttyOpenScript`): drop the now-stale `"surface configuration"` expectation (that keyword only existed in the old invalid form) and assert the corrected terminology instead — `new window`, `with configuration`, and the still-present `command:"…"` / `wait after command`.
+  - `internal/spawn/logemit_test.go`: the `ack=timeout` (non-permission) case now emits `WARN external window failed` instead of `DEBUG external window`. Update `TestLogWindowResults_OneDebugPerWindow` and the mixed confirmed/timeout/failed per-window assertion in `TestLogBatchSummary` so confirmed windows expect DEBUG `external window` and timeout/failed windows expect WARN `external window failed` (the DEBUG-per-window count is no longer `len(results)`).
 
-**Existing lanes stay green.** `go test ./...` (unit) and `go test -tags integration -p 1 ./...` (integration) must both pass; the `manual` and `ghosttycompile` tags remain excluded from both.
+**Existing lanes stay green.** `go test ./...` (unit) and `go test -tags integration -p 1 ./...` (integration) must both pass — inclusive of the lockstep test updates above; the `manual` and `ghosttycompile` tags remain excluded from both.
 
 ---
 
