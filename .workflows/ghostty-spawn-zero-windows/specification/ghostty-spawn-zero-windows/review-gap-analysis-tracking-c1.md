@@ -67,8 +67,8 @@ For planning readiness this matters: does the plan for this topic create tasks f
 **Proposed Addition**:
 Clarify whether the live-validation gate is a deliverable of this topic (planned + tracked here) or owned by a separate topic. If separate, either name it or drop the inline "the fix is not done until…" framing so the two sections agree on where the gate lives; if in-scope here, remove the "(next topic)" parenthetical.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Clarified the live-validation gate is an in-scope acceptance gate owned by THIS topic; removed the dangling "(next topic)" parenthetical from the Release posture line and added a paragraph stating the two checks are acceptance criteria of this work, spelled out under Testing & Validation Requirements.
 
 ---
 

@@ -140,7 +140,9 @@ The permission-wall branch (returns the driver Guidance) and the degenerate empt
 - `ghosttyEmbed` escaping still holds under the relocated `%s` (same double-quoted string context; expected unchanged) — confirm as part of Fix 1.
 - Riders #1 and #2 are separate defects surfaced by, not caused by, the template bug; both are in scope above.
 
-**Release posture.** Regular release, not an urgency hotfix — the feature is new and was never functional, so nothing regresses relative to a working prior state. It should land promptly, with the mandatory live validation (next topic) **gating the merge**.
+**Release posture.** Regular release, not an urgency hotfix — the feature is new and was never functional, so nothing regresses relative to a working prior state. It should land promptly, with the mandatory live validation **gating the merge**.
+
+The mandatory live validation is an **in-scope acceptance gate of this fix** (owned here, not a separate topic): its two checks — the `-tags manual` Ghostty test and a real ≥3-session `opened 3/3` burst — are acceptance criteria for this work and must be planned/tracked as part of it. They are spelled out under **Testing & Validation Requirements** below. Because they require a live Mac inside Ghostty they cannot run in an automated lane, but that does not move them out of scope — it makes them a manual acceptance step this topic owns.
 
 ---
 
