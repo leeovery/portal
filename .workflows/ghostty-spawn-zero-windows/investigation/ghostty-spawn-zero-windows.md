@@ -126,7 +126,7 @@ tell application "Ghostty"
 end tell
 ```
 
-**Why this happens:** the template was authored against an assumed/generic Cocoa-Scripting shape (`make new <class> with properties {…}`) rather than Ghostty 1.3.1's actual custom verb-style dictionary, and was never exercised against the real terminal before shipping — the in-code comment claiming it was "validated (Ghostty 1.3.1)" is false.
+**Why this happens:** the template was authored against a generic Cocoa-Scripting shape (`make new <class> with properties {…}`) instead of Ghostty 1.3.1's actual custom verb-style dictionary. Notably this is a **regression away from the researched design, not a guess at an unknown API**: the original feasibility research (`restore-host-terminal-windows`, deep-dive 001, 2026-06-30) had already resolved and recorded the correct form — *"Ghostty 1.3.x (user confirmed on 1.3.1) ships an AppleScript dictionary: `new window with configuration` where the config carries a `command` field"* (research §F1, line 42; restated line 146). The implementation drifted from `new window with configuration` to the invalid `make new … with properties` idiom, and that drift was never re-validated against the sdef the research had checked. The in-code comment claiming the template was "validated (Ghostty 1.3.1)" is false.
 
 ### Contributing Factors
 
