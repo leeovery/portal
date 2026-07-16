@@ -114,6 +114,8 @@ The permission-wall branch (returns the driver Guidance) and the degenerate empt
 - A **dedicated build tag** (proposed name **`ghosttycompile`**), so it compiles into neither `go test ./...` (unit) nor `go test -tags integration ./...` (integration), and is separable from the window-opening `manual` test. It runs via `go test -tags ghosttycompile ./internal/spawn/`.
 - **Within** the test, `t.Skip` when not macOS or when `Ghostty.app` is not present, so invoking the tag on a machine without Ghostty skips cleanly rather than hard-failing.
 
+**Invocation (concrete).** Compile via `osacompile -e <script> -o <out>`, where `<script>` is `ghosttyOpenScript(argv)` and `<out>` is a throwaway path under `t.TempDir()` (e.g. `probe.scpt`, auto-cleaned) — `osacompile` requires an output target and does not parse-and-discard like `osascript`. Assert the process exits `0`; a non-zero exit fails the test with the captured compiler output (the current broken template yields `-2741`). The representative argv is a fixed literal of the composed shape, e.g. `[]string{"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE", "/bin/sh", "-c", "echo probe"}`, so the template and `ghosttyEmbed` escaping are exercised together.
+
 **Accepted limitation.** The compile-check proves the emitted script **compiles** against the installed dictionary — it does **not** prove a window opens and runs the command. It is the automated regression tripwire for terminology drift; the functional proof remains the mandatory live validation (see Testing & Validation Requirements). The two are complementary, not substitutes.
 
 ---

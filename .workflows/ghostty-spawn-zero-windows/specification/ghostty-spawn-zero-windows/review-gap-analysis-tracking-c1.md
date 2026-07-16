@@ -27,8 +27,8 @@ Because `osacompile`'s CLI contract differs from the `osascript` path already in
 **Proposed Addition**:
 Specify the compile-check invocation concretely: the exact `osacompile` argv form (e.g. `-e <script>` vs temp-file input), the output target and its cleanup (e.g. compile to a `t.TempDir()` `.scpt`), and a concrete representative composed-argv fixture — so the test is a mechanical build, not a design task.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Appended a concrete "Invocation (concrete)" paragraph to Fix 4 pinning the `osacompile -e <script> -o <out>` form, `t.TempDir()` output, zero-exit assertion, and a fixed representative argv fixture.
 
 ---
 
