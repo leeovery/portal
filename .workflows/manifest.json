@@ -155,6 +155,9 @@
     },
     "cli-verb-surface-redesign": {
       "work_type": "feature"
+    },
+    "ghostty-spawn-zero-windows": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
