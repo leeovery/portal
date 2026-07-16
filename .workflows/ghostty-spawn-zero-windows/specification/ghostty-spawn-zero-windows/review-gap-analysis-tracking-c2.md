@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-16
 cycle: 2
 phase: Gap Analysis
@@ -60,9 +60,9 @@ The guard's whole value — a non-disruptive, reliable tripwire — depends on t
 The spec gives no fallback for either case (e.g. "ensure Ghostty is running first," or "skip if terminology cannot be resolved," or an alternative resolution path). This matters because the entire topic exists precisely because a scripting-tool behavior was assumed correct without live validation; asserting `osacompile`'s resolution semantics as fact — the same class of unvalidated assumption — reintroduces that risk into the very guard meant to prevent it. The gap is that the spec presents the mechanism as verified when it is an assumption an implementer must confirm before the guard can be trusted, and it does not state what the test should do if the assumption does not hold.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Softened Fix 4's "opens no window / runs nothing" from settled fact to "intended to" (cross-referencing an assumption note), and added an "Assumption to confirm (during live-Mac implementation)" paragraph stating the no-launch/not-running-required assumption must be confirmed on the live Mac, with explicit fallbacks (require/ensure Ghostty running, or `t.Skip` when terminology cannot resolve) so the guard never false-fails.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Reframed the assumption rather than asserting osacompile semantics as fact — directly addresses the "same class of unvalidated assumption" concern.
 
 ---
