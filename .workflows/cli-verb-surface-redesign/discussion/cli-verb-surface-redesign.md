@@ -60,7 +60,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  ├─ ✓ Arg resolution (universal, atomic pre-flight, create-on-miss) [decided]
   │  ├─ ✓ Domain-pinning flags (--session / --path) [decided]
   │  └─ ○ --detect home [pending]
-  ├─ ◐ attach disposition (hidden command vs open flags) [exploring]
+  ├─ ✓ attach disposition (retired — open --session + hidden ack flag) [decided]
   ├─ ○ Utility command audit (kill, list, hooks, clean, state, alias, init) [pending]
   └─ ○ Back-compat & deprecation story (aliases, muscle memory, scripts) [pending]
 
@@ -195,17 +195,29 @@ An architectural constraint independent of spelling: the spawned window must **n
 
 ### Options Considered
 
-**A. Keep `attach` as a hidden command** (proposed)
+**A. Keep `attach` as a hidden command** (initially proposed)
 - Pros: serves the spawn exec target; **free back-compat** — every existing `portal attach foo` script keeps working with zero alias machinery; exact semantics preserved verbatim.
-- Cons: one more (hidden) command in the tree.
+- Cons: one more (hidden) command in the tree; duplicates what `open --session` now expresses.
 
-**B. Fold into open flags** (`open --session <name> --spawn-ack …`)
-- Pros: smallest command tree.
-- Cons: back-compat for `portal attach` then needs a separate alias shim anyway; `--spawn-ack` pollutes open's flag surface.
+**B. Fold into open flags** (`open --session <name> --<ack> …`)
+- Pros: smallest command tree; one verb carries the whole session surface, including the machine path.
+- Cons: back-compat for `portal attach` then needs a separate alias shim (rerouted to the back-compat subtopic); ack flag rides on open's flag surface (hidden).
 
-### Journey / Decision
+### Journey
 
-(exploring — proposal on the table: public exactness lives on `open --session`; `attach` survives as hidden plumbing serving spawn-exec + back-compat)
+The initial proposal was A, argued on two grounds: the spawn exec target needs an invocable command, and keeping `attach` gives free back-compat. The user challenged: "why can't we just use Portal Open with a session flag, and pass through an open-acknowledge?" — and specifically recalled that the abridged bootstrap fast-path was deliberately built as a **marker/latch, not tied to certain commands**. Verified against the code: `cmd/root.go:173` — `BootstrappedLatchSatisfied` is consulted once in `PersistentPreRunE`, command-agnostically; any bootstrap-needing command (open included) takes the abridged path when the `@portal-bootstrapped` version-stamped latch is satisfied. So the bootstrap argument for `attach` was void. `attach`'s actual body is tiny (has-session check → best-effort ack write → connect), and every piece has an `open` equivalent. The "free back-compat" argument is real but belongs to the back-compat story (an alias artifact), not the design. Option A's proposer conceded.
+
+### Decision
+
+**`attach` is retired from the design.** Option B:
+
+- Spawned host windows exec `portal open --session <name> --<ack-flag> <batch>:<token>`.
+- **Pinned-domain contract:** `--session` (and `--path`) invocations hard-fail on unresolvable, **never** fall back to the TUI picker — a spawned window or script must not pop a TUI. `--session` never creates (a bare name has no directory to create from); `--path` keeps create-on-miss.
+- **Burst determinism preserved:** session vanished mid-burst ⇒ pinned open hard-fails ⇒ no ack written ⇒ the burst classifies that window failed, exactly as today.
+- The ack flag is hidden (today's `--spawn-ack` semantics; its name may drop the "spawn" word — spec-level detail; internal names like `internal/spawn` and the `spawn` log component are out of this redesign's scope, which governs the public verb surface).
+- Whether the literal `portal attach` string keeps working is purely a back-compat question (compat alias), decided in that subtopic — not a design keystone.
+
+Confidence: high.
 
 ---
 
@@ -241,7 +253,6 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 
 ### Open Threads
 
-- attach disposition — proposal on table (hidden command), awaiting confirmation.
 - `--detect`'s new home (spawn verb retiring).
 - Bare `portal` (no subcommand) behaviour — related to but distinct from the settled picker placement.
 - Stay-put multi-open flag — deliberately deferred scope.
@@ -250,8 +261,8 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 
 ### Current State
 
-- Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags, picker at no-args); `open` name kept on portal-metaphor semantic grounds; `spawn` retired; attach → plumbing.
-- Exploring: attach's exact disposition.
+- Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags, picker at no-args); `open` name kept on portal-metaphor semantic grounds; `spawn` retired; `attach` retired (open --session + hidden ack flag; compat alias TBD in back-compat).
+- Exploring: (none — next up: --detect home, utility audit, back-compat).
 
 ## Triage
 
