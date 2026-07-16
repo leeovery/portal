@@ -91,7 +91,7 @@ Exact copy (single-sourced in `PartialFailureMessage`):
 | Condition | Message |
 |-----------|---------|
 | At least one other external window opened (`othersOpened == true`) | `'s2' failed to open — others left open` (unchanged; single and multiple names) |
-| No other external window opened — total failure (`othersOpened == false`) | `'s2', 's3' failed to open — nothing opened` |
+| No other external window opened — total failure (`othersOpened == false`) | `'s2', 's3' failed to open — nothing opened` (single and multiple names — a total failure can involve exactly one failed external window, e.g. an N=2 burst: `'s2' failed to open — nothing opened`) |
 
 The `— nothing opened` suffix mirrors the established spawn copy in `GoneMessage` and `UnsupportedNoopMessage`, keeping the spawn message vocabulary consistent. As before: no count-aware verb ("failed to open" agrees with one or several names), no `spawn:` prefix (the CLI adds it), and no ⚠ glyph (the notice band prepends it).
 

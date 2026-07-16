@@ -62,6 +62,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  ├─ ✓ Miss handling (fallback stripped — hard fail; -f explicit) [decided]
   │  ├─ ✓ Domain-pinning flags (-s/-p/-z/-a/-f) [decided]
   │  ├─ ✓ Glob targets (session-domain; shell globs paths; -a globs) [decided]
+  │  ├─ ✓ Command passthrough -e/-- (mint-only, all minted targets) [decided]
   │  └─ ○ --detect home [pending]
   ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
   ├─ ○ Utility command audit (kill, list, hooks, clean, state, alias, init) [pending]
@@ -329,12 +330,12 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 - Bare `portal` (no subcommand) behaviour — related to but distinct from the settled picker placement.
 - Stay-put multi-open flag — deliberately deferred scope.
 - Utility command audit.
-- Remaining review findings queued: -e/-- passthrough (F1, in flight), wrong-guess feedback (F2), kill/list resolution scope (F4), completion UX (F5), bare-portal vs xctl (F7).
+- Remaining review findings queued: wrong-guess feedback (F2, in flight), kill/list resolution scope (F4), completion UX (F5), bare-portal vs xctl (F7).
 
 ### Current State
 
 - Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
-- Exploring: open's remaining flag surface (-e/-- passthrough).
+- Exploring: wrong-guess feedback surface (review F2).
 
 ## Triage
 
