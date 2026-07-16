@@ -48,18 +48,19 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (10 subtopics — 5 decided · 2 exploring · 3 pending)
+  Discussion Map — CLI Verb Surface Redesign (12 subtopics — 8 decided · 1 exploring · 3 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
-  │  ├─ ✓ spawn: distinct verb vs variadic attach [decided]
-  │  └─ ○ Where the picker sits [pending]
+  │  ├─ ✓ spawn: distinct verb vs variadic attach [decided → superseded by the fold]
+  │  └─ ✓ Where the picker sits (open, no args) [decided]
   ├─ ✓ Input domain legibility (universal target resolution) [decided]
-  ├─ ◐ Verb naming (keep incumbents vs rename) [exploring]
-  ├─ ◐ Verb B contract [exploring]
+  ├─ ✓ Verb naming (open stays — portal metaphor; verb B name dissolved) [decided]
+  ├─ ✓ The open fold (spawn absorbed; absorb/net-N as rule) [decided]
   │  ├─ ✓ Arg resolution (universal, atomic pre-flight, create-on-miss) [decided]
-  │  ├─ ○ Absorb vs stay-put [pending]
+  │  ├─ ✓ Domain-pinning flags (--session / --path) [decided]
   │  └─ ○ --detect home [pending]
+  ├─ ◐ attach disposition (hidden command vs open flags) [exploring]
   ├─ ○ Utility command audit (kill, list, hooks, clean, state, alias, init) [pending]
   └─ ○ Back-compat & deprecation story (aliases, muscle memory, scripts) [pending]
 
@@ -109,6 +110,8 @@ The discussion then reframed the space as **three possible axes to split verbs o
 
 Names for both verbs deliberately deferred to the Verb Naming subtopic. Confidence: high on the split; the contracts' fine print (verb B arg resolution, absorb-vs-stay-put) tracked separately.
 
+> **Superseded in part**: the two-public-verbs shape was later revised by **The Open Fold** (below) — verb B was absorbed into `open` once the absorb/net-N rule was recognized as making arity continuous. The underlying decisions survive: outcome-thinking, attach → plumbing, multi-open stays public (now as variadic `open`), universal resolution.
+
 ---
 
 ## Input Domain Legibility
@@ -135,11 +138,74 @@ Key facts bearing on the decision:
 
 ### Journey
 
-User: "i dont know tbh" — genuine fork. Perspective agents dispatched (Formal Systems ↔ Incentive Realist: what the coherent model demands vs how users actually behave). Awaiting synthesis.
+User: "i dont know tbh" — genuine fork. Perspective agents dispatched (Formal Systems ↔ Incentive Realist: what the coherent model demands vs how users actually behave). Synthesis surfaced four tensions:
+
+- **T1 (the core split)** — Formal Systems: rename A → `go` (mac `open` connotes new-window; `open` is the verb whose contract changes most — keeping the name while moving behaviour is silent drift). Incentive Realist: keep `open` (`x` absorbs nearly all invocations; the *reported* confusion is cured by demoting attach, so the rename chases an unreported problem; `go` collides with the Go toolchain in this author's world).
+- **T2** — verb B replacement: `windows` (guessable noun) vs `launch` (grammar-consistent verb); both lenses converged on retiring `spawn` (mechanism jargon, provisional, no muscle memory — only consumers are author-owned tests).
+- **T3** — names are a coupled set: `open`+`launch` is the one forbidden pair (near-synonyms for opposite poles).
+- **T4** — alias lifecycle: permanent silent aliases vs deprecated-with-sunset. (Still live; feeds the back-compat subtopic.)
+
+**Resolution of T1**: the user rejected the Realist's *frame* outright — "I don't care about the impacts of the rename; if the rename is the right thing to do, we do it. That's the whole point of this task." Migration cost is not a criterion here. `open` stays **on semantic merits**: "Portal open" is the tool's founding metaphor — you are *opening a portal to a session* (the play on words is why the tool is named Portal). The parameter doesn't change what you're doing, only how the destination is derived. Under the portal metaphor the mac new-window connotation dissolves — `open` never meant "window", it means the portal. `x` is acknowledged as a personal convenience, not the design.
+
+**T2/T3 dissolved** rather than resolved: The Open Fold (below) eliminates verb B entirely — there is no second verb to name. `spawn` the *word* is retired with it.
 
 ### Decision
 
-(pending)
+**Verb A is `open`, decided on semantic-fit grounds (portal metaphor), explicitly not on migration-cost grounds.** No second verb exists post-fold, so no other public session-verb name is needed. Confidence: high.
+
+---
+
+## The Open Fold (spawn absorbed into open)
+
+### Context
+
+With naming under discussion, the user pushed the shape further: "It's doing nothing different from the user's perspective as Portal open, except you're opening one or more… I feel like it's all just Portal open." Re-examining the earlier one-verb objection showed it was conditional — and the condition is settleable.
+
+### Journey
+
+- The earlier case for two verbs rested on one inexpressible sentence: "open a window for that session but leave my terminal alone" — a count-driven single verb can't say it. The fold survives this because of the **absorb/net-N rule**: "open portals to these N sessions; this terminal is one of them" is *continuous in N* — at N=1 your terminal is the only surface (plain open-here), at N=3 it's one of three. No behaviour cliff. Today's `spawn` already self-attaches the Nth, so the semantics are proven in production.
+- The cliff only appears if multi-open *stays put* while single-open connects — so **choosing the fold is choosing absorb-as-rule**. Stay-put isn't lost: it becomes an explicit future flag on `open` (`--detach`-ish) — the exceptional behaviour gets the flag, the natural behaviour gets the bare verb.
+- The user proposed **domain-pinning flags**: `--session` / `--path` on `open` pin the input domain instead of guessing — "wouldn't really be used by humans, but it is something that's scriptable." This relocates the script-determinism role from hidden `attach` to a **public, documented** home on `open`.
+- Consequence: the entire verb-B naming debate (T2/T3) evaporates — there is no verb B.
+
+### Decision
+
+**`portal open` is the single public session verb.**
+
+- `portal open` → picker
+- `portal open <target>` → resolve (session → path → alias → zoxide), create-on-miss for directory-shaped targets, connect this terminal
+- `portal open <t1> <t2> … <tN>` → N portals; this terminal becomes one of them (absorb/net-N rule), N−1 host windows spawn
+- `--session <name>` / `--path <dir>` → pin the input domain; no guessing; script-safe
+- Atomic resolution pre-flight for multi-target: any target unresolvable ⇒ nothing opens
+- Stay-put multi-open: future explicit flag, deliberately deferred scope (not designed here)
+- `spawn` retired as a public verb; `kill`, `list`, utilities unchanged by this decision
+- Picker placement (formerly its own open question) is settled by the same sentence: no parameters → the picker is how you choose the destination
+
+Confidence: high on the shape. Fine print still open: `--detect`'s new home; `attach`'s exact disposition (next subtopic).
+
+---
+
+## Attach Disposition
+
+### Context
+
+Post-fold, `attach`'s remaining jobs: (1) the exec target of every spawned host window (`portal attach <session> --spawn-ack <batch>:<token>` — a *separate process* in a fresh window must be handed some invocable command line; in-process functions can't serve this), and (2) exact/no-guessing attach for scripts — now covered publicly by `open --session`. Clarified for the user: today `open` is *not* sugar around the `attach` command — both call the same internal Go functions in-process (`connect()` = exec `tmux attach-session` outside tmux / `switch-client` inside); the command form exists only for cross-process callers. Go's `internal/` packages are language-enforced module-private (service class vs artisan command, in Laravel terms).
+
+An architectural constraint independent of spelling: the spawned window must **not** re-run open's guessing chain — the burst resolved all N targets at pre-flight, and re-resolution inside each window could diverge if state changed mid-burst. The exec target keeps exact semantics.
+
+### Options Considered
+
+**A. Keep `attach` as a hidden command** (proposed)
+- Pros: serves the spawn exec target; **free back-compat** — every existing `portal attach foo` script keeps working with zero alias machinery; exact semantics preserved verbatim.
+- Cons: one more (hidden) command in the tree.
+
+**B. Fold into open flags** (`open --session <name> --spawn-ack …`)
+- Pros: smallest command tree.
+- Cons: back-compat for `portal attach` then needs a separate alias shim anyway; `--spawn-ack` pollutes open's flag surface.
+
+### Journey / Decision
+
+(exploring — proposal on the table: public exactness lives on `open --session`; `attach` survives as hidden plumbing serving spawn-exec + back-compat)
 
 ---
 
@@ -175,15 +241,17 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 
 ### Open Threads
 
-- Verb naming — perspectives in flight.
-- Verb B contract fine print: universal resolution for its args; absorb-the-terminal (today's net-N) vs stay-put; where `--detect` lives.
-- Where the picker sits (verb A no-args vs bare `portal`).
-- Utility command audit; back-compat/deprecation story.
+- attach disposition — proposal on table (hidden command), awaiting confirmation.
+- `--detect`'s new home (spawn verb retiring).
+- Bare `portal` (no subcommand) behaviour — related to but distinct from the settled picker placement.
+- Stay-put multi-open flag — deliberately deferred scope.
+- Utility command audit; back-compat/deprecation story (synthesis T4 — alias lifecycle — feeds this).
+- Background review findings (5 gaps, 2 questions) queued for surfacing at breaks.
 
 ### Current State
 
-- Decided: outcome-split mental model, attach → plumbing, spawn-op stays public, universal target resolution.
-- Exploring: verb naming (perspective agents dispatched).
+- Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags, picker at no-args); `open` name kept on portal-metaphor semantic grounds; `spawn` retired; attach → plumbing.
+- Exploring: attach's exact disposition.
 
 ## Triage
 
