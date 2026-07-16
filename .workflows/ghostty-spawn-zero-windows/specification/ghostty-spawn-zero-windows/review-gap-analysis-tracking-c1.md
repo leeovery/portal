@@ -46,8 +46,8 @@ This mismatches the fix's stated purpose. The Problem paragraph frames the WARN 
 **Proposed Addition**:
 State explicitly whether `AckTimeout` windows whose adapter `Outcome` is `OutcomeSuccess` are intended to WARN (and accept that `detail` will be the success string), or whether the WARN is restricted to adapter open-failures (`OutcomeSpawnFailed`) — and adjust the condition wording and the Rider #1 test matrix to match. If ack-timeout is intended to WARN, add a sentence clarifying that `detail` for that sub-case is the ack outcome, not an osascript error.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolved by keeping the WARN across BOTH non-permission failure modes (`AckFailed` open-failure and `AckTimeout`-after-`OutcomeSuccess`), keyed by the `ack` attr — restricting to open-failures would re-introduce the invisibility gap. Added a clarifying paragraph to Fix 2 and pinned the `AckTimeout`-after-Success case in the Rider #1 test matrix.
 
 ---
 

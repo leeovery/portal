@@ -60,6 +60,8 @@ Everything downstream of the template is correct and stays unchanged: `ghosttyOp
 - A window that **failed** (`!r.Confirmed()`, i.e. `r.Ack` is `AckTimeout` or `AckFailed`) **and** whose `r.Result.Outcome` is **not** `OutcomePermissionRequired` → emit at **`WARN`** with a distinct message **`"external window failed"`**, carrying the existing closed attrs `session`, `ack`, `detail`.
 - Every other window — a **confirmed** window, or the **permission-required** window (whose detail is already carried by the dedicated `permission required — nothing self-attached` INFO event) → emit at **`DEBUG`** with the existing message `"external window"`, attrs unchanged.
 
+The failed set deliberately spans **both** non-permission failure modes — `AckFailed` (the adapter reported no window opened: `OutcomeSpawnFailed`, `detail` = the osascript error — the observed bug) and `AckTimeout` (the adapter opened the window `OutcomeSuccess` but its token never arrived within budget: `detail` = the benign success string). Both are genuine window failures the operator must see at INFO, and the **`ack` attr distinguishes the mode** (`ack=failed` vs `ack=timeout`), so the record stays honest even when `detail` is a success string. Restricting the WARN to open-failures (`OutcomeSpawnFailed`) only would re-introduce the exact invisibility gap this fix closes — a batch whose windows open but whose acks never land would show `opened 0/N` at INFO with no WARN explaining why.
+
 Rationale for the exclusions:
 - **Permission window excluded** so it does not double-report — `LogPermission` (INFO) is the single authority for the permission case, and the CLI's permission arm calls `LogWindowResults` before it.
 - **Distinct message string** (`"external window failed"`) rather than reusing `"external window"` at a higher level, so the failure is greppable and the same message string never appears at two levels.
@@ -152,7 +154,7 @@ Compile-only validation is **insufficient** — it proves the script parses, not
 
 **Automated tests (added/updated in lockstep with the fixes):**
 - **Prevention compile-check** (Fix 4): the new `ghosttycompile`-tagged test compiles `ghosttyOpenScript(...)` output via `osacompile` and asserts a zero exit; skips cleanly when not macOS / Ghostty absent.
-- **Rider #1** (`logemit` / `logtest.Sink`): assert a **failed, non-permission** `WindowResult` emits `external window failed` at **WARN** carrying `session`/`ack`/`detail`; a **confirmed** window emits `external window` at **DEBUG**; and a **permission-required** window does **not** emit the WARN (its detail is carried by the permission INFO event).
+- **Rider #1** (`logemit` / `logtest.Sink`): assert an **`AckFailed` (open-failure)** window emits `external window failed` at **WARN** carrying `session`/`ack=failed`/`detail`; an **`AckTimeout`-after-`OutcomeSuccess`** window also emits `external window failed` at **WARN** carrying `ack=timeout` (and the benign success `detail`); a **confirmed** window emits `external window` at **DEBUG**; and a **permission-required** window does **not** emit the WARN (its detail is carried by the permission INFO event).
 - **Rider #2 parity** (extend the existing `message_test.go` + `burst_partial_failure_test.go`, byte-identical across CLI and picker):
   - Total failure (`othersOpened == false`) renders `… failed to open — nothing opened` with **no** "others left open".
   - Genuine partial (`othersOpened == true`) still renders `… failed to open — others left open`.
