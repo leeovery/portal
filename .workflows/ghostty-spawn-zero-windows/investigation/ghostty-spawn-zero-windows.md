@@ -78,7 +78,7 @@ end tell
 Both statements are invalid against the **actual installed Ghostty 1.3.1 scripting dictionary** (`sdef /Applications/Ghostty.app`, verified this session — 318 lines):
 
 - **No `make` command exists.** The dictionary defines `perform action`, `new surface configuration`, `new window`, `new tab`, `split`, `focus`, `close`, `activate window`, … `count`, `exists`, `quit` — but **no `make`**. Ghostty ships only a *partial* copy of the Standard Suite (`<suite name="Standard Suite">` at line 296 contains only `count`/`exists`/`quit`), so `make` and `with properties` are undefined terminology.
-- **`surface configuration` is a `record-type`, not a class** (`sdef` line 104). You cannot `make new` a record. It carries properties `command` (text, line 111) and `wait after command` (boolean, line 116) — exactly the two the code populates — but they belong on a record *literal*, not a `make`d object.
+- **`surface configuration` is a `record-type`, not a class** (`sdef` line 104). You cannot `make new` a record. It carries the properties `command` (text) and `wait after command` (boolean) — exactly the two the code populates — but they belong on a record *literal*, not a `make`d object.
 - **`new window` takes a `with configuration` parameter** of type `surface configuration` (`sdef` line 167-168), NOT `with properties {configuration:…}`.
 
 The correct, minimal single-statement form (record literal coerced to the `with configuration` param):
