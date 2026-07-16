@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (8 subtopics — 4 decided · 1 exploring · 3 pending)
+  Discussion Map — CLI Verb Surface Redesign (10 subtopics — 5 decided · 2 exploring · 3 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -56,7 +56,10 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  └─ ○ Where the picker sits [pending]
   ├─ ✓ Input domain legibility (universal target resolution) [decided]
   ├─ ◐ Verb naming (keep incumbents vs rename) [exploring]
-  ├─ ○ Verb B contract (arg resolution, absorb vs stay-put, --detect home) [pending]
+  ├─ ◐ Verb B contract [exploring]
+  │  ├─ ✓ Arg resolution (universal, atomic pre-flight, create-on-miss) [decided]
+  │  ├─ ○ Absorb vs stay-put [pending]
+  │  └─ ○ --detect home [pending]
   ├─ ○ Utility command audit (kill, list, hooks, clean, state, alias, init) [pending]
   └─ ○ Back-compat & deprecation story (aliases, muscle memory, scripts) [pending]
 
@@ -137,6 +140,28 @@ User: "i dont know tbh" — genuine fork. Perspective agents dispatched (Formal 
 ### Decision
 
 (pending)
+
+---
+
+## Verb B Contract
+
+### Context
+
+Verb B (currently `spawn`) inherited a contract designed for the picker burst: exact session names only, `has-session` pre-flight with atomic abort, spawn N−1 external windows then self-attach the trigger terminal to the Nth (net N, never N+1), `--detect` diagnostic riding on the command. Going public-by-design (the scriptability decision) raises which parts of that contract should change.
+
+### Arg Resolution (decided)
+
+**Verb B's args get the same universal resolution as verb A** — exact session match → path → alias → zoxide, including create-on-miss for directory-shaped targets with no session. User's framing: "same precedence/ordering — any reason not to?" Two consequences examined and accepted:
+
+- **The all-or-nothing gate survives intact.** Resolution is read-only, so all N args resolve atomically *before* anything is created or opened; "any target unresolvable ⇒ nothing opens" replaces the `has-session` string check. Same abort semantics, better inputs.
+- **Guess-risk enters bursts.** A typo that zoxide-matches an unrelated dir opens a wrong window (and creates a session for it). Recoverable via `kill`; identical risk profile to verb A today — no new failure class.
+
+Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api blog infra`) shouldn't care whether restore already made the sessions; "exact names only" was another instance of the input-domain split the mental-model decision killed. Post-resolution partial-failure semantics stay leave-what-opened, as today.
+
+### Open
+
+- **Absorb vs stay-put** — today the trigger terminal always becomes one of the N (net-N rule, inherited from the picker where the leftover picker window would be junk). From a shell, "open windows but leave me here" is inexpressible; that headless mode was deferred (not rejected) in restore-host-terminal-windows.
+- **`--detect` home** — a diagnostic dry-run currently riding on the spawn command.
 
 ---
 
