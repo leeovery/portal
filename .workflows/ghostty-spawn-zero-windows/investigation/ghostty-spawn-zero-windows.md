@@ -158,7 +158,49 @@ end tell
 
 ## Fix Direction
 
-_(to be filled during Findings Review & Fix Discussion)_
+### Chosen Approach
+
+Three coordinated changes, all in `internal/spawn` (+ its picker/CLI seams), plus a prevention guard:
+
+1. **Primary — correct the Ghostty AppleScript template** (`internal/spawn/ghostty.go`). Replace the invalid two-statement `make new … with properties {…}` form with the single-statement, sdef-correct form:
+   ```applescript
+   tell application "Ghostty"
+       new window with configuration {command:"%s", wait after command:true}
+   end tell
+   ```
+   The `surface configuration` record literal coerces directly to `new window`'s `with configuration` parameter — no `make`, no `with properties`. Correct the false "validated (Ghostty 1.3.1)" comment. Re-verify the `ghosttyEmbed` escaping holds under the relocated `%s` payload (same double-quoted string context; expected to be unchanged).
+
+2. **Rider #1 — surface failure reason at WARN** (`internal/spawn/logemit.go`). Raise the per-window failure `detail` from DEBUG to WARN so the osascript error is visible at production-default INFO. This is a **spec amendment** (the `spawn` log catalog is spec-governed); the exact event shape/level wording is pinned at the spec phase.
+
+3. **Rider #2 — honest total-failure banner** (`internal/spawn/message.go`, consumed by `internal/tui/burst_partial_failure.go` + `cmd/spawn.go`). Make the "— others left open" suffix conditional on `opened > 0`; on total failure (`opened = 0`) render honest copy (e.g. "…failed to open — nothing opened"). **Golden-spec-governed + parity-tested** across CLI and picker; exact wording pinned at spec.
+
+4. **Prevention — compile-check regression guard.** Add a lightweight test that compiles the emitted AppleScript (via `osacompile`/osascript compile, no window opened) when Ghostty is present on macOS. It cannot run in a hermetic/CI lane (needs a real Mac + Ghostty) but would have caught *this exact* template regression automatically — the manual-only gate is precisely what let it ship.
+
+**Deciding factor:** the primary form is the researched-and-recorded API (restore-host-terminal-windows deep-dive 001) and was compile-validated this session, so it is the correct single fix, not one of several candidates. The riders are the two same-diagnosis defects that made the bug hard to see and hard to trust; both are cheap and directly reduce recurrence/mis-diagnosis risk. The prevention guard (option b) was chosen over process-discipline-only (option a) because the failed guard was process discipline.
+
+### Options Explored
+
+- **Primary template form** — the corrected `new window with configuration {…}` is the only viable form (validated against the installed sdef; the broken form has no valid API to salvage). No real alternatives.
+- **Prevention (a) manual test + discipline** — rejected: it is the same guard that already failed once (a `//go:build manual` test nobody ran).
+- **Prevention (b) compile-check guard** — chosen: automatically catches template terminology regressions; accepted limitation that it is macOS+Ghostty-gated, not hermetic.
+- **Rider #1 level** — WARN chosen over leaving at DEBUG (invisible when it matters) or ERROR (a per-window spawn failure is a recoverable, leave-what-opened condition, not process-fatal). Per-window-WARN vs distinct-WARN-event is a spec-phase shape decision.
+
+### Discussion
+
+User confirmed the findings and agreed the fix direction in one pass. The genuine decision raised — how to prevent recurrence — was resolved in favour of the compile-check guard (b) on the reasoning that the root "why it shipped" is a guard that only runs when someone remembers to run it. Two wording-level decisions (rider #1 log event shape/level, rider #2 total-failure copy) are deliberately left to the spec phase because both touch spec-governed vocabularies (the closed `spawn` log catalog; the golden parity-tested message copy) — the *direction* is decided here; the exact strings are pinned in the spec.
+
+### Testing Recommendations
+
+- **Mandatory live validation (load-bearing).** Run `go test -tags manual -run TestManual_OpenWindow_OpensRealGhosttyWindow ./internal/spawn/` on the live Mac inside Ghostty, then a real 3-session multi-select burst confirming `opened 3/3` and acks landing. Compile-only validation is insufficient — it proves the script parses, not that a window opens and runs the command. The fix is not "done" until this passes.
+- **New compile-check regression test** (prevention item 4) exercising `ghosttyOpenScript(...)` output through `osacompile`, asserting a zero exit (macOS+Ghostty-gated build tag).
+- **Rider #1** — a unit test asserting a failed `WindowResult` emits the `detail` at WARN (using the existing `logtest.Sink`).
+- **Rider #2** — extend the existing parity tests: assert the total-failure (`opened = 0`) message across both CLI and picker renders the honest copy (no "others left open"), and that the genuine partial case (`opened > 0`) still renders the suffix.
+
+### Risk Assessment
+
+- **Fix complexity:** Low. The primary is a template string swap; the riders are a log-level change and a conditional-copy change.
+- **Regression risk:** Low for the primary (the broken form opens nothing, so any working form is strictly better) and Low–Medium for the riders (both touch spec-governed surfaces with existing parity/log tests that must be updated in lockstep — the risk is spec-conformance drift, not runtime breakage).
+- **Recommended approach:** Regular release. Not a hotfix candidate in the urgency sense (the feature is new and was never functional), but it is the whole point of a shipped feature, so it should land promptly with the mandatory live validation gating the merge.
 
 ---
 
