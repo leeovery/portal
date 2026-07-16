@@ -70,4 +70,35 @@ Rationale for the exclusions:
 
 ---
 
+## Fix 3 (Rider #2) — Honest total-failure banner copy
+
+**Files:** `internal/spawn/message.go` (`PartialFailureMessage`, the single renderer), consumed by `cmd/spawn.go` (CLI exit-1 error) and `internal/tui/burst_partial_failure.go` (`burstPartialFailureFlash`, the picker flash). Golden-spec-governed copy; parity-tested across both surfaces.
+
+**Problem.** `PartialFailureMessage(failed []string)` hard-codes the suffix `— others left open`:
+
+```
+'s2' failed to open — others left open
+```
+
+On a **total** failure (every external window failed, nothing confirmed) the "others left open" clause is false — nothing opened, and the trigger self-attach is always skipped on partial failure. The observed banner `'portal-EfVRkk', 'portal-agent-first-3' failed to open — others left open` was emitted with `opened=0`.
+
+**Change.** Make the suffix conditional on whether any **other external window** actually opened. The renderer gains a signal for "did any other window open"; both callers derive it from the shared `spawn.PartitionResults` chokepoint (`othersOpened = len(confirmed) > 0`, confirmed = external windows whose ack landed). The trigger self-attach is never in the confirmed set and is skipped on partial failure, so it never counts as an "other".
+
+Exact copy (single-sourced in `PartialFailureMessage`):
+
+| Condition | Message |
+|-----------|---------|
+| At least one other external window opened (`othersOpened == true`) | `'s2' failed to open — others left open` (unchanged; single and multiple names) |
+| No other external window opened — total failure (`othersOpened == false`) | `'s2', 's3' failed to open — nothing opened` |
+
+The `— nothing opened` suffix mirrors the established spawn copy in `GoneMessage` and `UnsupportedNoopMessage`, keeping the spawn message vocabulary consistent. As before: no count-aware verb ("failed to open" agrees with one or several names), no `spawn:` prefix (the CLI adds it), and no ⚠ glyph (the notice band prepends it).
+
+**Parity & single-source.** The two callers must pass the correct `othersOpened` signal:
+- **CLI** (`cmd/spawn.go`): already computes `PartitionResults(results)` for `failed`; pass `len(confirmed) > 0`.
+- **Picker** (`burst_partial_failure.go` → `burstPartialFailureFlash`): already has `results`; compute `confirmed` from `PartitionResults` and pass `len(confirmed) > 0`.
+
+The permission-wall branch (returns the driver Guidance) and the degenerate empty-`failed` branch (returns `""` so no band renders) are **unchanged** — only the final `PartialFailureMessage(failed …)` call is affected. The copy stays single-sourced in `message.go` so a future edit lands in one place, and the CLI/picker parity tests assert byte-identical output.
+
+---
+
 ## Working Notes
