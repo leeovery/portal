@@ -49,4 +49,25 @@ Everything downstream of the template is correct and stays unchanged: `ghosttyOp
 
 ---
 
+## Fix 2 (Rider #1) — Surface per-window failure reason at WARN
+
+**File:** `internal/spawn/logemit.go` (`LogWindowResults`). Spec amendment to the closed `spawn` log catalog.
+
+**Problem.** `LogWindowResults` emits every external-window record — success *and* failure — at `DEBUG` (message `"external window"`, attrs `session`/`ack`/`detail`). At production-default INFO the batch summary `opened 0/N` is visible but the per-window `detail` (the osascript error text — the actual diagnosis) is not. The root cause could only be found by reproducing osascript outside portal.
+
+**Change.** In the per-window loop, split by outcome:
+
+- A window that **failed** (`!r.Confirmed()`, i.e. `r.Ack` is `AckTimeout` or `AckFailed`) **and** whose `r.Result.Outcome` is **not** `OutcomePermissionRequired` → emit at **`WARN`** with a distinct message **`"external window failed"`**, carrying the existing closed attrs `session`, `ack`, `detail`.
+- Every other window — a **confirmed** window, or the **permission-required** window (whose detail is already carried by the dedicated `permission required — nothing self-attached` INFO event) → emit at **`DEBUG`** with the existing message `"external window"`, attrs unchanged.
+
+Rationale for the exclusions:
+- **Permission window excluded** so it does not double-report — `LogPermission` (INFO) is the single authority for the permission case, and the CLI's permission arm calls `LogWindowResults` before it.
+- **Distinct message string** (`"external window failed"`) rather than reusing `"external window"` at a higher level, so the failure is greppable and the same message string never appears at two levels.
+
+**Catalog amendment (spec-governed).** The closed `spawn` component gains **one** new message string, `external window failed`, at **WARN**. It introduces **no new attr keys** — `session`, `ack`, `detail` are all already in the closed `spawn` vocabulary. The INFO batch summary (`opened N/N`) and all other spawn events are unchanged; the WARN is additive (a total-failure batch now logs both `opened 0/N` at INFO and one `external window failed` WARN per non-permission failed window).
+
+**Parity.** Both surfaces emit per-window records through this same helper (picker via `LogBatchSummary` → `LogWindowResults`; CLI via `logSpawnSummary`/its permission arm → `LogWindowResults`), so the WARN behaviour is identical across CLI and picker with no per-caller divergence beyond the pre-existing permission-arm asymmetry.
+
+---
+
 ## Working Notes
