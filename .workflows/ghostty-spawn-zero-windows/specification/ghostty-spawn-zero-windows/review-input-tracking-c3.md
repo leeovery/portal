@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-16
 cycle: 3
 phase: Input Review
@@ -28,9 +28,9 @@ The spec's Fix 4 never references that the observed `-2741` was produced via `os
 > **Assumption to confirm (during live-Mac implementation).** The guard assumes `osacompile` resolves the `tell application "Ghostty"` terminology from the installed dictionary **without requiring Ghostty to be running and without launching it** (no window, no side effect). This is the same class of scripting-tool assumption that caused the original bug, so it must **not** be treated as settled: because the test is macOS+Ghostty-gated it is authored and first run on a live Mac, where the behaviour is confirmed directly. …
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+Rewrote the "Assumption to confirm" note to credit the investigation's already-demonstrated `osacompile` reproduction (terminology resolution + no-window property evidenced, not assumed), narrow the genuinely-open question to Ghostty's *running* state, and drop the overstated "same class of assumption that caused the original bug" framing. Fallbacks (require/ensure running, or `t.Skip` on unresolved terminology) preserved.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Verified against investigation lines 96-101 — osacompile against installed Ghostty 1.3.1 produced the `-2741` terminology error, so the resolution/no-window half is evidenced; only running-state remains for live confirmation.
 
 ---
