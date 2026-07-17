@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (29 subtopics — 29 decided)
+  Discussion Map — CLI Verb Surface Redesign (30 subtopics — 30 decided)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -78,6 +78,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  ├─ ✓ uninstall (replaces state cleanup; runtime+state, keeps config) [decided]
   │  ├─ ✓ Maintenance/diagnostics reorg (clean deleted → doctor + --fix; project-prune automated) [decided]
   │  ├─ ✓ state namespace fully hidden (entry points, not removable) [decided]
+  │  ├─ ✓ Bootstrap exemption for doctor & uninstall (skipTmuxCheck) [decided]
   │  └─ ✓ Remaining verbs (keep as-is; hooks → hook + hooks alias) [decided]
   └─ ✓ Back-compat & deprecation story (none — deliberate reversal of the seed) [decided]
 
@@ -484,6 +485,22 @@ A separate process can only be handed a command line, never a Go function (same 
 **Keep the `state` prefix** — the hook definitions match those command strings by substring for idempotency (`notifyCommand`, `commitNowSubstring`, `migrateRenameSubstring`, `PortalDaemonArgvPattern`, …), so renaming churns internal matching for zero user benefit.
 
 Confidence: high.
+
+### Bootstrap Exemption (`doctor` & `uninstall`) — review F3
+
+#### Context
+
+`PersistentPreRunE` runs the full bootstrap (EnsureServer → RegisterHooks → EnsureSaver → Restore → …) before most commands, but `skipTmuxCheck` (`cmd/root.go:38`) exempts a set including `state`, whose comment already documents the exact hazard: "status/cleanup inspect or tear down machinery the bootstrap sets up — running bootstrap first would be circular." The final review (F3) caught that `doctor`/`uninstall`, as the renamed successors to `state status`/`state cleanup`, inherit this and it was never stated.
+
+#### Decision
+
+**`doctor` and `uninstall` join `skipTmuxCheck` (bootstrap-exempt).**
+
+- **`doctor` must be exempt** — otherwise bootstrap re-registers hooks and respawns the daemon one step *before* `doctor` reads health, so a read-only health check would heal its own subject and always report green (self-defeating). Exempt, it observes raw state, starts nothing (a down server is reported honestly, not silently started), heals nothing.
+- **`uninstall` must be exempt** — otherwise it would EnsureServer / RegisterHooks / EnsureSaver / Restore and then immediately tear all of it down (circular, wasteful, racy).
+- `clean` **leaves** the exempt set (deleted); `state` stays; the `hooks` → `hook` rename keeps the exemption (`skipTmuxCheck` keys on `c.Name()`, cobra's canonical name, so the `hooks` alias is covered).
+
+This applies the existing, code-documented exemption to the renamed successors — no new pattern. Confidence: high.
 
 ---
 
