@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-07-17
+
+🐛 Fixed
+
+- Spawning a session in Ghostty no longer opens zero windows — the AppleScript now uses the terminal's actual scripting API.
+- Session names or paths containing spaces are no longer shredded into separate words when spawning a new terminal window.
+- The "failed to open" message after a spawn failure now says "nothing opened" when no windows opened at all, instead of incorrectly claiming others were left open.
+- Failed spawn windows are now logged as warnings instead of being silently buried at debug level.
+
 ## [0.9.1] - 2026-07-15
 
 ✨ Added
