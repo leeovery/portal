@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (29 subtopics — 27 decided · 1 exploring · 2 pending)
+  Discussion Map — CLI Verb Surface Redesign (29 subtopics — 28 decided · 1 exploring · 1 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -71,7 +71,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ◐ Open invocation grammar (flag/target cross-products, review 002) [exploring]
   │  ├─ ✓ Target-set composition (union of positionals + pins) [decided]
   │  ├─ ✓ Self-target / duplicate absorb (dedupe; prefer current session) [decided]
-  │  ├─ ○ Burst exec-argv & mint responsibility [pending]
+  │  ├─ ✓ Burst exec-argv & mint responsibility (window = open --path/--session --ack) [decided]
   │  └─ ○ Mint-only flags with no target [pending]
   ├─ ✓ Completion UX (session names on positional + -s; paths to shell) [decided]
   ├─ ✓ Utility command audit [decided]
@@ -351,6 +351,18 @@ The absorb/net-N rule ("N surfaces, your terminal is one of them") gains two cla
    - Current session is **not** a target → the terminal switches in place to the **first target in argv/resolved order** (deterministic — replaces the previously-unspecified "the Nth"); the rest open as windows.
 
 "Your terminal is one of them" holds in every case. The inside/outside-tmux split only selects the connector for the in-place surface (`switch-client` inside, `exec attach` outside); the N−1 external windows always run the spawned `portal open …`. Confidence: high.
+
+### Burst exec-argv & mint responsibility (F4)
+
+Each spawned window runs the **same `open` grammar a human would** — one pinned target + the hidden `--ack` — no bespoke burst-only path:
+
+1. **Window argv, per surface:**
+   - Attach target (session / glob / `-s`) → `portal open --session <name> --ack <batch>:<token>`.
+   - Mint target (path / alias / zoxide / `-p` / `-z` / `-a`) → the parent **reduces it to a literal existing directory at resolve time**, then bakes `portal open --path <literal-dir> --ack <batch>:<token>`. Alias/zoxide queries never travel to the window (they could re-resolve differently mid-burst); only the resolved literal dir does, and `--path` cannot diverge. This is why "resolution must not re-run inside the window" holds without a session existing yet.
+2. **Minting happens in each window, not the parent — no pre-minting.** So the atomic guarantee is precisely the **read-only resolve** ("any target unresolvable ⇒ nothing opens, nothing created"). Once resolve passes, each surface opens/mints itself at exec time under **leave-what-opened**; a window that never comes up never mints, so there are no orphaned detached sessions. This is the exact strain the review flagged — resolved by scoping atomicity to the resolve phase and writes to per-surface.
+3. **Dedupe key (closes an F2 loose end):** attach targets dedupe by existing-session identity; mint targets dedupe by **resolved directory** — so `open ~/a ~/a` mints one session at `~/a`, not two.
+
+The payoff: a spawned window is just `portal open` with a pinned single target + `--ack`, running the identical grammar as an interactive invocation — no special code path. Confidence: high.
 
 ---
 
