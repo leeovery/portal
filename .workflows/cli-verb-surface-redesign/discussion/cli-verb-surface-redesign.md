@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (19 subtopics — 17 decided · 2 pending)
+  Discussion Map — CLI Verb Surface Redesign (22 subtopics — 18 decided · 2 exploring · 2 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -67,7 +67,10 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
   ├─ ✓ Resolution scope (universal resolution is open's grammar, not the CLI's) [decided]
   ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
-  ├─ ○ Utility command audit (list, hooks, clean, state, alias, init) [pending]
+  ├─ ◐ Utility command audit [exploring]
+  │  ├─ ✓ uninstall (replaces state cleanup; runtime+state, keeps config) [decided]
+  │  ├─ ◐ Maintenance/diagnostics reorg (clean smell → doctor? namespaces?) [exploring]
+  │  └─ ○ Remaining verbs (list/alias/hooks/init grammar; state status tier) [pending]
   └─ ✓ Back-compat & deprecation story (none — deliberate reversal of the seed) [decided]
 
 ---
@@ -315,6 +318,42 @@ Confidence: high.
 
 ---
 
+## Utility Command Audit
+
+Framing: per command, is it the right **name**, **shape**, and **tier** (public / hidden)? The `state`/`clean` cleanup pair drove the discussion; the rest (`list`, `alias`, `hooks`, `init`, `version`, `completion`) provisionally keep as-is — one parked grammar nit (`alias` singular vs `hooks` plural).
+
+A load-bearing fact established up front: **nothing internal calls `clean` or `state cleanup`.** The daemon does its own stale-hook cleanup in-process on an idle cadence, and bootstrap self-heals the daemon (orphan sweep + `EnsureSaver`). So neither is plumbing the machinery invokes — both are purely manual backstops to work already done automatically. "Internal only" would just mean *hidden*, not *wired in*.
+
+### `uninstall` (replaces `state cleanup`)
+
+#### Context
+
+`state cleanup` tore down Portal's machinery: kill `_portal-saver` (daemon SIGHUP flush), unregister global hooks, and `--purge` to delete the state dir. Two problems: (1) the meaningful action (purge) was hidden behind a flag — the exact inconsistency this redesign kills; (2) code-verified, the non-purge teardown **self-heals** — bootstrap re-registers hooks and respawns the daemon on the next tmux-touching command, so the teardown lasts only until the next `x`. Even `--purge` is transient while the tmux server runs: the daemon recaptures every live session into a fresh `sessions.json` on its next tick (the live server is the source of truth; the file is its mirror). Purge only permanently loses data when the server is *also* gone (post-reboot / `kill-server`).
+
+#### Decision
+
+Replace `state cleanup` with a public **`portal uninstall`** — the command *is* the teardown, nothing hidden behind a flag.
+
+- **Removes:** the `_portal-saver` daemon, Portal's global tmux hooks, and the on-disk **state dir** (`sessions.json`, logs, `daemon.pid`) — everything that persists across a tmux server reboot and would otherwise resurrect.
+- **Keeps config** (`projects.json`, `aliases`, `hooks.json`, `prefs.json`, `terminals.json`) — standard uninstall etiquette; the user removes those themselves if they want, and a reinstall picks up where they left off.
+- **Self-heal is documented, not fought:** if the user doesn't restart the tmux server and re-invokes Portal, it reinstalls itself (daemon + hooks + state dir return). Considered a *feature*; the command's output/docs say so, and note that removing the binary is the user's package-manager step.
+
+Confidence: high.
+
+### Maintenance & Diagnostics Reorg (`clean` → ?)
+
+#### Context
+
+`portal clean` bundles three unrelated jobs behind one global verb + a `--logs` flag: prune stale projects (projects.json dirs gone), prune stale hooks (hooks.json dead panes), force the log retention sweep. The **smell is the grab-bag**, not the functionality — one verb doing three things with a flag toggling a fourth. Value audit: stale-hook prune is redundant (daemon does it), the log sweep is redundant (handler retention-sweeps per day; manual `rm` covers the rest), and stale-project prune is the only unique action — harmless cruft. So `clean`'s unique value is near-nil as it stands.
+
+#### Under discussion
+
+User: not against the functionality, against the organization — "hiding all this stuff inside one global clean command is the smell." Wants either explicit namespaced commands (`portal logs rotate|clean`, a prune under `hooks`, etc.) or a considered **`portal doctor`** (previously floated). Key distinction raised: **diagnosis vs action** — `doctor` *reports* health (daemon up? hooks registered? saving working? stale entries?) and would subsume the `state status` diagnostic; the cleanup *actions* are separate and mostly redundant with automation. Open options: (a) drop `clean` wholesale (automation + manual `rm` suffice); (b) re-home each action to its data's namespace; (c) anchor on a read-only `doctor` health command, with rare fixes riding `doctor --fix` or namespaced commands. Not decided — "let's not be hasty."
+
+(no decision yet)
+
+---
+
 ## Back-Compat & Deprecation Story
 
 ### Context
@@ -376,8 +415,9 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 ### Current State
 
 - Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
-- Decided: kill stays single + exact (no globs, no CLI prompt).
-- Pending: utility command audit (list, hooks, clean, state, alias, init); --detect home.
+- Decided: kill stays single + exact; `uninstall` replaces `state cleanup` (public teardown, keeps config, self-heal documented).
+- Exploring: maintenance/diagnostics reorg (clean grab-bag → doctor? namespaces?).
+- Pending: remaining verbs (list/alias/hooks/init grammar; state status tier); --detect home.
 
 ## Triage
 
