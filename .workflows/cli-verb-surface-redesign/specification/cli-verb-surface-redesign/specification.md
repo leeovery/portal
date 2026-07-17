@@ -206,4 +206,20 @@ Rejected: sessions+directories merged into one slot (noisy); nothing at all (los
 
 ---
 
+## `attach` — Retired
+
+`portal attach` is **deleted outright** — not aliased, not deprecated-with-warning. Every current `attach` invocation has an `open` equivalent (`open` accepts session names; the exact/no-guessing path is `open --session`).
+
+- `attach`'s two former jobs are absorbed: (1) exact/no-guessing attach for scripts → `open --session <name>`; (2) the exec target of every spawned host window → `portal open --session <name> --ack <batch>:<token>`.
+- **Both `open` and the former `attach` already call the same internal Go functions in-process** (`connect()` = exec `tmux attach-session` outside tmux / `switch-client` inside); the command form existed only for cross-process callers. Nothing is lost by deleting the public command.
+- **The bootstrap fast-path is command-agnostic** — `BootstrappedLatchSatisfied` is consulted once in `PersistentPreRunE` for any bootstrap-needing command (`open` included), gated on the `@portal-bootstrapped` version-stamped latch. So `open` takes the same abridged fast-path `attach` did; there is no bootstrap reason to keep `attach`.
+
+### Spawned-window contract (pinned `open`)
+
+- Spawned host windows exec `portal open --session <name> --ack <batch>:<token>`.
+- **Pinned-domain hard-fail:** `--session`/`--path` never fall back to the TUI picker (a spawned window or script must not pop a TUI). `--session` never mints; `--path` mints per Axiom 2.
+- **Burst determinism preserved:** a session that vanished mid-burst ⇒ pinned `open` hard-fails ⇒ no ack written ⇒ the burst classifies that window failed, exactly as today.
+
+---
+
 ## Working Notes
