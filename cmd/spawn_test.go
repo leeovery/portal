@@ -1015,7 +1015,7 @@ func TestSpawnPartialFailure(t *testing.T) {
 		// its "spawn: " prefix. Asserting through the shared renderer proves the CLI
 		// body IS the picker's body (spec: "same one-line message the picker would
 		// show") and cannot drift.
-		want := "spawn: " + spawn.PartialFailureMessage([]string{"s2"})
+		want := "spawn: " + spawn.PartialFailureMessage([]string{"s2"}, true)
 		if err.Error() != want {
 			t.Errorf("message = %q, want %q", err.Error(), want)
 		}
@@ -1045,7 +1045,7 @@ func TestSpawnPartialFailure(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected a partial-failure error naming both failed windows, got nil")
 		}
-		want := "spawn: " + spawn.PartialFailureMessage([]string{"s2", "s3"})
+		want := "spawn: " + spawn.PartialFailureMessage([]string{"s2", "s3"}, true)
 		if err.Error() != want {
 			t.Errorf("message = %q, want %q (spawn-failed and timeout both named, in list order)", err.Error(), want)
 		}

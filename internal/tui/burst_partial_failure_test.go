@@ -139,7 +139,7 @@ func TestBurstPartialFailure_LeavesOpenedWindowsAndSkipsSelfAttach(t *testing.T)
 	// spawn.PartialFailureMessage (the CLI carries the same body under its "spawn:"
 	// prefix), so the spec's "same one-line message" parity is structural. The ⚠ is
 	// added by the warning band, not this body.
-	if want := spawn.PartialFailureMessage([]string{"alpha"}); rm.flashText != want {
+	if want := spawn.PartialFailureMessage([]string{"alpha"}, true); rm.flashText != want {
 		t.Errorf("flashText = %q, want %q (names the failed window; ⚠ added by the warning band)", rm.flashText, want)
 	}
 	if rm.flashKind != flashWarning {
@@ -242,7 +242,7 @@ func TestBurstPartialFailure_AckTimeoutAndSpawnFailedClassifyIdentically(t *test
 	if !rm.IsSessionSelected("charlie") {
 		t.Error("the spawn-failed charlie must classify as failed and stay marked")
 	}
-	if want := spawn.PartialFailureMessage([]string{"bravo", "charlie"}); rm.flashText != want {
+	if want := spawn.PartialFailureMessage([]string{"bravo", "charlie"}, true); rm.flashText != want {
 		t.Errorf("flashText = %q, want %q (both failed windows named)", rm.flashText, want)
 	}
 }
@@ -363,9 +363,14 @@ func TestBurstPartialFailure_UnattemptedPostPermissionStayMarked(t *testing.T) {
 
 // TestBurstPartialFailure_StaysInMultiSelectMode is the focused mode-preservation
 // guard: a partial failure never exits multi-select mode and never self-attaches.
+// It is also the total-failure parity case — external = [alpha] alone fails, nothing
+// else confirms — so the flash body must render "— nothing opened" byte-identically
+// with the CLI's total-failure copy (spawn.PartialFailureMessage(…, false)); the
+// skipped trigger bravo is not an external result, so it never counts as an "other".
 func TestBurstPartialFailure_StaysInMultiSelectMode(t *testing.T) {
 	m := newPendingBurstModel(t, []string{"alpha", "bravo"})
-	// external = [alpha], trigger = bravo. alpha times out → partial failure.
+	// external = [alpha], trigger = bravo. alpha times out with nothing else confirmed
+	// → TOTAL failure (othersOpened == false).
 	msg := spawnCompleteMsg{
 		Batch: "batch-xyz",
 		Results: []spawn.WindowResult{
@@ -389,5 +394,10 @@ func TestBurstPartialFailure_StaysInMultiSelectMode(t *testing.T) {
 	}
 	if !rm.IsSessionSelected("bravo") {
 		t.Error("the trigger bravo must stay marked")
+	}
+	// Total-failure parity: nothing opened, so the picker flash IS the CLI's
+	// total-failure body (spawn.PartialFailureMessage(…, false) = "… — nothing opened").
+	if want := spawn.PartialFailureMessage([]string{"alpha"}, false); rm.flashText != want {
+		t.Errorf("flashText = %q, want %q (total failure → — nothing opened, byte-identical to the CLI)", rm.flashText, want)
 	}
 }

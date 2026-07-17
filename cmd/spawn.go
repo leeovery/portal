@@ -176,7 +176,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	// an ack timeout (AckTimeout). The batch is all-confirmed exactly when failed is
 	// empty. The opened count for the summary is derived inside logSpawnSummary from
 	// the same chokepoint.
-	_, failed := spawn.PartitionResults(results)
+	confirmed, failed := spawn.PartitionResults(results)
 
 	if len(failed) > 0 {
 		// Permission-required is the burst-stop and takes precedence over the
@@ -207,7 +207,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 		// opaque Result.Detail for each failure went only to the DEBUG log (the summary
 		// emits its per-window loop), never the user-facing message below.
 		logSpawnSummary(logger, id, resolution, results, n, false, batch)
-		return fmt.Errorf("spawn: %s", spawn.PartialFailureMessage(failed))
+		return fmt.Errorf("spawn: %s", spawn.PartialFailureMessage(failed, len(confirmed) > 0))
 	}
 
 	// Every external window confirmed: the trigger self-attach is about to occur, so

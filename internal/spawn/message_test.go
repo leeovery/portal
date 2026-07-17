@@ -62,27 +62,43 @@ func TestGoneMessage(t *testing.T) {
 }
 
 func TestPartialFailureMessage(t *testing.T) {
-	t.Run("it renders the bare leave-what-opened body for one failed name", func(t *testing.T) {
+	t.Run("it renders the leave-what-opened body for one failed name when others opened", func(t *testing.T) {
 		const want = "'s2' failed to open — others left open"
-		if got := PartialFailureMessage([]string{"s2"}); got != want {
-			t.Errorf("PartialFailureMessage([s2]) = %q, want %q", got, want)
+		if got := PartialFailureMessage([]string{"s2"}, true); got != want {
+			t.Errorf("PartialFailureMessage([s2], true) = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("it names every failed window in list order for several names", func(t *testing.T) {
+	t.Run("it names every failed window in list order for several names when others opened", func(t *testing.T) {
 		const want = "'s2', 's3' failed to open — others left open"
-		if got := PartialFailureMessage([]string{"s2", "s3"}); got != want {
-			t.Errorf("PartialFailureMessage([s2 s3]) = %q, want %q", got, want)
+		if got := PartialFailureMessage([]string{"s2", "s3"}, true); got != want {
+			t.Errorf("PartialFailureMessage([s2 s3], true) = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("it carries no spawn prefix and no glyph", func(t *testing.T) {
-		got := PartialFailureMessage([]string{"s2"})
-		if strings.HasPrefix(got, "spawn:") {
-			t.Errorf("PartialFailureMessage body = %q, want no \"spawn:\" prefix", got)
+	t.Run("it renders the nothing-opened body for one failed name on total failure", func(t *testing.T) {
+		const want = "'s2' failed to open — nothing opened"
+		if got := PartialFailureMessage([]string{"s2"}, false); got != want {
+			t.Errorf("PartialFailureMessage([s2], false) = %q, want %q", got, want)
 		}
-		if strings.ContainsRune(got, '⚠') {
-			t.Errorf("PartialFailureMessage body = %q, want no ⚠ glyph", got)
+	})
+
+	t.Run("it names every failed window in list order for several names on total failure", func(t *testing.T) {
+		const want = "'s2', 's3' failed to open — nothing opened"
+		if got := PartialFailureMessage([]string{"s2", "s3"}, false); got != want {
+			t.Errorf("PartialFailureMessage([s2 s3], false) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it carries no spawn prefix and no glyph for both variants", func(t *testing.T) {
+		for _, othersOpened := range []bool{true, false} {
+			got := PartialFailureMessage([]string{"s2"}, othersOpened)
+			if strings.HasPrefix(got, "spawn:") {
+				t.Errorf("PartialFailureMessage body = %q, want no \"spawn:\" prefix", got)
+			}
+			if strings.ContainsRune(got, '⚠') {
+				t.Errorf("PartialFailureMessage body = %q, want no ⚠ glyph", got)
+			}
 		}
 	})
 }

@@ -42,17 +42,27 @@ func GoneMessage(names []string) string {
 }
 
 // PartialFailureMessage is the single renderer for the leave-what-opened
-// partial-failure outcome sentence — "'s2' failed to open — others left open"
-// for one name, "'s2', 's3' failed to open — others left open" for several —
+// partial-failure outcome sentence, with a conditional suffix keyed on whether
+// any OTHER external window actually opened. othersOpened == true is the genuine
+// partial — "'s2' failed to open — others left open" for one name, "'s2', 's3'
+// failed to open — others left open" for several. othersOpened == false is a
+// total failure (nothing confirmed, and the trigger self-attach is skipped on
+// any partial) — "'s2' failed to open — nothing opened" / "'s2', 's3' failed to
+// open — nothing opened"; the "— nothing opened" clause mirrors GoneMessage and
+// UnsupportedNoopMessage, keeping the honest no-op wording single-sourced. It is
 // composed from the shared QuoteJoin primitive. Both callers (the CLI's exit-1
-// error and the picker's re-asserted flash) render through it so the spec's
-// "same one-line message the picker would show" contract holds and a copy edit
-// lands in exactly one place. The body needs no count-aware verb: "failed to
-// open" agrees with a single name and with several. The body carries no
-// "spawn:" prefix and no ⚠ glyph: the CLI adds the prefix at its call site and
-// the notice band prepends the glyph via statusGlyph.
-func PartialFailureMessage(failed []string) string {
-	return fmt.Sprintf("%s failed to open — others left open", QuoteJoin(failed))
+// error and the picker's re-asserted flash) render through it — deriving
+// othersOpened as len(confirmed) > 0 from the shared PartitionResults chokepoint
+// — so the spec's "same one-line message the picker would show" contract holds
+// and a copy edit lands in exactly one place. The body needs no count-aware
+// verb: "failed to open" agrees with a single name and with several. The body
+// carries no "spawn:" prefix and no ⚠ glyph: the CLI adds the prefix at its call
+// site and the notice band prepends the glyph via statusGlyph.
+func PartialFailureMessage(failed []string, othersOpened bool) string {
+	if othersOpened {
+		return fmt.Sprintf("%s failed to open — others left open", QuoteJoin(failed))
+	}
+	return fmt.Sprintf("%s failed to open — nothing opened", QuoteJoin(failed))
 }
 
 // UnsupportedNoopMessage is the single renderer for the N≥2 unsupported-terminal

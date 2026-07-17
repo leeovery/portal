@@ -111,5 +111,12 @@ func burstPartialFailureFlash(results []spawn.WindowResult, failed []string) str
 	if len(failed) == 0 {
 		return ""
 	}
-	return spawn.PartialFailureMessage(failed)
+	// Total vs genuine partial: othersOpened is true exactly when some OTHER
+	// external window confirmed. Derive it from the same PartitionResults chokepoint
+	// the CLI uses (cmd/spawn.go), so a total failure renders "— nothing opened" and a
+	// genuine partial renders "— others left open" byte-identically across both paths.
+	// The skipped trigger self-attach is never an external result, so it can never
+	// count as an "other".
+	confirmed, _ := spawn.PartitionResults(results)
+	return spawn.PartialFailureMessage(failed, len(confirmed) > 0)
 }
