@@ -348,4 +348,44 @@ These are deferred future scope, not unresolved decisions — recorded so planni
 
 ---
 
+## Command Surface Summary (final shape)
+
+### Public commands
+
+| Command | Shape | Change from today |
+|---|---|---|
+| `portal open [targets…]` | single public session verb; no-args → picker; flags `-s/-p/-z/-a/-f`, `-e`/`--`; absorb/net-N; hidden `--ack` | **absorbs `attach` + `spawn`**; gains session-name targets, domain pins, multi-target burst; loses TUI-fallback-on-miss |
+| `portal kill <name>` | single + exact | unchanged |
+| `portal list` | list running sessions | unchanged |
+| `portal alias {set,rm,list}` | path aliases | unchanged |
+| `portal hook {set,rm,list}` | resume hooks | **renamed from `hooks`** (`hooks` kept as a silent alias) |
+| `portal doctor [--fix]` | health report; `--fix` repairs | **new** — subsumes `state status`, replaces `clean`, folds in `spawn --detect` |
+| `portal uninstall` | runtime-only teardown | **new** — replaces `state cleanup` |
+| `portal init [shell] [--cmd name]` | shell integration | unchanged |
+| `portal version` | version | unchanged |
+| `portal completion` | cobra built-in | unchanged |
+| bare `portal` | help / usage | unchanged (does not open picker) |
+
+### Removed public commands
+
+| Removed | Replacement |
+|---|---|
+| `portal attach <session>` | `portal open --session <name>` (or bare `open <name>`) |
+| `portal spawn [sessions…]` | `portal open <t1> <t2> …` (multi-target) |
+| `portal spawn --detect` | `portal doctor` (host-terminal line) |
+| `portal clean [--logs]` | `portal doctor --fix` (repairs) + automatic daemon pruning |
+| `portal state status` | `portal doctor` |
+| `portal state cleanup [--purge]` | `portal uninstall` |
+
+### Hidden (invocable plumbing, absent from `--help` / completion)
+
+| Hidden | Invoked by |
+|---|---|
+| `portal open --ack <batch>:<token>` | spawned host windows (burst receipt) |
+| `portal state daemon` | the `_portal-saver` pane |
+| `portal state hydrate` | `respawn-pane -k` per restored pane |
+| `portal state signal-hydrate` / `notify` / `commit-now` / `migrate-rename` | tmux hooks (`run-shell "portal state …"`) |
+
+---
+
 ## Working Notes
