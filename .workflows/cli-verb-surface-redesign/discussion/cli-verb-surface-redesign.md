@@ -75,7 +75,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  └─ ✓ Mint-only command, no target → picker in Projects mode (preserve) [decided]
   ├─ ✓ Completion UX (session names: positional/-s/kill; alias keys: -a; rest to shell) [decided]
   ├─ ✓ Utility command audit [decided]
-  │  ├─ ✓ uninstall (replaces state cleanup; runtime+state, keeps config) [decided]
+  │  ├─ ✓ uninstall (runtime-only, touches no files, fully recoverable) [decided]
   │  ├─ ✓ Maintenance/diagnostics reorg (clean deleted → doctor + --fix; project-prune automated) [decided]
   │  ├─ ✓ state namespace fully hidden (entry points, not removable) [decided]
   │  ├─ ✓ Bootstrap exemption for doctor & uninstall (skipTmuxCheck) [decided]
@@ -431,11 +431,16 @@ A load-bearing fact established up front: **nothing internal calls `clean` or `s
 
 #### Decision
 
-Replace `state cleanup` with a public **`portal uninstall`** — the command *is* the teardown, nothing hidden behind a flag.
+Replace `state cleanup` with a public **`portal uninstall`** that is **runtime-only and fully recoverable** — the command *is* the teardown, nothing hidden behind a flag, and it touches **no files at all**.
 
-- **Removes:** the `_portal-saver` daemon, Portal's global tmux hooks, and the on-disk **state dir** (`sessions.json`, logs, `daemon.pid`) — everything that persists across a tmux server reboot and would otherwise resurrect.
-- **Keeps config** (`projects.json`, `aliases`, `hooks.json`, `prefs.json`, `terminals.json`) — standard uninstall etiquette; the user removes those themselves if they want, and a reinstall picks up where they left off.
-- **Self-heal is documented, not fought:** if the user doesn't restart the tmux server and re-invokes Portal, it reinstalls itself (daemon + hooks + state dir return). Considered a *feature*; the command's output/docs say so, and note that removing the binary is the user's package-manager step.
+- **Removes only Portal's tmux-server footprint:** kills the `_portal-saver` daemon and unregisters the global tmux hooks. This is precisely the part that is *hard to do by hand* (locating the daemon, unregistering the exact hook entries) — which is the real reason the command earns its place.
+- **Touches no filesystem** — the state dir (`sessions.json`, logs) *and* config (`projects.json`, `aliases`, `hooks.json`, `prefs.json`, `terminals.json`) are both left untouched. Nothing irreversible happens.
+- **Prints the completion path:** "Portal's tmux runtime removed. Your saved sessions and config are untouched at `~/.config/portal/`. To remove Portal completely, uninstall the binary and delete that directory." Because `state/` lives *inside* `~/.config/portal/`, one `rm -rf ~/.config/portal` wipes both — a single deliberate act by the user, with full agency; Portal never silently deletes data.
+- **Fully recoverable:** the self-heal is now the *feature* — `portal open` re-bootstraps from the retained state (daemon + hooks return, sessions restore). `uninstall` means "deactivate Portal's machinery now," not "destroy my data."
+
+#### Journey — the destructive-delete design was replaced
+
+An earlier draft had `uninstall` delete the state dir (keeping config), which forced the F8 tension (silent irreversible deletion of `sessions.json` vs the no-prompt stance) and needed a `--yes` gate + symlink-safe removal logic. The user proposed the better shape above: **don't delete anything — remove only the tmux runtime, and tell the user to `rm ~/.config/portal` themselves for a full wipe.** This **dissolves F8 entirely** (no irreversible action ⇒ no `--yes`, no prompt, no confrontation with "CLI never prompts"), drops the symlink-safe state-dir deletion logic (nothing deletes the state dir now), and keeps Portal from ever silently nuking data. The only cost — "uninstall" leaves files behind — is standard uninstaller behavior ("app removed; delete preferences manually to finish") and is made honest by the printed message. Name kept (`uninstall`) per the user.
 
 Confidence: high.
 
