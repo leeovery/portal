@@ -1,0 +1,16 @@
+---
+topic: ghostty-spawn-zero-windows
+cycle: 3
+total_findings: 4
+deduplicated_findings: 3
+proposed_tasks: 0
+---
+# Analysis Report: Ghostty Spawn Zero Windows (Cycle 3)
+
+## Summary
+Cycle 3 surfaced four raw findings across the three analysis agents, deduplicating to three. All are low-severity: a deliberate (documented, drift-free) double-derivation in the picker partial-failure path, a trivial ~5-token re-authoring of the representative composed-argv shape across three spawn test files, and a single Fix-4 compile-guard observation raised independently by both the standards and architecture agents. None is high-severity, and the three do not cluster into a shared pattern, so no actionable tasks are proposed. The two spec fixes' single-sourcing holds (shared internal/spawn chokepoints reused throughout) and every mandated lockstep test update landed; the implementation is converging with only documented, spec-sanctioned observations remaining.
+
+## Discarded Findings
+- Picker partial-failure path derives FirstPermission + PartitionResults twice on the same results (duplication) — Low-severity. The double-derivation is deliberate and documented: burstPartialFailureFlash is intentionally self-contained so its correctness never depends on a caller passing a matching partition half. Both functions are pure, shared internal/spawn chokepoints operating on tiny slices with no drift risk (same single source of truth), so the redundancy is computational only. The agent's own primary recommendation is "no action is the valid default." Does not cluster with the other findings.
+- Representative "env-self-sufficient composed argv" literal re-authored across three spawn test files (duplication) — Low-severity, test-only. The shared portion is only ~5 tokens and each of the three test files (realAttachArgv, the manual test argv, the new ghosttycompile guard) deliberately carries a distinct payload. Two of the three predate this work unit. Minor drift-by-omission risk on the env-stripping prefix, but trivial and standalone — does not cluster into a pattern with the other low findings.
+- Fix 4 compile guard hard-fails only on the -2741 signature, narrower than the spec's literal "assert exit 0" (standards, architecture) — Low-severity, corroborated by two agents (deduplicated to one finding). The guard passes on a clean exit but, on a non-zero exit, hard-fails only when the compiler output contains the historical `-2741` drift discriminator and t.Skips every other non-zero result as environmental, so a hypothetical future drift to a different-but-still-invalid template form against a resolved dictionary would be silently skipped. Both agents note this is spec-sanctioned (the §Fix 4 "Assumption to confirm" clause explicitly authorizes t.Skip when terminology cannot be resolved), documented in-source (the LIVE-MAC CONFIRMATION / PRECONDITION RATIONALE blocks), and backstopped by the mandatory manual live validation (the -tags manual test + real ≥3-session burst) as the real functional proof. Both agents' primary recommendation is "accept as-is if the -2741-only signature is the intended contract," with broadening offered only as an optional alternative. A single spec-sanctioned low finding is not a cluster; discarded per the filter rule (discard low unless clustered).
