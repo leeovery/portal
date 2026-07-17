@@ -70,7 +70,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
   ├─ ✓ Open invocation grammar (flag/target cross-products, review 002) [decided]
   │  ├─ ✓ Target-set composition (union of positionals + pins) [decided]
-  │  ├─ ✓ Self-target absorb; no dedup (duplicates honored as intent) [decided]
+  │  ├─ ✓ Absorb: trigger takes first target (cmd-line order); no dedup, no current-session detection [decided]
   │  ├─ ✓ Burst exec-argv & mint responsibility (window = open --path/--session --ack) [decided]
   │  └─ ✓ Mint-only command, no target → picker in Projects mode (preserve) [decided]
   ├─ ✓ Completion UX (session names: positional/-s/kill; alias keys: -a; rest to shell) [decided]
@@ -353,11 +353,12 @@ This retro-justifies the Command Passthrough section's enumeration (which alread
 - **Duplicate mint targets** → each mints a *distinct* new session anyway (fresh `{project}-{nanoid}`), so `open ~/a ~/a` = two new sessions at `~/a` (e.g. server + editor in one project). This is the "multiple sessions per project" the second axiom celebrates — **removing dedup resolves the F2 contradiction the final review flagged** (the earlier "mint-dedupe-by-directory" clause contradicted the always-mint axiom; it is deleted, not exceptioned).
 - **Accepted consequence:** overlapping globs (`open 'api-*' 'api-1'`) can produce a duplicate surface; honored, not deduped (low-harm, killable; the user can write non-overlapping globs).
 
-**Self-target still works without dedup.** The trigger terminal provides exactly one in-place surface; it absorbs **one** target, preferring the current session if present:
-- Current session **is** among the targets → the terminal stays put on it (no switch) for one occurrence; every *other* target (including any additional occurrences of the current session) spawns a window. `open current other` from `current` = stay in `current`, one window for `other`.
-- Current session is **not** a target → the terminal switches in place to the **first target** (ordering per F1 below); the rest spawn windows.
+**The trigger absorbs the first target, unconditionally (resolves review-003 F1).** No current-session detection, no special-casing: the terminal takes the **first target in command-line order** (left-to-right as typed — positionals and pins interleaved; the implementation reads `os.Args` rather than cobra's split positional/flag buckets to preserve true order), and every remaining target opens a window.
 
-"Your terminal is one of them" holds in every case. The inside/outside-tmux split only selects the connector for the in-place surface (`switch-client` inside, `exec attach` outside); the remaining targets always run the spawned `portal open …`. Confidence: high.
+- If the current session happens to be the first target → a no-op switch (you stay put).
+- If it's elsewhere in the set, or absent → the terminal moves to the first target, and the current session (if named) simply gets its own window like any other target.
+
+Rationale (user, decided): *"it doesn't matter where the terminal ends up, as long as they all open"* — so skip the current-session detection entirely. All requested surfaces open; the trigger's landing spot is immaterial and need not be optimized. The inside/outside-tmux split only selects the connector for the first-target surface (`switch-client` inside, `exec attach` outside); the rest run the spawned `portal open …`. Confidence: high.
 
 ### Burst exec-argv & mint responsibility (F4)
 
