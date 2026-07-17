@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-17
 cycle: 3
 phase: Gap Analysis
@@ -26,8 +26,8 @@ This is the exact class of question cycle 2 resolved for the log-sweep (an actio
 **Proposed Addition**:
 State whether the "host terminal detected + supported" catalog entry participates in the exit-code contract. Recommend it is an **informational line only** (outside the pass/fail set), consistent with the "prints a line" framing and analogous to the log-sweep carve-out — so an unsupported/remote terminal is reported honestly but never makes `doctor` (or `doctor --fix`) non-zero; only genuine runtime-health failures (daemon/hooks/saver/state/stale) drive the exit code. (Alternatively, if it must count, state that explicitly and reconcile it with the remote-session use case.)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (informational-only — follows the cycle-2 log-sweep carve-out; an unsupported/remote terminal is environmental, not a health defect, and counting it would break `portal doctor &&` on every remote box). Logged to spec.
 
 ---
 
@@ -49,8 +49,8 @@ The two framings give opposite answers for the glob case, and the spec picks nei
 **Proposed Addition**:
 Extend the `resolve` line's behavior list to cover glob targets explicitly: state whether a bare glob emits `resolve` line(s) at all (recommend **no** line — a glob is deterministic like a pin, consistent with "focused on guesses" — or, if lines are wanted, one **per expanded session hit** with `domain = session` and the session name in `resolved_path`), and reconcile the wording so "bare positionals only" and "focused on guesses" no longer conflict for the glob case.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved with the "no line for globs" option — globs are deterministic (expanded against the finite live-session set), so they emit no `resolve` line, consistent with the "focused on guesses" rationale and pins. Reworded "bare positionals only" → "guessing-chain targets only" to remove the conflict. Logged to spec.
 
 ---
 
@@ -68,7 +68,7 @@ Under the argv contract, `-e claude` is excluded from targets *and* everything a
 **Proposed Addition**:
 State the `-e` / `--` coexistence rule — recommend treating simultaneous `-e` and `--` as a **usage error** (they are two spellings of the same single command; specifying both is ambiguous), or, if a precedence is preferred, state which form wins — so the "one command per mint surface" and command-parity guarantees rest on an unambiguous source.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved with the usage-error rule — `-e` and `--` are two spellings of one command; specifying both is ambiguous, so it errors. Keeps command-parity resting on a single unambiguous source. Logged to spec.
 
 ---

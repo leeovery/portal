@@ -83,9 +83,9 @@ This requires a **governed amendment to Portal's closed log taxonomy**: this fea
 
 The line's behavior:
 - **Level: INFO** — a guess must be reconstructable *after the fact*, which DEBUG (silent by default) could not guarantee; INFO is consistent with the existing per-`open` `process: exec` INFO line.
-- **Bare positionals only** — explicit pins (`-s`/`-p`/`-z`/`-a`) are deterministic and self-documenting in the argv, so they emit no `resolve` line; the component stays focused on guesses.
+- **Guessing-chain targets only** — a `resolve` line is emitted only for a bare positional resolved *through the chain* (session → path → alias → zoxide). Explicit pins (`-s`/`-p`/`-z`/`-a`) **and glob targets** are deterministic — no guessing — so they emit no `resolve` line; the component stays focused on guesses. (A glob's expansion to K session targets is still visible via the burst's own `portal.log` records.)
 - **Emitted on a miss too** — a total miss uses `domain = miss` with an empty `resolved_path`; the user-facing hard-fail error (stderr) is separate.
-- **One line per resolved bare target** — a multi-target burst emits one per bare positional.
+- **One line per resolved guessing-chain target** — a multi-target burst emits one per such target.
 
 ---
 
@@ -122,6 +122,7 @@ Plain `-f <text>` (no command) opens the picker on the default **Sessions** page
 
 `open -e <cmd>` and `open <target> -- <cmd> args…` run a command in newly-created sessions (the "open this project with claude running" mechanism), fed to `CreateFromDir` / `QuickStart` as the pane's initial process.
 
+- **`-e` and `--` are two spellings of the same single command — specifying both is a usage error.** There is exactly one command per invocation; `-e` and `--` cannot coexist. This keeps the "one command per mint surface" and command-parity guarantees resting on an unambiguous source.
 - **The command targets mint surfaces only.** A freshly-minted session has a clean pane to *be* the command's process. An existing (attach) session has no safe injection channel (see the safety note), so a command can never run in an attach target.
 - **Mixed sets are allowed; the command is scoped to the mint targets.** Mint-vs-attach is known per-target at resolve time, so the command is baked only into mint targets' invocations; attach targets get their `--session` with no command. `open api ~/new -e claude` → attach `api` as-is **and** mint `~/new` running claude, in two surfaces.
 - **Zero mint targets + a command ⇒ usage error.** `open api web -e claude` (all existing sessions) → error: the command has no new session to run in. (Erroring beats silently dropping the command.)
@@ -312,6 +313,7 @@ Name kept (`uninstall`).
 - `portal doctor` exits **0 iff every check passes; non-zero (1) if any check reports a problem** — a scriptable health gate (`portal doctor && …`).
 - A **down server** counts as **unhealthy → non-zero** (because `doctor` is bootstrap-exempt and starts nothing, so daemon / saver / hooks checks fail). It is reported honestly and distinctly — "Portal runtime not running — run `portal open` to start" vs. actual corruption — not a crash, just an unhealthy report.
 - `portal doctor --fix` **re-runs the diagnosis after applying repairs** and exits **0 iff everything is healthy post-repair, non-zero if anything remains unhealthy or unfixable**.
+- The **host-terminal check is informational only** — it is *outside* the pass/fail set. An unsupported/remote terminal is an environmental state, not a Portal-health defect (single-target `open` still works; only the multi-window burst is unavailable), so it is reported honestly but never makes `doctor` (or `doctor --fix`) non-zero. Only genuine runtime-health failures (daemon / hooks / saver / state dir / `sessions.json` / stale entries) drive the exit code.
 
 ### Host-terminal detection folded in (`--detect` retired)
 
