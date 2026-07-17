@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (18 subtopics — 16 decided · 1 exploring · 1 pending)
+  Discussion Map — CLI Verb Surface Redesign (19 subtopics — 16 decided · 1 exploring · 2 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -65,8 +65,9 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  ├─ ✓ Command passthrough -e/-- (mint-only, all minted targets) [decided]
   │  └─ ○ --detect home [pending]
   ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
-  ├─ ✓ Resolution scope & kill (open-only grammar; kill exact+single; CLI never prompts) [decided]
-  ├─ ◐ Utility command audit (list, hooks, clean, state, alias, init) [exploring]
+  ├─ ✓ Resolution scope (universal resolution is open's grammar, not the CLI's) [decided]
+  ├─ ◐ Kill shape (single+exact vs glob; CLI-prompt question) [exploring]
+  ├─ ○ Utility command audit (list, hooks, clean, state, alias, init) [pending]
   └─ ✓ Back-compat & deprecation story (none — deliberate reversal of the seed) [decided]
 
 ---
@@ -127,7 +128,7 @@ The seed framed illegible input domains (path/query vs single session name vs mu
 
 ### Decision
 
-Input domains are **not** made legible by verb — they are **unified inside resolution**. A target argument accepts a session name, path, alias, or zoxide query, resolved with a precedence order: **exact session match → path → alias → zoxide**. (Scope corrected by review finding F4: universal resolution is **`open`'s grammar, not the CLI's** — every other verb takes its natural domain; see Resolution Scope & Kill.) Collisions between a session name and a directory name are rare (`{project}-{nanoid}` names don't look like paths) and precedence-resolvable. Exactness (no-guessing) remains available in plumbing (`attach`) for scripts and the spawn machinery. Folded from the parent decision — no separate debate.
+Input domains are **not** made legible by verb — they are **unified inside resolution**. A target argument accepts a session name, path, alias, or zoxide query, resolved with a precedence order: **exact session match → path → alias → zoxide**. (Scope corrected by review finding F4: universal resolution is **`open`'s grammar, not the CLI's** — every other verb takes its natural domain; see Resolution Scope.) Collisions between a session name and a directory name are rare (`{project}-{nanoid}` names don't look like paths) and precedence-resolvable. Exactness (no-guessing) remains available in plumbing (`attach`) for scripts and the spawn machinery. Folded from the parent decision — no separate debate.
 
 ---
 
@@ -279,25 +280,34 @@ Confidence: high.
 
 ---
 
-## Resolution Scope & Kill
+## Resolution Scope
 
 ### Context
 
 Review finding F4: the input-domain decision's original phrasing ("any target argument to a *public verb* accepts session/path/alias/zoxide") swept in `kill` and `list` unreconciled — and a guessing chain on a destructive verb is exactly backwards.
 
-### Journey
-
-- Scoping rule proposed and accepted: **universal resolution is `open`'s grammar, not the CLI's.** Every other verb takes its natural domain — `kill`: session names; `list`: nothing. The original phrasing corrected in place.
-- Glob-kill (`kill 'agentic-workflows-*'` for bulk cleanup) was explored with a terminal `[y/N]` confirm guard + `--yes` for scripts. The user asked whether such prompt output already exists — verified: **the CLI has zero prompt machinery** (no stdin reads anywhere; the only interactive surface is the picker). Introducing a new interaction pattern for a marginal case felt like overkill, and the user leaned single-session "as much for safety as anything else".
-
 ### Decision
 
-- **`kill` stays single, exact session** — no globs, no resolution, instant, unchanged from today. Destruction gets maximum explicitness.
-- **New design principle, elevated from this exchange: the CLI never prompts — interactivity lives in the picker.**
-- Bulk kill's future home is the picker's multi-select (a general selection mode built for reuse) with the existing designed confirm modal — not the CLI.
-- Rejected: glob-kill with terminal confirm; TUI-modal-from-CLI (heavyweight; blurs the CLI/TUI boundary).
+**Universal resolution is `open`'s grammar, not the CLI's.** Every other verb takes its natural domain — `kill`: session names; `list`: nothing. The original phrasing corrected in place. Confidence: high.
 
-Confidence: high.
+---
+
+## Kill Shape
+
+### Context
+
+Whether `kill` gains session globs (`kill 'agentic-workflows-*'` for bulk cleanup) or stays single + exact. Raised alongside a possible terminal `[y/N]` confirm guard for destructive globs.
+
+### Facts established
+
+- **The CLI has zero interactive-prompt machinery today.** Verified against the code: no stdin reads anywhere (`bufio`/`Scanln`/`ReadString`/`[y/N]`/`confirm` all absent outside the TUI). Every CLI command is do-or-error, non-interactive. The one interactive surface in Portal is the picker (the Bubble Tea TUI), where the destructive-confirm modal already lives (`k`-to-kill).
+- A `[y/N]` glob-kill guard would therefore mean building a brand-new interaction pattern the CLI does not have.
+
+### Open — under discussion
+
+Reopened (the decision was prematurely closed). User leaned toward keeping `kill` single-session "as much for safety as anything else", and questioned how useful glob-for-kill is anyway — but this was a lean expressed while asking a question, not a locked decision. A candidate principle floated ("the CLI never prompts — interactivity lives in the picker") is **not** adopted; it awaits the actual decision here.
+
+(no decision yet)
 
 ---
 
@@ -362,7 +372,7 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 ### Current State
 
 - Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
-- Exploring: utility command audit (list, hooks, clean, state, alias, init).
+- Exploring: kill shape (single+exact vs glob) — REOPENED after premature closure.
 
 ## Triage
 
