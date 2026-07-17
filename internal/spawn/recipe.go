@@ -86,11 +86,31 @@ func validRecipeForEntry(key string, e TerminalEntry) (Recipe, RecipeKind, bool)
 	return *e.Commands.Open, kind, true
 }
 
+// shellQuote wraps s in POSIX single quotes so it survives as a single word when
+// the rendered {command} string is later word-split by a shell — Ghostty's
+// `bash -c` on the native path, or a shell-based terminal recipe / the delivered
+// $1 on the config path. Inside single quotes every byte is literal except the
+// single quote itself, emitted as the standard close-escape-reopen sequence
+// ('\''). Without this, an argv element containing a space — e.g. a session name
+// from a spaced project directory, "My Project-abc123" (SanitiseProjectName
+// strips only "."/":", never spaces) — would be re-split into separate words and
+// the attach target shredded.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // renderCommandString is the single canonical rendering of the composed attach
-// argv into the {command} string: a plain single-space join. It is the SAME
-// space-join the native Ghostty embed (ghosttyEmbed) uses, so a config recipe
-// and the native path render {command} identically. Consumed by the argv/script
-// recipe adapters (Tasks 4.4/4.5).
+// argv into the {command} string: each element is POSIX-single-quoted, then the
+// quoted elements are space-joined. Single-quoting preserves the argv element
+// boundaries across the shell word-split that ultimately runs the command, so a
+// multi-word element is reproduced intact rather than shredded. It is the SAME
+// rendering the native Ghostty embed (ghosttyEmbed) builds on, so a config
+// recipe and the native path render {command} identically. Consumed by the
+// argv/script recipe adapters (Tasks 4.4/4.5).
 func renderCommandString(command []string) string {
-	return strings.Join(command, " ")
+	quoted := make([]string, len(command))
+	for i, el := range command {
+		quoted[i] = shellQuote(el)
+	}
+	return strings.Join(quoted, " ")
 }

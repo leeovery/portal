@@ -66,26 +66,43 @@ func TestGhosttyOpenScript(t *testing.T) {
 	t.Run("it keeps a percent in the payload inert", func(t *testing.T) {
 		// The single %s is a fmt.Sprintf ARGUMENT, never a format-verb source,
 		// so a `%` in the payload passes through literally rather than being
-		// interpreted as a (malformed) verb.
+		// interpreted as a (malformed) verb. The element is shell-quoted, so it
+		// lands inside the single-quoted word.
 		script := ghosttyOpenScript([]string{"echo 100%done"})
 
-		if !strings.Contains(script, `command:"echo 100%done"`) {
-			t.Errorf("script does not carry the literal percent payload %q; script:\n%s", `command:"echo 100%done"`, script)
+		if !strings.Contains(script, `command:"'echo 100%done'"`) {
+			t.Errorf("script does not carry the literal percent payload %q; script:\n%s", `command:"'echo 100%done'"`, script)
 		}
 	})
 
-	t.Run("it embeds the composed attach argv verbatim after escaping", func(t *testing.T) {
+	t.Run("it single-quotes each argv element before embedding", func(t *testing.T) {
 		cmd := realAttachArgv()
 		script := ghosttyOpenScript(cmd)
 
-		// A quote/backslash-free argv embeds verbatim as a single space-joined
-		// string, so the window runs exactly that command.
-		embedded := strings.Join(cmd, " ")
+		// Each element is POSIX single-quoted so Ghostty's bash -c re-split
+		// reproduces the exact argv; a quote/backslash-free argv needs no further
+		// AppleScript escaping, so the embed is just the single-quoted join.
+		quoted := make([]string, len(cmd))
+		for i, a := range cmd {
+			quoted[i] = "'" + a + "'"
+		}
+		embedded := strings.Join(quoted, " ")
 		if ghosttyEmbed(cmd) != embedded {
-			t.Errorf("ghosttyEmbed = %q, want the verbatim space-join %q", ghosttyEmbed(cmd), embedded)
+			t.Errorf("ghosttyEmbed = %q, want the single-quoted join %q", ghosttyEmbed(cmd), embedded)
 		}
 		if !strings.Contains(script, `command:"`+embedded+`"`) {
 			t.Errorf("script does not embed the command property %q; script:\n%s", `command:"`+embedded+`"`, script)
+		}
+	})
+
+	t.Run("it preserves an argv element containing a space (spaced-session-name fix)", func(t *testing.T) {
+		// A spaced session name ("My Project-abc123") must survive Ghostty's
+		// bash -c word-split as ONE element, not be shredded into "My" and
+		// "Project-abc123" — the defect this fix closes.
+		embedded := ghosttyEmbed([]string{"/abs/portal", "attach", "My Project-abc123"})
+
+		if !strings.Contains(embedded, `'My Project-abc123'`) {
+			t.Errorf("ghosttyEmbed = %q, want the spaced session name quoted as one word", embedded)
 		}
 	})
 }

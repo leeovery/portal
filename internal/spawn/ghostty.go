@@ -14,23 +14,27 @@ import (
 // `wait after command:true` — the latter keeps the window up after its command
 // exits (the normal-detach window lifecycle for a spawned session).
 //
-// The single %s is the AppleScript-escaped, space-joined composed argv from
-// ghosttyEmbed; it is a fmt.Sprintf format ARGUMENT (never a verb source), so a
-// `%` in the payload is inert.
+// The single %s is the AppleScript-escaped, per-element-shell-quoted composed
+// argv from ghosttyEmbed; it is a fmt.Sprintf format ARGUMENT (never a verb
+// source), so a `%` in the payload is inert.
 const ghosttyScriptTemplate = `tell application "Ghostty"
 	new window with configuration {command:"%s", wait after command:true}
 end tell`
 
 // ghosttyEmbed renders the composed argv into the single string Ghostty's
-// `command` property expects: it joins the argv elements with single spaces,
-// then AppleScript-string-escapes the result so it embeds safely inside the
-// double-quoted AppleScript literal.
+// `command` property expects. Ghostty runs that string via `bash -c`, which
+// word-splits it, so it starts from renderCommandString — each argv element
+// POSIX-single-quoted, preserving element boundaries so a session name or path
+// containing a space is reproduced intact rather than shredded into separate
+// words — then AppleScript-string-escapes the result so it embeds safely inside
+// the double-quoted AppleScript literal.
 //
 // Escape ORDER is load-bearing: backslash (`\` -> `\\`) MUST run before quote
 // (`"` -> `\"`). Escaping the quote first would then double the escaping
-// backslash the quote-escape introduced, corrupting the literal.
+// backslash the quote-escape introduced, corrupting the literal. The order holds
+// even over the backslashes shellQuote introduces for an embedded single quote.
 func ghosttyEmbed(command []string) string {
-	embedded := strings.Join(command, " ")
+	embedded := renderCommandString(command)
 	embedded = strings.ReplaceAll(embedded, `\`, `\\`)
 	embedded = strings.ReplaceAll(embedded, `"`, `\"`)
 	return embedded

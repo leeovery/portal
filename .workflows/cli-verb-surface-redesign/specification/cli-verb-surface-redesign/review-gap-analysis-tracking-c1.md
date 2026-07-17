@@ -28,9 +28,10 @@ The trigger-absorb rule hinges on "command-line order (left-to-right as typed �
 Without a defined argv-ordering contract, the implementer must design a mini argv parser from scratch and guess the flag/value/terminator handling — a load-bearing decision because it determines which target the trigger absorbs and whether the target set is even assembled correctly.
 
 **Proposed Addition**:
+Added an "Argv parsing contract (target ordering)" subsection: cobra owns validation/binding/mutual-exclusion; a raw `os.Args` scan recovers order under a fixed contract (both `-s api` and `-s=api` value forms recognized and attributed to the pin; `-e <cmd>` value excluded from targets; `--` terminates parsing; value pins written separately, no bundling; ordered list = positionals + pin-values in os.Args order; trigger takes the first).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (routine completeness — standard argv parsing rules, no new design fork). Logged to spec.
 
 ---
 
@@ -48,9 +49,10 @@ The command-passthrough section establishes that "the command is baked only into
 So an implementer wiring the burst has no spec for *where* the baked command rides the spawned window's argv (append `-e <cmd>` before `--ack`? append `-- <cmd> args`?), nor for how the multi-arg `--` form (which captures multiple tokens) is reconstructed into a spawned window argv versus the single-token `-e` form. The trigger surface has the parallel gap: when the first target is a mint target carrying a command, the trigger mints locally and connects (no spawned window) — the command must feed `CreateFromDir` / `QuickStart` on that local path, which the passthrough section covers semantically but the burst section does not tie to the trigger's connect path. The intersection of command-passthrough and burst mechanics is where the two sections meet and neither fully specifies it.
 
 **Proposed Addition**:
+Added burst-argv item 3: command rides mint windows only, appended as `-- <cmd> args…` after `--ack` (multi-token form subsumes single-string `-e`); attach windows never carry it; the trigger, when it's a mint target with a command, mints locally and feeds `CreateFromDir`/`QuickStart` — same path as a spawned mint window.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (routine completeness — mechanical wiring of an already-decided rule). Logged to spec.
 
 ---
 
@@ -114,9 +116,10 @@ This lumps two distinct branches under one consequence, and the consequence is o
 As written, the sentence appears to state that in *both* branches "the current session gets its own window," which would wrongly imply spawning a window for a non-target current session. Given "No current-session detection, no special-casing," the intended behavior is clearly the latter, but the grammar could mislead an implementer into special-casing the current session.
 
 **Proposed Addition**:
+Split the ambiguous "elsewhere, or absent" bullet into two: current session elsewhere-in-set → gets its own window because it is a target; current session absent-from-set → left as a detached session with no surface, NOT given a window. Reinforced "no current-session detection — it gets a window only when it appears in the target set."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (clarity fix consistent with the already-decided "no current-session detection" rule; no new decision). Logged to spec.
 
 ---
 
@@ -130,9 +133,10 @@ As written, the sentence appears to state that in *both* branches "the current s
 "Target resolution precedence" presents the resolution algorithm as a single fixed chain: exact session name → path → alias → zoxide, first match wins. But a separate section ("Glob targets") establishes that a bare target containing glob metacharacters (`*`, `?`, `[…]`) is "session-domain by construction" and "skip[s] path/alias/zoxide entirely." That is effectively a pre-step of the resolution algorithm (detect glob → session-glob domain; else run the precedence chain), yet it is not mentioned or cross-referenced in the precedence section itself. An implementer building the resolver from the precedence section alone would run glob targets through path/alias/zoxide, which contradicts the glob section. The full per-positional algorithm should be stated in one place so the ordering (glob detection relative to the precedence chain) is unambiguous.
 
 **Proposed Addition**:
+Restructured "Target resolution precedence" into two steps: (1) glob pre-check — glob metacharacters ⇒ session-domain, expand against live names, skip the chain, zero matches ⇒ hard fail; (2) otherwise the precedence chain session → path → alias → zoxide.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (consistency fix — the glob decision already exists in Glob Targets; this states the full per-positional algorithm in one place). Logged to spec.
 
 ---
 
@@ -149,9 +153,10 @@ As written, the sentence appears to state that in *both* branches "the current s
 - **`_portal-bootstrap` anchor.** The teardown "removes only Portal's tmux-server footprint: kills the `_portal-saver` daemon and unregisters the global tmux hooks." It does not say whether the load-bearing `_portal-bootstrap` anchor session (and any live user sessions) are left in place. Presumably left (consistent with "touches no sessions"), but stating it removes ambiguity about how complete "removes Portal's tmux-server footprint" is.
 
 **Proposed Addition**:
+Added two bullets to `uninstall`: (1) idempotent / nothing-to-remove — graceful no-op that still prints the completion message, never errors on already-clean state; (2) leaves all sessions in place — user sessions and the load-bearing `_portal-bootstrap` anchor are left running; "removes the tmux footprint" = daemon + global hooks only, not sessions.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (in-scope edge cases; defaults consistent with "touches no sessions" and CLAUDE.md's "`_portal-bootstrap` never killed by production code"). Logged to spec.
 
 ---
 
@@ -165,8 +170,9 @@ As written, the sentence appears to state that in *both* branches "the current s
 The "Pinned-domain contract — never falls back to the picker" section names only `--session` and `--path` when asserting the hard-fail / no-TUI-popup guarantee ("a spawned window or script must never pop a TUI"). The domain-pinning flags table already specifies hard-fail-on-miss for `-z` (no zoxide match / not installed) and `-a` (unknown key), which implies no picker fallback — but the explicit "never pop a TUI" guarantee, which is the load-bearing property for scripts and spawned windows, is not extended to `-z`/`-a` in prose. For consistency and to avoid an implementer wiring a picker fallback onto a `-z`/`-a` miss, the guarantee should be stated for all four domain pins (any explicit pin hard-fails and never pops the picker).
 
 **Proposed Addition**:
+Rewrote the pinned-domain contract to cover all four pins: "Every domain pin (`-s`, `-p`, `-z`, `-a`) hard-fails on unresolvable and never falls back to the TUI picker … Only bare positionals run the guessing chain; only `-f` opens the picker."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (consistency fix — extends the load-bearing "never pop a TUI" guarantee already implied by the hard-fail table to `-z`/`-a`). Logged to spec.
 
 ---

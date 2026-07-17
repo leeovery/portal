@@ -46,9 +46,10 @@ In scope: the public verb surface and tiering (public / hidden), command names, 
 
 ### Target resolution precedence
 
-A bare positional target is resolved through a fixed precedence chain, first match wins:
+A bare positional target is resolved in two steps:
 
-**exact session name → path → alias → zoxide query**
+1. **Glob pre-check.** If the target contains glob metacharacters (`*`, `?`, `[…]`), it is **session-domain by construction**: expand it against live session names and skip the chain below entirely (see Glob Targets). Zero matches ⇒ unresolvable ⇒ hard fail.
+2. **Otherwise, the precedence chain**, first match wins: **exact session name → path → alias → zoxide query**.
 
 Each domain maps to an outcome per Axiom 2:
 - **exact session name** → attach existing session
@@ -103,7 +104,7 @@ Notes:
 
 ### Pinned-domain contract — never falls back to the picker
 
-`--session` and `--path` invocations **hard-fail on unresolvable and never fall back to the TUI picker** — a spawned window or script must never pop a TUI. `--session` never mints (a bare name has no directory to mint from); `--path` mints per Axiom 2 (the directory must exist).
+**Every domain pin (`-s`, `-p`, `-z`, `-a`) hard-fails on unresolvable and never falls back to the TUI picker** — a spawned window or script must never pop a TUI. `--session` never mints (a bare name has no directory to mint from); `--path` / `--zoxide` / `--alias` mint per Axiom 2 on a hit and hard-fail on a miss. Only bare positionals run the guessing chain; only `-f` opens the picker.
 
 ### `-f/--filter` is the sole non-composing flag
 
@@ -157,14 +158,27 @@ This absence is the deeper reason commands are mint-only — a safety floor, not
 **The trigger (invoking terminal) takes the first target in command-line order** (left-to-right as typed — positionals and pins interleaved; the implementation reads `os.Args` rather than cobra's split positional/flag buckets to preserve true order), and every remaining target opens a window.
 
 - If the current session happens to be the first target → a no-op switch (you stay put).
-- If it's elsewhere in the set, or absent → the terminal moves to the first target, and the current session (if named) simply gets its own window like any other target.
-- **No current-session detection, no special-casing** — the trigger's landing spot is immaterial: "it doesn't matter where the terminal ends up, as long as they all open." All requested surfaces open.
+- If the current session is **elsewhere in the set** (a non-first target) → the terminal moves to the first target, and the current session gets its own window *because it is a target*, like any other.
+- If the current session is **absent from the set** (not requested) → the terminal moves to the first target, and the current session is simply left as a detached session with no surface. It is **not** given a window (it was never a target).
+- **No current-session detection, no special-casing** — the current session is never treated specially; it gets a window only when it appears in the target set. The trigger's landing spot is immaterial: "it doesn't matter where the terminal ends up, as long as they all open." All requested surfaces open.
 - The inside/outside-tmux split only selects the connector for the first-target surface (`switch-client` inside, `exec attach` outside); the rest run the spawned `portal open …`.
 
 **No dedup — duplicates are honored as intent.** The target set is taken literally; repeated targets are *not* collapsed.
 - **Duplicate attach targets** → tmux natively supports multiple clients attached to one session (they mirror), so `open api api api` = three host windows all showing `api` (same session across three Spaces/monitors).
 - **Duplicate mint targets** → each mints a *distinct* new session anyway (fresh `{project}-{nanoid}`), so `open ~/a ~/a` = two new sessions at `~/a`.
 - **Accepted consequence:** overlapping globs (`open 'api-*' 'api-1'`) can produce a duplicate surface; honored, not deduped (low-harm, killable).
+
+### Argv parsing contract (target ordering)
+
+Cobra remains the source of truth for flag validation, value binding, `-f` mutual exclusion, and rejecting unknown flags. Target *ordering* is recovered by a raw `os.Args` scan layered on top, under a fixed contract:
+
+- Both value forms are recognized for each pin — `-s api` (space) and `-s=api` / `--session=api` (equals) — and the value token is attributed to that pin, never counted as a positional target.
+- `-e <cmd>` and its value are not targets and are excluded from the ordered target list (`open -e claude ~/new` → sole target `~/new`; `claude` is the command).
+- `--` terminates flag/target parsing; every token after `--` is command-passthrough args, never a target.
+- Value-taking pins are written separately, each with its own value — no bundled `-sf`-style combining for value pins.
+- The ordered target list is the sequence of positionals and pin-values in the exact left-to-right order they appear in `os.Args`; the trigger absorbs the first element of that list.
+
+The raw scan only recovers order — it classifies each token by the same flag set cobra knows, so the two never disagree.
 
 ### Burst exec-argv & mint responsibility
 
@@ -174,7 +188,8 @@ Each spawned window runs the **same `open` grammar a human would** — one pinne
    - Attach target (session / glob / `-s`) → `portal open --session <name> --ack <batch>:<token>`.
    - Mint target (path / alias / zoxide / `-p` / `-z` / `-a`) → the parent **reduces it to a literal existing directory at resolve time**, then bakes `portal open --path <literal-dir> --ack <batch>:<token>`. Alias/zoxide queries never travel to the window (they could re-resolve differently mid-burst); only the resolved literal dir does, and `--path` cannot diverge. This is why "resolution must not re-run inside the window" holds without a session existing yet.
 2. **Minting happens in each window, not the parent — no pre-minting.** The atomic guarantee is precisely the **read-only resolve**: any target unresolvable ⇒ nothing opens, nothing created. Once resolve passes, each surface opens/mints itself at exec time under **leave-what-opened**; a window that never comes up never mints, so there are no orphaned detached sessions.
-3. **No dedup** — duplicate targets each get their own window (mirrored attach, or distinct mint); the burst never collapses them.
+3. **Command passthrough rides mint windows only.** When a command is present (`-e`/`--`), it is appended to each **mint** window's argv in the multi-token passthrough form (which subsumes the single-string `-e` form), after `--ack`: `portal open --path <literal-dir> --ack <batch>:<token> -- <cmd> args…`. Attach windows never carry the command. When the **trigger** surface is itself a mint target carrying the command, the trigger mints locally (no spawned window) and feeds the command to `CreateFromDir` / `QuickStart` as the pane's initial process — the same path a spawned mint window takes.
+4. **No dedup** — duplicate targets each get their own window (mirrored attach, or distinct mint); the burst never collapses them.
 
 ### Atomic pre-flight & partial failure
 
@@ -249,6 +264,8 @@ Rejected: sessions+directories merged into one slot (noisy); nothing at all (los
   ```
   Because `state/` lives *inside* `~/.config/portal/`, one `rm -rf ~/.config/portal` wipes both — a single deliberate act by the user. Portal never silently deletes data.
 - **Fully recoverable:** the self-heal is the feature — `portal open` re-bootstraps from the retained state (daemon + hooks return, sessions restore). `uninstall` means "deactivate Portal's machinery now," not "destroy my data."
+- **Idempotent / nothing-to-remove.** If there is no running tmux server, no `_portal-saver` daemon, or no registered hooks, `uninstall` is a graceful no-op — it removes whatever is present and still prints the completion message; it never errors on already-clean state.
+- **Leaves all sessions in place.** `uninstall` touches no sessions: user sessions **and** the load-bearing `_portal-bootstrap` anchor session are left running. "Removes Portal's tmux-server footprint" means the daemon + global hooks only — not sessions.
 
 ### Why runtime-only (context)
 
