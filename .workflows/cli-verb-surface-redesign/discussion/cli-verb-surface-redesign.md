@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (23 subtopics — 23 decided)
+  Discussion Map — CLI Verb Surface Redesign (24 subtopics — 24 decided)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -67,6 +67,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
   ├─ ✓ Resolution scope (universal resolution is open's grammar, not the CLI's) [decided]
   ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
+  ├─ ✓ Completion UX (session names on positional + -s; paths to shell) [decided]
   ├─ ✓ Utility command audit [decided]
   │  ├─ ✓ uninstall (replaces state cleanup; runtime+state, keeps config) [decided]
   │  ├─ ✓ Maintenance/diagnostics reorg (clean deleted → doctor + --fix; project-prune automated) [decided]
@@ -316,6 +317,18 @@ Whether `kill` gains session globs (`kill 'agentic-workflows-*'` for bulk cleanu
 - The "CLI never prompts" idea is left as an observation, not adopted as a governing principle (it wasn't needed once glob-kill was dropped).
 
 Confidence: high.
+
+---
+
+## Tab-Completion (merged `open` domain)
+
+### Context
+
+Review finding F5: today's verb split gives each verb a clean completion domain (`attach` completes session names, `open` completes paths). The merged `open` accepts session name / path / alias / zoxide / glob in one positional — so what should `<Tab>` after `portal open ` offer?
+
+### Decision
+
+**Complete session names on the bare positional, and on `-s`; leave paths to the shell.** Session names are the finite, enumerable set only Portal knows; zoxide has its own `cd`-style completion and path completion is the shell's job (it does it better than we can). This keeps completion pointed at the one namespace Portal owns, without cramming multiple namespaces into one noisy list. Rejected: sessions+directories merged (noisy, two namespaces in one slot); nothing at all (loses the genuinely useful session-name completion). Flag-value completion where unambiguous: `-s` → session names. Confidence: high.
 
 ---
 
