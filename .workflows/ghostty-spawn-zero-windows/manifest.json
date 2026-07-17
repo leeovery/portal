@@ -33,7 +33,7 @@
         "ghostty-spawn-zero-windows": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "f001b23058710d925ad9e74b46562b11ac6292c3",
+          "spec_commit": "76f18ebc60ab6a832c443fe6c2cd7902ebc6193b",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
