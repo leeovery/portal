@@ -116,7 +116,7 @@
     "review": {
       "items": {
         "ghostty-spawn-zero-windows": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "ghostty-spawn-zero-windows-1-1",
             "ghostty-spawn-zero-windows-1-2",
