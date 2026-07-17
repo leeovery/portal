@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-17
 cycle: 1
 phase: Input Review
@@ -57,9 +57,9 @@ Reclaimed the check catalog as a spec-level authoritative list (daemon alive; ho
 Both the discussion and the spec assert the resolver-decision line rides "the existing log taxonomy," and the illustrative line uses a `resolve:` component prefix (Portal's log format is `<component>: <msg>`). But `resolve`/`resolver` is not in the current closed 16-name component set, and `open` itself owns no log component (it logs exec markers under `process` and the spawn burst under `spawn`). CLAUDE.md is explicit: "New components/attrs require amending the spec — never invent at call-site." So this locked observability addition cannot land as stated without either (a) a governed amendment adding a new `resolve` (or `resolver`) component to the closed vocabulary, or (b) a decision to route the line under an existing component. The source material glossed over this — it assumed "existing taxonomy" fits when it does not. This is a blind spot worth surfacing so planning doesn't invent a component at the call site (the exact thing the log spec prohibits).
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+Corrected the wrong-guess-feedback subsection: the `resolve` decision line is emitted from `cmd/open.go` (not the pure `internal/resolver` library), and this feature adds one new component `resolve` to the closed log taxonomy as a governed amendment, with attr keys `target`/`domain`/`resolved_path`. Planning wires the single `log.For("resolve")` binding.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Surfaced as a genuine undiscussed decision (discussion wrongly assumed the line fit the existing taxonomy). Code-verified: `internal/resolver` logs nothing; resolution is driven from `cmd/open.go`, which owns no component (logs under `process`/`spawn` only); no `resolve`/`resolver` in the closed 16-name set. User chose: add a dedicated `resolve` component (recommendation). Logged to spec.
 
 ---

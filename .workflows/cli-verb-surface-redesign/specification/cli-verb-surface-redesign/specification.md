@@ -76,7 +76,9 @@ The `-f/--filter` flag (see the flags topic) is what makes the filtered-picker m
 
 There is **no dedicated confirmation surface** when resolution guesses wrong (e.g. a wrong zoxide guess silently mints a session). A receipt line has nowhere reliable to live: outside tmux, `open` exec-replaces itself and pre-exec output is swallowed by the alternate screen; inside tmux it lands in the pane you switched away from. What the user reliably sees is tmux itself — the status bar shows the `{project}-{nanoid}` session name (which encodes the resolver's choice) plus the pane cwd. A wrong guess is self-announcing at the destination; recovery is `kill` + retry with a domain-pinning flag.
 
-One observability addition is locked: **the resolver logs its decision** under the existing log taxonomy, e.g. `resolve: 'blog' → zoxide → ~/Code/blog`, so a confusing guess is reconstructable from `portal.log`.
+One observability addition is locked: **`open` logs its resolution decision**, e.g. `resolve: 'blog' → zoxide → ~/Code/blog`, so a confusing guess is reconstructable from `portal.log`. The line is emitted from the `open` command body (`cmd/open.go`), where resolution is driven — `internal/resolver` stays a pure, log-free library.
+
+This requires a **governed amendment to Portal's closed log taxonomy**: this feature adds **one new component, `resolve`**, to the closed component set. `open` owns no log component today (it logs only exec markers under `process` and the spawn burst under `spawn`, neither of which fits a resolution decision), so resolution has no existing home. The `resolve` component carries the decision line with attr keys `target` (raw input), `domain` (session / path / alias / zoxide), and `resolved_path` (resolved directory, or resolved session name for a session hit). This is a spec-recorded amendment, **not** a call-site invention (which the log spec prohibits); planning wires the single `log.For("resolve")` binding in `cmd/open.go`.
 
 ---
 
