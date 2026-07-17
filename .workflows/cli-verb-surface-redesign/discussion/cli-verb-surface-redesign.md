@@ -559,8 +559,9 @@ Confidence: high.
 ### Key Insights
 
 1. Verb splits feel right when they split by *what happens*, not by what the argument looks like — the open/attach blur was an input-type split masquerading as a verb pair.
-2. The porcelain/plumbing distinction Portal already uses for `state` internals generalizes: exact/no-guessing commands (`attach`) serve machines and scripts and can be hidden without losing function.
-3. The picker multi-select's "net N surfaces, your terminal is one of them" rule is continuous in N — the seed's count-dependent-split worry about variadic verbs was a framing artifact.
+2. The porcelain/plumbing distinction Portal already uses for `state` internals generalizes — but the resolution landed one level cleaner than "hide the exact command": `attach` was *retired*, its exactness surfaced publicly as `open --session`/`--path` (documented, script-friendly), and only the truly-internal pieces stayed hidden (the `--ack` receipt flag + the argv-invoked `state` namespace). Exactness didn't need to be hidden — it needed to be a flag.
+3. The picker multi-select's "net N surfaces, your terminal is one of them" rule is continuous in N — the seed's count-dependent-split worry about variadic verbs was a framing artifact. (It later simplified even further: no dedup, and the trigger just takes the first target — "it doesn't matter where the terminal lands, as long as they all open.")
+4. A late-review discipline paid off twice: live-running the current `open -e` behavior overturned a wrong "usage error" lean (the picker restricts to Projects/mint mode — coherent), and re-reading `cmd/root.go` proved the bootstrap-latch argument command-agnostic. Verify against the running tool and the code, not against assumptions.
 
 ### Open Threads
 
@@ -571,7 +572,7 @@ Confidence: high.
 
 ### Current State
 
-- Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
+- Decided: `open` is the single public session verb (fold, absorb/net-N rule with no dedup, universal resolution, domain-pinning flags `-s`/`-p`/`-z`/`-a`/`-f`, mint-scoped `-e`/`--`, hidden `--ack`, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal, bar the one `hooks`→`hook` alias).
 - Decided: kill stays single + exact; `uninstall` replaces `state cleanup` — **runtime-only** (kills daemon + unregisters hooks, touches NO files: both config *and* state dir retained), fully recoverable, prints the manual `rm ~/.config/portal` path for a full wipe.
 - Decided: `clean` deleted → `doctor` (+ `--fix`); project-prune automated; `state` namespace fully hidden.
 - Decided: remaining verbs keep as-is (`hooks` → `hook`, `hooks` kept as the one back-compat alias); `--detect` folded into `doctor`.
