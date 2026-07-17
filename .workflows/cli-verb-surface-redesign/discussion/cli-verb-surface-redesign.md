@@ -48,12 +48,13 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (24 subtopics — 24 decided)
+  Discussion Map — CLI Verb Surface Redesign (25 subtopics — 25 decided)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
   │  ├─ ✓ spawn: distinct verb vs variadic attach [decided → superseded by the fold]
-  │  └─ ✓ Where the picker sits (open, no args) [decided]
+  │  ├─ ✓ Where the picker sits (open, no args) [decided]
+  │  └─ ✓ Bare portal → help, not picker (x=launcher, portal=mgmt) [decided]
   ├─ ✓ Input domain legibility (universal target resolution) [decided]
   ├─ ✓ Verb naming (open stays — portal metaphor; verb B name dissolved) [decided]
   ├─ ✓ The open fold (spawn absorbed; absorb/net-N as rule) [decided]
@@ -329,6 +330,18 @@ Review finding F5: today's verb split gives each verb a clean completion domain 
 ### Decision
 
 **Complete session names on the bare positional, and on `-s`; leave paths to the shell.** Session names are the finite, enumerable set only Portal knows; zoxide has its own `cd`-style completion and path completion is the shell's job (it does it better than we can). This keeps completion pointed at the one namespace Portal owns, without cramming multiple namespaces into one noisy list. Rejected: sessions+directories merged (noisy, two namespaces in one slot); nothing at all (loses the genuinely useful session-name completion). Flag-value completion where unambiguous: `-s` → session names. Confidence: high.
+
+---
+
+## Bare `portal` (no subcommand)
+
+### Context
+
+Review finding F7. Picker placement is decided (`portal open` with no args; `x` = `portal open`, so bare `x` → picker). One corner left: what does bare **`portal`** (no subcommand) do? Today it prints Cobra help — and since `xctl() { portal "$@" }`, bare `xctl` = bare `portal`.
+
+### Decision
+
+**Bare `portal` stays help/usage — it does NOT launch the picker.** The picker already has two doors (`portal open`, `x`); bare `portal` is the control-plane root and should list commands. Making it open the picker would also make bare `xctl` open the picker, muddying the two-tier split we keep: **`x` = launcher (picker/open), `xctl`/`portal` = management plane (help when bare).** Confidence: high.
 
 ---
 
