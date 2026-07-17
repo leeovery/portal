@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Restore Native Ghostty Spawn + Close Diagnosis/Copy/Guard Gaps
-status: draft
+status: approved
+approved_at: 2026-07-17
 
 **Goal**: Make native Ghostty multi-window spawn functional again by replacing the invalid `make new … with properties` AppleScript with the sdef-correct `new window with configuration {…}` form, and close the three gaps the defect exposed: per-window failure reasons invisible at INFO (Rider #1), dishonest total-failure banner copy (Rider #2), and the absence of an automated guard against terminology drift (Fix 4). The phase ends with both default test lanes green and the merge-gating live validation confirmed.
 
