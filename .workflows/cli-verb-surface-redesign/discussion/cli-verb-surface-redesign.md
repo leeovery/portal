@@ -451,25 +451,9 @@ Confidence: high.
 
 ---
 
-## Verb B Contract
+## Verb B Contract (superseded by The Open Fold)
 
-### Context
-
-Verb B (currently `spawn`) inherited a contract designed for the picker burst: exact session names only, `has-session` pre-flight with atomic abort, spawn N−1 external windows then self-attach the trigger terminal to the Nth (net N, never N+1), `--detect` diagnostic riding on the command. Going public-by-design (the scriptability decision) raises which parts of that contract should change.
-
-### Arg Resolution (decided)
-
-**Verb B's args get the same universal resolution as verb A** — exact session match → path → alias → zoxide, including create-on-miss for directory-shaped targets with no session. User's framing: "same precedence/ordering — any reason not to?" Two consequences examined and accepted:
-
-- **The all-or-nothing gate survives intact.** Resolution is read-only, so all N args resolve atomically *before* anything is created or opened; "any target unresolvable ⇒ nothing opens" replaces the `has-session` string check. Same abort semantics, better inputs.
-- **Guess-risk enters bursts.** A typo that zoxide-matches an unrelated dir opens a wrong window (and creates a session for it). Recoverable via `kill`; identical risk profile to verb A today — no new failure class.
-
-Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api blog infra`) shouldn't care whether restore already made the sessions; "exact names only" was another instance of the input-domain split the mental-model decision killed. Post-resolution partial-failure semantics stay leave-what-opened, as today.
-
-### Open
-
-- **Absorb vs stay-put** — today the trigger terminal always becomes one of the N (net-N rule, inherited from the picker where the leftover picker window would be junk). From a shell, "open windows but leave me here" is inexpressible; that headless mode was deferred (not rejected) in restore-host-terminal-windows.
-- **`--detect` home** — a diagnostic dry-run currently riding on the spawn command.
+*This section originally tracked a distinct "verb B" (`spawn`). The Open Fold dissolved verb B into `open`, so its live content migrated: **arg resolution** → The Open Fold → Arg Resolution + the Attach-vs-Mint Dichotomy; **absorb vs stay-put** → settled by the absorb/net-N rule (stay-put is a deferred future flag); **`--detect` home** → folded into `doctor`. Retained only as a pointer so the migration is traceable — no open items remain here.*
 
 ---
 
@@ -483,11 +467,10 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 
 ### Open Threads
 
-- `--detect`'s new home (spawn verb retiring).
-- Bare `portal` (no subcommand) behaviour — related to but distinct from the settled picker placement.
-- Stay-put multi-open flag — deliberately deferred scope.
-- Utility command audit.
-- Remaining review findings queued: completion UX (F5), bare-portal vs xctl (F7).
+- **Stay-put multi-open flag** — deliberately deferred future scope (open windows but leave the trigger terminal put); not designed here.
+- **Multi-match zoxide** (`doctor`-style "mint sessions for everything matching X") — deferred; shotgun risk.
+- **Bulk kill via the picker's multi-select** — noted as the natural future home if ever wanted; not built here.
+- (All Discussion Map subtopics are decided; the above are explicitly deferred scope, not unresolved decisions.)
 
 ### Current State
 
