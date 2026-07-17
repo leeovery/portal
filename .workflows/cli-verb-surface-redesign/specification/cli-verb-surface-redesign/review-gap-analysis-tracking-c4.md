@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-17
 cycle: 4
 phase: Gap Analysis
@@ -29,8 +29,8 @@ This is a plausible real path (a user sees `doctor` reporting problems on a down
 **Proposed Addition**:
 State that the "no stale entries" check — and the `--fix` stale-hook prune it drives — are **guarded against a down server**: when the tmux server is not running, dead-pane-hook staleness cannot be determined (there are no live panes to compare against), so the check is reported as *not-evaluable* / skipped rather than "all stale," and `--fix` performs **no** hook pruning in that state (the stale-project prune, being filesystem-only, may still run). This keeps the "reversible-by-reconstruction" guarantee intact and prevents `--fix` on a down/rebooted server from wiping valid `hooks.json` entries. (Confirms the safe behavior; the concrete probe stays planning's, per the catalog note.)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved — genuine data-loss hazard. Added a "down-server guard on the stale-hook prune" bullet: dead-pane-hook staleness is not-evaluable when the server is down, `--fix` does no hook pruning in that state (protects the reversible-by-reconstruction premise), stale-project prune (filesystem-only) may still run. Logged to spec.
 
 ---
 
@@ -53,7 +53,7 @@ Tab completion ("complete session names") would naturally use the filtered `List
 **Proposed Addition**:
 State that `open`'s session-domain resolution — exact-name match, session-glob expansion, and the `-s/--session` pin — operates only against the **user-visible session set** (the same leading-underscore-filtered `ListSessions` view used by the picker and completion), so the internal `_portal-saver` / `_portal-bootstrap` (and any future `_`-prefixed) sessions are never matchable as `open` targets. A bare/`-s` name or glob that would resolve only to a filtered internal session is treated as a miss (falls through / hard-fails) exactly as if the session did not exist.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved — footgun/contract-violation. Added a "Session set — user-visible only" note pinning exact-name / glob / `-s` resolution to the leading-underscore-filtered `ListSessions` view, so `_portal-saver` / `_portal-bootstrap` are never matchable; a name/glob resolving only to a filtered internal session is a miss. Logged to spec.
 
 ---

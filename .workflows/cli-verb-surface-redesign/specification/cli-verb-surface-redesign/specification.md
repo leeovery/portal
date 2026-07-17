@@ -57,6 +57,8 @@ Each domain maps to an outcome per Axiom 2:
 - **alias** (known alias key) → mint at aliased dir
 - **zoxide query** → mint at zoxide's best-match dir
 
+**Session set — user-visible only.** All session-domain resolution — exact-name match, session-glob expansion, and the `-s/--session` pin — matches only against the **user-visible session set** (the same leading-underscore-filtered `ListSessions` view used by the picker and tab completion). Portal's internal `_portal-saver` / `_portal-bootstrap` (and any future `_`-prefixed) sessions are therefore **never matchable as `open` targets** — a name or glob that would resolve only to a filtered internal session is treated as a miss (falls through / hard-fails), exactly as if it did not exist. This keeps the internal sessions' "invisible / never a user surface" contract intact and prevents `open _portal-saver` from attaching a user to Portal's own plumbing.
+
 Session-name vs directory-name collisions are rare (`{project}-{nanoid}` names don't look like paths) and resolved by precedence.
 
 ### Bare project shorthand does not reattach (accepted consequence)
@@ -307,6 +309,7 @@ Name kept (`uninstall`).
 - **`portal doctor --fix`** — performs the low-stakes, reversible-by-reconstruction repairs it diagnoses: prune stale hooks, prune stale projects, sweep logs. One coherent surface (diagnose, optionally repair the diagnosis) instead of a grab-bag verb plus scattered prune commands.
   - `--fix` is an action-behind-a-flag but is explicitly *not* the hidden-destructive pattern rejected on `uninstall`: it is the obvious paired verb to a diagnosis, and everything it does is low-stakes and reconstructable.
   - **Log-sweep is outside the diagnose→repair loop.** The catalog has no "logs" check (logs auto-rotate and retention-sweep in the log handler, so there is no stale-logs *health state* to report). `--fix`'s log-sweep is therefore a deliberate unconditional maintenance side-action — not the repair of a diagnosed condition — and does **not** participate in the exit-code contract (a stale-log state can never make `doctor` non-zero). The other two `--fix` repairs (prune stale hooks, prune stale projects) *do* pair with the "no stale entries" catalog check.
+  - **Down-server guard on the stale-hook prune (data-loss safety).** Detecting a dead-pane (stale) hook requires enumerating live panes on a *running* server; with the server **down**, that enumeration is empty and *every* hook would falsely look orphaned. So when the server is down, the "no stale entries" check reports dead-pane-hook staleness as **not-evaluable** (never "all stale"), and `--fix` performs **no hook pruning** in that state. This protects the "reversible-by-reconstruction" guarantee — a user-authored on-resume command is *not* reconstructable by Portal, so `--fix` must never wipe `hooks.json` on a down/rebooted server. The stale-**project** prune is filesystem-only (directory existence) and may still run.
 
 ### Exit-code contract
 
