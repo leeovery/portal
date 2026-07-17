@@ -296,4 +296,13 @@ A separate process can only be handed a command line, never a Go function (the s
 
 ---
 
+## Remaining Verbs — Keep As-Is, except `hooks` → `hook`
+
+`list`, `alias`, `init`, `version`, `completion` **keep as-is** (right name, shape, and tier). One grammar change:
+
+- **`hooks` → `hook`** (canonical), following the dominant modern convention of a **singular** namespace noun for a collection (`docker container`, `gh pr`, `git remote`). `alias` was already singular and stays; `hooks` was the odd one out.
+- **`hooks` is retained as a cobra alias of `hook`** — the one deliberate exception to the no-back-compat rule (see Back-Compat). `portal hook …` is canonical/documented; `portal hooks …` keeps working.
+
+---
+
 ## Working Notes
