@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (29 subtopics — 28 decided · 1 exploring · 1 pending)
+  Discussion Map — CLI Verb Surface Redesign (29 subtopics — 29 decided)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -68,11 +68,11 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
   ├─ ✓ Resolution scope (universal resolution is open's grammar, not the CLI's) [decided]
   ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
-  ├─ ◐ Open invocation grammar (flag/target cross-products, review 002) [exploring]
+  ├─ ✓ Open invocation grammar (flag/target cross-products, review 002) [decided]
   │  ├─ ✓ Target-set composition (union of positionals + pins) [decided]
   │  ├─ ✓ Self-target / duplicate absorb (dedupe; prefer current session) [decided]
   │  ├─ ✓ Burst exec-argv & mint responsibility (window = open --path/--session --ack) [decided]
-  │  └─ ○ Mint-only flags with no target [pending]
+  │  └─ ✓ Mint-only command, no target → picker in Projects mode (preserve) [decided]
   ├─ ✓ Completion UX (session names on positional + -s; paths to shell) [decided]
   ├─ ✓ Utility command audit [decided]
   │  ├─ ✓ uninstall (replaces state cleanup; runtime+state, keeps config) [decided]
@@ -248,7 +248,7 @@ Review finding F2 asked what the user sees when resolution guesses wrong — sha
 `open -e cmd` / `open <target> -- cmd args…` runs a command in the newly created session (the "open this project with claude running" mechanism, fed to `CreateFromDir`/`QuickStart` as the pane's shell-command). The attach-vs-mint dichotomy places it (review finding F1):
 
 - **`-e`/`--` are mint-only** — a command only means something on the mint branch; attaching to an existing session with `-e vim` is semantically void (the session already has its processes).
-- Valid when **every** resolved target is directory-domain (path / alias / zoxide / `-p` / `-z` / `-a`). Any session-domain target (exact name, glob, `-s`) or `-f` combined with a command ⇒ **usage error at the atomic pre-flight** — "any target that can't accept the command ⇒ nothing opens", consistent with the unresolvable rule.
+- Valid when **every** resolved target is directory-domain (path / alias / zoxide / `-p` / `-z` / `-a`). A command combined with a **session-domain (attach) target** (exact name, glob, `-s`) ⇒ **usage error at the atomic pre-flight** — running a command in an already-existing session is the void case. (A command with **no** target is NOT an error — it specializes the picker to Projects/mint mode; see "Mint-only command with no target (F7)" under Open Invocation Grammar.)
 - **Multi-target: the command runs in every minted session.** `x ~/Code/skill* -- claude` (shell-expanded paths) = N new sessions each running claude, in N windows — useful composition that falls out of the rules, not a special case. (Rejected: restricting `-e`/`--` to single-target.)
 
 Fine print still open: `--detect`'s new home.
@@ -363,6 +363,16 @@ Each spawned window runs the **same `open` grammar a human would** — one pinne
 3. **Dedupe key (closes an F2 loose end):** attach targets dedupe by existing-session identity; mint targets dedupe by **resolved directory** — so `open ~/a ~/a` mints one session at `~/a`, not two.
 
 The payoff: a spawned window is just `portal open` with a pinned single target + `--ack`, running the identical grammar as an interactive invocation — no special code path. Confidence: high.
+
+### Mint-only command with no target (F7) — preserve today's picker-restricts-to-Projects behavior
+
+**`open -e <cmd>` / `open -- <cmd>` with no target opens the picker restricted to Projects (mint-only) mode**, with a `Pick a project to run <cmd>` banner. Preserved exactly from today's behavior — **not** a usage error.
+
+- **False path corrected mid-review:** the orchestrator initially argued for a usage error, on the assumption that a command + picker was incoherent because the picker can attach to existing sessions (where a run-command is void). The user ran it and disproved this: code-verified (`internal/tui/model.go:755-759`, `WithCommand` → `commandPending = true` → `activePage = PageProjects`), a pending command **switches the picker into Projects mode**, and Projects only ever mint a fresh session — so the command always lands in a clean session. No incoherence, no footgun.
+- This is fully consistent with "no target → picker": the command doesn't suppress the picker, it **specializes** it to exactly the surfaces where a command is meaningful (mint), and the banner tells the user what's pending.
+- Interaction with Command Passthrough's "usage error" clause: the error is specifically for a **command combined with a session-domain (attach) target** (`open -s existing -e cmd`) — running a command in a session that already exists is the void case. A command with **no** target is *not* that case; it is the specialize-the-picker case above. `-f <text> -e <cmd>` likewise coheres (filtered Projects picker running the command) rather than erroring.
+
+Confidence: high (behavior observed live + code-verified).
 
 ---
 
