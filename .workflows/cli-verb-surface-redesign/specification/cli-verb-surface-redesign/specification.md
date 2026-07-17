@@ -116,6 +116,8 @@ Notes:
 
 `-f` is not a target — it is a "skip resolution, open the picker pre-filtered" redirect. It is **mutually exclusive** with positional targets and with every other pin flag (usage error otherwise).
 
+Plain `-f <text>` (no command) opens the picker on the default **Sessions** page with the text pre-filled — matching the removed implicit picker-with-filter fallback it replaces; the user can toggle to Projects from there. The command variant `-f <text> -e <cmd>` is the stated exception: a filtered **Projects** (mint-only) picker (see the multi-target topic).
+
 ### Command passthrough (`-e` / `--`) — mint-scoped
 
 `open -e <cmd>` and `open <target> -- <cmd> args…` run a command in newly-created sessions (the "open this project with claude running" mechanism), fed to `CreateFromDir` / `QuickStart` as the pane's initial process.
@@ -157,6 +159,7 @@ This absence is the deeper reason commands are mint-only — a safety floor, not
 - **Shell-quoting caveat (accepted, documented):** unquoted `*` is expanded by the shell against cwd files first, so session globs are typed quoted (`x 'api-*'`). Same wart as git/docker pattern args.
 - **Path globs are already free via the shell:** *unquoted* `x ~/Code/skill*` is expanded by the shell into N path args before Portal sees them → N minted sessions in N windows, zero Portal code. The quote is the domain switch.
 - **`-a` accepts key globs** (alias keys are a finite Portal-owned namespace: `-a 'workflow-*'`).
+- **A directory path whose name contains glob metacharacters** (e.g. `~/tmp/foo[1]`) is **unreachable as a bare positional** — the glob pre-check treats it as a session glob, it matches zero sessions, and it hard-fails. Reach it with **`-p <dir>`**, which pins the path domain and bypasses glob detection.
 - **Zoxide has no glob support** (subsequence/frecency scoring). Multi-match zoxide (mint sessions for everything frecency-matching a term) is **deferred** — shotgun risk; not designed now.
 
 ### The trigger absorbs the first target, unconditionally; no dedup
@@ -168,6 +171,7 @@ This absence is the deeper reason commands are mint-only — a safety floor, not
 - If the current session is **absent from the set** (not requested) → the terminal moves to the first target, and the current session is simply left as a detached session with no surface. It is **not** given a window (it was never a target).
 - **No current-session detection, no special-casing** — the current session is never treated specially; it gets a window only when it appears in the target set. The trigger's landing spot is immaterial: "it doesn't matter where the terminal ends up, as long as they all open." All requested surfaces open.
 - The inside/outside-tmux split only selects the connector for the first-target surface (`switch-client` inside, `exec attach` outside); the rest run the spawned `portal open …`.
+- **Execution order — the trigger connects *last*.** "Absorbs the first *target*" (which session the terminal lands on) is distinct from *when* the trigger connects. The N−1 non-trigger surfaces are spawned first; the trigger self-connects (`switch-client` inside / `exec attach` outside) **last**, after all spawns are issued. This ordering is load-bearing outside tmux: `exec attach` replaces the Portal process, so connecting the trigger before the spawns would destroy the burster and open only one surface.
 
 **No dedup — duplicates are honored as intent.** The target set is taken literally; repeated targets are *not* collapsed.
 - **Duplicate attach targets** → tmux natively supports multiple clients attached to one session (they mirror), so `open api api api` = three host windows all showing `api` (same session across three Spaces/monitors).
@@ -194,12 +198,13 @@ Each spawned window runs the **same `open` grammar a human would** — one pinne
    - Attach target (session / glob / `-s`) → `portal open --session <name> --ack <batch>:<token>`.
    - Mint target (path / alias / zoxide / `-p` / `-z` / `-a`) → the parent **reduces it to a literal existing directory at resolve time**, then bakes `portal open --path <literal-dir> --ack <batch>:<token>`. Alias/zoxide queries never travel to the window (they could re-resolve differently mid-burst); only the resolved literal dir does, and `--path` cannot diverge. This is why "resolution must not re-run inside the window" holds without a session existing yet.
 2. **Minting happens in each window, not the parent — no pre-minting.** The atomic guarantee is precisely the **read-only resolve**: any target unresolvable ⇒ nothing opens, nothing created. Once resolve passes, each surface opens/mints itself at exec time under **leave-what-opened**; a window that never comes up never mints, so there are no orphaned detached sessions.
-3. **Command passthrough rides mint windows only.** When a command is present (`-e`/`--`), it is appended to each **mint** window's argv in the multi-token passthrough form (which subsumes the single-string `-e` form), after `--ack`: `portal open --path <literal-dir> --ack <batch>:<token> -- <cmd> args…`. Attach windows never carry the command. When the **trigger** surface is itself a mint target carrying the command, the trigger mints locally (no spawned window) and feeds the command to `CreateFromDir` / `QuickStart` as the pane's initial process — the same path a spawned mint window takes.
+3. **Command passthrough rides mint windows only.** When a command is present (`-e`/`--`), it is appended to each **mint** window's argv in the multi-token passthrough form, after `--ack`: `portal open --path <literal-dir> --ack <batch>:<token> -- <cmd> args…`. Attach windows never carry the command. When the **trigger** surface is itself a mint target carrying the command, the trigger mints locally (no spawned window) and feeds the command to `CreateFromDir` / `QuickStart` as the pane's initial process — the same path a spawned mint window takes.
+   - **Command parity — no word-splitting.** The command is carried to every mint surface *as authored*: a single `-e "npm run dev"` string is preserved as **one unit**, never split into separate tokens. The trigger's local mint and every spawned mint window therefore run byte-identical commands (both feed `CreateFromDir` / `QuickStart` the same way), so the same command behaves identically regardless of which surface a mint target lands on.
 4. **No dedup** — duplicate targets each get their own window (mirrored attach, or distinct mint); the burst never collapses them.
 
 ### Atomic pre-flight & partial failure
 
-- **Pre-flight is a read-only resolve of the whole target set.** Any target unresolvable ⇒ atomic abort: nothing opens, nothing is created.
+- **Pre-flight is a read-only resolve of the whole target set.** Any target unresolvable ⇒ atomic abort: nothing opens, nothing is created. The abort **reports every unresolvable target** (not just the first), so one re-run can fix them all. The `-f <text>` suggestion in the miss message appears only in the single-target case — `-f` is mutually exclusive with targets, so it cannot carry a multi-target intent.
 - **Past the resolve, per-window failure is leave-what-opened.** Opened windows stay (Portal doesn't own/tear-down host windows), the trigger's self-attach is skipped on failure, and failed/un-acked surfaces don't retry automatically.
 - **Per-window ack timeout (~8s).** The parent polls for each window's `@portal-spawn-<batch>-<token>` receipt with a per-window timeout of ~8s, the timer starting at *that window's own spawn* so cumulative sequential delay never eats a later window's budget. A window whose receipt has not appeared by its timeout is the "un-acked / failed" case above.
 
@@ -299,6 +304,7 @@ Name kept (`uninstall`).
   **Subsumes `state status`.**
 - **`portal doctor --fix`** — performs the low-stakes, reversible-by-reconstruction repairs it diagnoses: prune stale hooks, prune stale projects, sweep logs. One coherent surface (diagnose, optionally repair the diagnosis) instead of a grab-bag verb plus scattered prune commands.
   - `--fix` is an action-behind-a-flag but is explicitly *not* the hidden-destructive pattern rejected on `uninstall`: it is the obvious paired verb to a diagnosis, and everything it does is low-stakes and reconstructable.
+  - **Log-sweep is outside the diagnose→repair loop.** The catalog has no "logs" check (logs auto-rotate and retention-sweep in the log handler, so there is no stale-logs *health state* to report). `--fix`'s log-sweep is therefore a deliberate unconditional maintenance side-action — not the repair of a diagnosed condition — and does **not** participate in the exit-code contract (a stale-log state can never make `doctor` non-zero). The other two `--fix` repairs (prune stale hooks, prune stale projects) *do* pair with the "no stale entries" catalog check.
 
 ### Exit-code contract
 

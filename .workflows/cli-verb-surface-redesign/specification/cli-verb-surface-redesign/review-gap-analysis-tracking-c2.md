@@ -27,8 +27,8 @@ The spec never states the execution ordering, but it is load-bearing: outside tm
 **Proposed Addition**:
 State the execution ordering explicitly in the burst mechanics: the N−1 non-trigger surfaces are spawned first; the trigger self-connects (`switch-client` / `exec attach`) **last**, after all spawns are issued and (per the partial-failure contract) their acks resolved — because the outside-tmux `exec attach` replaces the Portal process and would abort the burst if run before the spawns. Distinguish "trigger absorbs the first *target*" (which session it lands on) from "trigger connects *last*" (execution order).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (single correct answer dictated by the outside-tmux `exec attach` process-replacement constraint; consistent with existing spawn "self-attach the Nth"). Logged to spec.
 
 ---
 
@@ -46,8 +46,8 @@ An implementer cannot tell whether to (a) add a logs check to the catalog so `do
 **Proposed Addition**:
 Reconcile the catalog and the `--fix` action list — either add an explicit log-retention check to the `doctor` catalog (so the sweep is a diagnosed repair like the others), or state that log-sweep is a deliberate unconditional maintenance side-action of `--fix` that is outside the diagnose→repair loop and does not participate in the exit-code contract. State which.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved with option (b) — log-sweep is an unconditional side-action outside the diagnose→repair loop, not in the exit-code contract. Faithful to the discussion's "log sweep is redundant" note (logs auto-rotate/retention-sweep, so there is no stale-logs health state). Logged to spec.
 
 ---
 
@@ -85,8 +85,8 @@ This is not cosmetic: the miss that sends a user to `-f` could have been an inte
 **Proposed Addition**:
 State the page/mode plain `-f <text>` opens (recommend the default Sessions page, matching the removed implicit picker-with-filter fallback it replaces, with the user free to toggle to Projects via `x`), and that the pre-filter is applied to that page's filter. Keep the `-f … -e <cmd>` → Projects specialization as the stated exception.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (faithful digest — Sessions is the removed fallback's default page; the `-e` → Projects exception was already decided). Logged to spec.
 
 ---
 
@@ -102,8 +102,8 @@ State the page/mode plain `-f <text>` opens (recommend the default Sessions page
 **Proposed Addition**:
 Specify multi-target abort reporting — e.g. report every unresolvable target (not just the first) so a single re-run fixes them all, and clarify whether the `-f` suggestion appears when there is more than one target (since `-f` cannot carry a multi-target intent).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (completion — report every unresolvable target; `-f` hint only in the single-target case). Logged to spec.
 
 ---
 
@@ -119,8 +119,8 @@ The glob pre-check makes a bare token containing `*`, `?`, or `[…]` "session-d
 **Proposed Addition**:
 Add a one-line note to the glob section: a directory path whose name contains glob metacharacters is unreachable as a bare positional (it is treated as a session glob); reach it with `-p <dir>`, which pins path and bypasses glob detection.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (in-scope edge introduced by the redesign's own glob pre-check; escape hatch `-p` already exists). Logged to spec.
 
 ---
 
@@ -141,7 +141,7 @@ The trigger's local mint path (feeding the command to `CreateFromDir`/`QuickStar
 **Proposed Addition**:
 Define the `-e`-string → `--`-argv reconstruction so the trigger's local mint and every spawned mint window receive a byte-identical command (e.g. state whether the single `-e` string is preserved as one passthrough token or word-split, and by what rule), guaranteeing the same command runs identically regardless of which surface a mint target lands on.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved with the parity-preserving rule — command carried as authored, no word-splitting (a single `-e "npm run dev"` string stays one unit), so trigger local-mint and spawned mint windows run byte-identical commands. Matches today's single-string `-e`. Logged to spec.
 
 ---
