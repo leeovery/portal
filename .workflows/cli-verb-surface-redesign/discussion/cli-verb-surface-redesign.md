@@ -568,7 +568,7 @@ Confidence: high.
 ### Current State
 
 - Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
-- Decided: kill stays single + exact; `uninstall` replaces `state cleanup` (public teardown, keeps config, self-heal documented).
+- Decided: kill stays single + exact; `uninstall` replaces `state cleanup` — **runtime-only** (kills daemon + unregisters hooks, touches NO files: both config *and* state dir retained), fully recoverable, prints the manual `rm ~/.config/portal` path for a full wipe.
 - Decided: `clean` deleted → `doctor` (+ `--fix`); project-prune automated; `state` namespace fully hidden.
 - Decided: remaining verbs keep as-is (`hooks` → `hook`, `hooks` kept as the one back-compat alias); `--detect` folded into `doctor`.
 - All Discussion Map subtopics now decided.
