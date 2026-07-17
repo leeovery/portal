@@ -112,6 +112,13 @@
           ]
         }
       }
+    },
+    "review": {
+      "items": {
+        "ghostty-spawn-zero-windows": {
+          "status": "in-progress"
+        }
+      }
     }
   },
   "seeds": [
