@@ -25,3 +25,14 @@ approved_at: 2026-07-17
 - [ ] A new `//go:build ghosttycompile`-gated test in `internal/spawn` feeds `ghosttyOpenScript(<representative composed argv>)` through `osacompile -e <script> -o <t.TempDir()/probe.scpt>` and asserts a zero exit; it `t.Skip`s cleanly when not macOS or when `Ghostty.app` is absent; the live-Mac assumption about whether Ghostty must be running for terminology resolution is confirmed and the precondition adjusted so the guard never produces a false failure unrelated to the template
 - [ ] `go test ./...` (unit) and `go test -tags integration -p 1 ./...` (integration) both pass, inclusive of the lockstep updates; the `manual` and `ghosttycompile` tags remain excluded from both lanes
 - [ ] Merge-gating live validation passes on a live Mac inside Ghostty: `go test -tags manual -run TestManual_OpenWindow_OpensRealGhosttyWindow ./internal/spawn/` passes (a real window opens and runs the command), and a real ≥3-session picker multi-select burst confirms `opened 3/3` with token acks landing and the trigger self-attaching
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| ghostty-spawn-zero-windows-1-1 | Correct the native Ghostty AppleScript template | % in payload stays inert (format arg), backslash-before-quote escape order holds under relocated %s, downstream mapGhosttyResult mapping (clean exit → Success) unchanged, false "validated" comment corrected |
+| ghostty-spawn-zero-windows-1-2 | Surface per-window failure reason at WARN | AckTimeout-after-OutcomeSuccess emits WARN with benign success detail (ack=timeout distinguishes mode), permission-required window excluded from WARN (no double-report), confirmed window stays DEBUG, DEBUG-per-window count no longer len(results) |
+| ghostty-spawn-zero-windows-1-3 | Honest total-failure banner copy | total failure single-name (N=2, one failed external window), total failure multi-name, permission-wall branch unchanged, degenerate empty-failed branch returns "" unchanged, trigger self-attach never counts as an "other", CLI/picker byte-identical parity |
+| ghostty-spawn-zero-windows-1-4 | Compile-check regression guard (ghosttycompile-tagged) | t.Skip when not macOS or Ghostty.app absent, osacompile requires throwaway output target under t.TempDir, confirm/adjust gate if Ghostty must be running for terminology resolution, opens no window |
+| ghostty-spawn-zero-windows-1-5 | Merge-gating live validation (manual Ghostty test + real ≥3-session burst) | manual and ghosttycompile tags stay excluded from both default lanes, compile-only validation insufficient (functional proof required), acks land and trigger self-attaches (net-N, not N+1) |
