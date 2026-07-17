@@ -27,6 +27,22 @@
           "date": "2026-07-17"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "ghostty-spawn-zero-windows": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "f001b23058710d925ad9e74b46562b11ac6292c3",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   },
   "seeds": [
