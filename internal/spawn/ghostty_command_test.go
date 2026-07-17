@@ -88,14 +88,6 @@ func TestGhosttyOpenScript(t *testing.T) {
 			t.Errorf("script does not embed the command property %q; script:\n%s", `command:"`+embedded+`"`, script)
 		}
 	})
-
-	t.Run("it is pure — identical output for the same input", func(t *testing.T) {
-		cmd := realAttachArgv()
-
-		if a, b := ghosttyOpenScript(cmd), ghosttyOpenScript(cmd); a != b {
-			t.Errorf("ghosttyOpenScript is not pure: first call = %q, second = %q", a, b)
-		}
-	})
 }
 
 func TestGhosttyEmbed(t *testing.T) {

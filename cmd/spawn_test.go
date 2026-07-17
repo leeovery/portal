@@ -1021,6 +1021,40 @@ func TestSpawnPartialFailure(t *testing.T) {
 		}
 	})
 
+	t.Run("it renders the total-failure banner when every external window fails and nothing was left open", func(t *testing.T) {
+		// N=2 burst: external = s2 (trigger s3). The single external window
+		// spawn-fails, so nothing is confirmed → othersOpened == false → the
+		// banner must end "— nothing opened", NOT "— others left open". Asserting
+		// through the shared renderer proves byte-identical CLI/picker parity for
+		// the total-failure copy (Rider #2).
+		adapter := &spawntest.FakeAdapter{
+			Results: []spawn.Result{spawn.SpawnFailed("osascript exited 1: -1743")},
+		}
+		conn := &fakeSessionConnector{}
+		ack := &spawntest.FakeAckChannel{}
+		clock := &manualClock{}
+		logger, _ := newCaptureLoggerForComponent(t, "spawn")
+		spawnDeps = spawnPipelineDeps(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, logger)
+		withBurster(spawnDeps, adapter, ack, clock)
+		t.Cleanup(func() { spawnDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"spawn", "s2", "s3"})
+
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected a total-failure error, got nil")
+		}
+		if len(conn.calls) != 0 {
+			t.Errorf("self-attach targets = %#v, want none (nothing opened; trigger not self-attached)", conn.calls)
+		}
+		want := "spawn: " + spawn.PartialFailureMessage([]string{"s2"}, false)
+		if err.Error() != want {
+			t.Errorf("message = %q, want %q (total failure → nothing opened)", err.Error(), want)
+		}
+	})
+
 	t.Run("it classifies an ack timeout and an adapter spawn-failed identically as failed", func(t *testing.T) {
 		// External = s1,s2,s3 (trigger s4). s1 confirms; s2 is an adapter spawn-
 		// failed; s3 opens but times out (Confirm[2]=false). Both s2 and s3 are
