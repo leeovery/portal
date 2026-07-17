@@ -294,6 +294,12 @@ Name kept (`uninstall`).
 - **`portal doctor --fix`** — performs the low-stakes, reversible-by-reconstruction repairs it diagnoses: prune stale hooks, prune stale projects, sweep logs. One coherent surface (diagnose, optionally repair the diagnosis) instead of a grab-bag verb plus scattered prune commands.
   - `--fix` is an action-behind-a-flag but is explicitly *not* the hidden-destructive pattern rejected on `uninstall`: it is the obvious paired verb to a diagnosis, and everything it does is low-stakes and reconstructable.
 
+### Exit-code contract
+
+- `portal doctor` exits **0 iff every check passes; non-zero (1) if any check reports a problem** — a scriptable health gate (`portal doctor && …`).
+- A **down server** counts as **unhealthy → non-zero** (because `doctor` is bootstrap-exempt and starts nothing, so daemon / saver / hooks checks fail). It is reported honestly and distinctly — "Portal runtime not running — run `portal open` to start" vs. actual corruption — not a crash, just an unhealthy report.
+- `portal doctor --fix` **re-runs the diagnosis after applying repairs** and exits **0 iff everything is healthy post-repair, non-zero if anything remains unhealthy or unfixable**.
+
 ### Host-terminal detection folded in (`--detect` retired)
 
 `spawn --detect` (a dry-run that printed the detected host terminal's identity, e.g. `Ghostty · com.mitchellh.ghostty`) is retired with `spawn`. Its job folds into `doctor`: the picker keeps calling `Detect()` in-process; `doctor` calls the same function and prints a line such as `host terminal: Ghostty (supported)` / `unsupported (remote session)`.

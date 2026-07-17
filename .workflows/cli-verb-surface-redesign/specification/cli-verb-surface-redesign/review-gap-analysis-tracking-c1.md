@@ -72,9 +72,10 @@ Added burst-argv item 3: command rides mint windows only, appended as `-- <cmd> 
 The concrete per-check probe is explicitly delegated to planning, which is fine — but the exit-code semantics are a spec-level behavioral contract, not a probe detail, and an implementer would have to guess it.
 
 **Proposed Addition**:
+Added an "Exit-code contract" subsection to `doctor`: exits 0 iff all checks pass, non-zero (1) on any problem (scriptable gate); down server counts as unhealthy → non-zero but is reported honestly/distinctly ("runtime not running — run `portal open`" vs. corruption); `--fix` re-runs the diagnosis after repairing and exits 0 iff healthy post-repair, non-zero if anything remains unhealthy/unfixable.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Surfaced as a genuine undiscussed behavioral decision. User approved the recommendation (scriptable non-zero-on-problems, per the brew doctor idiom + the redesign's scriptability value). Logged to spec.
 
 ---
 
