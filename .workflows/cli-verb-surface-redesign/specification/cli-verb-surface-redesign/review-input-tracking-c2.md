@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-17
 cycle: 2
 phase: Input Review
@@ -25,9 +25,9 @@ This is a real boundary condition of the ack mechanism the redesign owns (`--spa
 "Its behavior: the spawned Portal process, as its last act before exec'ing into tmux, writes `@portal-spawn-<batch>-<token>` as a tmux server option — a delivery receipt the parent burst polls for. Full burst mechanics are in the multi-target topic."
 
 **Proposed Addition**:
-(leave blank until discussed)
+Extended the hidden `--ack` behavior: "The write is best-effort: the process still execs into tmux even if the write fails, so the window attaches regardless. A failed write therefore produces a false negative — the window is up but the parent's poll sees no receipt within its timeout and classifies it failed (leave-what-opened applies; no orphan is created)."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (sourced from discussion "Attach Disposition" best-effort ack; preserved behavior, completeness fix). Logged to spec.
 
 ---
