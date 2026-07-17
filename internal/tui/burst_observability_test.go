@@ -181,9 +181,14 @@ func TestBurstObservability_PartialFailureOpenedKofN(t *testing.T) {
 	assertClosedSpawnKeys(t, sink)
 }
 
-// TestBurstObservability_DebugPerExternalWindow asserts one DEBUG record per external
-// window carrying session + ack + the opaque driver detail.
-func TestBurstObservability_DebugPerExternalWindow(t *testing.T) {
+// TestBurstObservability_PerExternalWindowSplitByOutcome asserts the per-window
+// records split by outcome: a confirmed external window emits DEBUG "external window"
+// while a non-permission failed window (here an AckTimeout) emits WARN "external
+// window failed" — both carrying session + ack + the opaque driver detail. This is
+// the picker-side witness of the shared spawn.LogWindowResults split (mirrored on the
+// CLI); it closes the INFO-level invisibility gap where a failed window logged THAT it
+// failed but not WHY.
+func TestBurstObservability_PerExternalWindowSplitByOutcome(t *testing.T) {
 	m := newPendingBurstModel(t, []string{"alpha", "bravo", "charlie"})
 	logger, sink := logtest.NewCaptureLogger(t)
 	m.spawnLogger = logger
@@ -199,34 +204,41 @@ func TestBurstObservability_DebugPerExternalWindow(t *testing.T) {
 	}
 	injectComplete(t, m, msg)
 
+	// alpha (confirmed) → DEBUG "external window".
 	debugs := recordsByLevel(sink.Records(), slog.LevelDebug)
-	if len(debugs) != 2 {
-		t.Fatalf("want exactly 2 DEBUG spawn records (one per external window), got %d: %+v", len(debugs), debugs)
+	if len(debugs) != 1 {
+		t.Fatalf("want exactly 1 DEBUG spawn record (the confirmed window), got %d: %+v", len(debugs), debugs)
 	}
-	for i, r := range debugs {
-		if r.Msg != "external window" {
-			t.Errorf("DEBUG[%d] msg = %q, want %q", i, r.Msg, "external window")
-		}
+	if debugs[0].Msg != "external window" {
+		t.Errorf("DEBUG msg = %q, want %q", debugs[0].Msg, "external window")
 	}
-	// alpha: confirmed + its detail; bravo: timeout + its detail. The opaque detail
-	// rides as `detail`, never parsed.
 	if got := debugs[0].AttrString(t, "session"); got != "alpha" {
-		t.Errorf("DEBUG[0] session = %q, want alpha", got)
+		t.Errorf("DEBUG session = %q, want alpha", got)
 	}
 	if got := debugs[0].AttrString(t, "ack"); got != "confirmed" {
-		t.Errorf("DEBUG[0] ack = %q, want confirmed", got)
+		t.Errorf("DEBUG ack = %q, want confirmed", got)
 	}
 	if got := debugs[0].AttrString(t, "detail"); got != "opened alpha detail" {
-		t.Errorf("DEBUG[0] detail = %q, want the opaque driver detail", got)
+		t.Errorf("DEBUG detail = %q, want the opaque driver detail", got)
 	}
-	if got := debugs[1].AttrString(t, "session"); got != "bravo" {
-		t.Errorf("DEBUG[1] session = %q, want bravo", got)
+
+	// bravo (AckTimeout, non-permission) → WARN "external window failed" carrying the
+	// opaque detail; ack=timeout distinguishes the mode.
+	warns := recordsByLevel(sink.Records(), slog.LevelWarn)
+	if len(warns) != 1 {
+		t.Fatalf("want exactly 1 WARN spawn record (the failed window), got %d: %+v", len(warns), warns)
 	}
-	if got := debugs[1].AttrString(t, "ack"); got != "timeout" {
-		t.Errorf("DEBUG[1] ack = %q, want timeout", got)
+	if warns[0].Msg != "external window failed" {
+		t.Errorf("WARN msg = %q, want %q", warns[0].Msg, "external window failed")
 	}
-	if got := debugs[1].AttrString(t, "detail"); got != "boom bravo detail" {
-		t.Errorf("DEBUG[1] detail = %q, want the opaque driver detail", got)
+	if got := warns[0].AttrString(t, "session"); got != "bravo" {
+		t.Errorf("WARN session = %q, want bravo", got)
+	}
+	if got := warns[0].AttrString(t, "ack"); got != "timeout" {
+		t.Errorf("WARN ack = %q, want timeout", got)
+	}
+	if got := warns[0].AttrString(t, "detail"); got != "boom bravo detail" {
+		t.Errorf("WARN detail = %q, want the opaque driver detail", got)
 	}
 	assertClosedSpawnKeys(t, sink)
 }

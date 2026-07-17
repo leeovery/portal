@@ -73,6 +73,10 @@ func infoRecords(recs []logtest.Record) []logtest.Record {
 	return out
 }
 
+// warnRecords (the *logtest.Sink-based filter) is declared in
+// terminalsconfig_test.go and reused here — the package's single WARN-record
+// helper, mirroring debugRecords/infoRecords above.
+
 // TestLogBatchSummary_FullSuccessBody pins the full-success rendered body: one DEBUG
 // per external window (session/ack/detail) then one INFO `opened N/N` with the closed
 // resolution/terminal/bundle_id/opened/total/batch attrs, in that exact order.
@@ -137,16 +141,21 @@ func TestLogBatchSummary_OpenedDerivedFromPartitionResults(t *testing.T) {
 		t.Errorf("summary msg = %q, want %q", okInfo[0].Msg, "opened 2/4")
 	}
 
-	// One DEBUG per external window on both paths (3 windows).
-	if n := len(debugRecords(failSink.Records())); n != len(results) {
-		t.Errorf("DEBUG records = %d, want %d (one per external window)", n, len(results))
+	// Only confirmed windows emit DEBUG now; the two non-permission failed
+	// windows (bravo AckTimeout, charlie AckFailed) emit WARN.
+	if n := len(debugRecords(failSink.Records())); n != 1 {
+		t.Errorf("DEBUG records = %d, want 1 (only the confirmed alpha window)", n)
+	}
+	if n := len(warnRecords(failSink)); n != 2 {
+		t.Errorf("WARN records = %d, want 2 (the two failed windows bravo, charlie)", n)
 	}
 }
 
-// TestLogWindowResults_OneDebugPerWindow asserts the standalone per-window DEBUG
-// loop (the CLI permission path's detail emission) renders one record per window with
-// session/ack/detail and NO summary INFO.
-func TestLogWindowResults_OneDebugPerWindow(t *testing.T) {
+// TestLogWindowResults_SplitsByOutcome asserts the standalone per-window loop (the
+// CLI permission path's detail emission) renders a confirmed window at DEBUG
+// "external window" and a non-permission failed window at WARN "external window
+// failed", each carrying session/ack/detail and with NO summary INFO.
+func TestLogWindowResults_SplitsByOutcome(t *testing.T) {
 	logger, sink := logtest.NewCaptureLogger(t)
 	results := []WindowResult{
 		{Session: "alpha", Ack: AckConfirmed, Result: Success("opened alpha")},
@@ -156,7 +165,7 @@ func TestLogWindowResults_OneDebugPerWindow(t *testing.T) {
 	LogWindowResults(logger, results)
 
 	const want = "DEBUG external window session=alpha ack=confirmed detail=opened alpha\n" +
-		"DEBUG external window session=bravo ack=timeout detail=boom bravo"
+		"WARN external window failed session=bravo ack=timeout detail=boom bravo"
 	if got := sink.Body(); got != want {
 		t.Errorf("LogWindowResults body =\n  %q\nwant\n  %q", got, want)
 	}
@@ -164,6 +173,106 @@ func TestLogWindowResults_OneDebugPerWindow(t *testing.T) {
 		t.Errorf("LogWindowResults must emit NO INFO record, got %d", n)
 	}
 	assertClosedKeys(t, sink)
+}
+
+// TestLogWindowResults_FailedWindowsWarn pins the per-outcome split: any
+// non-permission failed window (AckFailed open-failure OR AckTimeout after a
+// successful open) emits WARN "external window failed" carrying session/ack/detail;
+// a confirmed window and the permission-required window (excluded to avoid a
+// double-report with LogPermission) stay at DEBUG "external window".
+func TestLogWindowResults_FailedWindowsWarn(t *testing.T) {
+	t.Run("ack_failed_open_failure_warns", func(t *testing.T) {
+		logger, sink := logtest.NewCaptureLogger(t)
+		// AckFailed = the adapter reported no window opened (OutcomeSpawnFailed);
+		// detail is the osascript error text — the observed primary defect.
+		results := []WindowResult{{Session: "x", Ack: AckFailed, Result: SpawnFailed("osascript boom")}}
+
+		LogWindowResults(logger, results)
+
+		r := sink.OnlyRecord(t)
+		if r.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", r.Level)
+		}
+		if r.Msg != "external window failed" {
+			t.Errorf("msg = %q, want %q", r.Msg, "external window failed")
+		}
+		if got := r.AttrString(t, "session"); got != "x" {
+			t.Errorf("session = %q, want %q", got, "x")
+		}
+		if got := r.AttrString(t, "ack"); got != "failed" {
+			t.Errorf("ack = %q, want %q", got, "failed")
+		}
+		if got := r.AttrString(t, "detail"); got != "osascript boom" {
+			t.Errorf("detail = %q, want %q", got, "osascript boom")
+		}
+		assertClosedKeys(t, sink)
+	})
+
+	t.Run("ack_timeout_after_success_warns", func(t *testing.T) {
+		logger, sink := logtest.NewCaptureLogger(t)
+		// The adapter opened the window (OutcomeSuccess) but its token never
+		// arrived within budget — a genuine window failure even though detail is a
+		// benign success string; ack=timeout distinguishes the mode.
+		results := []WindowResult{{Session: "y", Ack: AckTimeout, Result: Success("opened y")}}
+
+		LogWindowResults(logger, results)
+
+		r := sink.OnlyRecord(t)
+		if r.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", r.Level)
+		}
+		if r.Msg != "external window failed" {
+			t.Errorf("msg = %q, want %q", r.Msg, "external window failed")
+		}
+		if got := r.AttrString(t, "ack"); got != "timeout" {
+			t.Errorf("ack = %q, want %q", got, "timeout")
+		}
+		if got := r.AttrString(t, "detail"); got != "opened y" {
+			t.Errorf("detail = %q, want %q (benign success string still surfaced)", got, "opened y")
+		}
+		assertClosedKeys(t, sink)
+	})
+
+	t.Run("confirmed_window_stays_debug", func(t *testing.T) {
+		logger, sink := logtest.NewCaptureLogger(t)
+		results := []WindowResult{{Session: "z", Ack: AckConfirmed, Result: Success("opened z")}}
+
+		LogWindowResults(logger, results)
+
+		r := sink.OnlyRecord(t)
+		if r.Level != slog.LevelDebug {
+			t.Errorf("level = %v, want DEBUG", r.Level)
+		}
+		if r.Msg != "external window" {
+			t.Errorf("msg = %q, want %q", r.Msg, "external window")
+		}
+		if n := len(warnRecords(sink)); n != 0 {
+			t.Errorf("confirmed window must emit NO WARN, got %d", n)
+		}
+		assertClosedKeys(t, sink)
+	})
+
+	t.Run("permission_required_excluded_from_warn", func(t *testing.T) {
+		logger, sink := logtest.NewCaptureLogger(t)
+		// The permission window is AckFailed (!Confirmed()) but its detail is
+		// already carried by the dedicated LogPermission INFO event, so it must NOT
+		// also WARN here — the Outcome != OutcomePermissionRequired guard excludes it.
+		results := []WindowResult{{Session: "p", Ack: AckFailed, Result: PermissionRequired("evt -1743", "grant automation")}}
+
+		LogWindowResults(logger, results)
+
+		r := sink.OnlyRecord(t)
+		if r.Level != slog.LevelDebug {
+			t.Errorf("level = %v, want DEBUG (permission window excluded from WARN)", r.Level)
+		}
+		if r.Msg != "external window" {
+			t.Errorf("msg = %q, want %q", r.Msg, "external window")
+		}
+		if n := len(warnRecords(sink)); n != 0 {
+			t.Errorf("permission-required window must emit NO WARN (no double-report), got %d", n)
+		}
+		assertClosedKeys(t, sink)
+	})
 }
 
 // wantPermissionBody is the exact rendered body BOTH the CLI (logSpawnPermission) and

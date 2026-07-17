@@ -23,17 +23,42 @@ import (
 // the baseline pid/version/process_role are injected per-record by the production
 // handler, never at these call sites.
 
-// LogWindowResults emits one DEBUG "external window" record per external window,
-// carrying its session, its ack outcome, and the opaque driver detail (the spec's
-// "per-window spawn + ack outcome" event). The driver's OS-specific string rides up
-// as the opaque `detail` attr, never parsed (driver-quarantine). It is called
-// standalone by the CLI permission path (which emits the per-window detail before the
-// permission INFO) and internally by LogBatchSummary (which pairs it with the cycle
-// summary). The picker's permission path deliberately does NOT call it — that
-// asymmetry is preserved at the call sites, not here.
+// LogWindowResults emits one "per-window spawn + ack outcome" record per external
+// window, carrying its session, its ack outcome, and the opaque driver detail. The
+// driver's OS-specific string rides up as the opaque `detail` attr, never parsed
+// (driver-quarantine). It is called standalone by the CLI permission path (which
+// emits the per-window detail before the permission INFO) and internally by
+// LogBatchSummary (which pairs it with the cycle summary). The picker's permission
+// path deliberately does NOT call it — that asymmetry is preserved at the call
+// sites, not here.
+//
+// Records split by outcome so the operator can see WHY each window failed at the
+// production-default INFO level, not just THAT windows failed (the batch summary's
+// opened N/N counts). A window that FAILED (!Confirmed() — its ack is AckTimeout or
+// AckFailed) and whose outcome is NOT permission-required emits at WARN with the
+// distinct "external window failed" message. This deliberately spans BOTH
+// non-permission failure modes: AckFailed (the adapter reported no window opened;
+// detail is the osascript error text) AND AckTimeout (the window opened but its
+// token never arrived within budget; detail is a benign success string). Both are
+// genuine failures the operator must see; the ack attr distinguishes the mode
+// (failed vs timeout). Restricting the WARN to open-failures would re-introduce the
+// exact invisibility gap this closes.
+//
+// The permission-required window is excluded from the WARN even though it is also
+// !Confirmed() (AckFailed): its detail is already carried by the dedicated
+// LogPermission INFO event, and the CLI's permission arm calls LogWindowResults
+// before LogPermission, so the exclusion prevents a double-report. Every other
+// window — a confirmed window, or the permission-required window — emits at DEBUG
+// with the unchanged "external window" message.
 func LogWindowResults(logger *slog.Logger, results []WindowResult) {
 	logger = log.OrDiscard(logger)
 	for _, r := range results {
+		failed := !r.Confirmed()
+		nonPermission := r.Result.Outcome != OutcomePermissionRequired
+		if failed && nonPermission {
+			logger.Warn("external window failed", "session", r.Session, "ack", string(r.Ack), "detail", r.Result.Detail)
+			continue
+		}
 		logger.Debug("external window", "session", r.Session, "ack", string(r.Ack), "detail", r.Result.Detail)
 	}
 }
