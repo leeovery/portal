@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-17
 cycle: 2
 phase: Gap Analysis
@@ -66,8 +66,8 @@ The partial-failure contract states "the trigger's self-attach is skipped on fai
 **Proposed Addition**:
 Define, for the CLI burst: (a) exactly which failure gates the skip — recommend the trigger self-connects whenever its **own** first-target surface resolved, independent of other windows' ack failures (its target is unrelated to theirs), with failed spawned windows reported but not blocking the trigger's landing; and (b) the outside-tmux consequence when the skip does apply (Portal returns to the shell without attaching; the failure is reported on stderr). Reconcile with the picker's "marked surfaces retry" note, which does not apply to the CLI.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Surfaced as a CLI-vs-picker divergence the discussion never ruled on; discussed with the user (incl. a tangent on possibly making multi-open stay-put, which was set aside — absorb/net-N stays as specced). User chose the recommendation (Option B): the trigger connects to its own target independent of other windows' failures; skipped only if its own target fails at connect (outside tmux → returns to shell, reports failure). Logged to spec.
 
 ---
 
