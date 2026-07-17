@@ -317,4 +317,12 @@ This applies the existing, code-documented exemption to the renamed successors â
 
 ---
 
+## Bare `portal` (no subcommand)
+
+**Bare `portal` prints help/usage â€” it does NOT launch the picker.** The picker already has two doors (`portal open`, `x`); bare `portal` is the control-plane root and lists commands.
+
+- Making bare `portal` open the picker would also make bare `xctl` open the picker (since `xctl() { portal "$@" }`), muddying the two-tier split that is deliberately kept: **`x` = launcher (picker / open), `xctl` / `portal` = management plane (help when bare).**
+
+---
+
 ## Working Notes
