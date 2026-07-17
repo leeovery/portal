@@ -80,4 +80,54 @@ One observability addition is locked: **the resolver logs its decision** under t
 
 ---
 
+## `portal open` — Flags & Command Passthrough
+
+### Domain-pinning flags
+
+The domain-pinning flags name a target's domain explicitly, skipping the guessing chain. They exist primarily for scriptability and for reaching a domain shadowed by a higher-precedence match; humans typically use bare targets.
+
+| Flag | Pins to | Semantics on that domain |
+|---|---|---|
+| `-s/--session <name-or-glob>` | exact session / session glob | attach; hard fail on miss; never mints |
+| `-p/--path <dir>` | directory path | mint new session; dir must exist |
+| `-z/--zoxide <query>` | zoxide best match | mint at matched dir; hard fail on no match; **explicit error if zoxide not installed** |
+| `-a/--alias <key-or-glob>` | alias key / key glob | mint at aliased dir; hard fail on unknown key |
+| `-f/--filter <text>` | (none — picker redirect) | opens the picker pre-filled with `<text>`; skips resolution entirely |
+
+Notes:
+- `-z` differs from the guessing chain on zoxide-absence: pinned `-z` **errors** when zoxide is not installed (`ErrZoxideNotInstalled`), whereas the bare-target chain treats any zoxide error as "continue to next domain" (falls through silently).
+- `-a` is the only way to reach an alias key shadowed by a same-named session, and rounds out the four resolution domains.
+- `-e` is already `open`'s run-command flag (see Command Passthrough) — it is not available as a pin letter.
+
+### Pinned-domain contract — never falls back to the picker
+
+`--session` and `--path` invocations **hard-fail on unresolvable and never fall back to the TUI picker** — a spawned window or script must never pop a TUI. `--session` never mints (a bare name has no directory to mint from); `--path` mints per Axiom 2 (the directory must exist).
+
+### `-f/--filter` is the sole non-composing flag
+
+`-f` is not a target — it is a "skip resolution, open the picker pre-filtered" redirect. It is **mutually exclusive** with positional targets and with every other pin flag (usage error otherwise).
+
+### Command passthrough (`-e` / `--`) — mint-scoped
+
+`open -e <cmd>` and `open <target> -- <cmd> args…` run a command in newly-created sessions (the "open this project with claude running" mechanism), fed to `CreateFromDir` / `QuickStart` as the pane's initial process.
+
+- **The command targets mint surfaces only.** A freshly-minted session has a clean pane to *be* the command's process. An existing (attach) session has no safe injection channel (see the safety note), so a command can never run in an attach target.
+- **Mixed sets are allowed; the command is scoped to the mint targets.** Mint-vs-attach is known per-target at resolve time, so the command is baked only into mint targets' invocations; attach targets get their `--session` with no command. `open api ~/new -e claude` → attach `api` as-is **and** mint `~/new` running claude, in two surfaces.
+- **Zero mint targets + a command ⇒ usage error.** `open api web -e claude` (all existing sessions) → error: the command has no new session to run in. (Erroring beats silently dropping the command.)
+- **The command runs in every minted target.** `x ~/Code/skill* -- claude` (shell-expanded to N paths) = N new sessions each running claude, in N windows.
+- A command with **no target** is not this case — it opens the picker in mint-only (Projects) mode; see the multi-target/picker topic.
+
+**Command-injection-safety note (why attach targets can never take a command).** There is no tmux primitive for "run a command in an existing session only if safe":
+1. **mint** — the command *is* the pane's initial process; clean.
+2. **existing session at a shell prompt** — only `send-keys` (type the text in); works only if the pane is genuinely idle, which Portal can't guarantee (half-typed input would get the command appended) — a fragile heuristic.
+3. **existing session with a process running** (`npm run dev`, `claude`) — no safe option: `send-keys` injects keystrokes into the running process's stdin (garbage), and `respawn-pane -k` *kills* the running process and replaces it (destroys work).
+
+This absence is the deeper reason commands are mint-only — a safety floor, not a chosen restriction. Detecting case 2 via `pane_current_command` + conditional `send-keys` is **rejected** (fragile; makes `open` mutate live sessions — a surprising new power; thin payoff).
+
+### Hidden `--ack` flag
+
+`open --ack <batch>:<token>` is an internal receipt flag used by spawned host windows, **marked hidden via Cobra `MarkHidden`** (gone from `--help` and completion). It remains visible in `ps` when a spawned window runs — acceptable (internal, not secret). Its behavior: the spawned Portal process, as its last act before exec'ing into tmux, writes `@portal-spawn-<batch>-<token>` as a tmux server option — a delivery receipt the parent burst polls for. Full burst mechanics are in the multi-target topic. Rejected spellings: `--on-open` (reads as a hook trigger, collides with `--on-resume` vocabulary), `--open-ack` (redundant on `open`), `--receipt` (unusual CLI vocabulary). Today's equivalent flag `--spawn-ack` is only *labelled* "internal:" in help text, not actually hidden — the redesign hides it properly and renames it `--ack`.
+
+---
+
 ## Working Notes
