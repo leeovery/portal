@@ -73,7 +73,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  ├─ ✓ Self-target / duplicate absorb (dedupe; prefer current session) [decided]
   │  ├─ ✓ Burst exec-argv & mint responsibility (window = open --path/--session --ack) [decided]
   │  └─ ✓ Mint-only command, no target → picker in Projects mode (preserve) [decided]
-  ├─ ✓ Completion UX (session names on positional + -s; paths to shell) [decided]
+  ├─ ✓ Completion UX (session names: positional/-s/kill; alias keys: -a; rest to shell) [decided]
   ├─ ✓ Utility command audit [decided]
   │  ├─ ✓ uninstall (replaces state cleanup; runtime+state, keeps config) [decided]
   │  ├─ ✓ Maintenance/diagnostics reorg (clean deleted → doctor + --fix; project-prune automated) [decided]
@@ -388,7 +388,20 @@ Review finding F5: today's verb split gives each verb a clean completion domain 
 
 ### Decision
 
-**Complete session names on the bare positional, and on `-s`; leave paths to the shell.** Session names are the finite, enumerable set only Portal knows; zoxide has its own `cd`-style completion and path completion is the shell's job (it does it better than we can). This keeps completion pointed at the one namespace Portal owns, without cramming multiple namespaces into one noisy list. Rejected: sessions+directories merged (noisy, two namespaces in one slot); nothing at all (loses the genuinely useful session-name completion). Flag-value completion where unambiguous: `-s` → session names. Confidence: high.
+**The principle: complete every Portal-owned enumerable namespace; leave the rest to the shell.** Session names and alias keys are finite sets only Portal knows; zoxide has its own `cd`-style completion and path completion is the shell's job (it does it better than we can). This keeps completion pointed at Portal's own namespaces without cramming multiple into one noisy list.
+
+Applied consistently across every slot (F6 extended the original `-s`/positional-only decision):
+
+| Slot | Completes |
+|---|---|
+| `open` bare positional | session names |
+| `open -s` | session names |
+| `open -a` | alias keys |
+| `open -p` | (shell — paths) |
+| `open -z` | (shell / zoxide's own) |
+| `kill` positional | session names |
+
+Rejected: sessions+directories merged into one slot (noisy); nothing at all (loses the genuinely useful session-name / alias-key completion). Confidence: high.
 
 ---
 

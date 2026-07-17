@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: ghostty-spawn-zero-windows (Cycle 1)
 
 ## Task 1: Make burstPartialFailureFlash self-contained (remove the double partition / permission scan)
-status: pending
+status: approved
 severity: low
 sources: duplication, architecture
 
@@ -78,7 +78,7 @@ change.
   shape without altering any behavioural assertion.
 
 ## Task 2: Close the Fix 4 compile-guard's installed-but-not-running precondition gap
-status: pending
+status: approved
 severity: low
 sources: standards
 
