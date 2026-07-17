@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-17
 cycle: 1
 phase: Gap Analysis
@@ -94,9 +94,10 @@ The spec locks the new `resolve` component and its attr keys (`target`, `domain`
 - **Multi-target bursts.** Is one `resolve` line emitted per target in a burst? The spec phrases it in the singular ("`open` logs its resolution decision").
 
 **Proposed Addition**:
+Added a "line's behavior" list to the `resolve` component: level INFO (reconstructable after the fact, consistent with the existing per-`open` `process: exec` INFO line); bare positionals only (pins are deterministic/self-documenting, no line); emitted on a miss too (`domain = miss`, empty `resolved_path`; user-facing hard-fail error is separate); one line per resolved bare target in a burst. Also added `miss` to the `domain` attr vocabulary.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Surfaced as a genuine undiscussed decision (level in particular). User approved the recommendation (INFO / bare-only / emit-on-miss / one-per-target). Logged to spec.
 
 ---
 

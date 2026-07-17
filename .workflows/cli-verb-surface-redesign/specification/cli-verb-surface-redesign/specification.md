@@ -79,7 +79,13 @@ There is **no dedicated confirmation surface** when resolution guesses wrong (e.
 
 One observability addition is locked: **`open` logs its resolution decision**, e.g. `resolve: 'blog' → zoxide → ~/Code/blog`, so a confusing guess is reconstructable from `portal.log`. The line is emitted from the `open` command body (`cmd/open.go`), where resolution is driven — `internal/resolver` stays a pure, log-free library.
 
-This requires a **governed amendment to Portal's closed log taxonomy**: this feature adds **one new component, `resolve`**, to the closed component set. `open` owns no log component today (it logs only exec markers under `process` and the spawn burst under `spawn`, neither of which fits a resolution decision), so resolution has no existing home. The `resolve` component carries the decision line with attr keys `target` (raw input), `domain` (session / path / alias / zoxide), and `resolved_path` (resolved directory, or resolved session name for a session hit). This is a spec-recorded amendment, **not** a call-site invention (which the log spec prohibits); planning wires the single `log.For("resolve")` binding in `cmd/open.go`.
+This requires a **governed amendment to Portal's closed log taxonomy**: this feature adds **one new component, `resolve`**, to the closed component set. `open` owns no log component today (it logs only exec markers under `process` and the spawn burst under `spawn`, neither of which fits a resolution decision), so resolution has no existing home. The `resolve` component carries the decision line with attr keys `target` (raw input), `domain` (session / path / alias / zoxide, or `miss` on a total miss), and `resolved_path` (resolved directory, or resolved session name for a session hit; empty on a miss). This is a spec-recorded amendment, **not** a call-site invention (which the log spec prohibits); planning wires the single `log.For("resolve")` binding in `cmd/open.go`.
+
+The line's behavior:
+- **Level: INFO** — a guess must be reconstructable *after the fact*, which DEBUG (silent by default) could not guarantee; INFO is consistent with the existing per-`open` `process: exec` INFO line.
+- **Bare positionals only** — explicit pins (`-s`/`-p`/`-z`/`-a`) are deterministic and self-documenting in the argv, so they emit no `resolve` line; the component stays focused on guesses.
+- **Emitted on a miss too** — a total miss uses `domain = miss` with an empty `resolved_path`; the user-facing hard-fail error (stderr) is separate.
+- **One line per resolved bare target** — a multi-target burst emits one per bare positional.
 
 ---
 
