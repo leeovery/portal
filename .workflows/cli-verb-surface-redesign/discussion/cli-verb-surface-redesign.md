@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (22 subtopics — 18 decided · 2 exploring · 2 pending)
+  Discussion Map — CLI Verb Surface Redesign (23 subtopics — 20 decided · 1 exploring · 2 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -69,8 +69,9 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
   ├─ ◐ Utility command audit [exploring]
   │  ├─ ✓ uninstall (replaces state cleanup; runtime+state, keeps config) [decided]
-  │  ├─ ◐ Maintenance/diagnostics reorg (clean smell → doctor? namespaces?) [exploring]
-  │  └─ ○ Remaining verbs (list/alias/hooks/init grammar; state status tier) [pending]
+  │  ├─ ✓ Maintenance/diagnostics reorg (clean deleted → doctor + --fix; project-prune automated) [decided]
+  │  ├─ ✓ state namespace fully hidden (entry points, not removable) [decided]
+  │  └─ ○ Remaining verbs (list/alias/hooks/init grammar keep-as-is?) [pending]
   └─ ✓ Back-compat & deprecation story (none — deliberate reversal of the seed) [decided]
 
 ---
@@ -340,17 +341,46 @@ Replace `state cleanup` with a public **`portal uninstall`** — the command *is
 
 Confidence: high.
 
-### Maintenance & Diagnostics Reorg (`clean` → ?)
+### Maintenance & Diagnostics Reorg (`clean` deleted → `doctor`; `state` hidden)
 
 #### Context
 
-`portal clean` bundles three unrelated jobs behind one global verb + a `--logs` flag: prune stale projects (projects.json dirs gone), prune stale hooks (hooks.json dead panes), force the log retention sweep. The **smell is the grab-bag**, not the functionality — one verb doing three things with a flag toggling a fourth. Value audit: stale-hook prune is redundant (daemon does it), the log sweep is redundant (handler retention-sweeps per day; manual `rm` covers the rest), and stale-project prune is the only unique action — harmless cruft. So `clean`'s unique value is near-nil as it stands.
+`portal clean` bundled three unrelated jobs behind one global verb + a `--logs` flag: prune stale projects (projects.json dirs gone), prune stale hooks (hooks.json dead panes), force the log retention sweep. The **smell is the grab-bag**, not the functionality — one verb doing three things with a flag toggling a fourth. Value audit: stale-hook prune is redundant (daemon does it), the log sweep is redundant (handler retention-sweeps per day; manual `rm` covers the rest), stale-project prune is the only unique action — harmless cruft. So `clean`'s unique value is near-nil as it stood.
 
-#### Under discussion
+#### Journey
 
-User: not against the functionality, against the organization — "hiding all this stuff inside one global clean command is the smell." Wants either explicit namespaced commands (`portal logs rotate|clean`, a prune under `hooks`, etc.) or a considered **`portal doctor`** (previously floated). Key distinction raised: **diagnosis vs action** — `doctor` *reports* health (daemon up? hooks registered? saving working? stale entries?) and would subsume the `state status` diagnostic; the cleanup *actions* are separate and mostly redundant with automation. Open options: (a) drop `clean` wholesale (automation + manual `rm` suffice); (b) re-home each action to its data's namespace; (c) anchor on a read-only `doctor` health command, with rare fixes riding `doctor --fix` or namespaced commands. Not decided — "let's not be hasty."
+The reorg exposed that `clean` conflated **two needs wanting opposite treatments**: *diagnosis* ("is Portal healthy?" — recurring, valuable, today split awkwardly under `state status`) and *action* ("clean X" — mostly already automated). Separating them dissolves `clean`. The distinction the user endorsed: a doctor diagnoses **and** treats (real-life framing) — a well-worn CLI idiom (`brew doctor`, `flutter doctor`), many of which also fix.
 
-(no decision yet)
+`doctor --fix` is itself an action-behind-a-flag — the pattern just killed on `uninstall`. Distinguished and accepted: `--fix` is not a *hidden destructive* action (uninstall's purge was), it is the obvious paired verb to a diagnosis, and everything it does is low-stakes and reversible-by-reconstruction.
+
+#### Decision
+
+- **`portal doctor`** (new, public) — read-only health report across all of Portal: daemon alive, hooks registered without duplicates, saver session up, state dir sane, `sessions.json` valid, any stale entries. **Subsumes `state status`.** The exact check catalog is a spec-level detail.
+- **`portal doctor --fix`** — performs the low-stakes repairs it diagnoses: prune stale hooks, prune stale projects, sweep logs. One coherent surface (diagnose, optionally repair the diagnosis) instead of a grab-bag verb plus scattered prune commands.
+- **`clean` deleted.** `--logs` gone (logs auto-rotate + retention-sweep; `rm` for the rest). No `logs`/`hooks` maintenance namespaces created — the actions don't earn standing commands.
+- **Stale-project pruning folded into the daemon's automation** — a slow cadence (hourly-ish; today only `clean` pruned projects, whereas hooks already prune on the idle tick). Mechanism/cadence is an implementation detail. Net effect: `doctor` reads *healthy* almost always, because the automation keeps it that way; `--fix` is the manual trigger of the same repairs.
+
+Confidence: high.
+
+### `state` Namespace — fully hidden (not removable)
+
+#### Context
+
+User asked whether `state` could be **removed entirely** and become "a totally internal function." Answered precisely against the code.
+
+#### Decision
+
+**`state` becomes fully hidden but cannot stop being a command.** Every remaining `state` subcommand is a **separate-process entry point** invoked by an argv, not an in-process call:
+
+- `state daemon` — the process the `_portal-saver` pane runs.
+- `state hydrate` — exec'd into each restored pane via `respawn-pane -k`.
+- `state signal-hydrate` / `state notify` / `state commit-now` / `state migrate-rename` — all fired by tmux hooks as `run-shell "portal state …"` (verified in `internal/tmux/hooks_register.go`).
+
+A separate process can only be handed a command line, never a Go function (same constraint that kept `attach` alive as the spawn exec target). So these **must** stay invocable — but the whole namespace is marked **hidden** (gone from `--help` / completion). Once `status` → `doctor` and `cleanup` → `uninstall`, `state` has zero user-facing children, so hiding it entirely is exact: to the user `state` disappears; to tmux it remains plumbing.
+
+**Keep the `state` prefix** — the hook definitions match those command strings by substring for idempotency (`notifyCommand`, `commitNowSubstring`, `migrateRenameSubstring`, `PortalDaemonArgvPattern`, …), so renaming churns internal matching for zero user benefit.
+
+Confidence: high.
 
 ---
 
@@ -416,8 +446,8 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 
 - Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
 - Decided: kill stays single + exact; `uninstall` replaces `state cleanup` (public teardown, keeps config, self-heal documented).
-- Exploring: maintenance/diagnostics reorg (clean grab-bag → doctor? namespaces?).
-- Pending: remaining verbs (list/alias/hooks/init grammar; state status tier); --detect home.
+- Decided: `clean` deleted → `doctor` (+ `--fix`); project-prune automated; `state` namespace fully hidden.
+- Pending: remaining verbs (list/alias/hooks/init grammar keep-as-is?); --detect home.
 
 ## Triage
 
