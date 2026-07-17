@@ -37,3 +37,14 @@ approved_at: 2026-07-17
 | ghostty-spawn-zero-windows-1-3 | Honest total-failure banner copy | total failure single-name (N=2, one failed external window), total failure multi-name, permission-wall branch unchanged, degenerate empty-failed branch returns "" unchanged, trigger self-attach never counts as an "other", CLI/picker byte-identical parity |
 | ghostty-spawn-zero-windows-1-4 | Compile-check regression guard (ghosttycompile-tagged) | t.Skip when not macOS or Ghostty.app absent, osacompile requires throwaway output target under t.TempDir, confirm/adjust gate if Ghostty must be running for terminology resolution, opens no window |
 | ghostty-spawn-zero-windows-1-5 | Merge-gating live validation (manual Ghostty test + real ≥3-session burst) | manual and ghosttycompile tags stay excluded from both default lanes, compile-only validation insufficient (functional proof required), acks land and trigger self-attaches (net-N, not N+1) |
+
+### Phase 2: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| ghostty-spawn-zero-windows-2-1 | Make burstPartialFailureFlash self-contained (remove the double partition / permission scan) | PartitionResults/FirstPermission each run at most once (no discarded recomputation); byte-identical flash for total-failure ("— nothing opened"), genuine-partial ("— others left open"), permission-wall (verbatim Guidance), degenerate-empty ("" → no band); CLI/picker parity preserved; cmd/spawn.go untouched; helper signature no longer mixes passed-in half with re-derived half |
+| ghostty-spawn-zero-windows-2-2 | Close the Fix 4 compile-guard's installed-but-not-running precondition gap | installed-but-not-running cannot produce a false t.Fatalf template-drift (passes on clean resolution or t.Skips/precondition-gated); genuine -2741 drift to pre-fix `make new surface configuration` form still fails; corrected committed template still passes; no default/integration-lane behaviour change (compiles into neither lane); executor chooses path (a) live-Mac evidence or (b) defensive code change at implementation time |
