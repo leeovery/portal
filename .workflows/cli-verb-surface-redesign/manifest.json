@@ -11,6 +11,22 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "cli-verb-surface-redesign": {
+          "status": "in-progress",
+          "sources": {
+            "cli-verb-surface-redesign": {
+              "status": "pending"
+            }
+          },
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "construction_gate_mode": "gated",
+          "date": "2026-07-17"
+        }
+      }
     }
   },
   "seeds": [
