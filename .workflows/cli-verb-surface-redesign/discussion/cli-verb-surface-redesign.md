@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (29 subtopics — 26 decided · 1 exploring · 3 pending)
+  Discussion Map — CLI Verb Surface Redesign (29 subtopics — 27 decided · 1 exploring · 2 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -70,7 +70,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
   ├─ ◐ Open invocation grammar (flag/target cross-products, review 002) [exploring]
   │  ├─ ✓ Target-set composition (union of positionals + pins) [decided]
-  │  ├─ ○ Self-target / duplicate absorb [pending]
+  │  ├─ ✓ Self-target / duplicate absorb (dedupe; prefer current session) [decided]
   │  ├─ ○ Burst exec-argv & mint responsibility [pending]
   │  └─ ○ Mint-only flags with no target [pending]
   ├─ ✓ Completion UX (session names on positional + -s; paths to shell) [decided]
@@ -340,6 +340,17 @@ Consolidates the interaction cells the final review (set 002) found undefined �
 - **`-f` is the sole non-composing flag** — it is not a target but a "skip resolution, open the picker (pre-filtered)" redirect, so it is exclusive with all targets and all other pins.
 
 This retro-justifies the Command Passthrough section's enumeration (which already treated `-p`/`-z`/`-a` as directory-domain target contributors). Confidence: high.
+
+### Self-target & duplicate absorb (F2)
+
+The absorb/net-N rule ("N surfaces, your terminal is one of them") gains two clauses so the trigger-is-a-target and duplicate cases are defined:
+
+1. **Dedupe the resolved target set first.** Identical resolved surfaces collapse to one — `open api-1 api-1`, overlapping globs, a positional that resolves to the same session as a pin. Net count = *distinct* resolved surfaces.
+2. **The trigger terminal absorbs to a target, preferring the current session when it is in the set:**
+   - Current session **is** a (deduped) target → the terminal stays put on it (no switch, no self-window); windows open only for the *other* targets. `open current other` from `current` = stay in `current`, one window for `other` (net-2, never a redundant second window for a session you already occupy).
+   - Current session is **not** a target → the terminal switches in place to the **first target in argv/resolved order** (deterministic — replaces the previously-unspecified "the Nth"); the rest open as windows.
+
+"Your terminal is one of them" holds in every case. The inside/outside-tmux split only selects the connector for the in-place surface (`switch-client` inside, `exec attach` outside); the N−1 external windows always run the spawned `portal open …`. Confidence: high.
 
 ---
 
