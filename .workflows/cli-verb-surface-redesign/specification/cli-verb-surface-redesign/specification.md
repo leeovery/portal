@@ -233,4 +233,28 @@ Rejected: sessions+directories merged into one slot (noisy); nothing at all (los
 
 ---
 
+## `uninstall` — Runtime-Only Teardown (replaces `state cleanup`)
+
+`portal state cleanup` is replaced by a public **`portal uninstall`** that is **runtime-only and fully recoverable**. The command *is* the teardown — nothing hidden behind a flag — and it touches **no files at all**.
+
+- **Removes only Portal's tmux-server footprint:** kills the `_portal-saver` daemon and unregisters the global tmux hooks. This is precisely the part that is hard to do by hand (locating the daemon, unregistering the exact hook entries) — the reason the command earns its place.
+- **Touches no filesystem** — the state dir (`sessions.json`, logs) *and* config (`projects.json`, `aliases`, `hooks.json`, `prefs.json`, `terminals.json`) are both left untouched. Nothing irreversible happens.
+- **Prints the completion path**, e.g.:
+  ```
+  Portal's tmux runtime removed. Your saved sessions and config are untouched at ~/.config/portal/.
+  To remove Portal completely, uninstall the binary and delete that directory.
+  ```
+  Because `state/` lives *inside* `~/.config/portal/`, one `rm -rf ~/.config/portal` wipes both — a single deliberate act by the user. Portal never silently deletes data.
+- **Fully recoverable:** the self-heal is the feature — `portal open` re-bootstraps from the retained state (daemon + hooks return, sessions restore). `uninstall` means "deactivate Portal's machinery now," not "destroy my data."
+
+### Why runtime-only (context)
+
+- The old `state cleanup` hid its meaningful action (`--purge`, which deleted the state dir) behind a flag — the exact inconsistency this redesign removes.
+- The non-purge teardown already **self-heals**: bootstrap re-registers hooks and respawns the daemon on the next tmux-touching command. Even the old `--purge` was transient while the tmux server ran (the daemon recaptures every live session into a fresh `sessions.json` on its next tick). Purge only permanently lost data when the server was *also* gone (post-reboot / `kill-server`).
+- Because `uninstall` deletes nothing, there is **no `--yes` gate, no prompt, and no confrontation with the "CLI never prompts" observation** — the earlier destructive-delete design (which needed `--yes` + symlink-safe removal) is dropped entirely. Leaving files behind is standard uninstaller behavior, made honest by the printed message.
+
+Name kept (`uninstall`).
+
+---
+
 ## Working Notes
