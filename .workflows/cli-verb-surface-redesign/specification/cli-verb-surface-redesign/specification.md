@@ -130,4 +130,63 @@ This absence is the deeper reason commands are mint-only — a safety floor, not
 
 ---
 
+## `portal open` — Multi-Target Burst Mechanics
+
+### Target-set composition
+
+**The target set is the union of (all positionals + every `-s`/`-p`/`-z`/`-a` occurrence).** Each element resolves by its own rule — bare positionals run the precedence chain, pins skip the chain and pin their domain — then the whole union goes through atomic pre-flight + absorb/net-N.
+
+- Pins **repeat freely** (`open -s a -s b` = two attach targets).
+- Pins **mix across domains and with positionals** (`open -s api -p ~/Code/new blog` = attach `api` + mint at `~/Code/new` + resolve `blog` = three surfaces).
+- Pins are the explicit-domain way to name a target, fully interchangeable with positionals in a burst.
+- `-f` is the sole non-composing flag (picker redirect; exclusive with all targets and pins).
+
+### Glob targets
+
+- **A bare target containing glob metacharacters (`*`, `?`, `[…]`) is session-domain by construction** — patterns match against the finite set of live session names and skip path/alias/zoxide entirely. Expansion produces K targets that join the target list (`open 'agentic-workflows-*' blog` → K+1 surfaces; absorb rule unchanged). Glob, not regex.
+- **Zero matches ⇒ unresolvable ⇒ atomic hard fail** — no special case.
+- **Shell-quoting caveat (accepted, documented):** unquoted `*` is expanded by the shell against cwd files first, so session globs are typed quoted (`x 'api-*'`). Same wart as git/docker pattern args.
+- **Path globs are already free via the shell:** *unquoted* `x ~/Code/skill*` is expanded by the shell into N path args before Portal sees them → N minted sessions in N windows, zero Portal code. The quote is the domain switch.
+- **`-a` accepts key globs** (alias keys are a finite Portal-owned namespace: `-a 'workflow-*'`).
+- **Zoxide has no glob support** (subsequence/frecency scoring). Multi-match zoxide (mint sessions for everything frecency-matching a term) is **deferred** — shotgun risk; not designed now.
+
+### The trigger absorbs the first target, unconditionally; no dedup
+
+**The trigger (invoking terminal) takes the first target in command-line order** (left-to-right as typed — positionals and pins interleaved; the implementation reads `os.Args` rather than cobra's split positional/flag buckets to preserve true order), and every remaining target opens a window.
+
+- If the current session happens to be the first target → a no-op switch (you stay put).
+- If it's elsewhere in the set, or absent → the terminal moves to the first target, and the current session (if named) simply gets its own window like any other target.
+- **No current-session detection, no special-casing** — the trigger's landing spot is immaterial: "it doesn't matter where the terminal ends up, as long as they all open." All requested surfaces open.
+- The inside/outside-tmux split only selects the connector for the first-target surface (`switch-client` inside, `exec attach` outside); the rest run the spawned `portal open …`.
+
+**No dedup — duplicates are honored as intent.** The target set is taken literally; repeated targets are *not* collapsed.
+- **Duplicate attach targets** → tmux natively supports multiple clients attached to one session (they mirror), so `open api api api` = three host windows all showing `api` (same session across three Spaces/monitors).
+- **Duplicate mint targets** → each mints a *distinct* new session anyway (fresh `{project}-{nanoid}`), so `open ~/a ~/a` = two new sessions at `~/a`.
+- **Accepted consequence:** overlapping globs (`open 'api-*' 'api-1'`) can produce a duplicate surface; honored, not deduped (low-harm, killable).
+
+### Burst exec-argv & mint responsibility
+
+Each spawned window runs the **same `open` grammar a human would** — one pinned target + the hidden `--ack` — no bespoke burst-only path.
+
+1. **Window argv, per surface:**
+   - Attach target (session / glob / `-s`) → `portal open --session <name> --ack <batch>:<token>`.
+   - Mint target (path / alias / zoxide / `-p` / `-z` / `-a`) → the parent **reduces it to a literal existing directory at resolve time**, then bakes `portal open --path <literal-dir> --ack <batch>:<token>`. Alias/zoxide queries never travel to the window (they could re-resolve differently mid-burst); only the resolved literal dir does, and `--path` cannot diverge. This is why "resolution must not re-run inside the window" holds without a session existing yet.
+2. **Minting happens in each window, not the parent — no pre-minting.** The atomic guarantee is precisely the **read-only resolve**: any target unresolvable ⇒ nothing opens, nothing created. Once resolve passes, each surface opens/mints itself at exec time under **leave-what-opened**; a window that never comes up never mints, so there are no orphaned detached sessions.
+3. **No dedup** — duplicate targets each get their own window (mirrored attach, or distinct mint); the burst never collapses them.
+
+### Atomic pre-flight & partial failure
+
+- **Pre-flight is a read-only resolve of the whole target set.** Any target unresolvable ⇒ atomic abort: nothing opens, nothing is created.
+- **Past the resolve, per-window failure is leave-what-opened.** Opened windows stay (Portal doesn't own/tear-down host windows), the trigger's self-attach is skipped on failure, and failed/un-acked surfaces don't retry automatically.
+
+### Mint-only command with no target → picker in Projects mode
+
+**`open -e <cmd>` / `open -- <cmd>` with no target opens the picker restricted to Projects (mint-only) mode**, with a `Pick a project to run <cmd>` banner. This is preserved exactly from today's behavior — **not** a usage error.
+
+- A pending command switches the picker into Projects mode, and Projects only ever mint a fresh session — so the command always lands in a clean session. No incoherence.
+- The command doesn't suppress the picker; it **specializes** it to exactly the surfaces where a command is meaningful (mint), and the banner tells the user what's pending.
+- `-f <text> -e <cmd>` likewise coheres (filtered Projects picker running the command). The command's only *error* case is zero mint targets (all-attach explicit set, e.g. `open api web -e cmd`).
+
+---
+
 ## Working Notes
