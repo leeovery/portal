@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (19 subtopics — 16 decided · 1 exploring · 2 pending)
+  Discussion Map — CLI Verb Surface Redesign (19 subtopics — 17 decided · 2 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -66,7 +66,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   │  └─ ○ --detect home [pending]
   ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
   ├─ ✓ Resolution scope (universal resolution is open's grammar, not the CLI's) [decided]
-  ├─ ◐ Kill shape (single+exact vs glob; CLI-prompt question) [exploring]
+  ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
   ├─ ○ Utility command audit (list, hooks, clean, state, alias, init) [pending]
   └─ ✓ Back-compat & deprecation story (none — deliberate reversal of the seed) [decided]
 
@@ -303,11 +303,15 @@ Whether `kill` gains session globs (`kill 'agentic-workflows-*'` for bulk cleanu
 - **The CLI has zero interactive-prompt machinery today.** Verified against the code: no stdin reads anywhere (`bufio`/`Scanln`/`ReadString`/`[y/N]`/`confirm` all absent outside the TUI). Every CLI command is do-or-error, non-interactive. The one interactive surface in Portal is the picker (the Bubble Tea TUI), where the destructive-confirm modal already lives (`k`-to-kill).
 - A `[y/N]` glob-kill guard would therefore mean building a brand-new interaction pattern the CLI does not have.
 
-### Open — under discussion
+### Decision
 
-Reopened (the decision was prematurely closed). User leaned toward keeping `kill` single-session "as much for safety as anything else", and questioned how useful glob-for-kill is anyway — but this was a lean expressed while asking a question, not a locked decision. A candidate principle floated ("the CLI never prompts — interactivity lives in the picker") is **not** adopted; it awaits the actual decision here.
+**`kill` stays single + exact — no globs, no resolution, unchanged from today.** Instant kill of one named session. Decided by the user directly: keep destruction maximally explicit; glob-kill was judged marginal and not worth inventing a CLI prompt pattern the codebase doesn't have.
 
-(no decision yet)
+- Rejected: session globs on `kill`; a terminal `[y/N]` confirm guard.
+- Bulk kill's natural future home, if ever wanted, is the picker's multi-select (a general selection mode built for reuse) with the existing confirm modal — not the CLI. Noted as a possibility, not committed.
+- The "CLI never prompts" idea is left as an observation, not adopted as a governing principle (it wasn't needed once glob-kill was dropped).
+
+Confidence: high.
 
 ---
 
@@ -372,7 +376,8 @@ Rationale for create-on-miss: the morning-after-reboot script (`portal <B> api b
 ### Current State
 
 - Decided: `open` is the single public session verb (fold, absorb/net-N rule, universal resolution, domain-pinning flags --session/--path, hidden --ack, picker at no-args); `open` name kept on portal-metaphor grounds; `attach`/`spawn` deleted outright — no back-compat surface (deliberate seed reversal).
-- Exploring: kill shape (single+exact vs glob) — REOPENED after premature closure.
+- Decided: kill stays single + exact (no globs, no CLI prompt).
+- Pending: utility command audit (list, hooks, clean, state, alias, init); --detect home.
 
 ## Triage
 
