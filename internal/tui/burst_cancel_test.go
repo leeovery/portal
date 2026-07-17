@@ -380,7 +380,6 @@ func TestBurstCancel_CtrlCLiveWhileInputLockedCancelsNotQuits(t *testing.T) {
 func TestBurstPartialFailureFlash_DegenerateEmptyFailedNoFlash(t *testing.T) {
 	got := burstPartialFailureFlash(
 		[]spawn.WindowResult{{Session: "alpha", Ack: spawn.AckConfirmed, Result: spawn.Success("")}},
-		nil,
 	)
 	if got != "" {
 		t.Errorf("degenerate (no failed windows, no permission wall) must yield no flash; got %q", got)

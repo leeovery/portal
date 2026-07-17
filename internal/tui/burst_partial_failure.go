@@ -58,10 +58,12 @@ func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) 
 		return m, nil
 	}
 
-	// §7-1: derive the confirmed/failed partition from the shared spawn helper rather
-	// than a hand-rolled Ack loop, so the leave-what-opened mutation and the failed-
-	// window flash key off the same count-semantics rule the CLI does.
-	confirmed, failed := spawn.PartitionResults(msg.Results)
+	// §7-1: derive the confirmed set from the shared spawn PartitionResults chokepoint
+	// (rather than a hand-rolled Ack loop) for the leave-what-opened mutation, so it
+	// keys off the same count-semantics rule the CLI does. The failed-window flash owns
+	// its own derivation internally from the same chokepoint (burstPartialFailureFlash),
+	// so this caller no longer threads a partition half into it.
+	confirmed, _ := spawn.PartitionResults(msg.Results)
 
 	(&m).applyBurstSelectionMutation(confirmed)
 	// A user cancel (§6-8) converges here — same leave-what-opened mutation — but is
@@ -70,7 +72,7 @@ func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) 
 	// failed window, no permission wall — burstPartialFailureFlash returns "") renders
 	// no band. resetBurstState clears burstCancelled on the way out.
 	if !m.burstCancelled {
-		if text := burstPartialFailureFlash(msg.Results, failed); text != "" {
+		if text := burstPartialFailureFlash(msg.Results); text != "" {
 			m.setFlash(text)
 		}
 	}
@@ -93,30 +95,31 @@ func (m *Model) applyBurstSelectionMutation(confirmed []string) {
 	m.refreshSessionDelegate()
 }
 
-// burstPartialFailureFlash builds the §6-6 leave-what-opened flash. If ANY window hit
-// the permission wall its driver-composed Guidance is surfaced verbatim, once for the
-// batch — the burst already stopped on the first permission wall (§6-3), and every
-// later window (same source → same target) would hit the identical wall, so the
-// generic per-window failed-window copy would be misleading. With no permission wall
-// and no failed window (a degenerate partial — e.g. a burst that stopped early with
-// every attempted window confirmed) it returns "" so the caller renders NO band,
-// avoiding the leading-space "  failed to open …". Otherwise it names every failed
-// window via the shared spawn.QuoteJoin renderer. The opaque Result.Detail never
-// reaches the user (DEBUG log only, §6-10). The ⚠ glyph is added by the warning notice
-// band, so the message text carries none (formatSessionGoneFlash convention).
-func burstPartialFailureFlash(results []spawn.WindowResult, failed []string) string {
+// burstPartialFailureFlash builds the §6-6 leave-what-opened flash from the raw window
+// results — it is fully self-contained, owning the single FirstPermission +
+// PartitionResults derivation so its correctness never depends on a caller passing a
+// matching partition half. If ANY window hit the permission wall its driver-composed
+// Guidance is surfaced verbatim, once for the batch — the burst already stopped on the
+// first permission wall (§6-3), and every later window (same source → same target)
+// would hit the identical wall, so the generic per-window failed-window copy would be
+// misleading. With no permission wall and no failed window (a degenerate partial —
+// e.g. a burst that stopped early with every attempted window confirmed) it returns ""
+// so the caller renders NO band, avoiding the leading-space "  failed to open …".
+// Otherwise it names every failed window via the shared spawn.QuoteJoin renderer,
+// deriving othersOpened as len(confirmed) > 0 from the same PartitionResults chokepoint
+// the CLI uses (cmd/spawn.go): a total failure renders "— nothing opened" and a genuine
+// partial "— others left open" byte-identically across both paths (the skipped trigger
+// self-attach is never an external result, so it can never count as an "other"). The
+// opaque Result.Detail never reaches the user (DEBUG log only, §6-10). The ⚠ glyph is
+// added by the warning notice band, so the message text carries none
+// (formatSessionGoneFlash convention).
+func burstPartialFailureFlash(results []spawn.WindowResult) string {
 	if perm, ok := spawn.FirstPermission(results); ok {
 		return perm.Result.Guidance
 	}
+	confirmed, failed := spawn.PartitionResults(results)
 	if len(failed) == 0 {
 		return ""
 	}
-	// Total vs genuine partial: othersOpened is true exactly when some OTHER
-	// external window confirmed. Derive it from the same PartitionResults chokepoint
-	// the CLI uses (cmd/spawn.go), so a total failure renders "— nothing opened" and a
-	// genuine partial renders "— others left open" byte-identically across both paths.
-	// The skipped trigger self-attach is never an external result, so it can never
-	// count as an "other".
-	confirmed, _ := spawn.PartitionResults(results)
 	return spawn.PartialFailureMessage(failed, len(confirmed) > 0)
 }
