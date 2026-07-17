@@ -1,7 +1,7 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.5.12",
-    "commit": "6177da9293cc52607f389aba913860084aa3b08f",
+    "ref": "v0.5.13",
+    "commit": "bf85e3e3b61aa79b3367018a3e401c9d6ea4668f",
     "agents": [
       "claude"
     ],
@@ -240,6 +240,7 @@
       ".claude/skills/workflow-migrate/scripts/migrations/043-handled-umbrellas-and-restamp-caches.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/044-allow-workflows-mv.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/045-move-discovery-sessions.sh",
+      ".claude/skills/workflow-migrate/scripts/migrations/046-remove-workflows-write-rule.sh",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
@@ -473,12 +474,12 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "installedAt": "2026-07-01T18:01:36.418Z",
+    "installedAt": "2026-07-17T07:16:26.603Z",
     "constraint": "^0.5.0"
   },
   "samber/cc-skills-golang": {
-    "ref": "v1.7.0",
-    "commit": "8b2d019212d6a5390d472a7660a8489109d7db49",
+    "ref": "v1.9.0",
+    "commit": "4158351dd5420c027755953fb73baa92d59a8b7b",
     "agents": [
       "claude"
     ],
@@ -640,6 +641,14 @@
       ".claude/skills/golang-google-wire/references/advanced.md",
       ".claude/skills/golang-google-wire/references/recipes.md",
       ".claude/skills/golang-google-wire/references/testing.md",
+      ".claude/skills/golang-gopls/",
+      ".claude/skills/golang-gopls/SKILL.md",
+      ".claude/skills/golang-gopls/references/",
+      ".claude/skills/golang-gopls/references/cli.md",
+      ".claude/skills/golang-gopls/references/features.md",
+      ".claude/skills/golang-gopls/references/matrix.md",
+      ".claude/skills/golang-gopls/references/mcp.md",
+      ".claude/skills/golang-gopls/references/settings.md",
       ".claude/skills/golang-graphql/",
       ".claude/skills/golang-graphql/SKILL.md",
       ".claude/skills/golang-graphql/evals/",
@@ -736,6 +745,14 @@
       ".claude/skills/golang-project-layout/references/directory-layouts.md",
       ".claude/skills/golang-project-layout/references/testing-layout.md",
       ".claude/skills/golang-project-layout/references/workspaces.md",
+      ".claude/skills/golang-refactoring/",
+      ".claude/skills/golang-refactoring/SKILL.md",
+      ".claude/skills/golang-refactoring/references/",
+      ".claude/skills/golang-refactoring/references/catalog.md",
+      ".claude/skills/golang-refactoring/references/go-tooling.md",
+      ".claude/skills/golang-refactoring/references/safety-net.md",
+      ".claude/skills/golang-refactoring/references/structural.md",
+      ".claude/skills/golang-refactoring/references/workflow.md",
       ".claude/skills/golang-safety/",
       ".claude/skills/golang-safety/SKILL.md",
       ".claude/skills/golang-safety/evals/",
@@ -901,7 +918,7 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/samber/cc-skills-golang.git",
-    "installedAt": "2026-07-05T09:53:23.145Z",
+    "installedAt": "2026-07-17T07:16:28.470Z",
     "constraint": "^1.5.1"
   }
 }
