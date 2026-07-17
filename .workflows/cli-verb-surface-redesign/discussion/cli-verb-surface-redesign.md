@@ -70,7 +70,7 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
   ├─ ✓ Open invocation grammar (flag/target cross-products, review 002) [decided]
   │  ├─ ✓ Target-set composition (union of positionals + pins) [decided]
-  │  ├─ ✓ Self-target / duplicate absorb (dedupe; prefer current session) [decided]
+  │  ├─ ✓ Self-target absorb; no dedup (duplicates honored as intent) [decided]
   │  ├─ ✓ Burst exec-argv & mint responsibility (window = open --path/--session --ack) [decided]
   │  └─ ✓ Mint-only command, no target → picker in Projects mode (preserve) [decided]
   ├─ ✓ Completion UX (session names: positional/-s/kill; alias keys: -a; rest to shell) [decided]
@@ -345,16 +345,19 @@ Consolidates the interaction cells the final review (set 002) found undefined �
 
 This retro-justifies the Command Passthrough section's enumeration (which already treated `-p`/`-z`/`-a` as directory-domain target contributors). Confidence: high.
 
-### Self-target & duplicate absorb (F2)
+### Self-target absorb & no dedup (F2)
 
-The absorb/net-N rule ("N surfaces, your terminal is one of them") gains two clauses so the trigger-is-a-target and duplicate cases are defined:
+**No dedup — duplicates are honored as intent.** The target set is taken literally (all positionals + every pin, in command-line order); repeated targets are *not* collapsed. Rationale (user, decided hard): if someone asks for three windows of the same thing, Portal shouldn't stop them.
 
-1. **Dedupe the resolved target set first.** Identical resolved surfaces collapse to one — `open api-1 api-1`, overlapping globs, a positional that resolves to the same session as a pin. Net count = *distinct* resolved surfaces.
-2. **The trigger terminal absorbs to a target, preferring the current session when it is in the set:**
-   - Current session **is** a (deduped) target → the terminal stays put on it (no switch, no self-window); windows open only for the *other* targets. `open current other` from `current` = stay in `current`, one window for `other` (net-2, never a redundant second window for a session you already occupy).
-   - Current session is **not** a target → the terminal switches in place to the **first target in argv/resolved order** (deterministic — replaces the previously-unspecified "the Nth"); the rest open as windows.
+- **Duplicate attach targets** → tmux natively supports multiple clients attached to one session (they mirror), so `open api api api` = three host windows all showing `api` — a legitimate want (same session across three Spaces/monitors).
+- **Duplicate mint targets** → each mints a *distinct* new session anyway (fresh `{project}-{nanoid}`), so `open ~/a ~/a` = two new sessions at `~/a` (e.g. server + editor in one project). This is the "multiple sessions per project" the second axiom celebrates — **removing dedup resolves the F2 contradiction the final review flagged** (the earlier "mint-dedupe-by-directory" clause contradicted the always-mint axiom; it is deleted, not exceptioned).
+- **Accepted consequence:** overlapping globs (`open 'api-*' 'api-1'`) can produce a duplicate surface; honored, not deduped (low-harm, killable; the user can write non-overlapping globs).
 
-"Your terminal is one of them" holds in every case. The inside/outside-tmux split only selects the connector for the in-place surface (`switch-client` inside, `exec attach` outside); the N−1 external windows always run the spawned `portal open …`. Confidence: high.
+**Self-target still works without dedup.** The trigger terminal provides exactly one in-place surface; it absorbs **one** target, preferring the current session if present:
+- Current session **is** among the targets → the terminal stays put on it (no switch) for one occurrence; every *other* target (including any additional occurrences of the current session) spawns a window. `open current other` from `current` = stay in `current`, one window for `other`.
+- Current session is **not** a target → the terminal switches in place to the **first target** (ordering per F1 below); the rest spawn windows.
+
+"Your terminal is one of them" holds in every case. The inside/outside-tmux split only selects the connector for the in-place surface (`switch-client` inside, `exec attach` outside); the remaining targets always run the spawned `portal open …`. Confidence: high.
 
 ### Burst exec-argv & mint responsibility (F4)
 
@@ -364,7 +367,7 @@ Each spawned window runs the **same `open` grammar a human would** — one pinne
    - Attach target (session / glob / `-s`) → `portal open --session <name> --ack <batch>:<token>`.
    - Mint target (path / alias / zoxide / `-p` / `-z` / `-a`) → the parent **reduces it to a literal existing directory at resolve time**, then bakes `portal open --path <literal-dir> --ack <batch>:<token>`. Alias/zoxide queries never travel to the window (they could re-resolve differently mid-burst); only the resolved literal dir does, and `--path` cannot diverge. This is why "resolution must not re-run inside the window" holds without a session existing yet.
 2. **Minting happens in each window, not the parent — no pre-minting.** So the atomic guarantee is precisely the **read-only resolve** ("any target unresolvable ⇒ nothing opens, nothing created"). Once resolve passes, each surface opens/mints itself at exec time under **leave-what-opened**; a window that never comes up never mints, so there are no orphaned detached sessions. This is the exact strain the review flagged — resolved by scoping atomicity to the resolve phase and writes to per-surface.
-3. **Dedupe key (closes an F2 loose end):** attach targets dedupe by existing-session identity; mint targets dedupe by **resolved directory** — so `open ~/a ~/a` mints one session at `~/a`, not two.
+3. **No dedup** — see "Self-target absorb & no dedup (F2)". Duplicate targets each get their own window (mirrored attach, or distinct mint); the burst never collapses them.
 
 The payoff: a spawned window is just `portal open` with a pinned single target + `--ack`, running the identical grammar as an interactive invocation — no special code path. Confidence: high.
 
