@@ -305,4 +305,16 @@ A separate process can only be handed a command line, never a Go function (the s
 
 ---
 
+## Bootstrap Exemption — `doctor` & `uninstall`
+
+`PersistentPreRunE` runs the full bootstrap (EnsureServer → RegisterHooks → EnsureSaver → Restore → …) before most commands, but `skipTmuxCheck` (`cmd/root.go`) exempts a set (including `state`). As the renamed successors to `state status`/`state cleanup`, **`doctor` and `uninstall` join `skipTmuxCheck` (bootstrap-exempt).**
+
+- **`doctor` must be exempt** — otherwise bootstrap re-registers hooks and respawns the daemon one step *before* `doctor` reads health, so a read-only check would heal its own subject and always report green (self-defeating). Exempt, it observes raw state, starts nothing (a down server is reported honestly, not silently started), and heals nothing.
+- **`uninstall` must be exempt** — otherwise it would EnsureServer / RegisterHooks / EnsureSaver / Restore and then immediately tear all of it down (circular, wasteful, racy).
+- `clean` **leaves** the exempt set (deleted); `state` **stays**; the `hooks` → `hook` rename keeps the exemption (`skipTmuxCheck` keys on `c.Name()`, cobra's canonical name, so the `hooks` alias is covered).
+
+This applies the existing, code-documented exemption to the renamed successors — no new pattern.
+
+---
+
 ## Working Notes
