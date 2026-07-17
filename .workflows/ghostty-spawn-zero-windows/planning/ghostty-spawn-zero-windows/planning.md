@@ -27,7 +27,8 @@ approved_at: 2026-07-17
 - [ ] Merge-gating live validation passes on a live Mac inside Ghostty: `go test -tags manual -run TestManual_OpenWindow_OpensRealGhosttyWindow ./internal/spawn/` passes (a real window opens and runs the command), and a real ≥3-session picker multi-select burst confirms `opened 3/3` with token acks landing and the trigger self-attaching
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-17
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
