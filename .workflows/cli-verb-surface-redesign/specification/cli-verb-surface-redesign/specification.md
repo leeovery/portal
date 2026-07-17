@@ -338,4 +338,14 @@ This applies the existing, code-documented exemption to the renamed successors �
 
 ---
 
+## Deferred Scope (explicitly out of this design)
+
+These are deferred future scope, not unresolved decisions — recorded so planning does not build them:
+
+- **Stay-put multi-open flag** — an explicit future flag on `open` (open windows for N targets but leave the trigger terminal where it is). The absorb/net-N default takes the trigger to the first target; the exceptional stay-put behavior gets the flag when designed. Not designed here.
+- **Multi-match zoxide** — a `-z`/query variant that mints sessions for *every* frecency-match of a term (via `zoxide query --list`). Shotgun risk (mints N sessions for possibly-stale dirs). Not designed here.
+- **Bulk kill via the picker's multi-select** — the natural future home for killing many sessions at once (reusing the multi-select mode + the existing destructive-confirm modal). Not built here; `kill` stays single + exact.
+
+---
+
 ## Working Notes
