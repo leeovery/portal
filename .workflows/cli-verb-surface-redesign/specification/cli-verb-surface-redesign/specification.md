@@ -281,4 +281,19 @@ Name kept (`uninstall`).
 
 ---
 
+## `state` Namespace — Fully Hidden
+
+The `state` namespace becomes **fully hidden** but cannot stop being a command. Every remaining `state` subcommand is a **separate-process entry point** invoked by an argv, not an in-process Go call, so each must stay invocable:
+
+- `state daemon` — the process the `_portal-saver` pane runs.
+- `state hydrate` — exec'd into each restored pane via `respawn-pane -k`.
+- `state signal-hydrate` / `state notify` / `state commit-now` / `state migrate-rename` — all fired by tmux hooks as `run-shell "portal state …"`.
+
+A separate process can only be handed a command line, never a Go function (the same constraint that made `open --session` the spawn exec target). Once `status` → `doctor` and `cleanup` → `uninstall`, `state` has **zero user-facing children**, so the whole namespace is marked **hidden** (gone from `--help` and completion). To the user `state` disappears; to tmux it remains plumbing.
+
+- **Keep the `state` prefix** — the hook definitions match those command strings by substring for idempotency (`notifyCommand`, `commitNowSubstring`, `migrateRenameSubstring`, `PortalDaemonArgvPattern`, …); renaming would churn internal matching for zero user benefit.
+- `state` **cannot be removed entirely** (it is real plumbing), only hidden.
+
+---
+
 ## Working Notes
