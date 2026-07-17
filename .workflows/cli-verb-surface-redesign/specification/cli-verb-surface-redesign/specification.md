@@ -222,4 +222,15 @@ Rejected: sessions+directories merged into one slot (noisy); nothing at all (los
 
 ---
 
+## `kill` — Single + Exact (unchanged)
+
+`portal kill <name>` stays **single + exact** — no globs, no resolution chain, unchanged from today. Instant kill of one named session. Destruction is kept maximally explicit.
+
+- **Universal resolution does not apply to `kill`** — it takes session names only (its natural domain). A guessing chain on a destructive verb is backwards.
+- Rejected: session globs on `kill` (`kill 'agentic-workflows-*'`); a terminal `[y/N]` confirm guard.
+- **The CLI has no interactive-prompt machinery** — verified: no stdin reads anywhere (`bufio`/`Scanln`/`ReadString`/`[y/N]`/`confirm` are absent outside the TUI). Every CLI command is do-or-error, non-interactive. A `[y/N]` glob-kill guard would mean building a brand-new interaction pattern the CLI does not have; not worth it for a marginal feature.
+- Bulk kill's natural future home, if ever wanted, is the picker's multi-select with the existing destructive-confirm modal — not the CLI. Noted as a possibility, not committed.
+
+---
+
 ## Working Notes
