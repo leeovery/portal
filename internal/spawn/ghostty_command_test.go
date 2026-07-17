@@ -37,14 +37,15 @@ func TestGhosttyOpenArgv(t *testing.T) {
 }
 
 func TestGhosttyOpenScript(t *testing.T) {
-	t.Run("it builds a surface configuration with a command property and new window", func(t *testing.T) {
+	t.Run("it builds a new window with configuration carrying a command property", func(t *testing.T) {
 		script := ghosttyOpenScript(realAttachArgv())
 
 		wants := []string{
 			`tell application "Ghostty"`,
-			"surface configuration",
-			"command:",
 			"new window",
+			"with configuration",
+			`command:"`,
+			"wait after command",
 			"end tell",
 		}
 		for _, want := range wants {
@@ -52,13 +53,24 @@ func TestGhosttyOpenScript(t *testing.T) {
 				t.Errorf("script missing %q; script:\n%s", want, script)
 			}
 		}
+
+		// "surface configuration" only ever existed in the old invalid
+		// `make new surface configuration with properties {…}` form; the
+		// sdef-correct `new window with configuration {…}` template must not
+		// carry that keyword.
+		if strings.Contains(script, "surface configuration") {
+			t.Errorf("script still contains stale keyword %q; script:\n%s", "surface configuration", script)
+		}
 	})
 
-	t.Run("it includes the wait after command property", func(t *testing.T) {
-		script := ghosttyOpenScript(realAttachArgv())
+	t.Run("it keeps a percent in the payload inert", func(t *testing.T) {
+		// The single %s is a fmt.Sprintf ARGUMENT, never a format-verb source,
+		// so a `%` in the payload passes through literally rather than being
+		// interpreted as a (malformed) verb.
+		script := ghosttyOpenScript([]string{"echo 100%done"})
 
-		if !strings.Contains(script, "wait after command") {
-			t.Errorf("script missing %q (governs post-command window persistence); script:\n%s", "wait after command", script)
+		if !strings.Contains(script, `command:"echo 100%done"`) {
+			t.Errorf("script does not carry the literal percent payload %q; script:\n%s", `command:"echo 100%done"`, script)
 		}
 	})
 

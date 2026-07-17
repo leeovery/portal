@@ -5,19 +5,20 @@ import (
 	"strings"
 )
 
-// ghosttyScriptTemplate is the validated (Ghostty 1.3.1) AppleScript that opens
-// a new Ghostty window running an embedded command. It makes a `surface
-// configuration` record carrying the composed argv as its `command` property
-// plus `wait after command:true` — the latter governs whether the window
-// persists after its command exits (the normal-detach window lifecycle for a
-// spawned session) — then opens a `new window` using that configuration.
+// ghosttyScriptTemplate is the sdef-correct AppleScript that opens a new Ghostty
+// window running an embedded command. It passes a `surface configuration` record
+// literal directly to `new window`'s `with configuration` parameter — the only
+// form Ghostty's scripting dictionary defines (there is no `make` command and no
+// `with properties` terminology). The record carries exactly the two fields the
+// sdef defines on `surface configuration`: `command` (text) and
+// `wait after command:true` — the latter keeps the window up after its command
+// exits (the normal-detach window lifecycle for a spawned session).
 //
 // The single %s is the AppleScript-escaped, space-joined composed argv from
-// ghosttyEmbed; it is a format argument (never a verb source), so a `%` in the
-// payload is inert.
+// ghosttyEmbed; it is a fmt.Sprintf format ARGUMENT (never a verb source), so a
+// `%` in the payload is inert.
 const ghosttyScriptTemplate = `tell application "Ghostty"
-	set surfaceConfig to make new surface configuration with properties {command:"%s", wait after command:true}
-	make new window with properties {configuration:surfaceConfig}
+	new window with configuration {command:"%s", wait after command:true}
 end tell`
 
 // ghosttyEmbed renders the composed argv into the single string Ghostty's
