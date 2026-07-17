@@ -48,7 +48,7 @@ A living index of subtopics tracked during the discussion. This is the structura
 
 ### Map
 
-  Discussion Map — CLI Verb Surface Redesign (25 subtopics — 25 decided)
+  Discussion Map — CLI Verb Surface Redesign (29 subtopics — 26 decided · 1 exploring · 3 pending)
 
   ┌─ ✓ Mental model & verb taxonomy [decided]
   │  ├─ ✓ open vs attach reconciliation [decided]
@@ -68,6 +68,11 @@ A living index of subtopics tracked during the discussion. This is the structura
   ├─ ✓ attach disposition (retired — open --session + hidden --ack) [decided]
   ├─ ✓ Resolution scope (universal resolution is open's grammar, not the CLI's) [decided]
   ├─ ✓ Kill shape (single + exact — no globs, no CLI prompt) [decided]
+  ├─ ◐ Open invocation grammar (flag/target cross-products, review 002) [exploring]
+  │  ├─ ✓ Target-set composition (union of positionals + pins) [decided]
+  │  ├─ ○ Self-target / duplicate absorb [pending]
+  │  ├─ ○ Burst exec-argv & mint responsibility [pending]
+  │  └─ ○ Mint-only flags with no target [pending]
   ├─ ✓ Completion UX (session names on positional + -s; paths to shell) [decided]
   ├─ ✓ Utility command audit [decided]
   │  ├─ ✓ uninstall (replaces state cleanup; runtime+state, keeps config) [decided]
@@ -318,6 +323,23 @@ Whether `kill` gains session globs (`kill 'agentic-workflows-*'` for bulk cleanu
 - The "CLI never prompts" idea is left as an observation, not adopted as a governing principle (it wasn't needed once glob-kill was dropped).
 
 Confidence: high.
+
+---
+
+## Open Invocation Grammar (flag/target cross-products)
+
+Consolidates the interaction cells the final review (set 002) found undefined — each `open` flag/target was decided in isolation; this walks their cross-products so the spec author has one grammar table.
+
+### Target-set composition (F1)
+
+**The target set is the union of (all positionals + every `-s`/`-p`/`-z`/`-a` occurrence).** Each element resolves by its own rule — bare positionals run the precedence chain (session → path → alias → zoxide); pins skip the chain and pin their domain — then the whole union goes through atomic pre-flight + absorb/net-N.
+
+- Pins **repeat freely** (`open -s a -s b` = two attach targets).
+- Pins **mix across domains and with positionals** (`open -s api -p ~/Code/new blog` = attach `api` + mint at `~/Code/new` + resolve `blog` = three surfaces).
+- Pins are simply *the explicit-domain way to name a target*, fully interchangeable with positionals in a burst.
+- **`-f` is the sole non-composing flag** — it is not a target but a "skip resolution, open the picker (pre-filtered)" redirect, so it is exclusive with all targets and all other pins.
+
+This retro-justifies the Command Passthrough section's enumeration (which already treated `-p`/`-z`/`-a` as directory-domain target contributors). Confidence: high.
 
 ---
 
