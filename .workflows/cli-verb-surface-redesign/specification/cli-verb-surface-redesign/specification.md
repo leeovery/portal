@@ -189,4 +189,21 @@ Each spawned window runs the **same `open` grammar a human would** — one pinne
 
 ---
 
+## Tab Completion
+
+Principle: **complete every Portal-owned enumerable namespace; leave the rest to the shell.** Session names and alias keys are finite sets only Portal knows; zoxide has its own `cd`-style completion, and path completion is the shell's job. This keeps completion pointed at Portal's own namespaces without cramming multiple into one noisy list.
+
+| Slot | Completes |
+|---|---|
+| `open` bare positional | session names |
+| `open -s` | session names |
+| `open -a` | alias keys |
+| `open -p` | (shell — paths) |
+| `open -z` | (shell / zoxide's own) |
+| `kill` positional | session names |
+
+Rejected: sessions+directories merged into one slot (noisy); nothing at all (loses the genuinely useful session-name / alias-key completion).
+
+---
+
 ## Working Notes
