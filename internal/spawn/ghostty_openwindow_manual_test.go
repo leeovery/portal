@@ -29,15 +29,14 @@ func TestManual_OpenWindow_OpensRealGhosttyWindow(t *testing.T) {
 	// needs no live session — swap in a real `<exe> attach <session>` argv to
 	// verify the full attach path.
 	//
-	// Every element MUST be a single, shell-metacharacter-free token. ghosttyEmbed
-	// space-joins the argv into Ghostty's `command:"…"` string, and Ghostty runs
-	// that string via `login … bash -c "exec -l <string>"`, which re-splits on
-	// spaces. An element carrying spaces or a `;` (e.g. `sh -c "echo …; sleep 5"`)
-	// is shredded by that round-trip and mis-runs — exactly what composeAttachArgv
-	// avoids by emitting only discrete tokens (session names and ack ids are
-	// space/metacharacter-free). `echo` with plain word args re-joins cleanly, and
-	// `wait after command:true` holds the window open after it exits, so no `sleep`
-	// is needed to observe the window.
+	// ghosttyEmbed POSIX-single-quotes each argv element before joining, and
+	// Ghostty runs the resulting `command:"…"` string via `login … bash -c
+	// "exec -l <string>"`; the per-element quoting means bash's word-split
+	// reproduces the exact argv, so an element carrying spaces or shell
+	// metacharacters (e.g. a `My Project-abc123` session name) survives intact
+	// rather than being shredded. This marker uses plain word tokens purely for a
+	// simple, readable observable command; `wait after command:true` holds the
+	// window open after it exits, so no `sleep` is needed to observe the window.
 	argv := []string{
 		"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
 		"echo", "portal", "spawn", "manual", "verification",

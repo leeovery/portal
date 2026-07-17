@@ -109,15 +109,16 @@ func TestGhosttyOpenScript(t *testing.T) {
 
 func TestGhosttyEmbed(t *testing.T) {
 	t.Run("it AppleScript-escapes embedded double quotes and backslashes in the composed command", func(t *testing.T) {
-		// The element carries BOTH a backslash and a double quote. Backslash
-		// must be escaped FIRST (\ -> \\), then the quote (" -> \"). Escaping
-		// the quote first would then double the escaping backslash and corrupt
-		// the literal, yielding a\\b\\"c instead of the correct a\\b\"c.
+		// The element carries BOTH a backslash and a double quote. It is first
+		// POSIX-single-quoted (a\b"c -> 'a\b"c'), then AppleScript-escaped:
+		// backslash FIRST (\ -> \\), then the quote (" -> \"). Escaping the quote
+		// first would then double the escaping backslash and corrupt the literal,
+		// yielding 'a\\b\\"c' instead of the correct 'a\\b\"c'.
 		got := ghosttyEmbed([]string{`a\b"c`})
 
-		want := `a\\b\"c`
+		want := `'a\\b\"c'`
 		if got != want {
-			t.Fatalf("ghosttyEmbed(%q) = %q, want %q (backslash escaped before quote)", `a\b"c`, got, want)
+			t.Fatalf("ghosttyEmbed(%q) = %q, want %q (single-quoted, backslash escaped before quote)", `a\b"c`, got, want)
 		}
 
 		// Embedded inside the AppleScript literal, no unescaped payload quote
@@ -125,6 +126,18 @@ func TestGhosttyEmbed(t *testing.T) {
 		script := ghosttyOpenScript([]string{`a\b"c`})
 		if !strings.Contains(script, `command:"`+want+`"`) {
 			t.Errorf("script does not carry the escaped command %q; script:\n%s", want, script)
+		}
+	})
+
+	t.Run("it preserves a single quote through shell-quoting and AppleScript escaping", func(t *testing.T) {
+		// it's -> shellQuote -> 'it'\''s' -> AppleScript doubles the backslash ->
+		// 'it'\\''s'. Ghostty's AppleScript layer then un-doubles it and bash -c
+		// reconstructs the literal it's.
+		got := ghosttyEmbed([]string{"it's"})
+
+		want := `'it'\\''s'`
+		if got != want {
+			t.Fatalf("ghosttyEmbed(%q) = %q, want %q", "it's", got, want)
 		}
 	})
 }
