@@ -257,4 +257,28 @@ Name kept (`uninstall`).
 
 ---
 
+## `doctor` — Diagnostics & Repair (replaces `clean` and `state status`)
+
+`portal clean` is **deleted** and `state status` is subsumed. A new public **`portal doctor`** consolidates diagnosis and low-stakes repair.
+
+- **`portal doctor`** — a read-only health report across all of Portal: daemon alive, hooks registered without duplicates, saver session up, state dir sane, `sessions.json` valid, any stale entries. **Subsumes `state status`.** The exact check catalog is a spec-level detail for planning to enumerate.
+- **`portal doctor --fix`** — performs the low-stakes, reversible-by-reconstruction repairs it diagnoses: prune stale hooks, prune stale projects, sweep logs. One coherent surface (diagnose, optionally repair the diagnosis) instead of a grab-bag verb plus scattered prune commands.
+  - `--fix` is an action-behind-a-flag but is explicitly *not* the hidden-destructive pattern rejected on `uninstall`: it is the obvious paired verb to a diagnosis, and everything it does is low-stakes and reconstructable.
+
+### Host-terminal detection folded in (`--detect` retired)
+
+`spawn --detect` (a dry-run that printed the detected host terminal's identity, e.g. `Ghostty · com.mitchellh.ghostty`) is retired with `spawn`. Its job folds into `doctor`: the picker keeps calling `Detect()` in-process; `doctor` calls the same function and prints a line such as `host terminal: Ghostty (supported)` / `unsupported (remote session)`.
+
+### `clean` deleted
+
+- `portal clean` and its `--logs` flag are **removed**. Logs auto-rotate and retention-sweep in the log handler; `rm` covers the rest.
+- No `logs`/`hooks` maintenance namespaces are created — those actions don't earn standing commands.
+- **Stale-project pruning folds into the daemon's automation** on a slow cadence (hourly-ish; hooks already prune on the idle tick). Mechanism/cadence is an implementation detail. Net effect: `doctor` reads *healthy* almost always because the automation keeps it that way; `--fix` is the manual trigger of the same repairs.
+
+### Rationale (context)
+
+`clean` bundled three unrelated jobs (prune stale projects, prune stale hooks, force log sweep) behind one verb + a flag — a grab-bag. Value audit: stale-hook prune is redundant (daemon does it), the log sweep is redundant (handler retention-sweeps per day), stale-project prune was the only unique action (harmless cruft). The reorg separates *diagnosis* ("is Portal healthy?" — recurring, valuable) from *action* ("clean X" — mostly automated), which dissolves `clean`. `doctor`/`--fix` follows the `brew doctor` / `flutter doctor` idiom (a doctor diagnoses **and** treats). **Nothing internal calls `clean` or `state cleanup`** — both were purely manual backstops to already-automated work.
+
+---
+
 ## Working Notes
