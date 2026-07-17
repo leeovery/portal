@@ -23,10 +23,10 @@ The spec describes the ack mechanism ("a delivery receipt the parent burst polls
 "Its behavior: the spawned Portal process, as its last act before exec'ing into tmux, writes `@portal-spawn-<batch>-<token>` as a tmux server option — a delivery receipt the parent burst polls for. Full burst mechanics are in the multi-target topic."
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+Added a bullet to "Atomic pre-flight & partial failure": "**Per-window ack timeout (~8s).** The parent polls for each window's `@portal-spawn-<batch>-<token>` receipt with a per-window timeout of ~8s, the timer starting at *that window's own spawn* so cumulative sequential delay never eats a later window's budget. A window whose receipt has not appeared by its timeout is the 'un-acked / failed' case above."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Sourced from discussion "Attach Disposition" (~8s/window) + preserved per-window-timer-start behavior. Logged to spec.
 
 ---
 
@@ -40,10 +40,10 @@ _(leave blank until discussed)_
 The discussion flagged the exact check catalog as a *spec-level* detail — i.e., a thing the specification should pin down (as distinct from a discussion-level decision). The spec re-scopes it to "planning to enumerate." The check catalog is *what the command inspects* (spec content — the command's contract), not delivery phasing/task breakdown (planning's remit), so pushing the full catalog to planning is a mild hand-off drift. The spec does provide a representative list (daemon alive, hooks registered without duplicates, saver up, state dir sane, `sessions.json` valid, stale entries — matching the discussion's examples), so the gap is narrow: either promote that representative list to the authoritative catalog here, or explicitly acknowledge it is illustrative-not-exhaustive. Worth a decision so planning inherits an unambiguous scope.
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+Reclaimed the check catalog as a spec-level authoritative list (daemon alive; hooks registered without duplicates; `_portal-saver` up; state dir sane; `sessions.json` valid; no stale entries; host terminal detected + supported), replacing "The exact check catalog is a spec-level detail for planning to enumerate." Planning implements the concrete probe per check.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Faithful digest of the discussion's own enumerated checks + the `--detect` fold; no new checks invented. Logged to spec.
 
 ---
 

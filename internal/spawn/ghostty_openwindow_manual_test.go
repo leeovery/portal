@@ -18,10 +18,10 @@ import "testing"
 //	go test -tags manual -run TestManual_OpenWindow_OpensRealGhosttyWindow -v ./internal/spawn/
 //
 // Then visually confirm a NEW Ghostty window opened running the command below
-// (it prints the marker line and sleeps so the window is observable; the
-// `wait after command:true` property keeps the window up after the command
-// exits). The automated assertion only checks OpenWindow reported success —
-// the real-window-opened check is the human's eyes.
+// (it prints the marker line; the `wait after command:true` property keeps the
+// window up after the command exits so it stays observable). The automated
+// assertion only checks OpenWindow reported success — the real-window-opened
+// check is the human's eyes.
 func TestManual_OpenWindow_OpensRealGhosttyWindow(t *testing.T) {
 	// A representative env-self-sufficient argv (the shape composeAttachArgv
 	// produces): TMUX/TMUX_PANE stripped, run verbatim as a real argv. It runs a

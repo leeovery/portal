@@ -178,6 +178,7 @@ Each spawned window runs the **same `open` grammar a human would** — one pinne
 
 - **Pre-flight is a read-only resolve of the whole target set.** Any target unresolvable ⇒ atomic abort: nothing opens, nothing is created.
 - **Past the resolve, per-window failure is leave-what-opened.** Opened windows stay (Portal doesn't own/tear-down host windows), the trigger's self-attach is skipped on failure, and failed/un-acked surfaces don't retry automatically.
+- **Per-window ack timeout (~8s).** The parent polls for each window's `@portal-spawn-<batch>-<token>` receipt with a per-window timeout of ~8s, the timer starting at *that window's own spawn* so cumulative sequential delay never eats a later window's budget. A window whose receipt has not appeared by its timeout is the "un-acked / failed" case above.
 
 ### Mint-only command with no target → picker in Projects mode
 
@@ -261,7 +262,16 @@ Name kept (`uninstall`).
 
 `portal clean` is **deleted** and `state status` is subsumed. A new public **`portal doctor`** consolidates diagnosis and low-stakes repair.
 
-- **`portal doctor`** — a read-only health report across all of Portal: daemon alive, hooks registered without duplicates, saver session up, state dir sane, `sessions.json` valid, any stale entries. **Subsumes `state status`.** The exact check catalog is a spec-level detail for planning to enumerate.
+- **`portal doctor`** — a read-only health report across all of Portal. The authoritative check catalog (the set `doctor` inspects — planning implements the concrete probe per check):
+  - daemon alive;
+  - global tmux hooks registered without duplicates (exactly one Portal entry per managed event);
+  - `_portal-saver` session up;
+  - state dir sane;
+  - `sessions.json` valid;
+  - no stale entries (dead-pane hooks, gone-dir projects);
+  - host terminal detected + supported (see "Host-terminal detection folded in" below).
+
+  **Subsumes `state status`.**
 - **`portal doctor --fix`** — performs the low-stakes, reversible-by-reconstruction repairs it diagnoses: prune stale hooks, prune stale projects, sweep logs. One coherent surface (diagnose, optionally repair the diagnosis) instead of a grab-bag verb plus scattered prune commands.
   - `--fix` is an action-behind-a-flag but is explicitly *not* the hidden-destructive pattern rejected on `uninstall`: it is the obvious paired verb to a diagnosis, and everything it does is low-stakes and reconstructable.
 

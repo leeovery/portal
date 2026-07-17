@@ -16,7 +16,9 @@ import (
 // Ghostty's dictionary — the established, reproduced signature of a drifted
 // `tell application "Ghostty"` template (spec §Fix 4). It is the ONLY failure
 // signature this guard treats as a genuine template regression; every other
-// resolution failure is environmental and skipped.
+// resolution failure is environmental and skipped. Treating only `-2741` as
+// drift (rather than any non-zero exit) is Task 2-2's defensive-precondition
+// decision — see the PRECONDITION RATIONALE block below (installed-but-not-running).
 const driftDiscriminator = "-2741"
 
 // TestGhosttyOpenScript_CompilesAgainstInstalledDictionary is the automated
