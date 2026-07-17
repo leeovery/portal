@@ -35,12 +35,16 @@
           "format": "tick",
           "spec_commit": "76f18ebc60ab6a832c443fe6c2cd7902ebc6193b",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "ghostty-spawn-zero-windows-1-1",
-          "task_map": {}
+          "task": "ghostty-spawn-zero-windows-1-2",
+          "task_map": {
+            "ghostty-spawn-zero-windows-1": "tick-d70f38",
+            "ghostty-spawn-zero-windows-1-1": "tick-d64577"
+          },
+          "external_id": "tick-f00989"
         }
       }
     }
