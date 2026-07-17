@@ -1,7 +1,7 @@
 {
   "name": "ghostty-spawn-zero-windows",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-07-16",
   "description": "Native Ghostty spawn adapter AppleScript uses commands absent from Ghostty 1.3.1's scripting dictionary, so multi-window spawn compile-fails and opens zero windows; includes two riders (DEBUG-only failure logging, misleading total-failure banner copy)",
   "phases": {
@@ -136,5 +136,6 @@
       "source": "inbox:bug",
       "seeded_at": "2026-07-16T18:29:51Z"
     }
-  ]
+  ],
+  "completed_at": "2026-07-17"
 }
