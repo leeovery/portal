@@ -27,6 +27,22 @@
           "date": "2026-07-18"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "cli-verb-surface-redesign": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "172a6a31a63928b23c8b11c236d5c4eac7564280",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   },
   "seeds": [
