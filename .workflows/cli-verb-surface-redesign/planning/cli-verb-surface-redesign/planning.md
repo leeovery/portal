@@ -9,7 +9,8 @@ Portal's CLI is redesigned in one intentional pass: the three public session ver
 ---
 
 ## Phase 1: `open` single-target resolution grammar
-status: draft
+status: approved
+approved_at: 2026-07-18
 
 **Goal**: Replace `open`'s directory-only resolution chain with the new outcome-based grammar for a single bare target — glob pre-check, the precedence chain (exact session name → path → alias → zoxide), the attach-vs-mint dichotomy (Axiom 2), hard-fail on total miss (implicit TUI-fallback removed, `-f` escape hatch added), and the new `resolve` log component. This is the foundational new behaviour every later phase builds on.
 
@@ -28,7 +29,8 @@ status: draft
 ---
 
 ## Phase 2: Domain-pinning flags & mint-scoped command passthrough
-status: draft
+status: approved
+approved_at: 2026-07-18
 
 **Goal**: Add the four explicit domain-pinning flags (`-s`, `-p`, `-z`, `-a`) that skip the guessing chain, enforce the pinned-domain hard-fail contract (never fall back to the picker), and finalise the single-target `-e`/`--` command passthrough as mint-scoped, building on Phase 1's attach-vs-mint outcomes.
 
@@ -46,7 +48,8 @@ status: draft
 ---
 
 ## Phase 3: Multi-target burst (absorb / net-N)
-status: draft
+status: approved
+approved_at: 2026-07-18
 
 **Goal**: Make `open <t1> … <tN>` open N surfaces continuously in N — the invoking terminal becomes one surface and N−1 host windows spawn — by composing the union of positionals and pins, recovering true target order from `os.Args`, running an atomic read-only pre-flight, and dispatching the leave-what-opened burst (reusing `internal/spawn`) with the hidden `--ack` receipt flag.
 
@@ -65,7 +68,8 @@ status: draft
 ---
 
 ## Phase 4: `doctor` & `uninstall` — maintenance surface reshuffle
-status: draft
+status: approved
+approved_at: 2026-07-18
 
 **Goal**: Introduce the two public maintenance verbs that replace the hidden/grab-bag surface: `portal doctor [--fix]` (read-only health report plus low-stakes repair, subsuming `state status`, replacing `clean`, folding in `spawn --detect`) and `portal uninstall` (runtime-only, file-touching-none teardown replacing `state cleanup`), both wired bootstrap-exempt; delete `clean`.
 
@@ -83,7 +87,8 @@ status: draft
 ---
 
 ## Phase 5: Retire `attach` & `spawn`
-status: draft
+status: approved
+approved_at: 2026-07-18
 
 **Goal**: Delete the two public session verbs `open` now fully absorbs — `attach` (covered by `open --session` and the burst's `open --session --ack`) and `spawn` (covered by the multi-target burst; `--detect` now lives in `doctor`) — with no back-compat aliases, realising the redesign's headline collapse to a single public session verb.
 
@@ -99,7 +104,8 @@ status: draft
 ---
 
 ## Phase 6: Surface presentation — `hook` rename, `state` hiding, tab completion
-status: draft
+status: approved
+approved_at: 2026-07-18
 
 **Goal**: Finalise the public surface's presentation: rename `hooks` → `hook` (with a permanent silent `hooks` alias), fully hide the `state` namespace while keeping it argv-invocable, add tab completion for Portal-owned enumerable namespaces, and confirm bare `portal` is the help/management root.
 
