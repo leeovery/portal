@@ -57,6 +57,20 @@ approved_at: 2026-07-18
 
 **Rationale**: Pins are the "extended capability" layer on Phase 1's resolver — they name a target's domain without re-proving resolution, and they are the deterministic, scriptable path a spawned window will later exec. Grouping the single-target command semantics here keeps all of `open`'s flag surface cohesive and independently testable before the multi-target burst introduces per-target command baking.
 
+#### Tasks
+status: approved
+approved_at: 2026-07-18
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cli-verb-surface-redesign-2-1 | `-s/--session` pin — session-domain attach, never mints, hard-fails on miss | `-s` matching only a `_`-prefixed internal session (`_portal-saver`) is a miss (user-visible `ListSessions` view) and hard-fails; `-s` never falls back to the picker on miss; `-s` bypasses the guessing chain (never tries path/alias/zoxide even when a same-named dir/alias exists); session glob under `-s` expanding to >1 session → burst deferred to Phase 3 (single-match attaches); inside-tmux switch-client vs outside exec attach; empty session set → hard-fail |
+| cli-verb-surface-redesign-2-2 | `-p/--path` pin — path-domain mint, dir must exist | a dir whose name contains glob metacharacters (`~/tmp/foo[1]`) is reachable via `-p` (pin bypasses the Phase-1 glob pre-check); non-existent dir hard-fails (DirNotFound), never pops the picker; tilde/relative-path expansion reused from `ResolvePath`; `-p` never runs session/alias/zoxide matching (path-domain only) |
+| cli-verb-surface-redesign-2-3 | `-a/--alias` pin — alias-domain mint, key globs, shadow bypass, hard-fails on unknown key | alias key shadowed by a same-named session — `-a` mints at the aliased dir (bypasses session→path→alias precedence); unknown key hard-fails, never pops the picker; key glob (`-a 'workflow-*'`) single-match mints, multi-match → burst deferred to Phase 3; glob matches over the finite Portal-owned key namespace (enumerate via alias `List`); aliased dir no longer on disk → error |
+| cli-verb-surface-redesign-2-4 | `-z/--zoxide` pin — zoxide-domain mint, explicit not-installed error, hard-fails on no match | zoxide not installed → explicit `ErrZoxideNotInstalled` (distinct from the bare chain's silent fall-through); no match → hard-fail, never pops the picker; resolved dir validated to exist before mint; `-z` never runs session/path/alias matching (zoxide-domain only) |
+| cli-verb-surface-redesign-2-5 | `-f/--filter` mutual exclusivity extended to all pin flags | `-f` + `-s`/`-p`/`-z`/`-a` (each) → usage error; `-f` + positional already rejected in Phase 1 (regression); `-f` + `-e`/`--` command NOT an exclusivity violation (allowed — routed to the command-picker task); `-f` alone still opens the picker (regression); multiple pins alongside `-f` still error |
+| cli-verb-surface-redesign-2-6 | Command (`-e`/`--`) is mint-scoped — reject on attach targets | command + a session-resolving target (attach) → usage error, for a bare session name or a `-s` pin; single-target command + zero mint targets → usage error (multi-target zero-mint deferred to Phase 3); both `-e` and `--` → usage error (preserved); empty command value (`-e ""` / `--` with no args) → usage error (preserved); command + mint target threads into the mint (Phase-1 wiring, regression) |
+| cli-verb-surface-redesign-2-7 | Command with no target → Projects (mint-only) picker with banner | `open -e <cmd>` / `open -- <cmd>` (no target) → picker in Projects mode with `Pick a project to run <cmd>` banner (preserved, not a usage error); `-f <text> -e <cmd>` → filtered Projects picker (distinct from `-f` alone → Sessions page); banner wording exactly `Pick a project to run <cmd>`; Projects-only mode always mints a fresh session |
+
 ---
 
 ## Phase 3: Multi-target burst (absorb / net-N)
