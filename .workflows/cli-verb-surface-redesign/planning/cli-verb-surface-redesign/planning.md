@@ -27,7 +27,8 @@ approved_at: 2026-07-18
 **Rationale**: The feature's Phase 1 must deliver the most fundamental new capability integrated with existing patterns. The resolution grammar is that capability — attach-vs-mint classification is the contract that pins, the burst, and command-scoping all consume. Removing the TUI fallback and adding `-f` together keeps the miss-handling story complete (the error message's suggested flag actually works), leaving a coherent, testable single-target `open`.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-18
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
