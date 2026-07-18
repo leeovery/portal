@@ -39,7 +39,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 4,
-          "task": "cli-verb-surface-redesign-4-1",
+          "task": "cli-verb-surface-redesign-4-2",
           "task_map": {
             "cli-verb-surface-redesign-1": "tick-e26a0e",
             "cli-verb-surface-redesign-1-1": "tick-4f5f87",
@@ -64,7 +64,8 @@
             "cli-verb-surface-redesign-3-6": "tick-7ef14d",
             "cli-verb-surface-redesign-3-7": "tick-f4d2d3",
             "cli-verb-surface-redesign-3-8": "tick-82e424",
-            "cli-verb-surface-redesign-4": "tick-1fb18c"
+            "cli-verb-surface-redesign-4": "tick-1fb18c",
+            "cli-verb-surface-redesign-4-1": "tick-2b7c97"
           },
           "external_id": "tick-4f7acf"
         }
