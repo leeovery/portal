@@ -26,6 +26,17 @@ approved_at: 2026-07-18
 
 **Rationale**: The feature's Phase 1 must deliver the most fundamental new capability integrated with existing patterns. The resolution grammar is that capability — attach-vs-mint classification is the contract that pins, the burst, and command-scoping all consume. Removing the TUI fallback and adding `-f` together keeps the miss-handling story complete (the error message's suggested flag actually works), leaving a coherent, testable single-target `open`.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cli-verb-surface-redesign-1-1 | Exact session-name match → attach outcome | internal `_`-prefixed sessions never matchable (filtered ListSessions view, not tmux HasSession), empty session set, inside-tmux attach via switch-client vs outside via exec attach, a name matching no session falls through to the directory chain |
+| cli-verb-surface-redesign-1-2 | Directory chain (path → alias → zoxide) mint outcomes + total-miss hard-fail | bare project name (`api`) mints and never reattaches an `api-*` session, alias resolving to a non-existent dir errors, zoxide-not-installed / no-match falls through silently to miss, miss message names the raw target (`nothing resolved for 'blog' — try -f blog`), existing command→mint threading preserved (attach+command formalization is Phase 2) |
+| cli-verb-surface-redesign-1-3 | Glob pre-check → session-domain expansion + zero-match hard-fail | glob matching only `_`-prefixed internal sessions counts as zero, a path whose name contains glob metacharacters (`foo[1]`) is unreachable as a bare positional (zero-match hard-fail), glob skips the chain even when a same-named alias/dir exists, multi-match expansion into a burst deferred to Phase 3 |
+| cli-verb-surface-redesign-1-4 | `resolve` log component — INFO decision line | session hit logs resolved_path = session name, miss logs domain=miss with empty resolved_path, glob targets emit no line (deterministic — gate on the resolver's glob predicate), INFO level so guesses are reconstructable after the fact |
+| cli-verb-surface-redesign-1-5 | `-f/--filter` picker redirect + mutual exclusivity | `-f` + positional target → usage error, empty `-f` value, `-f` alone opens the filtered Sessions picker, no-arg `open` still launches the picker unchanged (regression) |
+
 ---
 
 ## Phase 2: Domain-pinning flags & mint-scoped command passthrough
