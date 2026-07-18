@@ -39,11 +39,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "cli-verb-surface-redesign-1-3",
+          "task": "cli-verb-surface-redesign-1-4",
           "task_map": {
             "cli-verb-surface-redesign-1": "tick-e26a0e",
             "cli-verb-surface-redesign-1-1": "tick-4f5f87",
-            "cli-verb-surface-redesign-1-2": "tick-9e7ff8"
+            "cli-verb-surface-redesign-1-2": "tick-9e7ff8",
+            "cli-verb-surface-redesign-1-3": "tick-1c23c8"
           },
           "external_id": "tick-4f7acf"
         }
