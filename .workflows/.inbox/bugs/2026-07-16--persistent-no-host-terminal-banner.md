@@ -12,3 +12,7 @@ Expected behaviour, as decided in discussion:
 2. **Multi-select fully disabled on any unsupported resolution** (named and NULL alike, since the burst can never do anything on either). Pressing `m` fails immediately with an error/flash rather than entering the mode — not deferred to the N≥2 Enter, and not gated on selection count: completely disabled. The reactive flash copy may need a variant suited to a blocked mode entry rather than the current `— nothing opened` burst wording, and the footer's multi-select hint may need to reflect the unavailable state.
 
 Impact: cosmetic-but-constant on every remote picker launch (a permanent warning band plus a lost section header), and a misleading affordance letting users mark sessions for a burst that can never fire.
+
+---
+
+**Note (2026-07-18, cli-verb-surface-redesign planning):** The CLI-verb redesign adds a CLI **multi-target `portal open <a> <b> …`** (N≥2) burst. Its planned behaviour on an unsupported/remote terminal was decided to match this bug's direction: **block outright — nothing opens, the trigger does not half-connect** (no "open-here + skip the rest"). So the CLI and TUI stay consistent: this bug disables the picker's `m`-entry, and the CLI burst hard-blocks N≥2. This bug (the TUI banner split + `m`-entry blocking) remains its own out-of-scope work — the redesign builds only the CLI-side block. When this bug is implemented, keep the copy/UX consistent with the CLI's unsupported message.
