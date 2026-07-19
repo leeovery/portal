@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: CLI Verb Surface Redesign (Cycle 3)
 
 ## Task 1: Single-source the command-on-attach usage-error string
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
