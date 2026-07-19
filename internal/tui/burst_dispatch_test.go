@@ -62,17 +62,18 @@ func markRow(t *testing.T, m Model, index int) Model {
 	return pressSession(t, m, pressM)
 }
 
-// spawnedSession extracts the target session from a composed attach argv (the
-// element right after "attach"), so a test reads the open order from the fake
-// adapter's recorded argv without depending on the argv's other fragments.
+// spawnedSession extracts the target session from a composed `open` argv (the
+// element right after "--session"), so a test reads the open order from the fake
+// adapter's recorded argv without depending on the argv's other fragments. The
+// picker multi-select burst is all-attach, so every window carries --session.
 func spawnedSession(t *testing.T, argv []string) string {
 	t.Helper()
 	for i := 0; i+1 < len(argv); i++ {
-		if argv[i] == "attach" {
+		if argv[i] == "--session" {
 			return argv[i+1]
 		}
 	}
-	t.Fatalf("argv has no 'attach <session>' pair: %#v", argv)
+	t.Fatalf("argv has no '--session <name>' pair: %#v", argv)
 	return ""
 }
 

@@ -158,7 +158,11 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 		return errors.New(unsupportedSpawnMessage(id))
 	}
 
-	batch, results, err := deps.NewBurster(adapter).Run(context.Background(), external, nil)
+	// The legacy CLI selection is all-attach (every target is an already-selected
+	// existing session), so it converges onto the generalized surface-spec burster
+	// via spawn.AttachSurfaces — each spawned window runs `open --session <name>
+	// --ack …`, no forked name-only builder.
+	batch, results, err := deps.NewBurster(adapter).Run(context.Background(), spawn.AttachSurfaces(external), nil)
 	if err != nil {
 		// Executable or ack-id resolution failed before any window opened; exit 1.
 		return err

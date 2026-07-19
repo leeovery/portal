@@ -50,10 +50,11 @@ const (
 	AckFailed AckOutcome = "failed"
 )
 
-// WindowResult is the outcome of attempting one external window: the target
-// session, its opaque per-window ack Token, the adapter's Result, and the
-// resolved token-ack classification (Ack). The burster returns one per external
-// session, in list order.
+// WindowResult is the outcome of attempting one external window: the target's
+// value (a session name for an attach surface, the literal dir for a mint
+// surface — carried in Session), its opaque per-window ack Token, the adapter's
+// Result, and the resolved token-ack classification (Ack). The burster returns
+// one per external surface, in list order.
 type WindowResult struct {
 	Session string
 	Token   string
@@ -101,16 +102,19 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 	}
 }
 
-// Run opens one external host-terminal window per session in external, in list
-// order, and returns the batch id plus one WindowResult per window.
+// Run opens one external host-terminal window per surface in external, in list
+// order, and returns the batch id plus one WindowResult per window. Each surface
+// carries the resolved open target (attach an existing session, or mint a fresh
+// session at a literal dir); the burster only SPAWNS each window's `open` argv —
+// minting happens in the window at exec time (via `open --path`), never here.
 //
 // The picker's own executable is resolved ONCE up front (an unresolvable
 // executable aborts the whole burst before any window opens: return "", nil,
 // err). ALL ids are generated up front too — the batch id and one token per
-// external session — so a generation failure aborts before any window opens
+// external surface — so a generation failure aborts before any window opens
 // (Task 3.1's "never an empty/malformed id" propagates here). Composing each
-// argv from the once-resolved exePath via the pure composeAttachArgv builder
-// keeps behaviour identical to resolving per window while avoiding a redundant
+// argv from the once-resolved exePath via the pure composeOpenArgv builder keeps
+// behaviour identical to resolving per window while avoiding a redundant
 // os.Executable read for every window.
 //
 // Each window is then, sequentially: composed, opened, and — if the adapter
@@ -130,7 +134,7 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 // collected so far (a nil error — a cancelled burst is a shutdown, not a
 // failure). A context.Background() ctx never cancels, so the CLI path is
 // unchanged.
-func (b *Burster) Run(ctx context.Context, external []string, progress func(done, total int)) (batch string, results []WindowResult, err error) {
+func (b *Burster) Run(ctx context.Context, external []Surface, progress func(done, total int)) (batch string, results []WindowResult, err error) {
 	exePath, err := b.Exe()
 	if err != nil {
 		return "", nil, err
@@ -151,21 +155,21 @@ func (b *Burster) Run(ctx context.Context, external []string, progress func(done
 	}
 
 	results = make([]WindowResult, 0, len(external))
-	for i, sess := range external {
+	for i, surface := range external {
 		// Between-windows cancel check (Task 6.8): a cancelled burst stops before
 		// composing or opening the next window.
 		if ctx.Err() != nil {
 			break
 		}
 		token := tokens[i]
-		argv := composeAttachArgv(exePath, path, sess, batch, token)
+		argv := composeOpenArgv(exePath, path, surface, batch, token)
 		result := b.Adapter.OpenWindow(argv)
 
 		ack := AckFailed
 		if result.OK() {
 			ack = awaitToken(ctx, b, batch, token)
 		}
-		results = append(results, WindowResult{Session: sess, Token: token, Result: result, Ack: ack})
+		results = append(results, WindowResult{Session: surface.Value, Token: token, Result: result, Ack: ack})
 
 		if progress != nil {
 			progress(i+1, len(external))

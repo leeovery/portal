@@ -23,10 +23,10 @@ import "testing"
 // assertion only checks OpenWindow reported success — the real-window-opened
 // check is the human's eyes.
 func TestManual_OpenWindow_OpensRealGhosttyWindow(t *testing.T) {
-	// A representative env-self-sufficient argv (the shape composeAttachArgv
+	// A representative env-self-sufficient argv (the shape composeOpenArgv
 	// produces): TMUX/TMUX_PANE stripped, run verbatim as a real argv. It runs a
-	// visible marker command instead of a real `portal attach` so the manual gate
-	// needs no live session — swap in a real `<exe> attach <session>` argv to
+	// visible marker command instead of a real `portal open` so the manual gate
+	// needs no live session — swap in a real `<exe> open --session <name>` argv to
 	// verify the full attach path.
 	//
 	// ghosttyEmbed POSIX-single-quotes each argv element before joining, and

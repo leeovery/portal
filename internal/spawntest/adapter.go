@@ -30,7 +30,7 @@ import (
 // Set Ack (plus, optionally, Confirm) to simulate the spawned window's marker
 // write: on a success Result for window i whose Confirm[i] is true (a nil Confirm
 // slice — and any index beyond it — confirms), the fake parses
-// --spawn-ack <batch>:<token> out of the argv it was handed and calls
+// --ack <batch>:<token> out of the argv it was handed and calls
 // Ack.Write(batch, token). A false Confirm[i] writes nothing, so the burster
 // times that window out. Leave Ack nil to record calls only.
 //
@@ -44,7 +44,7 @@ type FakeAdapter struct {
 	// Results scripts the outcome of each call: call i returns Results[i].
 	Results []spawn.Result
 	// Ack, when set, receives the parsed token of each confirmed success call,
-	// simulating the spawned `portal attach`'s @portal-spawn marker write.
+	// simulating the spawned `portal open`'s @portal-spawn marker write.
 	Ack *FakeAckChannel
 	// Confirm gates the marker write per window: Confirm[i] false suppresses
 	// window i's write (→ ack timeout). A nil slice confirms every window.
@@ -86,12 +86,12 @@ func (f *FakeAdapter) confirmed(i int) bool {
 	return true
 }
 
-// parseSpawnAck finds the --spawn-ack <value> pair in an argv and splits its
-// value back into (batch, token) via the real spawn.ParseSpawnAckFlag, so the
-// fake stays honest to the exact wire format composeAttachArgv produces.
+// parseSpawnAck finds the --ack <value> pair in an argv and splits its value
+// back into (batch, token) via the real spawn.ParseSpawnAckFlag, so the fake
+// stays honest to the exact wire format composeOpenArgv produces.
 func parseSpawnAck(argv []string) (batch, token string, ok bool) {
 	for i := 0; i+1 < len(argv); i++ {
-		if argv[i] == "--spawn-ack" {
+		if argv[i] == "--ack" {
 			return spawn.ParseSpawnAckFlag(argv[i+1])
 		}
 	}

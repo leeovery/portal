@@ -71,7 +71,7 @@ func (e *erroringAck) Collect(batch string) (map[string]struct{}, error) {
 // writingAdapter records each composed argv (in call order) and replays a
 // scripted Result per call (defaulting to Success once the script is exhausted).
 // On a success Result whose per-window confirm flag is true (nil confirm ⇒ all
-// true), it parses --spawn-ack <batch>:<token> out of the argv it was handed and
+// true), it parses --ack <batch>:<token> out of the argv it was handed and
 // writes that token to ack — simulating the spawned window's marker write. On a
 // non-success Result (or a false confirm flag) it writes nothing, so the burster
 // times that window out.
@@ -107,12 +107,12 @@ func (a *writingAdapter) confirmed(i int) bool {
 	return true
 }
 
-// parseSpawnAckArgv finds the --spawn-ack <value> pair in an argv and splits its
+// parseSpawnAckArgv finds the --ack <value> pair in an argv and splits its
 // value back into (batch, token) via the real ParseSpawnAckFlag, so the fake
-// stays honest to the wire format composeAttachArgv produces.
+// stays honest to the wire format composeOpenArgv produces.
 func parseSpawnAckArgv(argv []string) (batch, token string, ok bool) {
 	for i := 0; i+1 < len(argv); i++ {
-		if argv[i] == "--spawn-ack" {
+		if argv[i] == "--ack" {
 			return ParseSpawnAckFlag(argv[i+1])
 		}
 	}
@@ -136,7 +136,7 @@ const (
 )
 
 func TestBurster_Run(t *testing.T) {
-	t.Run("it resolves the executable once and composes an ack-flagged attach argv per session in list order", func(t *testing.T) {
+	t.Run("it resolves the executable once and composes an ack-flagged open argv per surface in list order", func(t *testing.T) {
 		clock := &manualClock{}
 		var exeCalls int
 		exe := func() (string, error) { exeCalls++; return testBurstExe, nil }
@@ -149,9 +149,9 @@ func TestBurster_Run(t *testing.T) {
 			Timeout: 8 * time.Second, Poll: 75 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
 		}
-		sessions := []string{"s1", "s2", "s3"}
+		surfaces := AttachSurfaces([]string{"s1", "s2", "s3"})
 
-		batch, results, err := b.Run(context.Background(), sessions, nil)
+		batch, results, err := b.Run(context.Background(), surfaces, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -161,23 +161,73 @@ func TestBurster_Run(t *testing.T) {
 		if batch == "" {
 			t.Fatal("batch id is empty, want a generated id")
 		}
-		if len(results) != len(sessions) {
-			t.Fatalf("results len = %d, want %d", len(results), len(sessions))
+		if len(results) != len(surfaces) {
+			t.Fatalf("results len = %d, want %d", len(results), len(surfaces))
 		}
-		if len(adapter.calls) != len(sessions) {
-			t.Fatalf("OpenWindow called %d times, want %d", len(adapter.calls), len(sessions))
+		if len(adapter.calls) != len(surfaces) {
+			t.Fatalf("OpenWindow called %d times, want %d", len(adapter.calls), len(surfaces))
 		}
-		for i, session := range sessions {
-			if results[i].Session != session {
-				t.Errorf("results[%d].Session = %q, want %q", i, results[i].Session, session)
+		for i, surface := range surfaces {
+			if results[i].Session != surface.Value {
+				t.Errorf("results[%d].Session = %q, want %q", i, results[i].Session, surface.Value)
 			}
 			if results[i].Ack != AckConfirmed {
 				t.Errorf("results[%d].Ack = %q, want %q", i, results[i].Ack, AckConfirmed)
 			}
-			want := composeAttachArgv(testBurstExe, testBurstPath, session, batch, results[i].Token)
+			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.calls[i], want)
 			}
+		}
+	})
+
+	t.Run("it composes the surface-matched open grammar per window over an attach+mint mix", func(t *testing.T) {
+		clock := &manualClock{}
+		ack := newDelayingAck(clock.now, 0)
+		adapter := &writingAdapter{ack: ack}
+		b := &Burster{
+			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
+			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second, Poll: 75 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+		// A mix of an attach surface (→ open --session <name>) and a mint surface
+		// (→ open --path <literal-dir>): the burster composes each window's argv from
+		// its own surface Kind, so the recorded argvs must match per surface.
+		surfaces := []Surface{
+			{Kind: SurfaceAttach, Value: "proj-existing"},
+			{Kind: SurfaceMint, Value: "/Users/me/projects/fresh"},
+		}
+
+		batch, results, err := b.Run(context.Background(), surfaces, nil)
+		if err != nil {
+			t.Fatalf("Run error = %v, want nil", err)
+		}
+		if len(adapter.calls) != len(surfaces) {
+			t.Fatalf("OpenWindow called %d times, want %d", len(adapter.calls), len(surfaces))
+		}
+		for i, surface := range surfaces {
+			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token)
+			if !slices.Equal(adapter.calls[i], want) {
+				t.Errorf("OpenWindow[%d] (%s) argv = %#v, want %#v", i, surface.Kind, adapter.calls[i], want)
+			}
+			if results[i].Ack != AckConfirmed {
+				t.Errorf("results[%d].Ack = %q, want %q", i, results[i].Ack, AckConfirmed)
+			}
+		}
+		// The mint window's argv pins the open-mint grammar exactly: --path with the
+		// literal dir, never --session and never an alias/zoxide input.
+		mintArgv := adapter.calls[1]
+		if !slices.Contains(mintArgv, "--path") {
+			t.Errorf("mint window argv = %#v, want a --path flag", mintArgv)
+		}
+		if slices.Contains(mintArgv, "--session") {
+			t.Errorf("mint window argv = %#v, must not carry --session", mintArgv)
+		}
+		flagIdx := slices.Index(mintArgv, "--path")
+		if got := mintArgv[flagIdx+1]; got != "/Users/me/projects/fresh" {
+			t.Errorf("mint --path value = %q, want the literal dir %q", got, "/Users/me/projects/fresh")
 		}
 	})
 
@@ -210,7 +260,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), []string{"w1", "w2"}, nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -245,7 +295,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), []string{"w1"}, nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1"}), nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil (a failing Collect must not surface as a Run error)", err)
 		}
@@ -273,7 +323,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), []string{"w1"}, nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1"}), nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -302,7 +352,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), []string{"w1", "w2"}, nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -336,7 +386,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), []string{"w1", "w2", "w3"}, nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3"}), nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -370,7 +420,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run(context.Background(), []string{"w1", "w2", "w3", "w4", "w5"}, nil)
+		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3", "w4", "w5"}), nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -384,8 +434,8 @@ func TestBurster_Run(t *testing.T) {
 			t.Errorf("window 2 Outcome = %v, want OutcomePermissionRequired", results[1].Result.Outcome)
 		}
 		// The two earlier windows were attempted, in order (windows 1 and 2).
-		for i, session := range []string{"w1", "w2"} {
-			want := composeAttachArgv(testBurstExe, testBurstPath, session, batch, results[i].Token)
+		for i, surface := range AttachSurfaces([]string{"w1", "w2"}) {
+			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.calls[i], want)
 			}
@@ -405,7 +455,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run(context.Background(), []string{"s1", "s2"}, nil)
+		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"s1", "s2"}), nil)
 		if batch != "" {
 			t.Errorf("batch = %q, want empty on executable-resolution failure", batch)
 		}
@@ -433,7 +483,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run(context.Background(), []string{"s1", "s2"}, nil)
+		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"s1", "s2"}), nil)
 		if batch != "" {
 			t.Errorf("batch = %q, want empty on id-generation failure", batch)
 		}
@@ -463,7 +513,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 		}
 
 		var got [][2]int
-		_, _, err := b.Run(context.Background(), []string{"w1", "w2", "w3"}, func(done, total int) {
+		_, _, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3"}), func(done, total int) {
 			got = append(got, [2]int{done, total})
 		})
 		if err != nil {
@@ -487,7 +537,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), []string{"w1", "w2"}, nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -511,7 +561,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 
 		// Cancel after the first window's progress fires: the between-windows ctx
 		// check must stop the loop before window 2 is composed or opened.
-		_, results, err := b.Run(ctx, []string{"w1", "w2", "w3"}, func(done, _ int) {
+		_, results, err := b.Run(ctx, AttachSurfaces([]string{"w1", "w2", "w3"}), func(done, _ int) {
 			if done == 1 {
 				cancel()
 			}

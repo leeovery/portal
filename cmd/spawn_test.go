@@ -125,7 +125,7 @@ func TestSpawnCommand(t *testing.T) {
 }
 
 // Fixed spawn-pipeline composition inputs: an injected ExePath and PATH so each
-// recorded OpenWindow argv is a deterministic, exact env-self-sufficient attach
+// recorded OpenWindow argv is a deterministic, exact env-self-sufficient `open`
 // command with no dependence on the running binary or the developer's PATH.
 const (
 	spawnPipelineExe  = "/opt/portal/bin/portal"
@@ -210,15 +210,16 @@ func goneExists(gone ...string) func(string) bool {
 	}
 }
 
-// wantAttachArgv is the exact env-self-sufficient attach argv the pipeline must
-// compose for session under the fixed exe/PATH seams, including the
-// --spawn-ack <batch>:<token> suffix.
+// wantAttachArgv is the exact env-self-sufficient `open` argv the pipeline must
+// compose for an all-attach surface under the fixed exe/PATH seams: the spawned
+// window runs the open grammar (`open --session <name>`) plus the hidden
+// --ack <batch>:<token> receipt.
 func wantAttachArgv(session, batch, token string) []string {
 	return []string{
 		"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
 		"PATH=" + spawnPipelinePATH,
-		spawnPipelineExe, "attach", session,
-		"--spawn-ack", batch + ":" + token,
+		spawnPipelineExe, "open", "--session", session,
+		"--ack", batch + ":" + token,
 	}
 }
 
