@@ -15,12 +15,13 @@ import (
 var runOpenBurstFunc = runOpenBurst
 
 // runOpenBurst opens the N≥2 resolved surfaces of a multi-target open — spawning
-// the N−1 non-trigger windows and self-connecting the trigger last (spec § Burst
-// exec-argv & mint responsibility). It is a PLACEHOLDER: Task 3-6 fills in the
-// real burst body (argv composition is Task 3-5). Until then it errors so a
-// production N≥2 path fails loudly rather than silently no-opping.
-func runOpenBurst(_ *cobra.Command, _ []spawn.Surface, _ []string) error {
-	return fmt.Errorf("multi-target burst not yet implemented")
+// the N−1 non-trigger windows FIRST and self-connecting the trigger LAST (spec §
+// The trigger absorbs the first target; § Burst exec-argv & mint responsibility).
+// It is the thin production entry point: it resolves the burst seams via
+// buildOpenBurstDeps and delegates to runOpenBurstWithDeps, which holds the
+// testable body.
+func runOpenBurst(cmd *cobra.Command, surfaces []spawn.Surface, command []string) error {
+	return runOpenBurstWithDeps(cmd, surfaces, command, buildOpenBurstDeps(cmd))
 }
 
 // openRawArgs returns the process's raw argv. The multi-target gate needs the
