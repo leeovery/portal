@@ -17,7 +17,7 @@ import (
 const recentWarningWindow = time.Hour
 
 // StatusReport is the data-only result of CollectStatus. Each field maps to a
-// section of `portal state status` output; the formatting layer is separate.
+// section of the `portal doctor` status output; the formatting layer is separate.
 type StatusReport struct {
 	// DaemonRunning is true when daemon.pid points at a live, signalable
 	// process. False when the PID file is missing, unparseable, or names a
@@ -63,7 +63,7 @@ type StatusReport struct {
 }
 
 // CollectStatus gathers diagnostic data about the daemon, last save, and
-// recent log activity for `portal state status` to render. It is a pure
+// recent log activity for `portal doctor` to render. It is a pure
 // data-collection layer: no I/O beyond reading state files, no formatting,
 // no logging.
 //

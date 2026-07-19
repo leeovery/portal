@@ -99,8 +99,8 @@ type DoctorDeps struct {
 	// independently of the tmux server state.
 	ProjectStore *project.Store
 	// Detector resolves the host-terminal identity for the informational
-	// host-terminal line — the SAME Detect() seam the picker/burst use
-	// (cmd/spawn.go). Production wires spawn.NewDetector over the doctor tmux
+	// host-terminal line — the SAME Detect() seam the picker and the multi-target
+	// open burst use (cmd/spawn_seams.go). Production wires spawn.NewDetector over the doctor tmux
 	// client. When nil (a direct-call unit test that does not exercise the line),
 	// the host-terminal line is omitted rather than invoking a real detector.
 	Detector TerminalDetector
@@ -277,7 +277,7 @@ func runDoctorFix(cmd *cobra.Command, deps *DoctorDeps) error {
 // config path) skips the prune. The helper's error return is discarded: a
 // hookStore.Load / CleanStale failure leaves the entries in place for the
 // re-diagnosis to report, honouring the repairs-never-drive-the-exit contract
-// (portal clean discards it the same way).
+// (the daemon's idle-tick hook cleanup, maybeRunHookCleanup, swallows it the same way).
 func pruneDoctorStaleHooks(w io.Writer, deps *DoctorDeps) {
 	if deps.HookStore == nil {
 		return
@@ -369,7 +369,7 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 
 // checkHostTerminal reports which host terminal Portal would drive for a
 // multi-window spawn burst, computed from the SAME Detect()+Resolve seams the
-// picker and `portal spawn` burst use — no bespoke detection path. It is
+// picker and the multi-target open burst use — no bespoke detection path. It is
 // INFORMATIONAL ONLY (checkInfo, rendered without a pass/fail marker): an
 // unsupported or remote host is an environmental state, not a Portal-health
 // defect (single-target `open` still works — only the multi-window burst is

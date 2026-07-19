@@ -367,7 +367,7 @@ func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testin
 // TestReattachIntegration_HasSessionPostBootstrapForSavedNames covers
 // planning task 5-10 case 2: every name present in sessions.json must
 // be queryable via has-session after bootstrap completes. This is the
-// central acceptance criterion — `portal attach NAME` only resolves a
+// central acceptance criterion — `portal open --session NAME` only resolves a
 // saved-only name when bootstrap's Restore step (5) has already
 // skeleton-created it BEFORE the command's RunE inspects HasSession.
 //
@@ -431,7 +431,7 @@ func TestReattachIntegration_HasSessionPostBootstrapForSavedNames(t *testing.T) 
 
 // TestReattachIntegration_AttachInsideTmuxSwitchClientPath covers
 // planning task 5-10 case 3: when Portal is invoked from inside an
-// existing tmux session, `portal attach NAME` must dispatch to a
+// existing tmux session, `portal open --session NAME` must dispatch to a
 // SwitchConnector (which calls tmux switch-client). We verify the
 // dispatch path with full type fidelity by routing openSessionFunc into
 // a real *SwitchConnector wrapped around a mock SwitchClienter — only the
@@ -494,7 +494,7 @@ func TestReattachIntegration_AttachInsideTmuxSwitchClientPath(t *testing.T) {
 
 // TestReattachIntegration_AttachOutsideTmuxAttachSessionPath covers
 // planning task 5-10 case 4: when Portal is invoked from a bare shell
-// (TMUX unset), `portal attach NAME` must dispatch through the
+// (TMUX unset), `portal open --session NAME` must dispatch through the
 // outside-tmux pipeline that production wires to AttachConnector
 // (`syscall.Exec` + `tmux attach-session -t NAME`). We substitute a
 // mockSessionConnector so the test does not require a real PTY hand-

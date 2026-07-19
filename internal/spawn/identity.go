@@ -9,8 +9,8 @@ import (
 // friendly display name for reading. BundleID is the exact bundle id read from
 // the terminal's `.app` (e.g. "dev.warp.Warp-Stable", "com.mitchellh.ghostty",
 // "com.apple.Terminal"); Name is the human-readable app name (e.g. "Warp",
-// "Ghostty", "Apple Terminal") shown by the picker banner and `portal spawn
-// --detect`.
+// "Ghostty", "Apple Terminal") shown by the picker banner and the `portal doctor`
+// host-terminal line.
 //
 // The zero value is the NULL identity — no host-local terminal — which a
 // remote/mosh client or an unsupported/transient detection outcome resolves to.

@@ -13,8 +13,8 @@ package cmd
 // calls the real function directly.
 //
 // The bug being guarded (Cross-Reboot Persistence (b), spec lines 108 / 150):
-// post-restore stale-cleanup (bootstrap step 11 / `portal clean`) builds its
-// live-key set from the live @portal-id via ListAllPaneHookKeys. Restore's
+// post-restore stale-cleanup (the daemon's idle-tick cleanup / doctor --fix) builds
+// its live-key set from the live @portal-id via ListAllPaneHookKeys. Restore's
 // re-stamp (internal/restore/session.go createSkeleton) re-seeds the
 // recreated live session with its saved @portal-id, so the live key resolves
 // to the immutable id-key ("tok123:0.0"), which MATCHES the id-keyed

@@ -80,8 +80,9 @@ func assertAtomicNoOp(t *testing.T, m Model, adapter *spawntest.FakeAdapter) {
 }
 
 // TestUnsupportedFlashText pins the exact §6-9 flash copy at the pure-function
-// level: the named-identity form mirrors cmd/spawn.go's unsupportedSpawnMessage
-// without the `spawn:` prefix, the NULL form is the honest no-host-local line, and
+// level: the named-identity form mirrors the shared spawn.UnsupportedNoopMessage
+// (the same copy the open burst's unsupported gate emits) without the `spawn:`
+// prefix, the NULL form is the honest no-host-local line, and
 // BOTH carry the `— nothing opened` RESPONSE suffix. No literal ⚠ (the band adds it).
 func TestUnsupportedFlashText(t *testing.T) {
 	tests := []struct {

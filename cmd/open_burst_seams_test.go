@@ -5,7 +5,7 @@ package cmd
 // defaulting builder — proving injected fields survive the shared-bundle
 // defaulting and that every unset field (notably the NOVEL LocalMint → openPathFunc
 // default) falls back to its production implementation. Mirrors
-// TestBuildSpawnDeps_PartialInjectionKeepsInjectedFillsRest (spawn_seams_test.go).
+// TestBuildProductionSpawnSeams (spawn_seams_test.go).
 
 import (
 	"io"

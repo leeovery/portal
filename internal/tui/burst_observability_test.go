@@ -348,17 +348,19 @@ func TestBurstObservability_OnlyClosedSpawnAttrKeys(t *testing.T) {
 	assertClosedSpawnKeys(t, sink)
 }
 
-// wantPermissionBody is the exact rendered body cmd/spawn.go's logSpawnPermission
-// and the picker's emitPermission must BOTH produce for the same identity /
-// resolution / detail — the closed `spawn` permission event. The mirrored cmd test
-// (TestLogSpawnPermission_ParityBody) pins the CLI side to this same literal, so a
-// drift in either emitter fails its own golden and the two paths stay byte-identical.
+// wantPermissionBody is the exact rendered body the shared spawn.LogPermission
+// produces and the picker's emitPermission must reproduce for the same identity /
+// resolution / detail — the closed `spawn` permission event both the picker and the
+// open burst's permission arm delegate to. internal/spawn's logemit_test.go pins
+// spawn.LogPermission to this same literal, so a drift in either emitter fails its
+// own golden and the picker + open-burst paths stay byte-identical.
 const wantPermissionBody = "INFO permission required — nothing self-attached resolution=native terminal=Ghostty bundle_id=com.mitchellh.ghostty detail=evt -1743"
 
 // TestBurstObservability_PermissionRequiredEmitsPermissionEvent asserts a picker
 // permission-required burst emits exactly the emitPermission INFO event (closed
 // resolution/terminal/bundle_id/detail attrs) and NOT the generic opened/total
-// summary — matching the CLI's logSpawnPermission skip-the-summary branch.
+// summary — matching spawn.LogPermission's skip-the-summary contract (the open burst
+// takes the same path).
 func TestBurstObservability_PermissionRequiredEmitsPermissionEvent(t *testing.T) {
 	m := newPendingBurstModel(t, []string{"alpha", "bravo", "charlie"}) // external=[alpha,bravo], trigger=charlie
 	logger, sink := logtest.NewCaptureLogger(t)
@@ -437,8 +439,9 @@ func TestBurstObservability_PartialFailureNoPermissionEmitsSummary(t *testing.T)
 }
 
 // TestEmitPermission_ParityWithCLI asserts the picker's emitPermission renders the
-// exact same body (message + closed attr set) as cmd/spawn.go's logSpawnPermission
-// for the same identity/resolution/detail — the cross-caller one-service lockstep.
+// exact same body (message + closed attr set) as the shared spawn.LogPermission (the
+// same emitter the open burst's permission arm uses) for the same
+// identity/resolution/detail — the cross-caller one-service lockstep.
 func TestEmitPermission_ParityWithCLI(t *testing.T) {
 	logger, sink := logtest.NewCaptureLogger(t)
 	m := Model{spawnLogger: logger}

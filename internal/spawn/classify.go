@@ -3,11 +3,12 @@ package spawn
 // classify.go is the single count-semantics chokepoint the spec designates: a
 // WindowResult is "opened" exactly when Confirmed() is true, the confirmed/failed
 // partition drives leave-what-opened retry, and "first permission wins" drives the
-// burst-stop. Both callers — the CLI (cmd/spawn.go) and the TUI picker
-// (internal/tui) — derive every opened / failed / all-confirmed / permission
-// decision from these three pure functions so the two paths cannot drift; a future
-// change to what "confirmed" means is a single edit here. They live alongside the
-// other shared spawn renderers (PreflightMissing / QuoteJoin / GoneVerb).
+// burst-stop. Both burst callers — the TUI picker (internal/tui) and the
+// multi-target open burst (cmd/open_burst_run.go) — derive every opened / failed /
+// all-confirmed / permission decision from these three pure functions so the two
+// paths cannot drift; a future change to what "confirmed" means is a single edit
+// here. They live alongside the other shared spawn renderers (PreflightMissing /
+// QuoteJoin / GoneVerb).
 
 // Confirmed reports whether this window's spawn was confirmed — its token marker
 // appeared within the per-window ack budget (Ack == AckConfirmed). It is the sole

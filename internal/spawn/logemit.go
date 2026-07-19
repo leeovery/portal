@@ -8,9 +8,9 @@ import (
 )
 
 // logemit.go is the SINGLE SOURCE of the closed `spawn`-component log-emission
-// shapes the spec governs (spec §Observability). Both spawn surfaces — the CLI
-// (cmd/spawn.go, the test seam) and the picker (internal/tui/burst_observability.go,
-// the dominant production path) — delegate their emission to these helpers, so the
+// shapes the spec governs (spec §Observability). Both burst surfaces — the picker
+// (internal/tui/burst_observability.go) and the multi-target open burst
+// (cmd/open_burst_run.go) — delegate their emission to these helpers, so the
 // closed message strings + attr-key list live in exactly one place and the two paths
 // cannot drift. It sits alongside the other shared spawn renderers
 // (message.go's GoneMessage/UnsupportedNoopMessage, classify.go's PartitionResults).
@@ -26,8 +26,8 @@ import (
 // LogWindowResults emits one "per-window spawn + ack outcome" record per external
 // window, carrying its session, its ack outcome, and the opaque driver detail. The
 // driver's OS-specific string rides up as the opaque `detail` attr, never parsed
-// (driver-quarantine). It is called standalone by the CLI permission path (which
-// emits the per-window detail before the permission INFO) and internally by
+// (driver-quarantine). It is called standalone by the open burst's permission arm
+// (which emits the per-window detail before the permission INFO) and internally by
 // LogBatchSummary (which pairs it with the cycle summary). The picker's permission
 // path deliberately does NOT call it — that asymmetry is preserved at the call
 // sites, not here.
@@ -46,7 +46,7 @@ import (
 //
 // The permission-required window is excluded from the WARN even though it is also
 // !Confirmed() (AckFailed): its detail is already carried by the dedicated
-// LogPermission INFO event, and the CLI's permission arm calls LogWindowResults
+// LogPermission INFO event, and the open burst's permission arm calls LogWindowResults
 // before LogPermission, so the exclusion prevents a double-report. Every other
 // window — a confirmed window, or the permission-required window — emits at DEBUG
 // with the unchanged "external window" message.

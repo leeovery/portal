@@ -21,7 +21,7 @@ import (
 //
 //   - the red section-header abort banner (abortBannerText) naming the gone
 //     session(s), rendered through the shared spawn.GoneMessage so the picker names
-//     sessions identically to the CLI — a single gone session reads `'<session>' is
+//     sessions identically to the open burst — a single gone session reads `'<session>' is
 //     gone — nothing opened`, several read `'s2', 's4' are gone — nothing opened`
 //     (the ⚠ glyph is added by renderPreflightAbortHeader);
 //   - the transient gone-row flags (goneFlagged) the delegate consults to draw the

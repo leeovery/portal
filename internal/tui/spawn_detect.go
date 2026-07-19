@@ -6,10 +6,11 @@ import (
 )
 
 // TerminalDetector resolves the host terminal's identity for the picker's async
-// detection lifecycle. It is the 1-method seam (mirroring cmd's spawn --detect
-// seam) that lets the model be driven with a fabricated detector — no real tmux,
-// ps, or defaults reads. Production wiring passes a *spawn.Detector built once at
-// TUI construction over the shared *tmux.Client.
+// detection lifecycle. It is the 1-method seam (the picker-side counterpart of
+// cmd's TerminalDetector, cmd/spawn_seams.go) that lets the model be driven with a
+// fabricated detector — no real tmux, ps, or defaults reads. Production wiring
+// passes a *spawn.Detector built once at TUI construction over the shared
+// *tmux.Client.
 type TerminalDetector interface {
 	Detect() spawn.Identity
 }
@@ -34,8 +35,8 @@ func WithTerminalDetector(d TerminalDetector) Option {
 }
 
 // WithResolve wires the config-aware identity→adapter/resolution seam. It is the
-// SAME resolver the spawn CLI uses (config override → native → unsupported),
-// loaded once from terminals.json at TUI construction. The picker never re-injects
+// SAME resolver the multi-target open burst uses (config override → native →
+// unsupported), loaded once from terminals.json at TUI construction. The picker never re-injects
 // it: the terminalDetectedMsg arm caches the Resolution and the later burst reuses
 // the cached value.
 func WithResolve(fn func(spawn.Identity) (spawn.Adapter, spawn.Resolution)) Option {

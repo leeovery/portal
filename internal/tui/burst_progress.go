@@ -182,7 +182,7 @@ type burstRunner struct {
 //     self-attach target). If any vanished between marking and Enter, emit a
 //     terminal abort event and STOP — nothing spawns (task 6-7 owns the abort UI).
 //  2. Otherwise open the N-1 external windows via the burster, streaming a progress
-//     event per window, self-clean the batch's ack markers on ALL paths (CLI
+//     event per window, self-clean the batch's ack markers on ALL paths (open-burst
 //     parity — bounded, harmless leaks self-expire with the tmux server), then emit
 //     the terminal outcome event.
 func (r burstRunner) run(ctx context.Context, emit func(burstProgress)) {
@@ -247,8 +247,8 @@ func WithSpawnGetenv(fn func(string) string) Option {
 // batch is all-confirmed precisely when the returned failed slice is empty (§9-6).
 // The partition is total (every result lands in confirmed OR failed, keyed off the
 // shared Confirmed() predicate), so len(failed) == 0 iff every result confirmed —
-// exactly the relationship the CLI's runSpawn (cmd/spawn.go) gates on, so the two
-// orchestrations cannot drift. The msg.Err and length guards remain: a pre-spawn
+// exactly the relationship the multi-target open burst (cmd/open_burst_run.go) gates
+// on, so the two orchestrations cannot drift. The msg.Err and length guards remain: a pre-spawn
 // error or an arity mismatch (including the vacuous N=1-here case, where the length
 // guard fires) yields false regardless of the partition.
 func (m Model) burstAllConfirmed(msg spawnCompleteMsg) bool {
@@ -402,10 +402,11 @@ func (m Model) beginBurst(ordered []string) (Model, tea.Cmd) {
 // branches on the cached RESOLUTION, not IsNull(): a recognised-but-undriven
 // terminal is non-NULL yet unsupported.
 //
-// §8-3: pre-flight runs BEFORE the unsupported no-op, mirroring cmd/spawn.go's
-// preflight-then-unsupported sequence — so a gone session on an unsupported terminal
-// surfaces the gone message and is pruned (handlePreflightAbort) rather than the
-// unsupported banner re-asserting over a stale selection.
+// §8-3: pre-flight runs BEFORE the unsupported no-op, mirroring the open burst's
+// preflight-then-unsupported sequence (cmd/open_burst_run.go) — so a gone session on
+// an unsupported terminal surfaces the gone message and is pruned
+// (handlePreflightAbort) rather than the unsupported banner re-asserting over a stale
+// selection.
 //
 // Both entry points route here — the direct N≥2 Enter (handleMultiSelectEnter →
 // beginBurst) and the deferred-Enter resolution (the terminalDetectedMsg arm's
@@ -423,8 +424,8 @@ func (m Model) decideBurst(ordered []string) (Model, tea.Cmd) {
 	}
 	if m.DetectUnsupported() {
 		// §8-3: pre-flight the whole marked set BEFORE the unsupported no-op, mirroring
-		// cmd/spawn.go's runSpawn ordering (pre-flight FIRST, then the N≥2 unsupported
-		// gate). A session killed between marking and Enter surfaces the more-actionable
+		// the open burst's ordering (cmd/open_burst_run.go: pre-flight FIRST, then the
+		// N≥2 unsupported gate). A session killed between marking and Enter surfaces the more-actionable
 		// gone message and is pruned from the selection even on an unsupported terminal
 		// — the same handlePreflightAbort arm the supported path reaches asynchronously —
 		// rather than the unsupported banner masking a gone session it never prunes. The
@@ -448,9 +449,10 @@ func (m Model) decideBurst(ordered []string) (Model, tea.Cmd) {
 
 // unsupportedFlashText is the §6-9 re-asserted-banner flash for the N≥2 Enter
 // atomic no-op, naming the resolved identity. It renders through the shared
-// spawn.UnsupportedNoopMessage — the single source of the copy the CLI's
-// unsupportedSpawnMessage also renders — so the picker flash and the CLI message
-// cannot drift. The bare body carries no `spawn:` prefix (CLI-only) and no literal
+// spawn.UnsupportedNoopMessage — the single source of the copy the open burst's
+// unsupported gate (cmd/open_burst_run.go) also renders — so the picker flash and the
+// open-burst message cannot drift. The bare body carries no `spawn:` prefix
+// (log-line only) and no literal
 // ⚠ (the warning notice band prepends the ⚠ via statusGlyph, per the
 // formatSessionGoneFlash / burstPartialFailureFlash convention); the `— nothing
 // opened` RESPONSE suffix distinguishes it from the 6-2 proactive persistent
@@ -481,9 +483,10 @@ func unsupportedFlashText(id spawn.Identity) string {
 // no-op — mirroring decideBurst's unsupported branch (emit the outcome + re-assert
 // the flash) — so a nil adapter can never reach spawn.NewBurster / OpenWindow.
 func (m Model) dispatchBurst(ordered []string) (Model, tea.Cmd) {
-	// Derive the net-N split through spawn.SplitNetN — the single computation the
-	// CLI (runSpawn) also uses — so the "net N, never N+1" invariant can't drift
-	// between the two callers. Safe here: decideBurst's empty-ordered guard
+	// Derive the net-N split through spawn.SplitNetN — the picker's SOLE consumer of
+	// that trailing-trigger split (the multi-target open burst uses the leading-trigger
+	// SplitTriggerFirst instead) — so the "net N, never N+1" invariant stays anchored in
+	// one shared computation. Safe here: decideBurst's empty-ordered guard
 	// guarantees len(ordered) >= 1 before dispatch.
 	external, trigger := spawn.SplitNetN(ordered)
 

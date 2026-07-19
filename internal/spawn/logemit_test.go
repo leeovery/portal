@@ -2,12 +2,13 @@ package spawn
 
 // White-box tests for the shared `spawn`-component log-emission helpers
 // (logemit.go). These are the SINGLE SOURCE of the closed spawn log vocabulary:
-// cmd/spawn.go (the CLI test seam) and internal/tui/burst_observability.go (the
-// dominant picker path) both delegate their emission to these helpers, so the
-// golden bodies pinned here are — by construction — byte-identical across both
-// callers. The `wantPermissionBody` literal below is the same one asserted at both
-// call sites (cmd TestLogSpawnPermission_ParityBody / tui TestEmitPermission_ParityWithCLI),
-// making this the cross-caller parity anchor for the permission event.
+// both burst callers — the multi-target open burst (cmd/open_burst_run.go) and
+// internal/tui/burst_observability.go (the picker path) — delegate their emission to
+// these helpers, so the golden bodies pinned here are — by construction —
+// byte-identical across both callers. The `wantPermissionBody` literal below is the
+// same one asserted at the picker's parity call site
+// (tui TestEmitPermission_ParityWithCLI), making this the cross-caller parity anchor
+// for the permission event.
 
 import (
 	"log/slog"
@@ -275,10 +276,10 @@ func TestLogWindowResults_FailedWindowsWarn(t *testing.T) {
 	})
 }
 
-// wantPermissionBody is the exact rendered body BOTH the CLI (logSpawnPermission) and
-// the picker (emitPermission) must produce — pinned identically at all three sites so
-// a drift in the shared helper fails every golden. Kept byte-for-byte in lockstep with
-// cmd/spawn_test.go and internal/tui/burst_observability_test.go.
+// wantPermissionBody is the exact rendered body the shared spawn.LogPermission
+// produces and the picker (emitPermission) must reproduce — pinned identically at
+// both golden sites so a drift in the shared helper fails every golden. Kept
+// byte-for-byte in lockstep with internal/tui/burst_observability_test.go.
 const wantPermissionBody = "INFO permission required — nothing self-attached resolution=native terminal=Ghostty bundle_id=com.mitchellh.ghostty detail=evt -1743"
 
 // TestLogPermission_Body pins the permission event's rendered body.

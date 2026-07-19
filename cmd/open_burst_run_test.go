@@ -641,9 +641,9 @@ func (a *ackWritingAdapter) confirmed(i int) bool {
 
 func TestRunOpenBurst_PartialFailure_LeavesOthersOpen_StillConnectsTrigger(t *testing.T) {
 	// External e1 spawn-fails, e2 confirms. Leave-what-opened: e2 stays open, e1 is
-	// neither retried nor torn down, and — the open-specific divergence from runSpawn
-	// — the trigger STILL connects and NO partial-failure error is returned. The
-	// failed window rides a best-effort stderr summary + portal.log only.
+	// neither retried nor torn down, and — the open-specific divergence from the
+	// picker's burst — the trigger STILL connects and NO partial-failure error is
+	// returned. The failed window rides a best-effort stderr summary + portal.log only.
 	events := &openBurstEvents{}
 	inner := &spawntest.FakeAdapter{
 		Results: []spawn.Result{spawn.SpawnFailed("osascript exited 1: -1743"), spawn.Success("ok")},

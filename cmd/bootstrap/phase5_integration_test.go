@@ -130,7 +130,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 // TestPhase5_RestoreCreatesMissingSession proves that when sessions.json
 // contains a session NAME not currently live, the bootstrap orchestrator's
 // Restore step skeleton-creates that session by the time Run returns. This is
-// the spec's central acceptance criterion for `portal attach NAME` against a
+// the spec's central acceptance criterion for `portal open --session NAME` against a
 // sessions.json-only name.
 //
 // Wiring: real RestoringMarker (Set/Clear), real restore.Orchestrator

@@ -53,8 +53,9 @@ type Resolver struct {
 }
 
 // NewResolver returns a config-aware Resolver over cfg, wired to the production
-// recipe runner. cmd/spawn.go builds one from the loaded terminals.json and uses
-// its Resolve method as the default resolve seam.
+// recipe runner. buildResolver (cmd/spawn_seams.go) builds one from the loaded
+// terminals.json; its Resolve method is the default resolve seam both burst callers
+// (the picker and the multi-target open burst) share.
 func NewResolver(cfg TerminalsConfig) *Resolver {
 	return &Resolver{Config: cfg, runner: &execRecipeRunner{}}
 }

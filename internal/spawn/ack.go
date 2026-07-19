@@ -35,13 +35,14 @@ type AckCleaner interface {
 }
 
 // AckWriter is the write-side consumer seam: a spawned window writes its own
-// token marker just before it execs into tmux (see portal attach --spawn-ack).
+// token marker just before it execs into tmux (see the open command's hidden
+// --ack flag / writeAckMarker in cmd/open.go).
 type AckWriter interface {
 	Write(batch, token string) error
 }
 
 // AckChannelFull is the combined Collect+Clean seam the burst orchestrators
-// depend on (SpawnDeps.Ack and tui.Deps.AckChannel both reference it). It is
+// depend on (OpenBurstDeps.Ack and tui.Deps.AckChannel both reference it). It is
 // deliberately narrower than the full ServerOptionAckChannel — the burster
 // never writes markers itself (the spawned windows do).
 type AckChannelFull interface {

@@ -3,11 +3,12 @@
 // window-spawning adapter, and drives the adapter to open new terminal windows
 // for restored sessions.
 //
-// It is a single service reached in-process by two callers — the TUI picker
-// (which spawns windows as part of its restore/attach flow) and the `portal
-// spawn` CLI (the thin command that mirrors the picker's commit and exposes the
-// `--detect` dry-run). Both callers share one detection and resolution path so
-// their behaviour cannot drift.
+// It is a single service reached in-process by two burst callers — the TUI picker
+// (which spawns windows as part of its multi-select attach flow) and the
+// multi-target open burst (cmd/open_burst_run.go — the `open` command opening N≥2
+// resolved surfaces). Both share one detection and resolution path so their
+// behaviour cannot drift. (The host-terminal detector alone is also reused by the
+// `portal doctor` host-terminal line.)
 //
 // Detection produces an Identity: the host terminal's macOS bundle id plus a
 // friendly display name, or a NULL identity when there is no host-local

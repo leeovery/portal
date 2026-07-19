@@ -597,17 +597,18 @@ type tuiConfig struct {
 	// model's cached resolution and never re-injects.
 	detector tui.TerminalDetector
 	resolve  func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
-	// §6-3 N≥2 picker-burst seams. Built once here (defaults mirroring the spawn
-	// CLI's SpawnDeps: client.HasSession / a shared server-option ack channel /
-	// os.Executable / os.Getenv) and threaded into tui.Deps. The burst REUSES the
-	// resolve seam above (the cached resolution + a re-resolve for the adapter).
+	// §6-3 N≥2 picker-burst seams. Built once here (defaults from the shared
+	// productionSpawnSeams bundle, cmd/spawn_seams.go: client.HasSession / a shared
+	// server-option ack channel / os.Executable / os.Getenv — the same bundle the
+	// multi-target open burst wires from) and threaded into tui.Deps. The burst REUSES
+	// the resolve seam above (the cached resolution + a re-resolve for the adapter).
 	sessionExists func(string) bool
 	ackChannel    spawn.AckChannelFull
 	spawnExe      spawn.ExecutableResolver
 	spawnGetenv   func(string) string
 	// spawnLogger is the §6-10 spawn-component logger the picker burst's completion
 	// chokepoint emits its batch summary + per-window detail through (log.For("spawn")
-	// in production; the parallel to cmd/spawn.go's package-level spawnLogger).
+	// in production; the parallel to cmd/spawn_seams.go's package-level spawnLogger).
 	spawnLogger    *slog.Logger
 	cwd            string
 	insideTmux     bool
@@ -807,8 +808,9 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	previewAttacher := tui.NewPreviewAttachPipeline(client, previewLogger)
 
 	// Build the shared production spawn seams ONCE from the resolved client. This
-	// is the same bundle the spawn CLI's buildSpawnDeps reads, so the picker's
-	// §6/§6-3 detection + burst seams cannot silently diverge from the CLI's.
+	// is the same bundle the multi-target open burst (buildOpenBurstDeps) reads, so
+	// the picker's §6/§6-3 detection + burst seams cannot silently diverge from the
+	// open burst's.
 	spawnSeams := buildProductionSpawnSeams(client)
 
 	cfg := tuiConfig{
@@ -840,9 +842,9 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		// by the later picker burst.
 		detector: spawnSeams.Detector,
 		resolve:  spawnSeams.Resolve,
-		// §6-3 N≥2 picker-burst seams — the same shared bundle the spawn CLI's
-		// SpawnDeps defaults from: the pre-flight has-session probe folds a probe
-		// fault to gone (conservative), the shared server-option ack channel
+		// §6-3 N≥2 picker-burst seams — the same shared productionSpawnSeams bundle
+		// the multi-target open burst defaults from: the pre-flight has-session probe
+		// folds a probe fault to gone (conservative), the shared server-option ack channel
 		// confirms/cleans spawned windows, and the exe/PATH seams compose each
 		// spawned attach argv.
 		sessionExists: spawnSeams.Exists,
@@ -850,7 +852,7 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		spawnExe:      spawnSeams.Exe,
 		spawnGetenv:   spawnSeams.Getenv,
 		// §6-10: the picker burst's spawn-component logger — the TUI parallel to
-		// cmd/spawn.go's package-level spawnLogger = log.For("spawn").
+		// cmd/spawn_seams.go's package-level spawnLogger = log.For("spawn").
 		spawnLogger: spawnSeams.Logger,
 		// NO_COLOR carve-out (§2.5): read the env ONCE here (cmd layer) so
 		// internal/tui stays env-free. The single colourless flag flows through

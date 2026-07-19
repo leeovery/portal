@@ -3,8 +3,8 @@ package tui
 // restore-host-terminal-windows-9-6 — burstAllConfirmed derives its all-confirmed
 // verdict from the shared spawn.PartitionResults chokepoint (the "failed slice is
 // empty" relationship), NOT a hand-rolled !r.Confirmed() loop, so the picker's
-// success gate rests on the SAME count-semantics the CLI's does (cmd/spawn.go's
-// runSpawn) and the two orchestrations cannot drift.
+// success gate rests on the SAME count-semantics the multi-target open burst
+// (cmd/open_burst_run.go) does and the two orchestrations cannot drift.
 //
 // White-box (package tui): burstAllConfirmed reads only m.burstExternal and the
 // terminal spawnCompleteMsg, so a bare Model literal with burstExternal set drives
@@ -114,9 +114,9 @@ func TestBurstAllConfirmed_TruthTable(t *testing.T) {
 	}
 }
 
-// burstClass is the terminal 3-way classification both the CLI (cmd/spawn.go's
-// runSpawn) and the picker (the spawnCompleteMsg handler + burstAllConfirmed) reach
-// for a completed burst.
+// burstClass is the terminal 3-way classification both the multi-target open burst
+// (cmd/open_burst_run.go) and the picker (the spawnCompleteMsg handler +
+// burstAllConfirmed) reach for a completed burst.
 type burstClass int
 
 const (
@@ -138,7 +138,8 @@ func (c burstClass) String() string {
 
 // canonicalBurstClass derives the terminal classification from the SHARED spawn
 // chokepoint — the exact spawn.PartitionResults → spawn.FirstPermission branch order
-// runSpawn (cmd/spawn.go) keys its self-attach/partial/permission decision off, and
+// the multi-target open burst (cmd/open_burst_run.go) keys its
+// self-attach/partial/permission decision off, and
 // the same relationship the picker's spawnCompleteMsg handler uses (burstAllConfirmed
 // for the all-confirmed axis, spawn.FirstPermission for the permission-vs-partial
 // split). Anchoring the fixture expectations to this single derivation is what proves
@@ -155,12 +156,12 @@ func canonicalBurstClass(results []spawn.WindowResult) burstClass {
 
 // TestBurstAllConfirmed_ClassificationParityWithChokepoint is the cross-caller parity
 // guard: a shared fixture table of []spawn.WindowResult reaches the SAME terminal
-// classification on the CLI and picker paths because both derive it from
+// classification on the open-burst and picker paths because both derive it from
 // spawn.PartitionResults / spawn.FirstPermission. It asserts the picker's success gate
 // (burstAllConfirmed) is true EXACTLY when the shared chokepoint's failed slice is
-// empty — the identical `len(failed) == 0` relationship runSpawn's all-confirmed gate
-// uses — for the same fixtures, so a future change to what "all confirmed" means lands
-// in PartitionResults and both orchestrations move together.
+// empty — the identical `len(failed) == 0` relationship the open burst's all-confirmed
+// gate uses — for the same fixtures, so a future change to what "all confirmed" means
+// lands in PartitionResults and both orchestrations move together.
 func TestBurstAllConfirmed_ClassificationParityWithChokepoint(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -178,7 +179,7 @@ func TestBurstAllConfirmed_ClassificationParityWithChokepoint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// The shared chokepoint reaches the fixture's declared class — this is the
-			// derivation both cmd/spawn.go and the picker key off.
+			// derivation both the open burst and the picker key off.
 			if got := canonicalBurstClass(tt.results); got != tt.want {
 				t.Fatalf("canonicalBurstClass = %s, want %s (the shared spawn.PartitionResults/FirstPermission derivation)", got, tt.want)
 			}
@@ -194,8 +195,8 @@ func TestBurstAllConfirmed_ClassificationParityWithChokepoint(t *testing.T) {
 			}
 
 			// And it rests directly on spawn.PartitionResults' failed==empty relationship —
-			// the SAME expression runSpawn's `len(failed) == 0` gate uses — closing the loop
-			// on "derives from the chokepoint, not a parallel loop".
+			// the SAME expression the open burst's `len(failed) == 0` gate uses — closing the
+			// loop on "derives from the chokepoint, not a parallel loop".
 			_, failed := spawn.PartitionResults(tt.results)
 			if gotConfirmed != (len(failed) == 0) {
 				t.Errorf("burstAllConfirmed = %v, but spawn.PartitionResults failed==empty is %v — the picker gate must rest on the same relationship the CLI's does", gotConfirmed, len(failed) == 0)

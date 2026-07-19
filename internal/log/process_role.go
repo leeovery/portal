@@ -3,9 +3,17 @@ package log
 import "strings"
 
 // Process-role values. This is the CLOSED 6-value space for the per-record
-// process_role baseline attr — every ResolveProcessRole result is exactly one of
-// these. Identifies which portal binary invocation emitted a log line, which is
-// critical for multi-writer disambiguation on reboot-recovery days.
+// process_role baseline attr. Identifies which portal binary invocation emitted a
+// log line, which is critical for multi-writer disambiguation on reboot-recovery
+// days.
+//
+// roleClean is now UNREACHABLE: the `portal clean` command was removed in the CLI
+// verb-surface redesign, so ResolveProcessRole never returns it and its
+// `case "clean"` arm below is dead. The value (and that dead arm) are retained in
+// place because pruning a closed-space process_role value requires a log-taxonomy
+// amendment — out of scope for a comment sweep. Every REACHABLE ResolveProcessRole
+// result is therefore one of the other five (daemon / hydrate / hooks_cli / tui /
+// bootstrap).
 const (
 	roleDaemon   = "daemon"
 	roleHydrate  = "hydrate"
@@ -19,7 +27,8 @@ const (
 )
 
 // ResolveProcessRole maps a process invocation's argument vector (os.Args[1:])
-// to one of the six closed process_role values.
+// to one of the closed process_role values (every value except the now-unreachable
+// clean; see the const block above).
 //
 // Init is called from main before Cobra parses argv, so the role must be
 // resolved from a lightweight os.Args inspection rather than a full parse. The
@@ -30,8 +39,8 @@ const (
 //
 //	state daemon                      -> daemon
 //	state hydrate / state signal-hydrate -> hydrate
-//	hooks …                           -> hooks_cli
-//	clean                             -> clean
+//	hook / hooks …                    -> hooks_cli (both spellings; `hooks` is the alias)
+//	clean                             -> clean (DEAD arm — `portal clean` removed)
 //	open … / x … / bare               -> tui
 //	anything else (incl. bare state)  -> bootstrap (explicit default)
 //
@@ -66,6 +75,9 @@ func ResolveProcessRole(args []string) string {
 		// hook-mutation log line carries process_role=hooks_cli regardless of the
 		// spelling the caller (incl. the machine-generated SessionStart skill) used.
 		return roleHooksCLI
+	// DEAD arm: `portal clean` was removed in the CLI verb-surface redesign, so no
+	// invocation reaches here. Retained (with roleClean) because pruning a
+	// closed-space process_role value requires a log-taxonomy amendment.
 	case "clean":
 		return roleClean
 	case "open", "x":

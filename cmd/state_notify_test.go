@@ -198,7 +198,7 @@ func TestStateNotify_DoesNotInvokeBootstrap(t *testing.T) {
 // directory), the notify subsystem emits a WARN entry to portal.log under the
 // "notify" tag. This is the task 12-5 acceptance: routine
 // notify failure reporting must be visible to portal.log so it can be
-// surfaced via portal state status recent-warnings.
+// surfaced via `portal doctor` recent-warnings.
 //
 // We force the OpenFile failure by pre-creating save.requested as a
 // directory beneath the state dir; OpenFile with O_WRONLY|O_CREATE|O_TRUNC

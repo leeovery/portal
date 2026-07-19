@@ -67,9 +67,9 @@ func composeOpenArgv(exePath, path string, surface Surface, batch, token string,
 
 // AttachSurfaces maps a list of existing session names to all-attach Surface
 // specs (one SurfaceAttach per name, in order). It is the convergence point that
-// lets the legacy all-attach callers (the `portal spawn` CLI and the picker
-// multi-select burst, which only ever attach to already-selected sessions) feed
-// the generalized surface-spec Burster without a forked, name-only builder.
+// lets the picker's all-attach multi-select burst (internal/tui — its SOLE
+// consumer, which only ever attaches to already-selected sessions) feed the
+// generalized surface-spec Burster without a forked, name-only builder.
 func AttachSurfaces(names []string) []Surface {
 	surfaces := make([]Surface, len(names))
 	for i, name := range names {

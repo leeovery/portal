@@ -3,9 +3,10 @@ package tui
 // restore-host-terminal-windows-8-3 — run pre-flight before the unsupported gate on
 // the picker burst path.
 //
-// The CLI's runSpawn pre-flights the whole batch FIRST — ahead of the N≥2
-// unsupported gate — so a gone session aborts with the more-actionable gone-session
-// message even on an unsupported terminal. These white-box (package tui) tests pin
+// The multi-target open burst (cmd/open_burst_run.go) pre-flights the whole batch
+// FIRST — ahead of the N≥2 unsupported gate — so a gone session aborts with the
+// more-actionable gone-session message even on an unsupported terminal. These
+// white-box (package tui) tests pin
 // the same ordering on the picker: decideBurst evaluates spawn.PreflightMissing over
 // the marked set before the DetectUnsupported() atomic no-op, so a gone session on an
 // unsupported terminal surfaces the abort banner + prunes the selection (matching
@@ -61,7 +62,7 @@ func assertUnsupportedPreflightAbort(t *testing.T, m Model, adapter *spawntest.F
 // TestBurstUnsupported_PreflightAbortBeforeNoop drives the already-resolved N≥2
 // Enter on a resolved-unsupported terminal (Apple Terminal) with one marked session
 // externally killed. Pre-flight runs BEFORE the unsupported no-op, so the gone
-// session surfaces the abort banner and is pruned — matching cmd/spawn.go — instead
+// session surfaces the abort banner and is pruned — matching the open burst — instead
 // of the unsupported banner re-asserting.
 func TestBurstUnsupported_PreflightAbortBeforeNoop(t *testing.T) {
 	sessions := []tmux.Session{

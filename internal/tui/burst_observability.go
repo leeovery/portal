@@ -1,15 +1,17 @@
 package tui
 
 // Picker-side spawn observability: the burst completion chokepoint emits the closed
-// `spawn`-component instrumentation the CLI (cmd/spawn.go) also emits — one INFO cycle
-// summary (`spawn: opened N/N`) plus one DEBUG per external window, using only the closed
-// spawn attr keys (batch/terminal/bundle_id/resolution/session/ack/opened/total/detail).
+// `spawn`-component instrumentation the multi-target open burst (cmd/open_burst_run.go)
+// also emits — one INFO cycle summary (`spawn: opened N/N`) plus one DEBUG per external
+// window, using only the closed spawn attr keys
+// (batch/terminal/bundle_id/resolution/session/ack/opened/total/detail).
 //
 // The emission shapes themselves live ONCE in internal/spawn/logemit.go
 // (spawn.LogBatchSummary / spawn.LogWindowResults / spawn.LogPermission /
 // spawn.LogUnsupported / spawn.LogGone) — the single source of the closed spawn log
-// vocabulary that both this picker path and the CLI delegate to, so the two paths cannot
-// drift. The methods here are thin model-bound wrappers: they supply m.spawnLogger and
+// vocabulary that both this picker path and the open burst delegate to, so the two paths
+// cannot drift. The methods here are thin model-bound wrappers: they supply m.spawnLogger
+// and
 // the model-derived total, and route each terminal outcome to the matching shared shape.
 // The driver's OS-specific string rides up as the opaque `detail` attr, never parsed
 // (driver-quarantine).
@@ -48,7 +50,7 @@ func (m Model) emitBurstSummary(batch string, id spawn.Identity, resolution spaw
 // opaque driver detail, and NO opened/total/batch summary attrs (the burst stopped on the
 // first wall, so there is no cycle summary to report). Routing the permission arm here
 // instead of emitBurstSummary is what keeps the picker's permission emission to ONLY the
-// permission INFO (no per-window DEBUG lines) — the deliberate picker/CLI asymmetry.
+// permission INFO (no per-window DEBUG lines) — the deliberate picker/open-burst asymmetry.
 func (m Model) emitPermission(id spawn.Identity, resolution spawn.Resolution, detail string) {
 	spawn.LogPermission(m.spawnLogger, id, resolution, detail)
 }

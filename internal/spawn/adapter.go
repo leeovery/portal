@@ -10,11 +10,11 @@ type Adapter interface {
 	// OpenWindow opens one new host-terminal window running command verbatim
 	// as a real argv, and reports the outcome as a generic typed Result.
 	//
-	// command is the composed env-self-sufficient attach argv
-	// (/usr/bin/env … <exe> attach <session>); the adapter runs it as-is and
-	// is NOT session-aware — it never bakes in `portal attach` and never
-	// parses the session out of the argv (the spec rejects a session-aware
-	// OpenAttached(session)).
+	// command is the composed env-self-sufficient open argv
+	// (/usr/bin/env … <exe> open --session <name> / --path <dir>); the adapter
+	// runs it as-is and is NOT session-aware — it never bakes in `portal open`
+	// and never parses the target out of the argv (the spec rejects a
+	// session-aware OpenAttached(session)).
 	OpenWindow(command []string) Result
 }
 

@@ -388,7 +388,7 @@ func TestRunMigrateRename_KeyWithColonInRemainder(t *testing.T) {
 // surface routes its diagnostic warnings through the injected *slog.Logger
 // under the canonical hooks component tag rather than fmt.Fprintf(os.Stderr,
 // ...). This is the task 12-5 acceptance: routine reporting in
-// state_migrate_rename must be visible to portal.log so portal state status
+// state_migrate_rename must be visible to portal.log so `portal doctor`
 // recent-warnings can surface it. We exercise the collision path (which is the
 // deterministic non-fatal warning path) and verify both the level and
 // component tag.

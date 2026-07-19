@@ -452,7 +452,7 @@ type Model struct {
 	// Async host-terminal detection lifecycle (restore-host-terminal-windows §6).
 	// detector runs the process-tree/client-walk identity detection off the Update
 	// path (a tea.Cmd on the command goroutine); resolve is the SAME config-aware
-	// identity→adapter/resolution seam the spawn CLI uses (loaded once from
+	// identity→adapter/resolution seam the multi-target open burst uses (loaded once from
 	// terminals.json at construction). Both are injected together (nil in the
 	// capture harness). Reaching PageSessions dispatches Detect() exactly once
 	// (detectDispatched latch); the terminalDetectedMsg arm caches the identity, the
@@ -478,8 +478,9 @@ type Model struct {
 	detectDispatched bool
 
 	// §6-3 N≥2 picker-burst seams + lifecycle (restore-host-terminal-windows). The
-	// seams mirror the spawn CLI's SpawnDeps: sessionExists is the pre-flight
-	// has-session probe, ackChannel is the token-ack Collect+Clean channel, spawnExe
+	// seams mirror the shared productionSpawnSeams bundle (cmd/spawn_seams.go), the
+	// same bundle the multi-target open burst wires from: sessionExists is the
+	// pre-flight has-session probe, ackChannel is the token-ack Collect+Clean channel, spawnExe
 	// resolves the picker's own binary, and spawnGetenv reads PATH — all injected
 	// together (nil in the capture harness / unit tests that never drive a burst).
 	// The RESOLVE seam is REUSED from the detection block above (m.resolve), never

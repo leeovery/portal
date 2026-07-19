@@ -16,7 +16,7 @@ import (
 //
 //	~260ms   the osascript open (measured: 4 sequential opens ~1.05s / ~260ms
 //	         each — see spec § Sequential vs parallel), plus
-//	         the spawned window's own abridged `portal attach` (warm-command
+//	         the spawned window's own abridged `portal open` (warm-command
 //	         fast-path, NO full bootstrap) up to the point it writes its token
 //	         marker just before exec.
 //
@@ -134,11 +134,11 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 //
 // progress (nil-tolerant) is invoked as progress(i+1, len(external)) after each
 // window's ack classification — the picker burst pipe streams it to the loading
-// UI, while the CLI passes nil for byte-identical Phase-2/3 behaviour. ctx is
+// UI, while the open burst passes nil (no live progress UI). ctx is
 // checked between windows AND inside awaitToken's poll loop (Task 6.8 drives the
 // cancel): on cancellation the burst stops iterating and returns what it has
 // collected so far (a nil error — a cancelled burst is a shutdown, not a
-// failure). A context.Background() ctx never cancels, so the CLI path is
+// failure). A context.Background() ctx never cancels, so the open burst path is
 // unchanged.
 func (b *Burster) Run(ctx context.Context, external []Surface, command []string, progress func(done, total int)) (batch string, results []WindowResult, err error) {
 	exePath, err := b.Exe()
@@ -204,8 +204,8 @@ func (b *Burster) Run(ctx context.Context, external []Surface, command []string,
 //
 // It also honours ctx cancellation (Task 6.8): a cancelled context ends the poll
 // immediately as AckTimeout (the caller's between-windows check then stops the
-// burst). A context.Background() ctx never cancels, so the CLI path polls exactly
-// as before.
+// burst). A context.Background() ctx never cancels, so the open burst path polls
+// exactly as before.
 func awaitToken(ctx context.Context, b *Burster, batch, token string) AckOutcome {
 	start := b.Now()
 	for {

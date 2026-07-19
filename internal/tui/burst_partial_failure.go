@@ -35,7 +35,8 @@ func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) 
 	// §7-1: the permission-required outcome is its own closed-catalog event. Detect it
 	// via the shared spawn.FirstPermission (the single count-semantics chokepoint) and
 	// route it to emitPermission — the dedicated INFO with NO opened/total summary —
-	// matching cmd/spawn.go's logSpawnPermission branch, which skips logSpawnSummary.
+	// matching the open burst's permission arm (cmd/open_burst_run.go), which likewise
+	// emits spawn.LogPermission and skips the batch summary.
 	// Every other non-all-confirmed outcome (a timeout / spawn-failed partial, or a
 	// pre-spawn Burster.Run error with empty Results) emits the generic batch summary:
 	// opened = the confirmed external windows only (the skipped trigger self-attach is
@@ -51,8 +52,8 @@ func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) 
 		// window opened → msg.Results is empty. Nothing opened → nothing to unmark, so
 		// the selection is left UNCHANGED (no degenerate empty-named "failed to open").
 		// The opaque msg.Err rides only to the DEBUG log (§6-10). This is the picker
-		// analogue of the CLI's `return err` on the same Burster.Run error, surfaced as
-		// a flash instead of an exit.
+		// analogue of the open burst's `return err` on the same Burster.Run error,
+		// surfaced as a flash instead of an exit.
 		m.setFlash(burstPreSpawnErrorFlash)
 		(&m).resetBurstState()
 		return m, nil
@@ -60,7 +61,7 @@ func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) 
 
 	// §7-1: derive the confirmed set from the shared spawn PartitionResults chokepoint
 	// (rather than a hand-rolled Ack loop) for the leave-what-opened mutation, so it
-	// keys off the same count-semantics rule the CLI does. The failed-window flash owns
+	// keys off the same count-semantics rule the open burst does. The failed-window flash owns
 	// its own derivation internally from the same chokepoint (burstPartialFailureFlash),
 	// so this caller no longer threads a partition half into it.
 	confirmed, _ := spawn.PartitionResults(msg.Results)
@@ -107,8 +108,9 @@ func (m *Model) applyBurstSelectionMutation(confirmed []string) {
 // so the caller renders NO band, avoiding the leading-space "  failed to open …".
 // Otherwise it names every failed window via the shared spawn.QuoteJoin renderer,
 // deriving othersOpened as len(confirmed) > 0 from the same PartitionResults chokepoint
-// the CLI uses (cmd/spawn.go): a total failure renders "— nothing opened" and a genuine
-// partial "— others left open" byte-identically across both paths (the skipped trigger
+// the open burst uses (cmd/open_burst_run.go): a total failure renders "— nothing opened"
+// and a genuine partial "— others left open" byte-identically across both paths (the
+// skipped trigger
 // self-attach is never an external result, so it can never count as an "other"). The
 // opaque Result.Detail never reaches the user (DEBUG log only, §6-10). The ⚠ glyph is
 // added by the warning notice band, so the message text carries none

@@ -253,7 +253,7 @@ func TestRunRetentionSweep_UngatedAlwaysRunsRegardlessOfSentinel(t *testing.T) {
 	t.Setenv("PORTAL_LOG_RETENTION_DAYS", "30")
 
 	// today's sentinel is present — a gated sweep would no-op. The ungated path
-	// (portal clean --logs, Task 2-9) must run anyway.
+	// (portal doctor --fix, Task 2-9) must run anyway.
 	touchFile(t, dir, sweptSentinelName("2026-05-30"))
 	old := touchFile(t, dir, "portal.log.2026-01-15")
 

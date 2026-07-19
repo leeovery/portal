@@ -43,7 +43,7 @@ const (
 //
 // The OneShot toggle is the lever used by tests that need an earlier
 // tmux call (e.g. bootstrap step 4 orphan sweep) to succeed before a
-// later `list-panes -a` consumer (e.g. the `portal clean` hook-cleanup
+// later `list-panes -a` consumer (e.g. the `doctor --fix` hook-cleanup
 // tail) observes the transient. When OneShot is
 // true, the FIRST intercepted call applies the policy; every subsequent
 // intercepted call falls through to the inner Commander. When OneShot is
@@ -52,7 +52,7 @@ const (
 //
 // Concurrent-safety: the interception counter uses atomic.Int64 so the
 // OneShot toggle is safe under the parallel `tmux ...` calls that
-// bootstrap step 4 (orphan sweep) and the `portal clean` hook-cleanup
+// bootstrap step 4 (orphan sweep) and the `doctor --fix` hook-cleanup
 // tail may issue.
 // The Mode and Inner fields are NOT protected because tests are expected
 // to flip them only between phases, not during concurrent tmux activity.

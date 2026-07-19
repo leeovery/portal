@@ -7,9 +7,9 @@ import (
 
 // QuoteJoin single-quotes each name and joins them with ", " — rendering 's2'
 // for one name and 's2', 's4' for several. It is the shared renderer for the
-// spawn one-line messages (the pre-flight gone-session error and the Phase-6
-// picker's equivalents), so the CLI (cmd/spawn.go) and the picker (internal/tui)
-// name sessions identically. An empty slice renders the empty string.
+// spawn one-line messages, so both burst callers — the picker (internal/tui) and
+// the multi-target open burst (cmd/open_burst_run.go) — name sessions identically.
+// An empty slice renders the empty string.
 func QuoteJoin(names []string) string {
 	quoted := make([]string, len(names))
 	for i, name := range names {
@@ -32,11 +32,11 @@ func GoneVerb(n int) string {
 // GoneMessage is the single renderer for the pre-flight gone-session outcome
 // sentence — "'s2' is gone — nothing opened" for one name, "'s2', 's4' are gone
 // — nothing opened" for several — composed from the shared QuoteJoin + GoneVerb
-// primitives. Every caller (the CLI abort error and outcome log, the picker
+// primitives. Every caller (the open burst's abort error and outcome log, the picker
 // outcome log, the picker abort banner, and the capture-harness seed banner)
 // renders through it so a copy edit lands in exactly one place. The body carries
-// no "spawn:" prefix and no ⚠ glyph: the CLI adds the prefix at its call sites
-// and the notice band prepends the glyph via statusGlyph.
+// no "spawn:" prefix and no ⚠ glyph: the log emitters add the prefix at their call
+// sites and the notice band prepends the glyph via statusGlyph.
 func GoneMessage(names []string) string {
 	return fmt.Sprintf("%s %s gone — nothing opened", QuoteJoin(names), GoneVerb(len(names)))
 }
@@ -50,14 +50,14 @@ func GoneMessage(names []string) string {
 // any partial) — "'s2' failed to open — nothing opened" / "'s2', 's3' failed to
 // open — nothing opened"; the "— nothing opened" clause mirrors GoneMessage and
 // UnsupportedNoopMessage, keeping the honest no-op wording single-sourced. It is
-// composed from the shared QuoteJoin primitive. Both callers (the CLI's exit-1
-// error and the picker's re-asserted flash) render through it — deriving
-// othersOpened as len(confirmed) > 0 from the shared PartitionResults chokepoint
-// — so the spec's "same one-line message the picker would show" contract holds
-// and a copy edit lands in exactly one place. The body needs no count-aware
+// composed from the shared QuoteJoin primitive. Both callers (the open burst's
+// best-effort stderr summary and the picker's re-asserted flash) render through it —
+// deriving othersOpened as len(confirmed) > 0 from the shared PartitionResults
+// chokepoint — so the spec's "same one-line message the picker would show" contract
+// holds and a copy edit lands in exactly one place. The body needs no count-aware
 // verb: "failed to open" agrees with a single name and with several. The body
-// carries no "spawn:" prefix and no ⚠ glyph: the CLI adds the prefix at its call
-// site and the notice band prepends the glyph via statusGlyph.
+// carries no "spawn:" prefix and no ⚠ glyph: the log emitters add the prefix at their
+// call site and the notice band prepends the glyph via statusGlyph.
 func PartialFailureMessage(failed []string, othersOpened bool) string {
 	if othersOpened {
 		return fmt.Sprintf("%s failed to open — others left open", QuoteJoin(failed))
@@ -70,10 +70,10 @@ func PartialFailureMessage(failed []string, othersOpened bool) string {
 // detection error folded to Identity{}) gets the honest "no host-local terminal
 // — nothing opened" line; a recognised-but-undriven identity names its friendly
 // name and bundle id, separated by the U+00B7 middle dot that mirrors the
-// --detect echo and the design banner. Both callers (the CLI unsupported message
-// and the picker's re-asserted flash) render through it. The body carries no
-// "spawn:" prefix and no ⚠ glyph: the CLI adds the prefix and the notice band
-// prepends the glyph via statusGlyph.
+// host-terminal identity echo and the design banner. Both callers (the open burst's
+// unsupported message and the picker's re-asserted flash) render through it. The body
+// carries no "spawn:" prefix and no ⚠ glyph: the log emitters add the prefix and the
+// notice band prepends the glyph via statusGlyph.
 func UnsupportedNoopMessage(id Identity) string {
 	if id.IsNull() {
 		return "no host-local terminal — nothing opened"

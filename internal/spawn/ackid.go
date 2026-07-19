@@ -71,8 +71,8 @@ func ParseSpawnMarkerName(name string) (batch, token string, ok bool) {
 	return b, t, true
 }
 
-// FormatSpawnAckFlag renders the "<batch>:<token>" value carried by the
-// portal attach --spawn-ack flag. The colon is unambiguous because option-safe
+// FormatSpawnAckFlag renders the "<batch>:<token>" value carried by the open
+// command's hidden --ack flag. The colon is unambiguous because option-safe
 // ids are colon-free.
 func FormatSpawnAckFlag(batch, token string) string {
 	return batch + ":" + token

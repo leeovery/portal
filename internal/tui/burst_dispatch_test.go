@@ -481,11 +481,11 @@ func TestBurstDispatch_DetectionNeverDispatched_DefersThenResolves(t *testing.T)
 	}
 }
 
-// TestBurstDispatch_SplitDerivesFromSplitNetN is the cross-caller drift guard for
-// the net-N split: the picker's dispatched BurstExternal/BurstTrigger for a shared
-// fixture are byte-identical to spawn.SplitNetN's output — the SAME single
-// computation the CLI's runSpawn derives its split through — so the "net N, never
-// N+1" split cannot diverge between the two callers.
+// TestBurstDispatch_SplitDerivesFromSplitNetN is the drift guard for the net-N
+// split: the picker's dispatched BurstExternal/BurstTrigger for a shared fixture are
+// byte-identical to spawn.SplitNetN's output — so the picker derives its "net N,
+// never N+1" split from the shared helper (SplitNetN's sole consumer) rather than a
+// hand-rolled inline split that could drift from it.
 func TestBurstDispatch_SplitDerivesFromSplitNetN(t *testing.T) {
 	fixture := []string{"alpha", "bravo", "charlie"}
 	m, _, _ := markedSupportedBurstModel(t, fixture)

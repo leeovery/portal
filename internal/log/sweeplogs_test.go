@@ -8,7 +8,7 @@ import (
 )
 
 // TestSweepLogsForClean_DeletesEveryPriorDayKeepsTodayWithCutoffToday pins the
-// `portal clean --logs` contract: the ungated cutoff==today sweep deletes every
+// `portal doctor --fix` log-sweep contract: the ungated cutoff==today sweep deletes every
 // rotated file with a date strictly before today while today's base file and its
 // .N segments survive (cutoff is computed from the injected clock, so the test
 // must pin today via fixedClock).

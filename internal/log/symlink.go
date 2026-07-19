@@ -87,8 +87,8 @@ func migrationGuard(stateDir string) error {
 // swing failure as WARN-and-continue and keeps writing to the already-open fd.
 //
 // A temp leaked by a crash between Symlink and Rename is reclaimed best-effort on
-// the next swing (the os.Remove first step) and by `portal clean` (which sweeps
-// portal.log.* siblings — out of scope here).
+// the next swing (the os.Remove first step) and by the `portal doctor --fix` log
+// sweep (which sweeps portal.log.* siblings — out of scope here).
 func swingSymlink(stateDir, target string) error {
 	return swingSymlinkAs(stateDir, target, os.Getpid())
 }

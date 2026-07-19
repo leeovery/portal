@@ -15,8 +15,9 @@ import (
 var openBurstDeps *OpenBurstDeps
 
 // OpenBurstDeps allows injecting dependencies for the multi-target open burst
-// pipeline (Task 3-6). It mirrors SpawnDeps (the spawn CLI's seam bundle) but is
-// FIRST-trigger and attach/mint-aware: the trigger absorbs the FIRST target and
+// pipeline (Task 3-6). Its shared seams default from the same productionSpawnSeams
+// bundle (cmd/spawn_seams.go) the picker burst reads, but it is FIRST-trigger and
+// attach/mint-aware: the trigger absorbs the FIRST target and
 // self-connects LAST — via either the inside/outside-tmux Connector (an attach
 // trigger) or LocalMint (a mint trigger) — while the N−1 non-trigger surfaces are
 // spawned FIRST through the Burster. Every field defaults to its production
@@ -59,12 +60,13 @@ type OpenBurstDeps struct {
 // injected fields (from openBurstDeps in tests) are kept, and every unset field
 // falls back to its production default. The shared production seams
 // (Resolve/Ack/ExePath/Getenv/Logger) come from the SAME buildProductionSpawnSeams
-// bundle the spawn CLI (buildSpawnDeps) and the picker read, so the three burst
+// bundle the picker (openTUI's tuiConfig population) also reads, so the two burst
 // paths cannot silently diverge. The bundle is memoised lazily — built at most
 // once, and only when a shared field actually needs defaulting — so a
 // fully-injected caller never resolves the tmux client (there is none in context
 // under nopRunner) nor loads terminals.json. The Detector default routes through
-// spawnDetector (the standalone --detect authority) exactly like buildSpawnDeps.
+// spawnDetector (the standalone host-terminal detector, cmd/spawn_seams.go) — the
+// same detector the picker and the `portal doctor` host-terminal line use.
 func buildOpenBurstDeps(cmd *cobra.Command) *OpenBurstDeps {
 	deps := &OpenBurstDeps{}
 	if openBurstDeps != nil {
@@ -191,23 +193,25 @@ func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command 
 	// successful attach, directly visible only in the trigger's own-target-failed
 	// skip case (connectTrigger returns an error).
 	//
-	// DIVERGENCE FROM runSpawn (cmd/spawn.go): runSpawn RETURNS an error (exit 1)
-	// and SKIPS its self-attach on ANY not-all-confirmed batch — a permission wall
-	// or a single failed/un-acked window aborts the whole command. open's burst
-	// NEVER returns a partial-failure error and ALWAYS connects the trigger to its
-	// own target: external failures — and even a permission wall on an external
-	// window — do not cost the trigger its landing (RESOLVED 2026-07-18). Only the
-	// trigger's OWN connect failure (connectTrigger below) surfaces as the command's
-	// error. triggerAttached is therefore always true in the batch summary: the
-	// trigger is unconditionally about to connect, matching runSpawn's
-	// just-before-connect logging point.
+	// DIVERGENCE FROM the picker's all-attach burst (internal/tui,
+	// handleBurstPartialFailure): the picker SKIPS its trigger self-attach on ANY
+	// not-all-confirmed batch — a permission wall or a single failed/un-acked window
+	// leaves it in multi-select mode with no landing. open's burst NEVER returns a
+	// partial-failure error and ALWAYS connects the trigger to its own target:
+	// external failures — and even a permission wall on an external window — do not
+	// cost the trigger its landing (RESOLVED 2026-07-18). Only the trigger's OWN
+	// connect failure (connectTrigger below) surfaces as the command's error.
+	// triggerAttached is therefore always true in the batch summary: the trigger is
+	// unconditionally about to connect, so the summary is emitted at this
+	// just-before-connect point.
 	confirmed, failed := spawn.PartitionResults(results)
 	total := len(surfaces) // N, including the trigger's own self-connect target.
 	if perm, ok := spawn.FirstPermission(results); ok {
 		// Permission-required stopped the burst on the first (source, target) wall
-		// (every later external window would hit the identical wall). Mirror
-		// runSpawn's permission arm — LogWindowResults + LogPermission, NO batch
-		// summary — and surface the driver's guidance ONCE, best-effort.
+		// (every later external window would hit the identical wall). Take the shared
+		// permission arm — LogWindowResults + LogPermission, NO batch summary (the
+		// picker's emitPermission takes the same path) — and surface the driver's
+		// guidance ONCE, best-effort.
 		spawn.LogWindowResults(deps.Logger, results)
 		spawn.LogPermission(deps.Logger, id, resolution, perm.Result.Detail)
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), perm.Result.Guidance)

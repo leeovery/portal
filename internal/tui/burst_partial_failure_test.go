@@ -365,7 +365,7 @@ func TestBurstPartialFailure_UnattemptedPostPermissionStayMarked(t *testing.T) {
 // guard: a partial failure never exits multi-select mode and never self-attaches.
 // It is also the total-failure parity case — external = [alpha] alone fails, nothing
 // else confirms — so the flash body must render "— nothing opened" byte-identically
-// with the CLI's total-failure copy (spawn.PartialFailureMessage(…, false)); the
+// with the open burst's total-failure copy (spawn.PartialFailureMessage(…, false)); the
 // skipped trigger bravo is not an external result, so it never counts as an "other".
 func TestBurstPartialFailure_StaysInMultiSelectMode(t *testing.T) {
 	m := newPendingBurstModel(t, []string{"alpha", "bravo"})
@@ -395,7 +395,7 @@ func TestBurstPartialFailure_StaysInMultiSelectMode(t *testing.T) {
 	if !rm.IsSessionSelected("bravo") {
 		t.Error("the trigger bravo must stay marked")
 	}
-	// Total-failure parity: nothing opened, so the picker flash IS the CLI's
+	// Total-failure parity: nothing opened, so the picker flash IS the open burst's
 	// total-failure body (spawn.PartialFailureMessage(…, false) = "… — nothing opened").
 	if want := spawn.PartialFailureMessage([]string{"alpha"}, false); rm.flashText != want {
 		t.Errorf("flashText = %q, want %q (total failure → — nothing opened, byte-identical to the CLI)", rm.flashText, want)
