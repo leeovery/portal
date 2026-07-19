@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -600,7 +603,7 @@ func TestDoctorSaverCheck(t *testing.T) {
 }
 
 // TestDoctorCheckOrder pins the stable report order: daemon, saver, hooks,
-// state dir, sessions.json.
+// state dir, sessions.json, stale hooks, stale projects.
 func TestDoctorCheckOrder(t *testing.T) {
 	dir := t.TempDir()
 	seedHealthyStateDir(t, dir)
@@ -608,7 +611,7 @@ func TestDoctorCheckOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
-	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json"}
+	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json", "stale hooks", "stale projects"}
 	if len(results) != len(want) {
 		t.Fatalf("check count = %d, want %d: %+v", len(results), len(want), results)
 	}
@@ -616,5 +619,270 @@ func TestDoctorCheckOrder(t *testing.T) {
 		if results[i].name != name {
 			t.Errorf("results[%d].name = %q, want %q", i, results[i].name, name)
 		}
+	}
+}
+
+// fakeHookLister is an AllPaneLister fake for the stale-hooks check: it returns
+// the crafted live hook-key set (or an error, to exercise the transient path)
+// without touching a real tmux server.
+type fakeHookLister struct {
+	keys []string
+	err  error
+}
+
+func (f fakeHookLister) ListAllPaneHookKeys() ([]string, error) { return f.keys, f.err }
+
+// seedHooksJSON writes a hooks.json at a fresh temp path with one on-resume
+// entry per supplied hook key and returns the store plus the file path (so a
+// read-only test can snapshot the bytes). Zero keys writes an empty object.
+func seedHooksJSON(t *testing.T, keys ...string) (*hooks.Store, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	m := map[string]map[string]string{}
+	for _, k := range keys {
+		m[k] = map[string]string{"on-resume": "echo hi"}
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal hooks.json: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write hooks.json: %v", err)
+	}
+	return hooks.NewStore(path), path
+}
+
+// seedProjectsJSON writes a projects.json at a fresh temp path with one project
+// record per supplied path and returns the store plus the file path.
+func seedProjectsJSON(t *testing.T, paths ...string) (*project.Store, string) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "projects.json")
+	var ps []project.Project
+	for i, p := range paths {
+		ps = append(ps, project.Project{Path: p, Name: "proj" + strconv.Itoa(i)})
+	}
+	payload := struct {
+		Projects []project.Project `json:"projects"`
+	}{Projects: ps}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal projects.json: %v", err)
+	}
+	if err := os.WriteFile(file, data, 0o600); err != nil {
+		t.Fatalf("write projects.json: %v", err)
+	}
+	return project.NewStore(file), file
+}
+
+// staleDeps builds a DoctorDeps with a healthy runtime and the stale-entry
+// seams wired to the supplied lister/stores.
+func staleDeps(dir string, lister AllPaneLister, hookStore *hooks.Store, projectStore *project.Store) *DoctorDeps {
+	return withHealthyRuntime(&DoctorDeps{
+		StateDir:     dir,
+		Now:          time.Now,
+		HookLister:   lister,
+		HookStore:    hookStore,
+		ProjectStore: projectStore,
+	})
+}
+
+func TestDoctorStaleHooksCheck(t *testing.T) {
+	t.Run("persisted key with no live pane fails", func(t *testing.T) {
+		dir := t.TempDir()
+		hookStore, _ := seedHooksJSON(t, "sessA:0.0")
+		lister := fakeHookLister{keys: []string{"sessB:0.0"}}
+		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale hooks")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail for a stale hook entry", got.status)
+		}
+		if got.detail != "1 stale hook entries" {
+			t.Errorf("detail = %q; want %q", got.detail, "1 stale hook entries")
+		}
+	})
+
+	t.Run("zero live panes with hooks present is not-evaluable, never all-stale", func(t *testing.T) {
+		dir := t.TempDir()
+		hookStore, _ := seedHooksJSON(t, "sessA:0.0", "sessB:0.0")
+		lister := fakeHookLister{keys: []string{}}
+		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale hooks")
+		if got.status != checkNotEvaluable {
+			t.Errorf("status = %v; want checkNotEvaluable (never a mass-stale failure)", got.status)
+		}
+		if got.detail != "zero live panes with hooks present (not evaluable)" {
+			t.Errorf("detail = %q; want %q", got.detail, "zero live panes with hooks present (not evaluable)")
+		}
+	})
+
+	t.Run("live-pane enumeration error is not-evaluable", func(t *testing.T) {
+		dir := t.TempDir()
+		hookStore, _ := seedHooksJSON(t, "sessA:0.0")
+		lister := fakeHookLister{err: errors.New("tmux transient")}
+		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale hooks")
+		if got.status != checkNotEvaluable {
+			t.Errorf("status = %v; want checkNotEvaluable on an enumeration error", got.status)
+		}
+		if got.detail != "could not enumerate live panes" {
+			t.Errorf("detail = %q; want %q", got.detail, "could not enumerate live panes")
+		}
+	})
+
+	t.Run("both empty passes as no hooks", func(t *testing.T) {
+		dir := t.TempDir()
+		hookStore, _ := seedHooksJSON(t)
+		lister := fakeHookLister{keys: []string{}}
+		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale hooks")
+		if got.status != checkPass {
+			t.Errorf("status = %v; want checkPass", got.status)
+		}
+		if got.detail != "no hooks" {
+			t.Errorf("detail = %q; want %q", got.detail, "no hooks")
+		}
+	})
+
+	t.Run("all persisted keys live passes", func(t *testing.T) {
+		dir := t.TempDir()
+		hookStore, _ := seedHooksJSON(t, "sessA:0.0", "sessB:0.0")
+		lister := fakeHookLister{keys: []string{"sessA:0.0", "sessB:0.0", "sessC:0.0"}}
+		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale hooks")
+		if got.status != checkPass {
+			t.Errorf("status = %v; want checkPass", got.status)
+		}
+		if got.detail != "no stale hooks" {
+			t.Errorf("detail = %q; want %q", got.detail, "no stale hooks")
+		}
+	})
+}
+
+func TestDoctorStaleProjectsCheck(t *testing.T) {
+	t.Run("gone dir fails, live dir retained", func(t *testing.T) {
+		dir := t.TempDir()
+		liveDir := t.TempDir()
+		goneDir := filepath.Join(t.TempDir(), "does-not-exist")
+		projectStore, _ := seedProjectsJSON(t, liveDir, goneDir)
+		results, err := runDoctorDiagnosis(staleDeps(dir, fakeHookLister{}, nil, projectStore))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale projects")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail for a gone-dir project", got.status)
+		}
+		// Only the gone dir is stale; the live dir is retained (not counted).
+		if got.detail != "1 stale projects" {
+			t.Errorf("detail = %q; want %q", got.detail, "1 stale projects")
+		}
+	})
+
+	t.Run("all live passes", func(t *testing.T) {
+		dir := t.TempDir()
+		liveDir := t.TempDir()
+		projectStore, _ := seedProjectsJSON(t, liveDir)
+		results, err := runDoctorDiagnosis(staleDeps(dir, fakeHookLister{}, nil, projectStore))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale projects")
+		if got.status != checkPass {
+			t.Errorf("status = %v; want checkPass", got.status)
+		}
+		if got.detail != "no stale projects" {
+			t.Errorf("detail = %q; want %q", got.detail, "no stale projects")
+		}
+	})
+
+	// Permission-denied paths are RETAINED (not stale) by the same os.Stat
+	// default branch project.Store.CleanStale uses — that classification is
+	// covered by the CleanStale model in internal/project; simulating EACCES
+	// portably here is infeasible, so this suite covers gone-dir + live-dir.
+
+	t.Run("evaluates with the server down (filesystem-only)", func(t *testing.T) {
+		goneDir := filepath.Join(t.TempDir(), "gone")
+		projectStore, _ := seedProjectsJSON(t, goneDir)
+		deps := &DoctorDeps{
+			StateDir:      t.TempDir(),
+			Now:           time.Now,
+			ServerRunning: func() bool { return false },
+			SaverPresent:  func() (bool, error) { return true, nil },
+			HookCounts:    func() (map[string]int, error) { return allHooksHealthy(), nil },
+			HookLister:    fakeHookLister{},
+			ProjectStore:  projectStore,
+		}
+		results, err := runDoctorDiagnosis(deps)
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale projects")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail — the stale-project check is filesystem-only and runs with the server down", got.status)
+		}
+	})
+}
+
+// TestDoctorStaleChecksAreReadOnly proves neither stale check mutates its store:
+// both are seeded with genuinely-stale entries (so they detect staleness and
+// would prune under --fix) and the on-disk bytes must be byte-identical after a
+// full diagnosis pass.
+func TestDoctorStaleChecksAreReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	hookStore, hooksPath := seedHooksJSON(t, "sessA:0.0")
+	liveDir := t.TempDir()
+	goneDir := filepath.Join(t.TempDir(), "gone")
+	projectStore, projectsPath := seedProjectsJSON(t, liveDir, goneDir)
+
+	hooksBefore, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("read hooks.json: %v", err)
+	}
+	projectsBefore, err := os.ReadFile(projectsPath)
+	if err != nil {
+		t.Fatalf("read projects.json: %v", err)
+	}
+
+	lister := fakeHookLister{keys: []string{"sessB:0.0"}} // sessA:0.0 is stale
+	results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, projectStore))
+	if err != nil {
+		t.Fatalf("runDoctorDiagnosis: %v", err)
+	}
+	// Sanity: both checks actually detected staleness (proving they ran).
+	if got := findCheck(t, results, "stale hooks"); got.status != checkFail {
+		t.Fatalf("stale hooks status = %v; want checkFail (setup should be stale)", got.status)
+	}
+	if got := findCheck(t, results, "stale projects"); got.status != checkFail {
+		t.Fatalf("stale projects status = %v; want checkFail (setup should be stale)", got.status)
+	}
+
+	hooksAfter, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("re-read hooks.json: %v", err)
+	}
+	projectsAfter, err := os.ReadFile(projectsPath)
+	if err != nil {
+		t.Fatalf("re-read projects.json: %v", err)
+	}
+	if !bytes.Equal(hooksBefore, hooksAfter) {
+		t.Errorf("hooks.json mutated by diagnosis (read-only violated)\nbefore: %s\nafter:  %s", hooksBefore, hooksAfter)
+	}
+	if !bytes.Equal(projectsBefore, projectsAfter) {
+		t.Errorf("projects.json mutated by diagnosis (read-only violated)\nbefore: %s\nafter:  %s", projectsBefore, projectsAfter)
 	}
 }

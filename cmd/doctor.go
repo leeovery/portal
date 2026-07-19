@@ -9,6 +9,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -79,6 +81,22 @@ type DoctorDeps struct {
 	// hook entries. Production wraps tmux.PortalHookCountsByEvent; a non-nil
 	// error is the transient path (not-evaluable).
 	HookCounts func() (map[string]int, error)
+	// HookLister enumerates every live pane's hook key — the live set the
+	// stale-hooks check tests persisted keys against. Production wires the same
+	// tmux.DefaultClient() used by the other runtime seams (it implements
+	// AllPaneLister via ListAllPaneHookKeys). An enumeration error, or a
+	// zero-length result while hooks are persisted, is the not-evaluable path
+	// (never "all stale").
+	HookLister AllPaneLister
+	// HookStore reads hooks.json for the stale-hooks check. Production wraps
+	// loadHookStore(); a nil pointer (unresolvable config path) makes the check
+	// not-evaluable rather than crashing diagnosis.
+	HookStore *hooks.Store
+	// ProjectStore reads projects.json for the stale-projects check. Production
+	// wraps loadProjectStore(); a nil pointer makes the check not-evaluable. The
+	// stale-projects check is filesystem-only (directory existence) and runs
+	// independently of the tmux server state.
+	ProjectStore *project.Store
 }
 
 // doctorDeps is the package-level DI seam; nil in production.
@@ -106,6 +124,17 @@ func resolveDoctorDeps() *DoctorDeps {
 		HookCounts: func() (map[string]int, error) {
 			return tmux.PortalHookCountsByEvent(client)
 		},
+		HookLister: client,
+	}
+	// The stale-entry stores are built best-effort: a load-path error (an
+	// unresolvable config dir) leaves the pointer nil, and the corresponding
+	// check reports checkNotEvaluable rather than crashing diagnosis. NewStore
+	// itself does no I/O — the file is read lazily by the check's Load call.
+	if hookStore, err := loadHookStore(); err == nil {
+		deps.HookStore = hookStore
+	}
+	if projectStore, err := loadProjectStore(); err == nil {
+		deps.ProjectStore = projectStore
 	}
 	if doctorDeps == nil {
 		return deps
@@ -124,6 +153,15 @@ func resolveDoctorDeps() *DoctorDeps {
 	}
 	if doctorDeps.HookCounts != nil {
 		deps.HookCounts = doctorDeps.HookCounts
+	}
+	if doctorDeps.HookLister != nil {
+		deps.HookLister = doctorDeps.HookLister
+	}
+	if doctorDeps.HookStore != nil {
+		deps.HookStore = doctorDeps.HookStore
+	}
+	if doctorDeps.ProjectStore != nil {
+		deps.ProjectStore = doctorDeps.ProjectStore
 	}
 	return deps
 }
@@ -179,7 +217,97 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 		checkHooksRegistered(serverUp, deps.HookCounts),
 		checkStateDirSane(dir, dirErr),
 		checkSessionsJSON(dir, dirErr),
+		checkStaleHooks(deps.HookLister, deps.HookStore),
+		checkStaleProjects(deps.ProjectStore),
 	}, nil
+}
+
+// checkStaleHooks reports whether hooks.json holds entries whose pane key no
+// longer matches a live tmux pane. It is a strictly READ-ONLY mirror of
+// runHookStaleCleanup's mass-deletion hazard guard (cmd/run_hook_stale_cleanup.go):
+// it computes the stale set but NEVER prunes — pruning is `doctor --fix`, a
+// separate surface. The guard order is load-bearing: when live-pane enumeration
+// is empty-or-errored while hooks are present it reports checkNotEvaluable,
+// NEVER "all stale", so a false failure can never mislead a --fix into a
+// mass-delete of user-authored, non-reconstructable on-resume commands.
+func checkStaleHooks(lister AllPaneLister, store *hooks.Store) checkResult {
+	const name = "stale hooks"
+	if store == nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read hooks.json"}
+	}
+	persisted, err := store.Load()
+	if err != nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read hooks.json"}
+	}
+	live, err := lister.ListAllPaneHookKeys()
+	if err != nil {
+		// Server-down / transient read — NEVER report "all stale".
+		return checkResult{name: name, status: checkNotEvaluable, detail: "could not enumerate live panes"}
+	}
+	if len(live) == 0 {
+		// Hazard-guard deferral: an empty live set with hooks present would make
+		// every entry look orphaned. Mirror runHookStaleCleanup — defer, never
+		// classify them all stale.
+		if len(persisted) == 0 {
+			return checkResult{name: name, status: checkPass, detail: "no hooks"}
+		}
+		return checkResult{name: name, status: checkNotEvaluable, detail: "zero live panes with hooks present (not evaluable)"}
+	}
+	stale := countStaleHookKeys(persisted, live)
+	if stale > 0 {
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("%d stale hook entries", stale)}
+	}
+	return checkResult{name: name, status: checkPass, detail: "no stale hooks"}
+}
+
+// countStaleHookKeys counts persisted hook keys absent from the live key set —
+// the same ∉ classification hooks.Store.CleanStale uses to select entries for
+// deletion, computed here READ-ONLY (no prune, no Save).
+func countStaleHookKeys(persisted map[string]map[string]string, live []string) int {
+	liveSet := make(map[string]struct{}, len(live))
+	for _, k := range live {
+		liveSet[k] = struct{}{}
+	}
+	stale := 0
+	for key := range persisted {
+		if _, ok := liveSet[key]; !ok {
+			stale++
+		}
+	}
+	return stale
+}
+
+// checkStaleProjects reports whether projects.json holds records whose directory
+// no longer exists. It mirrors project.Store.CleanStale's os.Stat classification
+// READ-ONLY (nil → live, ErrNotExist → stale, any other error such as
+// permission-denied → retained, NOT stale) without saving. It is filesystem-only
+// and therefore independent of the tmux server state.
+func checkStaleProjects(store *project.Store) checkResult {
+	const name = "stale projects"
+	if store == nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read projects.json"}
+	}
+	projects, err := store.Load()
+	if err != nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read projects.json"}
+	}
+	stale := 0
+	for _, p := range projects {
+		_, statErr := os.Stat(p.Path)
+		switch {
+		case statErr == nil:
+			// Directory present → live.
+		case errors.Is(statErr, os.ErrNotExist):
+			stale++
+		default:
+			// Permission-denied or other error → retained (NOT stale), matching
+			// project.Store.CleanStale's conservative default branch.
+		}
+	}
+	if stale > 0 {
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("%d stale projects", stale)}
+	}
+	return checkResult{name: name, status: checkPass, detail: "no stale projects"}
 }
 
 // checkDaemonAlive reports whether the save daemon is running. With the server
