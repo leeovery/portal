@@ -196,3 +196,22 @@ approved_at: 2026-07-18
 | cli-verb-surface-redesign-6-5 | Bare `portal` prints help/usage and does not launch the picker (control-plane root guard) | `rootCmd` has no `Run`/`RunE` so cobra returns `ErrHelp` before `PersistentPreRunE` — no bootstrap, no picker (verify); bare `portal` exits without launching the TUI; `x`/`portal open` remain the only picker doors while `xctl`/bare `portal` are the management plane; verification/guard-only — no production change expected (flag if the guard test already passes as-is) |
 
 ---
+
+### Phase 7: Analysis (Cycle 1)
+
+Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cli-verb-surface-redesign-7-1 | Repoint bootstrap warnings from the deleted `portal state status` to `portal doctor` | Both `CorruptSessionsJSONWarning` and `SaverDownWarning` rendered text asserted (contains `portal doctor`, not `portal state status`); comment-only references are out of scope (Task 7 covers those); no live user-facing string may instruct running a removed command |
+| cli-verb-surface-redesign-7-2 | Extract a single domain-pin dispatch helper for the four copy-paste arms in openCmd.RunE | Byte-identical behaviour per pin (-s/-p/-a/-z): same resolution, error propagation, and `openResolved` handoff; short-circuit on first changed pin flag preserved; adding a future pin must touch one place (the table), not four |
+| cli-verb-surface-redesign-7-3 | Collapse the dual source of truth for open's value-taking flags in the ordered-target argv scan | Two acceptable paths — thread `*cobra.Command`/`*pflag.FlagSet` to derive arity, or add a `VisitAll` drift-guard test; a future value-taking flag's value must not be misclassified as a bare positional target (covered by test); existing left-to-right multi-target ordering unchanged |
+| cli-verb-surface-redesign-7-4 | Single-source the single-target "nothing resolved" miss error string | U+2014 em-dash and `-f %s` suffix preserved byte-identical; both the bare-positional (`open.go:344`) and N=1 glob-to-zero burst (`open_burst.go:125`) sites call the one `singleMissError` helper; multi-target `aggregatedMissError` left as-is |
+| cli-verb-surface-redesign-7-5 | Extract expandSessionGlobAll to collapse the duplicated session-glob expansion block | Zero-match returns a single `MissResult{Target: pattern}`; non-zero returns K `SessionResult{Domain: "glob"}` — behaviour unchanged; `ResolveAliasPinAll` (validated-path body) left untouched; consumed by both `ResolveBareAll` and `ResolveSessionPinAll` |
+| cli-verb-surface-redesign-7-6 | Update CLAUDE.md command-surface prose to the redesigned surface | Docs-only, no automated test; remove all removed-surface refs (`portal spawn`/`clean`, `attach --spawn-ack`, `cmd/spawn.go`, `cmd/clean.go` as `loadPrefsStore` home); add `doctor [--fix]`/`uninstall`/open multi-target burst/hidden `--ack`/hooks→hook; fix bootstrap-exempt list (drop `clean`) |
+| cli-verb-surface-redesign-7-7 | Sweep stale removed-surface references in code comments and the process-role doc | Comments/docs only — not the bootstrap warning strings (Task 1) or CLAUDE.md (Task 6); repoint `internal/spawn` "cannot drift" anchors to the two surviving bursts (picker + open); annotate now-single-caller split helpers with their sole consumer; note dead `case "clean"` process-role arm, keep the closed-space value in place |
+| cli-verb-surface-redesign-7-8 | Single-source the two governed two-site emissions (resolve-decision log line + exec-handoff marker) | Two governed contracts (`resolve` INFO line + `process:exec` marker) each emitted from exactly one helper; `!HasGlobMeta` gate and attr keys single-sourced; emitted log output byte-identical to current; both call sites route through the helper |
+
+---

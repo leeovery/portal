@@ -6,7 +6,7 @@ total_proposed: 8
 # Analysis Tasks: CLI Verb Surface Redesign (Cycle 1)
 
 ## Task 1: Repoint bootstrap warnings from the deleted `portal state status` to `portal doctor`
-status: pending
+status: approved
 severity: high
 sources: standards
 
@@ -26,7 +26,7 @@ sources: standards
 - Unit assertion on the two warning constructors' rendered text: contains "portal doctor", does not contain "portal state status".
 
 ## Task 2: Extract a single domain-pin dispatch helper for the four copy-paste arms in openCmd.RunE
-status: pending
+status: approved
 severity: high
 sources: duplication
 
@@ -46,7 +46,7 @@ sources: duplication
 - Verify each pin flag routes to its corresponding `Resolve*Pin` and then `openResolved`.
 
 ## Task 3: Collapse the dual source of truth for open's value-taking flags in the ordered-target argv scan
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -68,7 +68,7 @@ sources: architecture
 - Existing `orderedOpenTargets` ordering tests pass unchanged.
 
 ## Task 4: Single-source the single-target "nothing resolved" miss error string
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -87,7 +87,7 @@ sources: duplication
 - Assert the bare-positional miss path and the N=1 glob-to-zero burst path produce the identical expected string.
 
 ## Task 5: Extract expandSessionGlobAll to collapse the duplicated session-glob expansion block
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -107,7 +107,7 @@ sources: duplication
 - Existing resolver tests for `ResolveBareAll` / `ResolveSessionPinAll` pass unchanged (zero-match miss, multi-match glob results, `Domain` tag).
 
 ## Task 6: Update CLAUDE.md command-surface prose to the redesigned surface
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -129,7 +129,7 @@ sources: standards
 - Documentation change — no automated test. Reviewer greps CLAUDE.md for `portal spawn`, `portal clean`, `state status`, `--spawn-ack`, `spawn --detect` and confirms no stale live-surface hits remain, and verifies the new-surface prose against the current command set.
 
 ## Task 7: Sweep stale removed-surface references in code comments and the process-role doc
-status: pending
+status: approved
 severity: low
 sources: standards, architecture
 
@@ -150,7 +150,7 @@ sources: standards, architecture
 - Comment/doc-only change — no automated test. Reviewer greps the internal tree for `cmd/spawn.go`, `runSpawn`, `buildSpawnDeps`, `SpawnDeps`, `spawn --detect`, `--spawn-ack`, `state status`, `clean --logs` and confirms no live-surface references remain.
 
 ## Task 8: Single-source the two governed two-site emissions (resolve-decision log line + exec-handoff marker)
-status: pending
+status: approved
 severity: low
 sources: duplication
 
