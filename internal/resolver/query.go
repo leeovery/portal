@@ -201,6 +201,26 @@ func (qr *QueryResolver) ResolveSessionPin(query string) (QueryResult, error) {
 	return nil, fmt.Errorf("No session found: %s", query) //nolint:staticcheck // user-facing message per spec
 }
 
+// ResolvePathPin resolves dir in the path domain ONLY — the -p/--path pin (spec §
+// Domain-pinning flags). It reuses ResolvePath (tilde/relative expansion +
+// existence + is-directory validation) and never consults the glob pre-check, the
+// session set, aliases, or zoxide: a pin names its domain explicitly. A hit always
+// mints (Axiom 2: a directory-domain hit → PathResult with Domain "path"). Because
+// ResolvePath stats the LITERAL path, a directory whose name contains glob
+// metacharacters (e.g. ~/tmp/foo[1]) is reachable here — the metacharacters are
+// never expanded — whereas the same value as a bare positional hard-fails via the
+// glob pre-check (spec § Glob targets). A non-existent directory or a
+// non-directory file hard-fails (exit 1) and the pin never falls back to the
+// picker (spec § Pinned-domain contract). It does NOT go through validatedPath:
+// ResolvePath already validates existence and rejects a non-directory file.
+func (qr *QueryResolver) ResolvePathPin(dir string) (QueryResult, error) {
+	resolved, err := ResolvePath(dir)
+	if err != nil {
+		return nil, err
+	}
+	return &PathResult{Path: resolved, Domain: "path"}, nil
+}
+
 // validatedPath returns a PathResult (tagged with the resolving domain) after
 // verifying the directory exists on disk. A non-existent directory is a hard
 // error (DirNotFoundError), distinct from a miss.

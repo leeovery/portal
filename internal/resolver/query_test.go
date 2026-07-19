@@ -531,6 +531,16 @@ func (f *failingZoxideQuerier) Query(terms string) (string, error) {
 	return "", nil
 }
 
+// failingSessionLister fails the test if ListSessionNames is ever called.
+// ResolvePathPin is path-domain only, so it must never consult the session set.
+type failingSessionLister struct{ t *testing.T }
+
+func (f *failingSessionLister) ListSessionNames() ([]string, error) {
+	f.t.Helper()
+	f.t.Fatalf("ResolvePathPin must not consult the session set (ListSessionNames called)")
+	return nil, nil
+}
+
 func TestQueryResolver_ResolveSessionPin(t *testing.T) {
 	// newPinResolver builds a QueryResolver whose alias and zoxide seams FAIL the
 	// test if consulted — ResolveSessionPin is session-domain only, so every pin
@@ -675,6 +685,155 @@ func TestQueryResolver_ResolveSessionPin(t *testing.T) {
 		}
 		if want := "No session found: myapp"; err.Error() != want {
 			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+}
+
+func TestQueryResolver_ResolvePathPin(t *testing.T) {
+	// newPathPinResolver builds a QueryResolver whose session, alias, and zoxide
+	// seams FAIL the test if consulted — ResolvePathPin is path-domain only (it
+	// reuses ResolvePath and touches none of the resolution seams), so every case
+	// doubles as a "never consults session/alias/zoxide" guard.
+	newPathPinResolver := func(t *testing.T) *resolver.QueryResolver {
+		return resolver.NewQueryResolver(
+			&failingSessionLister{t: t},
+			&failingAliasLookup{t: t},
+			&failingZoxideQuerier{t: t},
+			&mockDirValidator{existing: map[string]bool{}},
+		)
+	}
+
+	t.Run("existing directory returns PathResult domain path", func(t *testing.T) {
+		dir := t.TempDir()
+		dir, _ = filepath.EvalSymlinks(dir)
+
+		qr := newPathPinResolver(t)
+		result, err := qr.ResolvePathPin(dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected *PathResult, got %T", result)
+		}
+		if pr.Path != dir {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, dir)
+		}
+		if pr.Domain != "path" {
+			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, "path")
+		}
+	})
+
+	t.Run("directory whose name contains glob metacharacters is reachable", func(t *testing.T) {
+		// The reason -p exists: a glob-named dir (foo[1]) is UNREACHABLE as a bare
+		// positional (the glob pre-check treats it as a session glob, matches zero,
+		// hard-fails). -p reuses ResolvePath, which STATS the literal path — [1] is
+		// never expanded — so the dir resolves and mints.
+		tmp := t.TempDir()
+		tmp, _ = filepath.EvalSymlinks(tmp)
+		globDir := filepath.Join(tmp, "foo[1]")
+		if err := os.Mkdir(globDir, 0o755); err != nil {
+			t.Fatalf("failed to create glob-named dir: %v", err)
+		}
+
+		qr := newPathPinResolver(t)
+		result, err := qr.ResolvePathPin(globDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected *PathResult for a glob-named dir, got %T", result)
+		}
+		if pr.Path != globDir {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, globDir)
+		}
+		if pr.Domain != "path" {
+			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, "path")
+		}
+	})
+
+	t.Run("same glob-named path as a bare positional hard-fails via the glob pre-check (contrast)", func(t *testing.T) {
+		// Contrast to the case above: the identical value routed through the bare
+		// Resolve chain hits the glob pre-check (HasGlobMeta true), matches zero
+		// sessions, and is a total miss — which is exactly why -p exists.
+		tmp := t.TempDir()
+		tmp, _ = filepath.EvalSymlinks(tmp)
+		globDir := filepath.Join(tmp, "foo[1]")
+		if err := os.Mkdir(globDir, 0o755); err != nil {
+			t.Fatalf("failed to create glob-named dir: %v", err)
+		}
+
+		qr := resolver.NewQueryResolver(
+			&mockSessionLister{},
+			&mockAliasLookup{aliases: map[string]string{}},
+			&mockZoxideQuerier{err: resolver.ErrNoMatch},
+			&mockDirValidator{existing: map[string]bool{}},
+		)
+		result, err := qr.Resolve(globDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := result.(*resolver.MissResult); !ok {
+			t.Fatalf("expected *MissResult for the glob-named bare positional, got %T", result)
+		}
+	})
+
+	t.Run("non-existent directory hard-fails with Directory not found", func(t *testing.T) {
+		qr := newPathPinResolver(t)
+		result, err := qr.ResolvePathPin("/nonexistent/path/that/does/not/exist")
+		if result != nil {
+			t.Errorf("expected nil result on a miss, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for a non-existent dir, got nil")
+		}
+		if want := "Directory not found: /nonexistent/path/that/does/not/exist"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("a file (not a directory) hard-fails with not a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		dir, _ = filepath.EvalSymlinks(dir)
+		filePath := filepath.Join(dir, "file.txt")
+		if err := os.WriteFile(filePath, []byte("content"), 0o644); err != nil {
+			t.Fatalf("failed to create file: %v", err)
+		}
+
+		qr := newPathPinResolver(t)
+		result, err := qr.ResolvePathPin(filePath)
+		if result != nil {
+			t.Errorf("expected nil result for a file, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for a non-directory file, got nil")
+		}
+		if want := "not a directory: " + filePath; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("tilde is expanded to the home directory", func(t *testing.T) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatalf("failed to get home dir: %v", err)
+		}
+
+		qr := newPathPinResolver(t)
+		result, err := qr.ResolvePathPin("~")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected *PathResult, got %T", result)
+		}
+		if pr.Path != home {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, home)
 		}
 	})
 }

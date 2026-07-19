@@ -434,6 +434,181 @@ func TestOpenCommand_SessionPin_EmitsNoResolveLine(t *testing.T) {
 	}
 }
 
+func TestOpenCommand_PathPin_Mints_NoPicker(t *testing.T) {
+	// `open -p <existing-dir>` resolves in the path domain only and mints
+	// (openPathFunc) — never attaches (openSessionFunc) and never opens the picker
+	// (openTUIFunc). Spec § Domain-pinning flags: -p mints; dir must exist.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	dir := t.TempDir()
+
+	var mintedPath string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, _ []string) error {
+		mintedPath = path
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-p", dir})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if mintedPath != dir {
+		t.Errorf("openPathFunc minted %q, want %q", mintedPath, dir)
+	}
+	if sessionCalled {
+		t.Error("openSessionFunc must not be called for a -p pin (never attaches)")
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called for a -p pin (never opens the picker)")
+	}
+}
+
+func TestOpenCommand_PathPin_GlobNamedDir_Mints(t *testing.T) {
+	// A directory whose name contains glob metacharacters (foo[1]) is UNREACHABLE
+	// as a bare positional (the glob pre-check hard-fails it), but -p reaches it:
+	// ResolvePath stats the literal path, bypassing glob detection, and mints.
+	// Spec § Glob targets (glob-named dir escape).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	tmp := t.TempDir()
+	globDir := filepath.Join(tmp, "foo[1]")
+	if err := os.Mkdir(globDir, 0o755); err != nil {
+		t.Fatalf("failed to create glob-named dir: %v", err)
+	}
+
+	var mintedPath string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, _ []string) error {
+		mintedPath = path
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-p", globDir})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if mintedPath != globDir {
+		t.Errorf("openPathFunc minted %q, want %q", mintedPath, globDir)
+	}
+}
+
+func TestOpenCommand_PathPin_ThreadsCommandIntoMint(t *testing.T) {
+	// A present -e/-- command threads into the minted session unchanged:
+	// `open -p <dir> -e claude` → openPathFunc receives command == [claude].
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	dir := t.TempDir()
+
+	var gotPath string
+	var gotCommand []string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, command []string) error {
+		gotPath = path
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-p", dir, "-e", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotPath != dir {
+		t.Errorf("minted path = %q, want %q", gotPath, dir)
+	}
+	wantCmd := []string{"claude"}
+	if !slices.Equal(gotCommand, wantCmd) {
+		t.Errorf("threaded command = %v, want %v", gotCommand, wantCmd)
+	}
+}
+
+func TestOpenCommand_PathPin_EmitsNoResolveLine(t *testing.T) {
+	// A -p pin is deterministic (path-domain by construction), not a guess, so it
+	// emits NO "resolve" decision line (spec § Wrong-guess feedback — pins emit no
+	// resolve line).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	dir := t.TempDir()
+
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error { return nil }
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-p", dir})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if recs := h.resolveRecords(); len(recs) != 0 {
+		t.Fatalf("expected no resolve records for a -p pin, got %d", len(recs))
+	}
+}
+
 func TestOpenSession_DelegatesToBuildSessionConnector(t *testing.T) {
 	// openSession must build the connector via buildSessionConnector and connect
 	// through it — no real tmux. Inside tmux the connector is *SwitchConnector, so

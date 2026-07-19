@@ -192,6 +192,30 @@ var openCmd = &cobra.Command{
 			return openResolved(cmd, result, command)
 		}
 
+		// -p/--path pin (spec § Domain-pinning flags): resolve the value in the path
+		// domain only via ResolvePathPin (which reuses ResolvePath for tilde/relative
+		// expansion + existence + is-directory validation) and dispatch the resulting
+		// *PathResult through the shared outcome switch to mint. Because ResolvePath
+		// stats the LITERAL path, a directory whose name contains glob metacharacters
+		// (~/tmp/foo[1]) is reachable here — bypassing the glob pre-check that makes
+		// it unreachable as a bare positional (spec § Glob targets). A non-existent
+		// dir / non-directory file hard-fails; the pin never mints-to-picker (spec §
+		// Pinned-domain contract) and emits no resolve line (pins are deterministic,
+		// not guesses). Placed BEFORE the no-target early-return so `open -p <dir>`
+		// with an empty positional resolves the pin rather than launching the picker.
+		if cmd.Flags().Changed("path") {
+			pathVal, _ := cmd.Flags().GetString("path")
+			qr, err := buildQueryResolver(cmd)
+			if err != nil {
+				return err
+			}
+			result, err := qr.ResolvePathPin(pathVal)
+			if err != nil {
+				return err
+			}
+			return openResolved(cmd, result, command)
+		}
+
 		if destination == "" {
 			return openTUIFunc(cmd, "", command, serverWasStarted(cmd))
 		}
@@ -818,5 +842,6 @@ func init() {
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	openCmd.Flags().StringP("filter", "f", "", "open the picker pre-filtered by <text> (skips resolution)")
 	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints)")
+	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	rootCmd.AddCommand(openCmd)
 }
