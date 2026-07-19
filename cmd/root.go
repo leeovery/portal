@@ -29,27 +29,32 @@ import (
 //     marker/FIFO cleanup. hooks list needs nothing tmux-related at all.
 //     Stale hook-entry cleanup is no longer a bootstrap step; `portal
 //     clean` is the manual home.
-//   - state: every `portal state ...` subcommand. User-facing children
-//     (status, cleanup) inspect or tear down machinery the bootstrap sets
-//     up — running bootstrap first would be circular. Internal children
-//     (daemon, notify, signal-hydrate, hydrate, migrate-rename) are invoked
-//     by tmux hooks or as the pane's initial process; re-running bootstrap
-//     would recursively register hooks and could spawn nested daemons.
+//   - state: every `portal state ...` subcommand. Its user-facing child
+//     (status) inspects machinery the bootstrap sets up — running bootstrap
+//     first would be circular. Internal children (daemon, notify,
+//     signal-hydrate, hydrate, migrate-rename) are invoked by tmux hooks or
+//     as the pane's initial process; re-running bootstrap would recursively
+//     register hooks and could spawn nested daemons.
 //   - doctor: the read-only health report (Bootstrap Exemption). If bootstrap
 //     ran first it would re-register hooks and respawn the daemon one step
 //     BEFORE doctor reads health, so the read-only check would heal its own
 //     subject and always report green (self-defeating). Exempt, doctor
 //     observes raw state, starts nothing (a down server is reported honestly,
 //     not silently started), and heals nothing.
+//   - uninstall: the runtime-only teardown (Bootstrap Exemption). It kills the
+//     _portal-saver daemon and unregisters the global hooks; if bootstrap ran
+//     first it would EnsureServer / RegisterHooks / EnsureSaver / Restore and
+//     then immediately tear all of it back down — circular, wasteful, and racy.
 var skipTmuxCheck = map[string]bool{
-	"alias":   true,
-	"clean":   true,
-	"doctor":  true,
-	"help":    true,
-	"hooks":   true,
-	"init":    true,
-	"state":   true,
-	"version": true,
+	"alias":     true,
+	"clean":     true,
+	"doctor":    true,
+	"help":      true,
+	"hooks":     true,
+	"init":      true,
+	"state":     true,
+	"uninstall": true,
+	"version":   true,
 }
 
 // bootstrapDeps holds injectable dependencies for PersistentPreRunE. When

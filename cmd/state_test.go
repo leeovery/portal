@@ -6,8 +6,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // availableCommandNames parses Cobra help output and returns the set of names
@@ -36,10 +34,6 @@ func availableCommandNames(help string) map[string]bool {
 // resetStateCmdFlags resets flag values and Changed state on the state subcommands
 // so successive test invocations are independent.
 func resetStateCmdFlags() {
-	if f := stateCleanupCmd.Flags().Lookup("purge"); f != nil {
-		_ = f.Value.Set("false")
-		f.Changed = false
-	}
 	for _, name := range []string{"fifo", "file", "hook-key"} {
 		if f := stateHydrateCmd.Flags().Lookup(name); f != nil {
 			_ = f.Value.Set("")
@@ -81,7 +75,7 @@ func TestStateCommandRegistration(t *testing.T) {
 		}
 	})
 
-	t.Run("portal state --help lists only status and cleanup as available commands", func(t *testing.T) {
+	t.Run("portal state --help lists only status as an available command", func(t *testing.T) {
 		buf := new(bytes.Buffer)
 		resetRootCmd()
 		rootCmd.SetOut(buf)
@@ -92,12 +86,13 @@ func TestStateCommandRegistration(t *testing.T) {
 		}
 		listed := availableCommandNames(buf.String())
 
-		// status and cleanup are required to appear
-		required := []string{"status", "cleanup"}
-		for _, name := range required {
-			if !listed[name] {
-				t.Errorf("portal state --help missing %q in Available Commands; got %v", name, listed)
-			}
+		// status is the only user-facing child remaining under state.
+		if !listed["status"] {
+			t.Errorf("portal state --help missing %q in Available Commands; got %v", "status", listed)
+		}
+		// cleanup was removed (replaced by `portal uninstall`).
+		if listed["cleanup"] {
+			t.Errorf("portal state --help must not list removed subcommand %q; got %v", "cleanup", listed)
 		}
 		// hidden subcommands must never appear
 		hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "migrate-rename"}
@@ -106,10 +101,10 @@ func TestStateCommandRegistration(t *testing.T) {
 				t.Errorf("portal state --help must not list hidden subcommand %q; got %v", h, listed)
 			}
 		}
-		// any other listed name beyond the user-facing two and Cobra's built-in
-		// `help` is unexpected
+		// any other listed name beyond status and Cobra's built-in `help` is
+		// unexpected
 		for name := range listed {
-			if name == "status" || name == "cleanup" || name == "help" {
+			if name == "status" || name == "help" {
 				continue
 			}
 			t.Errorf("portal state --help listed unexpected command %q; got %v", name, listed)
@@ -215,8 +210,6 @@ func TestStateUserFacingSubcommandsExitZero(t *testing.T) {
 		args []string
 	}{
 		{name: "status with no args", args: []string{"state", "status"}},
-		{name: "cleanup with no flags", args: []string{"state", "cleanup"}},
-		{name: "cleanup with --purge", args: []string{"state", "cleanup", "--purge"}},
 	}
 
 	for _, tt := range tests {
@@ -225,26 +218,15 @@ func TestStateUserFacingSubcommandsExitZero(t *testing.T) {
 			errBuf := new(bytes.Buffer)
 			resetRootCmd()
 			resetStateCmdFlags()
-			// Isolate every subtest against a fresh per-subtest temp state
-			// dir so the cleanup / cleanup --purge cases never mutate the
-			// developer's real ~/.config/portal/state. The assertion this
-			// test cares about is that argv parsing succeeded and Cobra
-			// handed control to RunE without a usage/parse error. The
-			// status case is additionally allowed to exit non-zero with
-			// ErrStatusUnhealthy, since an empty TempDir is an unhealthy
-			// state surface (no daemon, stale save, recent warnings).
+			// Isolate the subtest against a fresh temp state dir so the status
+			// render reads only synthetic state and never the developer's real
+			// ~/.config/portal/state. The assertion this test cares about is
+			// that argv parsing succeeded and Cobra handed control to RunE
+			// without a usage/parse error; status is additionally allowed to
+			// exit non-zero with ErrStatusUnhealthy, since an empty TempDir is
+			// an unhealthy state surface (no daemon, stale save, recent
+			// warnings).
 			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-			// tmux isolation is equally load-bearing: the real cleanup body
-			// builds tmux.DefaultClient() (ambient TMUX = the developer's
-			// REAL server when tests run inside tmux) and kill-sessions
-			// _portal-saver — this test used to SIGHUP the developer's live
-			// daemon on every `go test ./cmd`. Inject the seam AND poison
-			// TMUX so a missed client dies loudly against a dead socket.
-			t.Setenv("TMUX", "/nonexistent/portal-state-test,0,0")
-			installStateCleanupDeps(t, &StateCleanupDeps{
-				Client:     tmux.NewClient(&recordingCommander{}),
-				Unregister: func(*tmux.Client) error { return nil },
-			})
 			rootCmd.SetOut(outBuf)
 			rootCmd.SetErr(errBuf)
 			rootCmd.SetArgs(tt.args)
@@ -306,17 +288,6 @@ func TestStateHydrateRequiresAllFlags(t *testing.T) {
 	}
 }
 
-func TestStateCleanupAcceptsPurgeFlag(t *testing.T) {
-	// Look up the flag definition directly to assert it's a bool flag
-	flag := stateCleanupCmd.Flags().Lookup("purge")
-	if flag == nil {
-		t.Fatal("--purge flag not declared on state cleanup")
-	}
-	if flag.Value.Type() != "bool" {
-		t.Errorf("--purge type = %q, want %q", flag.Value.Type(), "bool")
-	}
-}
-
 func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 	hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "migrate-rename"}
 	for _, name := range hidden {
@@ -339,7 +310,7 @@ func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 }
 
 func TestStateUserFacingSubcommandsAreVisible(t *testing.T) {
-	visible := []string{"status", "cleanup"}
+	visible := []string{"status"}
 	for _, name := range visible {
 		t.Run(name+" has Hidden=false", func(t *testing.T) {
 			var match bool

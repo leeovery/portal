@@ -132,7 +132,7 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 		{name: "portal alias list", args: []string{"alias", "list"}},
 		{name: "portal clean", args: []string{"clean"}},
 		{name: "portal state status", args: []string{"state", "status"}},
-		{name: "portal state cleanup", args: []string{"state", "cleanup"}},
+		{name: "portal uninstall", args: []string{"uninstall"}},
 		{name: "portal state daemon", args: []string{"state", "daemon"}},
 	}
 
@@ -144,10 +144,10 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 			// ISOLATION IS LOAD-BEARING HERE. These exempt commands Execute
 			// their REAL bodies (that is the point — prove the version
 			// checker is skipped on real dispatch), so every side-effect
-			// surface must be stubbed or poisoned. Incident of record: this
-			// test used to run the real `portal state cleanup` body against
-			// tmux.DefaultClient(), which honours the ambient TMUX — the
-			// developer's REAL server when tests run inside tmux — so every
+			// surface must be stubbed or poisoned. Incident of record: the
+			// former `portal state cleanup` body (now `portal uninstall`) ran
+			// against tmux.DefaultClient(), which honours the ambient TMUX —
+			// the developer's REAL server when tests run inside tmux — so every
 			// `go test ./cmd` KILLED the developer's live _portal-saver
 			// session (SIGHUP'ing the real daemon) and unregistered the real
 			// global hook table. The TMUX poison below is defence-in-depth:
@@ -160,11 +160,11 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 			t.Setenv("PORTAL_PROJECTS_FILE", t.TempDir()+"/projects.json")
 			t.Setenv("PORTAL_HOOKS_FILE", t.TempDir()+"/hooks.json")
 
-			// `portal clean` and `portal state cleanup` build tmux clients in
+			// `portal clean` and `portal uninstall` build tmux clients in
 			// their real bodies — inject their seams so no real client exists.
 			cleanDeps = &CleanDeps{AllPaneLister: &mockCleanPaneLister{}}
 			t.Cleanup(func() { cleanDeps = nil })
-			installStateCleanupDeps(t, &StateCleanupDeps{
+			installUninstallDeps(t, &UninstallDeps{
 				Client:     tmux.NewClient(&recordingCommander{}),
 				Unregister: func(*tmux.Client) error { return nil },
 			})
