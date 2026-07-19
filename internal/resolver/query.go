@@ -175,6 +175,117 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 	return &MissResult{Target: query}, nil
 }
 
+// ResolveBareAll adapts the single-result bare Resolve chain to the K-surface
+// multi-target context (Phase 3 burst pre-flight). CRITICAL divergence from
+// Resolve: a not-found is a COLLECTED MISS (a *MissResult in the returned slice),
+// NOT a hard error — the aggregated pre-flight reports EVERY unresolvable target,
+// not just the first (spec § Atomic pre-flight & partial failure). ANY bare-chain
+// hard error (a bad path, a gone alias/zoxide dir) therefore collapses to a single
+// *MissResult carrying the raw target.
+//
+// A glob value is session-domain by construction (spec § Glob targets): it expands
+// against the user-visible session set to K *SessionResult{Domain:"glob"} — the
+// per-match window fan-out this whole task exists to produce — and zero matches is
+// a single collected miss. A non-glob value defers to Resolve for the full
+// session→path→alias→zoxide→miss chain and wraps the outcome as a single result.
+//
+// The returned error is ALWAYS nil: the bare chain never surfaces
+// ErrZoxideNotInstalled (Resolve swallows it internally), so there is no
+// environment-fault to propagate — every failure is a collected miss.
+func (qr *QueryResolver) ResolveBareAll(query string) ([]QueryResult, error) {
+	if HasGlobMeta(query) {
+		names, _ := qr.sessions.ListSessionNames()
+		matches := MatchSessions(query, names)
+		if len(matches) == 0 {
+			return []QueryResult{&MissResult{Target: query}}, nil
+		}
+		results := make([]QueryResult, 0, len(matches))
+		for _, m := range matches {
+			results = append(results, &SessionResult{Name: m, Domain: "glob"})
+		}
+		return results, nil
+	}
+
+	r, err := qr.Resolve(query)
+	if err != nil {
+		return []QueryResult{&MissResult{Target: query}}, nil
+	}
+	return []QueryResult{r}, nil
+}
+
+// ResolveSessionPinAll adapts ResolveSessionPin to the K-surface multi-target
+// context. CRITICAL divergence from ResolveSessionPin: a not-found (exact miss,
+// zero-match glob, or empty session set) is a COLLECTED MISS (a *MissResult), NOT
+// the "No session found" hard error — multi-target pre-flight collects every miss
+// (spec § Atomic pre-flight & partial failure). A glob expands to K
+// *SessionResult{Domain:"glob"} over the user-visible set; an exact hit is a single
+// *SessionResult{Domain:"session"}. The returned error is always nil.
+func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, error) {
+	names, _ := qr.sessions.ListSessionNames()
+
+	if HasGlobMeta(query) {
+		matches := MatchSessions(query, names)
+		if len(matches) == 0 {
+			return []QueryResult{&MissResult{Target: query}}, nil
+		}
+		results := make([]QueryResult, 0, len(matches))
+		for _, m := range matches {
+			results = append(results, &SessionResult{Name: m, Domain: "glob"})
+		}
+		return results, nil
+	}
+
+	if slices.Contains(names, query) {
+		return []QueryResult{&SessionResult{Name: query, Domain: "session"}}, nil
+	}
+	return []QueryResult{&MissResult{Target: query}}, nil
+}
+
+// ResolveAliasPinAll adapts ResolveAliasPin to the K-surface multi-target context.
+// CRITICAL divergence from ResolveAliasPin: a not-found (unknown key, zero-match
+// glob) or a gone directory is a COLLECTED MISS (a *MissResult), NOT the "No alias
+// found" / *DirNotFoundError hard error — multi-target pre-flight collects every
+// miss (spec § Atomic pre-flight & partial failure).
+//
+// A glob value expands against the enumerated alias-key namespace (Keys +
+// MatchSessions); each matched key's directory is validated on disk and reduced to
+// a *PathResult{Domain:"alias"}, but a gone directory for one matched key becomes a
+// *MissResult carrying THAT KEY (the surviving keys still resolve) — the parent
+// reduces every mint to a literal existing dir at resolve time (spec § Burst
+// exec-argv & mint responsibility). An exact key resolves the same way, collecting
+// the miss under the raw value on an unknown key or a gone dir. The returned error
+// is always nil.
+func (qr *QueryResolver) ResolveAliasPinAll(value string) ([]QueryResult, error) {
+	if HasGlobMeta(value) {
+		matches := MatchSessions(value, qr.aliases.Keys())
+		if len(matches) == 0 {
+			return []QueryResult{&MissResult{Target: value}}, nil
+		}
+		results := make([]QueryResult, 0, len(matches))
+		for _, k := range matches {
+			// matches are drawn from Keys(), so Get always finds the key.
+			path, _ := qr.aliases.Get(k)
+			r, err := qr.validatedPath(path, "alias")
+			if err != nil {
+				results = append(results, &MissResult{Target: k})
+				continue
+			}
+			results = append(results, r)
+		}
+		return results, nil
+	}
+
+	path, ok := qr.aliases.Get(value)
+	if !ok {
+		return []QueryResult{&MissResult{Target: value}}, nil
+	}
+	r, err := qr.validatedPath(path, "alias")
+	if err != nil {
+		return []QueryResult{&MissResult{Target: value}}, nil
+	}
+	return []QueryResult{r}, nil
+}
+
 // ResolveSessionPin resolves query in the session domain ONLY — the -s/--session
 // pin (spec § Domain-pinning flags). It matches the value against the
 // user-visible session set (an exact name, or a filepath.Match glob) and never
