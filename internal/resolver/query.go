@@ -175,6 +175,24 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 	return &MissResult{Target: query}, nil
 }
 
+// expandSessionGlobAll expands a session-domain glob pattern against names into
+// the K-surface result slice shared by ResolveBareAll and ResolveSessionPinAll:
+// zero matches is a single collected *MissResult carrying the pattern, otherwise
+// each match (in MatchSessions order) becomes a *SessionResult{Domain:"glob"}.
+// names is passed in because the two callers source it differently (ResolveBareAll
+// fetches it inside its glob branch; ResolveSessionPinAll reuses an earlier fetch).
+func expandSessionGlobAll(pattern string, names []string) []QueryResult {
+	matches := MatchSessions(pattern, names)
+	if len(matches) == 0 {
+		return []QueryResult{&MissResult{Target: pattern}}
+	}
+	results := make([]QueryResult, 0, len(matches))
+	for _, m := range matches {
+		results = append(results, &SessionResult{Name: m, Domain: "glob"})
+	}
+	return results
+}
+
 // ResolveBareAll adapts the single-result bare Resolve chain to the K-surface
 // multi-target context (Phase 3 burst pre-flight). CRITICAL divergence from
 // Resolve: a not-found is a COLLECTED MISS (a *MissResult in the returned slice),
@@ -195,15 +213,7 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 func (qr *QueryResolver) ResolveBareAll(query string) ([]QueryResult, error) {
 	if HasGlobMeta(query) {
 		names, _ := qr.sessions.ListSessionNames()
-		matches := MatchSessions(query, names)
-		if len(matches) == 0 {
-			return []QueryResult{&MissResult{Target: query}}, nil
-		}
-		results := make([]QueryResult, 0, len(matches))
-		for _, m := range matches {
-			results = append(results, &SessionResult{Name: m, Domain: "glob"})
-		}
-		return results, nil
+		return expandSessionGlobAll(query, names), nil
 	}
 
 	r, err := qr.Resolve(query)
@@ -224,15 +234,7 @@ func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, erro
 	names, _ := qr.sessions.ListSessionNames()
 
 	if HasGlobMeta(query) {
-		matches := MatchSessions(query, names)
-		if len(matches) == 0 {
-			return []QueryResult{&MissResult{Target: query}}, nil
-		}
-		results := make([]QueryResult, 0, len(matches))
-		for _, m := range matches {
-			results = append(results, &SessionResult{Name: m, Domain: "glob"})
-		}
-		return results, nil
+		return expandSessionGlobAll(query, names), nil
 	}
 
 	if slices.Contains(names, query) {
