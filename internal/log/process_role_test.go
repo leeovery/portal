@@ -16,9 +16,11 @@ func TestResolveProcessRole(t *testing.T) {
 		{"state hydrate", []string{"state", "hydrate"}, "hydrate"},
 		{"state signal-hydrate", []string{"state", "signal-hydrate"}, "hydrate"},
 
-		// hooks ... -> hooks_cli
-		{"hooks set on-resume", []string{"hooks", "set", "--on-resume", "x"}, "hooks_cli"},
-		{"hooks alone", []string{"hooks"}, "hooks_cli"},
+		// hook (canonical) and hooks (permanent silent alias) both -> hooks_cli
+		{"hook set on-resume", []string{"hook", "set", "--on-resume", "x"}, "hooks_cli"},
+		{"hook alone", []string{"hook"}, "hooks_cli"},
+		{"hooks set on-resume (alias)", []string{"hooks", "set", "--on-resume", "x"}, "hooks_cli"},
+		{"hooks alone (alias)", []string{"hooks"}, "hooks_cli"},
 
 		// clean -> clean
 		{"clean", []string{"clean"}, "clean"},

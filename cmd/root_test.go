@@ -321,22 +321,29 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 	t.Run("orchestrator Run not called for skipTmuxCheck commands", func(t *testing.T) {
 		// Canonical coverage site for the skipTmuxCheck allowlist contract:
 		// every command on the allowlist must execute without invoking the
-		// 10-step bootstrap orchestrator. The hooks rows guard against
+		// 10-step bootstrap orchestrator. The hook rows guard against
 		// regression of the hooks-skip-bootstrap spec
-		// (.workflows/hooks-skip-bootstrap/specification/...) which moved
-		// `hooks` into the allowlist to eliminate the cascading-bootstrap
-		// ENOENT burst from Claude Code's SessionStart hook. The `hooks rm`
-		// row is included for symmetry — without it a refactor that
-		// special-cases `hooks rm --pane-key` through bootstrap would
+		// (.workflows/hooks-skip-bootstrap/specification/...) which moved the
+		// resume-hook verb into the allowlist to eliminate the
+		// cascading-bootstrap ENOENT burst from Claude Code's SessionStart
+		// hook. The canonical verb is `hook`; the `hooks` alias rows prove the
+		// permanent silent back-compat alias BOTH resolves AND inherits the
+		// bootstrap exemption (skipTmuxCheck keys on cobra's canonical
+		// c.Name()=="hook", so the alias is covered by the single `hook`
+		// entry). The rm rows are included for symmetry — without them a
+		// refactor that special-cases `rm --pane-key` through bootstrap would
 		// silently regress the no-bootstrap contract for that path.
 		tests := []struct {
 			name string
 			argv []string
 		}{
 			{name: "version", argv: []string{"version"}},
-			{name: "hooks list", argv: []string{"hooks", "list"}},
-			{name: "hooks set", argv: []string{"hooks", "set", "--on-resume", "true"}},
-			{name: "hooks rm", argv: []string{"hooks", "rm", "--on-resume"}},
+			{name: "hook list", argv: []string{"hook", "list"}},
+			{name: "hook set", argv: []string{"hook", "set", "--on-resume", "true"}},
+			{name: "hook rm", argv: []string{"hook", "rm", "--on-resume"}},
+			{name: "hooks alias list", argv: []string{"hooks", "list"}},
+			{name: "hooks alias set", argv: []string{"hooks", "set", "--on-resume", "true"}},
+			{name: "hooks alias rm", argv: []string{"hooks", "rm", "--on-resume"}},
 		}
 
 		for _, tt := range tests {
@@ -345,11 +352,12 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 				bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 				t.Cleanup(func() { bootstrapDeps = nil })
 
-				// hooks set / hooks rm need a TMUX_PANE, an injected
+				// hook/hooks set + rm need a TMUX_PANE, an injected
 				// KeyResolver, and an isolated hooks file so the command
 				// runs to completion without reaching real tmux or the
-				// developer's config dir.
-				if tt.argv[0] == "hooks" && (tt.argv[1] == "set" || tt.argv[1] == "rm") {
+				// developer's config dir. Keyed on the subcommand so both the
+				// canonical `hook` rows and the `hooks` alias rows get it.
+				if len(tt.argv) >= 2 && (tt.argv[1] == "set" || tt.argv[1] == "rm") {
 					dir := t.TempDir()
 					hooksFile := filepath.Join(dir, "hooks.json")
 					t.Setenv("PORTAL_HOOKS_FILE", hooksFile)

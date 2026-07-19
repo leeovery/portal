@@ -71,9 +71,15 @@ func resolveCurrentPaneKey() (string, error) {
 	return hookKey, nil
 }
 
-var hooksCmd = &cobra.Command{
-	Use:   "hooks",
-	Short: "Manage resume hooks",
+// hookCmd is the canonical resume-hook namespace. `hooks` is retained as a
+// permanent, silent cobra alias (the one deliberate back-compat carve-out —
+// machine-written `portal hooks set …` from external SessionStart skills keeps
+// working). A plain Aliases entry is silent by design: cobra prints no
+// deprecation notice (do NOT use cmd.Deprecated, which would).
+var hookCmd = &cobra.Command{
+	Use:     "hook",
+	Aliases: []string{"hooks"},
+	Short:   "Manage resume hooks",
 }
 
 var hooksListCmd = &cobra.Command{
@@ -179,8 +185,8 @@ func init() {
 	_ = hooksRmCmd.MarkFlagRequired("on-resume")
 	hooksRmCmd.Flags().String("pane-key", "", "Structural key of the pane whose hook should be removed (defaults to the current pane)")
 
-	hooksCmd.AddCommand(hooksListCmd)
-	hooksCmd.AddCommand(hooksSetCmd)
-	hooksCmd.AddCommand(hooksRmCmd)
-	rootCmd.AddCommand(hooksCmd)
+	hookCmd.AddCommand(hooksListCmd)
+	hookCmd.AddCommand(hooksSetCmd)
+	hookCmd.AddCommand(hooksRmCmd)
+	rootCmd.AddCommand(hookCmd)
 }

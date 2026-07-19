@@ -20,15 +20,17 @@ import (
 //
 // Per the resurrection spec, the exempt set is:
 //   - alias / help / init / version: user-facing config or help
-//   - hooks: hooks set/rm/list are pure config-file operations that need
+//   - hook: hook set/rm/list are pure config-file operations that need
 //     only $TMUX_PANE (already guaranteed because they run inside a tmux
 //     pane) and a single tmux display-message round-trip via
 //     buildHooksTmuxClient() in cmd/hooks.go to resolve the structural
 //     pane key; they do not need daemon orchestration, saver bootstrap,
 //     version-upgrade machinery, Restore, EagerSignalHydrate, or
-//     marker/FIFO cleanup. hooks list needs nothing tmux-related at all.
+//     marker/FIFO cleanup. hook list needs nothing tmux-related at all.
 //     Stale hook-entry cleanup is no longer a bootstrap step; the daemon
-//     prunes automatically and `doctor --fix` is the manual home.
+//     prunes automatically and `doctor --fix` is the manual home. The
+//     permanent silent `hooks` alias is covered for free: skipTmuxCheck
+//     keys on cobra's canonical c.Name()=="hook" regardless of the alias.
 //   - state: every `portal state ...` subcommand. Its children are all
 //     internal (daemon, notify, signal-hydrate, hydrate, migrate-rename,
 //     commit-now), invoked by tmux hooks or as the pane's initial process;
@@ -48,7 +50,7 @@ var skipTmuxCheck = map[string]bool{
 	"alias":     true,
 	"doctor":    true,
 	"help":      true,
-	"hooks":     true,
+	"hook":      true,
 	"init":      true,
 	"state":     true,
 	"uninstall": true,

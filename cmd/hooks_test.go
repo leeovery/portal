@@ -758,3 +758,90 @@ func TestHooksRmCommand(t *testing.T) {
 		}
 	})
 }
+
+// TestHookCommandRename covers the `hooks` → `hook` rename: `hook` is the
+// canonical command and `hooks` is retained as a permanent, silent cobra
+// alias (the one deliberate back-compat carve-out — no deprecation notice,
+// no timer). See spec §§ "Remaining Verbs" and "Back-Compat & Deprecation".
+func TestHookCommandRename(t *testing.T) {
+	t.Run("exposes hook as the canonical command name", func(t *testing.T) {
+		if hookCmd.Name() != "hook" {
+			t.Errorf("hookCmd.Name() = %q, want %q", hookCmd.Name(), "hook")
+		}
+	})
+
+	t.Run("declares hooks as an alias of hook", func(t *testing.T) {
+		found := false
+		for _, a := range hookCmd.Aliases {
+			if a == "hooks" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("hookCmd.Aliases = %v, want to contain %q", hookCmd.Aliases, "hooks")
+		}
+	})
+
+	t.Run("resolves the hooks alias to the hook subcommands", func(t *testing.T) {
+		for _, sub := range []string{"list", "set", "rm"} {
+			c, _, err := rootCmd.Find([]string{"hooks", sub})
+			if err != nil {
+				t.Fatalf("Find([hooks %s]) error: %v", sub, err)
+			}
+			if c.Name() != sub {
+				t.Errorf("Find([hooks %s]) resolved to %q, want %q", sub, c.Name(), sub)
+			}
+			if c.Parent() == nil || c.Parent().Name() != "hook" {
+				t.Errorf("Find([hooks %s]) parent = %v, want parent named hook", sub, c.Parent())
+			}
+		}
+	})
+
+	t.Run("keeps hooks working as a silent cobra alias", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{})
+
+		outBuf := new(bytes.Buffer)
+		errBuf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(outBuf)
+		rootCmd.SetErr(errBuf)
+		rootCmd.SetArgs([]string{"hooks", "list"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		combined := strings.ToLower(outBuf.String() + errBuf.String())
+		if strings.Contains(combined, "deprecat") {
+			t.Errorf("hooks alias produced deprecation text: out=%q err=%q", outBuf.String(), errBuf.String())
+		}
+		if strings.Contains(combined, "warning") {
+			t.Errorf("hooks alias produced warning text: out=%q err=%q", outBuf.String(), errBuf.String())
+		}
+	})
+
+	t.Run("machine-generated hooks set still persists via the alias", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%3")
+
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "claude --resume abc123"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data := readHooksJSON(t, hooksFile)
+		if data["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
+			t.Errorf("hook command = %q, want %q", data["my-session:0.0"]["on-resume"], "claude --resume abc123")
+		}
+	})
+}

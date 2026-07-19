@@ -60,7 +60,11 @@ func ResolveProcessRole(args []string) string {
 	}
 
 	switch path[0] {
-	case "hooks":
+	case "hook", "hooks":
+		// `hook` is the canonical resume-hooks verb; `hooks` is its permanent
+		// silent cobra alias (spec § Back-Compat). Both map to the same role so a
+		// hook-mutation log line carries process_role=hooks_cli regardless of the
+		// spelling the caller (incl. the machine-generated SessionStart skill) used.
 		return roleHooksCLI
 	case "clean":
 		return roleClean
