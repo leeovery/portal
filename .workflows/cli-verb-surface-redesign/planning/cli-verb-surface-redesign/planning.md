@@ -215,3 +215,17 @@ Address findings from Analysis (Cycle 1).
 | cli-verb-surface-redesign-7-8 | Single-source the two governed two-site emissions (resolve-decision log line + exec-handoff marker) | Two governed contracts (`resolve` INFO line + `process:exec` marker) each emitted from exactly one helper; `!HasGlobMeta` gate and attr keys single-sourced; emitted log output byte-identical to current; both call sites route through the helper |
 
 ---
+
+### Phase 8: Analysis (Cycle 2)
+
+Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cli-verb-surface-redesign-8-1 | Narrow `portal doctor`'s daemon-liveness probe off the over-scoped `CollectStatus` and share one pane counter | Routine `portal doctor` performs no state-dir tree walk and no full portal.log scan; sessions/panes derive from a single `ReadIndex` per invocation; exactly one pane counter (no `doctorPaneCount` duplicate of `state.countPanes`); dead `daemon.pid` → `DaemonRunning=false`; `CollectStatus` trimmed to consumed fields or deleted if doctor was its last production caller; daemon/sessions/panes output behaviourally identical to pre-change |
+| cli-verb-surface-redesign-8-2 | Remove the production-dead, divergent session-glob branch from `QueryResolver.Resolve` | Multi-match session glob never collapses to `matches[0]`; glob reaching the resolver expands to all matches or returns an explicit error (never silent first-match); single-target and burst glob expansion share one primitive; confirm callers (cmd/open.go:262, `ResolveBareAll`) never receive glob in the prod routing path; an `os.Args`-assumption break can no longer silently fork glob semantics |
+| cli-verb-surface-redesign-8-3 | Refresh stale post-redesign documentation and comments | Comment/doc-only change; process_role.go `roleTUI` mapping and `process_role_test.go` unchanged (comment-only in that file); bare `portal` described as prints help/usage, not TUI picker; CLAUDE.md "Incident of record #2" period-marked or re-anchored so removed `state cleanup` / deleted `TestStateUserFacingSubcommandsExitZero` don't read as current; underlying lesson preserved; no new code test, existing `process_role` tests stay green |
+
+---

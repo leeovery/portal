@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: CLI Verb Surface Redesign (Cycle 2)
 
 ## Task 1: Narrow `portal doctor`'s daemon-liveness probe off the over-scoped `CollectStatus` and share one pane counter
-status: pending
+status: approved
 severity: medium
 sources: architecture, duplication
 
@@ -34,7 +34,7 @@ sources: architecture, duplication
 - If `CollectStatus` is trimmed or deleted, update the state-package tests accordingly (remove assertions on dropped fields).
 
 ## Task 2: Remove the production-dead, divergent session-glob branch from `QueryResolver.Resolve`
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -59,7 +59,7 @@ sources: architecture
 - A regression test pinning that single-glob and burst-glob expansion agree on the match set.
 
 ## Task 3: Refresh stale post-redesign documentation and comments
-status: pending
+status: approved
 severity: low
 sources: standards
 
