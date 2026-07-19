@@ -6,9 +6,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +21,14 @@ import (
 // (cmd/state_commit_now.go) compile-time-links the stderr-suppression
 // contract. The sentinel exists solely to signal the unhealthy exit code.
 var ErrDoctorUnhealthy = errors.New("doctor unhealthy")
+
+// doctorRuntimeNotRunning is the byte-exact detail the daemon, saver and hooks
+// checks all report when the tmux server is down. It is distinct from the
+// corruption / dead-daemon details on purpose: a down server is an honest
+// "Portal isn't running" state (doctor is bootstrap-exempt and starts nothing),
+// not evidence of corruption. Reported unhealthy → non-zero, per the spec's
+// Exit-code contract.
+const doctorRuntimeNotRunning = "Portal runtime not running — run portal open to start"
 
 // checkStatus is the outcome of a single doctor health check.
 type checkStatus int
@@ -56,6 +66,19 @@ type DoctorDeps struct {
 	StateDir string
 	// Now supplies the clock used by the daemon check's CollectStatus call.
 	Now func() time.Time
+	// ServerRunning reports whether a tmux server is up. It is the front gate
+	// for the three runtime checks (daemon / saver / hooks): a down server
+	// short-circuits all three to the distinct not-running detail without
+	// touching tmux. Production wires tmux.Client.ServerRunning.
+	ServerRunning func() bool
+	// SaverPresent reports whether the _portal-saver session's pane is live.
+	// Production wraps tmux.SaverPanePIDOrAbsent (discarding the pid); a
+	// non-nil error is the transient path (not-evaluable, never a hard fail).
+	SaverPresent func() (present bool, err error)
+	// HookCounts returns the per-managed-event count of Portal-authored global
+	// hook entries. Production wraps tmux.PortalHookCountsByEvent; a non-nil
+	// error is the transient path (not-evaluable).
+	HookCounts func() (map[string]int, error)
 }
 
 // doctorDeps is the package-level DI seam; nil in production.
@@ -64,10 +87,26 @@ var doctorDeps *DoctorDeps
 // resolveDoctorDeps returns a fully-populated *DoctorDeps for one doctor
 // invocation. Unset fields in the package-level doctorDeps fall through to the
 // production defaults independently — same per-field nil-check idiom as
-// commitNowDeps / bootstrapDeps. The returned value is never nil and Now is
-// guaranteed non-nil.
+// commitNowDeps / bootstrapDeps. The returned value is never nil; Now and the
+// three tmux probe seams are guaranteed non-nil.
+//
+// doctor is bootstrap-exempt, so there is no shared tmux.Client in
+// cmd.Context(); the production defaults build ONE tmux.DefaultClient() here
+// and wire all three runtime seams off it (constructing the client is pure —
+// no I/O — so it is cheap even when tests override every seam).
 func resolveDoctorDeps() *DoctorDeps {
-	deps := &DoctorDeps{Now: time.Now}
+	client := tmux.DefaultClient()
+	deps := &DoctorDeps{
+		Now:           time.Now,
+		ServerRunning: client.ServerRunning,
+		SaverPresent: func() (bool, error) {
+			_, present, err := tmux.SaverPanePIDOrAbsent(client, tmux.PortalSaverName)
+			return present, err
+		},
+		HookCounts: func() (map[string]int, error) {
+			return tmux.PortalHookCountsByEvent(client)
+		},
+	}
 	if doctorDeps == nil {
 		return deps
 	}
@@ -76,6 +115,15 @@ func resolveDoctorDeps() *DoctorDeps {
 	}
 	if doctorDeps.Now != nil {
 		deps.Now = doctorDeps.Now
+	}
+	if doctorDeps.ServerRunning != nil {
+		deps.ServerRunning = doctorDeps.ServerRunning
+	}
+	if doctorDeps.SaverPresent != nil {
+		deps.SaverPresent = doctorDeps.SaverPresent
+	}
+	if doctorDeps.HookCounts != nil {
+		deps.HookCounts = doctorDeps.HookCounts
 	}
 	return deps
 }
@@ -120,19 +168,30 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 	}
 	now := deps.Now()
 
+	// Read the server gate once: a down server routes daemon / saver / hooks to
+	// the distinct not-running detail without probing tmux at all. The state-dir
+	// and sessions.json checks are server-independent and always run.
+	serverUp := deps.ServerRunning()
+
 	return []checkResult{
-		checkDaemonAlive(dir, dirErr, now),
+		checkDaemonAlive(serverUp, dir, dirErr, now),
+		checkSaverUp(serverUp, deps.SaverPresent),
+		checkHooksRegistered(serverUp, deps.HookCounts),
 		checkStateDirSane(dir, dirErr),
 		checkSessionsJSON(dir, dirErr),
 	}, nil
 }
 
-// checkDaemonAlive reports whether the save daemon is running. A live
-// daemon.pid passes with a "running (pid N, version V)" detail; a missing,
-// unparseable, or dead PID fails with "not running". The distinct down-server
-// message is Task 4-2, not here.
-func checkDaemonAlive(dir string, dirErr error, now time.Time) checkResult {
+// checkDaemonAlive reports whether the save daemon is running. With the server
+// down it reports the distinct not-running detail (doctor starts nothing, so a
+// down server is honestly unhealthy, not corrupt). With the server up it is a
+// STATE-based probe: a live daemon.pid passes with a "running (pid N, version
+// V)" detail; a missing, unparseable, or dead PID fails with "not running".
+func checkDaemonAlive(serverUp bool, dir string, dirErr error, now time.Time) checkResult {
 	const name = "daemon"
+	if !serverUp {
+		return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
+	}
 	if dirErr != nil {
 		return checkResult{name: name, status: checkFail, detail: "not running"}
 	}
@@ -145,6 +204,71 @@ func checkDaemonAlive(dir string, dirErr error, now time.Time) checkResult {
 		status: checkPass,
 		detail: fmt.Sprintf("running (pid %d, version %s)", report.DaemonPID, doctorDaemonVersion(report.DaemonVersion)),
 	}
+}
+
+// checkSaverUp reports whether the _portal-saver session's pane is live. With
+// the server down it reports the distinct not-running detail. With the server
+// up it probes via the injected saverPresent seam: present passes, absent
+// (present=false, err=nil) fails, and a transient tmux error is not-evaluable
+// (never a hard fail — an unreadable probe must not drive the exit code).
+func checkSaverUp(serverUp bool, saverPresent func() (bool, error)) checkResult {
+	const name = "saver"
+	if !serverUp {
+		return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
+	}
+	present, err := saverPresent()
+	switch {
+	case err != nil:
+		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read saver (transient tmux error)"}
+	case present:
+		return checkResult{name: name, status: checkPass, detail: "_portal-saver up"}
+	default:
+		return checkResult{name: name, status: checkFail, detail: "_portal-saver not running"}
+	}
+}
+
+// checkHooksRegistered reports whether Portal's global hooks are registered
+// exactly once per managed event. With the server down it reports the distinct
+// not-running detail. With the server up it inspects the per-event count map
+// from the injected hookCounts seam:
+//
+//   - a read error is not-evaluable (transient — never a hard fail);
+//   - any event with >=2 entries fails as a duplicate (the first offending
+//     event in sorted order, so the message is deterministic);
+//   - else any event with 0 entries fails as not-registered (first in sorted
+//     order);
+//   - else (every event == 1) passes.
+//
+// Duplicates are reported ahead of missing entries: a stacked duplicate is the
+// runaway-append failure mode this check exists to catch (tmux 3.6b's blind
+// no-arg read let pane-focus-out / window-layout-changed dups accumulate).
+func checkHooksRegistered(serverUp bool, hookCounts func() (map[string]int, error)) checkResult {
+	const name = "hooks"
+	if !serverUp {
+		return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
+	}
+	counts, err := hookCounts()
+	if err != nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read hooks (transient tmux error)"}
+	}
+
+	events := make([]string, 0, len(counts))
+	for ev := range counts {
+		events = append(events, ev)
+	}
+	sort.Strings(events)
+
+	for _, ev := range events {
+		if counts[ev] >= 2 {
+			return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("duplicate hook entries on %s (%d)", ev, counts[ev])}
+		}
+	}
+	for _, ev := range events {
+		if counts[ev] == 0 {
+			return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("hooks not registered on %s", ev)}
+		}
+	}
+	return checkResult{name: name, status: checkPass, detail: "hooks registered (one per event)"}
 }
 
 // doctorDaemonVersion substitutes "unknown" when the daemon never recorded a

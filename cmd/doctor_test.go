@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -64,11 +65,62 @@ func seedValidSessionsJSON(t *testing.T, dir string, sessions int) {
 	}
 }
 
+// allHooksHealthy is a HookCounts result with exactly one Portal entry on
+// every managed event — the healthy hooks state. Mirrors the managedEvents
+// table in internal/tmux (which cmd cannot import at test time); the doctor
+// hooks check only inspects the per-event counts, so the key set stands in for
+// the canonical event set.
+func allHooksHealthy() map[string]int {
+	return map[string]int{
+		"session-created":        1,
+		"session-closed":         1,
+		"session-renamed":        1,
+		"window-linked":          1,
+		"window-unlinked":        1,
+		"window-layout-changed":  1,
+		"pane-focus-out":         1,
+		"client-attached":        1,
+		"client-session-changed": 1,
+	}
+}
+
+// withHealthyRuntime fills the three runtime tmux probe seams on deps with a
+// healthy running server (server up, saver present, one hook per managed
+// event) unless the caller already set them. State-check-focused tests use it
+// so the server gate opens and the runtime checks pass, isolating the
+// server-independent state checks under test.
+func withHealthyRuntime(deps *DoctorDeps) *DoctorDeps {
+	if deps.ServerRunning == nil {
+		deps.ServerRunning = func() bool { return true }
+	}
+	if deps.SaverPresent == nil {
+		deps.SaverPresent = func() (bool, error) { return true, nil }
+	}
+	if deps.HookCounts == nil {
+		deps.HookCounts = func() (map[string]int, error) { return allHooksHealthy(), nil }
+	}
+	return deps
+}
+
+// seedHealthyStateDir seeds a live daemon.pid, a daemon.version marker, and a
+// valid single-session sessions.json so every state-based check passes — used
+// by tests that want to isolate a single runtime probe as the ONLY unhealthy
+// (or not-evaluable) check.
+func seedHealthyStateDir(t *testing.T, dir string) {
+	t.Helper()
+	seedLiveDaemonPID(t, dir)
+	seedDaemonVersion(t, dir, "v9.9.9")
+	seedValidSessionsJSON(t, dir, 1)
+}
+
 // runDoctor executes "portal doctor" with a hermetic DoctorDeps.StateDir
 // pointing at dir, returning stdout, stderr, and the rootCmd.Execute error.
+// The runtime tmux probe seams default to a healthy running server so the
+// existing state-check tests exercise their subject with the server gate open;
+// tests asserting a down/absent runtime override the seams before calling.
 func runDoctor(t *testing.T, dir string) (*bytes.Buffer, *bytes.Buffer, error) {
 	t.Helper()
-	doctorDeps = &DoctorDeps{StateDir: dir, Now: time.Now}
+	doctorDeps = withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now})
 	t.Cleanup(func() { doctorDeps = nil })
 
 	outBuf := new(bytes.Buffer)
@@ -174,7 +226,7 @@ func TestDoctorSessionsJSONStatesDistinguished(t *testing.T) {
 	t.Run("valid index reports N sessions, M panes", func(t *testing.T) {
 		dir := t.TempDir()
 		seedValidSessionsJSON(t, dir, 3)
-		results, err := runDoctorDiagnosis(&DoctorDeps{StateDir: dir, Now: now})
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: now}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -189,7 +241,7 @@ func TestDoctorSessionsJSONStatesDistinguished(t *testing.T) {
 
 	t.Run("absent sessions.json passes as no sessions saved yet", func(t *testing.T) {
 		dir := t.TempDir()
-		results, err := runDoctorDiagnosis(&DoctorDeps{StateDir: dir, Now: now})
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: now}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -207,7 +259,7 @@ func TestDoctorSessionsJSONStatesDistinguished(t *testing.T) {
 		if err := os.WriteFile(state.SessionsJSON(dir), []byte("{not json"), 0o600); err != nil {
 			t.Fatalf("write garbage sessions.json: %v", err)
 		}
-		results, err := runDoctorDiagnosis(&DoctorDeps{StateDir: dir, Now: now})
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: now}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -223,7 +275,7 @@ func TestDoctorDaemonCheckDetail(t *testing.T) {
 		dir := t.TempDir()
 		seedLiveDaemonPID(t, dir)
 		seedDaemonVersion(t, dir, "v1.2.3")
-		results, err := runDoctorDiagnosis(&DoctorDeps{StateDir: dir, Now: time.Now})
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -239,7 +291,7 @@ func TestDoctorDaemonCheckDetail(t *testing.T) {
 
 	t.Run("missing pid fails as not running", func(t *testing.T) {
 		dir := t.TempDir()
-		results, err := runDoctorDiagnosis(&DoctorDeps{StateDir: dir, Now: time.Now})
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -255,7 +307,7 @@ func TestDoctorDaemonCheckDetail(t *testing.T) {
 
 func TestDoctorStateDirSaneHealthyDirPasses(t *testing.T) {
 	dir := t.TempDir()
-	results, err := runDoctorDiagnosis(&DoctorDeps{StateDir: dir, Now: time.Now})
+	results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now}))
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
@@ -320,5 +372,249 @@ func TestDoctorUnhealthyStderrSilent(t *testing.T) {
 func TestIsSilentExitErrorRecognisesDoctorUnhealthy(t *testing.T) {
 	if !IsSilentExitError(ErrDoctorUnhealthy) {
 		t.Error("IsSilentExitError(ErrDoctorUnhealthy) = false; want true")
+	}
+}
+
+// doctorRuntimeNotRunningDetail is the byte-exact detail every runtime check
+// emits when the tmux server is down. Duplicated here (not imported) so the
+// test independently pins the contract rather than trusting the production
+// constant.
+const doctorRuntimeNotRunningDetail = "Portal runtime not running — run portal open to start"
+
+func TestDoctorServerDownReportsRuntimeNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	// A live daemon.pid on disk must NOT rescue the daemon check: a down server
+	// gates daemon, saver AND hooks to the distinct not-running message.
+	seedHealthyStateDir(t, dir)
+
+	deps := &DoctorDeps{
+		StateDir:      dir,
+		Now:           time.Now,
+		ServerRunning: func() bool { return false },
+		// Healthy probe returns: if the gate is (wrongly) bypassed these would
+		// produce PASS details, so the not-running assertions below would fail
+		// loudly — proving the down gate short-circuits the probes.
+		SaverPresent: func() (bool, error) { return true, nil },
+		HookCounts:   func() (map[string]int, error) { return allHooksHealthy(), nil },
+	}
+	results, err := runDoctorDiagnosis(deps)
+	if err != nil {
+		t.Fatalf("runDoctorDiagnosis: %v", err)
+	}
+
+	for _, name := range []string{"daemon", "saver", "hooks"} {
+		got := findCheck(t, results, name)
+		if got.status != checkFail {
+			t.Errorf("%s status = %v; want checkFail when server is down", name, got.status)
+		}
+		if got.detail != doctorRuntimeNotRunningDetail {
+			t.Errorf("%s detail = %q; want %q", name, got.detail, doctorRuntimeNotRunningDetail)
+		}
+	}
+
+	// The down-server report is unhealthy → non-zero, distinct from corruption.
+	if !doctorUnhealthy(results) {
+		t.Error("doctorUnhealthy = false; want true for a down server")
+	}
+
+	// State-based checks stay server-independent and pass on a healthy dir.
+	if got := findCheck(t, results, "state dir"); got.status != checkPass {
+		t.Errorf("state dir status = %v; want checkPass (server-independent)", got.status)
+	}
+	if got := findCheck(t, results, "sessions.json"); got.status != checkPass {
+		t.Errorf("sessions.json status = %v; want checkPass (server-independent)", got.status)
+	}
+}
+
+func TestDoctorHooksCheck(t *testing.T) {
+	dir := t.TempDir()
+
+	newDeps := func(counts map[string]int) *DoctorDeps {
+		return &DoctorDeps{
+			StateDir:      dir,
+			Now:           time.Now,
+			ServerRunning: func() bool { return true },
+			SaverPresent:  func() (bool, error) { return true, nil },
+			HookCounts:    func() (map[string]int, error) { return counts, nil },
+		}
+	}
+
+	t.Run("one entry per event passes", func(t *testing.T) {
+		results, err := runDoctorDiagnosis(newDeps(allHooksHealthy()))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "hooks")
+		if got.status != checkPass {
+			t.Errorf("status = %v; want checkPass", got.status)
+		}
+		if got.detail != "hooks registered (one per event)" {
+			t.Errorf("detail = %q; want %q", got.detail, "hooks registered (one per event)")
+		}
+	})
+
+	t.Run("a duplicated event fails", func(t *testing.T) {
+		counts := allHooksHealthy()
+		counts["pane-focus-out"] = 3
+		results, err := runDoctorDiagnosis(newDeps(counts))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "hooks")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail", got.status)
+		}
+		if got.detail != "duplicate hook entries on pane-focus-out (3)" {
+			t.Errorf("detail = %q; want %q", got.detail, "duplicate hook entries on pane-focus-out (3)")
+		}
+	})
+
+	t.Run("duplicate reports first offending event in sorted order", func(t *testing.T) {
+		counts := allHooksHealthy()
+		counts["window-linked"] = 2
+		counts["client-attached"] = 2 // "client-attached" < "window-linked"
+		results, err := runDoctorDiagnosis(newDeps(counts))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "hooks")
+		if got.detail != "duplicate hook entries on client-attached (2)" {
+			t.Errorf("detail = %q; want %q (first in sorted order)", got.detail, "duplicate hook entries on client-attached (2)")
+		}
+	})
+
+	t.Run("a zero-count event fails as not registered", func(t *testing.T) {
+		counts := allHooksHealthy()
+		counts["client-attached"] = 0
+		results, err := runDoctorDiagnosis(newDeps(counts))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "hooks")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail", got.status)
+		}
+		if got.detail != "hooks not registered on client-attached" {
+			t.Errorf("detail = %q; want %q", got.detail, "hooks not registered on client-attached")
+		}
+	})
+
+	t.Run("duplicate takes precedence over a zero-count event", func(t *testing.T) {
+		counts := allHooksHealthy()
+		counts["session-renamed"] = 0
+		counts["window-linked"] = 2
+		results, err := runDoctorDiagnosis(newDeps(counts))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "hooks")
+		if got.detail != "duplicate hook entries on window-linked (2)" {
+			t.Errorf("detail = %q; want the duplicate message to win over the zero-count message", got.detail)
+		}
+	})
+
+	t.Run("transient read failure is not-evaluable and does not drive exit", func(t *testing.T) {
+		seedHealthyStateDir(t, dir)
+		deps := &DoctorDeps{
+			StateDir:      dir,
+			Now:           time.Now,
+			ServerRunning: func() bool { return true },
+			SaverPresent:  func() (bool, error) { return true, nil },
+			HookCounts:    func() (map[string]int, error) { return nil, errors.New("tmux transient") },
+		}
+		results, err := runDoctorDiagnosis(deps)
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "hooks")
+		if got.status != checkNotEvaluable {
+			t.Errorf("status = %v; want checkNotEvaluable on a transient hooks read", got.status)
+		}
+		if got.detail != "could not read hooks (transient tmux error)" {
+			t.Errorf("detail = %q; want %q", got.detail, "could not read hooks (transient tmux error)")
+		}
+		if doctorUnhealthy(results) {
+			t.Error("a not-evaluable hooks check must not drive the exit code")
+		}
+	})
+}
+
+func TestDoctorSaverCheck(t *testing.T) {
+	dir := t.TempDir()
+
+	newDeps := func(present bool, saverErr error) *DoctorDeps {
+		return &DoctorDeps{
+			StateDir:      dir,
+			Now:           time.Now,
+			ServerRunning: func() bool { return true },
+			SaverPresent:  func() (bool, error) { return present, saverErr },
+			HookCounts:    func() (map[string]int, error) { return allHooksHealthy(), nil },
+		}
+	}
+
+	t.Run("present passes", func(t *testing.T) {
+		results, err := runDoctorDiagnosis(newDeps(true, nil))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "saver")
+		if got.status != checkPass {
+			t.Errorf("status = %v; want checkPass", got.status)
+		}
+		if got.detail != "_portal-saver up" {
+			t.Errorf("detail = %q; want %q", got.detail, "_portal-saver up")
+		}
+	})
+
+	t.Run("absent fails", func(t *testing.T) {
+		results, err := runDoctorDiagnosis(newDeps(false, nil))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "saver")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail", got.status)
+		}
+		if got.detail != "_portal-saver not running" {
+			t.Errorf("detail = %q; want %q", got.detail, "_portal-saver not running")
+		}
+	})
+
+	t.Run("transient error is not-evaluable and does not drive exit", func(t *testing.T) {
+		seedHealthyStateDir(t, dir)
+		results, err := runDoctorDiagnosis(newDeps(false, errors.New("tmux transient")))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "saver")
+		if got.status != checkNotEvaluable {
+			t.Errorf("status = %v; want checkNotEvaluable on a transient saver read", got.status)
+		}
+		if got.detail != "could not read saver (transient tmux error)" {
+			t.Errorf("detail = %q; want %q", got.detail, "could not read saver (transient tmux error)")
+		}
+		if doctorUnhealthy(results) {
+			t.Error("a not-evaluable saver check must not drive the exit code")
+		}
+	})
+}
+
+// TestDoctorCheckOrder pins the stable report order: daemon, saver, hooks,
+// state dir, sessions.json.
+func TestDoctorCheckOrder(t *testing.T) {
+	dir := t.TempDir()
+	seedHealthyStateDir(t, dir)
+	results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now}))
+	if err != nil {
+		t.Fatalf("runDoctorDiagnosis: %v", err)
+	}
+	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json"}
+	if len(results) != len(want) {
+		t.Fatalf("check count = %d, want %d: %+v", len(results), len(want), results)
+	}
+	for i, name := range want {
+		if results[i].name != name {
+			t.Errorf("results[%d].name = %q, want %q", i, results[i].name, name)
+		}
 	}
 }
