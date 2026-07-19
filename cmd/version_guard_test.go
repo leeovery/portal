@@ -1,5 +1,5 @@
 // Tests in this file mutate package-level state (versionChecker, bootstrapDeps,
-// listDeps, attachDeps, killDeps) and MUST NOT use t.Parallel.
+// listDeps, openDeps, openSessionFunc, killDeps) and MUST NOT use t.Parallel.
 package cmd
 
 import (
@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/spf13/cobra"
 )
 
 // stubVersionChecker records call count and returns the configured error
@@ -76,14 +77,17 @@ func TestVersionGuard_InvokedForOtherNonExemptCommands(t *testing.T) {
 			},
 		},
 		{
-			name: "portal attach",
-			args: []string{"attach", "my-session"},
+			name: "portal open --session",
+			args: []string{"open", "--session", "my-session"},
 			setup: func(t *testing.T) {
-				attachDeps = &AttachDeps{
-					Connector: &mockSessionConnector{},
-					Validator: &mockSessionValidator{sessions: map[string]bool{"my-session": true}},
-				}
-				t.Cleanup(func() { attachDeps = nil })
+				openDeps = &OpenDeps{SessionLister: &testSessionLister{names: []string{"my-session"}}}
+				t.Cleanup(func() { openDeps = nil })
+
+				// Route the resolved session hit into a no-op so no real
+				// connector (syscall.Exec / switch-client) fires.
+				origSession := openSessionFunc
+				openSessionFunc = func(_ *cobra.Command, _ string) error { return nil }
+				t.Cleanup(func() { openSessionFunc = origSession })
 			},
 		},
 		{

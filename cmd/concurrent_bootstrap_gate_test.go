@@ -25,6 +25,95 @@ func openProbeCmd() *cobra.Command {
 	return &cobra.Command{Use: "open"}
 }
 
+// openProbeCmdWithFlags builds an "open"-named cobra command carrying the same
+// -e/-f/-s/-p/-z/-a flag surface production registers (cmd/open.go's init), so
+// isTUIPath / anyOpenDomainPin can be probed with specific flags marked
+// Changed via Flags().Set. The domain pins (-s/-p/-z/-a) flip isTUIPath off;
+// -f/--filter and -e/--exec do NOT (they still launch the picker).
+func openProbeCmdWithFlags() *cobra.Command {
+	c := &cobra.Command{Use: "open"}
+	c.Flags().StringP("exec", "e", "", "")
+	c.Flags().StringP("filter", "f", "", "")
+	c.Flags().StringP("session", "s", "", "")
+	c.Flags().StringP("path", "p", "", "")
+	c.Flags().StringP("alias", "a", "", "")
+	c.Flags().StringP("zoxide", "z", "", "")
+	return c
+}
+
+// TestIsTUIPath locks the retire-attach routing fix (Phase 5, task 5-1): a bare
+// picker-launching `open` is the TUI path, but a domain-pin open
+// (-s/-p/-z/-a) is NOT — it dispatches a single resolved target directly and
+// must take the synchronous direct-path bootstrap (spec § attach — Retired:
+// "--session/--path never fall back to the TUI picker"). -f/--filter and
+// -e/--exec still launch the picker, so they remain TUI paths.
+func TestIsTUIPath(t *testing.T) {
+	t.Run("bare open (no args, no pins) is the TUI path", func(t *testing.T) {
+		if !isTUIPath(openProbeCmd(), []string{}) {
+			t.Error("bare open: isTUIPath = false, want true")
+		}
+	})
+
+	t.Run("open with a positional target is NOT the TUI path", func(t *testing.T) {
+		if isTUIPath(openProbeCmd(), []string{"~/dir"}) {
+			t.Error("positional open: isTUIPath = true, want false")
+		}
+	})
+
+	domainPins := []struct{ flag, val string }{
+		{"session", "api"},
+		{"path", "/tmp/x"},
+		{"zoxide", "proj"},
+		{"alias", "work"},
+	}
+	for _, dp := range domainPins {
+		t.Run("open --"+dp.flag+" (domain pin) is NOT the TUI path", func(t *testing.T) {
+			c := openProbeCmdWithFlags()
+			if err := c.Flags().Set(dp.flag, dp.val); err != nil {
+				t.Fatalf("set --%s: %v", dp.flag, err)
+			}
+			if isTUIPath(c, []string{}) {
+				t.Errorf("open --%s: isTUIPath = true, want false (domain pin dispatches directly)", dp.flag)
+			}
+		})
+	}
+
+	t.Run("open -f text (filter) IS the TUI path", func(t *testing.T) {
+		c := openProbeCmdWithFlags()
+		if err := c.Flags().Set("filter", "text"); err != nil {
+			t.Fatalf("set --filter: %v", err)
+		}
+		if !isTUIPath(c, []string{}) {
+			t.Error("open -f text: isTUIPath = false, want true (filter opens the picker pre-filtered)")
+		}
+	})
+
+	t.Run("open -e cmd (command, no target) IS the TUI path", func(t *testing.T) {
+		c := openProbeCmdWithFlags()
+		if err := c.Flags().Set("exec", "vim"); err != nil {
+			t.Fatalf("set --exec: %v", err)
+		}
+		if !isTUIPath(c, []string{}) {
+			t.Error("open -e cmd: isTUIPath = false, want true (opens the Projects picker)")
+		}
+	})
+
+	t.Run("repeated session pins (no positional) are NOT the TUI path", func(t *testing.T) {
+		c := openProbeCmdWithFlags()
+		_ = c.Flags().Set("session", "a")
+		_ = c.Flags().Set("session", "b")
+		if isTUIPath(c, []string{}) {
+			t.Error("open -s a -s b: isTUIPath = true, want false (multi-target burst dispatches directly)")
+		}
+	})
+
+	t.Run("a non-open command is never the TUI path", func(t *testing.T) {
+		if isTUIPath(&cobra.Command{Use: "list"}, []string{}) {
+			t.Error("list: isTUIPath = true, want false")
+		}
+	})
+}
+
 // probeClient returns a non-nil *tmux.Client for the decider unit tests. The
 // re-keyed decider issues ZERO tmux round-trips (the has-server probe is gone),
 // so the backing commander is never called — a plain recording commander suffices.
@@ -60,6 +149,43 @@ func TestShouldRunConcurrentBootstrap(t *testing.T) {
 	t.Run("it routes non-concurrent for a direct-path open", func(t *testing.T) {
 		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{"~/dir"}, probeClient(), false) {
 			t.Error("direct-path open: shouldRunConcurrentBootstrap = true, want false")
+		}
+	})
+
+	// Domain-pin opens dispatch a single resolved target directly (never the
+	// picker), so even on a cold/unlatched server they take the SYNCHRONOUS
+	// direct-path bootstrap — restore must run before ResolveSessionPin. This is
+	// the retire-attach routing fix: a bare positional attach (`attach NAME`) was
+	// always synchronous, so its replacement `open --session NAME` must be too.
+	for _, flag := range []string{"session", "path", "zoxide", "alias"} {
+		t.Run("it routes non-concurrent for open --"+flag+" (domain pin, not satisfied)", func(t *testing.T) {
+			c := openProbeCmdWithFlags()
+			if err := c.Flags().Set(flag, "val"); err != nil {
+				t.Fatalf("set --%s: %v", flag, err)
+			}
+			if shouldRunConcurrentBootstrap(c, []string{}, probeClient(), false) {
+				t.Errorf("open --%s + not satisfied: shouldRunConcurrentBootstrap = true, want false (synchronous direct dispatch)", flag)
+			}
+		})
+	}
+
+	t.Run("it routes concurrent for open -f text (filter, not satisfied)", func(t *testing.T) {
+		c := openProbeCmdWithFlags()
+		if err := c.Flags().Set("filter", "text"); err != nil {
+			t.Fatalf("set --filter: %v", err)
+		}
+		if !shouldRunConcurrentBootstrap(c, []string{}, probeClient(), false) {
+			t.Error("open -f text + not satisfied: shouldRunConcurrentBootstrap = false, want true (filter is a TUI path)")
+		}
+	})
+
+	t.Run("it routes concurrent for open -e cmd (command, no target, not satisfied)", func(t *testing.T) {
+		c := openProbeCmdWithFlags()
+		if err := c.Flags().Set("exec", "vim"); err != nil {
+			t.Fatalf("set --exec: %v", err)
+		}
+		if !shouldRunConcurrentBootstrap(c, []string{}, probeClient(), false) {
+			t.Error("open -e cmd + not satisfied: shouldRunConcurrentBootstrap = false, want true (command-only open is a TUI path)")
 		}
 	})
 }

@@ -32,7 +32,7 @@ const (
 //	state hydrate / state signal-hydrate -> hydrate
 //	hooks …                           -> hooks_cli
 //	clean                             -> clean
-//	open … / x … / attach … / bare    -> tui
+//	open … / x … / bare               -> tui
 //	anything else (incl. bare state)  -> bootstrap (explicit default)
 //
 // The function is PURE — it reads nothing global, so it is unit-testable without
@@ -64,7 +64,7 @@ func ResolveProcessRole(args []string) string {
 		return roleHooksCLI
 	case "clean":
 		return roleClean
-	case "open", "x", "attach":
+	case "open", "x":
 		return roleTUI
 	}
 

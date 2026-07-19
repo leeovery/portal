@@ -7,10 +7,10 @@ package cmd
 // (absent / version-mismatch / read-error / nil client) folds into the existing
 // full-bootstrap routing.
 //
-// Tests mutate package-level state (bootstrapDeps, listDeps, attachDeps,
-// openTUIFunc, rootCmd, the bootstrapWarnings sink, the version var, and the
-// tmux.BootstrapAliveCheck / tmux.PortalSaverRetryDelay seams) and MUST NOT use
-// t.Parallel.
+// Tests mutate package-level state (bootstrapDeps, listDeps, openDeps,
+// openSessionFunc, openTUIFunc, rootCmd, the bootstrapWarnings sink, the version
+// var, and the tmux.BootstrapAliveCheck / tmux.PortalSaverRetryDelay seams) and
+// MUST NOT use t.Parallel.
 
 import (
 	"bytes"
@@ -265,11 +265,14 @@ func TestPersistentPreRunE_Abridged_LeavesWarningsForOpenTUIOnTUIPath(t *testing
 	}
 }
 
-// TestPersistentPreRunE_Abridged_AttachTakesAbridgedPath proves attach — which
-// is deliberately NOT in skipTmuxCheck (the F1 dependency) — hits the abridged
-// gate on a satisfied latch: the full orchestrator never runs and the command
-// proceeds normally.
-func TestPersistentPreRunE_Abridged_AttachTakesAbridgedPath(t *testing.T) {
+// TestPersistentPreRunE_Abridged_OpenSessionTakesAbridgedPath proves the
+// abridged latch-satisfied fast-path is command-AGNOSTIC: `open --session` —
+// which absorbed the retired attach command's exact-name attach job — hits the
+// abridged gate on a satisfied latch exactly as attach did. The full
+// orchestrator never runs (runner.calls == 0) and the command still proceeds to
+// connect. This is the load-bearing proof that retiring attach lost no bootstrap
+// behaviour — the fast-path keys on the version-stamped latch, never on the verb.
+func TestPersistentPreRunE_Abridged_OpenSessionTakesAbridgedPath(t *testing.T) {
 	resetBootstrapOnce(t)
 	resetBootstrapWarnings(t)
 
@@ -278,23 +281,27 @@ func TestPersistentPreRunE_Abridged_AttachTakesAbridgedPath(t *testing.T) {
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
+	// Phase-2 open --session wiring: the injected SessionLister carries the target
+	// name (session-domain pre-check hits), and openSessionFunc routes the resolved
+	// hit into the connector so the "still connects" assertion holds.
 	connector := &mockSessionConnector{}
-	attachDeps = &AttachDeps{
-		Connector: connector,
-		Validator: &mockSessionValidator{sessions: map[string]bool{"proj-abc123": true}},
-	}
-	t.Cleanup(func() { attachDeps = nil })
+	openDeps = &OpenDeps{SessionLister: &testSessionLister{names: []string{"proj-abc123"}}}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error { return connector.Connect(name) }
+	t.Cleanup(func() { openSessionFunc = origSession })
 
 	resetRootCmd()
-	rootCmd.SetArgs([]string{"attach", "proj-abc123"})
+	rootCmd.SetArgs([]string{"open", "--session", "proj-abc123"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if runner.calls != 0 {
-		t.Errorf("attach + satisfied latch: orchestrator calls = %d, want 0 (abridged sync path)", runner.calls)
+		t.Errorf("open --session + satisfied latch: orchestrator calls = %d, want 0 (abridged sync path is command-agnostic)", runner.calls)
 	}
 	if connector.connectedTo != "proj-abc123" {
-		t.Errorf("attach did not proceed: connectedTo = %q, want proj-abc123", connector.connectedTo)
+		t.Errorf("open --session did not proceed: connectedTo = %q, want proj-abc123", connector.connectedTo)
 	}
 }

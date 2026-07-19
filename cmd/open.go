@@ -409,8 +409,7 @@ func writeAckMarker(cmd *cobra.Command) {
 // buildAckWriter returns the ack writer for the open command's --ack receiver.
 // When openDeps carries a non-nil AckWriter (testing), it is used; otherwise a
 // @portal-spawn- server-option channel over the shared tmux client (which
-// satisfies both the writer and lister seams) — mirroring attach's
-// buildAttachDeps.
+// satisfies both the writer and lister seams).
 func buildAckWriter(cmd *cobra.Command) spawn.AckWriter {
 	if openDeps != nil && openDeps.AckWriter != nil {
 		return openDeps.AckWriter

@@ -50,13 +50,6 @@ func TestPortalBinaryTmuxMissing(t *testing.T) {
 			wantCode: 1,
 		},
 		{
-			name:     "attach prints error to stderr and exits 1",
-			args:     []string{"attach", "test"},
-			wantErr:  true,
-			wantMsg:  "Portal requires tmux. Install with: brew install tmux",
-			wantCode: 1,
-		},
-		{
 			name:     "kill prints error to stderr and exits 1",
 			args:     []string{"kill", "test"},
 			wantErr:  true,

@@ -24,10 +24,9 @@ func TestResolveProcessRole(t *testing.T) {
 		{"clean", []string{"clean"}, "clean"},
 		{"clean with logs flag", []string{"clean", "--logs"}, "clean"},
 
-		// open / x / attach / bare -> tui
+		// open / x / bare -> tui
 		{"open path", []string{"open", "."}, "tui"},
 		{"x alias", []string{"x"}, "tui"},
-		{"attach foo", []string{"attach", "foo"}, "tui"},
 		{"bare portal", []string{}, "tui"},
 		{"only flags, no subcommand", []string{"--verbose"}, "tui"},
 
@@ -69,7 +68,7 @@ func TestResolveProcessRole(t *testing.T) {
 // CONTRIBUTOR NOTE: the verbs below mirror the Cobra command registration in
 // cmd/ (root.AddCommand / stateCmd.AddCommand in cmd/state_daemon.go,
 // cmd/state_hydrate.go, cmd/state_signal_hydrate.go, cmd/hooks.go, cmd/clean.go,
-// cmd/open.go, cmd/attach.go, ...). If you rename or add a subcommand that should
+// cmd/open.go, ...). If you rename or add a subcommand that should
 // map to a non-default role, you MUST update BOTH the table in
 // ResolveProcessRole (process_role.go) AND the canonical argv shapes in this
 // fixture. A removed/renamed mapping makes a non-default case here go red.
@@ -164,7 +163,6 @@ func TestResolveProcessRole_ClosedResultSpace(t *testing.T) {
 		{"clean"},
 		{"open", "."},
 		{"x"},
-		{"attach", "foo"},
 		{"version"},
 		{"totally", "unknown", "thing"},
 		{"--a", "--b", "--c"},

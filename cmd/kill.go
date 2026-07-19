@@ -15,6 +15,11 @@ type SessionKiller interface {
 	KillSession(name string) error
 }
 
+// SessionValidator checks whether a tmux session exists by name.
+type SessionValidator interface {
+	HasSession(name string) bool
+}
+
 // KillDeps allows injecting dependencies for testing.
 type KillDeps struct {
 	Killer    SessionKiller

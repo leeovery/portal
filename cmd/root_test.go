@@ -89,10 +89,6 @@ func resetRootCmd() {
 		_ = f.Value.Set("false")
 		f.Changed = false
 	}
-	if f := attachCmd.Flags().Lookup("spawn-ack"); f != nil { // reset attach spawn-ack flag
-		_ = f.Value.Set("")
-		f.Changed = false
-	}
 	if f := doctorCmd.Flags().Lookup("fix"); f != nil { // reset doctor --fix flag
 		_ = f.Value.Set("false")
 		f.Changed = false
@@ -106,7 +102,6 @@ func TestTmuxDependentCommandsFailWithoutTmux(t *testing.T) {
 	}{
 		{name: "portal open fails without tmux", args: []string{"open"}},
 		{name: "portal list fails without tmux", args: []string{"list"}},
-		{name: "portal attach fails without tmux", args: []string{"attach", "test-session"}},
 		{name: "portal kill fails without tmux", args: []string{"kill", "test-session"}},
 	}
 

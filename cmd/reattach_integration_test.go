@@ -1,31 +1,33 @@
 //go:build integration
 
-// Phase 5 task 5-10 — `portal attach NAME` / `portal open` reattach
-// integration test.
+// Phase 5 task 5-10 — `portal open --session NAME` / `portal open` reattach
+// integration test. (Originally written for the retired `portal attach NAME`;
+// migrated to `open --session NAME`, its exact replacement, when attach was
+// deleted in cli-verb-surface-redesign Phase 5.)
 //
 // This file locks in the Phase 5 acceptance bullet (planning.md L166):
 //
-//	`portal attach NAME` and `portal open` continue to resolve names
+//	`portal open --session NAME` and `portal open` continue to resolve names
 //	that only exist in `sessions.json` at bootstrap time (skeleton is
 //	created before the command's own attach logic runs).
 //
 // The seven planning task 5-10 acceptance bullets (phase-5-tasks.md
 // L941-L947) → their asserting test in this file:
 //
-//  1. "portal attach NAME resolves a name present only in sessions.json
+//  1. "open --session NAME resolves a name present only in sessions.json
 //     (bare shell)" → TestReattachIntegration_AttachOutsideTmuxAttachSessionPath.
 //  2. "portal open PATH resolves a session name present only in
 //     sessions.json" → TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton
 //     (no-arg TUI branch) AND
 //     TestReattachIntegration_OpenPathResolvesSavedOnlySession (path-arg
 //     branch through alias resolution into openPath).
-//  3. "portal attach NAME resolves a name present only in sessions.json
+//  3. "open --session NAME resolves a name present only in sessions.json
 //     (inside tmux switch-client)" →
 //     TestReattachIntegration_AttachInsideTmuxSwitchClientPath.
 //  4. "steady-state reattach with saved session already live performs
 //     zero structural rewrites" →
 //     TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites.
-//  5. "portal attach NAME returns the existing not-found error for names
+//  5. "open --session NAME returns the existing not-found error for names
 //     in neither live nor saved state" →
 //     TestReattachIntegration_UnknownNameNotFoundError.
 //  6. "has-session returns true for every name in sessions.json
@@ -53,10 +55,10 @@
 //
 // Why this file lives in cmd/ (and not cmd/bootstrap/):
 //   - The Phase 5 acceptance criterion is at the cmd-level: a user-
-//     facing `portal attach NAME` invocation must work against a saved-
-//     only name. That means we need access to the cmd package's
-//     injection seams (`bootstrapDeps`, `attachDeps`, `openTUIFunc`)
-//     which are unexported package-level state. cmd/bootstrap/'s
+//     facing `portal open --session NAME` invocation must work against a
+//     saved-only name. That means we need access to the cmd package's
+//     injection seams (`bootstrapDeps`, `openDeps`, `openSessionFunc`,
+//     `openTUIFunc`) which are unexported package-level state. cmd/bootstrap/'s
 //     reboot_roundtrip_test verifies the bootstrap orchestrator's
 //     reboot pipeline; this file verifies the cmd-layer pipeline that
 //     consumes its output.
@@ -91,7 +93,7 @@
 package cmd
 
 // Tests in this file mutate package-level state (bootstrapDeps,
-// attachDeps, openDeps, openTUIFunc, openPathFunc) and MUST NOT use
+// openDeps, openSessionFunc, openTUIFunc, openPathFunc) and MUST NOT use
 // t.Parallel.
 
 import (
@@ -295,16 +297,17 @@ func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testin
 	preRunSavedAt := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
 	restoretest.SeedSessionsJSONWithSavedAt(t, stateDir, preRunSavedAt, "alpha")
 
-	// Wire orchestrator + cmd-layer mocks. attachDeps validator points
-	// at the real socket-backed client so HasSession queries traverse
-	// the live tmux server. Connector is a mock so Connect is captured
-	// without trying to do a real attach.
+	// Wire orchestrator + cmd-layer mocks. openDeps' SessionLister points
+	// at the real socket-backed client so `open --session` resolves against
+	// the live tmux server. openSessionFunc routes the resolved hit into a
+	// mock connector so Connect is captured without trying to do a real attach.
 	connector := &mockSessionConnector{}
-	attachDeps = &AttachDeps{
-		Connector: connector,
-		Validator: client,
-	}
-	t.Cleanup(func() { attachDeps = nil })
+	openDeps = &OpenDeps{SessionLister: client}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error { return connector.Connect(name) }
+	t.Cleanup(func() { openSessionFunc = origSession })
 
 	bootstrapDeps = &BootstrapDeps{
 		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
@@ -313,13 +316,13 @@ func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testin
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
-	rootCmd.SetArgs([]string{"attach", "alpha"})
+	rootCmd.SetArgs([]string{"open", "--session", "alpha"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	// Connect must have been called — alpha was already live so
-	// HasSession passed and dispatch reached the connector.
+	// Connect must have been called — alpha was already live so the
+	// session pin resolved and dispatch reached the connector.
 	if connector.connectedTo != "alpha" {
 		t.Errorf("connector.Connect = %q; want %q", connector.connectedTo, "alpha")
 	}
@@ -391,11 +394,12 @@ func TestReattachIntegration_HasSessionPostBootstrapForSavedNames(t *testing.T) 
 	}
 
 	connector := &mockSessionConnector{}
-	attachDeps = &AttachDeps{
-		Connector: connector,
-		Validator: client,
-	}
-	t.Cleanup(func() { attachDeps = nil })
+	openDeps = &OpenDeps{SessionLister: client}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error { return connector.Connect(name) }
+	t.Cleanup(func() { openSessionFunc = origSession })
 
 	bootstrapDeps = &BootstrapDeps{
 		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
@@ -404,13 +408,13 @@ func TestReattachIntegration_HasSessionPostBootstrapForSavedNames(t *testing.T) 
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
-	rootCmd.SetArgs([]string{"attach", "ghost-foo"})
+	rootCmd.SetArgs([]string{"open", "--session", "ghost-foo"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	// attach must have dispatched to the connector — proving HasSession
-	// returned true post-bootstrap for the saved-only name.
+	// open --session must have dispatched to the connector — proving the
+	// session pin resolved the saved-only name post-bootstrap.
 	if connector.connectedTo != "ghost-foo" {
 		t.Errorf("connector.Connect = %q; want %q", connector.connectedTo, "ghost-foo")
 	}
@@ -429,15 +433,15 @@ func TestReattachIntegration_HasSessionPostBootstrapForSavedNames(t *testing.T) 
 // planning task 5-10 case 3: when Portal is invoked from inside an
 // existing tmux session, `portal attach NAME` must dispatch to a
 // SwitchConnector (which calls tmux switch-client). We verify the
-// dispatch path with full type fidelity by leaving attachDeps.Connector
-// pointing at a real *SwitchConnector wrapped around a mock
-// SwitchClienter — only the SwitchClient call itself is mocked, so
-// the cmd path through buildAttachDeps' inside-tmux branch and the
-// SwitchConnector's Connect method is end-to-end exercised.
+// dispatch path with full type fidelity by routing openSessionFunc into
+// a real *SwitchConnector wrapped around a mock SwitchClienter — only the
+// SwitchClient call itself is mocked, so the cmd path through
+// openResolved's session arm and the SwitchConnector's Connect method is
+// end-to-end exercised.
 //
-// The TMUX env variable is intentionally NOT consulted here because
-// attachDeps is non-nil and bypasses tmux.InsideTmux() — that gating
-// is covered separately by TestBuildSessionConnector. The contribution
+// The TMUX env variable is intentionally NOT consulted here because the
+// openSessionFunc override bypasses tmux.InsideTmux() — that gating is
+// covered separately by TestBuildSessionConnector. The contribution
 // of this case is verifying the end-to-end pipeline against a
 // saved-only name when the inside-tmux Connector type is wired.
 func TestReattachIntegration_AttachInsideTmuxSwitchClientPath(t *testing.T) {
@@ -461,11 +465,12 @@ func TestReattachIntegration_AttachInsideTmuxSwitchClientPath(t *testing.T) {
 	switcher := &mockSwitchClient{}
 	connector := &SwitchConnector{client: switcher}
 
-	attachDeps = &AttachDeps{
-		Connector: connector,
-		Validator: client,
-	}
-	t.Cleanup(func() { attachDeps = nil })
+	openDeps = &OpenDeps{SessionLister: client}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error { return connector.Connect(name) }
+	t.Cleanup(func() { openSessionFunc = origSession })
 
 	bootstrapDeps = &BootstrapDeps{
 		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
@@ -474,7 +479,7 @@ func TestReattachIntegration_AttachInsideTmuxSwitchClientPath(t *testing.T) {
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
-	rootCmd.SetArgs([]string{"attach", "switched-foo"})
+	rootCmd.SetArgs([]string{"open", "--session", "switched-foo"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -501,8 +506,8 @@ func TestReattachIntegration_AttachInsideTmuxSwitchClientPath(t *testing.T) {
 // the bare-shell wiring is in effect. The TMUX env variable is
 // intentionally cleared at the test process level via t.Setenv so
 // `tmux.InsideTmux()` would observe the bare-shell state if the test
-// path were to consult it (attachDeps non-nil bypasses it; the env
-// clear is documentation more than mechanism).
+// path were to consult it (the openSessionFunc override bypasses it;
+// the env clear is documentation more than mechanism).
 func TestReattachIntegration_AttachOutsideTmuxAttachSessionPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
@@ -527,11 +532,12 @@ func TestReattachIntegration_AttachOutsideTmuxAttachSessionPath(t *testing.T) {
 	// matching what the production tmux-attach-session-with-name path
 	// would target.
 	connector := &mockSessionConnector{}
-	attachDeps = &AttachDeps{
-		Connector: connector,
-		Validator: client,
-	}
-	t.Cleanup(func() { attachDeps = nil })
+	openDeps = &OpenDeps{SessionLister: client}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error { return connector.Connect(name) }
+	t.Cleanup(func() { openSessionFunc = origSession })
 
 	bootstrapDeps = &BootstrapDeps{
 		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
@@ -540,7 +546,7 @@ func TestReattachIntegration_AttachOutsideTmuxAttachSessionPath(t *testing.T) {
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
-	rootCmd.SetArgs([]string{"attach", "attached-foo"})
+	rootCmd.SetArgs([]string{"open", "--session", "attached-foo"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -559,9 +565,9 @@ func TestReattachIntegration_AttachOutsideTmuxAttachSessionPath(t *testing.T) {
 // TestReattachIntegration_UnknownNameNotFoundError covers planning task
 // 5-10 case 5: a name that exists in NEITHER live tmux NOR sessions.json
 // must surface the existing "No session found: <name>" error from
-// cmd/attach.go, with no Connector.Connect dispatch. This guards against
-// a future regression where bootstrap silently creates skeletons for
-// names not in sessions.json (it must not).
+// cmd/open.go's session pin (ResolveSessionPin), with no Connector.Connect
+// dispatch. This guards against a future regression where bootstrap
+// silently creates skeletons for names not in sessions.json (it must not).
 func TestReattachIntegration_UnknownNameNotFoundError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
@@ -578,11 +584,12 @@ func TestReattachIntegration_UnknownNameNotFoundError(t *testing.T) {
 	// "neither live nor saved" world.
 
 	connector := &mockSessionConnector{}
-	attachDeps = &AttachDeps{
-		Connector: connector,
-		Validator: client,
-	}
-	t.Cleanup(func() { attachDeps = nil })
+	openDeps = &OpenDeps{SessionLister: client}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error { return connector.Connect(name) }
+	t.Cleanup(func() { openSessionFunc = origSession })
 
 	bootstrapDeps = &BootstrapDeps{
 		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
@@ -591,7 +598,7 @@ func TestReattachIntegration_UnknownNameNotFoundError(t *testing.T) {
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
-	rootCmd.SetArgs([]string{"attach", "nope-not-here"})
+	rootCmd.SetArgs([]string{"open", "--session", "nope-not-here"})
 	err := rootCmd.Execute()
 
 	if err == nil {
@@ -602,8 +609,8 @@ func TestReattachIntegration_UnknownNameNotFoundError(t *testing.T) {
 		t.Errorf("error = %q; want %q", err.Error(), want)
 	}
 
-	// Connector must NOT have been invoked — the not-found branch in
-	// cmd/attach.go short-circuits before Connect.
+	// Connector must NOT have been invoked — the session-pin miss in
+	// cmd/open.go (ResolveSessionPin) hard-fails before openResolved dispatch.
 	if connector.connectedTo != "" {
 		t.Errorf("connector.Connect = %q; want empty (not-found short-circuits before dispatch)", connector.connectedTo)
 	}

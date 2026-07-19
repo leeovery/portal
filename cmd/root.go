@@ -279,12 +279,29 @@ var rootCmd = &cobra.Command{
 // isTUIPath reports whether the invoked command will launch the Bubble
 // Tea TUI (and therefore must NOT have warnings emitted to stderr from
 // PersistentPreRunE — they would corrupt the alt-screen rendering). The
-// only TUI-launching path is `portal open` with zero positional args; an
-// `open <path>` invocation resolves directly via openPath without
-// entering the TUI. See cmd/open.go's RunE for the gating logic that
-// mirrors this check.
+// TUI-launching path is `portal open` with zero positional args AND no
+// domain pin: an `open <path>` invocation resolves directly via openPath,
+// and a domain-pin `open --session/-p/-z/-a <val>` dispatches a single
+// resolved target directly (never the picker) — so neither is the TUI
+// path. -f/--filter and -e/--exec still launch the picker (filtered
+// Sessions / Projects), so they remain TUI paths and do NOT flip this.
+// See cmd/open.go's RunE for the gating logic that mirrors this check.
 func isTUIPath(cmd *cobra.Command, args []string) bool {
-	return cmd.Name() == "open" && len(args) == 0
+	return cmd.Name() == "open" && len(args) == 0 && !anyOpenDomainPin(cmd)
+}
+
+// anyOpenDomainPin reports whether a domain-pin flag (-s/-p/-z/-a) is set on an
+// open invocation. Such invocations dispatch a single resolved target directly
+// (never the TUI picker), so they must take the synchronous direct-path
+// bootstrap — matching the retired `attach`'s behaviour (spec § attach —
+// Retired: "--session/--path never fall back to the TUI picker") and the
+// command-agnostic bootstrap fast-path. -f/--filter and -e/--exec still launch
+// the picker, so they are NOT domain pins and do not flip isTUIPath. At
+// PersistentPreRunE time cobra has already parsed flags, so Flags().Changed is
+// populated on the matched openCmd.
+func anyOpenDomainPin(cmd *cobra.Command) bool {
+	return cmd.Flags().Changed("session") || cmd.Flags().Changed("path") ||
+		cmd.Flags().Changed("zoxide") || cmd.Flags().Changed("alias")
 }
 
 // shouldRunConcurrentBootstrap is the routing decider for the §10.2 startup
@@ -300,8 +317,10 @@ func isTUIPath(cmd *cobra.Command, args []string) bool {
 // tmux round-trips.
 //
 //   - TUI = isTUIPath(cmd, args) is true, i.e. `portal open` with zero
-//     positional args. `open <path>` resolves directly via openPath and is
-//     therefore NOT the TUI path.
+//     positional args AND no domain pin. `open <path>` resolves directly via
+//     openPath, and a domain-pin `open --session/-p/-z/-a` dispatches a single
+//     resolved target directly — so neither is the TUI path (both take the
+//     synchronous direct-path bootstrap).
 //   - nil client (skipTmuxCheck commands never reach here, but be defensive)
 //     classifies synchronous.
 //
