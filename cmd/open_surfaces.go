@@ -57,15 +57,14 @@ func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces
 		switch t.Domain {
 		case "bare":
 			// The bare guessing chain. Emit the single resolve decision line ONCE
-			// per non-glob bare target (spec § Wrong-guess feedback), reusing
-			// resolveDecision on the sole result — a non-glob ResolveBareAll always
-			// returns exactly one result. Globs are deterministic (session-domain by
-			// construction), not guesses, so they emit no line.
+			// per non-glob bare target (spec § Wrong-guess feedback), single-sourced
+			// via emitResolveDecision (it owns the !HasGlobMeta gate + the locked
+			// attr set, shared with the single-target open path). A non-glob
+			// ResolveBareAll always returns exactly one result; globs are
+			// deterministic (session-domain by construction), not guesses, so the
+			// helper's gate suppresses their line.
 			results, _ := qr.ResolveBareAll(t.Value)
-			if !resolver.HasGlobMeta(t.Value) {
-				domain, resolvedPath := resolveDecision(results[0])
-				resolveLogger.Info("resolved", "target", t.Value, "domain", domain, "resolved_path", resolvedPath)
-			}
+			emitResolveDecision(t.Value, results[0])
 			collect(results)
 		case "session":
 			results, _ := qr.ResolveSessionPinAll(t.Value)

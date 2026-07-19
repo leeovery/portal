@@ -119,17 +119,14 @@ func (ac *AttachConnector) Connect(name string) error {
 	}
 
 	// argv[0] is the "tmux" program name; argv[1:] is the tmux subcommand+flags.
-	// We log argv[1:] so args renders "attach-session -t =<name>" (target already
-	// names tmux) and pass the full argv to Exec.
+	// We pass the full argv to both logExecHandoff (which strips argv[0] so args
+	// renders "attach-session -t =<name>") and Exec.
 	argv := []string{"tmux", "attach-session", "-t", "=" + name}
 
-	// Exec-handoff marker (spec § Defensive invariants — exec-handoff markers).
-	// syscall.Exec replaces the process image and never returns, so Close never
-	// fires and no process: exit line is emitted — this exec line is the terminal
-	// marker for the bare-shell attach handoff. marker emitted pre-exec; the log
-	// writer is unbuffered (Task 2-7) so the bytes are in the kernel before
-	// syscall.Exec replaces the image — no Sync needed.
-	log.For("process").Info("exec", "target", "tmux", "args", strings.Join(argv[1:], " "))
+	// Exec-handoff marker, single-sourced via logExecHandoff and emitted
+	// IMMEDIATELY before syscall.Exec (the terminal marker before the process
+	// image is replaced).
+	logExecHandoff(argv)
 
 	return ex.Exec(tmuxPath, argv, os.Environ())
 }
@@ -268,18 +265,11 @@ var openCmd = &cobra.Command{
 		}
 
 		// Resolution-decision receipt (spec § Wrong-guess feedback — tmux is the
-		// receipt): emit one durable INFO line per bare positional resolved through
-		// the guessing chain (session → path → alias → zoxide), so a confusing guess
-		// is reconstructable from portal.log. Gated on the glob predicate — glob (and
-		// pinned) targets are deterministic, not guesses, so they emit no line.
-		// Emitted on a miss too (domain=miss, empty resolved_path), IN ADDITION to the
-		// separate stderr hard-fail below. A mid-chain hard error (DirNotFoundError)
-		// returned above never reaches here: classification did not complete, so no
-		// decision line fires.
-		if !resolver.HasGlobMeta(query) {
-			domain, resolvedPath := resolveDecision(result)
-			resolveLogger.Info("resolved", "target", query, "domain", domain, "resolved_path", resolvedPath)
-		}
+		// receipt): single-sourced via emitResolveDecision, which owns the
+		// !HasGlobMeta gate and the locked attr set. A mid-chain hard error
+		// (DirNotFoundError) returned above never reaches here: classification did
+		// not complete, so no decision line fires.
+		emitResolveDecision(query, result)
 
 		if miss, ok := result.(*resolver.MissResult); ok {
 			// Total miss: hard-fail with the escape-hatch message (spec § Miss
@@ -385,6 +375,25 @@ func buildAckWriter(cmd *cobra.Command) spawn.AckWriter {
 	return spawn.NewServerOptionAckChannel(client, client)
 }
 
+// emitResolveDecision writes the single spec-governed resolve-decision INFO line
+// for a bare positional resolved through the guessing chain — the SINGLE source
+// shared by both bare paths (the single-target openCmd.RunE arm and the
+// resolveOpenSurfaces burst arm), so the locked attr set (target/domain/
+// resolved_path) and the emission gate cannot drift between them.
+//
+// The !HasGlobMeta gate lives INSIDE the helper so both call sites gate
+// identically: glob (and pinned) targets are deterministic, not guesses, so they
+// emit no line. One INFO line per guessing-chain target — emitted on a miss too
+// (domain=miss, empty resolved_path) — so a confusing guess is reconstructable
+// from portal.log (spec § Wrong-guess feedback — tmux is the receipt).
+func emitResolveDecision(target string, result resolver.QueryResult) {
+	if resolver.HasGlobMeta(target) {
+		return
+	}
+	domain, resolvedPath := resolveDecision(result)
+	resolveLogger.Info("resolved", "target", target, "domain", domain, "resolved_path", resolvedPath)
+}
+
 // resolveDecision derives the (domain, resolved_path) attrs for the resolve
 // decision log line from a completed classification result. resolved_path is
 // overloaded per the spec: the resolved directory for a path/alias/zoxide hit,
@@ -402,6 +411,29 @@ func resolveDecision(result resolver.QueryResult) (domain, resolvedPath string) 
 	default:
 		return "", ""
 	}
+}
+
+// logExecHandoff writes the process:exec handoff marker — the SINGLE source
+// shared by both bare-shell exec paths (AttachConnector.Connect and
+// PathOpener.Open), so this load-bearing forensic tripwire reads byte-identically
+// on both (spec § Defensive invariants — exec-handoff markers).
+//
+// It takes the FULL argv and defensively strips argv[0] (the "tmux" program name)
+// so args renders the tmux subcommand chain only. The len guard is a no-op for
+// AttachConnector's fixed 4-element argv (→ argv[1:]) and guards PathOpener's
+// always-populated ExecArgs; both sites therefore emit args=argv[1:].
+//
+// It MUST be called IMMEDIATELY BEFORE syscall.Exec: that call replaces the
+// process image and never returns, so log.Close never fires and no process:exit
+// line is emitted — this marker is the terminal log line for the handoff. The
+// log writer is unbuffered, so the bytes are in the kernel before the image is
+// replaced — no Sync needed.
+func logExecHandoff(argv []string) {
+	args := argv
+	if len(args) > 0 {
+		args = args[1:]
+	}
+	log.For("process").Info("exec", "target", "tmux", "args", strings.Join(args, " "))
 }
 
 // parseCommandArgs extracts the command slice and destination from cobra args and flags.
@@ -512,21 +544,11 @@ func (po *PathOpener) Open(resolvedPath string, command []string) error {
 
 	// session.QuickStart builds ExecArgs as the chained create-stamp-attach
 	// invocation {"tmux", "new-session", "-d", …, ";", "set-option", …, ";",
-	// "attach-session", …}. ExecArgs[0] is always the "tmux" program name, so
-	// ExecArgs[1:] is the tmux subcommand chain. Drop the program name; never
-	// index [1:] on a <1-len slice (ExecArgs is always populated, but be defensive).
-	logArgs := result.ExecArgs
-	if len(logArgs) > 0 {
-		logArgs = logArgs[1:]
-	}
-
-	// Exec-handoff marker (spec § Defensive invariants — exec-handoff markers).
-	// syscall.Exec replaces the process image and never returns, so Close never
-	// fires — this exec line is the terminal marker for the bare-shell create-or-
-	// attach handoff. marker emitted pre-exec; the log writer is unbuffered
-	// (Task 2-7) so the bytes are in the kernel before syscall.Exec replaces the
-	// image — no Sync needed.
-	log.For("process").Info("exec", "target", "tmux", "args", strings.Join(logArgs, " "))
+	// "attach-session", …}. ExecArgs[0] is always the "tmux" program name.
+	// logExecHandoff drops it (single-sourced with AttachConnector so both emit
+	// args=argv[1:]) and is emitted IMMEDIATELY before syscall.Exec (the terminal
+	// marker before the process image is replaced).
+	logExecHandoff(result.ExecArgs)
 
 	return po.execer.Exec(po.tmuxPath, result.ExecArgs, os.Environ())
 }

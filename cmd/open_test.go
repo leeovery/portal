@@ -2213,6 +2213,81 @@ func TestOpenCommand_ResolveLog_GlobEmitsNoLine(t *testing.T) {
 	}
 }
 
+func TestEmitResolveDecision_Helper(t *testing.T) {
+	// emitResolveDecision is the single-sourced resolve-decision emitter shared by
+	// both bare paths (single-target open.go + resolveOpenSurfaces). The !HasGlobMeta
+	// gate lives INSIDE it, so a glob target emits nothing from either call site.
+	t.Run("non-glob target emits exactly one resolve line", func(t *testing.T) {
+		h := newCapturingHandler()
+		log.SetTestHandler(t, h)
+
+		emitResolveDecision("dev", &resolver.SessionResult{Name: "dev", Domain: "session"})
+
+		recs := h.resolveRecords()
+		if len(recs) != 1 {
+			t.Fatalf("expected exactly 1 resolve record, got %d", len(recs))
+		}
+		if recs[0].record.Level != slog.LevelInfo {
+			t.Errorf("resolve record level = %v, want INFO", recs[0].record.Level)
+		}
+		assertResolveAttr(t, recs[0], "target", "dev")
+		assertResolveAttr(t, recs[0], "domain", "session")
+		assertResolveAttr(t, recs[0], "resolved_path", "dev")
+	})
+
+	t.Run("glob target emits no line (gate lives in the helper)", func(t *testing.T) {
+		h := newCapturingHandler()
+		log.SetTestHandler(t, h)
+
+		emitResolveDecision("dev*", &resolver.SessionResult{Name: "dev-1", Domain: "glob"})
+
+		if recs := h.resolveRecords(); len(recs) != 0 {
+			t.Fatalf("expected no resolve records for a glob target, got %d", len(recs))
+		}
+	})
+}
+
+func TestLogExecHandoff_Helper(t *testing.T) {
+	// logExecHandoff is the single-sourced exec-handoff emitter shared by both exec
+	// paths (AttachConnector + PathOpener). It defensively strips argv[0] so both
+	// sites render args=argv[1:] byte-identically.
+	t.Run("strips argv[0] and joins the rest under target=tmux", func(t *testing.T) {
+		h := newCapturingHandler()
+		log.SetTestHandler(t, h)
+
+		logExecHandoff([]string{"tmux", "attach-session", "-t", "=foo"})
+
+		recs := h.execRecords()
+		if len(recs) != 1 {
+			t.Fatalf("expected exactly 1 process: exec record, got %d", len(recs))
+		}
+		if recs[0].record.Level != slog.LevelInfo {
+			t.Errorf("exec marker level = %v, want INFO", recs[0].record.Level)
+		}
+		if target, ok := recordStringAttr(recs[0], "target"); !ok || target != "tmux" {
+			t.Errorf("target attr = %q (ok=%v), want %q", target, ok, "tmux")
+		}
+		if gotArgs, ok := recordStringAttr(recs[0], "args"); !ok || gotArgs != "attach-session -t =foo" {
+			t.Errorf("args attr = %q (ok=%v), want %q", gotArgs, ok, "attach-session -t =foo")
+		}
+	})
+
+	t.Run("defensive: empty argv does not panic and logs empty args", func(t *testing.T) {
+		h := newCapturingHandler()
+		log.SetTestHandler(t, h)
+
+		logExecHandoff(nil)
+
+		recs := h.execRecords()
+		if len(recs) != 1 {
+			t.Fatalf("expected exactly 1 process: exec record, got %d", len(recs))
+		}
+		if gotArgs, ok := recordStringAttr(recs[0], "args"); !ok || gotArgs != "" {
+			t.Errorf("args attr = %q (ok=%v), want empty", gotArgs, ok)
+		}
+	})
+}
+
 func TestOpenCommand_BareProjectName_MintsNeverAttaches(t *testing.T) {
 	// 'open api' with a running api-x7Kd9a session must NOT attach it: the
 	// exact-name check misses ({project}-{nanoid} names never equal the bare
