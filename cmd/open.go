@@ -212,97 +212,43 @@ var openCmd = &cobra.Command{
 			return dispatchOpenBurst(cmd, ordered, command)
 		}
 
-		// -s/--session pin (spec § Domain-pinning flags): resolve the value in the
-		// session domain only (exact name / glob) and dispatch the hit through the
-		// shared outcome switch. A miss hard-fails — the pin never mints and never
-		// opens the picker (spec § Pinned-domain contract) — and emits no resolve
-		// line (pins are deterministic, not guesses). Placed BEFORE the no-target
-		// early-return so `open -s <name>` with an empty positional resolves the pin
-		// rather than launching the picker.
-		if cmd.Flags().Changed("session") {
-			sessionVal, _ := cmd.Flags().GetString("session")
-			qr, err := buildQueryResolver(cmd)
-			if err != nil {
-				return err
-			}
-			result, err := qr.ResolveSessionPin(sessionVal)
-			if err != nil {
-				return err
-			}
-			return openResolved(cmd, result, command)
+		// Domain-pinning flags (spec § Domain-pinning flags): each pin resolves its
+		// value in ONE domain only and dispatches the hit through the shared outcome
+		// switch (openResolved) via resolvePinAndOpen. Checked in a FIXED precedence
+		// order — session → path → alias → zoxide — and the first changed pin short-
+		// circuits. A pin never mints-to-picker (spec § Pinned-domain contract): a
+		// miss hard-fails and no resolve line is emitted (pins are deterministic, not
+		// guesses). The block sits BEFORE the no-target early-return so `open -s
+		// <name>` with an empty positional resolves the pin rather than launching the
+		// picker. A future pin is added in ONE place: this table.
+		//
+		//   -s/--session  attach the named session / glob; never mints.
+		//   -p/--path     mint at the LITERAL dir via ResolvePathPin (reuses
+		//                 ResolvePath for tilde/relative expansion + existence + is-
+		//                 directory validation). Because it stats the literal path, a
+		//                 glob-named dir (~/tmp/foo[1]) is reachable here, bypassing
+		//                 the bare-positional glob pre-check (spec § Glob targets).
+		//   -a/--alias    look the key up directly in the alias store, bypassing the
+		//                 session→path→alias precedence — the ONLY way to reach an
+		//                 alias key shadowed by a same-named session (glob expands
+		//                 against the finite alias-key namespace).
+		//   -z/--zoxide   query zoxide and make its outcome EXPLICIT — zoxide-not-
+		//                 installed surfaces ErrZoxideNotInstalled verbatim — unlike
+		//                 the bare chain, which swallows the error and falls through
+		//                 to the miss tail.
+		pinDispatch := []struct {
+			flag    string
+			resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error)
+		}{
+			{"session", (*resolver.QueryResolver).ResolveSessionPin},
+			{"path", (*resolver.QueryResolver).ResolvePathPin},
+			{"alias", (*resolver.QueryResolver).ResolveAliasPin},
+			{"zoxide", (*resolver.QueryResolver).ResolveZoxidePin},
 		}
-
-		// -p/--path pin (spec § Domain-pinning flags): resolve the value in the path
-		// domain only via ResolvePathPin (which reuses ResolvePath for tilde/relative
-		// expansion + existence + is-directory validation) and dispatch the resulting
-		// *PathResult through the shared outcome switch to mint. Because ResolvePath
-		// stats the LITERAL path, a directory whose name contains glob metacharacters
-		// (~/tmp/foo[1]) is reachable here — bypassing the glob pre-check that makes
-		// it unreachable as a bare positional (spec § Glob targets). A non-existent
-		// dir / non-directory file hard-fails; the pin never mints-to-picker (spec §
-		// Pinned-domain contract) and emits no resolve line (pins are deterministic,
-		// not guesses). Placed BEFORE the no-target early-return so `open -p <dir>`
-		// with an empty positional resolves the pin rather than launching the picker.
-		if cmd.Flags().Changed("path") {
-			pathVal, _ := cmd.Flags().GetString("path")
-			qr, err := buildQueryResolver(cmd)
-			if err != nil {
-				return err
+		for _, pin := range pinDispatch {
+			if cmd.Flags().Changed(pin.flag) {
+				return resolvePinAndOpen(cmd, pin.flag, pin.resolve, command)
 			}
-			result, err := qr.ResolvePathPin(pathVal)
-			if err != nil {
-				return err
-			}
-			return openResolved(cmd, result, command)
-		}
-
-		// -a/--alias pin (spec § Domain-pinning flags): resolve the value in the
-		// alias domain only via ResolveAliasPin, which looks the key up directly in
-		// the alias store — bypassing the session→path→alias precedence — so it is
-		// the ONLY way to reach an alias key shadowed by a same-named session. A glob
-		// value expands against the finite alias-key namespace (spec § Glob targets).
-		// A hit mints (Axiom 2) and a *PathResult routes through the shared outcome
-		// switch; an unknown key (or a glob matching zero keys) hard-fails and a gone
-		// dir hard-fails with "Directory not found" — the pin never mints-to-picker
-		// (spec § Pinned-domain contract) and emits no resolve line (pins are
-		// deterministic, not guesses). Placed BEFORE the no-target early-return so
-		// `open -a <key>` with an empty positional resolves the pin rather than
-		// launching the picker.
-		if cmd.Flags().Changed("alias") {
-			aliasVal, _ := cmd.Flags().GetString("alias")
-			qr, err := buildQueryResolver(cmd)
-			if err != nil {
-				return err
-			}
-			result, err := qr.ResolveAliasPin(aliasVal)
-			if err != nil {
-				return err
-			}
-			return openResolved(cmd, result, command)
-		}
-
-		// -z/--zoxide pin (spec § Domain-pinning flags): resolve the value in the
-		// zoxide domain only via ResolveZoxidePin, which queries zoxide and makes its
-		// outcome EXPLICIT — unlike the bare chain, which swallows any zoxide error and
-		// silently falls through to the miss tail. A hit mints (Axiom 2) and the
-		// *PathResult routes through the shared outcome switch; zoxide-not-installed
-		// surfaces ErrZoxideNotInstalled verbatim (a script sees WHY), a no-match hard-
-		// fails, and a gone best-match dir hard-fails with "Directory not found" — the
-		// pin never mints-to-picker (spec § Pinned-domain contract) and emits no resolve
-		// line (pins are deterministic, not guesses). Placed BEFORE the no-target early-
-		// return so `open -z <query>` with an empty positional resolves the pin rather
-		// than launching the picker.
-		if cmd.Flags().Changed("zoxide") {
-			zoxideVal, _ := cmd.Flags().GetString("zoxide")
-			qr, err := buildQueryResolver(cmd)
-			if err != nil {
-				return err
-			}
-			result, err := qr.ResolveZoxidePin(zoxideVal)
-			if err != nil {
-				return err
-			}
-			return openResolved(cmd, result, command)
 		}
 
 		if destination == "" {
@@ -345,6 +291,27 @@ var openCmd = &cobra.Command{
 		}
 		return openResolved(cmd, result, command)
 	},
+}
+
+// resolvePinAndOpen is the single body behind all four -s/-p/-a/-z domain-pin
+// arms in openCmd.RunE: read the flag value, build the query resolver, resolve
+// the value in the pinned domain, and hand the result to the shared outcome
+// switch (openResolved). The resolve parameter is a method value
+// ((*resolver.QueryResolver).ResolveSessionPin, etc.) — all four pins share the
+// uniform (string) (QueryResult, error) signature, so a new pin is one table row
+// in RunE, not a fifth copy of this arm. Error propagation and the openResolved
+// handoff are identical for every pin.
+func resolvePinAndOpen(cmd *cobra.Command, flag string, resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error), command []string) error {
+	val, _ := cmd.Flags().GetString(flag)
+	qr, err := buildQueryResolver(cmd)
+	if err != nil {
+		return err
+	}
+	result, err := resolve(qr, val)
+	if err != nil {
+		return err
+	}
+	return openResolved(cmd, result, command)
 }
 
 // openResolved dispatches a resolved query result to its outcome: a session-
