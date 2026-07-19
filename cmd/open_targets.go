@@ -17,6 +17,13 @@ type Target struct {
 // consumed off the argv, but it is never emitted as a target. Any flag-like
 // token absent from this map is a flag cobra already validated (e.g. a boolean
 // or --help) and is skipped without consuming a following value.
+//
+// This map is a hand-maintained mirror of openCmd's live cobra flag set (see
+// openCmd's init in open.go): adding a new VALUE-TAKING flag to openCmd requires
+// a matching entry here (both --long and any -short form), or orderedOpenTargets
+// will treat it as arity-0 and misroute its value as a bare positional target.
+// TestOpenTargetPinsCoverValueTakingFlags (open_targets_guard_test.go) walks the
+// live flag set and fails loudly if the two ever drift out of lockstep.
 var openTargetPins = map[string]string{
 	"-s": "session", "--session": "session",
 	"-p": "path", "--path": "path",
