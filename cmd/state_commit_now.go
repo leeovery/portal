@@ -24,15 +24,18 @@ var errCommitNowFailed = errors.New("commit-now failed")
 
 // IsSilentExitError reports whether err is one of the cmd-package sentinels
 // whose stderr emission must be suppressed at the top-level error handler.
-// Both errCommitNowFailed (state commit-now, hook subprocess context) and
-// ErrStatusUnhealthy (state status, rendered output already on stdout) drive
+// errCommitNowFailed (state commit-now, hook subprocess context),
+// ErrStatusUnhealthy (state status, rendered output already on stdout), and
+// ErrDoctorUnhealthy (doctor, rendered report already on stdout) all drive
 // non-zero process exits without printing anything to stderr. main.go calls
 // this in place of the legacy err.Error() == "" guard.
 func IsSilentExitError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, errCommitNowFailed) || errors.Is(err, ErrStatusUnhealthy)
+	return errors.Is(err, errCommitNowFailed) ||
+		errors.Is(err, ErrStatusUnhealthy) ||
+		errors.Is(err, ErrDoctorUnhealthy)
 }
 
 // commitNowDeps is the DI seam for the commit-now subcommand. When nil, the

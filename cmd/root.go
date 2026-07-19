@@ -35,9 +35,16 @@ import (
 //     (daemon, notify, signal-hydrate, hydrate, migrate-rename) are invoked
 //     by tmux hooks or as the pane's initial process; re-running bootstrap
 //     would recursively register hooks and could spawn nested daemons.
+//   - doctor: the read-only health report (Bootstrap Exemption). If bootstrap
+//     ran first it would re-register hooks and respawn the daemon one step
+//     BEFORE doctor reads health, so the read-only check would heal its own
+//     subject and always report green (self-defeating). Exempt, doctor
+//     observes raw state, starts nothing (a down server is reported honestly,
+//     not silently started), and heals nothing.
 var skipTmuxCheck = map[string]bool{
 	"alias":   true,
 	"clean":   true,
+	"doctor":  true,
 	"help":    true,
 	"hooks":   true,
 	"init":    true,
