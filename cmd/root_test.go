@@ -93,6 +93,10 @@ func resetRootCmd() {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
+	if f := doctorCmd.Flags().Lookup("fix"); f != nil { // reset doctor --fix flag
+		_ = f.Value.Set("false")
+		f.Changed = false
+	}
 }
 
 func TestTmuxDependentCommandsFailWithoutTmux(t *testing.T) {

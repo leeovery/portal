@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
@@ -208,16 +209,124 @@ var doctorCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		results, err := runDoctorDiagnosis(resolveDoctorDeps())
+		deps := resolveDoctorDeps()
+		results, err := runDoctorDiagnosis(deps)
 		if err != nil {
 			return err
 		}
 		renderDoctorReport(cmd.OutOrStdout(), results)
-		if doctorUnhealthy(results) {
+
+		fix, _ := cmd.Flags().GetBool("fix")
+		if !fix {
+			if doctorUnhealthy(results) {
+				return ErrDoctorUnhealthy
+			}
+			return nil
+		}
+
+		// --fix: apply the reversible repairs (rendering the initial report
+		// above first), then re-diagnose against the same deps so the checks
+		// observe post-repair on-disk state. The exit is driven SOLELY by the
+		// post-repair results — the repairs never touch it directly.
+		if err := runDoctorFix(cmd, deps); err != nil {
+			return err
+		}
+		postResults, err := runDoctorDiagnosis(deps)
+		if err != nil {
+			return err
+		}
+		renderDoctorReport(cmd.OutOrStdout(), postResults)
+		if doctorUnhealthy(postResults) {
 			return ErrDoctorUnhealthy
 		}
 		return nil
 	},
+}
+
+// runDoctorFix applies doctor's low-stakes, reversible-by-reconstruction repairs
+// in a fixed order — prune stale hooks, prune stale projects — then runs the
+// unconditional log-sweep maintenance side-action. It is invoked AFTER the
+// initial diagnosis render and BEFORE the re-diagnosis.
+//
+// The exit code is driven exclusively by the post-repair re-diagnosis, never by
+// these repairs directly (per the spec's Exit-code contract), so every repair is
+// best-effort: a failure is logged under the bootstrap component and swallowed,
+// leaving the condition for the re-diagnosis to observe and report. The error
+// return is reserved for a future catastrophic pre-diagnosis failure; today
+// runDoctorFix always returns nil.
+//
+// The down-server data-loss safety is NOT a bespoke branch here: the stale-hook
+// prune delegates to runHookStaleCleanup, whose mass-deletion hazard guard
+// already defers when live-pane enumeration is empty or errored (the
+// down/rebooted-server state), so a user-authored — non-reconstructable —
+// on-resume command is never wiped. The stale-project prune is filesystem-only
+// and runs regardless of server state.
+func runDoctorFix(cmd *cobra.Command, deps *DoctorDeps) error {
+	w := cmd.OutOrStdout()
+	pruneDoctorStaleHooks(w, deps)
+	pruneDoctorStaleProjects(w, deps)
+	sweepDoctorLogs(deps)
+	return nil
+}
+
+// pruneDoctorStaleHooks prunes hooks.json of entries whose pane key no longer
+// matches a live tmux pane, printing "Pruned stale hook: <key>" per removal to w.
+// It reuses runHookStaleCleanup VERBATIM: that helper's mass-deletion hazard
+// guard is the sole down-server protection (an empty or errored live set defers
+// with no prune), so there is deliberately no extra down-server branch here — a
+// separate branch would double-guard and risk drift. A nil store (unresolvable
+// config path) skips the prune. The helper's error return is discarded: a
+// hookStore.Load / CleanStale failure leaves the entries in place for the
+// re-diagnosis to report, honouring the repairs-never-drive-the-exit contract
+// (portal clean discards it the same way).
+func pruneDoctorStaleHooks(w io.Writer, deps *DoctorDeps) {
+	if deps.HookStore == nil {
+		return
+	}
+	_ = runHookStaleCleanup(deps.HookLister, deps.HookStore, bootstrapLogger, func(key string) {
+		_, _ = fmt.Fprintf(w, "Pruned stale hook: %s\n", key)
+	})
+}
+
+// pruneDoctorStaleProjects prunes projects.json of records whose directory no
+// longer exists via project.Store.CleanStale (filesystem-only, os.Stat-based),
+// printing "Pruned stale project: <name> (<path>)" per removal to w. It runs
+// regardless of tmux server state. A nil store skips the prune; a CleanStale
+// error is logged under the bootstrap component and swallowed.
+func pruneDoctorStaleProjects(w io.Writer, deps *DoctorDeps) {
+	if deps.ProjectStore == nil {
+		return
+	}
+	removed, err := deps.ProjectStore.CleanStale()
+	if err != nil {
+		bootstrapLogger.Warn("doctor --fix: stale-project prune failed", "error", err)
+		return
+	}
+	for _, p := range removed {
+		_, _ = fmt.Fprintf(w, "Pruned stale project: %s (%s)\n", p.Name, p.Path)
+	}
+}
+
+// sweepDoctorLogs runs the log-retention sweep — a deliberate unconditional
+// maintenance side-action OUTSIDE the diagnose→repair loop. It is NOT the repair
+// of a diagnosed condition (there is no stale-logs health check — logs
+// auto-rotate and retention-sweep in the log handler) and its outcome NEVER
+// touches the exit code: an unresolvable state dir or a sweep error is logged
+// under the bootstrap component and swallowed. It reuses deps.StateDir (the
+// hermetic test override) when set, else resolves READ-ONLY via state.Dir().
+func sweepDoctorLogs(deps *DoctorDeps) {
+	stateDir := deps.StateDir
+	if stateDir == "" {
+		dir, err := state.Dir()
+		if err != nil {
+			bootstrapLogger.Warn("doctor --fix: state dir unresolvable, skipping log sweep", "error", err)
+			return
+		}
+		stateDir = dir
+	}
+	if err := log.SweepLogsForClean(stateDir); err != nil {
+		bootstrapLogger.Warn("doctor --fix: log sweep failed", "error", err)
+	}
 }
 
 // runDoctorDiagnosis resolves the state directory READ-ONLY (state.Dir() when
@@ -574,5 +683,6 @@ func doctorUnhealthy(results []checkResult) bool {
 }
 
 func init() {
+	doctorCmd.Flags().Bool("fix", false, "apply low-stakes reversible repairs, then re-diagnose")
 	rootCmd.AddCommand(doctorCmd)
 }

@@ -917,6 +917,206 @@ func TestDoctorStaleHooksCheck(t *testing.T) {
 	})
 }
 
+// runDoctorFixCmd executes "portal doctor --fix" with the supplied hermetic
+// DoctorDeps, returning stdout, stderr, and the rootCmd.Execute error. Unlike
+// runDoctor it does NOT force withHealthyRuntime — the caller wires exactly the
+// seams the scenario needs (a down server, a stale-hook lister, temp-path
+// stores) so no real tmux server or state dir is ever touched.
+func runDoctorFixCmd(t *testing.T, deps *DoctorDeps) (*bytes.Buffer, *bytes.Buffer, error) {
+	t.Helper()
+	doctorDeps = deps
+	t.Cleanup(func() { doctorDeps = nil })
+
+	outBuf := new(bytes.Buffer)
+	errBuf := new(bytes.Buffer)
+	resetRootCmd()
+	rootCmd.SetOut(outBuf)
+	rootCmd.SetErr(errBuf)
+	rootCmd.SetArgs([]string{"doctor", "--fix"})
+	err := rootCmd.Execute()
+	return outBuf, errBuf, err
+}
+
+// TestDoctorFixPrunesStaleEntriesThenRediagnosesClean is the happy path: a stale
+// hook and a stale project are seeded over an otherwise-healthy runtime; after
+// `--fix` both are pruned from disk, the post-repair diagnosis reports them
+// clean, and the command exits 0.
+func TestDoctorFixPrunesStaleEntriesThenRediagnosesClean(t *testing.T) {
+	dir := t.TempDir()
+	seedHealthyStateDir(t, dir)
+
+	hookStore, hooksPath := seedHooksJSON(t, "sessA:0.0")
+	liveDir := t.TempDir()
+	goneDir := filepath.Join(t.TempDir(), "gone")
+	projectStore, projectsPath := seedProjectsJSON(t, liveDir, goneDir)
+
+	// A live-pane set that excludes sessA:0.0 makes it stale (prunable); the
+	// non-empty set means the hazard guard does NOT defer.
+	lister := fakeHookLister{keys: []string{"sessB:0.0"}}
+
+	outBuf, _, err := runDoctorFixCmd(t, staleDeps(dir, lister, hookStore, projectStore))
+	if err != nil {
+		t.Fatalf("Execute err = %v; want nil (healthy post-repair)", err)
+	}
+
+	hooksAfter, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("read hooks.json: %v", err)
+	}
+	if strings.Contains(string(hooksAfter), "sessA:0.0") {
+		t.Errorf("stale hook sessA:0.0 not pruned from hooks.json:\n%s", hooksAfter)
+	}
+
+	projectsAfter, err := os.ReadFile(projectsPath)
+	if err != nil {
+		t.Fatalf("read projects.json: %v", err)
+	}
+	if strings.Contains(string(projectsAfter), goneDir) {
+		t.Errorf("stale project %q not pruned from projects.json:\n%s", goneDir, projectsAfter)
+	}
+	if !strings.Contains(string(projectsAfter), liveDir) {
+		t.Errorf("live project %q wrongly pruned:\n%s", liveDir, projectsAfter)
+	}
+
+	out := outBuf.String()
+	if !strings.Contains(out, "Pruned stale hook: sessA:0.0") {
+		t.Errorf("missing pruned-hook breadcrumb:\n%s", out)
+	}
+	if !strings.Contains(out, "Pruned stale project: proj1 ("+goneDir+")") {
+		t.Errorf("missing pruned-project breadcrumb:\n%s", out)
+	}
+	// The initial (pre-fix) report AND the post-repair report both render.
+	if n := strings.Count(out, "Portal doctor:"); n != 2 {
+		t.Errorf("report count = %d; want 2 (initial + post-repair):\n%s", n, out)
+	}
+	// Post-repair the two stale checks read clean.
+	if !strings.Contains(out, "stale hooks: no stale hooks") {
+		t.Errorf("post-repair stale-hooks check not clean:\n%s", out)
+	}
+	if !strings.Contains(out, "stale projects: no stale projects") {
+		t.Errorf("post-repair stale-projects check not clean:\n%s", out)
+	}
+}
+
+// TestDoctorFixProtectsUserHooksWhenLiveSetEmptyOrErrored proves the down-server
+// data-loss safety: when live-pane enumeration is empty OR errored (the
+// down/rebooted-server state), `--fix` prunes NO hooks — user-authored,
+// non-reconstructable on-resume commands survive byte-for-byte. The protection
+// is the runHookStaleCleanup hazard guard, not a bespoke doctor branch.
+func TestDoctorFixProtectsUserHooksWhenLiveSetEmptyOrErrored(t *testing.T) {
+	cases := []struct {
+		name   string
+		lister fakeHookLister
+	}{
+		{"empty live set", fakeHookLister{keys: []string{}}},
+		{"enumeration error", fakeHookLister{err: errors.New("tmux transient")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedHealthyStateDir(t, dir)
+			hookStore, hooksPath := seedHooksJSON(t, "sessA:0.0", "sessB:0.0")
+			before, err := os.ReadFile(hooksPath)
+			if err != nil {
+				t.Fatalf("read hooks.json: %v", err)
+			}
+
+			if _, _, err := runDoctorFixCmd(t, staleDeps(dir, tc.lister, hookStore, nil)); err != nil {
+				t.Fatalf("Execute err = %v; want nil (healthy runtime, hooks deferred)", err)
+			}
+
+			after, err := os.ReadFile(hooksPath)
+			if err != nil {
+				t.Fatalf("re-read hooks.json: %v", err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Errorf("hooks.json mutated on an empty/errored live set (user commands must survive)\nbefore: %s\nafter:  %s", before, after)
+			}
+		})
+	}
+}
+
+// TestDoctorFixDownServerPrunesProjectsButNotHooks proves the split behaviour on
+// a down server: the filesystem-only stale-project prune STILL runs (gone dir
+// removed), the stale-hook prune does NOT (hazard guard defers), and the
+// post-repair exit is driven by the re-diagnosis — still non-zero because the
+// daemon / saver / hooks checks remain failed on a down server.
+func TestDoctorFixDownServerPrunesProjectsButNotHooks(t *testing.T) {
+	dir := t.TempDir()
+	hookStore, hooksPath := seedHooksJSON(t, "sessA:0.0")
+	goneDir := filepath.Join(t.TempDir(), "gone")
+	projectStore, projectsPath := seedProjectsJSON(t, goneDir)
+	hooksBefore, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("read hooks.json: %v", err)
+	}
+
+	deps := &DoctorDeps{
+		StateDir:      dir,
+		Now:           time.Now,
+		ServerRunning: func() bool { return false },
+		// A down server yields an empty live-pane enumeration.
+		HookLister:   fakeHookLister{keys: []string{}},
+		HookStore:    hookStore,
+		ProjectStore: projectStore,
+		Detector:     fakeTerminalDetector{},
+		Resolve:      doctorUnsupportedResolve,
+	}
+	outBuf, _, execErr := runDoctorFixCmd(t, deps)
+	if execErr != ErrDoctorUnhealthy {
+		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy (server still down post-repair)", execErr)
+	}
+
+	hooksAfter, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("re-read hooks.json: %v", err)
+	}
+	if !bytes.Equal(hooksBefore, hooksAfter) {
+		t.Errorf("hooks.json pruned on a down server (user commands must survive)\nbefore: %s\nafter:  %s", hooksBefore, hooksAfter)
+	}
+
+	projectsAfter, err := os.ReadFile(projectsPath)
+	if err != nil {
+		t.Fatalf("re-read projects.json: %v", err)
+	}
+	if strings.Contains(string(projectsAfter), goneDir) {
+		t.Errorf("filesystem-only stale-project prune did not run on a down server:\n%s", projectsAfter)
+	}
+	if !strings.Contains(outBuf.String(), "Pruned stale project: proj0 ("+goneDir+")") {
+		t.Errorf("missing pruned-project breadcrumb:\n%s", outBuf.String())
+	}
+}
+
+// TestDoctorFixLogSweepNeverDrivesExit proves the log-sweep is an unconditional
+// maintenance side-action OUTSIDE the diagnose→repair loop: it runs against the
+// resolved state dir (deleting a stale rotated log seeded there) yet an
+// otherwise-healthy post-repair state still exits 0 — a stale-log state can
+// never make doctor non-zero.
+func TestDoctorFixLogSweepNeverDrivesExit(t *testing.T) {
+	dir := t.TempDir()
+	seedHealthyStateDir(t, dir)
+
+	// A rotated log dated well before today: the sweep (cutoff == today) deletes
+	// it, which observably proves the sweep ran against deps.StateDir.
+	staleLog := filepath.Join(dir, "portal.log.2000-01-01")
+	if err := os.WriteFile(staleLog, []byte("old\n"), 0o600); err != nil {
+		t.Fatalf("seed stale rotated log: %v", err)
+	}
+
+	// nil stores → no hook/project prune; the log-sweep is the ONLY repair action,
+	// isolating its (non-)effect on the exit code. Stale checks report
+	// not-evaluable (never fail), so the post-repair state is fully healthy.
+	deps := withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now})
+	_, _, err := runDoctorFixCmd(t, deps)
+	if err != nil {
+		t.Fatalf("Execute err = %v; want nil — a log-sweep must never drive the exit code", err)
+	}
+
+	if _, statErr := os.Stat(staleLog); !os.IsNotExist(statErr) {
+		t.Errorf("stale rotated log not swept (stat err = %v); log-sweep did not run against the state dir", statErr)
+	}
+}
+
 func TestDoctorStaleProjectsCheck(t *testing.T) {
 	t.Run("gone dir fails, live dir retained", func(t *testing.T) {
 		dir := t.TempDir()
