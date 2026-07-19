@@ -2600,6 +2600,146 @@ func TestOpenCommand_NoArgs_NoFilter_LaunchesPicker(t *testing.T) {
 	}
 }
 
+func TestOpenCommand_CommandNoTarget_ExecFlag_OpensProjectsPicker(t *testing.T) {
+	// Regression guard (spec § Mint-only command with no target → picker in
+	// Projects mode): `open -e <cmd>` with NO target and NO pin must reach the
+	// no-target early-return and thread the command into the picker (initialFilter
+	// == "", command == [claude]) — NOT the Task 2-6 usage error. The command is
+	// threaded so the model lands in command-pending Projects mode; because there
+	// is no positional and no pin, resolution + openResolved never run, so the
+	// mint-scoped *SessionResult guard cannot fire on this path.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	lister := &recordingFilterLister{}
+	openDeps = &OpenDeps{
+		SessionLister: lister,
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var gotFilter string
+	var gotCommand []string
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, initialFilter string, command []string, _ bool) error {
+		tuiCalled = true
+		gotFilter = initialFilter
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-e", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("open -e <cmd> with no target must NOT be a usage error, got: %v", err)
+	}
+
+	if !tuiCalled {
+		t.Fatal("openTUIFunc must be called for a command with no target (Projects-mode picker)")
+	}
+	if gotFilter != "" {
+		t.Errorf("initialFilter = %q, want empty (no -f)", gotFilter)
+	}
+	wantCmd := []string{"claude"}
+	if !slices.Equal(gotCommand, wantCmd) {
+		t.Errorf("command = %v, want %v (threaded into Projects mode)", gotCommand, wantCmd)
+	}
+	if sessionCalled || pathCalled {
+		t.Error("no resolution outcome (attach/mint) may fire on the no-target command path — the Task 2-6 guard must not run")
+	}
+	if lister.called {
+		t.Error("query resolver must not be consulted on the no-target command path (resolution skipped)")
+	}
+}
+
+func TestOpenCommand_CommandNoTarget_DashDash_OpensProjectsPicker(t *testing.T) {
+	// Same contract as the -e spelling via the -- spelling: `open -- <cmd>` with
+	// no target and no pin threads the command into the Projects-mode picker
+	// (initialFilter == "", command == [claude]) and is NOT a usage error.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	lister := &recordingFilterLister{}
+	openDeps = &OpenDeps{
+		SessionLister: lister,
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var gotFilter string
+	var gotCommand []string
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, initialFilter string, command []string, _ bool) error {
+		tuiCalled = true
+		gotFilter = initialFilter
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "--", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("open -- <cmd> with no target must NOT be a usage error, got: %v", err)
+	}
+
+	if !tuiCalled {
+		t.Fatal("openTUIFunc must be called for a -- command with no target (Projects-mode picker)")
+	}
+	if gotFilter != "" {
+		t.Errorf("initialFilter = %q, want empty (no -f)", gotFilter)
+	}
+	wantCmd := []string{"claude"}
+	if !slices.Equal(gotCommand, wantCmd) {
+		t.Errorf("command = %v, want %v (threaded into Projects mode)", gotCommand, wantCmd)
+	}
+	if sessionCalled || pathCalled {
+		t.Error("no resolution outcome (attach/mint) may fire on the no-target command path — the Task 2-6 guard must not run")
+	}
+	if lister.called {
+		t.Error("query resolver must not be consulted on the no-target command path (resolution skipped)")
+	}
+}
+
 func TestOpenCommand_Filter_ThreadsCommandToPicker(t *testing.T) {
 	// -f threads any present -e/-- command straight through to the picker,
 	// preserving the command-present ⇒ Projects specialization for free.
