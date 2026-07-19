@@ -156,15 +156,21 @@ var openCmd = &cobra.Command{
 			return err
 		}
 
-		// -f/--filter is the sole non-composing flag (spec § -f/--filter): not a
-		// target, but a "skip resolution, open the picker pre-filtered" redirect.
-		// Handled BEFORE resolution — it never routes through the query resolver.
-		// It is mutually exclusive with a positional target (Phase 1 scope: pins
-		// don't exist yet) and rejects an empty value, mirroring the empty -e guard.
+		// -f/--filter is the sole non-composing flag (spec § -f/--filter is the sole
+		// non-composing flag; § Target-set composition): not a target, but a "skip
+		// resolution, open the picker pre-filtered" redirect. Handled BEFORE
+		// resolution AND before the pin dispatch blocks — it never routes through the
+		// query resolver, so `open -f x -s y` is rejected rather than resolving the
+		// pin. It is mutually exclusive with a positional target AND with every domain
+		// pin (-s/-p/-z/-a); only the command (-e/--) may accompany it, specialising
+		// the picker to filtered-Projects mode (Task 2-7). An empty value is rejected,
+		// mirroring the empty -e guard.
 		if cmd.Flags().Changed("filter") {
 			filterVal, _ := cmd.Flags().GetString("filter")
-			if destination != "" {
-				return NewUsageError("cannot use -f/--filter with a target")
+			anyPin := cmd.Flags().Changed("session") || cmd.Flags().Changed("path") ||
+				cmd.Flags().Changed("zoxide") || cmd.Flags().Changed("alias")
+			if destination != "" || anyPin {
+				return NewUsageError("cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)")
 			}
 			if filterVal == "" {
 				return NewUsageError("-f/--filter value must not be empty")

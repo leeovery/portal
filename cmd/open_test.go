@@ -2304,7 +2304,7 @@ func TestOpenCommand_Filter_WithPositionalTarget_UsageError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected usage error, got nil")
 	}
-	want := "cannot use -f/--filter with a target"
+	want := "cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
@@ -2317,6 +2317,134 @@ func TestOpenCommand_Filter_WithPositionalTarget_UsageError(t *testing.T) {
 	}
 	if lister.called {
 		t.Error("query resolver must not be consulted on a -f/target conflict")
+	}
+}
+
+func TestOpenCommand_Filter_WithPin_UsageError(t *testing.T) {
+	// -f combined with ANY domain pin (-s/-p/-z/-a) is a usage error (exit 2):
+	// -f is the sole non-composing flag (spec § -f/--filter is the sole
+	// non-composing flag; § Target-set composition). The guard runs BEFORE pin
+	// dispatch, so neither the resolver nor the picker is invoked, and no
+	// resolution outcome (attach/mint) fires.
+	cases := []struct {
+		name string
+		flag string
+		val  string
+	}{
+		{"session pin", "-s", "api"},
+		{"path pin", "-p", "~/Code/api"},
+		{"zoxide pin", "-z", "api"},
+		{"alias pin", "-a", "api"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+			t.Cleanup(func() { bootstrapDeps = nil })
+
+			lister := &recordingFilterLister{}
+			openDeps = &OpenDeps{
+				SessionLister: lister,
+				AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+				Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+				DirValidator:  &testDirValidator{existing: map[string]bool{}},
+			}
+			t.Cleanup(func() { openDeps = nil })
+
+			tuiCalled := false
+			origTUI := openTUIFunc
+			openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+				tuiCalled = true
+				return nil
+			}
+			t.Cleanup(func() { openTUIFunc = origTUI })
+
+			sessionCalled := false
+			origSession := openSessionFunc
+			openSessionFunc = func(_ *cobra.Command, _ string) error {
+				sessionCalled = true
+				return nil
+			}
+			t.Cleanup(func() { openSessionFunc = origSession })
+
+			pathCalled := false
+			origPath := openPathFunc
+			openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+				pathCalled = true
+				return nil
+			}
+			t.Cleanup(func() { openPathFunc = origPath })
+
+			resetRootCmd()
+			rootCmd.SetArgs([]string{"open", "-f", "blog", tc.flag, tc.val})
+			err := rootCmd.Execute()
+
+			if err == nil {
+				t.Fatal("expected usage error, got nil")
+			}
+			want := "cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)"
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err.Error(), want)
+			}
+			var usageErr *UsageError
+			if !errors.As(err, &usageErr) {
+				t.Errorf("expected *UsageError (exit 2), got %T", err)
+			}
+			if tuiCalled {
+				t.Error("openTUIFunc must not be called when -f conflicts with a pin")
+			}
+			if sessionCalled || pathCalled {
+				t.Error("no resolution outcome (attach/mint) may fire on a -f/pin conflict")
+			}
+			if lister.called {
+				t.Error("query resolver must not be consulted on a -f/pin conflict")
+			}
+		})
+	}
+}
+
+func TestOpenCommand_Filter_WithMultiplePins_UsageError(t *testing.T) {
+	// -f combined with multiple pins is still a usage error — the guard rejects
+	// on ANY pin, so -f + -s + -p is rejected the same as a single pin.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	lister := &recordingFilterLister{}
+	openDeps = &OpenDeps{
+		SessionLister: lister,
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-f", "blog", "-s", "api", "-p", "~/Code/new"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	want := "cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("expected *UsageError (exit 2), got %T", err)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called when -f conflicts with pins")
+	}
+	if lister.called {
+		t.Error("query resolver must not be consulted on a -f/pins conflict")
 	}
 }
 
