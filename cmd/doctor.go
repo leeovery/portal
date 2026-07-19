@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -97,6 +98,17 @@ type DoctorDeps struct {
 	// stale-projects check is filesystem-only (directory existence) and runs
 	// independently of the tmux server state.
 	ProjectStore *project.Store
+	// Detector resolves the host-terminal identity for the informational
+	// host-terminal line — the SAME Detect() seam the picker/burst use
+	// (cmd/spawn.go). Production wires spawn.NewDetector over the doctor tmux
+	// client. When nil (a direct-call unit test that does not exercise the line),
+	// the host-terminal line is omitted rather than invoking a real detector.
+	Detector TerminalDetector
+	// Resolve maps a detected identity to its adapter + resolution class — the
+	// SAME config-aware resolver the burst uses (buildResolver().Resolve, loaded
+	// from terminals.json). Only its Resolution is read here (a NULL identity
+	// short-circuits before Resolve). When nil the host-terminal line is omitted.
+	Resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
 }
 
 // doctorDeps is the package-level DI seam; nil in production.
@@ -125,6 +137,16 @@ func resolveDoctorDeps() *DoctorDeps {
 			return tmux.PortalHookCountsByEvent(client)
 		},
 		HookLister: client,
+		// The host-terminal line reuses the picker/burst seams verbatim: the
+		// process-tree/tmux detector over the doctor client, and the config-aware
+		// terminals.json resolver. spawn.NewDetector is pure construction (no I/O
+		// until Detect); Resolve is deferred through a closure so buildResolver
+		// only reads terminals.json when the line is actually computed (a
+		// non-null identity), and never when a test overrides the seam.
+		Detector: spawn.NewDetector(client),
+		Resolve: func(id spawn.Identity) (spawn.Adapter, spawn.Resolution) {
+			return buildResolver().Resolve(id)
+		},
 	}
 	// The stale-entry stores are built best-effort: a load-path error (an
 	// unresolvable config dir) leaves the pointer nil, and the corresponding
@@ -162,6 +184,12 @@ func resolveDoctorDeps() *DoctorDeps {
 	}
 	if doctorDeps.ProjectStore != nil {
 		deps.ProjectStore = doctorDeps.ProjectStore
+	}
+	if doctorDeps.Detector != nil {
+		deps.Detector = doctorDeps.Detector
+	}
+	if doctorDeps.Resolve != nil {
+		deps.Resolve = doctorDeps.Resolve
 	}
 	return deps
 }
@@ -211,7 +239,7 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 	// and sessions.json checks are server-independent and always run.
 	serverUp := deps.ServerRunning()
 
-	return []checkResult{
+	results := []checkResult{
 		checkDaemonAlive(serverUp, dir, dirErr, now),
 		checkSaverUp(serverUp, deps.SaverPresent),
 		checkHooksRegistered(serverUp, deps.HookCounts),
@@ -219,7 +247,45 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 		checkSessionsJSON(dir, dirErr),
 		checkStaleHooks(deps.HookLister, deps.HookStore),
 		checkStaleProjects(deps.ProjectStore),
-	}, nil
+	}
+	// The host-terminal identity is INFORMATIONAL — it lives at the END of the
+	// report, after the pass/fail catalog, and never drives the exit code.
+	// Production always wires both seams (resolveDoctorDeps), so the line is
+	// always present there; direct-call unit tests that do not exercise it leave
+	// the seams nil, in which case it is omitted.
+	if deps.Detector != nil && deps.Resolve != nil {
+		results = append(results, checkHostTerminal(deps.Detector, deps.Resolve))
+	}
+	return results, nil
+}
+
+// checkHostTerminal reports which host terminal Portal would drive for a
+// multi-window spawn burst, computed from the SAME Detect()+Resolve seams the
+// picker and `portal spawn` burst use — no bespoke detection path. It is
+// INFORMATIONAL ONLY (checkInfo, rendered without a pass/fail marker): an
+// unsupported or remote host is an environmental state, not a Portal-health
+// defect (single-target `open` still works — only the multi-window burst is
+// unavailable), so the line sits OUTSIDE the pass/fail set and can NEVER drive
+// the exit code (doctorUnhealthy counts only checkFail). Classification:
+//
+//   - a NULL identity (remote/mosh, no host-local client, or a transient detect
+//     failure Detect folds to NULL) → "unsupported (remote session)";
+//   - a recognised-but-undriven terminal (non-null, Resolution == Unsupported) →
+//     "<Name> (unsupported)";
+//   - a driven terminal (Resolution != Unsupported) → "<Name> (supported)".
+//
+// A NULL identity short-circuits before Resolve is consulted, so even a config
+// `*` catch-all can never reclassify a remote client as supported.
+func checkHostTerminal(detector TerminalDetector, resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)) checkResult {
+	const name = "host terminal"
+	id := detector.Detect()
+	if id.IsNull() {
+		return checkResult{name: name, status: checkInfo, detail: "unsupported (remote session)"}
+	}
+	if _, resolution := resolve(id); resolution == spawn.ResolutionUnsupported {
+		return checkResult{name: name, status: checkInfo, detail: fmt.Sprintf("%s (unsupported)", id.Name)}
+	}
+	return checkResult{name: name, status: checkInfo, detail: fmt.Sprintf("%s (supported)", id.Name)}
 }
 
 // checkStaleHooks reports whether hooks.json holds entries whose pane key no

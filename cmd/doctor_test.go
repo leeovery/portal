@@ -15,8 +15,18 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
 )
+
+// doctorUnsupportedResolve is a neutral host-terminal Resolve seam returning
+// "unsupported" for any identity. withHealthyRuntime stubs it (with a NULL
+// detector) so the appended informational host-terminal line is computed from
+// injected fakes rather than a real spawn.NewDetector (which reads the process
+// tree / tmux) in every doctor test.
+func doctorUnsupportedResolve(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
+	return nil, spawn.ResolutionUnsupported
+}
 
 // seedLiveDaemonPID writes daemon.pid pointing at the current process so the
 // liveness probe always succeeds in-test. Self-contained (does not borrow the
@@ -92,6 +102,12 @@ func allHooksHealthy() map[string]int {
 // event) unless the caller already set them. State-check-focused tests use it
 // so the server gate opens and the runtime checks pass, isolating the
 // server-independent state checks under test.
+//
+// It also stubs the informational host-terminal seams (a NULL detector +
+// unsupported resolve) unless the caller set them, so the appended host-terminal
+// line never invokes a real spawn.NewDetector (which reads the process tree /
+// tmux). The stub is inert: host terminal is checkInfo, never counted by
+// doctorUnhealthy.
 func withHealthyRuntime(deps *DoctorDeps) *DoctorDeps {
 	if deps.ServerRunning == nil {
 		deps.ServerRunning = func() bool { return true }
@@ -101,6 +117,12 @@ func withHealthyRuntime(deps *DoctorDeps) *DoctorDeps {
 	}
 	if deps.HookCounts == nil {
 		deps.HookCounts = func() (map[string]int, error) { return allHooksHealthy(), nil }
+	}
+	if deps.Detector == nil {
+		deps.Detector = fakeTerminalDetector{}
+	}
+	if deps.Resolve == nil {
+		deps.Resolve = doctorUnsupportedResolve
 	}
 	return deps
 }
@@ -602,8 +624,130 @@ func TestDoctorSaverCheck(t *testing.T) {
 	})
 }
 
+// TestDoctorHostTerminalLine covers the informational host-terminal line: the
+// three classifications (supported / recognised-but-undriven / NULL-remote),
+// each computed from the injected Detect()+Resolve seams and reported as
+// checkInfo.
+func TestDoctorHostTerminalLine(t *testing.T) {
+	dir := t.TempDir()
+	seedHealthyStateDir(t, dir)
+
+	hostDeps := func(id spawn.Identity, resolution spawn.Resolution) *DoctorDeps {
+		return withHealthyRuntime(&DoctorDeps{
+			StateDir: dir,
+			Now:      time.Now,
+			Detector: fakeTerminalDetector{id: id},
+			Resolve: func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
+				return nil, resolution
+			},
+		})
+	}
+
+	t.Run("driven terminal reports supported", func(t *testing.T) {
+		deps := hostDeps(spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}, spawn.ResolutionNative)
+		results, err := runDoctorDiagnosis(deps)
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "host terminal")
+		if got.status != checkInfo {
+			t.Errorf("status = %v; want checkInfo", got.status)
+		}
+		if got.detail != "Ghostty (supported)" {
+			t.Errorf("detail = %q; want %q", got.detail, "Ghostty (supported)")
+		}
+	})
+
+	t.Run("null identity reports unsupported remote session regardless of resolve", func(t *testing.T) {
+		// Resolve returns Native to prove the NULL short-circuit ignores it: a
+		// remote/mosh / no-host-local client can never be classified "supported".
+		deps := hostDeps(spawn.Identity{}, spawn.ResolutionNative)
+		results, err := runDoctorDiagnosis(deps)
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "host terminal")
+		if got.status != checkInfo {
+			t.Errorf("status = %v; want checkInfo", got.status)
+		}
+		if got.detail != "unsupported (remote session)" {
+			t.Errorf("detail = %q; want %q", got.detail, "unsupported (remote session)")
+		}
+	})
+
+	t.Run("recognised but undriven terminal reports unsupported", func(t *testing.T) {
+		deps := hostDeps(spawn.Identity{Name: "SomeTerm", BundleID: "com.some.term"}, spawn.ResolutionUnsupported)
+		results, err := runDoctorDiagnosis(deps)
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "host terminal")
+		if got.status != checkInfo {
+			t.Errorf("status = %v; want checkInfo", got.status)
+		}
+		if got.detail != "SomeTerm (unsupported)" {
+			t.Errorf("detail = %q; want %q", got.detail, "SomeTerm (unsupported)")
+		}
+	})
+}
+
+// TestDoctorHostTerminalNeverDrivesExit proves the informational host-terminal
+// line is outside the pass/fail set: an unsupported host can't push the exit
+// non-zero, and a supported host can't rescue a genuine runtime-health failure.
+func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
+	t.Run("unsupported host with a healthy runtime stays healthy", func(t *testing.T) {
+		dir := t.TempDir()
+		seedHealthyStateDir(t, dir)
+		// NULL detector → "unsupported (remote session)"; every runtime check
+		// healthy; the stale checks are not-evaluable (nil stores) — none a fail.
+		deps := withHealthyRuntime(&DoctorDeps{
+			StateDir: dir,
+			Now:      time.Now,
+			Detector: fakeTerminalDetector{},
+			Resolve:  doctorUnsupportedResolve,
+		})
+		results, err := runDoctorDiagnosis(deps)
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		if got := findCheck(t, results, "host terminal"); got.detail != "unsupported (remote session)" {
+			t.Fatalf("setup: host terminal detail = %q; want the unsupported line", got.detail)
+		}
+		if doctorUnhealthy(results) {
+			t.Error("doctorUnhealthy = true; an unsupported host must never drive the exit code")
+		}
+	})
+
+	t.Run("supported host does not rescue a real check failure", func(t *testing.T) {
+		dir := t.TempDir()
+		seedDeadDaemonPID(t, dir) // the daemon check fails → genuine unhealthy
+		deps := withHealthyRuntime(&DoctorDeps{
+			StateDir: dir,
+			Now:      time.Now,
+			Detector: fakeTerminalDetector{id: spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}},
+			Resolve: func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
+				return nil, spawn.ResolutionNative
+			},
+		})
+		results, err := runDoctorDiagnosis(deps)
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		if got := findCheck(t, results, "host terminal"); got.detail != "Ghostty (supported)" {
+			t.Fatalf("setup: host terminal detail = %q; want the supported line", got.detail)
+		}
+		if got := findCheck(t, results, "daemon"); got.status != checkFail {
+			t.Fatalf("setup: daemon status = %v; want checkFail", got.status)
+		}
+		if !doctorUnhealthy(results) {
+			t.Error("doctorUnhealthy = false; a real check failure must stay unhealthy even with a supported host")
+		}
+	})
+}
+
 // TestDoctorCheckOrder pins the stable report order: daemon, saver, hooks,
-// state dir, sessions.json, stale hooks, stale projects.
+// state dir, sessions.json, stale hooks, stale projects, host terminal (the
+// informational host line is appended last).
 func TestDoctorCheckOrder(t *testing.T) {
 	dir := t.TempDir()
 	seedHealthyStateDir(t, dir)
@@ -611,7 +755,7 @@ func TestDoctorCheckOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
-	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json", "stale hooks", "stale projects"}
+	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json", "stale hooks", "stale projects", "host terminal"}
 	if len(results) != len(want) {
 		t.Fatalf("check count = %d, want %d: %+v", len(results), len(want), results)
 	}
