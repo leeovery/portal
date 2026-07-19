@@ -196,6 +196,22 @@ var openCmd = &cobra.Command{
 			return openTUIFunc(cmd, filterVal, command, serverWasStarted(cmd))
 		}
 
+		// Multi-target routing gate (spec § Atomic pre-flight & partial failure; §
+		// The trigger absorbs the first target). Recover the ordered target set from
+		// the RAW argv — cobra collapses repeated same-flag values (`open -s a -s b`)
+		// and splits positionals from flags, losing the interleaved order and repeats
+		// the burst needs. Positioned AFTER the --ack guard and the -f branch but
+		// BEFORE the single-pin blocks, so a 2-pin set (`-s a -s b`) bursts rather
+		// than hitting the single -s block. A set of 2+ targets bursts; a single
+		// glob-expandable target also bursts because it may expand to K≥2 (overriding
+		// Phase 1's single-glob first-match). Everything else (zero targets, a single
+		// non-glob / -p / -z target) falls through to the UNCHANGED single-target path
+		// below.
+		ordered := orderedOpenTargets(openOwnArgs())
+		if isMultiTarget(ordered) {
+			return dispatchOpenBurst(cmd, ordered, command)
+		}
+
 		// -s/--session pin (spec § Domain-pinning flags): resolve the value in the
 		// session domain only (exact name / glob) and dispatch the hit through the
 		// shared outcome switch. A miss hard-fails — the pin never mints and never
