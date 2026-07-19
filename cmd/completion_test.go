@@ -4,6 +4,8 @@ package cmd
 // MUST NOT use t.Parallel.
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -63,6 +65,94 @@ func TestCompleteSessionNames(t *testing.T) {
 	})
 }
 
+// withCompletionAliasKeys overrides the injectable alias-key seam for the
+// duration of a test and restores it via t.Cleanup. The seam is the ONLY
+// config-file touch-point of the alias completer; overriding it keeps the
+// completion tests hermetic (no real aliases file read, no tmux client).
+func withCompletionAliasKeys(t *testing.T, fn func() []string) {
+	t.Helper()
+	prev := completionAliasKeys
+	completionAliasKeys = fn
+	t.Cleanup(func() { completionAliasKeys = prev })
+}
+
+func TestCompleteAliasKeys(t *testing.T) {
+	t.Run("returns all keys plus NoFileComp for empty prefix", func(t *testing.T) {
+		withCompletionAliasKeys(t, func() []string { return []string{"blog", "work"} })
+
+		keys, directive := completeAliasKeys("")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"blog", "work"}; !slices.Equal(keys, want) {
+			t.Errorf("keys = %v, want %v", keys, want)
+		}
+	})
+
+	t.Run("prefix-filters by toComplete", func(t *testing.T) {
+		withCompletionAliasKeys(t, func() []string { return []string{"work", "web"} })
+
+		keys, directive := completeAliasKeys("wo")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"work"}; !slices.Equal(keys, want) {
+			t.Errorf("keys = %v, want %v", keys, want)
+		}
+	})
+
+	t.Run("empty and no panic when seam returns nil (missing aliases file)", func(t *testing.T) {
+		withCompletionAliasKeys(t, func() []string { return nil })
+
+		keys, directive := completeAliasKeys("")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if len(keys) != 0 {
+			t.Errorf("keys = %v, want empty slice", keys)
+		}
+	})
+}
+
+// TestCompletionAliasKeysProductionSeam exercises the REAL completionAliasKeys
+// seam (loadAliasStore -> config-path aliases file via PORTAL_ALIASES_FILE),
+// proving it needs no tmux client (pure config-file I/O) and that a seeded file
+// yields its keys while a missing file yields nothing (no error, no panic).
+func TestCompletionAliasKeysProductionSeam(t *testing.T) {
+	t.Run("loads keys from the seeded aliases file", func(t *testing.T) {
+		aliasFile := filepath.Join(t.TempDir(), "aliases")
+		if err := os.WriteFile(aliasFile, []byte("work=/w\nblog=/b\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		keys, directive := completeAliasKeys("")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"blog", "work"}; !slices.Equal(keys, want) {
+			t.Errorf("keys = %v, want %v", keys, want)
+		}
+	})
+
+	t.Run("missing aliases file yields no suggestions", func(t *testing.T) {
+		t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(t.TempDir(), "does-not-exist"))
+
+		keys, directive := completeAliasKeys("")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if len(keys) != 0 {
+			t.Errorf("keys = %v, want empty slice", keys)
+		}
+	})
+}
+
 func TestCompletionWiring(t *testing.T) {
 	t.Run("open positional routes through completeSessionNames", func(t *testing.T) {
 		if openCmd.ValidArgsFunction == nil {
@@ -94,6 +184,35 @@ func TestCompletionWiring(t *testing.T) {
 		}
 		if want := []string{"api-1"}; !slices.Equal(names, want) {
 			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("open --alias flag completion registered and routes through completeAliasKeys", func(t *testing.T) {
+		fn, ok := openCmd.GetFlagCompletionFunc("alias")
+		if !ok {
+			t.Fatal("--alias flag completion not registered")
+		}
+		withCompletionAliasKeys(t, func() []string { return []string{"work"} })
+
+		keys, directive := fn(openCmd, nil, "")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"work"}; !slices.Equal(keys, want) {
+			t.Errorf("keys = %v, want %v", keys, want)
+		}
+	})
+
+	t.Run("open --path has no Portal completion function (falls to shell)", func(t *testing.T) {
+		if _, ok := openCmd.GetFlagCompletionFunc("path"); ok {
+			t.Error("--path must have NO Portal completion func — cobra emits ShellCompDirectiveDefault so the shell provides path completion")
+		}
+	})
+
+	t.Run("open --zoxide has no Portal completion function (falls to shell)", func(t *testing.T) {
+		if _, ok := openCmd.GetFlagCompletionFunc("zoxide"); ok {
+			t.Error("--zoxide must have NO Portal completion func — cobra emits ShellCompDirectiveDefault so the shell / zoxide provides completion")
 		}
 	})
 

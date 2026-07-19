@@ -990,15 +990,21 @@ func init() {
 	_ = openCmd.Flags().MarkHidden("ack")
 
 	// Tab completion (spec § Tab Completion): the bare positional and the
-	// -s/--session pin both complete session names via the shared completer.
-	// -p/-z are left to the shell; -a alias-key completion lands in 6-4. The
-	// hidden --ack flag and the hidden state namespace are auto-excluded by
+	// -s/--session pin complete session names via the shared completer; -a/--alias
+	// completes the finite Portal-owned alias-key namespace via completeAliasKeys.
+	// -p/--path and -z/--zoxide register NO completer, so cobra emits
+	// ShellCompDirectiveDefault and the shell (and zoxide's own, for -z) provides
+	// file/default completion — the deliberate ABSENCE is the intended behaviour.
+	// The hidden --ack flag and the hidden state namespace are auto-excluded by
 	// cobra — no work here beyond not un-hiding them.
 	openCmd.ValidArgsFunction = func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return completeSessionNames(toComplete)
 	}
 	_ = openCmd.RegisterFlagCompletionFunc("session", func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return completeSessionNames(toComplete)
+	})
+	_ = openCmd.RegisterFlagCompletionFunc("alias", func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return completeAliasKeys(toComplete)
 	})
 
 	rootCmd.AddCommand(openCmd)
