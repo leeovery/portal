@@ -56,6 +56,11 @@ type OpenDeps struct {
 	AliasLookup   resolver.AliasLookup
 	Zoxide        resolver.ZoxideQuerier
 	DirValidator  resolver.DirValidator
+	// AckWriter writes the @portal-spawn-<batch>-<token> confirmation marker for
+	// a spawned window (the hidden --ack carrier). When nil, buildAckWriter falls
+	// back to a real @portal-spawn- server-option channel over the shared tmux
+	// client. See writeAckMarker and the spec § Hidden --ack flag.
+	AckWriter spawn.AckWriter
 }
 
 // SessionConnector connects the user to a tmux session.
@@ -154,6 +159,19 @@ var openCmd = &cobra.Command{
 		command, destination, err := parseCommandArgs(cmd, args)
 		if err != nil {
 			return err
+		}
+
+		// --ack <batch>:<token> is the hidden internal receipt flag (spec § Hidden
+		// --ack flag): a spawned host window writes the @portal-spawn-<batch>-<token>
+		// server option as its last act before the attach/mint handoff. Validate the
+		// value fast, at the very TOP of RunE — before the -f branch and the pin
+		// blocks (which touch tmux via ListSessionNames) — so a malformed value is a
+		// usage error (exit 2) before any tmux call. The best-effort write itself
+		// rides both receivers via writeAckMarker in openResolved.
+		if ackVal, _ := cmd.Flags().GetString("ack"); ackVal != "" {
+			if _, _, ok := spawn.ParseSpawnAckFlag(ackVal); !ok {
+				return NewUsageError("open: --ack must be <batch>:<token>")
+			}
 		}
 
 		// -f/--filter is the sole non-composing flag (spec § -f/--filter is the sole
@@ -334,12 +352,55 @@ func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []str
 		if len(command) > 0 {
 			return NewUsageError("a command (-e/--) can only run in a newly-created session, not an existing one")
 		}
+		// The --ack marker write is the LAST act before the attach handoff, and
+		// strictly AFTER the command guard above — a command+attach usage error
+		// must fire without writing a marker (spec § Hidden --ack flag).
+		writeAckMarker(cmd)
 		return openSessionFunc(cmd, r.Name)
 	case *resolver.PathResult:
+		// The --ack marker write is the LAST act before the mint handoff.
+		writeAckMarker(cmd)
 		return openPathFunc(cmd, r.Path, command)
 	default:
 		return fmt.Errorf("unexpected resolution result: %T", result)
 	}
+}
+
+// writeAckMarker writes the @portal-spawn-<batch>-<token> confirmation marker as
+// the last act before the attach/mint handoff, when the hidden --ack flag is
+// present (a no-op when absent). The value was already validated at the top of
+// RunE, so the re-parse here is guaranteed to succeed. The write is best-effort
+// (spec § Hidden --ack flag): a failure logs at DEBUG under the spawn component
+// and falls through to the connector — the spawned window still attaches, a
+// false negative the parent's poll classifies as failed, never an orphan.
+func writeAckMarker(cmd *cobra.Command) {
+	ackVal, _ := cmd.Flags().GetString("ack")
+	if ackVal == "" {
+		return
+	}
+	batch, token, ok := spawn.ParseSpawnAckFlag(ackVal)
+	if !ok {
+		return // unreachable: RunE rejects a malformed --ack before dispatch
+	}
+	if err := buildAckWriter(cmd).Write(batch, token); err != nil {
+		spawnLogger.Debug("spawn-ack marker write failed",
+			"batch", batch,
+			"detail", err.Error(),
+		)
+	}
+}
+
+// buildAckWriter returns the ack writer for the open command's --ack receiver.
+// When openDeps carries a non-nil AckWriter (testing), it is used; otherwise a
+// @portal-spawn- server-option channel over the shared tmux client (which
+// satisfies both the writer and lister seams) — mirroring attach's
+// buildAttachDeps.
+func buildAckWriter(cmd *cobra.Command) spawn.AckWriter {
+	if openDeps != nil && openDeps.AckWriter != nil {
+		return openDeps.AckWriter
+	}
+	client := tmuxClient(cmd)
+	return spawn.NewServerOptionAckChannel(client, client)
 }
 
 // resolveDecision derives the (domain, resolved_path) attrs for the resolve
@@ -910,5 +971,7 @@ func init() {
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")
+	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — write the @portal-spawn-<batch>-<token> ack marker before the attach/mint handoff")
+	_ = openCmd.Flags().MarkHidden("ack")
 	rootCmd.AddCommand(openCmd)
 }

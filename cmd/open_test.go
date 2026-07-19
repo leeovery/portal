@@ -3303,3 +3303,300 @@ func TestExecMarker_VisibleAtWARN(t *testing.T) {
 		t.Errorf("args attr = %q (ok=%v), want %q", gotArgs, ok, "attach-session -t =foo")
 	}
 }
+
+// countingSessionLister records how many times ListSessionNames is invoked, so a
+// test can prove a fast-fail (e.g. a malformed --ack) short-circuits before any
+// session-domain resolution touches tmux.
+type countingSessionLister struct {
+	names []string
+	calls int
+}
+
+func (c *countingSessionLister) ListSessionNames() ([]string, error) {
+	c.calls++
+	return c.names, nil
+}
+
+func TestOpenCommand_Ack_MalformedValue_UsageErrorBeforeTmux(t *testing.T) {
+	// `open <target> --ack <malformed>` is a usage error (exit 2) rejected at the
+	// very top of RunE — BEFORE any resolver/tmux call — so the session lister is
+	// never touched and neither connector seam fires (spec § Hidden --ack flag).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	lister := &countingSessionLister{names: []string{"dev"}}
+	openDeps = &OpenDeps{
+		SessionLister: lister,
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "dev", "--ack", "notcolon"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected a UsageError for a malformed --ack value, got nil")
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("error %v (%T) does not match *cmd.UsageError", err, err)
+	}
+	want := "open: --ack must be <batch>:<token>"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	if lister.calls != 0 {
+		t.Errorf("ListSessionNames called %d times for a malformed --ack, want 0 (reject before tmux)", lister.calls)
+	}
+	if sessionCalled {
+		t.Error("openSessionFunc must not be called for a malformed --ack")
+	}
+	if pathCalled {
+		t.Error("openPathFunc must not be called for a malformed --ack")
+	}
+}
+
+func TestOpenCommand_Ack_MarkerWrittenBeforeSessionAttach(t *testing.T) {
+	// `open -s <name> --ack <batch>:<token>` writes the @portal-spawn marker as the
+	// last act before the attach handoff: the ack Write fires with (batch, token)
+	// AND strictly before openSessionFunc (spec § Hidden --ack flag).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	var order []string
+	ackWriter := &mockAckWriter{order: &order}
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"dev"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+		AckWriter:     ackWriter,
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var connectedTo string
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error {
+		connectedTo = name
+		order = append(order, "session")
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-s", "dev", "--ack", "b:t"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(ackWriter.calls) != 1 {
+		t.Fatalf("Write call count = %d, want 1", len(ackWriter.calls))
+	}
+	if got := ackWriter.calls[0]; got.batch != "b" || got.token != "t" {
+		t.Errorf("Write(%q, %q), want (%q, %q)", got.batch, got.token, "b", "t")
+	}
+	if connectedTo != "dev" {
+		t.Errorf("openSessionFunc called with %q, want %q", connectedTo, "dev")
+	}
+	wantOrder := []string{"write", "session"}
+	if !slices.Equal(order, wantOrder) {
+		t.Errorf("call order = %v, want %v (write strictly before attach)", order, wantOrder)
+	}
+}
+
+func TestOpenCommand_Ack_MarkerWrittenBeforePathMint(t *testing.T) {
+	// `open -p <dir> --ack <batch>:<token>` writes the @portal-spawn marker as the
+	// last act before the mint handoff: the ack Write fires with (batch, token) AND
+	// strictly before openPathFunc (spec § Hidden --ack flag).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	var order []string
+	ackWriter := &mockAckWriter{order: &order}
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+		AckWriter:     ackWriter,
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	dir := t.TempDir()
+
+	var mintedPath string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, _ []string) error {
+		mintedPath = path
+		order = append(order, "path")
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-p", dir, "--ack", "b:t"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(ackWriter.calls) != 1 {
+		t.Fatalf("Write call count = %d, want 1", len(ackWriter.calls))
+	}
+	if got := ackWriter.calls[0]; got.batch != "b" || got.token != "t" {
+		t.Errorf("Write(%q, %q), want (%q, %q)", got.batch, got.token, "b", "t")
+	}
+	if mintedPath != dir {
+		t.Errorf("openPathFunc minted %q, want %q", mintedPath, dir)
+	}
+	wantOrder := []string{"write", "path"}
+	if !slices.Equal(order, wantOrder) {
+		t.Errorf("call order = %v, want %v (write strictly before mint)", order, wantOrder)
+	}
+}
+
+func TestOpenCommand_Ack_WriteFailureStillConnects(t *testing.T) {
+	// A best-effort marker-write failure must NOT abort the handoff: the connector
+	// still runs (false negative, no orphan) and RunE returns nil (spec § Hidden
+	// --ack flag — the write is best-effort).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	t.Run("session attach", func(t *testing.T) {
+		ackWriter := &mockAckWriter{err: fmt.Errorf("set-option failed")}
+		openDeps = &OpenDeps{
+			SessionLister: &testSessionLister{names: []string{"dev"}},
+			AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+			Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+			DirValidator:  &testDirValidator{existing: map[string]bool{}},
+			AckWriter:     ackWriter,
+		}
+		t.Cleanup(func() { openDeps = nil })
+
+		var connectedTo string
+		origSession := openSessionFunc
+		openSessionFunc = func(_ *cobra.Command, name string) error {
+			connectedTo = name
+			return nil
+		}
+		t.Cleanup(func() { openSessionFunc = origSession })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"open", "-s", "dev", "--ack", "b:t"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("expected no error on best-effort write failure, got %v", err)
+		}
+
+		if len(ackWriter.calls) != 1 {
+			t.Errorf("Write call count = %d, want 1", len(ackWriter.calls))
+		}
+		if connectedTo != "dev" {
+			t.Errorf("openSessionFunc called with %q, want %q (best-effort must still connect)", connectedTo, "dev")
+		}
+	})
+
+	t.Run("path mint", func(t *testing.T) {
+		ackWriter := &mockAckWriter{err: fmt.Errorf("set-option failed")}
+		openDeps = &OpenDeps{
+			SessionLister: &testSessionLister{},
+			AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+			Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+			DirValidator:  &testDirValidator{existing: map[string]bool{}},
+			AckWriter:     ackWriter,
+		}
+		t.Cleanup(func() { openDeps = nil })
+
+		dir := t.TempDir()
+
+		var mintedPath string
+		origPath := openPathFunc
+		openPathFunc = func(_ *cobra.Command, path string, _ []string) error {
+			mintedPath = path
+			return nil
+		}
+		t.Cleanup(func() { openPathFunc = origPath })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"open", "-p", dir, "--ack", "b:t"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("expected no error on best-effort write failure, got %v", err)
+		}
+
+		if len(ackWriter.calls) != 1 {
+			t.Errorf("Write call count = %d, want 1", len(ackWriter.calls))
+		}
+		if mintedPath != dir {
+			t.Errorf("openPathFunc minted %q, want %q (best-effort must still mint)", mintedPath, dir)
+		}
+	})
+}
+
+func TestOpenCommand_Ack_CommandAttachGuardFiresBeforeWrite(t *testing.T) {
+	// The command+attach usage guard must fire BEFORE the marker write on the
+	// session arm: `open -s <name> -e <cmd> --ack b:t` is a usage error and NO
+	// marker is written (spec § Command passthrough — mint-scoped).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	ackWriter := &mockAckWriter{}
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"dev"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+		AckWriter:     ackWriter,
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		t.Error("openSessionFunc must not be called: a command targeting an existing session is a usage error")
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-s", "dev", "-e", "claude", "--ack", "b:t"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected a UsageError for a command targeting an attach session, got nil")
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("error %v (%T) does not match *cmd.UsageError", err, err)
+	}
+	if len(ackWriter.calls) != 0 {
+		t.Errorf("marker written %d times despite the command+attach guard, want 0", len(ackWriter.calls))
+	}
+}
+
+func TestOpenCommand_Ack_FlagIsHidden(t *testing.T) {
+	// --ack is an internal receipt flag: hidden from --help and completion via
+	// Cobra MarkHidden (spec § Hidden --ack flag).
+	f := openCmd.Flags().Lookup("ack")
+	if f == nil {
+		t.Fatal("open command has no --ack flag")
+	}
+	if !f.Hidden {
+		t.Error("--ack flag must be hidden (MarkHidden), but Hidden == false")
+	}
+}
