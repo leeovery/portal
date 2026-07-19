@@ -321,6 +321,94 @@ func TestOpenCommand_SessionPin_ExactHit_RoutesToConnector(t *testing.T) {
 	}
 }
 
+func TestOpenCommand_BareSessionAttach_WithCommand_UsageError(t *testing.T) {
+	// A command (-e/--) is mint-scoped: an existing (attach) session has no safe
+	// command-injection channel, so `open <exact-session-name> -e <cmd>` is a
+	// usage error (exit 2) and NO attach happens (spec § Command passthrough —
+	// mint-scoped). The bare-positional session hit routes through the shared
+	// openResolved dispatch, where the *SessionResult arm rejects a command.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"dev"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "dev", "-e", "claude"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	want := "a command (-e/--) can only run in a newly-created session, not an existing one"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("expected *UsageError (exit 2), got %T", err)
+	}
+	if sessionCalled {
+		t.Error("openSessionFunc must not be called: no attach may happen when a command targets an existing session")
+	}
+}
+
+func TestOpenCommand_SessionPin_WithCommand_UsageError(t *testing.T) {
+	// The same mint-scoped guard fires for the -s pin: `open -s <session> -e <cmd>`
+	// is a usage error (exit 2), because the -s pin also dispatches its session hit
+	// through the shared openResolved switch. No attach happens.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"dev"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-s", "dev", "-e", "claude"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	want := "a command (-e/--) can only run in a newly-created session, not an existing one"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("expected *UsageError (exit 2), got %T", err)
+	}
+	if sessionCalled {
+		t.Error("openSessionFunc must not be called: no attach may happen when a command targets a -s pinned session")
+	}
+}
+
 func TestOpenCommand_SessionPin_Glob_AttachesFirstMatch(t *testing.T) {
 	// `open -s '<glob>'` expands against the user-visible session set via
 	// filepath.Match; at single-target arity the first match attaches (multi-match

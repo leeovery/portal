@@ -321,9 +321,19 @@ var openCmd = &cobra.Command{
 // through the identical outcome switch. A MissResult is deliberately NOT handled
 // here — the bare path renders its own escape-hatch message inline, and pins
 // never yield a miss — so any unexpected result type is a defensive error.
+//
+// A command (-e/--) is mint-scoped (spec § Command passthrough — mint-scoped):
+// an existing (attach) session has no safe command-injection channel (send-keys
+// corrupts a busy pane; respawn-pane -k destroys running work), so a command can
+// never run in an attach target. The guard lives here, in the *SessionResult
+// arm, so it covers BOTH the bare-positional session hit and the -s pin (both
+// route through this switch) with a single check.
 func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []string) error {
 	switch r := result.(type) {
 	case *resolver.SessionResult:
+		if len(command) > 0 {
+			return NewUsageError("a command (-e/--) can only run in a newly-created session, not an existing one")
+		}
 		return openSessionFunc(cmd, r.Name)
 	case *resolver.PathResult:
 		return openPathFunc(cmd, r.Path, command)
