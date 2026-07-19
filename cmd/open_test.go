@@ -1149,6 +1149,162 @@ func TestOpenCommand_TotalMiss_HardFails(t *testing.T) {
 	}
 }
 
+func TestOpenCommand_ResolveLog_SessionHit(t *testing.T) {
+	// A session-domain hit emits exactly one INFO "resolve" decision line with
+	// domain=session and resolved_path = the session name (the attr is overloaded
+	// per the spec: resolved directory, or session name for a session hit).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"dev"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error { return nil }
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "dev"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	recs := h.resolveRecords()
+	if len(recs) != 1 {
+		t.Fatalf("expected exactly 1 resolve record, got %d", len(recs))
+	}
+	r := recs[0]
+	if r.record.Level != slog.LevelInfo {
+		t.Errorf("resolve record level = %v, want INFO", r.record.Level)
+	}
+	assertResolveAttr(t, r, "target", "dev")
+	assertResolveAttr(t, r, "domain", "session")
+	assertResolveAttr(t, r, "resolved_path", "dev")
+}
+
+func TestOpenCommand_ResolveLog_ZoxideMint(t *testing.T) {
+	// A zoxide mint emits one INFO "resolve" line with domain=zoxide and
+	// resolved_path = the resolved directory.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{result: "/Users/lee/Code/blog"},
+		DirValidator:  &testDirValidator{existing: map[string]bool{"/Users/lee/Code/blog": true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error { return nil }
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "blog"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	recs := h.resolveRecords()
+	if len(recs) != 1 {
+		t.Fatalf("expected exactly 1 resolve record, got %d", len(recs))
+	}
+	r := recs[0]
+	if r.record.Level != slog.LevelInfo {
+		t.Errorf("resolve record level = %v, want INFO", r.record.Level)
+	}
+	assertResolveAttr(t, r, "target", "blog")
+	assertResolveAttr(t, r, "domain", "zoxide")
+	assertResolveAttr(t, r, "resolved_path", "/Users/lee/Code/blog")
+}
+
+func TestOpenCommand_ResolveLog_Miss(t *testing.T) {
+	// A total miss emits one INFO "resolve" line with domain=miss and an empty
+	// resolved_path — IN ADDITION to (not instead of) the separate stderr
+	// hard-fail error, which the command still returns.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "blog"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected hard-fail error for total miss, got nil")
+	}
+	want := "nothing resolved for 'blog' — try -f blog"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+
+	recs := h.resolveRecords()
+	if len(recs) != 1 {
+		t.Fatalf("expected exactly 1 resolve record, got %d", len(recs))
+	}
+	r := recs[0]
+	if r.record.Level != slog.LevelInfo {
+		t.Errorf("resolve record level = %v, want INFO", r.record.Level)
+	}
+	assertResolveAttr(t, r, "target", "blog")
+	assertResolveAttr(t, r, "domain", "miss")
+	assertResolveAttr(t, r, "resolved_path", "")
+}
+
+func TestOpenCommand_ResolveLog_GlobEmitsNoLine(t *testing.T) {
+	// A glob target is deterministic (session-domain by construction, not a
+	// guess), so it emits NO "resolve" decision line — the component stays
+	// focused on guessing-chain resolutions.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"dev-abc"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error { return nil }
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "dev*"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if recs := h.resolveRecords(); len(recs) != 0 {
+		t.Fatalf("expected no resolve records for a glob target, got %d", len(recs))
+	}
+}
+
 func TestOpenCommand_BareProjectName_MintsNeverAttaches(t *testing.T) {
 	// 'open api' with a running api-x7Kd9a session must NOT attach it: the
 	// exact-name check misses ({project}-{nanoid} names never equal the bare
@@ -1405,6 +1561,35 @@ func filterExecRecords(in []capturedRecord) []capturedRecord {
 		}
 	}
 	return out
+}
+
+// resolveRecords returns every captured record whose component is "resolve" and
+// whose message is "resolved" — the resolution-decision receipt line.
+func (h *capturingHandler) resolveRecords() []capturedRecord {
+	var out []capturedRecord
+	for _, cr := range h.snapshot() {
+		if cr.record.Message != "resolved" {
+			continue
+		}
+		if recordComponent(cr) == "resolve" {
+			out = append(out, cr)
+		}
+	}
+	return out
+}
+
+// assertResolveAttr asserts that a captured resolve record carries the named
+// string attr with the expected value.
+func assertResolveAttr(t *testing.T, cr capturedRecord, key, want string) {
+	t.Helper()
+	got, ok := recordStringAttr(cr, key)
+	if !ok {
+		t.Errorf("resolve record missing %q attr", key)
+		return
+	}
+	if got != want {
+		t.Errorf("resolve record %q = %q, want %q", key, got, want)
+	}
 }
 
 // recordComponent extracts the "component" attr from a captured record, checking

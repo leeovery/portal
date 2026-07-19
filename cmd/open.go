@@ -21,6 +21,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// resolveLogger binds the "resolve" log component once for the whole open
+// command (a spec-governed amendment to the closed log taxonomy — see the spec
+// § Wrong-guess feedback). openCmd.RunE emits exactly one INFO decision line per
+// bare positional resolved through the guessing chain, so a confusing guess is
+// reconstructable from portal.log. internal/resolver stays a pure, log-free
+// library: the binding and emission live only here.
+var resolveLogger = log.For("resolve")
+
 // openTUIFunc is the function used to launch the TUI. Tests override it via
 // t.Cleanup-restored assignment to capture arguments without launching the
 // real Bubble Tea program.
@@ -164,6 +172,20 @@ var openCmd = &cobra.Command{
 			return err
 		}
 
+		// Resolution-decision receipt (spec § Wrong-guess feedback — tmux is the
+		// receipt): emit one durable INFO line per bare positional resolved through
+		// the guessing chain (session → path → alias → zoxide), so a confusing guess
+		// is reconstructable from portal.log. Gated on the glob predicate — glob (and
+		// later, pinned) targets are deterministic, not guesses, so they emit no line.
+		// Emitted on a miss too (domain=miss, empty resolved_path), IN ADDITION to the
+		// separate stderr hard-fail below. A mid-chain hard error (DirNotFoundError)
+		// returned above never reaches here: classification did not complete, so no
+		// decision line fires.
+		if !resolver.HasGlobMeta(query) {
+			domain, resolvedPath := resolveDecision(result)
+			resolveLogger.Info("resolved", "target", query, "domain", domain, "resolved_path", resolvedPath)
+		}
+
 		switch r := result.(type) {
 		case *resolver.SessionResult:
 			return openSessionFunc(cmd, r.Name)
@@ -178,6 +200,25 @@ var openCmd = &cobra.Command{
 			return fmt.Errorf("unexpected resolution result: %T", result)
 		}
 	},
+}
+
+// resolveDecision derives the (domain, resolved_path) attrs for the resolve
+// decision log line from a completed classification result. resolved_path is
+// overloaded per the spec: the resolved directory for a path/alias/zoxide hit,
+// the session name for a session hit, and empty for a miss. It reads the domain
+// off the already-obtained result (r.Domain / the "miss" literal) — it does not
+// re-run the classification.
+func resolveDecision(result resolver.QueryResult) (domain, resolvedPath string) {
+	switch r := result.(type) {
+	case *resolver.SessionResult:
+		return r.Domain, r.Name
+	case *resolver.PathResult:
+		return r.Domain, r.Path
+	case *resolver.MissResult:
+		return "miss", ""
+	default:
+		return "", ""
+	}
 }
 
 // parseCommandArgs extracts the command slice and destination from cobra args and flags.
