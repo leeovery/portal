@@ -92,6 +92,13 @@ func aggregatedMissError(misses []string) error {
 	return fmt.Errorf("nothing resolved for: %s", spawn.QuoteJoin(misses))
 }
 
+// commandAttachOnlyMessage is the user-facing usage-error text for the
+// command-on-attach guard. It is the SOLE authoring site for this wording,
+// consumed by BOTH the single-target guard (openResolved's *SessionResult arm,
+// cmd/open.go) and the multi-target zero-mint guard (runOpenBurstWithDeps,
+// cmd/open_burst_run.go — the arity of the same rule) so the two cannot drift.
+const commandAttachOnlyMessage = "a command (-e/--) can only run in a newly-created session, not an existing one"
+
 // singleMissError is the single-target (N=1) "nothing resolved" hard-fail
 // message (spec § Miss handling): it keeps the Phase-1 -f escape-hatch
 // suggestion, substituting the target TWICE (quoted, then after -f). It is the

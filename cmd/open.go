@@ -323,7 +323,7 @@ func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []str
 	switch r := result.(type) {
 	case *resolver.SessionResult:
 		if len(command) > 0 {
-			return NewUsageError("a command (-e/--) can only run in a newly-created session, not an existing one")
+			return NewUsageError(commandAttachOnlyMessage)
 		}
 		// The --ack marker write is the LAST act before the attach handoff, and
 		// strictly AFTER the command guard above — a command+attach usage error

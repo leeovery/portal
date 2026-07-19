@@ -148,7 +148,7 @@ func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command 
 	// with the Task 2-6 message BEFORE detect/resolve/spawn — the multi-target arity
 	// of the single-target attach-command guard (openResolved's *SessionResult arm).
 	if len(command) > 0 && !hasMintSurface(surfaces) {
-		return NewUsageError("a command (-e/--) can only run in a newly-created session, not an existing one")
+		return NewUsageError(commandAttachOnlyMessage)
 	}
 
 	trigger, external := spawn.SplitTriggerFirst(surfaces)
