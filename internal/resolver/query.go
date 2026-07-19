@@ -170,6 +170,37 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 	return &MissResult{Target: query}, nil
 }
 
+// ResolveSessionPin resolves query in the session domain ONLY — the -s/--session
+// pin (spec § Domain-pinning flags). It matches the value against the
+// user-visible session set (an exact name, or a filepath.Match glob) and never
+// consults aliases / zoxide / the filesystem: a pin names its domain explicitly.
+// A hit yields a SessionResult — Domain "session" for an exact name, "glob" for a
+// glob expansion (the first match at single-target arity; per-match window
+// fan-out is the Phase 3 burst). The pin never mints and never falls back to the
+// picker (spec § Pinned-domain contract).
+func (qr *QueryResolver) ResolveSessionPin(query string) (QueryResult, error) {
+	// Fetch the user-visible session set once. A nil/empty slice or a lister error
+	// collapses to "no sessions" — the same tolerance the bare-target session
+	// pre-check (Resolve) applies.
+	names, _ := qr.sessions.ListSessionNames()
+
+	if HasGlobMeta(query) {
+		if matches := MatchSessions(query, names); len(matches) > 0 {
+			return &SessionResult{Name: matches[0], Domain: "glob"}, nil
+		}
+	} else if slices.Contains(names, query) {
+		return &SessionResult{Name: query, Domain: "session"}, nil
+	}
+
+	// Miss: no exact match, zero glob matches, or an empty session set. Hard-fail
+	// with the VERBATIM string the retired attach command used, so `open --session`
+	// is byte-identical to the former `attach` on the miss path (planner decision).
+	// A plain error (not a UsageError) → runtime failure → exit 1. The capitalised
+	// leading word trips staticcheck ST1005, silenced per the directive attach.go
+	// carried.
+	return nil, fmt.Errorf("No session found: %s", query) //nolint:staticcheck // user-facing message per spec
+}
+
 // validatedPath returns a PathResult (tagged with the resolving domain) after
 // verifying the directory exists on disk. A non-existent directory is a hard
 // error (DirNotFoundError), distinct from a miss.

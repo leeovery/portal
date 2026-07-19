@@ -511,6 +511,174 @@ func TestQueryResolver_Resolve_SessionDomain(t *testing.T) {
 	})
 }
 
+// failingAliasLookup fails the test if Get is ever called. ResolveSessionPin is
+// session-domain only, so it must never consult the alias lookup.
+type failingAliasLookup struct{ t *testing.T }
+
+func (f *failingAliasLookup) Get(name string) (string, bool) {
+	f.t.Helper()
+	f.t.Fatalf("ResolveSessionPin must not consult aliases (Get called with %q)", name)
+	return "", false
+}
+
+// failingZoxideQuerier fails the test if Query is ever called. ResolveSessionPin
+// is session-domain only, so it must never consult zoxide.
+type failingZoxideQuerier struct{ t *testing.T }
+
+func (f *failingZoxideQuerier) Query(terms string) (string, error) {
+	f.t.Helper()
+	f.t.Fatalf("ResolveSessionPin must not consult zoxide (Query called with %q)", terms)
+	return "", nil
+}
+
+func TestQueryResolver_ResolveSessionPin(t *testing.T) {
+	// newPinResolver builds a QueryResolver whose alias and zoxide seams FAIL the
+	// test if consulted — ResolveSessionPin is session-domain only, so every pin
+	// case doubles as a "never consults the directory chain" guard.
+	newPinResolver := func(t *testing.T, names []string, err error) *resolver.QueryResolver {
+		return resolver.NewQueryResolver(
+			&mockSessionLister{names: names, err: err},
+			&failingAliasLookup{t: t},
+			&failingZoxideQuerier{t: t},
+			&mockDirValidator{existing: map[string]bool{}},
+		)
+	}
+
+	t.Run("exact user-visible session-name hit returns SessionResult domain session", func(t *testing.T) {
+		qr := newPinResolver(t, []string{"api-x7Kd9a", "web-abc123"}, nil)
+
+		result, err := qr.ResolveSessionPin("api-x7Kd9a")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		sr, ok := result.(*resolver.SessionResult)
+		if !ok {
+			t.Fatalf("expected *SessionResult, got %T", result)
+		}
+		if sr.Name != "api-x7Kd9a" {
+			t.Errorf("SessionResult.Name = %q, want %q", sr.Name, "api-x7Kd9a")
+		}
+		if sr.Domain != "session" {
+			t.Errorf("SessionResult.Domain = %q, want %q", sr.Domain, "session")
+		}
+	})
+
+	t.Run("glob expansion attaches the first match with domain glob", func(t *testing.T) {
+		// Matching preserves lister order; the single-target arity attaches the
+		// first match (per-match window fan-out is the Phase 3 burst).
+		qr := newPinResolver(t, []string{"api-1", "api-2", "web-abc"}, nil)
+
+		result, err := qr.ResolveSessionPin("api-*")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		sr, ok := result.(*resolver.SessionResult)
+		if !ok {
+			t.Fatalf("expected *SessionResult, got %T", result)
+		}
+		if sr.Name != "api-1" {
+			t.Errorf("SessionResult.Name = %q, want %q (first match)", sr.Name, "api-1")
+		}
+		if sr.Domain != "glob" {
+			t.Errorf("SessionResult.Domain = %q, want %q", sr.Domain, "glob")
+		}
+	})
+
+	t.Run("zero-match glob hard-fails with the verbatim attach miss message", func(t *testing.T) {
+		qr := newPinResolver(t, []string{"web-abc"}, nil)
+
+		result, err := qr.ResolveSessionPin("api-*")
+		if result != nil {
+			t.Errorf("expected nil result on a miss, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail error for a zero-match glob, got nil")
+		}
+		if want := "No session found: api-*"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("exact miss hard-fails with the verbatim attach miss message", func(t *testing.T) {
+		qr := newPinResolver(t, []string{"web-abc"}, nil)
+
+		result, err := qr.ResolveSessionPin("api")
+		if result != nil {
+			t.Errorf("expected nil result on a miss, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail error for an exact miss, got nil")
+		}
+		if want := "No session found: api"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("internal underscore-prefixed session is a miss (filtered lister)", func(t *testing.T) {
+		// The lister returns the leading-underscore-filtered view, so pinning
+		// _portal-saver never matches — it is treated as if it did not exist.
+		qr := newPinResolver(t, []string{"api-x7Kd9a"}, nil)
+
+		result, err := qr.ResolveSessionPin("_portal-saver")
+		if result != nil {
+			t.Errorf("expected nil result for a filtered internal session, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for a filtered internal session, got nil")
+		}
+		if want := "No session found: _portal-saver"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("empty session set is a miss", func(t *testing.T) {
+		qr := newPinResolver(t, []string{}, nil)
+
+		result, err := qr.ResolveSessionPin("anything")
+		if result != nil {
+			t.Errorf("expected nil result for an empty session set, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for an empty session set, got nil")
+		}
+		if want := "No session found: anything"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("lister error collapses to a miss, not a resolve error", func(t *testing.T) {
+		qr := newPinResolver(t, nil, errors.New("tmux unreachable"))
+
+		result, err := qr.ResolveSessionPin("anything")
+		if result != nil {
+			t.Errorf("expected nil result on a lister error, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected the miss hard-fail on a lister error, got nil")
+		}
+		if want := "No session found: anything"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("never consults aliases or zoxide on a miss", func(t *testing.T) {
+		// A bare Resolve would fall through a session miss to alias/zoxide. The pin
+		// must not: with a name that also exists as an alias, the failing seams
+		// would fatal the test if consulted, and the pin hard-fails instead.
+		qr := newPinResolver(t, []string{"web-abc"}, nil)
+
+		_, err := qr.ResolveSessionPin("myapp")
+		if err == nil {
+			t.Fatal("expected hard-fail (session-domain only), got nil")
+		}
+		if want := "No session found: myapp"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+}
+
 func TestQueryResolver_Resolve_NonExistentResolvedDirectory(t *testing.T) {
 	t.Run("non-existent resolved directory prints error and exits 1", func(t *testing.T) {
 		aliasLookup := &mockAliasLookup{aliases: map[string]string{"myapp": "/does/not/exist"}}

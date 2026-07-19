@@ -256,6 +256,184 @@ func TestOpenCommand_SessionNameHit_RoutesToSessionConnector(t *testing.T) {
 	}
 }
 
+func TestOpenCommand_SessionPin_ExactHit_RoutesToConnector(t *testing.T) {
+	// `open -s <exact-user-visible-name>` resolves in the session domain only and
+	// attaches (openSessionFunc) — never mints (openPathFunc) or opens the picker
+	// (openTUIFunc). Spec § Domain-pinning flags: -s attaches, never mints.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"api-x7Kd9a"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var connectedTo string
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error {
+		connectedTo = name
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-s", "api-x7Kd9a"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if connectedTo != "api-x7Kd9a" {
+		t.Errorf("openSessionFunc called with %q, want %q", connectedTo, "api-x7Kd9a")
+	}
+	if pathCalled {
+		t.Error("openPathFunc must not be called for a -s pin (never mints)")
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called for a -s pin (never opens the picker)")
+	}
+}
+
+func TestOpenCommand_SessionPin_Glob_AttachesFirstMatch(t *testing.T) {
+	// `open -s '<glob>'` expands against the user-visible session set via
+	// filepath.Match; at single-target arity the first match attaches (multi-match
+	// fan-out is deferred to Phase 3). Spec § Glob targets.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"api-1", "api-2"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var connectedTo string
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error {
+		connectedTo = name
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-s", "api-*"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if connectedTo != "api-1" {
+		t.Errorf("openSessionFunc called with %q, want %q (first glob match)", connectedTo, "api-1")
+	}
+}
+
+func TestOpenCommand_SessionPin_Miss_HardFailsNoPicker(t *testing.T) {
+	// A -s miss (no exact, zero glob, or empty set) hard-fails with the verbatim
+	// attach miss message and NEVER opens the picker or mints. Spec § Pinned-domain
+	// contract: pins never fall back to the picker.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"web-abc"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-s", "api"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected hard-fail error for a -s miss, got nil")
+	}
+	want := "No session found: api"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called on a -s miss")
+	}
+	if pathCalled {
+		t.Error("openPathFunc must not be called on a -s miss")
+	}
+	// A missing session is a runtime failure → plain error (exit 1), not UsageError.
+	var usageErr *UsageError
+	if errors.As(err, &usageErr) {
+		t.Error("-s miss error must be a plain error, not a *UsageError")
+	}
+}
+
+func TestOpenCommand_SessionPin_EmitsNoResolveLine(t *testing.T) {
+	// A -s pin is deterministic (session-domain by construction), not a guess, so
+	// it emits NO "resolve" decision line (spec § Wrong-guess feedback — pins emit
+	// no resolve line; Phase 1 gates the line to the bare-positional path).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"dev"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error { return nil }
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-s", "dev"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if recs := h.resolveRecords(); len(recs) != 0 {
+		t.Fatalf("expected no resolve records for a -s pin, got %d", len(recs))
+	}
+}
+
 func TestOpenSession_DelegatesToBuildSessionConnector(t *testing.T) {
 	// openSession must build the connector via buildSessionConnector and connect
 	// through it — no real tmux. Inside tmux the connector is *SwitchConnector, so

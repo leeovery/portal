@@ -172,6 +172,26 @@ var openCmd = &cobra.Command{
 			return openTUIFunc(cmd, filterVal, command, serverWasStarted(cmd))
 		}
 
+		// -s/--session pin (spec § Domain-pinning flags): resolve the value in the
+		// session domain only (exact name / glob) and dispatch the hit through the
+		// shared outcome switch. A miss hard-fails — the pin never mints and never
+		// opens the picker (spec § Pinned-domain contract) — and emits no resolve
+		// line (pins are deterministic, not guesses). Placed BEFORE the no-target
+		// early-return so `open -s <name>` with an empty positional resolves the pin
+		// rather than launching the picker.
+		if cmd.Flags().Changed("session") {
+			sessionVal, _ := cmd.Flags().GetString("session")
+			qr, err := buildQueryResolver(cmd)
+			if err != nil {
+				return err
+			}
+			result, err := qr.ResolveSessionPin(sessionVal)
+			if err != nil {
+				return err
+			}
+			return openResolved(cmd, result, command)
+		}
+
 		if destination == "" {
 			return openTUIFunc(cmd, "", command, serverWasStarted(cmd))
 		}
@@ -192,7 +212,7 @@ var openCmd = &cobra.Command{
 		// receipt): emit one durable INFO line per bare positional resolved through
 		// the guessing chain (session → path → alias → zoxide), so a confusing guess
 		// is reconstructable from portal.log. Gated on the glob predicate — glob (and
-		// later, pinned) targets are deterministic, not guesses, so they emit no line.
+		// pinned) targets are deterministic, not guesses, so they emit no line.
 		// Emitted on a miss too (domain=miss, empty resolved_path), IN ADDITION to the
 		// separate stderr hard-fail below. A mid-chain hard error (DirNotFoundError)
 		// returned above never reaches here: classification did not complete, so no
@@ -202,20 +222,35 @@ var openCmd = &cobra.Command{
 			resolveLogger.Info("resolved", "target", query, "domain", domain, "resolved_path", resolvedPath)
 		}
 
-		switch r := result.(type) {
-		case *resolver.SessionResult:
-			return openSessionFunc(cmd, r.Name)
-		case *resolver.PathResult:
-			return openPathFunc(cmd, r.Path, command)
-		case *resolver.MissResult:
+		if miss, ok := result.(*resolver.MissResult); ok {
 			// Total miss: hard-fail with the escape-hatch message (spec § Miss
-			// handling). A plain (non-usage) error → exit code 1 via main.classify;
-			// the TUI picker is never launched on a miss. The em-dash is U+2014.
-			return fmt.Errorf("nothing resolved for '%s' — try -f %s", r.Target, r.Target)
-		default:
-			return fmt.Errorf("unexpected resolution result: %T", result)
+			// handling). Handled inline in the bare-positional path — pins never
+			// yield a MissResult. A plain (non-usage) error → exit code 1 via
+			// main.classify; the TUI picker is never launched on a miss. The em-dash
+			// is U+2014.
+			return fmt.Errorf("nothing resolved for '%s' — try -f %s", miss.Target, miss.Target)
 		}
+		return openResolved(cmd, result, command)
 	},
+}
+
+// openResolved dispatches a resolved query result to its outcome: a session-
+// domain hit attaches (openSessionFunc); a directory-domain hit mints
+// (openPathFunc), threading the mint-scoped command. It is the single shared
+// dispatch point for the -s/--session pin, the mint pins (later Phase 2 tasks),
+// and the bare-positional path, so every entry point routes a resolved result
+// through the identical outcome switch. A MissResult is deliberately NOT handled
+// here — the bare path renders its own escape-hatch message inline, and pins
+// never yield a miss — so any unexpected result type is a defensive error.
+func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []string) error {
+	switch r := result.(type) {
+	case *resolver.SessionResult:
+		return openSessionFunc(cmd, r.Name)
+	case *resolver.PathResult:
+		return openPathFunc(cmd, r.Path, command)
+	default:
+		return fmt.Errorf("unexpected resolution result: %T", result)
+	}
 }
 
 // resolveDecision derives the (domain, resolved_path) attrs for the resolve
@@ -782,5 +817,6 @@ func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
 func init() {
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	openCmd.Flags().StringP("filter", "f", "", "open the picker pre-filtered by <text> (skips resolution)")
+	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints)")
 	rootCmd.AddCommand(openCmd)
 }
