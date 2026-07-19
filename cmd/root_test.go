@@ -145,11 +145,6 @@ func TestNonTmuxCommandsWorkWithoutTmux(t *testing.T) {
 			args: []string{"alias", "set", "proj", "/some/path"},
 			env:  map[string]string{"PORTAL_ALIASES_FILE": "TEMPDIR/aliases"},
 		},
-		{
-			name: "portal clean works without tmux",
-			args: []string{"clean"},
-			env:  map[string]string{"PORTAL_PROJECTS_FILE": "TEMPDIR/projects.json"},
-		},
 	}
 
 	for _, tt := range tests {
@@ -517,7 +512,7 @@ func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
 			args []string
 		}{
 			{name: "portal version", args: []string{"version"}},
-			{name: "portal state status", args: []string{"state", "status"}},
+			{name: "portal state", args: []string{"state"}},
 		}
 		for _, tt := range exempt {
 			t.Run(tt.name, func(t *testing.T) {
@@ -528,19 +523,11 @@ func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
 				}
 				t.Cleanup(func() { bootstrapDeps = nil })
 
-				// state status renders a real diagnostic and exits
-				// non-zero on an unhealthy surface. Point at an empty
-				// TempDir; ErrStatusUnhealthy is irrelevant to the
-				// RegisterHooks assertion below.
-				if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "status" {
-					t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-				}
-
 				resetRootCmd()
 				resetStateCmdFlags()
 				rootCmd.SetArgs(tt.args)
 				err := rootCmd.Execute()
-				if err != nil && err != ErrStatusUnhealthy {
+				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 

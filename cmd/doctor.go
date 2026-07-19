@@ -19,8 +19,7 @@ import (
 )
 
 // ErrDoctorUnhealthy is returned by `portal doctor` when any check reports a
-// failure. Like ErrStatusUnhealthy (the retired `state status` sentinel it
-// mirrors), it drives a non-zero process exit while emitting nothing to
+// failure. It drives a non-zero process exit while emitting nothing to
 // stderr: the rendered report is already on stdout, and IsSilentExitError
 // (cmd/state_commit_now.go) compile-time-links the stderr-suppression
 // contract. The sentinel exists solely to signal the unhealthy exit code.

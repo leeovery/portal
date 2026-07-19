@@ -7,9 +7,9 @@ package cmd
 //
 //   - the daemon's throttled hook cleanup, maybeRunHookCleanup
 //     (cmd/state_daemon.go), which runs it once per hookCleanupInterval on
-//     the tick loop's idle branch; and
-//   - the portal-clean hook-cleanup tail, cleanCmd.RunE → cleanStaleHooks
-//     (cmd/clean.go), which runs it at the end of `portal clean`.
+//     the tick loop's idle branch — the sole AUTOMATIC caller; and
+//   - the doctor --fix stale-hook prune, pruneDoctorStaleHooks
+//     (cmd/doctor.go), the user-triggered manual repair.
 //
 // Its log format strings are declared exactly once here. Integration tests
 // substring-assert against those format strings; collapsing the declarations
@@ -23,14 +23,13 @@ package cmd
 // parameter — neither live caller wants a propagated ListAllPaneHookKeys error.
 // hookStore.Load and store.CleanStale errors DO propagate (return err); each
 // live caller handles that non-nil return itself (the daemon logs WARN and
-// swallows; portal clean discards it after the canonical Warn is already in
-// portal.log).
+// swallows; doctor --fix discards it after the canonical Warn is already in
+// portal.log, leaving the entries for the re-diagnosis to report).
 //
 //   - onRemoved (nil-tolerant): per-removal callback invoked after a
 //     successful store.CleanStale. The daemon passes nil (nothing to print
-//     to the user). portal clean passes a stdout writer that prints
-//     "Removed stale hook: <key>" so the user-facing output preserves the
-//     pre-extraction contract byte-for-byte.
+//     to the user). doctor --fix passes a stdout writer that prints
+//     "Pruned stale hook: <key>" so each repair is surfaced to the user.
 //
 // Algorithm:
 //   1. ListAllPaneHookKeys. On error emit Warn and return nil (Warn-and-continue).
@@ -48,13 +47,6 @@ package cmd
 //   6. store.CleanStale. On success, emit completion Debug and invoke
 //      onRemoved once per removed key (when non-nil). Errors from
 //      CleanStale propagate up verbatim.
-//
-// Note on duplicate Load: the portal-clean tail loads the hooks store
-// once upfront to check the persisted==0 early-exit, then delegates to
-// this helper which loads again. The redundant ReadFile is intentional
-// — keeps the helper self-contained (no pre-loaded-map parameter) and
-// the second Load observes the same on-disk content. See the parent
-// plan task for the explicit accept-the-double-Load decision (Option a).
 
 import (
 	"log/slog"
@@ -62,9 +54,24 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 )
 
+// AllPaneLister returns each live pane's hook key across all tmux sessions —
+// the live set that feeds hooks.Store.CleanStale. Each key has the form
+// <@portal-id or session_name>:window_index.pane_index, resolved per-session
+// by tmux.HookKeyFormat (a stamped session yields "<id>:w.p", an un-stamped one
+// "<name>:w.p"). This is the hook-key sibling of the name-based structural
+// enumeration; the cleanup live set must derive keys the same way registration
+// does so freshly-registered id-keyed entries are not mass-orphaned. Consumed by
+// runHookStaleCleanup (below), the daemon's maybeRunHookCleanup
+// (cmd/state_daemon.go), and doctor's stale-hooks check + --fix prune
+// (cmd/doctor.go); production wiring supplies *tmux.Client, which satisfies it
+// via ListAllPaneHookKeys.
+type AllPaneLister interface {
+	ListAllPaneHookKeys() ([]string, error)
+}
+
 // runHookStaleCleanup is the shared implementation of the daemon's throttled
-// hook cleanup (maybeRunHookCleanup, cmd/state_daemon.go) and the portal-clean
-// hook-cleanup tail (cleanCmd.RunE → cleanStaleHooks, cmd/clean.go). See the
+// hook cleanup (maybeRunHookCleanup, cmd/state_daemon.go) and the doctor --fix
+// stale-hook prune (pruneDoctorStaleHooks, cmd/doctor.go). See the
 // package-doc-style block above for the full algorithm description and design
 // rationale.
 //
@@ -78,7 +85,7 @@ import (
 // component's *slog.Logger.
 //
 // A nil onRemoved is tolerated — the per-removed-entry callback is
-// simply skipped when nil (the daemon passes nil; portal clean passes a
+// simply skipped when nil (the daemon passes nil; doctor --fix passes a
 // stdout writer).
 func runHookStaleCleanup(
 	lister AllPaneLister,

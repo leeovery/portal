@@ -130,8 +130,6 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 		{name: "portal version", args: []string{"version"}},
 		{name: "portal init", args: []string{"init", "zsh"}},
 		{name: "portal alias list", args: []string{"alias", "list"}},
-		{name: "portal clean", args: []string{"clean"}},
-		{name: "portal state status", args: []string{"state", "status"}},
 		{name: "portal uninstall", args: []string{"uninstall"}},
 		{name: "portal state daemon", args: []string{"state", "daemon"}},
 	}
@@ -160,10 +158,8 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 			t.Setenv("PORTAL_PROJECTS_FILE", t.TempDir()+"/projects.json")
 			t.Setenv("PORTAL_HOOKS_FILE", t.TempDir()+"/hooks.json")
 
-			// `portal clean` and `portal uninstall` build tmux clients in
-			// their real bodies — inject their seams so no real client exists.
-			cleanDeps = &CleanDeps{AllPaneLister: &mockCleanPaneLister{}}
-			t.Cleanup(func() { cleanDeps = nil })
+			// `portal uninstall` builds a tmux client in its real body —
+			// inject its seam so no real client exists.
 			installUninstallDeps(t, &UninstallDeps{
 				Client:     tmux.NewClient(&recordingCommander{}),
 				Unregister: func(*tmux.Client) error { return nil },
@@ -179,18 +175,11 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 				withDaemonLockFileReset(t)
 			}
 
-			// state status now renders a real diagnostic; an empty state
-			// dir produces ErrStatusUnhealthy, which is irrelevant to the
-			// version-checker assertion below.
-			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "status" {
-				t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-			}
-
 			resetRootCmd()
 			resetStateCmdFlags()
 			rootCmd.SetArgs(tt.args)
 			err := rootCmd.Execute()
-			if err != nil && err != ErrStatusUnhealthy {
+			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 

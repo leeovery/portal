@@ -1,11 +1,13 @@
 //go:build integration
 
 // Scaffolding for the transient-listpanes integration test covering the
-// `portal clean` RunE hook-cleanup callsite
-// (cmd/cleanstale_transient_listpanes_clean_integration_test.go). The
-// companion bootstrap-step callsite was retired when hooks stale-cleanup
-// left the orchestrator, so this file no longer straddles two consumers;
-// its helpers (isolateCleanStaleTestEnv, runTransientCleanStaleModeSubtest,
+// `doctor --fix` stale-hook prune callsite
+// (cmd/cleanstale_transient_listpanes_doctorfix_integration_test.go). The
+// original consumers — the bootstrap-step callsite (retired when hooks
+// stale-cleanup left the orchestrator) and the `portal clean` RunE tail
+// (deleted in the cli-verb-surface redesign) — are both gone; this file now
+// backs the single doctor --fix consumer. Its helpers
+// (isolateCleanStaleTestEnv, runTransientCleanStaleModeSubtest,
 // configDirFromEnvSlice, staleHookCleanupLogLines, containsLineMatching)
 // are consumed by that single file.
 //
@@ -62,11 +64,11 @@ import (
 // scrubbed test-process env to detect leaks against the developer's
 // real config dir — and only injects the isolated XDG_CONFIG_HOME
 // into the returned env slice (which subprocesses pick up via
-// `cmd.Env = env`). Both the bootstrap orchestrator and the
-// `portal clean` RunE run IN the test process, so cmd-package config
-// path resolution (`configFilePath` → `xdg.ConfigBase` →
-// `$XDG_CONFIG_HOME`) would resolve to the test process's HOME-based
-// fallback and miss the seeded hooks.json. Re-pushing
+// `cmd.Env = env`). The doctor --fix stale-hook prune (pruneDoctorStaleHooks)
+// runs IN the test process, so cmd-package config path resolution
+// (`configFilePath` → `xdg.ConfigBase` → `$XDG_CONFIG_HOME`) would resolve to
+// the test process's HOME-based fallback and miss the seeded hooks.json.
+// Re-pushing
 // XDG_CONFIG_HOME onto the test process here AFTER IsolateStateForTest
 // has snapshotted the pre-test state is safe — the backstop captures
 // its baseline before this call returns, so the post-snapshot Setenv
@@ -82,7 +84,7 @@ func isolateCleanStaleTestEnv(t *testing.T) (env []string, stateDir string) {
 	// matching production precedence), and SeedHooksJSON would mkdir
 	// /nonexistent and fail. Point PORTAL_HOOKS_FILE at a writable isolated
 	// location BEFORE IsolateStateForTest so the derived env slice carries
-	// the good path AND the in-process `portal clean` RunE (which resolves
+	// the good path AND the in-process doctor --fix prune (which resolves
 	// hooks.json via os.Getenv) lands on the same file. Minimal test-local
 	// fix; the broader "IsolateStateForTest should also scrub PORTAL_*_FILE"
 	// root cause is deliberately out of scope for this task.
@@ -92,7 +94,7 @@ func isolateCleanStaleTestEnv(t *testing.T) (env []string, stateDir string) {
 	t.Setenv("PORTAL_LOG_LEVEL", "debug")
 	t.Setenv("XDG_CONFIG_HOME", configDirFromEnvSlice(t, env))
 	// Wire the production internal/log file handler at the isolated state dir
-	// so the in-process `portal clean` RunE (which logs via the global
+	// so the in-process doctor --fix prune (which logs via the global
 	// log.For("bootstrap") component logger) lands its stale-hook cleanup
 	// breadcrumbs in <stateDir>/portal.log — exactly as main -> log.Init does
 	// in the real binary. The observability migration (internal/log) replaced
@@ -119,15 +121,15 @@ func isolateCleanStaleTestEnv(t *testing.T) (env []string, stateDir string) {
 //     simulate. Drives both the install-commander step and the
 //     mode-specific log-fingerprint needles the driver asserts.
 //   - invoke: entry-point closure. Receives the env slice + stateDir
-//     produced by the env-builder and is responsible for installing the
-//     portal-clean callsite's commander seam (`cleanDeps.AllPaneLister`),
+//     produced by the env-builder and is responsible for wiring the
+//     callsite's HookLister seam (the transient-wrapped tmux client),
 //     invoking the entry point, and returning any post-invocation
 //     output the extraAssert may want to inspect. A non-nil err
 //     return fails the subtest with a callsite-appropriate message
 //     supplied by the closure.
 //   - extraAssert: optional post-invocation assertions beyond the
-//     shared byte-identity + log-fingerprint asserts. The portal-clean
-//     callsite uses this to additionally verify no "Removed stale hook:"
+//     shared byte-identity + log-fingerprint asserts. The doctor --fix
+//     callsite uses this to additionally verify no "Pruned stale hook:"
 //     line surfaces on stdout.
 type transientModeSpec struct {
 	name        string

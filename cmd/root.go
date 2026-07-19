@@ -19,7 +19,7 @@ import (
 // If any command in the parent chain matches, the tmux check is skipped.
 //
 // Per the resurrection spec, the exempt set is:
-//   - alias / clean / help / init / version: user-facing config or help
+//   - alias / help / init / version: user-facing config or help
 //   - hooks: hooks set/rm/list are pure config-file operations that need
 //     only $TMUX_PANE (already guaranteed because they run inside a tmux
 //     pane) and a single tmux display-message round-trip via
@@ -27,14 +27,13 @@ import (
 //     pane key; they do not need daemon orchestration, saver bootstrap,
 //     version-upgrade machinery, Restore, EagerSignalHydrate, or
 //     marker/FIFO cleanup. hooks list needs nothing tmux-related at all.
-//     Stale hook-entry cleanup is no longer a bootstrap step; `portal
-//     clean` is the manual home.
-//   - state: every `portal state ...` subcommand. Its user-facing child
-//     (status) inspects machinery the bootstrap sets up — running bootstrap
-//     first would be circular. Internal children (daemon, notify,
-//     signal-hydrate, hydrate, migrate-rename) are invoked by tmux hooks or
-//     as the pane's initial process; re-running bootstrap would recursively
-//     register hooks and could spawn nested daemons.
+//     Stale hook-entry cleanup is no longer a bootstrap step; the daemon
+//     prunes automatically and `doctor --fix` is the manual home.
+//   - state: every `portal state ...` subcommand. Its children are all
+//     internal (daemon, notify, signal-hydrate, hydrate, migrate-rename,
+//     commit-now), invoked by tmux hooks or as the pane's initial process;
+//     re-running bootstrap would recursively register hooks and could spawn
+//     nested daemons.
 //   - doctor: the read-only health report (Bootstrap Exemption). If bootstrap
 //     ran first it would re-register hooks and respawn the daemon one step
 //     BEFORE doctor reads health, so the read-only check would heal its own
@@ -47,7 +46,6 @@ import (
 //     then immediately tear all of it back down — circular, wasteful, and racy.
 var skipTmuxCheck = map[string]bool{
 	"alias":     true,
-	"clean":     true,
 	"doctor":    true,
 	"help":      true,
 	"hooks":     true,

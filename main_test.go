@@ -100,7 +100,7 @@ func TestRun(t *testing.T) {
 	})
 
 	t.Run("it suppresses stderr for an IsSilentExitError", func(t *testing.T) {
-		buf := withSeams(t, func() error { return cmd.ErrStatusUnhealthy })
+		buf := withSeams(t, func() error { return cmd.ErrDoctorUnhealthy })
 
 		code, panicked := run()
 

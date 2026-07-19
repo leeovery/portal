@@ -5,7 +5,8 @@ package cmd
 // subtests were removed once runHookStaleCleanup became the single source
 // of truth for the algorithm (see cmd/run_hook_stale_cleanup.go and
 // cmd/run_hook_stale_cleanup_test.go) — production wiring composes the
-// helper through cleanCmd.RunE (cmd/clean.go) so no test mirror is
+// helper through the daemon's maybeRunHookCleanup (cmd/state_daemon.go) and
+// doctor --fix's pruneDoctorStaleHooks (cmd/doctor.go), so no test mirror is
 // needed (the bootstrap-step CleanStale callsite was removed when hooks
 // cleanup left the orchestrator). The remaining helpers (recordingLogger,
 // stubAllPaneLister, newTempHooksStore, readFileBytes, countMatching,

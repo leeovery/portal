@@ -168,7 +168,7 @@ func TestPersistentPreRunE_DoesNotInvokeOrchestratorForExemptCommands(t *testing
 		args []string
 	}{
 		{name: "portal version", args: []string{"version"}},
-		{name: "portal state status", args: []string{"state", "status"}},
+		{name: "portal state", args: []string{"state"}},
 		{name: "portal init", args: []string{"init", "zsh"}},
 	}
 	for _, tt := range cases {
@@ -181,17 +181,9 @@ func TestPersistentPreRunE_DoesNotInvokeOrchestratorForExemptCommands(t *testing
 
 			resetRootCmd()
 			resetStateCmdFlags()
-			// state status now renders a real diagnostic and exits
-			// non-zero when the surface is unhealthy. Point the command
-			// at an empty TempDir and treat ErrStatusUnhealthy as
-			// expected — this test only cares whether the orchestrator
-			// was invoked.
-			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "status" {
-				t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-			}
 			rootCmd.SetArgs(tt.args)
 			err := rootCmd.Execute()
-			if err != nil && err != ErrStatusUnhealthy {
+			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 

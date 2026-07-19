@@ -56,7 +56,12 @@ func TestStateCommandRegistration(t *testing.T) {
 		}
 	})
 
-	t.Run("state appears in portal --help with its short description", func(t *testing.T) {
+	t.Run("state is an internal group absent from portal --help", func(t *testing.T) {
+		// After the cli-verb-surface redesign, every `state` child is hidden
+		// plumbing (spec § Command Surface Summary → Hidden). With no user-facing
+		// child and no Run, Cobra stops surfacing `state` in `portal --help`
+		// Available Commands — it stays registered and invocable (proven by the
+		// sibling subtest above), but it is no longer a visible public verb.
 		buf := new(bytes.Buffer)
 		resetRootCmd()
 		rootCmd.SetOut(buf)
@@ -65,17 +70,13 @@ func TestStateCommandRegistration(t *testing.T) {
 		if err := rootCmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		out := buf.String()
-		listed := availableCommandNames(out)
-		if !listed["state"] {
-			t.Errorf("portal --help missing 'state' in Available Commands; got %v\noutput:\n%s", listed, out)
-		}
-		if !strings.Contains(out, "Manage Portal session resurrection state") {
-			t.Errorf("portal --help missing state Short description:\n%s", out)
+		listed := availableCommandNames(buf.String())
+		if listed["state"] {
+			t.Errorf("portal --help must not list 'state' now that it has no user-facing children; got %v", listed)
 		}
 	})
 
-	t.Run("portal state --help lists only status as an available command", func(t *testing.T) {
+	t.Run("portal state --help lists no user-facing subcommands", func(t *testing.T) {
 		buf := new(bytes.Buffer)
 		resetRootCmd()
 		rootCmd.SetOut(buf)
@@ -86,25 +87,24 @@ func TestStateCommandRegistration(t *testing.T) {
 		}
 		listed := availableCommandNames(buf.String())
 
-		// status is the only user-facing child remaining under state.
-		if !listed["status"] {
-			t.Errorf("portal state --help missing %q in Available Commands; got %v", "status", listed)
-		}
-		// cleanup was removed (replaced by `portal uninstall`).
-		if listed["cleanup"] {
-			t.Errorf("portal state --help must not list removed subcommand %q; got %v", "cleanup", listed)
+		// status was removed (subsumed by `portal doctor`); cleanup was removed
+		// (replaced by `portal uninstall`). After the cli-verb-surface redesign,
+		// state has NO user-facing children — every remaining child is hidden.
+		for _, removed := range []string{"status", "cleanup"} {
+			if listed[removed] {
+				t.Errorf("portal state --help must not list removed subcommand %q; got %v", removed, listed)
+			}
 		}
 		// hidden subcommands must never appear
-		hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "migrate-rename"}
+		hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "migrate-rename", "commit-now"}
 		for _, h := range hidden {
 			if listed[h] {
 				t.Errorf("portal state --help must not list hidden subcommand %q; got %v", h, listed)
 			}
 		}
-		// any other listed name beyond status and Cobra's built-in `help` is
-		// unexpected
+		// only Cobra's built-in `help` / `completion` may remain
 		for name := range listed {
-			if name == "status" || name == "help" {
+			if name == "help" || name == "completion" {
 				continue
 			}
 			t.Errorf("portal state --help listed unexpected command %q; got %v", name, listed)
@@ -122,11 +122,9 @@ func TestStateCommandRegistration(t *testing.T) {
 		}
 		listed := availableCommandNames(buf.String())
 
-		// state itself is visible at root
-		if !listed["state"] {
-			t.Errorf("portal --help missing 'state' in Available Commands; got %v", listed)
-		}
-		// hidden subcommands of state should not surface at root either
+		// hidden subcommands of state must not surface at root. (state itself is
+		// no longer a visible top-level command — see the internal-group subtest
+		// above — so we only assert its hidden plumbing children never leak up.)
 		hidden := []string{"signal-hydrate", "migrate-rename", "hydrate", "notify"}
 		for _, h := range hidden {
 			if listed[h] {
@@ -146,8 +144,9 @@ func TestStateBareInvocationPrintsHelp(t *testing.T) {
 		t.Fatalf("portal state should exit 0, got error: %v", err)
 	}
 	out := buf.String()
-	// Cobra default help output for a parent command includes "Available Commands:"
-	if !strings.Contains(out, "Available Commands") && !strings.Contains(out, "status") {
+	// Cobra default help output for a parent command includes the "Usage:"
+	// section and the state Short description even when every child is hidden.
+	if !strings.Contains(out, "Usage:") && !strings.Contains(out, "Manage Portal session resurrection state") {
 		t.Errorf("portal state did not print help output:\n%s", out)
 	}
 }
@@ -199,40 +198,6 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 			}
 			if errBuf.Len() != 0 {
 				t.Errorf("expected no stderr noise, got: %s", errBuf.String())
-			}
-		})
-	}
-}
-
-func TestStateUserFacingSubcommandsExitZero(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{name: "status with no args", args: []string{"state", "status"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			outBuf := new(bytes.Buffer)
-			errBuf := new(bytes.Buffer)
-			resetRootCmd()
-			resetStateCmdFlags()
-			// Isolate the subtest against a fresh temp state dir so the status
-			// render reads only synthetic state and never the developer's real
-			// ~/.config/portal/state. The assertion this test cares about is
-			// that argv parsing succeeded and Cobra handed control to RunE
-			// without a usage/parse error; status is additionally allowed to
-			// exit non-zero with ErrStatusUnhealthy, since an empty TempDir is
-			// an unhealthy state surface (no daemon, stale save, recent
-			// warnings).
-			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-			rootCmd.SetOut(outBuf)
-			rootCmd.SetErr(errBuf)
-			rootCmd.SetArgs(tt.args)
-			err := rootCmd.Execute()
-			if err != nil && err != ErrStatusUnhealthy {
-				t.Fatalf("expected exit 0 or ErrStatusUnhealthy, got error: %v\nstderr: %s", err, errBuf.String())
 			}
 		})
 	}
@@ -298,27 +263,6 @@ func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 					match = true
 					if !c.Hidden {
 						t.Errorf("subcommand %q must have Hidden=true", name)
-					}
-					break
-				}
-			}
-			if !match {
-				t.Errorf("subcommand %q not registered under state", name)
-			}
-		})
-	}
-}
-
-func TestStateUserFacingSubcommandsAreVisible(t *testing.T) {
-	visible := []string{"status"}
-	for _, name := range visible {
-		t.Run(name+" has Hidden=false", func(t *testing.T) {
-			var match bool
-			for _, c := range stateCmd.Commands() {
-				if c.Name() == name {
-					match = true
-					if c.Hidden {
-						t.Errorf("subcommand %q must not be hidden", name)
 					}
 					break
 				}

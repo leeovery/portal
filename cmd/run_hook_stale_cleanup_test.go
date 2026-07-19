@@ -2,8 +2,8 @@ package cmd
 
 // Unit coverage for the shared runHookStaleCleanup helper. Its two live
 // callers are the daemon's throttled hook cleanup (maybeRunHookCleanup,
-// cmd/state_daemon.go) and the portal-clean hook-cleanup tail
-// (cleanCmd.RunE → cleanStaleHooks, cmd/clean.go). One helper, one
+// cmd/state_daemon.go) and the doctor --fix stale-hook prune
+// (pruneDoctorStaleHooks, cmd/doctor.go). One helper, one
 // declaration of each load-bearing log format string, one source of truth
 // that both callsites delegate to so integration substring-asserts cannot
 // drift between sites.

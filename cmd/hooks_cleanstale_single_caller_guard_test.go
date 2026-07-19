@@ -14,10 +14,10 @@ import (
 // selection: "assert the daemon's throttled cleanup is the only hooks-CleanStale
 // caller left"). Phase 1 removed the hooks CleanStale step from the orchestrator
 // entirely, so after this feature the daemon's maybeRunHookCleanup and the
-// manual `portal clean` path (cleanCmd, package cmd) are the ONLY callers — and
-// neither lives under cmd/bootstrap. This test walks the cmd/bootstrap production
-// source and fails if any file re-introduces a call to the hooks Store.CleanStale
-// method or the shared runHookStaleCleanup helper.
+// manual `doctor --fix` prune (pruneDoctorStaleHooks, package cmd) are the ONLY
+// callers — and neither lives under cmd/bootstrap. This test walks the
+// cmd/bootstrap production source and fails if any file re-introduces a call to
+// the hooks Store.CleanStale method or the shared runHookStaleCleanup helper.
 //
 // The `\bCleanStale\b` word-boundary is deliberate: the unrelated marker-sweep
 // step Store method CleanStaleMarkers (which legitimately remains in the
@@ -51,7 +51,7 @@ func TestHooksCleanStale_NoBootstrapStepIsAnAutomaticCaller(t *testing.T) {
 		if loc := forbidden.FindIndex(src); loc != nil {
 			line := 1 + strings.Count(string(src[:loc[0]]), "\n")
 			t.Errorf("%s:%d references the hooks CleanStale path; the daemon (maybeRunHookCleanup) "+
-				"and `portal clean` are the only permitted automatic callers — a bootstrap step must not clean hooks",
+				"and `doctor --fix` (pruneDoctorStaleHooks) are the only permitted callers — a bootstrap step must not clean hooks",
 				path, line)
 		}
 	}

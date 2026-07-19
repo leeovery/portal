@@ -1245,14 +1245,6 @@ func TestIsSilentExitError_DetectsCommitNowSentinel(t *testing.T) {
 	}
 }
 
-// 27e. IsSilentExitError must also cover ErrStatusUnhealthy so the silent
-// stderr-suppression contract spans both subcommands.
-func TestIsSilentExitError_DetectsStatusUnhealthy(t *testing.T) {
-	if !IsSilentExitError(ErrStatusUnhealthy) {
-		t.Error("IsSilentExitError(ErrStatusUnhealthy) = false; want true")
-	}
-}
-
 // 27f. IsSilentExitError must return false for ordinary errors so the
 // suppression guard does not over-fire.
 func TestIsSilentExitError_RejectsOrdinaryErrors(t *testing.T) {

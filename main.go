@@ -77,7 +77,7 @@ func run() (code int, panicked bool) {
 //  1. *bootstrap.FatalError -> code 1, no stderr (Execute already wrote the
 //     single user-facing line; duplicating it would double-print).
 //  2. otherwise print the error to stderr unless it is a silent-exit sentinel
-//     (cmd.ErrStatusUnhealthy / the wrapped commit-now failure).
+//     (cmd.ErrDoctorUnhealthy / the wrapped commit-now failure).
 //  3. *cmd.UsageError -> code 2.
 //  4. anything else -> code 1.
 func classify(err error) int {
@@ -89,7 +89,7 @@ func classify(err error) int {
 	}
 
 	// Some errors are intentional silent-exit sentinels — e.g.
-	// cmd.ErrStatusUnhealthy (status output already rendered to stdout) and
+	// cmd.ErrDoctorUnhealthy (doctor report already rendered to stdout) and
 	// the wrapped errCommitNowFailed returned by `portal state commit-now`
 	// (a tmux hook subprocess with nowhere meaningful to surface stderr).
 	// cmd.IsSilentExitError compile-time-links the suppression contract

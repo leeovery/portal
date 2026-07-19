@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/xdg"
 )
 
@@ -121,4 +123,40 @@ func configFilePath(envVar, filename string) (string, error) {
 	migrateConfigFile(oldPath, newPath, configFileComponents[filename])
 
 	return newPath, nil
+}
+
+// loadProjectStore creates a project store from the configured file path.
+// Uses PORTAL_PROJECTS_FILE env var if set (for testing), otherwise
+// defaults to ~/.config/portal/projects.json.
+func loadProjectStore() (*project.Store, error) {
+	path, err := projectsFilePath()
+	if err != nil {
+		return nil, err
+	}
+	return project.NewStore(path), nil
+}
+
+// projectsFilePath returns the path to the projects.json file.
+// Uses PORTAL_PROJECTS_FILE env var if set (for testing), otherwise
+// defaults to ~/.config/portal/projects.json.
+func projectsFilePath() (string, error) {
+	return configFilePath("PORTAL_PROJECTS_FILE", "projects.json")
+}
+
+// loadPrefsStore creates a prefs store from the configured file path.
+// Uses PORTAL_PREFS_FILE env var if set (for testing), otherwise
+// defaults to ~/.config/portal/prefs.json.
+func loadPrefsStore() (*prefs.Store, error) {
+	path, err := prefsFilePath()
+	if err != nil {
+		return nil, err
+	}
+	return prefs.NewStore(path), nil
+}
+
+// prefsFilePath returns the path to the prefs.json file.
+// Uses PORTAL_PREFS_FILE env var if set (for testing), otherwise
+// defaults to ~/.config/portal/prefs.json.
+func prefsFilePath() (string, error) {
+	return configFilePath("PORTAL_PREFS_FILE", "prefs.json")
 }
