@@ -1,7 +1,6 @@
 package resolver_test
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/leeovery/portal/internal/resolver"
@@ -82,30 +81,24 @@ func TestMatchSessions(t *testing.T) {
 	}
 }
 
-// trackingAliasLookup records whether Get was consulted, so a test can prove the
-// glob pre-check returns before the directory chain runs.
-type trackingAliasLookup struct {
-	aliases map[string]string
-	called  bool
-}
-
-func (t *trackingAliasLookup) Get(name string) (string, bool) {
-	t.called = true
-	path, ok := t.aliases[name]
-	return path, ok
-}
-
-func (t *trackingAliasLookup) Keys() []string {
-	keys := make([]string, 0, len(t.aliases))
-	for name := range t.aliases {
-		keys = append(keys, name)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
-func TestQueryResolver_Resolve_GlobPreCheck(t *testing.T) {
-	t.Run("session glob expands to first user-visible match", func(t *testing.T) {
+// TestQueryResolver_Resolve_GlobFallsThroughToMiss pins the NON-glob-only contract
+// of the single-target Resolve chain. Glob expansion is EXCLUSIVELY the burst's job
+// (ResolveBareAll → expandSessionGlobAll, all-match — see query_all_test.go): the
+// single glob-expansion primitive fans a pattern out to EVERY matching session.
+// Resolve itself no longer pre-checks or expands globs. A glob value reaching
+// Resolve is never a literal session name, never a path argument (session-style
+// globs carry no '/', '.', '~'), never an alias key, and never a zoxide hit, so it
+// falls through the whole session→path→alias→zoxide chain to a *MissResult — a LOUD
+// hard-fail via the caller, NEVER a silent first-match. This is the safety net for
+// the routing assumption: if a glob ever slips past the multi-target gate into
+// Resolve, it fails loudly instead of degrading "burst every match" to "attach the
+// first". (The all-match burst behaviour lives in TestQueryResolver_ResolveBareAll /
+// TestQueryResolver_ResolveSessionPinAll and stays unchanged.)
+func TestQueryResolver_Resolve_GlobFallsThroughToMiss(t *testing.T) {
+	t.Run("multi-match session glob does NOT collapse to the first match", func(t *testing.T) {
+		// The regression this task removes: the old glob pre-check returned
+		// matches[0] (api-1) as a SessionResult{Domain:"glob"}. With the branch
+		// gone the glob falls through to a miss — glob fan-out is the burst's job.
 		sessions := &mockSessionLister{names: []string{"api-1", "api-2", "web-3"}}
 		aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
 		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
@@ -117,19 +110,19 @@ func TestQueryResolver_Resolve_GlobPreCheck(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sr, ok := result.(*resolver.SessionResult)
+		if sr, ok := result.(*resolver.SessionResult); ok {
+			t.Fatalf("glob must not collapse to a first-match SessionResult, got %+v", sr)
+		}
+		mr, ok := result.(*resolver.MissResult)
 		if !ok {
-			t.Fatalf("expected *SessionResult, got %T", result)
+			t.Fatalf("expected *MissResult, got %T", result)
 		}
-		if sr.Name != "api-1" {
-			t.Errorf("SessionResult.Name = %q, want %q", sr.Name, "api-1")
-		}
-		if sr.Domain != "glob" {
-			t.Errorf("SessionResult.Domain = %q, want %q", sr.Domain, "glob")
+		if mr.Target != "api-*" {
+			t.Errorf("MissResult.Target = %q, want %q", mr.Target, "api-*")
 		}
 	})
 
-	t.Run("glob matching zero user-visible sessions hard-fails", func(t *testing.T) {
+	t.Run("session glob matching zero sessions falls through to miss", func(t *testing.T) {
 		sessions := &mockSessionLister{names: []string{"web-3"}}
 		aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
 		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
@@ -150,7 +143,7 @@ func TestQueryResolver_Resolve_GlobPreCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("glob matching only internal sessions counts as zero", func(t *testing.T) {
+	t.Run("session glob matching only internal sessions falls through to miss", func(t *testing.T) {
 		// The lister returns the leading-underscore-filtered view, so a glob
 		// that would match only internal _portal-* sessions sees an empty set.
 		sessions := &mockSessionLister{names: []string{"api-1"}}
@@ -173,66 +166,7 @@ func TestQueryResolver_Resolve_GlobPreCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("glob skips directory chain even when same-named alias exists", func(t *testing.T) {
-		sessions := &mockSessionLister{names: []string{"api-1"}}
-		aliasLookup := &trackingAliasLookup{aliases: map[string]string{"api-*": "/some/alias/dir"}}
-		zoxideCalled := false
-		zoxide := &trackingZoxideQuerier{
-			result:  "/zoxide/path",
-			onQuery: func() { zoxideCalled = true },
-		}
-		dirValidator := &mockDirValidator{existing: map[string]bool{"/some/alias/dir": true}}
-
-		qr := resolver.NewQueryResolver(sessions, aliasLookup, zoxide, dirValidator)
-		result, err := qr.Resolve("api-*")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if _, ok := result.(*resolver.SessionResult); !ok {
-			t.Fatalf("expected *SessionResult (glob wins over alias), got %T", result)
-		}
-		if aliasLookup.called {
-			t.Error("alias lookup should not be consulted for a glob target")
-		}
-		if zoxideCalled {
-			t.Error("zoxide should not be consulted for a glob target")
-		}
-	})
-
-	t.Run("path with glob metacharacters is unreachable as a bare positional", func(t *testing.T) {
-		// A directory path whose name contains glob metacharacters is captured
-		// by the glob pre-check, matches zero sessions, and hard-fails — it is
-		// never routed to ResolvePath (reachable only via -p in Phase 2).
-		globPaths := []string{"foo[1]", "~/tmp/foo[1]"}
-		for _, query := range globPaths {
-			t.Run(query, func(t *testing.T) {
-				sessions := &mockSessionLister{names: []string{"api-1"}}
-				aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
-				zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
-				dirValidator := &mockDirValidator{existing: map[string]bool{}}
-
-				qr := resolver.NewQueryResolver(sessions, aliasLookup, zoxide, dirValidator)
-				result, err := qr.Resolve(query)
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-
-				if _, ok := result.(*resolver.PathResult); ok {
-					t.Fatalf("expected *MissResult, got *PathResult (glob pre-check bypassed)")
-				}
-				mr, ok := result.(*resolver.MissResult)
-				if !ok {
-					t.Fatalf("expected *MissResult, got %T", result)
-				}
-				if mr.Target != query {
-					t.Errorf("MissResult.Target = %q, want %q", mr.Target, query)
-				}
-			})
-		}
-	})
-
-	t.Run("malformed glob yields zero matches and hard-fails", func(t *testing.T) {
+	t.Run("malformed glob falls through to miss", func(t *testing.T) {
 		sessions := &mockSessionLister{names: []string{"foo1", "foo2"}}
 		aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
 		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}

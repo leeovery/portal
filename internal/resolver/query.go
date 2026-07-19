@@ -111,35 +111,25 @@ func NewQueryResolver(sessions SessionLister, aliases AliasLookup, zoxide Zoxide
 	}
 }
 
-// Resolve applies the resolution chain for the given query.
-// A glob pre-check runs first: a target containing glob metacharacters is
-// session-domain by construction and is expanded against the user-visible
-// session set, never reaching the directory chain. Otherwise the session domain
-// is checked: an exact match against the user-visible session set yields a
-// SessionResult (attach). Otherwise, path-like arguments are resolved directly
-// via ResolvePath, and non-path arguments are checked against aliases, then
-// zoxide; a target that resolves nowhere yields a MissResult (the caller
-// hard-fails, no TUI fallback). After alias or zoxide resolution, the directory
-// is validated on disk.
+// Resolve applies the single-target resolution chain for the given query in
+// precedence order: exact session-name match → path detection → alias lookup →
+// zoxide query → total miss (hard fail).
+//
+// Resolve is the NON-GLOB single-target resolver: it does NOT pre-check or expand
+// globs. Glob expansion is EXCLUSIVELY the burst's job (ResolveBareAll →
+// expandSessionGlobAll, all-match) — the single glob-expansion primitive that fans
+// a pattern out to EVERY matching session. A glob value reaching Resolve is never a
+// literal session name, path argument, alias key, or zoxide hit, so it falls
+// through the whole chain to a MissResult — a LOUD hard-fail via the caller, never
+// a silent first-match. (In production a glob never reaches Resolve at all: the
+// multi-target routing gate diverts any glob-bearing target to the burst.)
+//
+// An exact match against the user-visible session set yields a SessionResult
+// (attach). Otherwise, path-like arguments are resolved directly via ResolvePath,
+// and non-path arguments are checked against aliases, then zoxide; a target that
+// resolves nowhere yields a MissResult (the caller hard-fails, no TUI fallback).
+// After alias or zoxide resolution, the directory is validated on disk.
 func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
-	// Glob pre-check (spec § Target resolution precedence step 1): a target
-	// containing glob metacharacters is session-domain by construction —
-	// expanded against the user-visible session set and never run through the
-	// path/alias/zoxide chain. Unconditional, so a directory path whose name
-	// contains glob metacharacters (e.g. ~/tmp/foo[1]) is captured here and
-	// hard-fails as an unreachable bare positional rather than reaching
-	// ResolvePath (reach it with -p). Zero matches is a total miss (hard fail);
-	// at single-target arity a multi-match resolves to the first match — the
-	// per-match window fan-out is the Phase 3 burst.
-	if HasGlobMeta(query) {
-		names, _ := qr.sessions.ListSessionNames()
-		matches := MatchSessions(query, names)
-		if len(matches) == 0 {
-			return &MissResult{Target: query}, nil
-		}
-		return &SessionResult{Name: matches[0], Domain: "glob"}, nil
-	}
-
 	// Session domain first (spec § Target resolution precedence: exact session
 	// name → path → alias → zoxide). Fetch the user-visible session set once; a
 	// nil/empty list or a lister error collapses to "no sessions" — the tmux

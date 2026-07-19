@@ -743,9 +743,10 @@ func TestQueryResolver_ResolvePathPin(t *testing.T) {
 
 	t.Run("directory whose name contains glob metacharacters is reachable", func(t *testing.T) {
 		// The reason -p exists: a glob-named dir (foo[1]) is UNREACHABLE as a bare
-		// positional (the glob pre-check treats it as a session glob, matches zero,
-		// hard-fails). -p reuses ResolvePath, which STATS the literal path — [1] is
-		// never expanded — so the dir resolves and mints.
+		// positional (the multi-target routing gate treats it as a session glob and
+		// routes it to the burst, where it matches zero sessions and hard-fails). -p
+		// reuses ResolvePath, which STATS the literal path — [1] is never expanded —
+		// so the dir resolves and mints.
 		tmp := t.TempDir()
 		tmp, _ = filepath.EvalSymlinks(tmp)
 		globDir := filepath.Join(tmp, "foo[1]")
@@ -768,32 +769,6 @@ func TestQueryResolver_ResolvePathPin(t *testing.T) {
 		}
 		if pr.Domain != "path" {
 			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, "path")
-		}
-	})
-
-	t.Run("same glob-named path as a bare positional hard-fails via the glob pre-check (contrast)", func(t *testing.T) {
-		// Contrast to the case above: the identical value routed through the bare
-		// Resolve chain hits the glob pre-check (HasGlobMeta true), matches zero
-		// sessions, and is a total miss — which is exactly why -p exists.
-		tmp := t.TempDir()
-		tmp, _ = filepath.EvalSymlinks(tmp)
-		globDir := filepath.Join(tmp, "foo[1]")
-		if err := os.Mkdir(globDir, 0o755); err != nil {
-			t.Fatalf("failed to create glob-named dir: %v", err)
-		}
-
-		qr := resolver.NewQueryResolver(
-			&mockSessionLister{},
-			&mockAliasLookup{aliases: map[string]string{}},
-			&mockZoxideQuerier{err: resolver.ErrNoMatch},
-			&mockDirValidator{existing: map[string]bool{}},
-		)
-		result, err := qr.Resolve(globDir)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if _, ok := result.(*resolver.MissResult); !ok {
-			t.Fatalf("expected *MissResult for the glob-named bare positional, got %T", result)
 		}
 	})
 

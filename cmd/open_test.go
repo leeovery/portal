@@ -22,6 +22,7 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
@@ -2183,21 +2184,30 @@ func TestOpenCommand_ResolveLog_Miss(t *testing.T) {
 func TestOpenCommand_ResolveLog_GlobEmitsNoLine(t *testing.T) {
 	// A glob target is deterministic (session-domain by construction, not a
 	// guess), so it emits NO "resolve" decision line — the component stays
-	// focused on guessing-chain resolutions.
+	// focused on guessing-chain resolutions. A glob routes to the burst (the
+	// multi-target gate diverts any glob-bearing target), so this drives the
+	// production path via an injected raw argv: the glob's resolve-line
+	// suppression lives in resolveOpenSurfaces' emitResolveDecision gate, NOT in
+	// the single-target Resolve (which is now non-glob-only — a glob reaching it
+	// is a loud miss, never a first-match).
 	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	openDeps = &OpenDeps{
-		SessionLister: &testSessionLister{names: []string{"dev-abc"}},
+		SessionLister: &testSessionLister{names: []string{"dev-1", "dev-2"}},
 		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
 		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
 		DirValidator:  &testDirValidator{existing: map[string]bool{}},
 	}
 	t.Cleanup(func() { openDeps = nil })
 
-	origSession := openSessionFunc
-	openSessionFunc = func(_ *cobra.Command, _ string) error { return nil }
-	t.Cleanup(func() { openSessionFunc = origSession })
+	origBurst := runOpenBurstFunc
+	runOpenBurstFunc = func(_ *cobra.Command, _ []spawn.Surface, _ []string) error { return nil }
+	t.Cleanup(func() { runOpenBurstFunc = origBurst })
+
+	origRaw := openRawArgs
+	openRawArgs = func() []string { return []string{"portal", "open", "dev*"} }
+	t.Cleanup(func() { openRawArgs = origRaw })
 
 	h := newCapturingHandler()
 	log.SetTestHandler(t, h)
