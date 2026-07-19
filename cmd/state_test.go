@@ -4,8 +4,11 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // availableCommandNames parses Cobra help output and returns the set of names
@@ -253,66 +256,110 @@ func TestStateHydrateRequiresAllFlags(t *testing.T) {
 	}
 }
 
+// stateChildCommands is the canonical list of the six hidden `state` children,
+// referenced by their package-level command vars so a rename or a dropped
+// registration is a compile error rather than a silent miss.
+var stateChildCommands = []*cobra.Command{
+	stateDaemonCmd,
+	stateHydrateCmd,
+	stateSignalHydrateCmd,
+	stateNotifyCmd,
+	stateCommitNowCmd,
+	stateMigrateRenameCmd,
+}
+
+// TestStateParentIsHidden locks the parent stateCmd as Hidden so the entire
+// `state` subtree drops out of `portal --help` and generated completions in one
+// move, independent of any future child. Hiding marks visibility only — every
+// child stays fully argv-invocable (see TestStateChildrenRemainInvocableByArgv
+// and TestStateInternalSubcommandsAcceptValidArgv).
+func TestStateParentIsHidden(t *testing.T) {
+	if !stateCmd.Hidden {
+		t.Error("stateCmd.Hidden = false; want true (the whole state subtree must be hidden)")
+	}
+	if stateCmd.IsAvailableCommand() {
+		t.Error("stateCmd.IsAvailableCommand() = true; want false (hidden parent with no user-facing children)")
+	}
+}
+
 func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
-	hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "migrate-rename"}
-	for _, name := range hidden {
-		t.Run(name+" has Hidden=true", func(t *testing.T) {
-			var match bool
-			for _, c := range stateCmd.Commands() {
-				if c.Name() == name {
-					match = true
-					if !c.Hidden {
-						t.Errorf("subcommand %q must have Hidden=true", name)
-					}
-					break
-				}
+	t.Run("each of the six child command vars is Hidden", func(t *testing.T) {
+		for _, c := range stateChildCommands {
+			if !c.Hidden {
+				t.Errorf("state child %q must have Hidden=true", c.Name())
 			}
-			if !match {
-				t.Errorf("subcommand %q not registered under state", name)
+		}
+	})
+
+	// Every registered child must be hidden plumbing. Iterating the live child
+	// set (which contains only the six real children — cobra adds no help /
+	// completion command under a subcommand) means a future child added without
+	// Hidden fails loudly here.
+	t.Run("every registered state child is Hidden", func(t *testing.T) {
+		children := stateCmd.Commands()
+		if len(children) != len(stateChildCommands) {
+			t.Errorf("state has %d children, want %d; a new child must be added to stateChildCommands and marked Hidden", len(children), len(stateChildCommands))
+		}
+		for _, c := range children {
+			if !c.Hidden {
+				t.Errorf("registered state child %q is not Hidden", c.Name())
+			}
+		}
+	})
+}
+
+// TestStateChildrenRemainInvocableByArgv proves Hidden marks visibility only, not
+// execution: every child still resolves through rootCmd.Find and would dispatch.
+// The daemon, the hydrate helpers, and reboot hook-firing all invoke these by
+// argv, so this invariant is load-bearing.
+func TestStateChildrenRemainInvocableByArgv(t *testing.T) {
+	names := []string{"daemon", "hydrate", "signal-hydrate", "notify", "commit-now", "migrate-rename"}
+	for _, name := range names {
+		t.Run(name+" resolves via Find", func(t *testing.T) {
+			resetRootCmd()
+			found, _, err := rootCmd.Find([]string{"state", name})
+			if err != nil {
+				t.Fatalf("rootCmd.Find([state %s]): %v", name, err)
+			}
+			if found.Name() != name {
+				t.Fatalf("rootCmd.Find([state %s]) resolved to %q; Hidden must not disable resolution", name, found.Name())
 			}
 		})
 	}
 }
 
 func TestStateHiddenSubcommandsAbsentFromShellCompletions(t *testing.T) {
-	hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "migrate-rename"}
+	// All six hidden children plus the parent must be gone from every shell.
+	hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "migrate-rename", "commit-now"}
+	// Whole-word matcher for the parent `state` entry: the completion boilerplate
+	// contains the word "statement(s)", so a bare substring check for "state"
+	// false-positives. \bstate\b matches only a standalone `state` command entry.
+	wholeState := regexp.MustCompile(`\bstate\b`)
 
-	t.Run("bash completion does not reference hidden subcommands", func(t *testing.T) {
-		buf := new(bytes.Buffer)
-		if err := rootCmd.GenBashCompletionV2(buf, true); err != nil {
-			t.Fatalf("GenBashCompletionV2: %v", err)
-		}
-		out := buf.String()
-		for _, h := range hidden {
-			if strings.Contains(out, h) {
-				t.Errorf("bash completion contains hidden subcommand %q", h)
-			}
-		}
-	})
+	shells := []struct {
+		name string
+		gen  func(*bytes.Buffer) error
+	}{
+		{"bash", func(b *bytes.Buffer) error { return rootCmd.GenBashCompletionV2(b, true) }},
+		{"zsh", func(b *bytes.Buffer) error { return rootCmd.GenZshCompletion(b) }},
+		{"fish", func(b *bytes.Buffer) error { return rootCmd.GenFishCompletion(b, true) }},
+	}
 
-	t.Run("zsh completion does not reference hidden subcommands", func(t *testing.T) {
-		buf := new(bytes.Buffer)
-		if err := rootCmd.GenZshCompletion(buf); err != nil {
-			t.Fatalf("GenZshCompletion: %v", err)
-		}
-		out := buf.String()
-		for _, h := range hidden {
-			if strings.Contains(out, h) {
-				t.Errorf("zsh completion contains hidden subcommand %q", h)
+	for _, sh := range shells {
+		t.Run(sh.name+" completion omits the hidden state subtree", func(t *testing.T) {
+			buf := new(bytes.Buffer)
+			if err := sh.gen(buf); err != nil {
+				t.Fatalf("generate %s completion: %v", sh.name, err)
 			}
-		}
-	})
-
-	t.Run("fish completion does not reference hidden subcommands", func(t *testing.T) {
-		buf := new(bytes.Buffer)
-		if err := rootCmd.GenFishCompletion(buf, true); err != nil {
-			t.Fatalf("GenFishCompletion: %v", err)
-		}
-		out := buf.String()
-		for _, h := range hidden {
-			if strings.Contains(out, h) {
-				t.Errorf("fish completion contains hidden subcommand %q", h)
+			out := buf.String()
+			for _, h := range hidden {
+				if strings.Contains(out, h) {
+					t.Errorf("%s completion contains hidden subcommand %q", sh.name, h)
+				}
 			}
-		}
-	})
+			if wholeState.MatchString(out) {
+				t.Errorf("%s completion contains a bare 'state' command entry", sh.name)
+			}
+		})
+	}
 }
