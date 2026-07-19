@@ -93,7 +93,7 @@
         "cli-verb-surface-redesign": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 0,
@@ -129,7 +129,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 3,
-          "current_task": "cli-verb-surface-redesign-3-2",
+          "current_task": "cli-verb-surface-redesign-3-3",
           "completed_tasks": [
             "cli-verb-surface-redesign-1-1",
             "cli-verb-surface-redesign-1-2",
@@ -143,7 +143,8 @@
             "cli-verb-surface-redesign-2-5",
             "cli-verb-surface-redesign-2-6",
             "cli-verb-surface-redesign-2-7",
-            "cli-verb-surface-redesign-3-1"
+            "cli-verb-surface-redesign-3-1",
+            "cli-verb-surface-redesign-3-2"
           ],
           "completed_phases": [
             1,
