@@ -338,6 +338,15 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 			argv []string
 		}{
 			{name: "version", argv: []string{"version"}},
+			// __complete is the load-bearing bootstrap-exemption row: cobra's
+			// __complete command execute() runs the ROOT PersistentPreRunE
+			// (passing __complete as cmd), so WITHOUT __complete in
+			// skipTmuxCheck every TAB press fires the full 10-step bootstrap
+			// (starts tmux + restore). Name()=="__complete" is canonical for
+			// both __complete and __completeNoDesc. argv ["__complete","open",""]
+			// requests completion of open's bare positional — it must reach the
+			// completer without invoking the orchestrator.
+			{name: "__complete open", argv: []string{"__complete", "open", ""}},
 			{name: "hook list", argv: []string{"hook", "list"}},
 			{name: "hook set", argv: []string{"hook", "set", "--on-resume", "true"}},
 			{name: "hook rm", argv: []string{"hook", "rm", "--on-resume"}},

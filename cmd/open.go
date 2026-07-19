@@ -988,5 +988,18 @@ func init() {
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")
 	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — write the @portal-spawn-<batch>-<token> ack marker before the attach/mint handoff")
 	_ = openCmd.Flags().MarkHidden("ack")
+
+	// Tab completion (spec § Tab Completion): the bare positional and the
+	// -s/--session pin both complete session names via the shared completer.
+	// -p/-z are left to the shell; -a alias-key completion lands in 6-4. The
+	// hidden --ack flag and the hidden state namespace are auto-excluded by
+	// cobra — no work here beyond not un-hiding them.
+	openCmd.ValidArgsFunction = func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return completeSessionNames(toComplete)
+	}
+	_ = openCmd.RegisterFlagCompletionFunc("session", func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return completeSessionNames(toComplete)
+	})
+
 	rootCmd.AddCommand(openCmd)
 }

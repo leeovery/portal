@@ -56,5 +56,15 @@ func buildKillDeps(cmd *cobra.Command) (SessionKiller, SessionValidator) {
 }
 
 func init() {
+	// Tab completion (spec § Tab Completion): kill's single positional completes
+	// session names via the shared completer. kill is ExactArgs(1), so once the
+	// first positional is present there is nothing more to complete.
+	killCmd.ValidArgsFunction = func(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return completeSessionNames(toComplete)
+	}
+
 	rootCmd.AddCommand(killCmd)
 }

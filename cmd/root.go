@@ -46,15 +46,25 @@ import (
 //     _portal-saver daemon and unregisters the global hooks; if bootstrap ran
 //     first it would EnsureServer / RegisterHooks / EnsureSaver / Restore and
 //     then immediately tear all of it back down — circular, wasteful, and racy.
+//   - __complete: cobra's shell-completion request verb. Its execute() runs the
+//     ROOT PersistentPreRunE (passing __complete as cmd), so WITHOUT this entry
+//     every TAB press would fire Portal's full 10-step bootstrap (starting the
+//     tmux server + restore) merely to compute a completion list. cobra derives
+//     Name() from Use ("__complete [command-line]"), so Name()=="__complete"
+//     covers both __complete and __completeNoDesc with a single key. The
+//     completer builds its own tmux.DefaultClient() (cmd/completion.go), never
+//     the context-injected client, precisely because none is present on this
+//     exempt path.
 var skipTmuxCheck = map[string]bool{
-	"alias":     true,
-	"doctor":    true,
-	"help":      true,
-	"hook":      true,
-	"init":      true,
-	"state":     true,
-	"uninstall": true,
-	"version":   true,
+	"__complete": true,
+	"alias":      true,
+	"doctor":     true,
+	"help":       true,
+	"hook":       true,
+	"init":       true,
+	"state":      true,
+	"uninstall":  true,
+	"version":    true,
 }
 
 // bootstrapDeps holds injectable dependencies for PersistentPreRunE. When
