@@ -41,7 +41,10 @@ const (
 //	state hydrate / state signal-hydrate -> hydrate
 //	hook / hooks …                    -> hooks_cli (both spellings; `hooks` is the alias)
 //	clean                             -> clean (DEAD arm — `portal clean` removed)
-//	open … / x … / bare               -> tui
+//	open … / x …                      -> tui
+//	bare (no subcommand)              -> tui (retained for taxonomy continuity; bare
+//	                                     `portal` now PRINTS HELP, it does not launch
+//	                                     the picker — see the len(path)==0 arm below)
 //	anything else (incl. bare state)  -> bootstrap (explicit default)
 //
 // The function is PURE — it reads nothing global, so it is unit-testable without
@@ -64,7 +67,12 @@ func ResolveProcessRole(args []string) string {
 	}
 
 	if len(path) == 0 {
-		// Bare `portal` (no subcommand token at all) is the TUI picker.
+		// Bare `portal` (no subcommand token at all) PRINTS HELP/USAGE — it is the
+		// control-plane root, not the picker. Post-redesign rootCmd has no Run/RunE,
+		// so cobra returns ErrHelp before PersistentPreRunE and no TUI is launched.
+		// roleTUI is retained here purely for continuity of the closed, forensically
+		// inert process-role taxonomy; reclassifying bare `portal` would require a
+		// log-taxonomy amendment, so the mapping (and this return) stay put.
 		return roleTUI
 	}
 
