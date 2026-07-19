@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/leeovery/portal/internal/spawn"
@@ -168,8 +169,10 @@ func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command 
 	// Spawn the N−1 external surfaces FIRST (before the trigger self-connects). A
 	// pre-spawn abort — the executable or an ack id failed to resolve before any
 	// window opened — returns immediately, so the trigger never connects on a burst
-	// that could not even start.
-	batch, _, err := deps.NewBurster(adapter).Run(context.Background(), external, command, nil)
+	// that could not even start. The per-window ~8s ack timeout is provided by the
+	// burster itself (spawnAckTimeout + awaitToken, each window timed from its OWN
+	// spawn); this path adds no timeout logic of its own.
+	batch, results, err := deps.NewBurster(adapter).Run(context.Background(), external, command, nil)
 	if err != nil {
 		return err
 	}
@@ -180,14 +183,47 @@ func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command 
 	// the tmux server.
 	_ = deps.Ack.Clean(batch)
 
-	// TASK 3-8 INSERTION POINT: inspect the burst results here for the
-	// leave-what-opened partial-failure REPORTING — per-window ack-timeout
-	// classification, the failed-window error message, and the full portal.log batch
-	// summary. Per spec §211 the trigger self-connects REGARDLESS of the N−1 windows'
-	// per-window outcomes (its target is unrelated to theirs), so that reporting must
-	// NOT gate the self-connect below.
+	// Report the N−1 external outcomes on every post-burst path — leave-what-opened.
+	// The trigger's self-connect below is INDEPENDENT of these outcomes (spec §211
+	// trigger-independence): its target is unrelated to the externals', so this
+	// reporting must NOT gate the connect. It logs to portal.log (the durable
+	// surface) and, at most, prints ONE best-effort stderr line — swallowed by a
+	// successful attach, directly visible only in the trigger's own-target-failed
+	// skip case (connectTrigger returns an error).
+	//
+	// DIVERGENCE FROM runSpawn (cmd/spawn.go): runSpawn RETURNS an error (exit 1)
+	// and SKIPS its self-attach on ANY not-all-confirmed batch — a permission wall
+	// or a single failed/un-acked window aborts the whole command. open's burst
+	// NEVER returns a partial-failure error and ALWAYS connects the trigger to its
+	// own target: external failures — and even a permission wall on an external
+	// window — do not cost the trigger its landing (RESOLVED 2026-07-18). Only the
+	// trigger's OWN connect failure (connectTrigger below) surfaces as the command's
+	// error. triggerAttached is therefore always true in the batch summary: the
+	// trigger is unconditionally about to connect, matching runSpawn's
+	// just-before-connect logging point.
+	confirmed, failed := spawn.PartitionResults(results)
+	total := len(surfaces) // N, including the trigger's own self-connect target.
+	if perm, ok := spawn.FirstPermission(results); ok {
+		// Permission-required stopped the burst on the first (source, target) wall
+		// (every later external window would hit the identical wall). Mirror
+		// runSpawn's permission arm — LogWindowResults + LogPermission, NO batch
+		// summary — and surface the driver's guidance ONCE, best-effort.
+		spawn.LogWindowResults(deps.Logger, results)
+		spawn.LogPermission(deps.Logger, id, resolution, perm.Result.Detail)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), perm.Result.Guidance)
+	} else if len(failed) > 0 {
+		// Leave-what-opened: the opened (confirmed) windows stay; the failed/un-acked
+		// surfaces are neither auto-retried nor torn down. One batch summary + a
+		// best-effort one-line stderr summary naming the failed window(s).
+		spawn.LogBatchSummary(deps.Logger, id, resolution, results, total, true, batch)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), spawn.PartialFailureMessage(failed, len(confirmed) > 0))
+	} else {
+		// Full success: every external window confirmed. One batch summary.
+		spawn.LogBatchSummary(deps.Logger, id, resolution, results, total, true, batch)
+	}
 
-	// Self-connect the trigger LAST, after every external window has been spawned.
+	// Self-connect the trigger LAST, after every external window has been spawned —
+	// regardless of the external outcomes reported above.
 	return connectTrigger(cmd, trigger, command, deps)
 }
 

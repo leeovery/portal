@@ -9,11 +9,15 @@ package cmd
 // handoff. MUST NOT use t.Parallel (package cmd mutates package-level state).
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
 	"github.com/spf13/cobra"
@@ -492,5 +496,427 @@ func TestRunOpenBurst_PreSpawnBursterError_TriggerNotConnected(t *testing.T) {
 	}
 	if len(mint.calls) != 0 {
 		t.Errorf("LocalMint called %d times, want 0 (trigger not connected on pre-spawn abort)", len(mint.calls))
+	}
+}
+
+// --- Task 3-8: leave-what-opened partial failure + per-window ack timeout + log ---
+
+// burstDelayingAck mirrors internal/spawn's burst_test.go delayingAck at the cmd
+// layer: Write records a token with a reveal instant of now()+delay, Collect
+// returns only tokens whose reveal instant has arrived, and Clean records swept
+// batches. Driving it with the shared manualClock lets a cmd-level burst test prove
+// the per-window ack timer starts at each window's OWN spawn (a delay >= Poll and <
+// Timeout forces the poll loop to cross a timeout check, which an immediate-reveal
+// FakeAckChannel cannot). It satisfies spawn.AckChannelFull (Collect+Clean) and
+// spawn.AckWriter (Write).
+type burstDelayingAck struct {
+	now      func() time.Time
+	delay    time.Duration
+	revealAt map[string]map[string]time.Time
+	cleaned  []string
+}
+
+func newBurstDelayingAck(now func() time.Time, delay time.Duration) *burstDelayingAck {
+	return &burstDelayingAck{now: now, delay: delay, revealAt: map[string]map[string]time.Time{}}
+}
+
+func (d *burstDelayingAck) Write(batch, token string) error {
+	set := d.revealAt[batch]
+	if set == nil {
+		set = map[string]time.Time{}
+		d.revealAt[batch] = set
+	}
+	set[token] = d.now().Add(d.delay)
+	return nil
+}
+
+func (d *burstDelayingAck) Collect(batch string) (map[string]struct{}, error) {
+	out := map[string]struct{}{}
+	for token, revealAt := range d.revealAt[batch] {
+		if !d.now().Before(revealAt) { // now >= revealAt
+			out[token] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func (d *burstDelayingAck) Clean(batch string) error {
+	d.cleaned = append(d.cleaned, batch)
+	delete(d.revealAt, batch)
+	return nil
+}
+
+// ackWritingAdapter is a minimal spawn.Adapter that, on each OpenWindow, parses the
+// --ack <batch>:<token> pair out of the composed argv and — when that window's
+// confirm flag is true (a nil confirm slice, and any index beyond it, confirms) —
+// writes the token to an AckWriter, simulating the spawned window's marker write.
+// It always reports the adapter open itself as successful, so a suppressed write
+// times the window out. It is the cmd-side counterpart of burst_test.go's
+// writingAdapter, used only where the burster's Ack is a burstDelayingAck (whose
+// concrete type the spawntest.FakeAdapter cannot target).
+type ackWritingAdapter struct {
+	ack     spawn.AckWriter
+	confirm []bool
+	calls   int
+}
+
+func (a *ackWritingAdapter) OpenWindow(command []string) spawn.Result {
+	i := a.calls
+	a.calls++
+	if a.confirmed(i) {
+		for j := 0; j+1 < len(command); j++ {
+			if command[j] == "--ack" {
+				if batch, token, ok := spawn.ParseSpawnAckFlag(command[j+1]); ok {
+					_ = a.ack.Write(batch, token)
+				}
+			}
+		}
+	}
+	return spawn.Success("ok")
+}
+
+func (a *ackWritingAdapter) confirmed(i int) bool {
+	if i < len(a.confirm) {
+		return a.confirm[i]
+	}
+	return true
+}
+
+func TestRunOpenBurst_PartialFailure_LeavesOthersOpen_StillConnectsTrigger(t *testing.T) {
+	// External e1 spawn-fails, e2 confirms. Leave-what-opened: e2 stays open, e1 is
+	// neither retried nor torn down, and — the open-specific divergence from runSpawn
+	// — the trigger STILL connects and NO partial-failure error is returned. The
+	// failed window rides a best-effort stderr summary + portal.log only.
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{
+		Results: []spawn.Result{spawn.SpawnFailed("osascript exited 1: -1743"), spawn.Success("ok")},
+	}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	conn := &recordingConnector{events: events}
+	mint := &recordingMint{events: events}
+	ack := &spawntest.FakeAckChannel{}
+	clock := &manualClock{}
+	logger, _ := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	deps.Logger = logger
+	withOpenBurster(deps, inner, ack, clock)
+
+	buf := new(bytes.Buffer)
+	cmd := &cobra.Command{}
+	cmd.SetErr(buf)
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+		{Kind: spawn.SurfaceAttach, Value: "e2"},
+	}
+	if err := runOpenBurstWithDeps(cmd, surfaces, nil, deps); err != nil {
+		t.Fatalf("partial failure must NOT return an error (trigger-independence); got %v", err)
+	}
+
+	// Both externals were attempted (no early stop, no teardown).
+	if len(inner.Calls) != 2 {
+		t.Errorf("OpenWindow calls = %d, want 2 (e1 failed, e2 opened; both attempted)", len(inner.Calls))
+	}
+	// The trigger connects regardless of e1's failure.
+	if !slices.Equal(conn.calls, []string{"trig"}) {
+		t.Errorf("self-connect targets = %#v, want exactly [trig] (trigger connects independent of external failures)", conn.calls)
+	}
+	// Best-effort stderr partial-failure summary names the failed window; e2 opened,
+	// so othersOpened is true.
+	want := spawn.PartialFailureMessage([]string{"e1"}, true)
+	if got := strings.TrimSpace(buf.String()); got != want {
+		t.Errorf("stderr = %q, want the partial-failure summary %q", got, want)
+	}
+}
+
+func TestRunOpenBurst_TriggerOwnConnectFails_PropagatesError(t *testing.T) {
+	// The trigger's OWN connect failing (its attach session vanished between
+	// pre-flight and connect) is the SOLE case the trigger is skipped: connectTrigger
+	// returns that error and runOpenBurstWithDeps propagates it (outside tmux Portal
+	// returns to the shell). Externals all succeed, isolating the own-target failure
+	// as the cause.
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	connErr := errors.New("attach session vanished")
+	conn := &recordingConnector{events: events, err: connErr}
+	mint := &recordingMint{events: events}
+	ack := &spawntest.FakeAckChannel{}
+	clock := &manualClock{}
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	withOpenBurster(deps, inner, ack, clock)
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+	}
+	err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps)
+
+	if !errors.Is(err, connErr) {
+		t.Fatalf("error = %v, want the trigger's own connect error (skipped only if its own target fails)", err)
+	}
+}
+
+func TestRunOpenBurst_TriggerMintOwnConnectFails_PropagatesError(t *testing.T) {
+	// The mint-trigger analogue: LocalMint failing (the trigger's own local mint
+	// errors) propagates as the command's error, even though the external window
+	// opened fine.
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	conn := &recordingConnector{events: events}
+	mintErr := errors.New("git root resolution failed")
+	mint := &recordingMint{events: events, err: mintErr}
+	ack := &spawntest.FakeAckChannel{}
+	clock := &manualClock{}
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	withOpenBurster(deps, inner, ack, clock)
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceMint, Value: "/repo/api"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+	}
+	err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps)
+
+	if !errors.Is(err, mintErr) {
+		t.Fatalf("error = %v, want the trigger's own local-mint error", err)
+	}
+}
+
+func TestRunOpenBurst_RecordsOutcomesInLog(t *testing.T) {
+	// Full success: each external window's outcome is recorded in portal.log via the
+	// shared logemit helpers — one DEBUG per window carrying its ack, plus one INFO
+	// `opened N/N` batch summary (opened = 2 confirmed externals + the trigger; total
+	// = len(surfaces) = 3).
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	conn := &recordingConnector{events: events}
+	mint := &recordingMint{events: events}
+	ack := &spawntest.FakeAckChannel{}
+	clock := &manualClock{}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	deps.Logger = logger
+	withOpenBurster(deps, inner, ack, clock)
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+		{Kind: spawn.SurfaceAttach, Value: "e2"},
+	}
+	if err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var summaries, windows []logtest.Record
+	for _, rec := range sink.Records() {
+		switch {
+		case rec.Level == slog.LevelInfo && strings.HasPrefix(rec.Msg, "opened"):
+			summaries = append(summaries, rec)
+		case rec.Level == slog.LevelDebug && rec.HasAttr("ack"):
+			windows = append(windows, rec)
+		}
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("INFO opened summaries = %d, want exactly 1; body:\n%s", len(summaries), sink.Body())
+	}
+	s := summaries[0]
+	if s.Msg != "opened 3/3" {
+		t.Errorf("summary msg = %q, want %q (2 externals + trigger / len(surfaces))", s.Msg, "opened 3/3")
+	}
+	if got := s.AttrString(t, "resolution"); got != "native" {
+		t.Errorf("resolution attr = %q, want %q", got, "native")
+	}
+	if got := s.AttrString(t, "terminal"); got != "Ghostty" {
+		t.Errorf("terminal attr = %q, want %q", got, "Ghostty")
+	}
+	if got := s.AttrString(t, "bundle_id"); got != "com.mitchellh.ghostty" {
+		t.Errorf("bundle_id attr = %q, want %q", got, "com.mitchellh.ghostty")
+	}
+	if got := s.IntAttr(t, "opened"); got != 3 {
+		t.Errorf("opened attr = %d, want 3", got)
+	}
+	if got := s.IntAttr(t, "total"); got != 3 {
+		t.Errorf("total attr = %d, want 3 (len(surfaces), N including the trigger)", got)
+	}
+	if got := s.AttrString(t, "batch"); got == "" {
+		t.Errorf("batch attr = %q, want a non-empty batch id", got)
+	}
+	if len(windows) != 2 {
+		t.Fatalf("per-window DEBUG lines with an ack attr = %d, want 2; body:\n%s", len(windows), sink.Body())
+	}
+	for _, w := range windows {
+		if got := w.AttrString(t, "ack"); got != "confirmed" {
+			t.Errorf("per-window ack attr = %q, want %q", got, "confirmed")
+		}
+	}
+}
+
+func TestRunOpenBurst_PermissionRequired_GuidanceOnce_StillConnectsTrigger(t *testing.T) {
+	// A permission wall on an EXTERNAL window stops the burst (later windows never
+	// spawn), surfaces the driver's guidance exactly ONCE (LogPermission + one
+	// best-effort stderr line, NO batch summary), and — per trigger-independence —
+	// STILL connects the trigger with NO error returned.
+	const guidance = "grant Automation for Ghostty, then try again"
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{
+		Results: []spawn.Result{spawn.Success("ok"), spawn.PermissionRequired("evt -1743", guidance)},
+	}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	conn := &recordingConnector{events: events}
+	mint := &recordingMint{events: events}
+	ack := &spawntest.FakeAckChannel{}
+	clock := &manualClock{}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	deps.Logger = logger
+	withOpenBurster(deps, inner, ack, clock)
+
+	buf := new(bytes.Buffer)
+	cmd := &cobra.Command{}
+	cmd.SetErr(buf)
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+		{Kind: spawn.SurfaceAttach, Value: "e2"},
+		{Kind: spawn.SurfaceAttach, Value: "e3"},
+	}
+	if err := runOpenBurstWithDeps(cmd, surfaces, nil, deps); err != nil {
+		t.Fatalf("a permission wall on an external window must NOT return an error (trigger-independence); got %v", err)
+	}
+
+	// Burst stopped at the permission wall (e2): e1,e2 attempted, e3 never spawned.
+	if len(inner.Calls) != 2 {
+		t.Errorf("OpenWindow calls = %d, want 2 (burst stops at the permission wall; e3 never spawned)", len(inner.Calls))
+	}
+	// The trigger STILL connects (permission on an external window doesn't cost it its landing).
+	if !slices.Equal(conn.calls, []string{"trig"}) {
+		t.Errorf("self-connect targets = %#v, want exactly [trig] (trigger connects despite the external permission wall)", conn.calls)
+	}
+	// Exactly one LogPermission INFO and NO batch summary (the burst stopped).
+	var perms, summaries []logtest.Record
+	for _, rec := range sink.Records() {
+		switch {
+		case rec.Level == slog.LevelInfo && rec.Msg == "permission required — nothing self-attached":
+			perms = append(perms, rec)
+		case rec.Level == slog.LevelInfo && strings.HasPrefix(rec.Msg, "opened"):
+			summaries = append(summaries, rec)
+		}
+	}
+	if len(perms) != 1 {
+		t.Errorf("permission INFO records = %d, want exactly 1; body:\n%s", len(perms), sink.Body())
+	}
+	if len(summaries) != 0 {
+		t.Errorf("generic opened-summary records = %d, want 0 (permission path skips the batch summary); body:\n%s", len(summaries), sink.Body())
+	}
+	// Guidance surfaced exactly once on stderr, verbatim, on a single line.
+	if got := strings.TrimSpace(buf.String()); got != guidance {
+		t.Errorf("stderr = %q, want exactly the driver guidance %q (shown once)", got, guidance)
+	}
+	// Driver-quarantine: the opaque AppleEvent detail never reaches the stderr line.
+	if strings.Contains(buf.String(), "-1743") {
+		t.Errorf("stderr %q leaks the opaque driver detail; it must ride the log only", buf.String())
+	}
+}
+
+func TestRunOpenBurst_MarkersCleanedBeforeSelfConnect(t *testing.T) {
+	// The batch @portal-spawn-* markers are cleaned on every post-burst path BEFORE
+	// the trigger's self-connect handoff (a point of no return outside tmux). The
+	// cleanOrderConnector snapshots how many batches were cleaned at Connect time.
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: &openBurstEvents{}, inner: inner}
+	ack := &spawntest.FakeAckChannel{}
+	conn := &cleanOrderConnector{ack: ack}
+	mint := &recordingMint{events: &openBurstEvents{}}
+	clock := &manualClock{}
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	withOpenBurster(deps, inner, ack, clock)
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+	}
+	if err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !slices.Equal(conn.calls, []string{"trig"}) {
+		t.Fatalf("self-connect targets = %#v, want exactly [trig]", conn.calls)
+	}
+	if len(conn.cleanedBefore) != 1 || conn.cleanedBefore[0] != 1 {
+		t.Errorf("batches cleaned before the self-connect = %#v, want [1] (Clean precedes Connect)", conn.cleanedBefore)
+	}
+}
+
+func TestRunOpenBurst_PerWindowAckTimeout_TimedFromOwnSpawn(t *testing.T) {
+	// External e1 never acks (times out, consuming a FULL ~8s budget); e2 acks
+	// late-but-in-time. The per-window timer starts at e2's OWN spawn, so e1's spent
+	// budget does not eat e2's — e2 still confirms even though the global clock is
+	// already past a whole Timeout by e2's spawn. Mirrors internal/spawn's
+	// burst_test.go per-window clock proof, driven through the open burst; a delay >=
+	// Poll and < Timeout forces the poll loop across a timeout check (an
+	// immediate-reveal ack could not distinguish per-window from a global timer).
+	clock := &manualClock{}
+	dack := newBurstDelayingAck(clock.now, 200*time.Millisecond)
+	adapter := &ackWritingAdapter{ack: dack, confirm: []bool{false, true}}
+	conn := &recordingConnector{events: &openBurstEvents{}}
+	mint := &recordingMint{events: &openBurstEvents{}}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	deps.Logger = logger
+	deps.Ack = dack
+	deps.NewBurster = func(a spawn.Adapter) *spawn.Burster {
+		return &spawn.Burster{
+			Adapter: a,
+			Ack:     dack,
+			Exe:     deps.ExePath,
+			Getenv:  deps.Getenv,
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second,
+			Poll:    75 * time.Millisecond,
+			Now:     clock.now,
+			Sleep:   clock.sleep,
+		}
+	}
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+		{Kind: spawn.SurfaceAttach, Value: "e2"},
+	}
+	if err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The global clock is already past a full Timeout by e2's spawn (e1 consumed it),
+	// so e2 confirming proves its budget is judged from its own spawn, not a global timer.
+	if elapsed := clock.t.Sub(time.Time{}); elapsed < 8*time.Second {
+		t.Fatalf("clock advanced only %v, want >= Timeout so the per-window proof is meaningful", elapsed)
+	}
+
+	var e1Timeout, e2Confirmed bool
+	for _, rec := range sink.Records() {
+		if !rec.HasAttr("session") || !rec.HasAttr("ack") {
+			continue
+		}
+		switch rec.AttrString(t, "session") {
+		case "e1":
+			e1Timeout = rec.AttrString(t, "ack") == "timeout"
+		case "e2":
+			e2Confirmed = rec.AttrString(t, "ack") == "confirmed"
+		}
+	}
+	if !e1Timeout {
+		t.Errorf("want e1 recorded ack=timeout; body:\n%s", sink.Body())
+	}
+	if !e2Confirmed {
+		t.Errorf("want e2 recorded ack=confirmed (judged from its own spawn); body:\n%s", sink.Body())
+	}
+	// The trigger still connects.
+	if !slices.Equal(conn.calls, []string{"trig"}) {
+		t.Errorf("self-connect targets = %#v, want exactly [trig]", conn.calls)
 	}
 }
