@@ -169,8 +169,11 @@ var openCmd = &cobra.Command{
 			return openSessionFunc(cmd, r.Name)
 		case *resolver.PathResult:
 			return openPathFunc(cmd, r.Path, command)
-		case *resolver.FallbackResult:
-			return openTUIFunc(cmd, r.Query, command, false)
+		case *resolver.MissResult:
+			// Total miss: hard-fail with the escape-hatch message (spec § Miss
+			// handling). A plain (non-usage) error → exit code 1 via main.classify;
+			// the TUI picker is never launched on a miss. The em-dash is U+2014.
+			return fmt.Errorf("nothing resolved for '%s' — try -f %s", r.Target, r.Target)
 		default:
 			return fmt.Errorf("unexpected resolution result: %T", result)
 		}

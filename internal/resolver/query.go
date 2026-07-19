@@ -33,9 +33,13 @@ type QueryResult interface {
 	queryResult()
 }
 
-// PathResult indicates the query resolved to a directory path.
+// PathResult indicates the query resolved to a directory path that should be
+// minted as a fresh session (Axiom 2: directory-domain hits always mint).
+// Domain records which arm produced it ("path" / "alias" / "zoxide") for the
+// caller's resolution log line.
 type PathResult struct {
-	Path string
+	Path   string
+	Domain string
 }
 
 func (*PathResult) queryResult() {}
@@ -50,13 +54,16 @@ type SessionResult struct {
 
 func (*SessionResult) queryResult() {}
 
-// FallbackResult indicates no resolution was found; the TUI should be
-// launched with the query pre-filled as filter text.
-type FallbackResult struct {
-	Query string
+// MissResult indicates the query resolved to nothing across every domain — a
+// total miss. It carries the raw input so the caller can render the hard-fail
+// escape-hatch error and emit the resolution log line (domain = miss). There is
+// no implicit TUI-picker fallback (spec § Miss handling — total miss is a hard
+// fail).
+type MissResult struct {
+	Target string
 }
 
-func (*FallbackResult) queryResult() {}
+func (*MissResult) queryResult() {}
 
 // DirNotFoundError indicates a resolved directory does not exist on disk.
 type DirNotFoundError struct {
@@ -81,7 +88,7 @@ func (v *OSDirValidator) Exists(path string) bool {
 }
 
 // QueryResolver applies the resolution chain: exact session-name match, path
-// detection, alias lookup, zoxide query, then TUI fallback.
+// detection, alias lookup, zoxide query, then a total miss (hard fail).
 type QueryResolver struct {
 	sessions     SessionLister
 	aliases      AliasLookup
@@ -103,7 +110,8 @@ func NewQueryResolver(sessions SessionLister, aliases AliasLookup, zoxide Zoxide
 // The session domain is checked first: an exact match against the user-visible
 // session set yields a SessionResult (attach). Otherwise, path-like arguments
 // are resolved directly via ResolvePath, and non-path arguments are checked
-// against aliases, then zoxide, then fall back to TUI. After alias or zoxide
+// against aliases, then zoxide; a target that resolves nowhere yields a
+// MissResult (the caller hard-fails, no TUI fallback). After alias or zoxide
 // resolution, the directory is validated on disk.
 func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 	// Session domain first (spec § Target resolution precedence: exact session
@@ -120,27 +128,33 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &PathResult{Path: resolved}, nil
+		return &PathResult{Path: resolved, Domain: "path"}, nil
 	}
 
 	// Alias lookup
 	if path, ok := qr.aliases.Get(query); ok {
-		return qr.validatedPath(path)
+		return qr.validatedPath(path, "alias")
 	}
 
-	// Zoxide query
+	// Zoxide query. A zoxide error (not installed / no match) is swallowed here
+	// so the bare-target chain continues to the miss tail — unlike the pinned
+	// -z, which errors explicitly (spec § Domain-pinning flags).
 	if path, err := qr.zoxide.Query(query); err == nil {
-		return qr.validatedPath(path)
+		return qr.validatedPath(path, "zoxide")
 	}
 
-	// Zoxide not installed or no match: fall through to TUI
-	return &FallbackResult{Query: query}, nil
+	// No domain resolved the target: a total miss. The caller turns this into
+	// the hard-fail escape-hatch error (spec § Miss handling); there is no
+	// implicit TUI-picker fallback.
+	return &MissResult{Target: query}, nil
 }
 
-// validatedPath returns a PathResult after verifying the directory exists on disk.
-func (qr *QueryResolver) validatedPath(path string) (QueryResult, error) {
+// validatedPath returns a PathResult (tagged with the resolving domain) after
+// verifying the directory exists on disk. A non-existent directory is a hard
+// error (DirNotFoundError), distinct from a miss.
+func (qr *QueryResolver) validatedPath(path, domain string) (QueryResult, error) {
 	if !qr.dirValidator.Exists(path) {
 		return nil, &DirNotFoundError{Path: path}
 	}
-	return &PathResult{Path: path}, nil
+	return &PathResult{Path: path, Domain: domain}, nil
 }

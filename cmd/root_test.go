@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // resetRootCmd resets the root command's output streams and subcommand flags for testing.
@@ -40,6 +41,14 @@ func resetRootCmd() {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
+	// pflag does not reset argsLenAtDash between Parse calls, and it stays stale
+	// on an empty-args Parse (an early return). A prior `open <t> -- cmd` Execute
+	// therefore leaves openCmd's dash index at a positive value; a later no-`--`
+	// Execute would then slice args[dashIdx:] out of range in parseCommandArgs.
+	// Re-Init restores argsLenAtDash to -1 without disturbing the defined flags
+	// (Init only resets name/errorHandling/argsLenAtDash). Production is immune —
+	// each portal invocation is a fresh process — so this is a harness-only reset.
+	openCmd.Flags().Init(openCmd.Name(), pflag.ContinueOnError)
 	if f := hooksSetCmd.Flags().Lookup("on-resume"); f != nil { // reset hooks set flags
 		_ = f.Value.Set("")
 		f.Changed = false

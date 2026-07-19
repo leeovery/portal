@@ -710,10 +710,10 @@ func TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton(t *testing.T) 
 //     either tmux switch-client (inside-tmux) or syscall.Exec (bare
 //     shell). The former requires a live attached client (impossible in
 //     a test harness); the latter would replace the test process.
-//   - openTUIFunc is overridden to fail the test if the resolver took
-//     the FallbackResult branch — ensures we are exercising the
-//     path-arg PathResult branch and not silently falling through to
-//     the TUI.
+//   - openTUIFunc is overridden to fail the test if the resolver ever
+//     reached the picker — ensures we are exercising the path-arg
+//     PathResult branch and not falling through (a total miss now
+//     hard-fails rather than launching the TUI).
 //
 // What this case uniquely contributes (vs the no-arg sibling): it
 // proves the cmd-layer resolver chain reaches openPath when alias
@@ -789,13 +789,12 @@ func TestReattachIntegration_OpenPathResolvesSavedOnlySession(t *testing.T) {
 	}
 	t.Cleanup(func() { openPathFunc = origOpenPath })
 
-	// TUI launcher must NOT be reached — falling through to the TUI
-	// would mean the alias resolution silently produced FallbackResult,
-	// which would mask a regression in the path-arg branch we're
-	// testing.
+	// TUI launcher must NOT be reached — reaching it would mean the alias
+	// resolution failed to produce a PathResult, which would mask a
+	// regression in the path-arg branch we're testing.
 	origOpenTUI := openTUIFunc
 	openTUIFunc = func(_ *cobra.Command, query string, _ []string, _ bool) error {
-		t.Errorf("openTUIFunc unexpectedly called (query=%q); resolver should have produced PathResult, not FallbackResult", query)
+		t.Errorf("openTUIFunc unexpectedly called (query=%q); resolver should have produced PathResult", query)
 		return nil
 	}
 	t.Cleanup(func() { openTUIFunc = origOpenTUI })

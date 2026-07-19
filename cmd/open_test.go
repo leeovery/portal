@@ -1104,17 +1104,14 @@ func TestProcessTUIResult(t *testing.T) {
 	})
 }
 
-func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
-	// When a destination is provided but resolves to FallbackResult,
-	// the bootstrap orchestrator has already run; the fallback openTUI call
-	// is reached with serverStarted reflecting the orchestrator's outcome.
-	runner := &recordingRunner{started: true}
-	client := tmux.NewClient(&stubCommander{})
-	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
+func TestOpenCommand_TotalMiss_HardFails(t *testing.T) {
+	// A target that resolves to nothing across every domain is a hard failure
+	// carrying the escape-hatch message — the TUI picker is NEVER launched on a
+	// miss (spec § Miss handling — total miss is a hard fail). The implicit
+	// fallback-to-TUI-with-filter is removed.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
-	// Force the resolver to return FallbackResult (no session, no alias, no
-	// zoxide match, no dir).
 	openDeps = &OpenDeps{
 		SessionLister: &testSessionLister{},
 		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
@@ -1123,23 +1120,117 @@ func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
 	}
 	t.Cleanup(func() { openDeps = nil })
 
-	var capturedServerStarted bool
+	tuiCalled := false
 	origFunc := openTUIFunc
-	openTUIFunc = func(_ *cobra.Command, initialFilter string, command []string, serverStarted bool) error {
-		capturedServerStarted = serverStarted
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
 		return nil
 	}
 	t.Cleanup(func() { openTUIFunc = origFunc })
 
 	resetRootCmd()
-	rootCmd.SetArgs([]string{"open", "nonexistent-query"})
+	rootCmd.SetArgs([]string{"open", "blog"})
 	err := rootCmd.Execute()
 
-	if err != nil {
+	if err == nil {
+		t.Fatal("expected hard-fail error for total miss, got nil")
+	}
+	want := "nothing resolved for 'blog' — try -f blog"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called on a total miss")
+	}
+	// A plain (non-usage) error → exit code 1, not the UsageError code 2.
+	var usageErr *UsageError
+	if errors.As(err, &usageErr) {
+		t.Error("miss error must be a plain error, not a *UsageError")
+	}
+}
+
+func TestOpenCommand_BareProjectName_MintsNeverAttaches(t *testing.T) {
+	// 'open api' with a running api-x7Kd9a session must NOT attach it: the
+	// exact-name check misses ({project}-{nanoid} names never equal the bare
+	// project name), so api falls through the directory chain and mints
+	// (spec § Bare project shorthand does not reattach).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"api-x7Kd9a"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{"api": "/Users/lee/Code/api"}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{"/Users/lee/Code/api": true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var mintedPath string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, _ []string) error {
+		mintedPath = path
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "api"})
+	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if capturedServerStarted {
-		t.Error("fallback-to-TUI path passed serverStarted=true; expected false to avoid double wait")
+
+	if mintedPath != "/Users/lee/Code/api" {
+		t.Errorf("openPathFunc minted %q, want %q", mintedPath, "/Users/lee/Code/api")
+	}
+	if sessionCalled {
+		t.Error("openSessionFunc must not be called for a bare project name (no reattach)")
+	}
+}
+
+func TestOpenCommand_CommandThreadsIntoMintedTarget(t *testing.T) {
+	// The -- command must thread through openPath into the minted session,
+	// unchanged from today's openPath(cmd, path, command) routing.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{"api": "/Users/lee/Code/api"}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{"/Users/lee/Code/api": true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var gotPath string
+	var gotCommand []string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, command []string) error {
+		gotPath = path
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "api", "--", "vim", "."})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotPath != "/Users/lee/Code/api" {
+		t.Errorf("minted path = %q, want %q", gotPath, "/Users/lee/Code/api")
+	}
+	wantCmd := []string{"vim", "."}
+	if !slices.Equal(gotCommand, wantCmd) {
+		t.Errorf("threaded command = %v, want %v", gotCommand, wantCmd)
 	}
 }
 

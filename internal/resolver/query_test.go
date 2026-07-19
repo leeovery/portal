@@ -59,8 +59,9 @@ func TestQueryResolver_Resolve(t *testing.T) {
 		zoxideErr    error
 		existingDirs map[string]bool
 		wantPath     string
-		wantFallback bool
-		wantQuery    string
+		wantDomain   string
+		wantMiss     bool
+		wantTarget   string
 		wantErr      string
 	}{
 		{
@@ -71,7 +72,7 @@ func TestQueryResolver_Resolve(t *testing.T) {
 			zoxideErr:    nil,
 			existingDirs: map[string]bool{"/Users/lee/Code/myapp": true},
 			wantPath:     "/Users/lee/Code/myapp",
-			wantFallback: false,
+			wantDomain:   "alias",
 		},
 		{
 			name:         "alias miss falls through to zoxide",
@@ -81,27 +82,27 @@ func TestQueryResolver_Resolve(t *testing.T) {
 			zoxideErr:    nil,
 			existingDirs: map[string]bool{"/Users/lee/Code/proj": true},
 			wantPath:     "/Users/lee/Code/proj",
-			wantFallback: false,
+			wantDomain:   "zoxide",
 		},
 		{
-			name:         "zoxide miss falls through to TUI fallback",
+			name:         "zoxide miss falls through to miss",
 			query:        "unknown",
 			aliases:      map[string]string{},
 			zoxideResult: "",
 			zoxideErr:    resolver.ErrNoMatch,
 			existingDirs: map[string]bool{},
-			wantFallback: true,
-			wantQuery:    "unknown",
+			wantMiss:     true,
+			wantTarget:   "unknown",
 		},
 		{
-			name:         "TUI fallback includes query string for filter pre-fill",
+			name:         "miss result carries raw target string",
 			query:        "searchterm",
 			aliases:      map[string]string{},
 			zoxideResult: "",
 			zoxideErr:    resolver.ErrNoMatch,
 			existingDirs: map[string]bool{},
-			wantFallback: true,
-			wantQuery:    "searchterm",
+			wantMiss:     true,
+			wantTarget:   "searchterm",
 		},
 		{
 			name:         "resolved alias directory validated for existence",
@@ -128,8 +129,8 @@ func TestQueryResolver_Resolve(t *testing.T) {
 			zoxideResult: "",
 			zoxideErr:    resolver.ErrZoxideNotInstalled,
 			existingDirs: map[string]bool{},
-			wantFallback: true,
-			wantQuery:    "myquery",
+			wantMiss:     true,
+			wantTarget:   "myquery",
 		},
 		{
 			name:         "query matches alias; alias path used not zoxide",
@@ -139,7 +140,7 @@ func TestQueryResolver_Resolve(t *testing.T) {
 			zoxideErr:    nil,
 			existingDirs: map[string]bool{"/alias/path": true, "/zoxide/path": true},
 			wantPath:     "/alias/path",
-			wantFallback: false,
+			wantDomain:   "alias",
 		},
 	}
 
@@ -166,13 +167,13 @@ func TestQueryResolver_Resolve(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if tt.wantFallback {
-				fb, ok := result.(*resolver.FallbackResult)
+			if tt.wantMiss {
+				mr, ok := result.(*resolver.MissResult)
 				if !ok {
-					t.Fatalf("expected FallbackResult, got %T", result)
+					t.Fatalf("expected MissResult, got %T", result)
 				}
-				if fb.Query != tt.wantQuery {
-					t.Errorf("FallbackResult.Query = %q, want %q", fb.Query, tt.wantQuery)
+				if mr.Target != tt.wantTarget {
+					t.Errorf("MissResult.Target = %q, want %q", mr.Target, tt.wantTarget)
 				}
 				return
 			}
@@ -183,6 +184,9 @@ func TestQueryResolver_Resolve(t *testing.T) {
 			}
 			if pr.Path != tt.wantPath {
 				t.Errorf("PathResult.Path = %q, want %q", pr.Path, tt.wantPath)
+			}
+			if tt.wantDomain != "" && pr.Domain != tt.wantDomain {
+				t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, tt.wantDomain)
 			}
 		})
 	}
@@ -216,6 +220,9 @@ func TestQueryResolver_Resolve_PathLikeArguments(t *testing.T) {
 		}
 		if pr.Path != subDir {
 			t.Errorf("PathResult.Path = %q, want %q", pr.Path, subDir)
+		}
+		if pr.Domain != "path" {
+			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, "path")
 		}
 	})
 
@@ -436,12 +443,12 @@ func TestQueryResolver_Resolve_SessionDomain(t *testing.T) {
 		if _, ok := result.(*resolver.SessionResult); ok {
 			t.Fatal("expected fall-through for filtered internal session, got *SessionResult")
 		}
-		fb, ok := result.(*resolver.FallbackResult)
+		mr, ok := result.(*resolver.MissResult)
 		if !ok {
-			t.Fatalf("expected *FallbackResult, got %T", result)
+			t.Fatalf("expected *MissResult, got %T", result)
 		}
-		if fb.Query != "_portal-saver" {
-			t.Errorf("FallbackResult.Query = %q, want %q", fb.Query, "_portal-saver")
+		if mr.Target != "_portal-saver" {
+			t.Errorf("MissResult.Target = %q, want %q", mr.Target, "_portal-saver")
 		}
 	})
 
@@ -498,8 +505,8 @@ func TestQueryResolver_Resolve_SessionDomain(t *testing.T) {
 		if _, ok := result.(*resolver.SessionResult); ok {
 			t.Fatal("expected fall-through on lister error, got *SessionResult")
 		}
-		if _, ok := result.(*resolver.FallbackResult); !ok {
-			t.Fatalf("expected *FallbackResult, got %T", result)
+		if _, ok := result.(*resolver.MissResult); !ok {
+			t.Fatalf("expected *MissResult, got %T", result)
 		}
 	})
 }
