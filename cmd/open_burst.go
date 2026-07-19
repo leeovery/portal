@@ -92,6 +92,16 @@ func aggregatedMissError(misses []string) error {
 	return fmt.Errorf("nothing resolved for: %s", spawn.QuoteJoin(misses))
 }
 
+// singleMissError is the single-target (N=1) "nothing resolved" hard-fail
+// message (spec § Miss handling): it keeps the Phase-1 -f escape-hatch
+// suggestion, substituting the target TWICE (quoted, then after -f). It is the
+// SOLE authoring site for this wording — both the bare-positional path
+// (cmd/open.go) and the N=1 glob-expanding-to-zero burst arm call it so the two
+// cannot drift. The em-dash is U+2014. A plain (non-usage) error → exit 1.
+func singleMissError(target string) error {
+	return fmt.Errorf("nothing resolved for '%s' — try -f %s", target, target)
+}
+
 // dispatchOpenBurst runs the atomic read-only pre-flight for a multi-target open
 // and routes the outcome (spec § Atomic pre-flight & partial failure):
 //
@@ -122,7 +132,7 @@ func dispatchOpenBurst(cmd *cobra.Command, ordered []Target, command []string) e
 	if len(misses) > 0 {
 		if len(ordered) == 1 {
 			// A single glob expanding to zero is N=1 arity — keep the -f hint.
-			return fmt.Errorf("nothing resolved for '%s' — try -f %s", misses[0], misses[0])
+			return singleMissError(misses[0])
 		}
 		return aggregatedMissError(misses)
 	}

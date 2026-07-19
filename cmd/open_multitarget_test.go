@@ -203,6 +203,15 @@ func TestOpenCommand_SingleTargetMiss_KeepsMinusFSuggestion(t *testing.T) {
 	}
 }
 
+func TestSingleMissError_ByteIdenticalFormat(t *testing.T) {
+	// The single-sourced single-target miss message must reproduce the exact
+	// spec-governed wording byte-for-byte: the U+2014 em-dash and the target
+	// substituted TWICE (once quoted, once after -f).
+	if got, want := singleMissError("blog").Error(), "nothing resolved for 'blog' — try -f blog"; got != want {
+		t.Errorf("singleMissError = %q, want %q", got, want)
+	}
+}
+
 func TestOpenCommand_SingleGlobExpandingToZero_KeepsMinusF(t *testing.T) {
 	// A single session glob that expands to ZERO matches is N=1 arity: it routes
 	// through the burst resolver (glob may expand to K≥2) but, expanding to zero,

@@ -286,8 +286,8 @@ var openCmd = &cobra.Command{
 			// handling). Handled inline in the bare-positional path — pins never
 			// yield a MissResult. A plain (non-usage) error → exit code 1 via
 			// main.classify; the TUI picker is never launched on a miss. The em-dash
-			// is U+2014.
-			return fmt.Errorf("nothing resolved for '%s' — try -f %s", miss.Target, miss.Target)
+			// is U+2014. The wording is single-sourced in singleMissError.
+			return singleMissError(miss.Target)
 		}
 		return openResolved(cmd, result, command)
 	},
