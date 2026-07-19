@@ -268,6 +268,42 @@ func TestList(t *testing.T) {
 	})
 }
 
+func TestKeys(t *testing.T) {
+	t.Run("returns alias names sorted", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "aliases")
+		store := alias.NewStore(filePath)
+
+		store.Set("zebra", "/z/path")
+		store.Set("apple", "/a/path")
+		store.Set("mango", "/m/path")
+
+		keys := store.Keys()
+
+		want := []string{"apple", "mango", "zebra"}
+		if len(keys) != len(want) {
+			t.Fatalf("got %d keys, want %d", len(keys), len(want))
+		}
+		for i, k := range keys {
+			if k != want[i] {
+				t.Errorf("keys[%d] = %q, want %q", i, k, want[i])
+			}
+		}
+	})
+
+	t.Run("returns empty slice when no aliases", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "aliases")
+		store := alias.NewStore(filePath)
+
+		keys := store.Keys()
+
+		if len(keys) != 0 {
+			t.Errorf("got %d keys, want 0", len(keys))
+		}
+	})
+}
+
 func TestFileFormat(t *testing.T) {
 	t.Run("writes flat key=value format one per line", func(t *testing.T) {
 		dir := t.TempDir()

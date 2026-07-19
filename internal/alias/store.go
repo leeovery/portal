@@ -221,6 +221,18 @@ func (s *Store) DeleteAndSave(name, via string) (existed bool, err error) {
 	return true, nil
 }
 
+// Keys returns all alias names sorted. It exposes the finite alias-key
+// namespace for glob enumeration (resolver.AliasLookup.Keys) without leaking the
+// []Alias name-to-path shape that List returns.
+func (s *Store) Keys() []string {
+	keys := make([]string, 0, len(s.aliases))
+	for name := range s.aliases {
+		keys = append(keys, name)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 // List returns all aliases sorted by name.
 func (s *Store) List() []Alias {
 	result := make([]Alias, 0, len(s.aliases))

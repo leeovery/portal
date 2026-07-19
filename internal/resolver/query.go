@@ -13,9 +13,13 @@ type SessionLister interface {
 	ListSessionNames() ([]string, error)
 }
 
-// AliasLookup retrieves the path for a given alias name.
+// AliasLookup retrieves the path for a given alias name and enumerates the
+// finite alias-key namespace. Keys backs the -a/--alias pin's key-glob
+// expansion (spec § Glob targets — alias keys are a finite Portal-owned
+// namespace). Both methods are satisfied by *alias.Store.
 type AliasLookup interface {
 	Get(name string) (string, bool)
+	Keys() []string
 }
 
 // ZoxideQuerier queries zoxide for a directory matching the given terms.
@@ -219,6 +223,47 @@ func (qr *QueryResolver) ResolvePathPin(dir string) (QueryResult, error) {
 		return nil, err
 	}
 	return &PathResult{Path: resolved, Domain: "path"}, nil
+}
+
+// ResolveAliasPin resolves value in the alias domain ONLY — the -a/--alias pin
+// (spec § Domain-pinning flags). It looks the key up directly in the alias store,
+// bypassing the session→path→alias→zoxide precedence, so it is the ONLY way to
+// reach an alias key SHADOWED by a same-named session. When value is a glob it is
+// expanded against the enumerated alias-key namespace (Keys + filepath.Match via
+// MatchSessions — a finite Portal-owned namespace, spec § Glob targets); at
+// single-target arity the first match mints (per-match window fan-out is the
+// Phase 3 burst). The resolved key's directory is validated on disk via
+// validatedPath: a hit always mints (Axiom 2 — PathResult with Domain "alias"), a
+// gone directory hard-fails with *DirNotFoundError (distinct from the unknown-key
+// miss), and an unknown key — or a glob matching zero keys — hard-fails with a
+// plain "No alias found" error. It never consults qr.sessions or qr.zoxide, and
+// the pin never falls back to the picker (spec § Pinned-domain contract).
+func (qr *QueryResolver) ResolveAliasPin(value string) (QueryResult, error) {
+	if HasGlobMeta(value) {
+		matches := MatchSessions(value, qr.aliases.Keys())
+		if len(matches) == 0 {
+			return nil, unknownAliasError(value)
+		}
+		// matches are drawn from Keys(), so the first is always a real key.
+		path, _ := qr.aliases.Get(matches[0])
+		return qr.validatedPath(path, "alias")
+	}
+
+	path, ok := qr.aliases.Get(value)
+	if !ok {
+		return nil, unknownAliasError(value)
+	}
+	return qr.validatedPath(path, "alias")
+}
+
+// unknownAliasError is the alias-pin hard-fail for an unknown key or a glob
+// matching zero keys (spec § Domain-pinning flags: -a hard-fails on an unknown
+// key). Single-sourced so both the exact-miss and zero-match-glob paths produce a
+// byte-identical message. A plain error (not a UsageError) → runtime failure →
+// exit 1. The capitalised leading word matches the house style (cf. "No session
+// found") and trips staticcheck ST1005, silenced per the directive.
+func unknownAliasError(value string) error {
+	return fmt.Errorf("No alias found: %s", value) //nolint:staticcheck // user-facing message per spec
 }
 
 // validatedPath returns a PathResult (tagged with the resolving domain) after

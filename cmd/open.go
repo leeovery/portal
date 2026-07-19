@@ -216,6 +216,31 @@ var openCmd = &cobra.Command{
 			return openResolved(cmd, result, command)
 		}
 
+		// -a/--alias pin (spec § Domain-pinning flags): resolve the value in the
+		// alias domain only via ResolveAliasPin, which looks the key up directly in
+		// the alias store — bypassing the session→path→alias precedence — so it is
+		// the ONLY way to reach an alias key shadowed by a same-named session. A glob
+		// value expands against the finite alias-key namespace (spec § Glob targets).
+		// A hit mints (Axiom 2) and a *PathResult routes through the shared outcome
+		// switch; an unknown key (or a glob matching zero keys) hard-fails and a gone
+		// dir hard-fails with "Directory not found" — the pin never mints-to-picker
+		// (spec § Pinned-domain contract) and emits no resolve line (pins are
+		// deterministic, not guesses). Placed BEFORE the no-target early-return so
+		// `open -a <key>` with an empty positional resolves the pin rather than
+		// launching the picker.
+		if cmd.Flags().Changed("alias") {
+			aliasVal, _ := cmd.Flags().GetString("alias")
+			qr, err := buildQueryResolver(cmd)
+			if err != nil {
+				return err
+			}
+			result, err := qr.ResolveAliasPin(aliasVal)
+			if err != nil {
+				return err
+			}
+			return openResolved(cmd, result, command)
+		}
+
 		if destination == "" {
 			return openTUIFunc(cmd, "", command, serverWasStarted(cmd))
 		}
@@ -843,5 +868,6 @@ func init() {
 	openCmd.Flags().StringP("filter", "f", "", "open the picker pre-filtered by <text> (skips resolution)")
 	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints)")
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
+	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
 	rootCmd.AddCommand(openCmd)
 }

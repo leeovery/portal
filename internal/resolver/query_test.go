@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/leeovery/portal/internal/resolver"
@@ -17,6 +18,15 @@ type mockAliasLookup struct {
 func (m *mockAliasLookup) Get(name string) (string, bool) {
 	path, ok := m.aliases[name]
 	return path, ok
+}
+
+func (m *mockAliasLookup) Keys() []string {
+	keys := make([]string, 0, len(m.aliases))
+	for name := range m.aliases {
+		keys = append(keys, name)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // mockZoxideQuerier implements resolver.ZoxideQuerier for testing.
@@ -521,6 +531,12 @@ func (f *failingAliasLookup) Get(name string) (string, bool) {
 	return "", false
 }
 
+func (f *failingAliasLookup) Keys() []string {
+	f.t.Helper()
+	f.t.Fatalf("session/path pin must not enumerate alias keys (Keys called)")
+	return nil
+}
+
 // failingZoxideQuerier fails the test if Query is ever called. ResolveSessionPin
 // is session-domain only, so it must never consult zoxide.
 type failingZoxideQuerier struct{ t *testing.T }
@@ -834,6 +850,154 @@ func TestQueryResolver_ResolvePathPin(t *testing.T) {
 		}
 		if pr.Path != home {
 			t.Errorf("PathResult.Path = %q, want %q", pr.Path, home)
+		}
+	})
+}
+
+func TestQueryResolver_ResolveAliasPin(t *testing.T) {
+	// newAliasPinResolver builds a QueryResolver whose session and zoxide seams
+	// FAIL the test if consulted — ResolveAliasPin is alias-domain only (it looks
+	// the key up directly in the alias store, bypassing the session→path→alias→
+	// zoxide precedence), so every case doubles as a "never consults session or
+	// zoxide" guard. The failing session lister also proves a same-named shadowing
+	// session is never checked.
+	newAliasPinResolver := func(t *testing.T, aliases map[string]string, existing map[string]bool) *resolver.QueryResolver {
+		return resolver.NewQueryResolver(
+			&failingSessionLister{t: t},
+			&mockAliasLookup{aliases: aliases},
+			&failingZoxideQuerier{t: t},
+			&mockDirValidator{existing: existing},
+		)
+	}
+
+	t.Run("known key returns PathResult domain alias with the validated dir", func(t *testing.T) {
+		// The failing session lister proves a same-named shadowing session is never
+		// consulted: -a bypasses the session→path→alias precedence entirely.
+		qr := newAliasPinResolver(t,
+			map[string]string{"myapp": "/Users/lee/Code/myapp"},
+			map[string]bool{"/Users/lee/Code/myapp": true},
+		)
+
+		result, err := qr.ResolveAliasPin("myapp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected *PathResult, got %T", result)
+		}
+		if pr.Path != "/Users/lee/Code/myapp" {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, "/Users/lee/Code/myapp")
+		}
+		if pr.Domain != "alias" {
+			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, "alias")
+		}
+	})
+
+	t.Run("key glob single match mints at the matched key's dir", func(t *testing.T) {
+		qr := newAliasPinResolver(t,
+			map[string]string{"workflow-a": "/code/wa", "blog": "/code/blog"},
+			map[string]bool{"/code/wa": true},
+		)
+
+		result, err := qr.ResolveAliasPin("workflow-*")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected *PathResult, got %T", result)
+		}
+		if pr.Path != "/code/wa" {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, "/code/wa")
+		}
+		if pr.Domain != "alias" {
+			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, "alias")
+		}
+	})
+
+	t.Run("key glob multi-match mints the first sorted match (single-target)", func(t *testing.T) {
+		// Keys() returns sorted names and MatchSessions preserves order, so the
+		// first match is deterministic: "workflow-a" precedes "workflow-b".
+		// Per-match fan-out is the Phase 3 burst.
+		qr := newAliasPinResolver(t,
+			map[string]string{"workflow-b": "/code/wb", "workflow-a": "/code/wa"},
+			map[string]bool{"/code/wa": true, "/code/wb": true},
+		)
+
+		result, err := qr.ResolveAliasPin("workflow-*")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected *PathResult, got %T", result)
+		}
+		if pr.Path != "/code/wa" {
+			t.Errorf("PathResult.Path = %q, want %q (first sorted match)", pr.Path, "/code/wa")
+		}
+	})
+
+	t.Run("unknown key hard-fails with No alias found", func(t *testing.T) {
+		qr := newAliasPinResolver(t,
+			map[string]string{"api": "/code/api"},
+			map[string]bool{"/code/api": true},
+		)
+
+		result, err := qr.ResolveAliasPin("nope")
+		if result != nil {
+			t.Errorf("expected nil result for an unknown key, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for an unknown key, got nil")
+		}
+		if want := "No alias found: nope"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("glob matching zero keys hard-fails with No alias found", func(t *testing.T) {
+		qr := newAliasPinResolver(t,
+			map[string]string{"api": "/code/api"},
+			map[string]bool{"/code/api": true},
+		)
+
+		result, err := qr.ResolveAliasPin("web-*")
+		if result != nil {
+			t.Errorf("expected nil result for a zero-match glob, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for a zero-match glob, got nil")
+		}
+		if want := "No alias found: web-*"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("resolved key whose dir is gone hard-fails with Directory not found", func(t *testing.T) {
+		// Distinct from the unknown-key miss: the key resolves, but its directory
+		// no longer exists — the shared disk validation (validatedPath) rejects it.
+		qr := newAliasPinResolver(t,
+			map[string]string{"stale": "/gone/dir"},
+			map[string]bool{},
+		)
+
+		result, err := qr.ResolveAliasPin("stale")
+		if result != nil {
+			t.Errorf("expected nil result for a gone dir, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for a gone dir, got nil")
+		}
+		if want := "Directory not found: /gone/dir"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+		var dirErr *resolver.DirNotFoundError
+		if !errors.As(err, &dirErr) {
+			t.Errorf("expected *DirNotFoundError, got %T", err)
 		}
 	})
 }

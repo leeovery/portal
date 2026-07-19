@@ -1,6 +1,7 @@
 package resolver_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/leeovery/portal/internal/resolver"
@@ -92,6 +93,15 @@ func (t *trackingAliasLookup) Get(name string) (string, bool) {
 	t.called = true
 	path, ok := t.aliases[name]
 	return path, ok
+}
+
+func (t *trackingAliasLookup) Keys() []string {
+	keys := make([]string, 0, len(t.aliases))
+	for name := range t.aliases {
+		keys = append(keys, name)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 func TestQueryResolver_Resolve_GlobPreCheck(t *testing.T) {

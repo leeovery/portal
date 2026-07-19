@@ -37,6 +37,15 @@ func (t *testAliasLookup) Get(name string) (string, bool) {
 	return path, ok
 }
 
+func (t *testAliasLookup) Keys() []string {
+	keys := make([]string, 0, len(t.aliases))
+	for name := range t.aliases {
+		keys = append(keys, name)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 // testZoxideQuerier implements resolver.ZoxideQuerier for testing.
 type testZoxideQuerier struct {
 	result string
@@ -606,6 +615,199 @@ func TestOpenCommand_PathPin_EmitsNoResolveLine(t *testing.T) {
 
 	if recs := h.resolveRecords(); len(recs) != 0 {
 		t.Fatalf("expected no resolve records for a -p pin, got %d", len(recs))
+	}
+}
+
+func TestOpenCommand_AliasPin_Mints_NoPicker(t *testing.T) {
+	// `open -a <key>` resolves in the alias domain only and mints (openPathFunc) at
+	// the aliased dir — even when a SAME-NAMED session exists (a session shadows the
+	// key in the bare precedence chain). -a bypasses precedence: it never attaches
+	// (openSessionFunc) and never opens the picker (openTUIFunc). Spec § Domain-
+	// pinning flags: -a is the only way to reach a shadowed alias key.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	dir := t.TempDir()
+
+	openDeps = &OpenDeps{
+		// A same-named session ("myapp") shadows the alias key in the bare chain;
+		// -a must ignore it entirely and mint at the aliased dir.
+		SessionLister: &testSessionLister{names: []string{"myapp"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{"myapp": dir}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{dir: true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var mintedPath string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, _ []string) error {
+		mintedPath = path
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-a", "myapp"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if mintedPath != dir {
+		t.Errorf("openPathFunc minted %q, want %q", mintedPath, dir)
+	}
+	if sessionCalled {
+		t.Error("openSessionFunc must not be called for a -a pin (bypasses the shadowing session, never attaches)")
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called for a -a pin (never opens the picker)")
+	}
+}
+
+func TestOpenCommand_AliasPin_UnknownKey_HardFailsNoPicker(t *testing.T) {
+	// A -a miss (unknown key) hard-fails with "No alias found: <key>" and NEVER
+	// opens the picker or mints. Spec § Pinned-domain contract: pins never fall back
+	// to the picker.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{"known": "/code/known"}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-a", "nope"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected hard-fail error for a -a unknown key, got nil")
+	}
+	want := "No alias found: nope"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called on a -a unknown-key miss")
+	}
+	if pathCalled {
+		t.Error("openPathFunc must not be called on a -a unknown-key miss")
+	}
+	// An unknown alias key is a runtime failure → plain error (exit 1), not a UsageError.
+	var usageErr *UsageError
+	if errors.As(err, &usageErr) {
+		t.Error("-a unknown-key error must be a plain error, not a *UsageError")
+	}
+}
+
+func TestOpenCommand_AliasPin_ThreadsCommandIntoMint(t *testing.T) {
+	// A present -e/-- command threads into the minted session unchanged:
+	// `open -a <key> -e claude` → openPathFunc receives command == [claude].
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	dir := t.TempDir()
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{"myapp": dir}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{dir: true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var gotPath string
+	var gotCommand []string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, command []string) error {
+		gotPath = path
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-a", "myapp", "-e", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotPath != dir {
+		t.Errorf("minted path = %q, want %q", gotPath, dir)
+	}
+	wantCmd := []string{"claude"}
+	if !slices.Equal(gotCommand, wantCmd) {
+		t.Errorf("threaded command = %v, want %v", gotCommand, wantCmd)
+	}
+}
+
+func TestOpenCommand_AliasPin_EmitsNoResolveLine(t *testing.T) {
+	// A -a pin is deterministic (alias-domain by construction), not a guess, so it
+	// emits NO "resolve" decision line (spec § Wrong-guess feedback — pins emit no
+	// resolve line).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	dir := t.TempDir()
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{"myapp": dir}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{dir: true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error { return nil }
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-a", "myapp"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if recs := h.resolveRecords(); len(recs) != 0 {
+		t.Fatalf("expected no resolve records for a -a pin, got %d", len(recs))
 	}
 }
 
