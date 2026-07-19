@@ -1,7 +1,7 @@
 ---
 phase: 4
 phase_name: "doctor & uninstall — maintenance surface reshuffle"
-total: 7
+total: 8
 ---
 
 ## cli-verb-surface-redesign-4-1 | approved
@@ -357,3 +357,47 @@ total: 7
 > Confirmed non-test callers of the relocated helpers: `loadProjectStore`/`projectsFilePath`/`loadPrefsStore`/`prefsFilePath` — `cmd/open.go`; `AllPaneLister` — `cmd/run_hook_stale_cleanup.go` + `cmd/state_daemon.go`. `runHookStaleCleanup`'s current doc comment names two live callers (the daemon's `maybeRunHookCleanup` and `cleanCmd.RunE → cleanStaleHooks`); after this task only the daemon remains. `IsSilentExitError` currently ORs `errCommitNowFailed || ErrStatusUnhealthy` — task 4.1 added `ErrDoctorUnhealthy`; this task removes the `ErrStatusUnhealthy` term.
 
 **Spec Reference**: `.workflows/cli-verb-surface-redesign/specification/cli-verb-surface-redesign/specification.md` §§ `doctor` — `clean` deleted; Command Surface Summary — Removed public commands; Bootstrap Exemption; Rationale.
+
+## cli-verb-surface-redesign-4-8 | approved
+
+### Task 4.8: Fold stale-project pruning into the daemon's throttled automation
+
+**Problem**: `clean`'s one genuinely-unique job was pruning stale (gone-dir) projects. The redesign deletes `clean` (Task 4-7) on the promise that stale-project pruning "folds into the daemon's automation on a slow cadence" so `doctor` reads healthy almost always and `doctor --fix` is only the manual trigger of the same repair. Today the `_portal-saver` daemon prunes stale hooks on its throttled idle tick (`maybeRunHookCleanup` → `runHookStaleCleanup`) but has never pruned stale projects. Deleting `clean` (Task 4-7) and delivering only the manual `doctor --fix` (Task 4-5) leaves the automatic half of `clean`'s replacement unbuilt — gone-dir projects would accumulate until a manual `--fix`, contradicting the spec's "the automation keeps it healthy" intent.
+
+**Solution**: Extend the daemon's throttled idle-tick cleanup in `cmd/state_daemon.go`, alongside the existing `maybeRunHookCleanup`, to also prune stale projects via `project.Store.CleanStale()` — the same filesystem-only classification `doctor --fix` (Task 4-5) and the `doctor` stale-project check (Task 4-3) use — on a slow cadence (hourly-ish, mirroring the hook-cleanup throttle). This is the automatic-daemon-pruning half of `clean`'s replacement; the mechanism/cadence is an implementation detail per the spec.
+
+**Outcome**: The `_portal-saver` daemon periodically prunes gone-dir projects (filesystem-only), so `doctor`'s stale-project check reads clean almost always without a manual `doctor --fix`; `doctor --fix` remains the manual trigger of the identical repair.
+
+**Do**:
+- In `cmd/state_daemon.go`, add a throttled stale-project prune next to the existing `maybeRunHookCleanup` idle-tick path. Reuse (or mirror) the existing hook-cleanup throttle interval so the project prune runs on a slow cadence rather than every 1s tick (cadence is an implementation detail — hourly-ish is fine).
+- Load the project store the same way the daemon resolves its other config-backed stores and call `project.Store.CleanStale()` (filesystem-only: `os.Stat` → `ErrNotExist` is stale; permission-denied and other errors are retained — identical to Task 4-3/4-5).
+- Keep the prune best-effort and non-fatal to the capture loop: a `CleanStale` error is logged and swallowed, exactly like the hook cleanup, and never aborts `captureAndCommit` / the daemon.
+- Emit one INFO cycle breadcrumb per prune batch under the existing clean-stale log vocabulary (reuse `storelog.EmitCleanStaleSummary` / the project store's own mutation breadcrumb where applicable) — introduce NO new log component (the taxonomy is closed).
+- The prune runs only inside the live `_portal-saver` pane (the daemon only exists on a running server), so the down-server false-orphan hazard that guards the *hook* prune does not apply to the filesystem-only project prune — no hazard guard is needed here.
+
+**Acceptance Criteria**:
+- [ ] The daemon prunes gone-dir projects (`os.Stat` → `ErrNotExist`) on its throttled idle-tick cadence via `project.Store.CleanStale()`; permission-denied paths are retained (not pruned).
+- [ ] The prune runs on a slow cadence (not every tick), reusing/mirroring the existing hook-cleanup throttle.
+- [ ] The prune is best-effort and non-fatal — a `CleanStale` error is logged and swallowed and never disrupts the capture/commit loop.
+- [ ] After the daemon has run its cadence, `doctor`'s stale-project check (Task 4-3) reads clean without a manual `doctor --fix`.
+- [ ] No new log component is introduced; the prune emits its breadcrumb under the existing clean-stale vocabulary.
+
+**Tests**:
+- `"the daemon prunes a gone-dir project on its throttled tick"` — seed a project at a deleted path; advance the daemon's throttle; assert the project is removed from `projects.json`.
+- `"the daemon retains a permission-denied project path"` — a path whose stat errors non-`ErrNotExist` is not pruned.
+- `"the project prune is throttled, not per-tick"` — assert the prune does not fire on every 1s tick (only on the slow cadence).
+- `"a project-prune error is swallowed and the capture loop continues"` — force a `CleanStale`/store error; assert the daemon keeps ticking and `captureAndCommit` still runs.
+- Integration-tagged (`//go:build integration`, `IsolateStateForTest`, `SpawnIsolatedDaemon`, `tmuxtest`, `portalbintest`): `"a real daemon prunes a genuinely stale project over its cadence and doctor then reads clean"`.
+
+**Edge Cases**:
+- Filesystem-only classification (gone-dir → stale; permission-denied → retained), matching `project.Store.CleanStale` and the Task 4-3/4-5 doctor semantics.
+- Slow cadence (hourly-ish), throttled like the existing hook cleanup — cadence is an implementation detail.
+- Best-effort / non-fatal — never disrupts capture.
+- Runs only on a live server (inside the `_portal-saver` pane), so the hook prune's down-server hazard guard is not needed for the filesystem-only project prune.
+
+**Context**:
+> Spec § `clean` deleted: "**Stale-project pruning folds into the daemon's automation** on a slow cadence (hourly-ish; hooks already prune on the idle tick). Mechanism/cadence is an implementation detail. Net effect: `doctor` reads *healthy* almost always because the automation keeps it that way; `--fix` is the manual trigger of the same repairs." Spec § Command Surface Summary — Removed public commands: "`portal clean [--logs]` → `portal doctor --fix` (repairs) **+ automatic daemon pruning**."
+>
+> This task delivers the *automatic-daemon-pruning* half of `clean`'s replacement; Task 4-5 delivers the *manual* `doctor --fix` half and Task 4-7 deletes `clean`. It reuses `project.Store.CleanStale` (`internal/project/store.go`) — the exact filesystem-only classification the old `clean` and the new `doctor --fix` use — and hangs it on the daemon's existing throttled idle-tick path (`cmd/state_daemon.go`'s `maybeRunHookCleanup`), so no new algorithm is introduced.
+
+**Spec Reference**: `.workflows/cli-verb-surface-redesign/specification/cli-verb-surface-redesign/specification.md` §§ `doctor` — Diagnostics & Repair (`clean` deleted); Command Surface Summary — Removed public commands.

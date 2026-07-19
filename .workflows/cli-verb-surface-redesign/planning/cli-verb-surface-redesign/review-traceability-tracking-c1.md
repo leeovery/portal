@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-18
 cycle: 1
 phase: Traceability Review
@@ -103,7 +103,7 @@ This is not one of the pre-cleared deferrals (which are `internal/spawn` / the `
 **Spec Reference**: `.workflows/cli-verb-surface-redesign/specification/cli-verb-surface-redesign/specification.md` §§ `doctor` — Diagnostics & Repair (`clean` deleted); Command Surface Summary — Removed public commands.
 ```
 
-**Resolution**: Pending
-**Notes**: Companion edits are bundled in the Proposed content: (1) the new task row in `planning.md`'s Phase 4 task table, and (2) the `total: 7 → 8` front-matter bump plus the full task block appended to `phase-4-tasks.md`. Placed at the end of Phase 4 because it operates on the maintenance-surface reshuffle (reuses `project.Store.CleanStale` from Task 4-5 and pairs with the `clean` deletion in Task 4-7); it has no ordering dependency on Tasks 4-1..4-6 beyond sharing the `CleanStale` reuse.
+**Resolution**: Fixed
+**Notes**: Applied verbatim (auto-approved). Added `cli-verb-surface-redesign-4-8` to `planning.md`'s Phase 4 table, bumped `phase-4-tasks.md` `total: 7 → 8` and appended the full task block, and created tick task `tick-fa598d` under the Phase 4 parent (`tick-1fb18c`) with the internal→external mapping recorded in the manifest. Placed at the end of Phase 4 (reuses `project.Store.CleanStale` from Task 4-5, pairs with the `clean` deletion in Task 4-7); no ordering dependency on Tasks 4-1..4-6 beyond the `CleanStale` reuse.
 
 ---

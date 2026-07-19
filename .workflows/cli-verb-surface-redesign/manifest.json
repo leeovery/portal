@@ -36,8 +36,8 @@
           "spec_commit": "a701ad102328992b3538da3b88fef3082da39891",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
-          "finding_gate_mode": "gated",
-          "review_cycle": 0,
+          "finding_gate_mode": "auto",
+          "review_cycle": 1,
           "phase": 7,
           "task": "~",
           "task_map": {
@@ -81,7 +81,8 @@
             "cli-verb-surface-redesign-6-2": "tick-21f6a3",
             "cli-verb-surface-redesign-6-3": "tick-fe6649",
             "cli-verb-surface-redesign-6-4": "tick-02e402",
-            "cli-verb-surface-redesign-6-5": "tick-4742cc"
+            "cli-verb-surface-redesign-6-5": "tick-4742cc",
+            "cli-verb-surface-redesign-4-8": "tick-fa598d"
           },
           "external_id": "tick-4f7acf"
         }
