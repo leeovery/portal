@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -55,8 +56,21 @@ func (t *testDirValidator) Exists(path string) bool {
 	return t.existing[path]
 }
 
+// testSessionLister implements resolver.SessionLister for testing — it returns
+// the user-visible (leading-underscore-filtered) session name set.
+type testSessionLister struct {
+	names []string
+	err   error
+}
+
+func (t *testSessionLister) ListSessionNames() ([]string, error) {
+	return t.names, t.err
+}
+
 func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	// A Client is required in context: the session-domain pre-check consults it
+	// via buildQueryResolver → tmuxClient(cmd) before path resolution runs.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}, Client: tmux.NewClient(&stubCommander{})}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
@@ -77,7 +91,9 @@ func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
 }
 
 func TestOpenCommand_PathArgument_FileNotDirectory(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	// A Client is required in context: the session-domain pre-check consults it
+	// via buildQueryResolver → tmuxClient(cmd) before path resolution runs.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}, Client: tmux.NewClient(&stubCommander{})}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	dir := t.TempDir()
@@ -130,9 +146,10 @@ func TestOpenCommand_QueryResolution_AliasNotFound(t *testing.T) {
 	// When a non-path query resolves to an alias that points to a non-existent directory,
 	// the error message should indicate the directory was not found.
 	openDeps = &OpenDeps{
-		AliasLookup:  &testAliasLookup{aliases: map[string]string{"myapp": "/nonexistent/alias/path"}},
-		Zoxide:       &testZoxideQuerier{err: resolver.ErrNoMatch},
-		DirValidator: &testDirValidator{existing: map[string]bool{}},
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{"myapp": "/nonexistent/alias/path"}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
 	}
 	t.Cleanup(func() { openDeps = nil })
 
@@ -160,9 +177,10 @@ func TestOpenCommand_QueryResolution_ZoxideNotFound(t *testing.T) {
 	// When a non-path query resolves via zoxide to a non-existent directory,
 	// the error message should indicate the directory was not found.
 	openDeps = &OpenDeps{
-		AliasLookup:  &testAliasLookup{aliases: map[string]string{}},
-		Zoxide:       &testZoxideQuerier{result: "/gone/zoxide/dir"},
-		DirValidator: &testDirValidator{existing: map[string]bool{}},
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{result: "/gone/zoxide/dir"},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
 	}
 	t.Cleanup(func() { openDeps = nil })
 
@@ -180,6 +198,88 @@ func TestOpenCommand_QueryResolution_ZoxideNotFound(t *testing.T) {
 	want := "Directory not found: /gone/zoxide/dir"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestOpenCommand_SessionNameHit_RoutesToSessionConnector(t *testing.T) {
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	// An exact user-visible session-name hit must attach (openSessionFunc),
+	// never mint (openPathFunc) or launch the picker (openTUIFunc).
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"api-x7Kd9a"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var connectedTo string
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, name string) error {
+		connectedTo = name
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "api-x7Kd9a"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if connectedTo != "api-x7Kd9a" {
+		t.Errorf("openSessionFunc called with %q, want %q", connectedTo, "api-x7Kd9a")
+	}
+	if pathCalled {
+		t.Error("openPathFunc must not be called for a session-name hit")
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called for a session-name hit")
+	}
+}
+
+func TestOpenSession_DelegatesToBuildSessionConnector(t *testing.T) {
+	// openSession must build the connector via buildSessionConnector and connect
+	// through it — no real tmux. Inside tmux the connector is *SwitchConnector, so
+	// Connect issues switch-client -t =<name> through the client's commander.
+	t.Setenv("TMUX", "/tmp/fake-socket,1,0")
+
+	cmder := &recordingCommander{}
+	client := tmux.NewClient(cmder)
+	cmd := cmdWithClient(client)
+
+	if err := openSession(cmd, "api-x7Kd9a"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantCall := []string{"switch-client", "-t", "=api-x7Kd9a"}
+	found := false
+	for _, c := range cmder.Calls {
+		if slices.Equal(c, wantCall) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected switch-client call %v, got calls %v", wantCall, cmder.Calls)
 	}
 }
 
@@ -1013,11 +1113,13 @@ func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
-	// Force the resolver to return FallbackResult (no alias, no zoxide match, no dir).
+	// Force the resolver to return FallbackResult (no session, no alias, no
+	// zoxide match, no dir).
 	openDeps = &OpenDeps{
-		AliasLookup:  &testAliasLookup{aliases: map[string]string{}},
-		Zoxide:       &testZoxideQuerier{err: resolver.ErrNoMatch},
-		DirValidator: &testDirValidator{existing: map[string]bool{}},
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
 	}
 	t.Cleanup(func() { openDeps = nil })
 

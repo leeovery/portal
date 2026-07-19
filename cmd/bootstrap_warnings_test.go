@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -289,7 +290,10 @@ func TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg(t *testing.T) {
 	runner := &recordingRunner{
 		warnings: []bootstrap.Warning{bootstrap.SaverDownWarning()},
 	}
-	bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
+	// Provide the tmux client that production's PersistentPreRunE always injects
+	// into context — the session-domain check at the front of open resolution
+	// consults it via buildQueryResolver → tmuxClient(cmd).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: tmux.NewClient(&stubCommander{})}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	// Resolution will fail on a non-existent path, but PersistentPreRunE's

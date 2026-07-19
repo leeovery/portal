@@ -757,9 +757,13 @@ func TestReattachIntegration_OpenPathResolvesSavedOnlySession(t *testing.T) {
 	// for the alias itself — the OSDirValidator does the existence
 	// check on projectDir which we just mkdir'd).
 	openDeps = &OpenDeps{
-		AliasLookup:  &testAliasLookup{aliases: map[string]string{"mysaved": projectDir}},
-		Zoxide:       &testZoxideQuerier{err: resolver.ErrNoMatch},
-		DirValidator: &resolver.OSDirValidator{},
+		// The real client is the user-visible session set: "mysaved" is not a
+		// live session, so the session-domain pre-check misses and resolution
+		// falls through to the alias chain (as production does).
+		SessionLister: client,
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{"mysaved": projectDir}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &resolver.OSDirValidator{},
 	}
 	t.Cleanup(func() { openDeps = nil })
 

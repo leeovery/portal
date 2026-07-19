@@ -33,15 +33,21 @@ var openTUIFunc = openTUI
 // syscall.Exec).
 var openPathFunc = openPath
 
+// openSessionFunc is the function used to attach this terminal to an existing
+// session (the session-domain outcome). Tests override it via t.Cleanup-restored
+// assignment to capture the target without building a real connector.
+var openSessionFunc = openSession
+
 // openDeps holds injectable dependencies for the open command.
 // When nil, real implementations are used.
 var openDeps *OpenDeps
 
 // OpenDeps allows injecting dependencies for testing.
 type OpenDeps struct {
-	AliasLookup  resolver.AliasLookup
-	Zoxide       resolver.ZoxideQuerier
-	DirValidator resolver.DirValidator
+	SessionLister resolver.SessionLister
+	AliasLookup   resolver.AliasLookup
+	Zoxide        resolver.ZoxideQuerier
+	DirValidator  resolver.DirValidator
 }
 
 // SessionConnector connects the user to a tmux session.
@@ -124,6 +130,14 @@ func buildSessionConnector(client *tmux.Client) SessionConnector {
 	return &AttachConnector{}
 }
 
+// openSession connects this terminal to an existing named session — the
+// session-domain outcome of resolution (Axiom 2: a session-domain hit attaches).
+// buildSessionConnector selects switch-client (inside tmux) or exec attach
+// (outside tmux); the "=" exact-match target is applied by the connector.
+func openSession(cmd *cobra.Command, name string) error {
+	return buildSessionConnector(tmuxClient(cmd)).Connect(name)
+}
+
 var openCmd = &cobra.Command{
 	Use:   "open [-e cmd] [destination] [-- cmd args...]",
 	Short: "Open the interactive session picker or start a session at a path",
@@ -140,7 +154,7 @@ var openCmd = &cobra.Command{
 
 		query := destination
 
-		qr, err := buildQueryResolver()
+		qr, err := buildQueryResolver(cmd)
 		if err != nil {
 			return err
 		}
@@ -151,6 +165,8 @@ var openCmd = &cobra.Command{
 		}
 
 		switch r := result.(type) {
+		case *resolver.SessionResult:
+			return openSessionFunc(cmd, r.Name)
 		case *resolver.PathResult:
 			return openPathFunc(cmd, r.Path, command)
 		case *resolver.FallbackResult:
@@ -684,9 +700,12 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 }
 
 // buildQueryResolver creates a QueryResolver with appropriate dependencies.
-func buildQueryResolver() (*resolver.QueryResolver, error) {
+// The session lister is the user-visible (leading-underscore-filtered) session
+// set: openDeps.SessionLister when injected, otherwise the shared *tmux.Client
+// (which satisfies resolver.SessionLister via ListSessionNames).
+func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
 	if openDeps != nil {
-		return resolver.NewQueryResolver(openDeps.AliasLookup, openDeps.Zoxide, openDeps.DirValidator), nil
+		return resolver.NewQueryResolver(openDeps.SessionLister, openDeps.AliasLookup, openDeps.Zoxide, openDeps.DirValidator), nil
 	}
 
 	store, err := loadAliasStore()
@@ -697,7 +716,7 @@ func buildQueryResolver() (*resolver.QueryResolver, error) {
 	zoxide := resolver.NewZoxideResolver(&resolver.RealCommandRunner{}, exec.LookPath)
 	dirValidator := &resolver.OSDirValidator{}
 
-	return resolver.NewQueryResolver(store, zoxide, dirValidator), nil
+	return resolver.NewQueryResolver(tmuxClient(cmd), store, zoxide, dirValidator), nil
 }
 
 func init() {

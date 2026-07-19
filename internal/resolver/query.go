@@ -3,7 +3,15 @@ package resolver
 import (
 	"fmt"
 	"os"
+	"slices"
 )
+
+// SessionLister returns the user-visible (leading-underscore-filtered) set of
+// running tmux session names — the same view the picker and tab completion use.
+// A nil/empty slice or an error is treated by the resolver as "no sessions".
+type SessionLister interface {
+	ListSessionNames() ([]string, error)
+}
 
 // AliasLookup retrieves the path for a given alias name.
 type AliasLookup interface {
@@ -31,6 +39,16 @@ type PathResult struct {
 }
 
 func (*PathResult) queryResult() {}
+
+// SessionResult indicates the query resolved to an existing running session in
+// the session domain. Domain is "session" for an exact-name hit; a later task
+// also produces SessionResult with Domain "glob" for glob expansion.
+type SessionResult struct {
+	Name   string
+	Domain string
+}
+
+func (*SessionResult) queryResult() {}
 
 // FallbackResult indicates no resolution was found; the TUI should be
 // launched with the query pre-filled as filter text.
@@ -62,17 +80,19 @@ func (v *OSDirValidator) Exists(path string) bool {
 	return info.IsDir()
 }
 
-// QueryResolver applies the resolution chain: path detection, alias lookup,
-// zoxide query, then TUI fallback.
+// QueryResolver applies the resolution chain: exact session-name match, path
+// detection, alias lookup, zoxide query, then TUI fallback.
 type QueryResolver struct {
+	sessions     SessionLister
 	aliases      AliasLookup
 	zoxide       ZoxideQuerier
 	dirValidator DirValidator
 }
 
 // NewQueryResolver creates a QueryResolver with the given dependencies.
-func NewQueryResolver(aliases AliasLookup, zoxide ZoxideQuerier, dirValidator DirValidator) *QueryResolver {
+func NewQueryResolver(sessions SessionLister, aliases AliasLookup, zoxide ZoxideQuerier, dirValidator DirValidator) *QueryResolver {
 	return &QueryResolver{
+		sessions:     sessions,
 		aliases:      aliases,
 		zoxide:       zoxide,
 		dirValidator: dirValidator,
@@ -80,10 +100,21 @@ func NewQueryResolver(aliases AliasLookup, zoxide ZoxideQuerier, dirValidator Di
 }
 
 // Resolve applies the resolution chain for the given query.
-// Path-like arguments are resolved directly via ResolvePath.
-// Non-path arguments are checked against aliases, then zoxide, then fall back to TUI.
-// After alias or zoxide resolution, the directory is validated on disk.
+// The session domain is checked first: an exact match against the user-visible
+// session set yields a SessionResult (attach). Otherwise, path-like arguments
+// are resolved directly via ResolvePath, and non-path arguments are checked
+// against aliases, then zoxide, then fall back to TUI. After alias or zoxide
+// resolution, the directory is validated on disk.
 func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
+	// Session domain first (spec § Target resolution precedence: exact session
+	// name → path → alias → zoxide). Fetch the user-visible session set once; a
+	// nil/empty list or a lister error collapses to "no sessions" — the tmux
+	// client already returns ([]string{}, nil) when no server runs, and an
+	// error is not surfaced here (treated as no match).
+	if names, err := qr.sessions.ListSessionNames(); err == nil && slices.Contains(names, query) {
+		return &SessionResult{Name: query, Domain: "session"}, nil
+	}
+
 	if IsPathArgument(query) {
 		resolved, err := ResolvePath(query)
 		if err != nil {

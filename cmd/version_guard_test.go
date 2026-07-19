@@ -41,7 +41,9 @@ func TestVersionGuard_InvokedForNonExemptOpen(t *testing.T) {
 	stub := &stubVersionChecker{}
 	installStubVersionChecker(t, stub)
 
-	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	// A Client is required in context: open's session-domain pre-check consults
+	// it via buildQueryResolver → tmuxClient(cmd) before path resolution runs.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}, Client: tmux.NewClient(&stubCommander{})}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()

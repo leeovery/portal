@@ -38,6 +38,18 @@ func (m *mockDirValidator) Exists(path string) bool {
 	return m.existing[path]
 }
 
+// mockSessionLister implements resolver.SessionLister for testing. names is the
+// user-visible (leading-underscore-filtered) session set — the same view the
+// real tmux client returns from ListSessionNames.
+type mockSessionLister struct {
+	names []string
+	err   error
+}
+
+func (m *mockSessionLister) ListSessionNames() ([]string, error) {
+	return m.names, m.err
+}
+
 func TestQueryResolver_Resolve(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -137,7 +149,7 @@ func TestQueryResolver_Resolve(t *testing.T) {
 			zoxide := &mockZoxideQuerier{result: tt.zoxideResult, err: tt.zoxideErr}
 			dirValidator := &mockDirValidator{existing: tt.existingDirs}
 
-			qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
+			qr := resolver.NewQueryResolver(&mockSessionLister{}, aliasLookup, zoxide, dirValidator)
 			result, err := qr.Resolve(tt.query)
 
 			if tt.wantErr != "" {
@@ -192,7 +204,7 @@ func TestQueryResolver_Resolve_PathLikeArguments(t *testing.T) {
 		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
 
-		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
+		qr := resolver.NewQueryResolver(&mockSessionLister{}, aliasLookup, zoxide, dirValidator)
 		result, err := qr.Resolve(query)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -225,7 +237,7 @@ func TestQueryResolver_Resolve_PathLikeArguments(t *testing.T) {
 		// Change working directory so ./mydir resolves to our temp subdir
 		t.Chdir(dir)
 
-		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
+		qr := resolver.NewQueryResolver(&mockSessionLister{}, aliasLookup, zoxide, dirValidator)
 		result, err := qr.Resolve(query)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -254,7 +266,7 @@ func TestQueryResolver_Resolve_PathLikeArguments(t *testing.T) {
 		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
 
-		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
+		qr := resolver.NewQueryResolver(&mockSessionLister{}, aliasLookup, zoxide, dirValidator)
 		result, err := qr.Resolve(query)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -283,7 +295,7 @@ func TestQueryResolver_Resolve_PathLikeNotSentToAliasOrZoxide(t *testing.T) {
 		}
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
 
-		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
+		qr := resolver.NewQueryResolver(&mockSessionLister{}, aliasLookup, zoxide, dirValidator)
 		_, err := qr.Resolve(dir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -312,7 +324,7 @@ func TestQueryResolver_Resolve_PathLikeNotSentToAliasOrZoxide(t *testing.T) {
 		}
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
 
-		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
+		qr := resolver.NewQueryResolver(&mockSessionLister{}, aliasLookup, zoxide, dirValidator)
 		_, err := qr.Resolve("./mydir")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -332,7 +344,7 @@ func TestQueryResolver_Resolve_PathLikeNotSentToAliasOrZoxide(t *testing.T) {
 		}
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
 
-		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
+		qr := resolver.NewQueryResolver(&mockSessionLister{}, aliasLookup, zoxide, dirValidator)
 		_, err := qr.Resolve("~")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -358,13 +370,147 @@ func (t *trackingZoxideQuerier) Query(terms string) (string, error) {
 	return t.result, t.err
 }
 
+func TestQueryResolver_Resolve_SessionDomain(t *testing.T) {
+	t.Run("exact user-visible session-name hit returns SessionResult", func(t *testing.T) {
+		sessions := &mockSessionLister{names: []string{"api-x7Kd9a", "web-abc123"}}
+		aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
+		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
+		dirValidator := &mockDirValidator{existing: map[string]bool{}}
+
+		qr := resolver.NewQueryResolver(sessions, aliasLookup, zoxide, dirValidator)
+		result, err := qr.Resolve("api-x7Kd9a")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		sr, ok := result.(*resolver.SessionResult)
+		if !ok {
+			t.Fatalf("expected *SessionResult, got %T", result)
+		}
+		if sr.Name != "api-x7Kd9a" {
+			t.Errorf("SessionResult.Name = %q, want %q", sr.Name, "api-x7Kd9a")
+		}
+		if sr.Domain != "session" {
+			t.Errorf("SessionResult.Domain = %q, want %q", sr.Domain, "session")
+		}
+	})
+
+	t.Run("session-domain checked before path/alias/zoxide", func(t *testing.T) {
+		// The session hit must win even when the same name would also resolve
+		// via alias/zoxide — session-domain is first in the precedence chain.
+		sessions := &mockSessionLister{names: []string{"myapp"}}
+		aliasLookup := &mockAliasLookup{aliases: map[string]string{"myapp": "/Users/lee/Code/myapp"}}
+		zoxide := &mockZoxideQuerier{result: "/Users/lee/Code/myapp"}
+		dirValidator := &mockDirValidator{existing: map[string]bool{"/Users/lee/Code/myapp": true}}
+
+		qr := resolver.NewQueryResolver(sessions, aliasLookup, zoxide, dirValidator)
+		result, err := qr.Resolve("myapp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		sr, ok := result.(*resolver.SessionResult)
+		if !ok {
+			t.Fatalf("expected *SessionResult (session wins over alias), got %T", result)
+		}
+		if sr.Name != "myapp" {
+			t.Errorf("SessionResult.Name = %q, want %q", sr.Name, "myapp")
+		}
+	})
+
+	t.Run("underscore-prefixed name never matches (filtered lister)", func(t *testing.T) {
+		// The lister returns the leading-underscore-filtered view, so internal
+		// _-prefixed sessions are absent — open _portal-saver falls through as
+		// if the session did not exist.
+		sessions := &mockSessionLister{names: []string{"api-x7Kd9a"}}
+		aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
+		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
+		dirValidator := &mockDirValidator{existing: map[string]bool{}}
+
+		qr := resolver.NewQueryResolver(sessions, aliasLookup, zoxide, dirValidator)
+		result, err := qr.Resolve("_portal-saver")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if _, ok := result.(*resolver.SessionResult); ok {
+			t.Fatal("expected fall-through for filtered internal session, got *SessionResult")
+		}
+		fb, ok := result.(*resolver.FallbackResult)
+		if !ok {
+			t.Fatalf("expected *FallbackResult, got %T", result)
+		}
+		if fb.Query != "_portal-saver" {
+			t.Errorf("FallbackResult.Query = %q, want %q", fb.Query, "_portal-saver")
+		}
+	})
+
+	t.Run("no session match falls through to directory chain", func(t *testing.T) {
+		sessions := &mockSessionLister{names: []string{"api-x7Kd9a"}}
+		aliasLookup := &mockAliasLookup{aliases: map[string]string{"myapp": "/Users/lee/Code/myapp"}}
+		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
+		dirValidator := &mockDirValidator{existing: map[string]bool{"/Users/lee/Code/myapp": true}}
+
+		qr := resolver.NewQueryResolver(sessions, aliasLookup, zoxide, dirValidator)
+		result, err := qr.Resolve("myapp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected *PathResult, got %T", result)
+		}
+		if pr.Path != "/Users/lee/Code/myapp" {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, "/Users/lee/Code/myapp")
+		}
+	})
+
+	t.Run("empty session set treated as no match", func(t *testing.T) {
+		sessions := &mockSessionLister{names: []string{}}
+		aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
+		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
+		dirValidator := &mockDirValidator{existing: map[string]bool{}}
+
+		qr := resolver.NewQueryResolver(sessions, aliasLookup, zoxide, dirValidator)
+		result, err := qr.Resolve("anything")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if _, ok := result.(*resolver.SessionResult); ok {
+			t.Fatal("expected fall-through for empty session set, got *SessionResult")
+		}
+	})
+
+	t.Run("lister error collapses to no match, not a resolve error", func(t *testing.T) {
+		sessions := &mockSessionLister{err: errors.New("tmux unreachable")}
+		aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
+		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
+		dirValidator := &mockDirValidator{existing: map[string]bool{}}
+
+		qr := resolver.NewQueryResolver(sessions, aliasLookup, zoxide, dirValidator)
+		result, err := qr.Resolve("anything")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if _, ok := result.(*resolver.SessionResult); ok {
+			t.Fatal("expected fall-through on lister error, got *SessionResult")
+		}
+		if _, ok := result.(*resolver.FallbackResult); !ok {
+			t.Fatalf("expected *FallbackResult, got %T", result)
+		}
+	})
+}
+
 func TestQueryResolver_Resolve_NonExistentResolvedDirectory(t *testing.T) {
 	t.Run("non-existent resolved directory prints error and exits 1", func(t *testing.T) {
 		aliasLookup := &mockAliasLookup{aliases: map[string]string{"myapp": "/does/not/exist"}}
 		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
 
-		qr := resolver.NewQueryResolver(aliasLookup, zoxide, dirValidator)
+		qr := resolver.NewQueryResolver(&mockSessionLister{}, aliasLookup, zoxide, dirValidator)
 		_, err := qr.Resolve("myapp")
 
 		if err == nil {
