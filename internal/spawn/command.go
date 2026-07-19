@@ -30,21 +30,39 @@ type ExecutableResolver func() (string, error)
 //   - --ack <batch>:<token> : TWO discrete argv elements (never a joined
 //     "--ack=<value>" and never quoted). The colon-joined value is unambiguous
 //     because option-safe ids are colon-free (see FormatSpawnAckFlag).
+//   - -- <command…> : the OPTIONAL mint-only command passthrough (spec § Command
+//     passthrough rides mint windows only). When command is non-empty AND the
+//     surface is a mint, the literal "--" terminator plus each command element is
+//     appended AFTER --ack, so the window runs the command as its new session's
+//     initial process. Each command element stays ONE argv element — carried
+//     BYTE-IDENTICALLY, never joined, split, or quoted — so a single
+//     `-e "npm run dev"` string (command = ["npm run dev"]) reaches the window as
+//     one unit, identical to the trigger's local mint. An ATTACH surface never
+//     carries the command (an existing session has no safe command-injection
+//     channel), and an empty command appends nothing (no dangling bare "--").
 //
 // Minting happens in the WINDOW at exec time (via `open --path`), never in the
 // parent: the burster only spawns this argv, so a window that never comes up
 // never mints and leaves no orphan session.
-func composeOpenArgv(exePath, path string, surface Surface, batch, token string) []string {
+func composeOpenArgv(exePath, path string, surface Surface, batch, token string, command []string) []string {
 	targetFlag := "--session"
 	if surface.Kind == SurfaceMint {
 		targetFlag = "--path"
 	}
-	return []string{
+	argv := []string{
 		"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
 		"PATH=" + path,
 		exePath, "open", targetFlag, surface.Value,
 		"--ack", FormatSpawnAckFlag(batch, token),
 	}
+	// Mint-only command passthrough: append "-- <command…>" verbatim after --ack,
+	// only for a mint surface carrying a non-empty command. Attach windows and the
+	// empty-command case append nothing (no bare "--").
+	if surface.Kind == SurfaceMint && len(command) > 0 {
+		argv = append(argv, "--")
+		argv = append(argv, command...)
+	}
+	return argv
 }
 
 // AttachSurfaces maps a list of existing session names to all-attach Surface

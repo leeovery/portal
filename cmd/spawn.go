@@ -162,7 +162,7 @@ func runSpawn(cmd *cobra.Command, args []string, deps *SpawnDeps) error {
 	// existing session), so it converges onto the generalized surface-spec burster
 	// via spawn.AttachSurfaces — each spawned window runs `open --session <name>
 	// --ack …`, no forked name-only builder.
-	batch, results, err := deps.NewBurster(adapter).Run(context.Background(), spawn.AttachSurfaces(external), nil)
+	batch, results, err := deps.NewBurster(adapter).Run(context.Background(), spawn.AttachSurfaces(external), nil, nil)
 	if err != nil {
 		// Executable or ack-id resolution failed before any window opened; exit 1.
 		return err

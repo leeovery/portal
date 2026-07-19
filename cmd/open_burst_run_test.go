@@ -131,6 +131,20 @@ func surfacesFromArgv(calls [][]string) []spawn.Surface {
 	return out
 }
 
+// argvForTarget returns the first recorded argv whose flag element (e.g. --path /
+// --session) is immediately followed by value, or nil if none matches. It lets a
+// test pick out a specific spawned window's argv from the recorded calls.
+func argvForTarget(calls [][]string, flag, value string) []string {
+	for _, argv := range calls {
+		for i := 0; i+1 < len(argv); i++ {
+			if argv[i] == flag && argv[i+1] == value {
+				return argv
+			}
+		}
+	}
+	return nil
+}
+
 func TestRunOpenBurst_TriggerFirst_ExternalRestInOrder(t *testing.T) {
 	// surfaces = [a, b, c] → trigger a (first), external [b, c] in order.
 	events := &openBurstEvents{}
@@ -258,6 +272,110 @@ func TestRunOpenBurst_TriggerMint_RoutesToLocalMint(t *testing.T) {
 	// The external attach window still spawned.
 	if len(inner.Calls) != 1 {
 		t.Errorf("OpenWindow calls = %d, want 1 (the external e1)", len(inner.Calls))
+	}
+}
+
+func TestRunOpenBurst_Command_RidesMintExternalsOnly(t *testing.T) {
+	// A mixed external set with a command: the external MINT window carries the
+	// `-- claude` passthrough tail, the external ATTACH window does not. The
+	// attach trigger connects bare (its own target carries no command).
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	conn := &recordingConnector{events: events}
+	mint := &recordingMint{events: events}
+	ack := &spawntest.FakeAckChannel{}
+	clock := &manualClock{}
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	withOpenBurster(deps, inner, ack, clock)
+
+	command := []string{"claude"}
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},    // trigger: connects bare
+		{Kind: spawn.SurfaceMint, Value: "/repo/new"}, // external mint: carries `-- claude`
+		{Kind: spawn.SurfaceAttach, Value: "api"},     // external attach: no command
+	}
+	if err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, command, deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(inner.Calls) != 2 {
+		t.Fatalf("OpenWindow calls = %d, want 2 (the two externals)", len(inner.Calls))
+	}
+	mintArgv := argvForTarget(inner.Calls, "--path", "/repo/new")
+	if mintArgv == nil {
+		t.Fatalf("no external mint window argv for /repo/new; calls = %#v", inner.Calls)
+	}
+	dashIdx := slices.Index(mintArgv, "--")
+	if dashIdx < 0 {
+		t.Fatalf("external mint window argv missing `--`; argv = %#v", mintArgv)
+	}
+	if rest := mintArgv[dashIdx+1:]; !slices.Equal(rest, command) {
+		t.Errorf("external mint post-`--` argv = %#v, want %#v verbatim", rest, command)
+	}
+
+	attachArgv := argvForTarget(inner.Calls, "--session", "api")
+	if attachArgv == nil {
+		t.Fatalf("no external attach window argv for api; calls = %#v", inner.Calls)
+	}
+	if slices.Contains(attachArgv, "--") {
+		t.Errorf("external attach window argv carries the command; argv = %#v", attachArgv)
+	}
+
+	// The attach trigger self-connects bare.
+	if !slices.Equal(conn.calls, []string{"trig"}) {
+		t.Errorf("self-connect targets = %#v, want exactly [trig]", conn.calls)
+	}
+	if len(mint.calls) != 0 {
+		t.Errorf("LocalMint called %d times, want 0 for an attach trigger", len(mint.calls))
+	}
+}
+
+func TestRunOpenBurst_AllAttachWithCommand_UsageError(t *testing.T) {
+	// A multi-target ALL-ATTACH set carrying a command has nowhere to run it (no mint
+	// surface), so it is a usage error (exit 2) — the multi-target arity of the
+	// single-target attach-command guard. Nothing opens, nothing self-connects.
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	conn := &recordingConnector{events: events}
+	mint := &recordingMint{events: events}
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+
+	// Spy: neither the burster nor any detection may run on the guard path.
+	bursterBuilt := false
+	deps.NewBurster = func(spawn.Adapter) *spawn.Burster {
+		bursterBuilt = true
+		return nil
+	}
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "api"},
+		{Kind: spawn.SurfaceAttach, Value: "web"},
+	}
+	err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, []string{"claude"}, deps)
+
+	if err == nil {
+		t.Fatal("expected a usage error for an all-attach set carrying a command, got nil")
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("error = %T (%v), want *UsageError (exit 2)", err, err)
+	}
+	if want := "a command (-e/--) can only run in a newly-created session, not an existing one"; err.Error() != want {
+		t.Errorf("error = %q, want %q (Task 2-6's message)", err.Error(), want)
+	}
+	if bursterBuilt {
+		t.Error("NewBurster must not be built on the zero-mint-command usage-error path")
+	}
+	if len(inner.Calls) != 0 {
+		t.Errorf("OpenWindow called %d times, want 0 (nothing opens)", len(inner.Calls))
+	}
+	if len(conn.calls) != 0 {
+		t.Errorf("Connector.Connect targets = %#v, want none (nothing self-connects)", conn.calls)
+	}
+	if len(mint.calls) != 0 {
+		t.Errorf("LocalMint called %d times, want 0 (nothing self-connects)", len(mint.calls))
 	}
 }
 

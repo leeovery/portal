@@ -117,6 +117,12 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 // behaviour identical to resolving per window while avoiding a redundant
 // os.Executable read for every window.
 //
+// command (nil-tolerant) is the mint-only passthrough (spec § Command passthrough
+// rides mint windows only): the SAME command rides every MINT surface in the burst
+// (appended after --ack by composeOpenArgv), while ATTACH surfaces ignore it. It is
+// carried byte-identically — a single `-e "npm run dev"` string stays one unit — so
+// every spawned mint window and the trigger's local mint run identical commands.
+//
 // Each window is then, sequentially: composed, opened, and — if the adapter
 // reported success — awaited for its token via awaitToken (a per-window timer
 // starting at THIS window's spawn). A window the adapter could not open is
@@ -134,7 +140,7 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 // collected so far (a nil error — a cancelled burst is a shutdown, not a
 // failure). A context.Background() ctx never cancels, so the CLI path is
 // unchanged.
-func (b *Burster) Run(ctx context.Context, external []Surface, progress func(done, total int)) (batch string, results []WindowResult, err error) {
+func (b *Burster) Run(ctx context.Context, external []Surface, command []string, progress func(done, total int)) (batch string, results []WindowResult, err error) {
 	exePath, err := b.Exe()
 	if err != nil {
 		return "", nil, err
@@ -162,7 +168,7 @@ func (b *Burster) Run(ctx context.Context, external []Surface, progress func(don
 			break
 		}
 		token := tokens[i]
-		argv := composeOpenArgv(exePath, path, surface, batch, token)
+		argv := composeOpenArgv(exePath, path, surface, batch, token, command)
 		result := b.Adapter.OpenWindow(argv)
 
 		ack := AckFailed

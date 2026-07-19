@@ -1578,6 +1578,31 @@ func TestParseCommandArgs(t *testing.T) {
 			wantErr:      "no command specified after --",
 			wantUsageErr: true,
 		},
+		{
+			// Regression (Task 3-7): the Phase-2 -e/-- exclusivity guard still fires
+			// with MULTIPLE positionals present (the multi-target burst path), before
+			// any resolve/spawn.
+			name:         "both -e and -- with multiple targets produces exit code 2",
+			args:         []string{"open", "api", "web", "-e", "vim", "--", "claude"},
+			wantErr:      "cannot use both -e/--exec and -- to specify a command",
+			wantUsageErr: true,
+		},
+		{
+			// Regression (Task 3-7): the Phase-2 empty -e guard still fires with
+			// MULTIPLE positionals present.
+			name:         "-e empty with multiple targets produces exit code 2",
+			args:         []string{"open", "api", "web", "-e", ""},
+			wantErr:      "-e/--exec value must not be empty",
+			wantUsageErr: true,
+		},
+		{
+			// Regression (Task 3-7): the Phase-2 empty -- guard still fires with
+			// MULTIPLE positionals present.
+			name:         "-- with multiple targets but no command args produces exit code 2",
+			args:         []string{"open", "api", "web", "--"},
+			wantErr:      "no command specified after --",
+			wantUsageErr: true,
+		},
 	}
 
 	for _, tt := range tests {

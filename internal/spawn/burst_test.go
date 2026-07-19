@@ -151,7 +151,7 @@ func TestBurster_Run(t *testing.T) {
 		}
 		surfaces := AttachSurfaces([]string{"s1", "s2", "s3"})
 
-		batch, results, err := b.Run(context.Background(), surfaces, nil)
+		batch, results, err := b.Run(context.Background(), surfaces, nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -174,7 +174,7 @@ func TestBurster_Run(t *testing.T) {
 			if results[i].Ack != AckConfirmed {
 				t.Errorf("results[%d].Ack = %q, want %q", i, results[i].Ack, AckConfirmed)
 			}
-			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token)
+			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token, nil)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.calls[i], want)
 			}
@@ -200,7 +200,7 @@ func TestBurster_Run(t *testing.T) {
 			{Kind: SurfaceMint, Value: "/Users/me/projects/fresh"},
 		}
 
-		batch, results, err := b.Run(context.Background(), surfaces, nil)
+		batch, results, err := b.Run(context.Background(), surfaces, nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -208,7 +208,7 @@ func TestBurster_Run(t *testing.T) {
 			t.Fatalf("OpenWindow called %d times, want %d", len(adapter.calls), len(surfaces))
 		}
 		for i, surface := range surfaces {
-			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token)
+			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token, nil)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] (%s) argv = %#v, want %#v", i, surface.Kind, adapter.calls[i], want)
 			}
@@ -228,6 +228,55 @@ func TestBurster_Run(t *testing.T) {
 		flagIdx := slices.Index(mintArgv, "--path")
 		if got := mintArgv[flagIdx+1]; got != "/Users/me/projects/fresh" {
 			t.Errorf("mint --path value = %q, want the literal dir %q", got, "/Users/me/projects/fresh")
+		}
+	})
+
+	t.Run("it threads the command to mint windows only, never attach windows", func(t *testing.T) {
+		clock := &manualClock{}
+		ack := newDelayingAck(clock.now, 0)
+		adapter := &writingAdapter{ack: ack}
+		b := &Burster{
+			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
+			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second, Poll: 75 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+		// A mixed external set: the same command rides every MINT surface (appended
+		// after --ack), and is absent from every ATTACH surface.
+		command := []string{"claude", "--resume"}
+		surfaces := []Surface{
+			{Kind: SurfaceAttach, Value: "proj-existing"},
+			{Kind: SurfaceMint, Value: "/Users/me/projects/fresh"},
+		}
+
+		batch, results, err := b.Run(context.Background(), surfaces, command, nil)
+		if err != nil {
+			t.Fatalf("Run error = %v, want nil", err)
+		}
+		if len(adapter.calls) != len(surfaces) {
+			t.Fatalf("OpenWindow called %d times, want %d", len(adapter.calls), len(surfaces))
+		}
+		for i, surface := range surfaces {
+			// The whole argv equals composeOpenArgv with the SAME command — the mint
+			// surface carries the `-- claude --resume` tail, the attach surface does not.
+			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token, command)
+			if !slices.Equal(adapter.calls[i], want) {
+				t.Errorf("OpenWindow[%d] (%s) argv = %#v, want %#v", i, surface.Kind, adapter.calls[i], want)
+			}
+		}
+		// Explicit: the attach window's argv has no `--` passthrough terminator.
+		if slices.Contains(adapter.calls[0], "--") {
+			t.Errorf("attach window argv carries the command; argv = %#v", adapter.calls[0])
+		}
+		// Explicit: the mint window's argv carries the command verbatim after `--`.
+		mintArgv := adapter.calls[1]
+		dashIdx := slices.Index(mintArgv, "--")
+		if dashIdx < 0 {
+			t.Fatalf("mint window argv missing the `--` passthrough terminator; argv = %#v", mintArgv)
+		}
+		if rest := mintArgv[dashIdx+1:]; !slices.Equal(rest, command) {
+			t.Errorf("mint window post-`--` argv = %#v, want the command %#v verbatim", rest, command)
 		}
 	})
 
@@ -260,7 +309,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -295,7 +344,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1"}), nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1"}), nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil (a failing Collect must not surface as a Run error)", err)
 		}
@@ -323,7 +372,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1"}), nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1"}), nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -352,7 +401,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -386,7 +435,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3"}), nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3"}), nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -420,7 +469,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3", "w4", "w5"}), nil)
+		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3", "w4", "w5"}), nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -435,7 +484,7 @@ func TestBurster_Run(t *testing.T) {
 		}
 		// The two earlier windows were attempted, in order (windows 1 and 2).
 		for i, surface := range AttachSurfaces([]string{"w1", "w2"}) {
-			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token)
+			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token, nil)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.calls[i], want)
 			}
@@ -455,7 +504,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"s1", "s2"}), nil)
+		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"s1", "s2"}), nil, nil)
 		if batch != "" {
 			t.Errorf("batch = %q, want empty on executable-resolution failure", batch)
 		}
@@ -483,7 +532,7 @@ func TestBurster_Run(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"s1", "s2"}), nil)
+		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"s1", "s2"}), nil, nil)
 		if batch != "" {
 			t.Errorf("batch = %q, want empty on id-generation failure", batch)
 		}
@@ -513,7 +562,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 		}
 
 		var got [][2]int
-		_, _, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3"}), func(done, total int) {
+		_, _, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2", "w3"}), nil, func(done, total int) {
 			got = append(got, [2]int{done, total})
 		})
 		if err != nil {
@@ -537,7 +586,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 			Now: clock.now, Sleep: clock.sleep,
 		}
 
-		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil)
+		_, results, err := b.Run(context.Background(), AttachSurfaces([]string{"w1", "w2"}), nil, nil)
 		if err != nil {
 			t.Fatalf("Run error = %v, want nil", err)
 		}
@@ -561,7 +610,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 
 		// Cancel after the first window's progress fires: the between-windows ctx
 		// check must stop the loop before window 2 is composed or opened.
-		_, results, err := b.Run(ctx, AttachSurfaces([]string{"w1", "w2", "w3"}), func(done, _ int) {
+		_, results, err := b.Run(ctx, AttachSurfaces([]string{"w1", "w2", "w3"}), nil, func(done, _ int) {
 			if done == 1 {
 				cancel()
 			}

@@ -195,7 +195,7 @@ func (r burstRunner) run(ctx context.Context, emit func(burstProgress)) {
 	// session), so it converges onto the generalized surface-spec burster via
 	// spawn.AttachSurfaces — each spawned window runs `open --session <name>
 	// --ack …`. r.external stays []string for the pre-flight probe above.
-	batch, results, err := r.burster.Run(ctx, spawn.AttachSurfaces(r.external), func(done, total int) {
+	batch, results, err := r.burster.Run(ctx, spawn.AttachSurfaces(r.external), nil, func(done, total int) {
 		emit(burstProgress{DoneCount: done, Total: total})
 	})
 	_ = r.ackChannel.Clean(batch)

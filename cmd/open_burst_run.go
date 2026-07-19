@@ -139,6 +139,15 @@ func buildOpenBurstDeps(cmd *cobra.Command) *OpenBurstDeps {
 // Precondition: len(surfaces) >= 2 (dispatchOpenBurst routes a single surface to
 // the plain single-target connect).
 func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command []string, deps *OpenBurstDeps) error {
+	// Multi-target zero-mint command guard (spec § Mint-only command): a command
+	// (-e/--) rides mint windows only, so a multi-target set carrying a command with
+	// ZERO mint surfaces (every surface is an attach) has nowhere to run it. Refuse
+	// with the Task 2-6 message BEFORE detect/resolve/spawn — the multi-target arity
+	// of the single-target attach-command guard (openResolved's *SessionResult arm).
+	if len(command) > 0 && !hasMintSurface(surfaces) {
+		return NewUsageError("a command (-e/--) can only run in a newly-created session, not an existing one")
+	}
+
 	trigger, external := spawn.SplitTriggerFirst(surfaces)
 
 	// Detect the host terminal, then resolve its window-opening adapter. Order is
@@ -160,7 +169,7 @@ func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command 
 	// pre-spawn abort — the executable or an ack id failed to resolve before any
 	// window opened — returns immediately, so the trigger never connects on a burst
 	// that could not even start.
-	batch, _, err := deps.NewBurster(adapter).Run(context.Background(), external, nil)
+	batch, _, err := deps.NewBurster(adapter).Run(context.Background(), external, command, nil)
 	if err != nil {
 		return err
 	}
@@ -180,6 +189,18 @@ func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command 
 
 	// Self-connect the trigger LAST, after every external window has been spawned.
 	return connectTrigger(cmd, trigger, command, deps)
+}
+
+// hasMintSurface reports whether any surface in the set is a mint (a fresh session
+// at a directory) — the surface kind a mint-scoped command can run in. Used by the
+// multi-target zero-mint command guard.
+func hasMintSurface(surfaces []spawn.Surface) bool {
+	for _, s := range surfaces {
+		if s.Kind == spawn.SurfaceMint {
+			return true
+		}
+	}
+	return false
 }
 
 // connectTrigger self-connects the trigger surface in the invoking terminal: a
