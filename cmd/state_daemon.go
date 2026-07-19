@@ -15,6 +15,7 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -27,7 +28,8 @@ import (
 // HashMap and PrevIndex are mutable across ticks and updated by the loop —
 // HashMap by WriteScrollbackIfChanged, PrevIndex by captureAndCommit.
 // LastSaveAt is updated by tick when a capture-and-commit succeeds; lastCleanup
-// is rewritten by maybeRunHookCleanup each time the throttled cleanup fires.
+// is rewritten by maybeRunHookCleanup and lastProjectCleanup by
+// maybeRunProjectCleanup, each time its throttled prune fires.
 type daemonDeps struct {
 	Dir     string
 	Version string
@@ -49,6 +51,22 @@ type daemonDeps struct {
 	// so the first cleanup fires one interval (~10s) after start, not on the
 	// first idle tick (~1s).
 	lastCleanup time.Time
+
+	// ProjectStore is built once at daemon startup via loadProjectStore(); it
+	// MUST resolve the same projects.json foreground commands (and doctor --fix)
+	// mutate, relying on the same env-inheritance rule as HookStore. It drives
+	// the daemon's throttled stale-project prune (maybeRunProjectCleanup) via
+	// project.Store.CleanStale — the same filesystem-only classification doctor
+	// --fix (task 4-5) and the doctor stale-project check (task 4-3) use. A nil
+	// pointer (loadProjectStore failed at startup) disables the prune for the
+	// daemon's lifetime, exactly like the HookStore nil-guard.
+	ProjectStore *project.Store
+
+	// lastProjectCleanup is the throttle anchor for the daemon-owned
+	// stale-project prune; initialised to the daemon-START time (exactly like
+	// lastCleanup) so the first prune fires one interval after start, not on the
+	// first idle tick.
+	lastProjectCleanup time.Time
 
 	HashMap      state.HashMap
 	PrevIndex    *state.Index
@@ -216,6 +234,12 @@ const selfSupervisionHysteresisTicks = 3
 // irrelevant. Tuning detail — 10s default.
 const hookCleanupInterval = 10 * time.Second
 
+// projectCleanupInterval is the throttle interval for the daemon-owned
+// stale-project prune (maybeRunProjectCleanup). Gone-dir projects are inert
+// clutter, not a correctness hazard, so this is a slow cadence — hourly-ish in
+// production; the throttle-gate mechanism mirrors the hook cleanup.
+const projectCleanupInterval = 1 * time.Hour
+
 // defaultDaemonRun is the production daemon body: a 1-second ticker that fires
 // captures when the dirty flag is set or the 30-second max-gap has elapsed,
 // returning to delegate the final flush to daemonShutdownFunc on ctx-cancel.
@@ -355,15 +379,16 @@ func defaultDaemonTickLoop(ctx context.Context, deps *daemonDeps) error {
 //  1. @portal-restoring suppresses the entire tick (incl. clearing the dirty
 //     flag) so a save.requested touch during restore survives until restore
 //     completes.
-//  2. !dirty && !gap is the idle fast path — after the no-op stat, run the
-//     throttled daemon-owned hooks stale-cleanup gate (maybeRunHookCleanup;
-//     ~10s throttle) then return. Cleanup lives HERE — on the idle branch,
-//     after the @portal-restoring check — so it fires on a mostly-idle warm
-//     server; placing it after the capture branch would gate it behind capture
-//     work and it would never run on an idle server. It is skipped entirely
-//     while @portal-restoring is set (whole tick skipped) and on capture-pending
-//     ticks (dirty||gap -> capture runs, cleanup skipped; scrollback always
-//     wins).
+//  2. !dirty && !gap is the idle fast path — after the no-op stat, run the two
+//     throttled daemon-owned prunes: the hooks stale-cleanup gate
+//     (maybeRunHookCleanup; ~10s throttle) then the stale-project prune
+//     (maybeRunProjectCleanup; slow ~hourly throttle). Both live HERE — on the
+//     idle branch, after the @portal-restoring check — so they fire on a
+//     mostly-idle warm server; placing them after the capture branch would gate
+//     them behind capture work and they would never run on an idle server. They
+//     are skipped entirely while @portal-restoring is set (whole tick skipped)
+//     and on capture-pending ticks (dirty||gap -> capture runs, prunes skipped;
+//     scrollback always wins).
 //  3. captureAndCommit failures leave LastSaveAt and save.requested untouched
 //     so the next tick retries.
 func tick(ctx context.Context, deps *daemonDeps) {
@@ -380,6 +405,7 @@ func tick(ctx context.Context, deps *daemonDeps) {
 	gap := time.Since(deps.LastSaveAt) >= deps.MaxGap
 	if !dirty && !gap {
 		maybeRunHookCleanup(deps)
+		maybeRunProjectCleanup(deps)
 		return
 	}
 
@@ -431,6 +457,47 @@ func maybeRunHookCleanup(deps *daemonDeps) {
 		deps.Logger.Warn("hooks stale-cleanup failed", "error", err)
 	}
 	deps.lastCleanup = time.Now()
+}
+
+// maybeRunProjectCleanup is the throttled gate for the daemon-owned
+// stale-project prune (spec § clean deleted — stale-project pruning folds into
+// the daemon's automation on a slow cadence). It mirrors maybeRunHookCleanup
+// EXACTLY in shape: nil-guard → throttle-check → best-effort call → reset the
+// anchor AFTER the body. Below the throttle interval it is a pure no-op; once
+// time.Since(deps.lastProjectCleanup) >= projectCleanupInterval it invokes
+// project.Store.CleanStale — the same filesystem-only os.Stat classification
+// doctor --fix (task 4-5) and the doctor stale-project check (task 4-3) use
+// (gone dir → stale/pruned; permission-denied → retained). CleanStale emits its
+// own "projects" clean-stale audit breadcrumb, so no new log component or event
+// is introduced here — the daemon only adds a WARN on a CleanStale error.
+//
+// deps.lastProjectCleanup is reset AFTER the body runs (whether it succeeded or
+// errored), so a failing prune still advances the throttle and retries next
+// cadence rather than hammering the store. A CleanStale error is logged WARN and
+// swallowed (mirroring maybeRunHookCleanup and the tick loop's "tick failed"
+// handling) — the gate never returns an error and never disrupts the
+// capture/commit loop.
+//
+// A nil deps.ProjectStore means loadProjectStore() failed at daemon startup and
+// the prune is disabled for this daemon's lifetime; the gate no-ops before the
+// throttle check, leaving lastProjectCleanup untouched.
+//
+// NO hazard guard is needed (unlike the HOOK prune): the project prune is
+// filesystem-only and the daemon only runs inside the live _portal-saver pane,
+// so the down-server false-orphan hazard that guards the hook prune (a
+// zero-live-panes read is ambiguous while the server is transiently empty) does
+// NOT apply — a gone directory is unambiguously stale regardless of server state.
+func maybeRunProjectCleanup(deps *daemonDeps) {
+	if deps.ProjectStore == nil {
+		return
+	}
+	if time.Since(deps.lastProjectCleanup) < projectCleanupInterval {
+		return
+	}
+	if _, err := deps.ProjectStore.CleanStale(); err != nil {
+		deps.Logger.Warn("projects stale-cleanup failed", "error", err)
+	}
+	deps.lastProjectCleanup = time.Now()
 }
 
 // captureAndCommit runs a full save cycle: list skeleton markers, capture the
@@ -719,20 +786,40 @@ var stateDaemonCmd = &cobra.Command{
 			hookStore = nil
 		}
 
+		// Build the projects store once, from the SAME resolver foreground
+		// commands and doctor --fix use (loadProjectStore → projectsFilePath →
+		// configFilePath("PORTAL_PROJECTS_FILE", "projects.json")), so the
+		// daemon's throttled stale-project prune (maybeRunProjectCleanup) prunes
+		// the identical projects.json. Like the hooks-store wiring above, this is
+		// best-effort — a path-resolution failure must NOT abort the daemon's
+		// PRIMARY job (scrollback capture + resurrection state). On failure we log
+		// one observable WARN and proceed with a nil store; maybeRunProjectCleanup
+		// no-ops while the store is absent, so the prune is disabled for this
+		// daemon's lifetime but capture runs regardless.
+		projectStore, err := loadProjectStore()
+		if err != nil {
+			logger.Warn("load project store failed; stale-project prune disabled", "error", err)
+			projectStore = nil
+		}
+
 		client := tmux.DefaultClient()
+		startedAt := time.Now()
 		deps := &daemonDeps{
 			Dir:     dir,
 			Version: version,
 			Logger:  logger,
 			Client:  client,
-			// lastCleanup is anchored to daemon-START time so the first hooks
-			// stale-cleanup (tasks 3-2/3-3) fires one interval after start.
-			HookStore:    hookStore,
-			lastCleanup:  time.Now(),
-			HashMap:      hm,
-			PrevIndex:    prevIdx,
-			TickerPeriod: 1 * time.Second,
-			MaxGap:       30 * time.Second,
+			// lastCleanup / lastProjectCleanup are anchored to daemon-START time
+			// so the first hooks stale-cleanup (tasks 3-2/3-3) and the first
+			// stale-project prune (task 4-8) each fire one interval after start.
+			HookStore:          hookStore,
+			lastCleanup:        startedAt,
+			ProjectStore:       projectStore,
+			lastProjectCleanup: startedAt,
+			HashMap:            hm,
+			PrevIndex:          prevIdx,
+			TickerPeriod:       1 * time.Second,
+			MaxGap:             30 * time.Second,
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())

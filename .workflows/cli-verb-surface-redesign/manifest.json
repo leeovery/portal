@@ -128,8 +128,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 4,
-          "current_task": "cli-verb-surface-redesign-4-8",
+          "current_phase": 5,
+          "current_task": "~",
           "completed_tasks": [
             "cli-verb-surface-redesign-1-1",
             "cli-verb-surface-redesign-1-2",
@@ -157,12 +157,14 @@
             "cli-verb-surface-redesign-4-4",
             "cli-verb-surface-redesign-4-5",
             "cli-verb-surface-redesign-4-6",
-            "cli-verb-surface-redesign-4-7"
+            "cli-verb-surface-redesign-4-7",
+            "cli-verb-surface-redesign-4-8"
           ],
           "completed_phases": [
             1,
             2,
-            3
+            3,
+            4
           ]
         }
       }
