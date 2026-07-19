@@ -85,10 +85,6 @@ func resetRootCmd() {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
-	if f := spawnCmd.Flags().Lookup("detect"); f != nil { // reset spawn detect flag
-		_ = f.Value.Set("false")
-		f.Changed = false
-	}
 	if f := doctorCmd.Flags().Lookup("fix"); f != nil { // reset doctor --fix flag
 		_ = f.Value.Set("false")
 		f.Changed = false
@@ -186,6 +182,18 @@ func TestOpenSubcommandIsRegistered(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("open subcommand is not registered on root command")
+	}
+}
+
+// TestSpawnCommandIsRetired asserts `portal spawn` was removed outright — the
+// verb-surface redesign folds multi-window spawn into `open <t1> <t2> …` and
+// spawn --detect into `doctor`, with no back-compat alias. This is the light
+// registration check; the full retired-surface reachability guard is Task 5-3.
+func TestSpawnCommandIsRetired(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "spawn" {
+			t.Fatal("spawn command must be retired (not registered on rootCmd)")
+		}
 	}
 }
 

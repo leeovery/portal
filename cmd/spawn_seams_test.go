@@ -1,14 +1,14 @@
 package cmd
 
-// Tests in this file mutate package-level state (spawnDeps) and MUST NOT use
-// t.Parallel. They exercise the shared production spawn-seam builder that both
-// the CLI (buildSpawnDeps) and the picker (openTUI's tuiConfig population) read
-// from, plus buildSpawnDeps' injected-field precedence over it.
+// Tests in this file exercise the shared production spawn-seam builder
+// (buildProductionSpawnSeams) that both the open burst (buildOpenBurstDeps) and
+// the picker (openTUI's tuiConfig population) read from. The file also houses the
+// shared fakeTerminalDetector + cmdWithClient test doubles consumed across the
+// open-burst / doctor / detection-seam tests. Per the cmd-package convention
+// (package-level mutable seams), tests here MUST NOT use t.Parallel.
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,10 +17,22 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/spawntest"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
+
+// fakeTerminalDetector is a fake TerminalDetector that returns a fixed
+// Identity, letting host-terminal-aware command bodies (the open burst, doctor,
+// the picker detection seam) be Executed without real tmux, ps, or defaults
+// reads. It satisfies both cmd.TerminalDetector and tui.TerminalDetector (both
+// declare Detect() spawn.Identity).
+type fakeTerminalDetector struct {
+	id spawn.Identity
+}
+
+func (f fakeTerminalDetector) Detect() spawn.Identity {
+	return f.id
+}
 
 // isolateTerminalsFile points PORTAL_TERMINALS_FILE at a temp path so
 // buildResolver (reached via buildProductionSpawnSeams) never reads the
@@ -32,8 +44,8 @@ func isolateTerminalsFile(t *testing.T) {
 }
 
 // cmdWithClient returns a *cobra.Command carrying client under tmuxClientKey,
-// exactly as PersistentPreRunE injects it — so buildSpawnDeps' lazy
-// tmuxClient(cmd) resolution finds a client instead of panicking.
+// exactly as PersistentPreRunE injects it — so a lazy tmuxClient(cmd) resolution
+// (buildOpenBurstDeps, spawnDetector) finds a client instead of panicking.
 func cmdWithClient(client *tmux.Client) *cobra.Command {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.WithValue(context.Background(), tmuxClientKey, client))
@@ -99,67 +111,4 @@ func TestBuildProductionSpawnSeams(t *testing.T) {
 			t.Errorf("Getenv(PATH) = %q, want os.Getenv value %q", got, want)
 		}
 	})
-}
-
-func TestBuildSpawnDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T) {
-	isolateTerminalsFile(t)
-
-	client := tmux.NewClient(&recordingCommander{})
-	cmd := cmdWithClient(client)
-
-	// Sentinels for the three injected fields. Each is behaviourally
-	// distinguishable from its production default so we can prove the injected
-	// value survived rather than being overwritten by the shared builder.
-	injectedAdapter := &spawntest.FakeAdapter{}
-	injectedResolve := func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
-		return injectedAdapter, spawn.ResolutionConfig
-	}
-	injectedExists := func(string) bool { return false }
-	injectedLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	spawnDeps = &SpawnDeps{
-		Resolve: injectedResolve,
-		Exists:  injectedExists,
-		Logger:  injectedLogger,
-	}
-	t.Cleanup(func() { spawnDeps = nil })
-
-	deps := buildSpawnDeps(cmd)
-
-	// Injected fields must win over the shared builder.
-	gotAdapter, gotResolution := deps.Resolve(spawn.Identity{})
-	if gotAdapter != spawn.Adapter(injectedAdapter) || gotResolution != spawn.ResolutionConfig {
-		t.Errorf("Resolve overwritten: got (%T, %q), want injected (*spawntest.FakeAdapter, %q)", gotAdapter, gotResolution, spawn.ResolutionConfig)
-	}
-	if deps.Exists("anything") {
-		t.Error("Exists overwritten: injected predicate returns false for all names, got true")
-	}
-	if deps.Logger != injectedLogger {
-		t.Error("Logger overwritten: want the injected *slog.Logger instance")
-	}
-
-	// Unset fields must be filled from the shared production builder.
-	if _, ok := deps.Ack.(*spawn.ServerOptionAckChannel); !ok {
-		t.Errorf("Ack not defaulted from shared builder: got %T, want *spawn.ServerOptionAckChannel", deps.Ack)
-	}
-	if deps.ExePath == nil {
-		t.Error("ExePath not defaulted from shared builder")
-	}
-	if deps.Getenv == nil {
-		t.Error("Getenv not defaulted from shared builder")
-	}
-	if got, want := deps.Getenv("PATH"), os.Getenv("PATH"); got != want {
-		t.Errorf("defaulted Getenv(PATH) = %q, want os.Getenv value %q", got, want)
-	}
-
-	// The non-shared CLI defaults are still populated exactly as before.
-	if deps.Detector == nil {
-		t.Error("Detector default missing (should route through spawnDetector)")
-	}
-	if deps.Connector == nil {
-		t.Error("Connector default missing (CLI-only)")
-	}
-	if deps.NewBurster == nil {
-		t.Error("NewBurster default missing (CLI-only lazy closure)")
-	}
 }

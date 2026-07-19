@@ -11,6 +11,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -74,6 +75,62 @@ func (m *recordingMint) mint(_ *cobra.Command, dir string, command []string) err
 	m.events.seq = append(m.events.seq, "mint:"+dir)
 	m.calls = append(m.calls, mintCall{dir: dir, command: command})
 	return m.err
+}
+
+// Fixed burst-composition inputs: an injected ExePath and PATH so each recorded
+// OpenWindow argv is a deterministic, exact env-self-sufficient `open` command
+// with no dependence on the running binary or the developer's PATH.
+const (
+	spawnPipelineExe  = "/opt/portal/bin/portal"
+	spawnPipelinePATH = "/opt/homebrew/bin:/usr/bin:/bin"
+)
+
+// ghosttyIdentity is the fixed supported host-terminal identity the burst tests
+// detect (a real native adapter would resolve for it in production).
+func ghosttyIdentity() spawn.Identity {
+	return spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}
+}
+
+// appleTerminalIdentity is a recognised-but-undriven host terminal: it has a real
+// friendly name and bundle id (so it is NOT the NULL identity), yet no native
+// adapter drives it, so the resolver classifies it unsupported. The N≥2
+// atomic-no-op gate must name it in the one-line message.
+func appleTerminalIdentity() spawn.Identity {
+	return spawn.NewIdentity("com.apple.Terminal", "Apple Terminal")
+}
+
+// manualClock is the deterministic fake clock the burster-reaching tests drive:
+// now reads the current instant, sleep advances it. No real time passes, so no
+// real time.Sleep is ever invoked.
+type manualClock struct{ t time.Time }
+
+func (c *manualClock) now() time.Time        { return c.t }
+func (c *manualClock) sleep(d time.Duration) { c.t = c.t.Add(d) }
+
+// seqIDGen returns a deterministic id generator yielding "id1", "id2", … — the
+// first call is the batch id, each later call a per-window token. Option-safe
+// (alphanumeric) so NewSpawnID accepts them and distinct so no ids collide.
+func seqIDGen() func() (string, error) {
+	var n int
+	return func() (string, error) {
+		n++
+		return fmt.Sprintf("id%d", n), nil
+	}
+}
+
+// cleanOrderConnector is a SessionConnector that, on each Connect, snapshots how
+// many batches the shared ack channel has cleaned so far — letting a test prove
+// Clean(batch) ran BEFORE the trigger self-connect on the success path.
+type cleanOrderConnector struct {
+	ack           *spawntest.FakeAckChannel
+	calls         []string
+	cleanedBefore []int
+}
+
+func (c *cleanOrderConnector) Connect(name string) error {
+	c.calls = append(c.calls, name)
+	c.cleanedBefore = append(c.cleanedBefore, len(c.ack.Cleaned))
+	return nil
 }
 
 // openBurstDepsForTest assembles a fully-injected OpenBurstDeps for the burst body:
