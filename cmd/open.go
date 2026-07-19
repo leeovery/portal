@@ -156,6 +156,22 @@ var openCmd = &cobra.Command{
 			return err
 		}
 
+		// -f/--filter is the sole non-composing flag (spec § -f/--filter): not a
+		// target, but a "skip resolution, open the picker pre-filtered" redirect.
+		// Handled BEFORE resolution — it never routes through the query resolver.
+		// It is mutually exclusive with a positional target (Phase 1 scope: pins
+		// don't exist yet) and rejects an empty value, mirroring the empty -e guard.
+		if cmd.Flags().Changed("filter") {
+			filterVal, _ := cmd.Flags().GetString("filter")
+			if destination != "" {
+				return NewUsageError("cannot use -f/--filter with a target")
+			}
+			if filterVal == "" {
+				return NewUsageError("-f/--filter value must not be empty")
+			}
+			return openTUIFunc(cmd, filterVal, command, serverWasStarted(cmd))
+		}
+
 		if destination == "" {
 			return openTUIFunc(cmd, "", command, serverWasStarted(cmd))
 		}
@@ -765,5 +781,6 @@ func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
 
 func init() {
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
+	openCmd.Flags().StringP("filter", "f", "", "open the picker pre-filtered by <text> (skips resolution)")
 	rootCmd.AddCommand(openCmd)
 }

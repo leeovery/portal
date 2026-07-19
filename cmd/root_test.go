@@ -41,6 +41,10 @@ func resetRootCmd() {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
+	if f := openCmd.Flags().Lookup("filter"); f != nil { // reset filter flag
+		_ = f.Value.Set("")
+		f.Changed = false
+	}
 	// pflag does not reset argsLenAtDash between Parse calls, and it stays stale
 	// on an empty-args Parse (an early return). A prior `open <t> -- cmd` Execute
 	// therefore leaves openCmd's dash index at a positive value; a later no-`--`

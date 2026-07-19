@@ -1417,6 +1417,209 @@ func TestOpenCommand_DirectTUI_PassesServerStarted(t *testing.T) {
 	}
 }
 
+// recordingFilterLister records whether its ListSessionNames was consulted, so a
+// -f invocation can assert the query resolver's session pre-check never ran (i.e.
+// resolution was skipped entirely — -f is a picker redirect, not a target).
+type recordingFilterLister struct {
+	names  []string
+	called bool
+}
+
+func (r *recordingFilterLister) ListSessionNames() ([]string, error) {
+	r.called = true
+	return r.names, nil
+}
+
+func TestOpenCommand_Filter_OpensPickerPrefilteredAndSkipsResolution(t *testing.T) {
+	// -f <text> (no positional) skips resolution and launches the picker
+	// pre-filled with the filter text (spec § -f/--filter is the sole
+	// non-composing flag). The query resolver's session pre-check must never run.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	lister := &recordingFilterLister{}
+	openDeps = &OpenDeps{
+		SessionLister: lister,
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var gotFilter string
+	var gotCommand []string
+	tuiCalled := false
+	origFunc := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, initialFilter string, command []string, _ bool) error {
+		tuiCalled = true
+		gotFilter = initialFilter
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-f", "blog"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !tuiCalled {
+		t.Fatal("openTUIFunc must be called for -f")
+	}
+	if gotFilter != "blog" {
+		t.Errorf("initialFilter = %q, want %q", gotFilter, "blog")
+	}
+	if gotCommand != nil {
+		t.Errorf("command = %v, want nil", gotCommand)
+	}
+	if lister.called {
+		t.Error("query resolver must not be consulted for a -f invocation (resolution skipped)")
+	}
+}
+
+func TestOpenCommand_Filter_WithPositionalTarget_UsageError(t *testing.T) {
+	// -f combined with a positional target is a usage error (exit 2); neither the
+	// resolver nor the picker is invoked (spec § -f is mutually exclusive with a
+	// positional target).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	lister := &recordingFilterLister{}
+	openDeps = &OpenDeps{
+		SessionLister: lister,
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	tuiCalled := false
+	origFunc := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-f", "blog", "api"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	want := "cannot use -f/--filter with a target"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("expected *UsageError (exit 2), got %T", err)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called when -f conflicts with a positional target")
+	}
+	if lister.called {
+		t.Error("query resolver must not be consulted on a -f/target conflict")
+	}
+}
+
+func TestOpenCommand_Filter_EmptyValue_UsageError(t *testing.T) {
+	// An explicitly empty -f value is a usage error (exit 2), mirroring the
+	// existing empty -e guard (planner decision).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	tuiCalled := false
+	origFunc := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-f", ""})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	want := "-f/--filter value must not be empty"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("expected *UsageError (exit 2), got %T", err)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called for an empty -f value")
+	}
+}
+
+func TestOpenCommand_NoArgs_NoFilter_LaunchesPicker(t *testing.T) {
+	// Regression guard: no-arg open (no -f) still launches the picker with an
+	// empty initial filter — the -f feature must not disturb this path.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	var gotFilter string
+	tuiCalled := false
+	origFunc := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, initialFilter string, _ []string, _ bool) error {
+		tuiCalled = true
+		gotFilter = initialFilter
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !tuiCalled {
+		t.Fatal("openTUIFunc must be called for no-arg open")
+	}
+	if gotFilter != "" {
+		t.Errorf("initialFilter = %q, want empty", gotFilter)
+	}
+}
+
+func TestOpenCommand_Filter_ThreadsCommandToPicker(t *testing.T) {
+	// -f threads any present -e/-- command straight through to the picker,
+	// preserving the command-present ⇒ Projects specialization for free.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	var gotFilter string
+	var gotCommand []string
+	origFunc := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, initialFilter string, command []string, _ bool) error {
+		gotFilter = initialFilter
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-f", "web", "-e", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotFilter != "web" {
+		t.Errorf("initialFilter = %q, want %q", gotFilter, "web")
+	}
+	wantCmd := []string{"claude"}
+	if !slices.Equal(gotCommand, wantCmd) {
+		t.Errorf("command = %v, want %v", gotCommand, wantCmd)
+	}
+}
+
 func TestBuildSessionConnector(t *testing.T) {
 	t.Run("returns SwitchConnector when inside tmux", func(t *testing.T) {
 		t.Setenv("TMUX", "/tmp/tmux-501/default,12345,0")
