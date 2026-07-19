@@ -54,7 +54,7 @@ type Warning = warning.Warning
 func CorruptSessionsJSONWarning() Warning {
 	return Warning{Lines: []string{
 		"Portal state file unusable — restoration skipped.",
-		"Check `portal state status` or ~/.config/portal/state/portal.log.",
+		"Check `portal doctor` or ~/.config/portal/state/portal.log.",
 	}}
 }
 
@@ -64,6 +64,6 @@ func CorruptSessionsJSONWarning() Warning {
 func SaverDownWarning() Warning {
 	return Warning{Lines: []string{
 		"Portal save daemon failed to start — sessions won't be captured.",
-		"Run `portal state status` for details.",
+		"Run `portal doctor` for details.",
 	}}
 }

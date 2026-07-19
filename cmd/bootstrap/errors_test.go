@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -68,7 +69,7 @@ func TestCorruptSessionsJSONWarning_returnsExactSpecCopy(t *testing.T) {
 	got := CorruptSessionsJSONWarning()
 	want := []string{
 		"Portal state file unusable — restoration skipped.",
-		"Check `portal state status` or ~/.config/portal/state/portal.log.",
+		"Check `portal doctor` or ~/.config/portal/state/portal.log.",
 	}
 	if len(got.Lines) != len(want) {
 		t.Fatalf("Lines len = %d, want %d; got %#v", len(got.Lines), len(want), got.Lines)
@@ -78,13 +79,14 @@ func TestCorruptSessionsJSONWarning_returnsExactSpecCopy(t *testing.T) {
 			t.Errorf("Lines[%d] = %q, want %q", i, got.Lines[i], want[i])
 		}
 	}
+	assertRepointedToDoctor(t, got)
 }
 
 func TestSaverDownWarning_returnsExactSpecCopy(t *testing.T) {
 	got := SaverDownWarning()
 	want := []string{
 		"Portal save daemon failed to start — sessions won't be captured.",
-		"Run `portal state status` for details.",
+		"Run `portal doctor` for details.",
 	}
 	if len(got.Lines) != len(want) {
 		t.Fatalf("Lines len = %d, want %d; got %#v", len(got.Lines), len(want), got.Lines)
@@ -93,5 +95,19 @@ func TestSaverDownWarning_returnsExactSpecCopy(t *testing.T) {
 		if got.Lines[i] != want[i] {
 			t.Errorf("Lines[%d] = %q, want %q", i, got.Lines[i], want[i])
 		}
+	}
+	assertRepointedToDoctor(t, got)
+}
+
+// assertRepointedToDoctor asserts a soft-bootstrap warning points the user at
+// `portal doctor` and never at the removed `portal state status` command.
+func assertRepointedToDoctor(t *testing.T, w Warning) {
+	t.Helper()
+	body := strings.Join(w.Lines, "\n")
+	if !strings.Contains(body, "portal doctor") {
+		t.Errorf("warning does not mention `portal doctor`; got %q", body)
+	}
+	if strings.Contains(body, "portal state status") {
+		t.Errorf("warning still references removed `portal state status`; got %q", body)
 	}
 }

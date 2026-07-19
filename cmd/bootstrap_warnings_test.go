@@ -222,9 +222,9 @@ func TestPersistentPreRunE_EmitsWarningsToStderrOnCLIPath(t *testing.T) {
 	got := stderr.String()
 	wantLines := []string{
 		"Portal save daemon failed to start — sessions won't be captured.",
-		"Run `portal state status` for details.",
+		"Run `portal doctor` for details.",
 		"Portal state file unusable — restoration skipped.",
-		"Check `portal state status` or ~/.config/portal/state/portal.log.",
+		"Check `portal doctor` or ~/.config/portal/state/portal.log.",
 	}
 	for _, want := range wantLines {
 		if !strings.Contains(got, want+"\n") {
