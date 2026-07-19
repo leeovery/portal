@@ -145,7 +145,7 @@ func seedHealthyStateDir(t *testing.T, dir string) {
 // tests asserting a down/absent runtime override the seams before calling.
 func runDoctor(t *testing.T, dir string) (*bytes.Buffer, *bytes.Buffer, error) {
 	t.Helper()
-	doctorDeps = withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now})
+	doctorDeps = withHealthyRuntime(&DoctorDeps{StateDir: dir})
 	t.Cleanup(func() { doctorDeps = nil })
 
 	outBuf := new(bytes.Buffer)
@@ -246,12 +246,10 @@ func TestDoctorIsReadOnly(t *testing.T) {
 }
 
 func TestDoctorSessionsJSONStatesDistinguished(t *testing.T) {
-	now := func() time.Time { return time.Now() }
-
 	t.Run("valid index reports N sessions, M panes", func(t *testing.T) {
 		dir := t.TempDir()
 		seedValidSessionsJSON(t, dir, 3)
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: now}))
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -266,7 +264,7 @@ func TestDoctorSessionsJSONStatesDistinguished(t *testing.T) {
 
 	t.Run("absent sessions.json passes as no sessions saved yet", func(t *testing.T) {
 		dir := t.TempDir()
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: now}))
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -284,7 +282,7 @@ func TestDoctorSessionsJSONStatesDistinguished(t *testing.T) {
 		if err := os.WriteFile(state.SessionsJSON(dir), []byte("{not json"), 0o600); err != nil {
 			t.Fatalf("write garbage sessions.json: %v", err)
 		}
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: now}))
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -300,7 +298,7 @@ func TestDoctorDaemonCheckDetail(t *testing.T) {
 		dir := t.TempDir()
 		seedLiveDaemonPID(t, dir)
 		seedDaemonVersion(t, dir, "v1.2.3")
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now}))
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -316,7 +314,7 @@ func TestDoctorDaemonCheckDetail(t *testing.T) {
 
 	t.Run("missing pid fails as not running", func(t *testing.T) {
 		dir := t.TempDir()
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now}))
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -332,7 +330,7 @@ func TestDoctorDaemonCheckDetail(t *testing.T) {
 
 func TestDoctorStateDirSaneHealthyDirPasses(t *testing.T) {
 	dir := t.TempDir()
-	results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now}))
+	results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
@@ -363,7 +361,7 @@ func TestDoctorRejectsArgs(t *testing.T) {
 	seedDaemonVersion(t, dir, "v9.9.9")
 	seedValidSessionsJSON(t, dir, 1)
 
-	doctorDeps = &DoctorDeps{StateDir: dir, Now: time.Now}
+	doctorDeps = &DoctorDeps{StateDir: dir}
 	t.Cleanup(func() { doctorDeps = nil })
 	resetRootCmd()
 	rootCmd.SetArgs([]string{"doctor", "unexpected"})
@@ -414,7 +412,6 @@ func TestDoctorServerDownReportsRuntimeNotRunning(t *testing.T) {
 
 	deps := &DoctorDeps{
 		StateDir:      dir,
-		Now:           time.Now,
 		ServerRunning: func() bool { return false },
 		// Healthy probe returns: if the gate is (wrongly) bypassed these would
 		// produce PASS details, so the not-running assertions below would fail
@@ -457,7 +454,6 @@ func TestDoctorHooksCheck(t *testing.T) {
 	newDeps := func(counts map[string]int) *DoctorDeps {
 		return &DoctorDeps{
 			StateDir:      dir,
-			Now:           time.Now,
 			ServerRunning: func() bool { return true },
 			SaverPresent:  func() (bool, error) { return true, nil },
 			HookCounts:    func() (map[string]int, error) { return counts, nil },
@@ -542,7 +538,6 @@ func TestDoctorHooksCheck(t *testing.T) {
 		seedHealthyStateDir(t, dir)
 		deps := &DoctorDeps{
 			StateDir:      dir,
-			Now:           time.Now,
 			ServerRunning: func() bool { return true },
 			SaverPresent:  func() (bool, error) { return true, nil },
 			HookCounts:    func() (map[string]int, error) { return nil, errors.New("tmux transient") },
@@ -570,7 +565,6 @@ func TestDoctorSaverCheck(t *testing.T) {
 	newDeps := func(present bool, saverErr error) *DoctorDeps {
 		return &DoctorDeps{
 			StateDir:      dir,
-			Now:           time.Now,
 			ServerRunning: func() bool { return true },
 			SaverPresent:  func() (bool, error) { return present, saverErr },
 			HookCounts:    func() (map[string]int, error) { return allHooksHealthy(), nil },
@@ -635,7 +629,6 @@ func TestDoctorHostTerminalLine(t *testing.T) {
 	hostDeps := func(id spawn.Identity, resolution spawn.Resolution) *DoctorDeps {
 		return withHealthyRuntime(&DoctorDeps{
 			StateDir: dir,
-			Now:      time.Now,
 			Detector: fakeTerminalDetector{id: id},
 			Resolve: func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
 				return nil, resolution
@@ -702,7 +695,6 @@ func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 		// healthy; the stale checks are not-evaluable (nil stores) — none a fail.
 		deps := withHealthyRuntime(&DoctorDeps{
 			StateDir: dir,
-			Now:      time.Now,
 			Detector: fakeTerminalDetector{},
 			Resolve:  doctorUnsupportedResolve,
 		})
@@ -723,7 +715,6 @@ func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 		seedDeadDaemonPID(t, dir) // the daemon check fails → genuine unhealthy
 		deps := withHealthyRuntime(&DoctorDeps{
 			StateDir: dir,
-			Now:      time.Now,
 			Detector: fakeTerminalDetector{id: spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}},
 			Resolve: func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
 				return nil, spawn.ResolutionNative
@@ -751,7 +742,7 @@ func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 func TestDoctorCheckOrder(t *testing.T) {
 	dir := t.TempDir()
 	seedHealthyStateDir(t, dir)
-	results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now}))
+	results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
@@ -823,7 +814,6 @@ func seedProjectsJSON(t *testing.T, paths ...string) (*project.Store, string) {
 func staleDeps(dir string, lister AllPaneLister, hookStore *hooks.Store, projectStore *project.Store) *DoctorDeps {
 	return withHealthyRuntime(&DoctorDeps{
 		StateDir:     dir,
-		Now:          time.Now,
 		HookLister:   lister,
 		HookStore:    hookStore,
 		ProjectStore: projectStore,
@@ -1053,7 +1043,6 @@ func TestDoctorFixDownServerPrunesProjectsButNotHooks(t *testing.T) {
 
 	deps := &DoctorDeps{
 		StateDir:      dir,
-		Now:           time.Now,
 		ServerRunning: func() bool { return false },
 		// A down server yields an empty live-pane enumeration.
 		HookLister:   fakeHookLister{keys: []string{}},
@@ -1106,7 +1095,7 @@ func TestDoctorFixLogSweepNeverDrivesExit(t *testing.T) {
 	// nil stores → no hook/project prune; the log-sweep is the ONLY repair action,
 	// isolating its (non-)effect on the exit code. Stale checks report
 	// not-evaluable (never fail), so the post-repair state is fully healthy.
-	deps := withHealthyRuntime(&DoctorDeps{StateDir: dir, Now: time.Now})
+	deps := withHealthyRuntime(&DoctorDeps{StateDir: dir})
 	_, _, err := runDoctorFixCmd(t, deps)
 	if err != nil {
 		t.Fatalf("Execute err = %v; want nil — a log-sweep must never drive the exit code", err)
@@ -1164,7 +1153,6 @@ func TestDoctorStaleProjectsCheck(t *testing.T) {
 		projectStore, _ := seedProjectsJSON(t, goneDir)
 		deps := &DoctorDeps{
 			StateDir:      t.TempDir(),
-			Now:           time.Now,
 			ServerRunning: func() bool { return false },
 			SaverPresent:  func() (bool, error) { return true, nil },
 			HookCounts:    func() (map[string]int, error) { return allHooksHealthy(), nil },

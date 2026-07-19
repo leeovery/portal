@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"sort"
-	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
@@ -60,15 +59,13 @@ type checkResult struct {
 
 // DoctorDeps is the DI seam for the doctor command. In production doctorDeps
 // is nil and resolveDoctorDeps supplies the real collaborators (StateDir from
-// state.Dir(), Now from time.Now). Tests assign a *DoctorDeps with a hermetic
-// StateDir temp dir so diagnosis runs against seeded fixtures without touching
-// the developer's real ~/.config/portal/state.
+// state.Dir()). Tests assign a *DoctorDeps with a hermetic StateDir temp dir so
+// diagnosis runs against seeded fixtures without touching the developer's real
+// ~/.config/portal/state.
 type DoctorDeps struct {
 	// StateDir overrides the resolved state directory. Empty means "resolve
 	// via state.Dir()" (the production path).
 	StateDir string
-	// Now supplies the clock used by the daemon check's CollectStatus call.
-	Now func() time.Time
 	// ServerRunning reports whether a tmux server is up. It is the front gate
 	// for the three runtime checks (daemon / saver / hooks): a down server
 	// short-circuits all three to the distinct not-running detail without
@@ -117,8 +114,8 @@ var doctorDeps *DoctorDeps
 // resolveDoctorDeps returns a fully-populated *DoctorDeps for one doctor
 // invocation. Unset fields in the package-level doctorDeps fall through to the
 // production defaults independently — same per-field nil-check idiom as
-// commitNowDeps / bootstrapDeps. The returned value is never nil; Now and the
-// three tmux probe seams are guaranteed non-nil.
+// commitNowDeps / bootstrapDeps. The returned value is never nil; the three
+// tmux probe seams are guaranteed non-nil.
 //
 // doctor is bootstrap-exempt, so there is no shared tmux.Client in
 // cmd.Context(); the production defaults build ONE tmux.DefaultClient() here
@@ -127,7 +124,6 @@ var doctorDeps *DoctorDeps
 func resolveDoctorDeps() *DoctorDeps {
 	client := tmux.DefaultClient()
 	deps := &DoctorDeps{
-		Now:           time.Now,
 		ServerRunning: client.ServerRunning,
 		SaverPresent: func() (bool, error) {
 			_, present, err := tmux.SaverPanePIDOrAbsent(client, tmux.PortalSaverName)
@@ -163,9 +159,6 @@ func resolveDoctorDeps() *DoctorDeps {
 	}
 	if doctorDeps.StateDir != "" {
 		deps.StateDir = doctorDeps.StateDir
-	}
-	if doctorDeps.Now != nil {
-		deps.Now = doctorDeps.Now
 	}
 	if doctorDeps.ServerRunning != nil {
 		deps.ServerRunning = doctorDeps.ServerRunning
@@ -340,7 +333,6 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 	if dir == "" {
 		dir, dirErr = state.Dir()
 	}
-	now := deps.Now()
 
 	// Read the server gate once: a down server routes daemon / saver / hooks to
 	// the distinct not-running detail without probing tmux at all. The state-dir
@@ -348,7 +340,7 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 	serverUp := deps.ServerRunning()
 
 	results := []checkResult{
-		checkDaemonAlive(serverUp, dir, dirErr, now),
+		checkDaemonAlive(serverUp, dir, dirErr),
 		checkSaverUp(serverUp, deps.SaverPresent),
 		checkHooksRegistered(serverUp, deps.HookCounts),
 		checkStateDirSane(dir, dirErr),
@@ -487,9 +479,13 @@ func checkStaleProjects(store *project.Store) checkResult {
 // checkDaemonAlive reports whether the save daemon is running. With the server
 // down it reports the distinct not-running detail (doctor starts nothing, so a
 // down server is honestly unhealthy, not corrupt). With the server up it is a
-// STATE-based probe: a live daemon.pid passes with a "running (pid N, version
-// V)" detail; a missing, unparseable, or dead PID fails with "not running".
-func checkDaemonAlive(serverUp bool, dir string, dirErr error, now time.Time) checkResult {
+// narrow STATE-based probe reading only the three facts the detail needs: the
+// recorded pid (state.ReadPIDFile), its liveness (state.IsProcessAlive), and the
+// recorded version (state.ReadVersionFile). A live daemon.pid passes with a
+// "running (pid N, version V)" detail; a missing, unparseable, or dead PID fails
+// with "not running". It deliberately does NOT walk the state-dir tree or scan
+// portal.log — a routine doctor run stays cheap.
+func checkDaemonAlive(serverUp bool, dir string, dirErr error) checkResult {
 	const name = "daemon"
 	if !serverUp {
 		return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
@@ -497,14 +493,18 @@ func checkDaemonAlive(serverUp bool, dir string, dirErr error, now time.Time) ch
 	if dirErr != nil {
 		return checkResult{name: name, status: checkFail, detail: "not running"}
 	}
-	report, err := state.CollectStatus(dir, now)
-	if err != nil || report == nil || !report.DaemonRunning {
+	pid, err := state.ReadPIDFile(dir)
+	if err != nil || !state.IsProcessAlive(pid) {
 		return checkResult{name: name, status: checkFail, detail: "not running"}
 	}
+	// A missing or unreadable daemon.version is the normal "never recorded"
+	// condition — swallow the error and let doctorDaemonVersion substitute
+	// "unknown" so the detail never renders a bare "version )".
+	version, _ := state.ReadVersionFile(dir)
 	return checkResult{
 		name:   name,
 		status: checkPass,
-		detail: fmt.Sprintf("running (pid %d, version %s)", report.DaemonPID, doctorDaemonVersion(report.DaemonVersion)),
+		detail: fmt.Sprintf("running (pid %d, version %s)", pid, doctorDaemonVersion(version)),
 	}
 }
 
@@ -625,21 +625,9 @@ func checkSessionsJSON(dir string, dirErr error) checkResult {
 		return checkResult{
 			name:   name,
 			status: checkPass,
-			detail: fmt.Sprintf("%d sessions, %d panes", len(idx.Sessions), doctorPaneCount(idx)),
+			detail: fmt.Sprintf("%d sessions, %d panes", len(idx.Sessions), state.CountPanes(idx)),
 		}
 	}
-}
-
-// doctorPaneCount returns the total number of panes across every window in
-// every session of idx.
-func doctorPaneCount(idx state.Index) int {
-	total := 0
-	for _, s := range idx.Sessions {
-		for _, w := range s.Windows {
-			total += len(w.Panes)
-		}
-	}
-	return total
 }
 
 // renderDoctorReport writes the "Portal doctor:" header followed by one line
