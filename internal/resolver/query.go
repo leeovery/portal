@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -254,6 +255,33 @@ func (qr *QueryResolver) ResolveAliasPin(value string) (QueryResult, error) {
 		return nil, unknownAliasError(value)
 	}
 	return qr.validatedPath(path, "alias")
+}
+
+// ResolveZoxidePin resolves query in the zoxide domain ONLY — the -z/--zoxide pin
+// (spec § Domain-pinning flags). It queries zoxide and, UNLIKE the bare-target
+// chain (which swallows any zoxide error and silently falls through to the miss
+// tail), makes the outcome explicit: zoxide-not-installed surfaces
+// ErrZoxideNotInstalled verbatim (returned directly so a caller can errors.Is it
+// — a script sees WHY, distinct from the silent fall-through), and any other query
+// failure (a no-match) hard-fails with a plain "No zoxide match" error (exit 1). On
+// a hit the best-match directory is validated on disk via validatedPath: a hit
+// always mints (Axiom 2 — PathResult with Domain "zoxide"), and a gone best-match
+// dir hard-fails with *DirNotFoundError (distinct from the no-match). It never
+// consults qr.sessions or qr.aliases — zoxide-domain only — and never falls back to
+// the picker (spec § Pinned-domain contract).
+func (qr *QueryResolver) ResolveZoxidePin(query string) (QueryResult, error) {
+	path, err := qr.zoxide.Query(query)
+	if err != nil {
+		if errors.Is(err, ErrZoxideNotInstalled) {
+			return nil, ErrZoxideNotInstalled
+		}
+		// Any other query failure is a no-match: a distinct hard-fail with the
+		// house-style capitalised message. The capitalised leading word matches the
+		// sibling pins (cf. "No session found" / "No alias found") and trips
+		// staticcheck ST1005, silenced per the directive.
+		return nil, fmt.Errorf("No zoxide match for: %s", query) //nolint:staticcheck // user-facing message per spec
+	}
+	return qr.validatedPath(path, "zoxide")
 }
 
 // unknownAliasError is the alias-pin hard-fail for an unknown key or a glob

@@ -1002,6 +1002,98 @@ func TestQueryResolver_ResolveAliasPin(t *testing.T) {
 	})
 }
 
+func TestQueryResolver_ResolveZoxidePin(t *testing.T) {
+	// newZoxidePinResolver builds a QueryResolver whose session and alias seams
+	// FAIL the test if consulted — ResolveZoxidePin is zoxide-domain only (it
+	// queries zoxide and touches neither the session set nor the alias store), so
+	// every case doubles as a "never consults session or alias" guard.
+	newZoxidePinResolver := func(t *testing.T, zoxide resolver.ZoxideQuerier, existing map[string]bool) *resolver.QueryResolver {
+		return resolver.NewQueryResolver(
+			&failingSessionLister{t: t},
+			&failingAliasLookup{t: t},
+			zoxide,
+			&mockDirValidator{existing: existing},
+		)
+	}
+
+	t.Run("best-match dir returns PathResult domain zoxide", func(t *testing.T) {
+		dir := t.TempDir()
+		dir, _ = filepath.EvalSymlinks(dir)
+		qr := newZoxidePinResolver(t, &mockZoxideQuerier{result: dir}, map[string]bool{dir: true})
+
+		result, err := qr.ResolveZoxidePin("proj")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected *PathResult, got %T", result)
+		}
+		if pr.Path != dir {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, dir)
+		}
+		if pr.Domain != "zoxide" {
+			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, "zoxide")
+		}
+	})
+
+	t.Run("zoxide not installed surfaces ErrZoxideNotInstalled explicitly", func(t *testing.T) {
+		// The whole point of the pin: zoxide-absence is surfaced verbatim (a script
+		// sees WHY), distinct from the bare chain's silent fall-through.
+		qr := newZoxidePinResolver(t, &mockZoxideQuerier{err: resolver.ErrZoxideNotInstalled}, map[string]bool{})
+
+		result, err := qr.ResolveZoxidePin("proj")
+		if result != nil {
+			t.Errorf("expected nil result when zoxide is not installed, got %T", result)
+		}
+		if !errors.Is(err, resolver.ErrZoxideNotInstalled) {
+			t.Fatalf("expected ErrZoxideNotInstalled, got %v", err)
+		}
+	})
+
+	t.Run("no match hard-fails with No zoxide match for", func(t *testing.T) {
+		qr := newZoxidePinResolver(t, &mockZoxideQuerier{err: resolver.ErrNoMatch}, map[string]bool{})
+
+		result, err := qr.ResolveZoxidePin("nope")
+		if result != nil {
+			t.Errorf("expected nil result on a no-match, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for a no-match, got nil")
+		}
+		if want := "No zoxide match for: nope"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+		// A no-match is a distinct outcome from not-installed: it must NOT surface as
+		// ErrZoxideNotInstalled (the caller distinguishes them via errors.Is).
+		if errors.Is(err, resolver.ErrZoxideNotInstalled) {
+			t.Error("a no-match must not surface as ErrZoxideNotInstalled")
+		}
+	})
+
+	t.Run("best-match dir gone hard-fails with Directory not found", func(t *testing.T) {
+		// Distinct from a no-match: zoxide resolves, but its best-match directory no
+		// longer exists — the shared disk validation (validatedPath) rejects it.
+		qr := newZoxidePinResolver(t, &mockZoxideQuerier{result: "/gone/dir"}, map[string]bool{})
+
+		result, err := qr.ResolveZoxidePin("proj")
+		if result != nil {
+			t.Errorf("expected nil result for a gone dir, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected hard-fail for a gone dir, got nil")
+		}
+		if want := "Directory not found: /gone/dir"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+		var dirErr *resolver.DirNotFoundError
+		if !errors.As(err, &dirErr) {
+			t.Errorf("expected *DirNotFoundError, got %T", err)
+		}
+	})
+}
+
 func TestQueryResolver_Resolve_NonExistentResolvedDirectory(t *testing.T) {
 	t.Run("non-existent resolved directory prints error and exits 1", func(t *testing.T) {
 		aliasLookup := &mockAliasLookup{aliases: map[string]string{"myapp": "/does/not/exist"}}

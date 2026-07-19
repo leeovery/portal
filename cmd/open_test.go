@@ -811,6 +811,246 @@ func TestOpenCommand_AliasPin_EmitsNoResolveLine(t *testing.T) {
 	}
 }
 
+func TestOpenCommand_ZoxidePin_Mints_NoPicker(t *testing.T) {
+	// `open -z <query>` resolves in the zoxide domain only and mints (openPathFunc)
+	// at zoxide's best-match dir — never attaches (openSessionFunc) and never opens
+	// the picker (openTUIFunc). Spec § Domain-pinning flags: -z mints at zoxide's
+	// best match.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	dir := t.TempDir()
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{result: dir},
+		DirValidator:  &testDirValidator{existing: map[string]bool{dir: true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var mintedPath string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, _ []string) error {
+		mintedPath = path
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-z", "proj"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if mintedPath != dir {
+		t.Errorf("openPathFunc minted %q, want %q", mintedPath, dir)
+	}
+	if sessionCalled {
+		t.Error("openSessionFunc must not be called for a -z pin (never attaches)")
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called for a -z pin (never opens the picker)")
+	}
+}
+
+func TestOpenCommand_ZoxidePin_NotInstalled_ErrorsNoPicker(t *testing.T) {
+	// zoxide-absence is surfaced verbatim as ErrZoxideNotInstalled (a script sees
+	// WHY), distinct from the bare chain's silent fall-through, and the pin NEVER
+	// opens the picker. Spec § Domain-pinning flags: explicit error if zoxide is not
+	// installed.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrZoxideNotInstalled},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-z", "proj"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected an error when zoxide is not installed, got nil")
+	}
+	if !errors.Is(err, resolver.ErrZoxideNotInstalled) {
+		t.Fatalf("expected ErrZoxideNotInstalled, got %v", err)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called when zoxide is not installed")
+	}
+	if pathCalled {
+		t.Error("openPathFunc must not be called when zoxide is not installed")
+	}
+}
+
+func TestOpenCommand_ZoxidePin_NoMatch_HardFailsNoPicker(t *testing.T) {
+	// A -z no-match hard-fails with "No zoxide match for: <query>" and NEVER opens
+	// the picker or mints. Spec § Pinned-domain contract: pins never fall back to
+	// the picker.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-z", "nope"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected hard-fail error for a -z no-match, got nil")
+	}
+	want := "No zoxide match for: nope"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called on a -z no-match")
+	}
+	if pathCalled {
+		t.Error("openPathFunc must not be called on a -z no-match")
+	}
+	// A no-match is a runtime failure → plain error (exit 1), not a UsageError.
+	var usageErr *UsageError
+	if errors.As(err, &usageErr) {
+		t.Error("-z no-match error must be a plain error, not a *UsageError")
+	}
+}
+
+func TestOpenCommand_ZoxidePin_ThreadsCommandIntoMint(t *testing.T) {
+	// A present -e/-- command threads into the minted session unchanged:
+	// `open -z <query> -e claude` → openPathFunc receives command == [claude].
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	dir := t.TempDir()
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{result: dir},
+		DirValidator:  &testDirValidator{existing: map[string]bool{dir: true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var gotPath string
+	var gotCommand []string
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, path string, command []string) error {
+		gotPath = path
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-z", "proj", "-e", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotPath != dir {
+		t.Errorf("minted path = %q, want %q", gotPath, dir)
+	}
+	wantCmd := []string{"claude"}
+	if !slices.Equal(gotCommand, wantCmd) {
+		t.Errorf("threaded command = %v, want %v", gotCommand, wantCmd)
+	}
+}
+
+func TestOpenCommand_ZoxidePin_EmitsNoResolveLine(t *testing.T) {
+	// A -z pin is deterministic (zoxide-domain by construction), not a guess, so it
+	// emits NO "resolve" decision line (spec § Wrong-guess feedback — pins emit no
+	// resolve line).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	dir := t.TempDir()
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{result: dir},
+		DirValidator:  &testDirValidator{existing: map[string]bool{dir: true}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error { return nil }
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-z", "proj"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if recs := h.resolveRecords(); len(recs) != 0 {
+		t.Fatalf("expected no resolve records for a -z pin, got %d", len(recs))
+	}
+}
+
 func TestOpenSession_DelegatesToBuildSessionConnector(t *testing.T) {
 	// openSession must build the connector via buildSessionConnector and connect
 	// through it — no real tmux. Inside tmux the connector is *SwitchConnector, so

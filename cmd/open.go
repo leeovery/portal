@@ -241,6 +241,30 @@ var openCmd = &cobra.Command{
 			return openResolved(cmd, result, command)
 		}
 
+		// -z/--zoxide pin (spec § Domain-pinning flags): resolve the value in the
+		// zoxide domain only via ResolveZoxidePin, which queries zoxide and makes its
+		// outcome EXPLICIT — unlike the bare chain, which swallows any zoxide error and
+		// silently falls through to the miss tail. A hit mints (Axiom 2) and the
+		// *PathResult routes through the shared outcome switch; zoxide-not-installed
+		// surfaces ErrZoxideNotInstalled verbatim (a script sees WHY), a no-match hard-
+		// fails, and a gone best-match dir hard-fails with "Directory not found" — the
+		// pin never mints-to-picker (spec § Pinned-domain contract) and emits no resolve
+		// line (pins are deterministic, not guesses). Placed BEFORE the no-target early-
+		// return so `open -z <query>` with an empty positional resolves the pin rather
+		// than launching the picker.
+		if cmd.Flags().Changed("zoxide") {
+			zoxideVal, _ := cmd.Flags().GetString("zoxide")
+			qr, err := buildQueryResolver(cmd)
+			if err != nil {
+				return err
+			}
+			result, err := qr.ResolveZoxidePin(zoxideVal)
+			if err != nil {
+				return err
+			}
+			return openResolved(cmd, result, command)
+		}
+
 		if destination == "" {
 			return openTUIFunc(cmd, "", command, serverWasStarted(cmd))
 		}
@@ -869,5 +893,6 @@ func init() {
 	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints)")
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
+	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")
 	rootCmd.AddCommand(openCmd)
 }
