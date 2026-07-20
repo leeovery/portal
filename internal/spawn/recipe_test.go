@@ -182,9 +182,9 @@ func TestRenderCommandString(t *testing.T) {
 		// strips only "."/":", not spaces) is e.g. "My Project-abc123". A naive
 		// space-join would let a downstream shell re-split it into two words and
 		// shred the attach target; single-quoting keeps it one word.
-		got := renderCommandString([]string{"/abs/portal", "attach", "My Project-abc123"})
+		got := renderCommandString([]string{"/abs/portal", "open", "My Project-abc123"})
 
-		want := "'/abs/portal' 'attach' 'My Project-abc123'"
+		want := "'/abs/portal' 'open' 'My Project-abc123'"
 		if got != want {
 			t.Errorf("renderCommandString = %q, want %q (spaced element stays one quoted word)", got, want)
 		}

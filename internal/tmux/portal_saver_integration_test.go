@@ -433,7 +433,7 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 // § Risk & Rollout → Coordination):
 //
 //   - multiple-state-daemons-running-concurrently — daemon.lock flock
-//     + killSaverAndWaitForDaemon barrier; this test's sentinel reuses
+//   - killSaverAndWaitForDaemon barrier; this test's sentinel reuses
 //     state.AcquireDaemonLock from that suite.
 //   - daemon-merge-reintroduces-dead-sessions — structural-index merge
 //     in the daemon's commit pipeline.

@@ -11,13 +11,13 @@ import (
 
 func TestZoxideResolver_Query(t *testing.T) {
 	tests := []struct {
-		name         string
-		terms        string
-		lookPathErr  error
-		runOutput    string
-		runErr       error
-		want         string
-		wantErr      error
+		name        string
+		terms       string
+		lookPathErr error
+		runOutput   string
+		runErr      error
+		want        string
+		wantErr     error
 	}{
 		{
 			name:        "returns best match from zoxide query",

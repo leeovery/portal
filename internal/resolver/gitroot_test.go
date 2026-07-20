@@ -24,13 +24,13 @@ func (m *MockCommandRunner) Run(name string, args ...string) (string, error) {
 
 func TestResolveGitRoot(t *testing.T) {
 	tests := []struct {
-		name       string
-		dirExists  bool
-		mockOutput string
-		mockErr    error
-		want       string
+		name        string
+		dirExists   bool
+		mockOutput  string
+		mockErr     error
+		want        string
 		wantOrigDir bool
-		wantErr    bool
+		wantErr     bool
 	}{
 		{
 			name:       "resolves subdirectory to git repository root",
