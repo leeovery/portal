@@ -3,12 +3,12 @@ scope: cli-verb-surface-redesign review remediation — resolver glob-pin diverg
 cycle: 1
 source: review
 total_proposed: 6
-gate_mode: gated
+gate_mode: auto
 ---
 # Review Tasks: CLI Verb Surface Redesign (Cycle 1)
 
 ## Task 1: Sweep the surviving divergent silent-first-match glob branches out of the single-pin resolve paths
-status: pending
+status: approved
 severity: high
 sources: report-8-2, report-2-1, report-2-3
 
@@ -31,7 +31,7 @@ sources: report-8-2, report-2-1, report-2-3
 - A resolver-level test that a multi-match glob under `ResolveSessionPin` and `ResolveAliasPin` yields the loud miss/error (or full match set), mirroring `TestQueryResolver_Resolve_GlobFallsThroughToMiss`.
 
 ## Task 2: Single-source the domain-pin set so the exclusivity guard cannot miss a future pin
-status: pending
+status: approved
 severity: medium
 sources: report-1-5, report-2-5
 
@@ -52,7 +52,7 @@ sources: report-1-5, report-2-5
 - A guard/unit test asserting every `pinDispatch` key is present in the shared pin-name list (drift guard), matching the existing guard-test style.
 
 ## Task 3: Fix two paths that report success while an operation silently failed
-status: pending
+status: approved
 severity: medium
 sources: report-4-6, report-3-8
 
@@ -72,7 +72,7 @@ sources: report-4-6, report-3-8
 - An open-burst test forcing `connectTrigger` failure, asserting the corrective WARN / honest count.
 
 ## Task 4: Doctor — correct count copy and close the test-coverage gaps
-status: pending
+status: approved
 severity: low
 sources: report-4-1, report-4-3
 
@@ -91,7 +91,7 @@ sources: report-4-1, report-4-3
 - The three additions above.
 
 ## Task 5: Close the test-coverage parity gaps across the redesigned surface
-status: pending
+status: approved
 severity: low
 sources: report-2-5, report-2-6, report-2-2, report-4-8, report-3-3, report-3-2, report-6-3
 
@@ -113,7 +113,7 @@ sources: report-2-5, report-2-6, report-2-2, report-4-8, report-3-3, report-3-2,
 - All additions listed under Do.
 
 ## Task 6: Small DRY / legibility cleanups (redundant and misleading code)
-status: pending
+status: approved
 severity: low
 sources: report-2-3, report-5-2, report-6-4
 
