@@ -32,6 +32,15 @@ var ErrDoctorUnhealthy = errors.New("doctor unhealthy")
 // Exit-code contract.
 const doctorRuntimeNotRunning = "Portal runtime not running — run portal open to start"
 
+// runtimeDownResult is the single source of the "runtime not running" result
+// the three runtime checks (daemon / saver / hooks) all report when the tmux
+// server is down. Each passes its own const name; the status/detail are fixed,
+// so a future change to how a down server is reported is a one-line edit here
+// rather than three lockstep edits at the call sites.
+func runtimeDownResult(name string) checkResult {
+	return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
+}
+
 // checkStatus is the outcome of a single doctor health check.
 type checkStatus int
 
@@ -483,7 +492,7 @@ func checkStaleProjects(store *project.Store) checkResult {
 func checkDaemonAlive(serverUp bool, dir string, dirErr error) checkResult {
 	const name = "daemon"
 	if !serverUp {
-		return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
+		return runtimeDownResult(name)
 	}
 	if dirErr != nil {
 		return checkResult{name: name, status: checkFail, detail: "not running"}
@@ -511,7 +520,7 @@ func checkDaemonAlive(serverUp bool, dir string, dirErr error) checkResult {
 func checkSaverUp(serverUp bool, saverPresent func() (bool, error)) checkResult {
 	const name = "saver"
 	if !serverUp {
-		return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
+		return runtimeDownResult(name)
 	}
 	present, err := saverPresent()
 	switch {
@@ -542,7 +551,7 @@ func checkSaverUp(serverUp bool, saverPresent func() (bool, error)) checkResult 
 func checkHooksRegistered(serverUp bool, hookCounts func() (map[string]int, error)) checkResult {
 	const name = "hooks"
 	if !serverUp {
-		return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
+		return runtimeDownResult(name)
 	}
 	counts, err := hookCounts()
 	if err != nil {

@@ -537,6 +537,25 @@ func TestDoctorServerDownReportsRuntimeNotRunning(t *testing.T) {
 	}
 }
 
+// TestRuntimeDownResult pins the shared down-server result helper: for each of
+// the three runtime-check names it must produce checkFail with the byte-exact
+// doctorRuntimeNotRunning detail, so the daemon / saver / hooks checks stay
+// byte-identical after routing their !serverUp arm through it.
+func TestRuntimeDownResult(t *testing.T) {
+	for _, name := range []string{"daemon", "saver", "hooks"} {
+		got := runtimeDownResult(name)
+		if got.name != name {
+			t.Errorf("runtimeDownResult(%q).name = %q; want %q", name, got.name, name)
+		}
+		if got.status != checkFail {
+			t.Errorf("runtimeDownResult(%q).status = %v; want checkFail", name, got.status)
+		}
+		if got.detail != doctorRuntimeNotRunningDetail {
+			t.Errorf("runtimeDownResult(%q).detail = %q; want %q", name, got.detail, doctorRuntimeNotRunningDetail)
+		}
+	}
+}
+
 func TestDoctorHooksCheck(t *testing.T) {
 	dir := t.TempDir()
 
