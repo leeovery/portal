@@ -1013,6 +1013,158 @@ func TestDoctorStaleHooksCheck(t *testing.T) {
 	})
 }
 
+// TestDoctorStaleHooksParityWithPredicate proves checkStaleHooks derives its
+// stale count from the same hooks.StaleKeys predicate the prune uses: for
+// representative persisted/live inputs past the hazard guard, the reported count
+// equals len(hooks.StaleKeys(persisted, live)); and the hazard-guard paths still
+// map to checkNotEvaluable/checkPass with no prune (byte-identical store).
+func TestDoctorStaleHooksParityWithPredicate(t *testing.T) {
+	t.Run("past-guard count equals the shared predicate", func(t *testing.T) {
+		cases := []struct {
+			name      string
+			persisted []string
+			live      []string
+		}{
+			{"one stale", []string{"sessA:0.0"}, []string{"sessB:0.0"}},
+			{"two stale", []string{"sessA:0.0", "sessB:0.0"}, []string{"sessC:0.0"}},
+			{"one of three stale", []string{"sessA:0.0", "sessB:0.0", "sessC:0.0"}, []string{"sessA:0.0", "sessB:0.0"}},
+			{"none stale", []string{"sessA:0.0"}, []string{"sessA:0.0", "sessB:0.0"}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				hookStore, _ := seedHooksJSON(t, tc.persisted...)
+				lister := fakeHookLister{keys: tc.live}
+				results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
+				if err != nil {
+					t.Fatalf("runDoctorDiagnosis: %v", err)
+				}
+				got := findCheck(t, results, "stale hooks")
+
+				persisted, err := hookStore.Load()
+				if err != nil {
+					t.Fatalf("load hooks: %v", err)
+				}
+				want := len(hooks.StaleKeys(persisted, tc.live))
+
+				// The detail carries the count; assert it matches the predicate.
+				wantDetail := "no stale hooks"
+				wantStatus := checkPass
+				if want > 0 {
+					wantDetail = pluralCount(want, "stale hook entry", "stale hook entries")
+					wantStatus = checkFail
+				}
+				if got.status != wantStatus {
+					t.Errorf("status = %v, want %v (predicate count %d)", got.status, wantStatus, want)
+				}
+				if got.detail != wantDetail {
+					t.Errorf("detail = %q, want %q (predicate count %d)", got.detail, wantDetail, want)
+				}
+			})
+		}
+	})
+
+	t.Run("hazard-guard paths map to not-evaluable or pass with no prune", func(t *testing.T) {
+		cases := []struct {
+			name       string
+			persisted  []string
+			lister     fakeHookLister
+			wantStatus checkStatus
+			wantDetail string
+		}{
+			{"enumeration error", []string{"sessA:0.0"}, fakeHookLister{err: errors.New("tmux transient")}, checkNotEvaluable, "could not enumerate live panes"},
+			{"empty live with hooks present", []string{"sessA:0.0"}, fakeHookLister{keys: []string{}}, checkNotEvaluable, "zero live panes with hooks present (not evaluable)"},
+			{"empty live with no hooks", nil, fakeHookLister{keys: []string{}}, checkPass, "no hooks"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				hookStore, hooksPath := seedHooksJSON(t, tc.persisted...)
+				before, err := os.ReadFile(hooksPath)
+				if err != nil {
+					t.Fatalf("read hooks.json: %v", err)
+				}
+				results, err := runDoctorDiagnosis(staleDeps(dir, tc.lister, hookStore, nil))
+				if err != nil {
+					t.Fatalf("runDoctorDiagnosis: %v", err)
+				}
+				got := findCheck(t, results, "stale hooks")
+				if got.status != tc.wantStatus {
+					t.Errorf("status = %v, want %v", got.status, tc.wantStatus)
+				}
+				if got.detail != tc.wantDetail {
+					t.Errorf("detail = %q, want %q", got.detail, tc.wantDetail)
+				}
+				after, err := os.ReadFile(hooksPath)
+				if err != nil {
+					t.Fatalf("re-read hooks.json: %v", err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Errorf("hooks.json mutated by diagnosis (read-only violated)")
+				}
+			})
+		}
+	})
+}
+
+// TestDoctorStaleProjectsParityWithPredicate proves checkStaleProjects derives
+// its stale count from the same project.Store.StaleEntries predicate the prune
+// uses (present/missing fixtures) and stays not-evaluable on a load error.
+func TestDoctorStaleProjectsParityWithPredicate(t *testing.T) {
+	t.Run("count equals the shared predicate", func(t *testing.T) {
+		dir := t.TempDir()
+		liveDir := t.TempDir()
+		goneA := filepath.Join(t.TempDir(), "gone-a")
+		goneB := filepath.Join(t.TempDir(), "gone-b")
+		projectStore, _ := seedProjectsJSON(t, liveDir, goneA, goneB)
+
+		results, err := runDoctorDiagnosis(staleDeps(dir, fakeHookLister{}, nil, projectStore))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale projects")
+
+		stale, err := projectStore.StaleEntries()
+		if err != nil {
+			t.Fatalf("StaleEntries: %v", err)
+		}
+		want := len(stale)
+		if want != 2 {
+			t.Fatalf("StaleEntries count = %d, want 2 (fixture sanity)", want)
+		}
+		if got.status != checkFail {
+			t.Errorf("status = %v, want checkFail", got.status)
+		}
+		if got.detail != pluralCount(want, "stale project", "stale projects") {
+			t.Errorf("detail = %q, want %q", got.detail, pluralCount(want, "stale project", "stale projects"))
+		}
+	})
+
+	t.Run("load error is not-evaluable", func(t *testing.T) {
+		dir := t.TempDir()
+		// projects.json inside a 0000 dir so Load fails with a non-ErrNotExist
+		// (permission) error — the not-evaluable path.
+		unreadableDir := filepath.Join(t.TempDir(), "noread")
+		if err := os.Mkdir(unreadableDir, 0o000); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(unreadableDir, 0o700) })
+		projectStore := project.NewStore(filepath.Join(unreadableDir, "projects.json"))
+
+		results, err := runDoctorDiagnosis(staleDeps(dir, fakeHookLister{}, nil, projectStore))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale projects")
+		if got.status != checkNotEvaluable {
+			t.Errorf("status = %v, want checkNotEvaluable on a load error", got.status)
+		}
+		if got.detail != "could not read projects.json" {
+			t.Errorf("detail = %q, want %q", got.detail, "could not read projects.json")
+		}
+	})
+}
+
 // runDoctorFixCmd executes "portal doctor --fix" with the supplied hermetic
 // DoctorDeps, returning stdout, stderr, and the rootCmd.Execute error. Unlike
 // runDoctor it does NOT force withHealthyRuntime — the caller wires exactly the

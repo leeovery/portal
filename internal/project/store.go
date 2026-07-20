@@ -164,6 +164,47 @@ func (s *Store) List() ([]Project, error) {
 	return projects, nil
 }
 
+// StaleEntries loads projects.json and returns the records whose directory no
+// longer exists on disk — the store-owned staleness predicate. It is the single
+// owner of the os.Stat tri-state classification (via partitionByExistence):
+// CleanStale prunes through the same classifier, and doctor's strictly
+// read-only stale-projects diagnosis counts through StaleEntries, so the report
+// and the prune provably share one predicate and cannot silently drift.
+//
+// StaleEntries is read-only — it Loads and classifies, never Saves — so doctor
+// reuses it without any risk of mutation. A permission-denied / non-ErrNotExist
+// os.Stat error retains the entry (NOT stale), matching the conservative
+// default branch below.
+func (s *Store) StaleEntries() ([]Project, error) {
+	projects, err := s.Load()
+	if err != nil {
+		return nil, err
+	}
+	_, removed := partitionByExistence(projects)
+	return removed, nil
+}
+
+// partitionByExistence splits projects into the kept (directory present, or an
+// os.Stat error other than ErrNotExist such as permission-denied) and removed
+// (directory gone — os.Stat reports ErrNotExist) sets. It is the single home of
+// the os.Stat tri-state classification, shared by StaleEntries (doctor's
+// read-only count) and CleanStale (the prune), so the two cannot drift.
+func partitionByExistence(projects []Project) (kept, removed []Project) {
+	for _, p := range projects {
+		_, statErr := os.Stat(p.Path)
+		switch {
+		case statErr == nil:
+			kept = append(kept, p)
+		case errors.Is(statErr, os.ErrNotExist):
+			removed = append(removed, p)
+		default:
+			// Permission denied or other errors: retain the project.
+			kept = append(kept, p)
+		}
+	}
+	return kept, removed
+}
+
 // CleanStale removes projects whose directories no longer exist on disk.
 // Projects with permission errors are retained. Returns the removed projects.
 // The file is only saved if at least one project was removed.
@@ -196,21 +237,10 @@ func (s *Store) CleanStale() ([]Project, error) {
 		return nil, fmt.Errorf("failed to load projects: %w", err)
 	}
 
-	var kept []Project
-	var removed []Project
-
-	for _, p := range projects {
-		_, statErr := os.Stat(p.Path)
-		switch {
-		case statErr == nil:
-			kept = append(kept, p)
-		case errors.Is(statErr, os.ErrNotExist):
-			removed = append(removed, p)
-		default:
-			// Permission denied or other errors: retain the project
-			kept = append(kept, p)
-		}
-	}
+	// Partition via the shared classifier so the prune and doctor's read-only
+	// diagnosis derive their stale set from the identical os.Stat tri-state and
+	// cannot drift.
+	kept, removed := partitionByExistence(projects)
 
 	// Zero-removal case: skip both the Save and the summary (decision (a)).
 	if len(removed) == 0 {

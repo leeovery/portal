@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"time"
@@ -227,6 +228,33 @@ func (s *Store) List() ([]Hook, error) {
 	return list, nil
 }
 
+// StaleKeys returns the persisted hook keys absent from the supplied live-key
+// set — the ∉ classification that decides which entries are stale. It is the
+// single owner of that rule inside this package: CleanStale selects its
+// removals through it, and doctor's strictly read-only stale-hooks diagnosis
+// counts through the same call, so the report and the prune provably share one
+// predicate and cannot silently drift.
+//
+// StaleKeys is pure: it takes the already-loaded persisted map (the shape
+// Store.Load returns) plus the live keys and neither Loads nor Saves nor
+// mutates, so doctor reuses it without a second load. It does NOT encode the
+// mass-deletion hazard guard — an empty live set makes every persisted key
+// stale here; the guard that defers on an empty/errored live set is a
+// cmd-layer repair-safety policy, not part of this classification.
+func StaleKeys(persisted map[string]map[string]string, live []string) []string {
+	liveSet := make(map[string]struct{}, len(live))
+	for _, k := range live {
+		liveSet[k] = struct{}{}
+	}
+	var stale []string
+	for key := range persisted {
+		if _, ok := liveSet[key]; !ok {
+			stale = append(stale, key)
+		}
+	}
+	return stale
+}
+
 // CleanStale removes hook entries for keys not present in liveKeys.
 // Returns the removed keys. The file is only saved if at least one entry
 // was removed.
@@ -254,21 +282,10 @@ func (s *Store) CleanStale(liveKeys []string) ([]string, error) {
 		return nil, fmt.Errorf("failed to load hooks: %w", err)
 	}
 
-	live := make(map[string]struct{}, len(liveKeys))
-	for _, k := range liveKeys {
-		live[k] = struct{}{}
-	}
-
-	kept := make(hooksFile)
-	var removed []string
-
-	for key, events := range h {
-		if _, ok := live[key]; ok {
-			kept[key] = events
-		} else {
-			removed = append(removed, key)
-		}
-	}
+	// Select removals via the shared StaleKeys predicate so the prune and
+	// doctor's read-only diagnosis derive their stale set from the identical ∉
+	// classification and cannot drift.
+	removed := StaleKeys(h, liveKeys)
 
 	// Zero-removal case: a clean that removes nothing is an idempotent no-op.
 	// Preserve the existing skip (no Save) and emit NO summary — the
@@ -276,6 +293,14 @@ func (s *Store) CleanStale(liveKeys []string) ([]string, error) {
 	// no-op must not clutter the INFO baseline.
 	if len(removed) == 0 {
 		return removed, nil
+	}
+
+	// Build the kept map as the complement of the removed set (removed = keys ∉
+	// live, so kept = keys ∈ live) — same map contents the earlier inline
+	// partition produced.
+	kept := maps.Clone(h)
+	for _, key := range removed {
+		delete(kept, key)
 	}
 
 	for _, key := range removed {

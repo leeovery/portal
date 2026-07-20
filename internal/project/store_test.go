@@ -3,6 +3,7 @@ package project_test
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -545,6 +546,123 @@ func TestRename(t *testing.T) {
 			t.Errorf("Name = %q, want %q (should be unchanged)", projects[0].Name, "first")
 		}
 	})
+}
+
+func TestStaleEntries(t *testing.T) {
+	t.Run("classifies present as live, missing as stale, permission-denied as retained", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+
+		liveDir := t.TempDir()
+		goneDir := filepath.Join(dir, "gone")
+
+		// A child under a 0000 parent so os.Stat returns permission denied
+		// (retained, NOT stale) — the tri-state default branch.
+		parentDir := filepath.Join(dir, "restricted")
+		deniedDir := filepath.Join(parentDir, "child")
+		if err := os.MkdirAll(deniedDir, 0o755); err != nil {
+			t.Fatalf("failed to create child dir: %v", err)
+		}
+		if err := os.Chmod(parentDir, 0o000); err != nil {
+			t.Fatalf("failed to chmod: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(parentDir, 0o755) })
+
+		content := `{"projects":[
+			{"path":"` + liveDir + `","name":"live","last_used":"2026-01-01T00:00:00Z"},
+			{"path":"` + goneDir + `","name":"stale","last_used":"2026-02-01T00:00:00Z"},
+			{"path":"` + deniedDir + `","name":"denied","last_used":"2026-03-01T00:00:00Z"}
+		]}`
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		store := project.NewStore(filePath)
+		stale, err := store.StaleEntries()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(stale) != 1 {
+			t.Fatalf("len(stale) = %d, want 1 (only the gone dir): %+v", len(stale), stale)
+		}
+		if stale[0].Path != goneDir {
+			t.Errorf("stale[0].Path = %q, want %q", stale[0].Path, goneDir)
+		}
+	})
+
+	t.Run("returns empty when every directory exists", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+		liveDir := t.TempDir()
+
+		content := `{"projects":[{"path":"` + liveDir + `","name":"live","last_used":"2026-01-01T00:00:00Z"}]}`
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		store := project.NewStore(filePath)
+		stale, err := store.StaleEntries()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(stale) != 0 {
+			t.Errorf("len(stale) = %d, want 0: %+v", len(stale), stale)
+		}
+	})
+}
+
+// TestCleanStaleRemovesExactlyStaleEntries proves CleanStale removes precisely
+// the set the shared StaleEntries predicate reports — the prune and the doctor
+// diagnosis provably share one classification and cannot drift.
+func TestCleanStaleRemovesExactlyStaleEntries(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "projects.json")
+
+	liveDir := t.TempDir()
+	goneA := filepath.Join(dir, "gone-a")
+	goneB := filepath.Join(dir, "gone-b")
+
+	content := `{"projects":[
+		{"path":"` + liveDir + `","name":"live","last_used":"2026-01-01T00:00:00Z"},
+		{"path":"` + goneA + `","name":"staleA","last_used":"2026-02-01T00:00:00Z"},
+		{"path":"` + goneB + `","name":"staleB","last_used":"2026-03-01T00:00:00Z"}
+	]}`
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	store := project.NewStore(filePath)
+
+	predicted, err := store.StaleEntries()
+	if err != nil {
+		t.Fatalf("StaleEntries: %v", err)
+	}
+	removed, err := store.CleanStale()
+	if err != nil {
+		t.Fatalf("CleanStale: %v", err)
+	}
+
+	predictedPaths := pathsOf(predicted)
+	removedPaths := pathsOf(removed)
+	if len(removedPaths) != len(predictedPaths) {
+		t.Fatalf("CleanStale removed %v, StaleEntries predicted %v", removedPaths, predictedPaths)
+	}
+	for i := range predictedPaths {
+		if removedPaths[i] != predictedPaths[i] {
+			t.Errorf("removed[%d] = %q, StaleEntries[%d] = %q", i, removedPaths[i], i, predictedPaths[i])
+		}
+	}
+}
+
+// pathsOf returns the sorted Path fields of the given projects.
+func pathsOf(projects []project.Project) []string {
+	paths := make([]string, 0, len(projects))
+	for _, p := range projects {
+		paths = append(paths, p.Path)
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 func TestCleanStale(t *testing.T) {

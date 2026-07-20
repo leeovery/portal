@@ -723,6 +723,96 @@ func TestCleanStale(t *testing.T) {
 	})
 }
 
+func TestStaleKeys(t *testing.T) {
+	t.Run("returns persisted keys absent from the live set", func(t *testing.T) {
+		persisted := map[string]map[string]string{
+			"live-a:0.0":  {"on-resume": "x"},
+			"stale-b:0.0": {"on-resume": "y"},
+			"live-c:0.0":  {"on-resume": "z"},
+			"stale-d:0.0": {"on-resume": "w"},
+		}
+		live := []string{"live-a:0.0", "live-c:0.0", "extra-e:0.0"}
+
+		got := hooks.StaleKeys(persisted, live)
+		sort.Strings(got)
+		want := []string{"stale-b:0.0", "stale-d:0.0"}
+		if len(got) != len(want) {
+			t.Fatalf("StaleKeys = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("StaleKeys[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("returns empty when every persisted key is live", func(t *testing.T) {
+		persisted := map[string]map[string]string{
+			"a:0.0": {"on-resume": "x"},
+			"b:0.0": {"on-resume": "y"},
+		}
+		got := hooks.StaleKeys(persisted, []string{"a:0.0", "b:0.0", "c:0.0"})
+		if len(got) != 0 {
+			t.Errorf("StaleKeys = %v, want empty", got)
+		}
+	})
+
+	t.Run("returns every persisted key when the live set is empty", func(t *testing.T) {
+		persisted := map[string]map[string]string{
+			"a:0.0": {"on-resume": "x"},
+			"b:0.0": {"on-resume": "y"},
+		}
+		got := hooks.StaleKeys(persisted, []string{})
+		if len(got) != 2 {
+			t.Fatalf("StaleKeys = %v, want both keys", got)
+		}
+	})
+
+	t.Run("returns empty for an empty persisted map", func(t *testing.T) {
+		got := hooks.StaleKeys(map[string]map[string]string{}, []string{"a:0.0"})
+		if len(got) != 0 {
+			t.Errorf("StaleKeys = %v, want empty", got)
+		}
+	})
+}
+
+// TestCleanStaleRemovesExactlyStaleKeys proves CleanStale removes precisely the
+// set the shared StaleKeys predicate reports — the prune and the doctor
+// diagnosis provably share one classification and cannot drift.
+func TestCleanStaleRemovesExactlyStaleKeys(t *testing.T) {
+	dir := t.TempDir()
+	store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+	for _, k := range []string{"a:0.0", "b:0.0", "c:0.0", "d:0.0"} {
+		if err := store.Set(k, "on-resume", "cmd", "cli"); err != nil {
+			t.Fatalf("seed set %q: %v", k, err)
+		}
+	}
+
+	live := []string{"a:0.0", "c:0.0"}
+
+	persisted, err := store.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	predicted := hooks.StaleKeys(persisted, live)
+	sort.Strings(predicted)
+
+	removed, err := store.CleanStale(live)
+	if err != nil {
+		t.Fatalf("CleanStale: %v", err)
+	}
+	sort.Strings(removed)
+
+	if len(removed) != len(predicted) {
+		t.Fatalf("CleanStale removed %v, StaleKeys predicted %v", removed, predicted)
+	}
+	for i := range predicted {
+		if removed[i] != predicted[i] {
+			t.Errorf("removed[%d] = %q, StaleKeys[%d] = %q", i, removed[i], i, predicted[i])
+		}
+	}
+}
+
 func TestCleanStaleLogging(t *testing.T) {
 	t.Run("emits per-entry DEBUG and one INFO summary with entries=N when removing N hooks", func(t *testing.T) {
 		dir := t.TempDir()
