@@ -410,10 +410,14 @@ func TestOpenCommand_SessionPin_WithCommand_UsageError(t *testing.T) {
 	}
 }
 
-func TestOpenCommand_SessionPin_Glob_AttachesFirstMatch(t *testing.T) {
-	// `open -s '<glob>'` expands against the user-visible session set via
-	// filepath.Match; at single-target arity the first match attaches (multi-match
-	// fan-out is deferred to Phase 3). Spec § Glob targets.
+func TestOpenCommand_SessionPin_Glob_HardFailsNoFirstMatch(t *testing.T) {
+	// Regression guard (report 13-1): a glob-bearing `-s` value reaching the single-pin
+	// path must NEVER silently fork to the first match — glob fan-out is EXCLUSIVELY the
+	// burst's job. In production the isMultiTarget/os.Args gate diverts a glob-bearing
+	// `-s` value to the burst; but under `go test` that gate is inert (openOwnArgs()
+	// finds no "open" token in the test binary's argv and returns nil), so this drives
+	// the exact os.Args-assumption-break the report is about: `open -s 'api-*'` reaches
+	// ResolveSessionPin directly and must hard-fail LOUDLY instead of attaching api-1.
 	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
@@ -425,22 +429,26 @@ func TestOpenCommand_SessionPin_Glob_AttachesFirstMatch(t *testing.T) {
 	}
 	t.Cleanup(func() { openDeps = nil })
 
-	var connectedTo string
+	attached := false
 	origSession := openSessionFunc
-	openSessionFunc = func(_ *cobra.Command, name string) error {
-		connectedTo = name
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		attached = true
 		return nil
 	}
 	t.Cleanup(func() { openSessionFunc = origSession })
 
 	resetRootCmd()
 	rootCmd.SetArgs([]string{"open", "-s", "api-*"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := rootCmd.Execute()
 
-	if connectedTo != "api-1" {
-		t.Errorf("openSessionFunc called with %q, want %q (first glob match)", connectedTo, "api-1")
+	if err == nil {
+		t.Fatal("expected hard-fail error for a glob-bearing -s value at the single-pin, got nil")
+	}
+	if want := "No session found: api-*"; err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	if attached {
+		t.Error("openSessionFunc must not be called — a multi-match glob must not collapse to the first match")
 	}
 }
 

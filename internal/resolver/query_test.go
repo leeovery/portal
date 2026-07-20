@@ -590,25 +590,25 @@ func TestQueryResolver_ResolveSessionPin(t *testing.T) {
 		}
 	})
 
-	t.Run("glob expansion attaches the first match with domain glob", func(t *testing.T) {
-		// Matching preserves lister order; the single-target arity attaches the
-		// first match (per-match window fan-out is the Phase 3 burst).
+	t.Run("multi-match glob does NOT collapse to the first match — loud miss", func(t *testing.T) {
+		// Regression guard (report 13-1): the single-pin path must NEVER silently
+		// fork a glob-bearing -s value to matches[0]. Glob fan-out is exclusively the
+		// burst's job (ResolveSessionPinAll → expandSessionGlobAll, all-match). A glob
+		// reaching ResolveSessionPin is not a literal session name, so it falls through
+		// to the verbatim attach miss — the same loud hard-fail as a zero-match glob —
+		// independent of the isMultiTarget/os.Args gate that normally diverts globs to
+		// the burst.
 		qr := newPinResolver(t, []string{"api-1", "api-2", "web-abc"}, nil)
 
 		result, err := qr.ResolveSessionPin("api-*")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if result != nil {
+			t.Errorf("expected nil result — a multi-match glob must not collapse to a SessionResult, got %T", result)
 		}
-
-		sr, ok := result.(*resolver.SessionResult)
-		if !ok {
-			t.Fatalf("expected *SessionResult, got %T", result)
+		if err == nil {
+			t.Fatal("expected hard-fail error for a multi-match glob, got nil")
 		}
-		if sr.Name != "api-1" {
-			t.Errorf("SessionResult.Name = %q, want %q (first match)", sr.Name, "api-1")
-		}
-		if sr.Domain != "glob" {
-			t.Errorf("SessionResult.Domain = %q, want %q", sr.Domain, "glob")
+		if want := "No session found: api-*"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
 		}
 	})
 
@@ -870,49 +870,49 @@ func TestQueryResolver_ResolveAliasPin(t *testing.T) {
 		}
 	})
 
-	t.Run("key glob single match mints at the matched key's dir", func(t *testing.T) {
+	t.Run("single-match key glob no longer expands in the single-pin — loud miss", func(t *testing.T) {
+		// Regression guard (report 13-1): the single-pin path no longer glob-expands at
+		// ANY arity — glob fan-out is exclusively the burst's job (ResolveAliasPinAll).
+		// A glob reaching ResolveAliasPin is not a literal alias key, so even a
+		// single-match glob falls through to the "No alias found" hard-fail, independent
+		// of the isMultiTarget/os.Args gate that normally diverts globs to the burst.
 		qr := newAliasPinResolver(t,
 			map[string]string{"workflow-a": "/code/wa", "blog": "/code/blog"},
 			map[string]bool{"/code/wa": true},
 		)
 
 		result, err := qr.ResolveAliasPin("workflow-*")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if result != nil {
+			t.Errorf("expected nil result — a glob must not collapse to a PathResult, got %T", result)
 		}
-
-		pr, ok := result.(*resolver.PathResult)
-		if !ok {
-			t.Fatalf("expected *PathResult, got %T", result)
+		if err == nil {
+			t.Fatal("expected hard-fail error for a single-match glob, got nil")
 		}
-		if pr.Path != "/code/wa" {
-			t.Errorf("PathResult.Path = %q, want %q", pr.Path, "/code/wa")
-		}
-		if pr.Domain != "alias" {
-			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, "alias")
+		if want := "No alias found: workflow-*"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
 		}
 	})
 
-	t.Run("key glob multi-match mints the first sorted match (single-target)", func(t *testing.T) {
-		// Keys() returns sorted names and MatchSessions preserves order, so the
-		// first match is deterministic: "workflow-a" precedes "workflow-b".
-		// Per-match fan-out is the Phase 3 burst.
+	t.Run("multi-match key glob does NOT mint the first match — loud miss", func(t *testing.T) {
+		// Regression guard (report 13-1): the single-pin path must NEVER silently fork a
+		// glob-bearing -a value to the first matched key. A glob reaching ResolveAliasPin
+		// is not a literal alias key, so it falls through to the "No alias found"
+		// hard-fail — the same loud fail as a zero-match glob — independent of the
+		// isMultiTarget/os.Args gate that normally diverts globs to the burst.
 		qr := newAliasPinResolver(t,
 			map[string]string{"workflow-b": "/code/wb", "workflow-a": "/code/wa"},
 			map[string]bool{"/code/wa": true, "/code/wb": true},
 		)
 
 		result, err := qr.ResolveAliasPin("workflow-*")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if result != nil {
+			t.Errorf("expected nil result — a multi-match glob must not collapse to a PathResult, got %T", result)
 		}
-
-		pr, ok := result.(*resolver.PathResult)
-		if !ok {
-			t.Fatalf("expected *PathResult, got %T", result)
+		if err == nil {
+			t.Fatal("expected hard-fail error for a multi-match glob, got nil")
 		}
-		if pr.Path != "/code/wa" {
-			t.Errorf("PathResult.Path = %q, want %q (first sorted match)", pr.Path, "/code/wa")
+		if want := "No alias found: workflow-*"; err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
 		}
 	})
 

@@ -119,11 +119,11 @@
         "cli-verb-surface-redesign": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "auto",
-          "analysis_gate_mode": "auto",
+          "fix_gate_mode": "gated",
+          "analysis_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 7,
-          "analysis_cycle_session": 7,
+          "analysis_cycle_session": 0,
           "linters": [
             {
               "name": "go vet",
@@ -154,8 +154,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 12,
-          "current_task": "cli-verb-surface-redesign-12-1",
+          "current_phase": 13,
+          "current_task": "cli-verb-surface-redesign-13-2",
           "completed_tasks": [
             "cli-verb-surface-redesign-1-1",
             "cli-verb-surface-redesign-1-2",
@@ -207,7 +207,8 @@
             "cli-verb-surface-redesign-9-1",
             "cli-verb-surface-redesign-10-1",
             "cli-verb-surface-redesign-11-1",
-            "cli-verb-surface-redesign-12-1"
+            "cli-verb-surface-redesign-12-1",
+            "cli-verb-surface-redesign-13-1"
           ],
           "completed_phases": [
             1,

@@ -280,29 +280,31 @@ func (qr *QueryResolver) ResolveAliasPinAll(value string) ([]QueryResult, error)
 
 // ResolveSessionPin resolves query in the session domain ONLY — the -s/--session
 // pin (spec § Domain-pinning flags). It matches the value against the
-// user-visible session set (an exact name, or a filepath.Match glob) and never
-// consults aliases / zoxide / the filesystem: a pin names its domain explicitly.
-// A hit yields a SessionResult — Domain "session" for an exact name, "glob" for a
-// glob expansion (the first match at single-target arity; per-match window
-// fan-out is the Phase 3 burst). The pin never mints and never falls back to the
-// picker (spec § Pinned-domain contract).
+// user-visible session set by EXACT name and never consults aliases / zoxide /
+// the filesystem: a pin names its domain explicitly. An exact hit yields a
+// SessionResult with Domain "session".
+//
+// ResolveSessionPin does NOT glob-expand: glob fan-out is EXCLUSIVELY the burst's
+// job (ResolveSessionPinAll → expandSessionGlobAll, the all-match primitive). A
+// glob value reaching this single-pin path is never a literal session name, so it
+// falls through to the hard-fail miss — a LOUD failure mirroring Resolve's
+// loud-miss, never a silent first-match — independent of the multi-target routing
+// gate that normally diverts a glob-bearing -s value to the burst. The pin never
+// mints and never falls back to the picker (spec § Pinned-domain contract).
 func (qr *QueryResolver) ResolveSessionPin(query string) (QueryResult, error) {
 	// Fetch the user-visible session set once. A nil/empty slice or a lister error
 	// collapses to "no sessions" — the same tolerance the bare-target session
 	// pre-check (Resolve) applies.
 	names, _ := qr.sessions.ListSessionNames()
 
-	if HasGlobMeta(query) {
-		if matches := MatchSessions(query, names); len(matches) > 0 {
-			return &SessionResult{Name: matches[0], Domain: "glob"}, nil
-		}
-	} else if slices.Contains(names, query) {
+	if slices.Contains(names, query) {
 		return &SessionResult{Name: query, Domain: "session"}, nil
 	}
 
-	// Miss: no exact match, zero glob matches, or an empty session set. Hard-fail
-	// with the VERBATIM string the retired attach command used, so `open --session`
-	// is byte-identical to the former `attach` on the miss path (planner decision).
+	// Miss: no exact match, a glob value (never a literal session name), or an empty
+	// session set. Hard-fail with the VERBATIM string the retired attach command
+	// used, so `open --session` is byte-identical to the former `attach` on the miss
+	// path (planner decision).
 	// A plain error (not a UsageError) → runtime failure → exit 1. The capitalised
 	// leading word is a deliberate user-facing message (staticcheck ST1005 silenced
 	// per house style); its verbatim text is preserved for byte-compat with the
@@ -331,29 +333,23 @@ func (qr *QueryResolver) ResolvePathPin(dir string) (QueryResult, error) {
 }
 
 // ResolveAliasPin resolves value in the alias domain ONLY — the -a/--alias pin
-// (spec § Domain-pinning flags). It looks the key up directly in the alias store,
-// bypassing the session→path→alias→zoxide precedence, so it is the ONLY way to
-// reach an alias key SHADOWED by a same-named session. When value is a glob it is
-// expanded against the enumerated alias-key namespace (Keys + filepath.Match via
-// MatchSessions — a finite Portal-owned namespace, spec § Glob targets); at
-// single-target arity the first match mints (per-match window fan-out is the
-// Phase 3 burst). The resolved key's directory is validated on disk via
-// validatedPath: a hit always mints (Axiom 2 — PathResult with Domain "alias"), a
-// gone directory hard-fails with *DirNotFoundError (distinct from the unknown-key
-// miss), and an unknown key — or a glob matching zero keys — hard-fails with a
-// plain "No alias found" error. It never consults qr.sessions or qr.zoxide, and
-// the pin never falls back to the picker (spec § Pinned-domain contract).
+// (spec § Domain-pinning flags). It looks the key up directly in the alias store
+// by EXACT key, bypassing the session→path→alias→zoxide precedence, so it is the
+// ONLY way to reach an alias key SHADOWED by a same-named session. The resolved
+// key's directory is validated on disk via validatedPath: a hit always mints
+// (Axiom 2 — PathResult with Domain "alias"), a gone directory hard-fails with
+// *DirNotFoundError (distinct from the unknown-key miss), and an unknown key
+// hard-fails with a plain "No alias found" error.
+//
+// ResolveAliasPin does NOT glob-expand: glob fan-out is EXCLUSIVELY the burst's
+// job (ResolveAliasPinAll, all-match over the enumerated alias-key namespace). A
+// glob value reaching this single-pin path is never a literal alias key, so it
+// falls through to the "No alias found" hard-fail — a LOUD failure mirroring
+// Resolve's loud-miss, never a silent first-match — independent of the
+// multi-target routing gate that normally diverts a glob-bearing -a value to the
+// burst. It never consults qr.sessions or qr.zoxide, and the pin never falls back
+// to the picker (spec § Pinned-domain contract).
 func (qr *QueryResolver) ResolveAliasPin(value string) (QueryResult, error) {
-	if HasGlobMeta(value) {
-		matches := MatchSessions(value, qr.aliases.Keys())
-		if len(matches) == 0 {
-			return nil, unknownAliasError(value)
-		}
-		// matches are drawn from Keys(), so the first is always a real key.
-		path, _ := qr.aliases.Get(matches[0])
-		return qr.validatedPath(path, "alias")
-	}
-
 	path, ok := qr.aliases.Get(value)
 	if !ok {
 		return nil, unknownAliasError(value)
