@@ -227,8 +227,18 @@ func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command 
 	}
 
 	// Self-connect the trigger LAST, after every external window has been spawned —
-	// regardless of the external outcomes reported above.
-	return connectTrigger(cmd, trigger, command, deps)
+	// regardless of the external outcomes reported above. The batch summary above
+	// optimistically counted the trigger's self-attach in `opened` because it MUST
+	// be emitted before this connect (a successful outside-tmux attach exec-replaces
+	// the process and never returns to emit it). Only the rare connect-failure path
+	// falls through here, so emit a corrective WARN naming the trigger that did NOT
+	// attach — the durable portal.log must not be left claiming an `opened N/N` that
+	// counts a trigger which never landed.
+	if err := connectTrigger(cmd, trigger, command, deps); err != nil {
+		spawn.LogTriggerConnectFailed(deps.Logger, trigger.Value, err.Error())
+		return err
+	}
+	return nil
 }
 
 // hasMintSurface reports whether any surface in the set is a mint (a fresh session

@@ -121,21 +121,43 @@ var uninstallCmd = &cobra.Command{
 const killSaverInfoMessage = "killed _portal-saver; daemon will flush final state on SIGHUP"
 
 // killSaver kills the _portal-saver session, delivering SIGHUP to the daemon
-// for a final atomic flush before exit. Idempotent across two failure modes:
-//  1. _portal-saver absent at probe time (HasSession returns false) — no
-//     KillSession call, returns nil.
-//  2. _portal-saver auto-destroyed between probe and kill (KillSession returns
-//     a "can't find session" error) — treated as success since the desired
-//     state is "session gone."
+// for a final atomic flush before exit. It probes with the discriminating
+// HasSessionProbe (not the error-collapsing HasSession) so a transient tmux
+// fault is never mistaken for "saver absent". Three probe outcomes:
+//  1. (present, nil) — _portal-saver confirmed present: proceed to KillSession.
+//  2. (absent, err) — a genuine non-zero tmux exit (saver truly gone): no
+//     KillSession call, returns nil. Idempotent success — nothing to remove.
+//  3. (present, err) — an OS-layer/transient fault (missing tmux binary, exec
+//     lookup failure, transport hiccup): the probe could NOT confirm the saver's
+//     state, so it is logged at WARN/ComponentDaemon and returned wrapped rather
+//     than silently reported "removed". uninstall still prints its completion
+//     message but exits non-zero via the accumulated error.
+//
+// Idempotent, too, across a probe/kill race: _portal-saver auto-destroyed
+// between a present probe and the kill (KillSession returns a "can't find
+// session" error) is treated as success — the desired state is "session gone."
 //
 // Other KillSession errors (e.g. permission denied, server error) are logged
 // at WARN/ComponentDaemon and returned wrapped so RunE can accumulate them.
 // Successful kills emit an INFO/ComponentDaemon line that names the SIGHUP
 // flush behaviour for operator forensics.
 func killSaver(c *tmux.Client, logger *slog.Logger) error {
-	if !c.HasSession(tmux.PortalSaverName) {
+	present, err := c.HasSessionProbe(tmux.PortalSaverName)
+	switch {
+	case err == nil:
+		// (present, nil): saver confirmed present — fall through to the kill below.
+	case !present:
+		// (absent, err): genuine non-zero tmux exit — the saver is truly gone.
+		// Idempotent success: nothing to kill, nothing to claim removed.
 		return nil
+	default:
+		// (present, err): OS-layer/transient fault — the probe could not confirm
+		// the saver's state, so do NOT silently report it removed. Surface it so
+		// uninstall exits non-zero.
+		logger.Warn("kill _portal-saver probe failed", "error", err)
+		return fmt.Errorf("saver probe: %w", err)
 	}
+
 	if err := c.KillSession(tmux.PortalSaverName); err != nil {
 		if isSessionAbsentError(err) {
 			logger.Info(killSaverInfoMessage)

@@ -715,6 +715,63 @@ func TestRunOpenBurst_TriggerOwnConnectFails_PropagatesError(t *testing.T) {
 	}
 }
 
+func TestRunOpenBurst_TriggerConnectFails_EmitsCorrectiveWarn(t *testing.T) {
+	// The batch summary is emitted just BEFORE the trigger self-connect (a
+	// successful outside-tmux attach exec-replaces this process and never returns),
+	// so it optimistically counts the trigger's self-attach in `opened`. On the rare
+	// connect-failure path the process survives, so a corrective WARN must record
+	// that the trigger did NOT attach — otherwise the durable portal.log is left
+	// claiming an `opened N/N` that includes a trigger which never landed.
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	connErr := errors.New("attach session vanished")
+	conn := &recordingConnector{events: events, err: connErr}
+	mint := &recordingMint{events: events}
+	ack := &spawntest.FakeAckChannel{}
+	clock := &manualClock{}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	deps.Logger = logger
+	withOpenBurster(deps, inner, ack, clock)
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+	}
+	err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps)
+
+	if !errors.Is(err, connErr) {
+		t.Fatalf("error = %v, want the trigger's own connect error propagated", err)
+	}
+
+	var warns, summaries []logtest.Record
+	for _, rec := range sink.Records() {
+		switch {
+		case rec.Level == slog.LevelWarn && rec.Msg == "trigger did not attach":
+			warns = append(warns, rec)
+		case rec.Level == slog.LevelInfo && strings.HasPrefix(rec.Msg, "opened"):
+			summaries = append(summaries, rec)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("corrective WARN records = %d, want exactly 1; body:\n%s", len(warns), sink.Body())
+	}
+	w := warns[0]
+	if got := w.AttrString(t, "session"); got != "trig" {
+		t.Errorf("corrective WARN session attr = %q, want %q (the trigger that did not attach)", got, "trig")
+	}
+	if got := w.AttrString(t, "detail"); !strings.Contains(got, connErr.Error()) {
+		t.Errorf("corrective WARN detail attr = %q, want it to carry the connect error %q", got, connErr.Error())
+	}
+	// The batch summary above still emitted its optimistic `opened` count — it MUST,
+	// since a successful attach never returns to emit it. The corrective WARN is what
+	// keeps the durable log honest despite that count.
+	if len(summaries) != 1 {
+		t.Fatalf("opened batch summaries = %d, want exactly 1; body:\n%s", len(summaries), sink.Body())
+	}
+}
+
 func TestRunOpenBurst_TriggerMintOwnConnectFails_PropagatesError(t *testing.T) {
 	// The mint-trigger analogue: LocalMint failing (the trigger's own local mint
 	// errors) propagates as the command's error, even though the external window

@@ -94,6 +94,19 @@ func LogBatchSummary(logger *slog.Logger, id Identity, resolution Resolution, re
 	)
 }
 
+// LogTriggerConnectFailed emits the corrective WARN for a trigger self-connect that
+// failed AFTER the batch summary was already emitted. The open burst emits its batch
+// summary just BEFORE the trigger self-connect because a successful outside-tmux attach
+// exec-replaces the process and never returns — so the summary optimistically counts the
+// trigger's self-attach in `opened`. On the rare connect-failure path the process
+// survives, so this WARN records that the trigger did NOT attach, keeping the durable
+// portal.log honest (it must not leave `opened N/N` claiming an attach that failed). It
+// carries only the closed spawn attr keys: `session` (the trigger target that did not
+// attach) and the opaque driver `detail` (the connect error text, never parsed).
+func LogTriggerConnectFailed(logger *slog.Logger, session, detail string) {
+	log.OrDiscard(logger).Warn("trigger did not attach", "session", session, "detail", detail)
+}
+
 // LogPermission emits the permission-required outcome line — a distinct entry in the
 // closed spawn event catalog. It carries the closed resolution/terminal/bundle_id attrs
 // plus the opaque driver detail (never an AppleEvent number this layer interpreted; the

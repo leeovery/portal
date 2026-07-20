@@ -5,12 +5,29 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/leeovery/portal/internal/tmux"
 )
+
+// newExitError returns a real *exec.ExitError (a process that exited non-zero),
+// the shape tmux's `has-session` produces when a session is genuinely absent.
+// The uninstall probe (HasSessionProbe) discriminates a genuine non-zero exit
+// (session absent) from an OS-layer fault (non-ExitError) via errors.As against
+// *exec.ExitError, so an absent-saver mock must return this — a bare
+// errors.New(...) would be misclassified as a transient fault.
+func newExitError(t *testing.T) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", "exit 1").Run()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
+	}
+	return err
+}
 
 // recordingCommander is a tmux.Commander that records every Run call and
 // dispatches via an optional RunFunc. Mirrors internal/tmux/MockCommander
@@ -200,7 +217,7 @@ func TestUninstall_IsIdempotentWhenSaverAbsent(t *testing.T) {
 			case "info":
 				return "", nil
 			case "has-session":
-				return "", errors.New("can't find session: _portal-saver")
+				return "", newExitError(t) // genuine non-zero exit: saver absent
 			case "show-hooks":
 				return "", nil
 			}
@@ -234,7 +251,7 @@ func TestUninstall_PrintsExactCompletionMessage(t *testing.T) {
 			case "info":
 				return "", nil
 			case "has-session":
-				return "", errors.New("can't find session: _portal-saver")
+				return "", newExitError(t) // genuine non-zero exit: saver absent
 			case "show-hooks":
 				return "", nil
 			}
@@ -297,6 +314,63 @@ func TestUninstall_AccumulatesHookRemovalFailureWithoutSkippingKill(t *testing.T
 	// The completion message must still print on a partial-failure return.
 	if out.String() != wantCompletionMessage {
 		t.Errorf("completion message must print on partial failure:\n got %q\nwant %q", out.String(), wantCompletionMessage)
+	}
+}
+
+func TestUninstall_TransientProbeFaultSurfacesErrorNotSilentRemoval(t *testing.T) {
+	// A transient (OS-layer) fault probing _portal-saver — a missing tmux binary,
+	// an exec lookup failure, a transport hiccup — is NOT a genuine "session
+	// absent" exit: it does not unwrap to *exec.ExitError, so HasSessionProbe
+	// reports (present=true, err). killSaver must fold that fault into the returned
+	// error rather than silently treating the saver as absent and letting uninstall
+	// exit 0 with a false "removed" claim. It must NOT attempt the kill (the probe
+	// could not confirm the saver is even there) and must NOT emit the removal INFO.
+	probeFault := errors.New(`exec: "tmux": executable file not found in $PATH`)
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil // server running
+			case "has-session":
+				return "", probeFault // OS-layer fault, NOT an *exec.ExitError
+			}
+			if args[0] == "kill-session" {
+				t.Fatalf("kill-session must not run on a transient probe fault: %v", args)
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installUninstallDeps(t, &UninstallDeps{
+		Client:     tmux.NewClient(cmder),
+		Unregister: func(*tmux.Client) error { return nil },
+		Logger:     logger,
+	})
+
+	out, _, err := runUninstall(t)
+	if err == nil {
+		t.Fatal("expected an error from the transient probe fault, got nil (false silent 'removed')")
+	}
+	if !strings.Contains(err.Error(), "daemon kill") {
+		t.Errorf("error %q does not contain the 'daemon kill' wrap", err.Error())
+	}
+	if !errors.Is(err, probeFault) {
+		t.Errorf("error %v does not wrap the underlying probe fault %v", err, probeFault)
+	}
+
+	logged := sink.Body()
+	if strings.Contains(logged, "killed _portal-saver") {
+		t.Errorf("must NOT claim saver removal on a probe fault; log:\n%s", logged)
+	}
+	if !strings.Contains(logged, "WARN") {
+		t.Errorf("expected a WARN log for the probe fault; log:\n%s", logged)
+	}
+
+	// The completion message still prints on every path (uninstall never
+	// short-circuits it) — but the command now exits non-zero via the returned error.
+	if out.String() != wantCompletionMessage {
+		t.Errorf("completion message must print on a probe fault:\n got %q\nwant %q", out.String(), wantCompletionMessage)
 	}
 }
 
@@ -438,7 +512,7 @@ func TestUninstall_DoesNotInvokeBootstrap(t *testing.T) {
 			case "info":
 				return "", nil
 			case "has-session":
-				return "", errors.New("can't find session: _portal-saver")
+				return "", newExitError(t) // genuine non-zero exit: saver absent
 			case "show-hooks":
 				return "", nil
 			}
