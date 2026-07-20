@@ -64,7 +64,8 @@ const MigrateRenameSubstring = migrateRenameSubstring
 // the teardown read-failure WARN through the same recording-logger seam the
 // register side uses. Production code outside tests routes through the
 // no-logger UnregisterPortalHooks wrapper (consumed as a function value by
-// cmd/state_cleanup.go), which binds the package-level bootstrap logger.
+// cmd/uninstall.go's buildUninstallDeps), which binds the package-level
+// bootstrap logger.
 var UnregisterPortalHooksWithLogger = unregisterPortalHooks
 
 // SaverPanePID re-exports the unexported saverPanePID for the external

@@ -304,8 +304,9 @@ func (qr *QueryResolver) ResolveSessionPin(query string) (QueryResult, error) {
 	// with the VERBATIM string the retired attach command used, so `open --session`
 	// is byte-identical to the former `attach` on the miss path (planner decision).
 	// A plain error (not a UsageError) → runtime failure → exit 1. The capitalised
-	// leading word trips staticcheck ST1005, silenced per the directive attach.go
-	// carried.
+	// leading word is a deliberate user-facing message (staticcheck ST1005 silenced
+	// per house style); its verbatim text is preserved for byte-compat with the
+	// former attach miss path.
 	return nil, fmt.Errorf("No session found: %s", query) //nolint:staticcheck // user-facing message per spec
 }
 

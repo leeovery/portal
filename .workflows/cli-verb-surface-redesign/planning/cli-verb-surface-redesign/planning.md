@@ -253,3 +253,15 @@ Address findings from Analysis (Cycle 5).
 | cli-verb-surface-redesign-11-1 | Correct doctor's host-terminal seam provenance comments (they claim shared-bundle single-sourcing that does not exist) | Comment-only change; `resolveDoctorDeps`' `Detector`/`Resolve` construction is byte-for-byte unchanged (no behavioral/code change); no comment in cmd/doctor.go implies doctor reads from the shared `buildProductionSpawnSeams` bundle via "the SAME" seam/resolver; comments explicitly state the detector+resolve pair is independently re-constructed in `resolveDoctorDeps` and name the deliberate deferred terminals.json read (behind the lazy `Resolve` closure) as the reason doctor does not adopt the eager bundle, kept in sync by hand; the optional route-through-`buildProductionSpawnSeams` refactor is explicitly NOT required; `go build ./...` succeeds and `golangci-lint run` clean on cmd/doctor.go; no new tests, existing doctor host-terminal suite (cmd/doctor_test.go) stays green |
 
 ---
+
+### Phase 12: Analysis (Cycle 6)
+
+Address findings from Analysis (Cycle 6).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cli-verb-surface-redesign-12-1 | Retarget stale source comments that cite redesign-deleted files (cmd/state_cleanup.go, attach.go) | Comment-only change (no code/signature/behaviour edit in the three files); four sites retargeted — `internal/tmux/hooks_unregister.go:14-15` & `:95-96` and `internal/tmux/tmux.go:382` point at `cmd/uninstall.go` (`buildUninstallDeps`/`killSaver`), `internal/resolver/query.go:307-308` rewords to a house-style/byte-compat justification naming no deleted file; `internal/tmux/portal_saver.go` kept as-is in the `KillSession` caller list; the `//nolint:staticcheck` directive and the `"No session found: %s"` string are byte-for-byte unchanged; `grep -rn "state_cleanup.go\|attach.go" internal/` returns nothing from these sites; no new tests, existing UnregisterPortalHooks (bootstrap/uninstall) / KillSession exact-target / resolver "No session found" miss suites stay green; `go build ./...` succeeds and `golangci-lint run` clean on the three touched files |
+
+---

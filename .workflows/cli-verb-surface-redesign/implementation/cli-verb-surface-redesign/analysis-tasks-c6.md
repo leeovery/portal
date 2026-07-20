@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: CLI Verb Surface Redesign (Cycle 6)
 
 ## Task 1: Retarget stale source comments that cite redesign-deleted files (cmd/state_cleanup.go, attach.go)
-status: pending
+status: approved
 severity: low
 sources: standards
 

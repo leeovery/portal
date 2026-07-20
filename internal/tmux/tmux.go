@@ -379,10 +379,10 @@ func (c *Client) ActivePaneCurrentPath(session string) (string, error) {
 // on a wrong-session kill, so the prefix is load-bearing here.
 //
 // This Client-method chokepoint fix covers every caller with no caller-side
-// change — including the internal _portal-saver callers (cmd/state_cleanup.go,
-// internal/tmux/portal_saver.go), which gain the prefix harmlessly (fixed
-// literal name, no possible prefix collision). See spec § Required Behaviour &
-// The Fix.
+// change — including the internal _portal-saver callers (cmd/uninstall.go's
+// killSaver, internal/tmux/portal_saver.go), which gain the prefix harmlessly
+// (fixed literal name, no possible prefix collision). See spec § Required
+// Behaviour & The Fix.
 func (c *Client) KillSession(name string) error {
 	_, err := c.cmd.Run("kill-session", "-t", exactTarget(name))
 	if err != nil {

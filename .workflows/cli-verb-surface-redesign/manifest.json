@@ -99,7 +99,9 @@
             "cli-verb-surface-redesign-10": "tick-b909f8",
             "cli-verb-surface-redesign-10-1": "tick-e5826e",
             "cli-verb-surface-redesign-11": "tick-e16171",
-            "cli-verb-surface-redesign-11-1": "tick-af054b"
+            "cli-verb-surface-redesign-11-1": "tick-af054b",
+            "cli-verb-surface-redesign-12": "tick-13714e",
+            "cli-verb-surface-redesign-12-1": "tick-6bd1c6"
           },
           "external_id": "tick-4f7acf"
         }
@@ -145,8 +147,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 11,
-          "current_task": "cli-verb-surface-redesign-11-1",
+          "current_phase": 12,
+          "current_task": "cli-verb-surface-redesign-12-1",
           "completed_tasks": [
             "cli-verb-surface-redesign-1-1",
             "cli-verb-surface-redesign-1-2",
@@ -197,7 +199,8 @@
             "cli-verb-surface-redesign-8-3",
             "cli-verb-surface-redesign-9-1",
             "cli-verb-surface-redesign-10-1",
-            "cli-verb-surface-redesign-11-1"
+            "cli-verb-surface-redesign-11-1",
+            "cli-verb-surface-redesign-12-1"
           ],
           "completed_phases": [
             1,
@@ -210,7 +213,8 @@
             8,
             9,
             10,
-            11
+            11,
+            12
           ]
         }
       }

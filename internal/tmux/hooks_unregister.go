@@ -12,7 +12,8 @@ import (
 // bootstrapLogger is the component-bound WARN sink for the per-event read
 // failure UnregisterPortalHooks now emits. Bound once at package init so the
 // exported UnregisterPortalHooks signature (consumed as a function value by
-// cmd/state_cleanup.go) stays unchanged. Mirrors the per-package
+// cmd/uninstall.go's buildUninstallDeps, which defaults the Unregister seam to
+// tmux.UnregisterPortalHooks) stays unchanged. Mirrors the per-package
 // log.For(...) binding pattern used elsewhere in this package.
 var bootstrapLogger = log.For("bootstrap")
 
@@ -93,8 +94,9 @@ var portalEvents = managedEventNames()
 // proceeds so every other event is still torn down.
 //
 // The exported signature is func(*Client) error — it is consumed as a function
-// value by cmd/state_cleanup.go — so this stays a thin wrapper that binds the
-// package-level bootstrap WARN sink and delegates to unregisterPortalHooks.
+// value by cmd/uninstall.go's buildUninstallDeps (which defaults the Unregister
+// seam to tmux.UnregisterPortalHooks) — so this stays a thin wrapper that binds
+// the package-level bootstrap WARN sink and delegates to unregisterPortalHooks.
 func UnregisterPortalHooks(c *Client) error {
 	return unregisterPortalHooks(c, bootstrapLogger)
 }
