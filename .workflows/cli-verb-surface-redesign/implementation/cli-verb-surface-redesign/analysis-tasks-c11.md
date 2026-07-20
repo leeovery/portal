@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: cli-verb-surface-redesign (Cycle 11)
 
 ## Task 1: Name the host-terminal resolution seam type in internal/spawn
-status: pending
+status: approved
 severity: low
 sources: architecture
 
