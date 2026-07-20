@@ -29,8 +29,8 @@ After [shell setup](#shell-integration) you drive it through two functions: **`x
 ```bash
 eval "$(portal init zsh)"          # add to ~/.zshrc: defines the x() and xctl() functions
 x                                  # launch the interactive picker
-x ~/Code/myproject                 # open a session at a path (creates it, or attaches)
-x ~/Code/api -e "make dev"         # open a session and run a command
+x ~/Code/myproject                 # mint a new session at a path
+x ~/Code/api -e "make dev"         # mint a new session and run a command
 xctl alias set work ~/Code/work    # alias a path...
 x work                             # ...then open it by name
 xctl list                          # list running sessions
@@ -84,8 +84,8 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
 - **Session grouping and tags**: flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
 - **Scrollback preview**: hit `Space` for a read-only peek at any session's saved scrollback, cycling windows and panes without attaching.
 - **Reboot-safe sessions**: starts the tmux server and restores structure, layout, working dirs, and ANSI scrollback after a reboot, optionally re-running per-pane commands via resume hooks. Replaces tmux-resurrect / tmux-continuum.
-- **Multi-window spawn**: mark several sessions with `m` and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
-- **Fast open**: jump to a project by path, alias, or zoxide (`x work`), with git-root resolution and project memory built in.
+- **Multi-window open**: name several targets (`x work api db`) or mark them with `m` in the picker and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
+- **Fast open**: jump to a project by path, alias, or zoxide (`x work`), or attach an existing session by name or glob (`x api`, `x 'api-*'`), with git-root resolution and project memory built in.
 
 ## Shell Integration
 
@@ -119,46 +119,39 @@ eval "$(portal init zsh --cmd p)"   # creates p() and pctl()
 
 ### `x` (open)
 
-Interactive session picker or path-based session creation. `x` maps to `portal open`.
+The single session verb — the picker, opening a target, and multi-window bursts all live here. `x` maps to `portal open`. (`x` absorbs the former `attach` and `spawn` commands; both are retired.)
 
 ```bash
-x                                    # interactive TUI
-x ~/Code/myproject                   # open session at path
-x myalias                            # resolve alias → path → session
-x ~/Code/app -e "make dev"           # run command in new session
+x                                    # interactive TUI picker
+x api                                # attach the existing session named "api"
+x 'api-*'                            # attach every session matching the glob
+x ~/Code/myproject                   # mint a new session at a path
+x myalias                            # resolve alias → mint a new session there
+x ~/Code/app -e "make dev"           # mint a session and run a command
 x ~/Code/app -- npm start            # alternative command syntax
+x work api ~/Code/new                # open three surfaces at once (see below)
 ```
 
-| Flag | Description |
-|---|---|
-| `-e, --exec` | Command to execute in the new session |
+**Resolution.** A bare target runs the precedence chain, first match wins:
 
-Path resolution order: aliases → zoxide → TUI with filter.
+**exact session name → path → alias → zoxide query.**
+
+An exact session name **attaches** that existing session; a path, alias, or zoxide match **mints a brand-new session** there (directory targets always create — there is no find-or-create, so `x api` mints even while an `api-*` session runs; reach the existing one with the name, a glob, or `-s`). A target that resolves to nothing is a hard failure — there is no TUI-fallback-on-miss; the error points you at `-f`.
+
+**Domain pins** skip the chain and force one domain (each hard-fails on a miss, never pops the picker):
+
+| Flag | Pins to | Behaviour |
+|---|---|---|
+| `-s, --session <name/glob>` | session | attach; never mints |
+| `-p, --path <dir>` | path | mint at the directory (must exist) |
+| `-a, --alias <key/glob>` | alias | mint at the aliased directory |
+| `-z, --zoxide <query>` | zoxide | mint at zoxide's best match (errors if zoxide isn't installed) |
+| `-f, --filter <text>` | — | skip resolution, open the picker pre-filtered (mutually exclusive with any target or pin) |
+| `-e, --exec <cmd>` / `-- <cmd>` | — | command to run in a **freshly minted** session (never an attach target) |
+
+**Multi-window bursts.** Two or more targets (or one glob expanding to several sessions) open a portal to each: this terminal becomes the first surface and the remaining **N−1** open in host-terminal windows — **N windows for N targets**. Pins and bare targets mix freely (`x -s api -p ~/Code/new blog`), the command rides only the minted surfaces, and a supported terminal is required for the extra windows (Ghostty natively, others via [`terminals.json`](#configuration)). This is the command-line form of the picker's [multi-select mode](#multi-select-mode).
 
 New sessions auto-resolve to the git repository root when applicable.
-
-### `xctl attach`
-
-Attach to an existing tmux session by name.
-
-```bash
-xctl attach myproject
-```
-
-### `xctl spawn`
-
-Open one or more sessions, each in its own host-terminal window — the command-line form of the picker's [multi-select mode](#multi-select-mode). Portal reuses the calling window for one session and spawns the rest as fresh host windows (net **N** windows for **N** sessions). Needs a supported terminal (Ghostty natively, others via [`terminals.json`](#configuration)).
-
-```bash
-xctl spawn --detect                  # print the detected terminal + bundle id, open nothing
-xctl spawn work api db               # open three sessions across three windows
-```
-
-| Flag | Description |
-|---|---|
-| `--detect` | Dry run: print the detected host terminal (friendly name + bundle id) and exit without opening anything |
-
-`--detect` names the terminal so you can copy its bundle id into `terminals.json`. Without it, at least one session name is required. Exit codes: a pre-flight failure (a marked session is gone), a partial spawn failure, or two-or-more sessions on an unsupported terminal exit `1` with a one-line reason on stderr; a usage error (no sessions and no `--detect`, or an unknown flag) exits `2`.
 
 ### `xctl list`
 
@@ -193,17 +186,19 @@ xctl alias rm work                   # remove alias
 xctl alias list                      # list all aliases
 ```
 
-### `xctl hooks`
+### `xctl hook`
 
-Register per-pane commands that re-execute automatically when a session is attached after a reboot. `hooks set` must be run from inside a tmux pane; `hooks rm` defaults to the current pane but accepts `--pane-key` to remove a hook for any pane (including ones that no longer exist).
+Register per-pane commands that re-execute automatically when a session is attached after a reboot. `hook set` must be run from inside a tmux pane; `hook rm` defaults to the current pane but accepts `--pane-key` to remove a hook for any pane (including ones that no longer exist).
+
+The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent alias, so existing `xctl hooks …` scripts keep working unchanged.
 
 Hooks stay attached to a session even if you rename it, whether from the picker's `r` modal or an external `tmux rename-session`. A renamed session still re-runs its command after the next reboot.
 
 ```bash
-xctl hooks set --on-resume "npm start"            # register a resume hook
-xctl hooks rm --on-resume                         # remove the current pane's hook
-xctl hooks rm --on-resume --pane-key 'sess:0.1'   # remove a specific entry (works outside tmux)
-xctl hooks list                                   # list all hooks
+xctl hook set --on-resume "npm start"            # register a resume hook
+xctl hook rm --on-resume                         # remove the current pane's hook
+xctl hook rm --on-resume --pane-key 'sess:0.1'   # remove a specific entry (works outside tmux)
+xctl hook list                                   # list all hooks
 ```
 
 **When hooks fire:** resume hooks run only when Portal recreates a pane from saved state
@@ -212,32 +207,24 @@ detach and reattach within the same server lifetime, because the pane and its pr
 are still alive; re-running the hook then would launch a second copy of a long-running
 command such as a dev server.
 
-### `xctl clean`
+### `xctl doctor`
 
-Remove stale projects whose directories no longer exist on disk, and prune hooks for panes that no longer exist.
-
-```bash
-xctl clean              # prune stale projects + hooks (rotated logs preserved)
-xctl clean --logs       # also delete rotated portal.log.<date> files, keeping today's
-```
-
-Rotated logs are kept unless you pass `--logs` (see [Logging](#logging)).
-
-### `xctl state`
-
-Inspect or tear down Portal's saved-session state used for reboot restoration.
+A read-only health report across Portal's resurrection machinery — daemon alive, global hooks registered without duplicates, `_portal-saver` up, state dir sane, `sessions.json` valid, no stale entries, and the detected host terminal. It starts nothing (a down runtime is reported honestly, not silently started), and exits `0` only when every check passes, non-zero otherwise — a scriptable health gate. The host-terminal line is informational and never affects the exit code.
 
 ```bash
-xctl state status                    # daemon + state health
-xctl state cleanup                   # remove hooks + stop daemon
-xctl state cleanup --purge           # also wipe ~/.config/portal/state/
+xctl doctor              # health report (subsumes the retired `state status`)
+xctl doctor --fix        # apply low-stakes repairs, then re-diagnose
 ```
 
-- `xctl state status`: print daemon status, last save time, captured counts,
-  state size, and recent warnings. Exits non-zero when the daemon is down, last
-  save is stale, or warnings are present in the last hour.
-- `xctl state cleanup [--purge]`: kills the daemon and removes Portal's tmux
-  hook entries. With `--purge`, also removes `~/.config/portal/state/`.
+`--fix` performs the reversible-by-reconstruction repairs: prune stale hooks, prune stale projects (replacing the retired `clean`), and sweep old logs. It re-runs the diagnosis afterwards and the exit code reflects the post-repair state. The daemon already runs these prunes automatically on a slow cadence, so `doctor` usually reads healthy without you doing anything — `--fix` is the manual trigger. The host-terminal check (folding in the retired `spawn --detect`) prints the detected terminal and its bundle id so you can copy it into [`terminals.json`](#configuration).
+
+### `portal uninstall`
+
+Remove Portal's tmux-server footprint — kill the save daemon and unregister the global hooks — **without touching any files**. Saved sessions and all config are left in place; the next `x`/`portal open` re-bootstraps the runtime, so it means "deactivate Portal's machinery now," not "destroy my data." Idempotent: a no-op on already-clean state. See [Uninstall](#uninstall).
+
+```bash
+portal uninstall
+```
 
 ### `xctl version`
 
@@ -326,7 +313,7 @@ terminals are configured via [`terminals.json`](#configuration). On an unsupport
 (or a remote/mosh client with no local window) Portal shows a banner naming the detected
 terminal and its bundle id, and opening two or more marked sessions is a no-op — a single
 marked session still attaches in the current window, which needs no host-window support. Run
-`xctl spawn --detect` to see what Portal detects. If a spawn only partially succeeds, Portal
+`xctl doctor` to see what Portal detects. If a burst only partially succeeds, Portal
 leaves the windows that did open in place and keeps the failed sessions marked, so pressing
 `Enter` again retries just those.
 
@@ -373,7 +360,7 @@ attach, and resume hooks run on the recreated panes.
 This replaces tmux-continuum and tmux-resurrect for session persistence. If you have
 either installed, remove it (or set `@continuum-restore off`) to avoid restoring twice.
 
-Pair restoration with [resume hooks](#xctl-hooks) to re-run pane commands such as dev
+Pair restoration with [resume hooks](#xctl-hook) to re-run pane commands such as dev
 servers and editors after a reboot.
 
 ## Configuration
@@ -386,14 +373,14 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
 | `hooks.json` | Per-pane resume hooks (pane → event → command) | `PORTAL_HOOKS_FILE` |
 | `prefs.json` | UI preferences: last-used session-list grouping mode and the owned-canvas `appearance` (`auto`/`light`/`dark`) | `PORTAL_PREFS_FILE` |
-| `terminals.json` | Host-terminal spawn recipes for [multi-select](#multi-select-mode) / `xctl spawn` on custom terminals (Ghostty is built in). User-authored, read-only. | `PORTAL_TERMINALS_FILE` |
+| `terminals.json` | Host-terminal window recipes for [multi-select](#multi-select-mode) / multi-target `x` on custom terminals (Ghostty is built in). User-authored, read-only. | `PORTAL_TERMINALS_FILE` |
 | `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
-Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
+Projects are auto-populated when you create new sessions, pruned automatically by the daemon, and cleanable on demand with `xctl doctor --fix`.
 
 **Appearance.** Portal paints its own light or dark canvas so its colours always sit on the surface they were tuned for. By default (`"appearance": "auto"`) it detects your terminal's background and matches it, falling back to dark if the terminal doesn't answer. Set `"appearance": "light"` or `"dark"` in `prefs.json` to pin the canvas and skip detection, which helps when auto-detection misfires (for example under tmux passthrough). Setting `NO_COLOR` to any non-empty value disables the canvas and renders on your terminal's native colours.
 
-**Custom terminals (`terminals.json`).** Portal spawns host windows natively on Ghostty. For any other terminal, add a recipe keyed by the identity Portal shows you (run `xctl spawn --detect`, or read the unsupported banner — a friendly `.app` name, a raw bundle id, or a `*`-glob). Each recipe describes how that terminal opens a window running a command, with `{command}` as the placeholder Portal fills in:
+**Custom terminals (`terminals.json`).** Portal opens host windows natively on Ghostty. For any other terminal, add a recipe keyed by the identity Portal shows you (run `xctl doctor`, or read the unsupported banner — a friendly `.app` name, a raw bundle id, or a `*`-glob). Each recipe describes how that terminal opens a window running a command, with `{command}` as the placeholder Portal fills in:
 
 ```json
 // ~/.config/portal/terminals.json
@@ -411,10 +398,10 @@ A recipe is either an `argv` array (Portal substitutes `{command}` into one elem
 
 ## Logging
 
-Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_STATE_DIR`). It is human-readable text with a `subsystem:` prefix on every line, so `grep "daemon:" portal.log` (or `restore:`, `saver:`, `hydrate:`, `spawn:`, …) reconstructs what any subsystem did. `portal.log` is a symlink to a calendar-daily file (`portal.log.<date>`), so `tail -f portal.log` always follows today's log.
+Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_STATE_DIR`). It is human-readable text with a `subsystem:` prefix on every line, so `grep "daemon:" portal.log` (or `restore:`, `saver:`, `hydrate:`, `spawn:`, `resolve:`, …) reconstructs what any subsystem did. `portal.log` is a symlink to a calendar-daily file (`portal.log.<date>`), so `tail -f portal.log` always follows today's log.
 
 - **Rotation:** a new file each local day; older files are kept read-only. A size-cap safety valve rolls over to `portal.log.<date>.N` if a single day ever grows huge.
-- **Retention:** rotated files older than 30 days are deleted automatically (one breadcrumb logged per deletion). `xctl clean --logs` sweeps them on demand.
+- **Retention:** rotated files older than 30 days are deleted automatically (one breadcrumb logged per deletion). `xctl doctor --fix` forces a sweep on demand.
 - **Level:** defaults to `info` (a few lines per meaningful event). Set `PORTAL_LOG_LEVEL=debug` to capture full reconstruction detail when investigating an issue.
 
 | Env var | Purpose | Default |
@@ -435,7 +422,7 @@ mode `0600`, directories `0700`.
   diffs of sensitive files), they will be captured.
 - **`portal.log` records config changes verbatim.** It does not contain pane
   scrollback, but config-mutation breadcrumbs and exec handoffs are logged as-is:
-  a `xctl hooks set --on-resume "<cmd>"` command string, alias values, and
+  a `xctl hook set --on-resume "<cmd>"` command string, alias values, and
   project paths appear in the log. Redact manually if you share it in a bug report.
 - **Mitigations:** for sensitive panes, run `tmux set-option -w history-limit 0`
   to prevent scrollback from accumulating, or `tmux clear-history` on demand
@@ -451,11 +438,11 @@ Two paths depending on whether you want to keep your saved state:
   Portal's tmux hooks check for the binary before they run, so tmux keeps working
   normally once it is gone. Your saved state is preserved, and reinstalling picks
   up where it left off.
-- **Explicit teardown:** run `portal state cleanup` (kills the daemon and removes
-  Portal's tmux hook entries), or `portal state cleanup --purge` to also wipe saved
-  state under `~/.config/portal/state/`. Then uninstall the binary. Non-state config
-  (`hooks.json`, `projects.json`, `aliases`) is preserved either way; remove it
-  manually if you want.
+- **Explicit teardown:** run `portal uninstall` (kills the daemon and unregisters
+  Portal's global tmux hooks). It touches **no files** — saved sessions and all
+  config are left in place, and running `x` again re-bootstraps the runtime. To
+  remove Portal completely, uninstall the binary and delete `~/.config/portal/`
+  (which holds both state and config) yourself.
 
 ## License
 
