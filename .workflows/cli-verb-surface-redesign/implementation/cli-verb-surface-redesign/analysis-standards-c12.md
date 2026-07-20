@@ -1,0 +1,19 @@
+AGENT: standards
+FINDINGS: none
+SUMMARY: Implementation conforms to the CLI verb-surface-redesign specification and project conventions. Full fresh pass over the whole surface at cycle 12 found no spec drift and no project-skill MUST DO / MUST NOT DO violations.
+
+Coverage of the verified decision points (for the orchestrator's record — no action required):
+
+- `open` as the single public session verb; resolution precedence (glob pre-check → exact session → path → alias → zoxide) implemented in resolver.Resolve and routed correctly; a bare glob is diverted to the burst by the multi-target gate so a glob never reaches the single-target Resolve (matches spec §Glob targets).
+- Miss handling is a hard fail with the exact escape-hatch message; singleMissError uses U+2014 (verified by hexdump) and byte-matches "nothing resolved for '<t>' — try -f <t>"; no TUI-picker fallback on a miss.
+- `resolve` log component is a spec-governed amendment, bound once (cmd/open.go:30 `log.For("resolve")`), emitted only from the cmd layer for non-glob guessing-chain targets (single path and burst DomainBare arm via the shared emitResolveDecision), INFO level, attrs exactly target/domain/resolved_path, domain=miss on a total miss. internal/resolver stays log-free.
+- Closed log taxonomy: enumerated every non-test `log.For(...)` binding — no call-site invention beyond the sanctioned `resolve` and `spawn`; spawn attr keys (session/ack/detail/resolution/terminal/bundle_id/opened/total/batch) match the closed set; config-migrate empty-component emission is correctly suppressed.
+- Pinned-domain hard-fail contract honored: -s/-p/-z/-a each resolve one domain and return their error directly (resolvePinAndOpen), never openTUIFunc; -z surfaces ErrZoxideNotInstalled explicitly; anyOpenDomainPin/isTUIPath keep pinned opens off the loading-TUI concurrent route.
+- `-f` is the sole non-composing flag (mutually exclusive with targets and every pin, rejected in RunE before dispatch); `-e`/`--` are mint-scoped with mutual exclusion, one command per invocation, and byte-identical command parity (composeOpenArgv appends `-- <command…>` verbatim to mint windows only; trigger local-mint feeds the same slice).
+- Hidden `--ack` (MarkHidden), best-effort marker write as the last act before handoff.
+- Multi-target burst: net-N trigger-first split, atomic read-only pre-flight reporting every unresolvable target, -f suffix only in the single-target message, leave-what-opened, zero-mint-command usage error, unsupported-terminal atomic no-op.
+- attach/spawn/clean/state-status/state-cleanup deleted (files absent; retired_surface_test guards); no residual retired-verb argv composition; `init` emits `x() { portal open "$@" }` for all shells.
+- kill single+exact unchanged; uninstall runtime-only (kills _portal-saver, unregisters hooks, touches no files, idempotent, prints byte-exact completion lines, leaves _portal-bootstrap); doctor catalog + exit-code contract (fail/unknown drive non-zero; info/not-evaluable do not; host-terminal informational; down-server honest-unhealthy; --fix re-diagnoses and log-sweep is outside the exit contract; down-server mass-deletion guard via runHookStaleCleanup; report/prune share StaleKeys/StaleEntries predicates).
+- state namespace fully Hidden (invocable), children preserved; hooks→hook with permanent silent cobra alias (Aliases, not Deprecated); bootstrap exemption extended to doctor + uninstall in skipTmuxCheck (keyed on canonical Name()); bare `portal` prints help without bootstrapping (rootCmd not Runnable, guarded by tests); tab completion wires session-name/alias-key completers on the spec's slots and leaves -p/-z to the shell.
+- Session-domain resolution matches only the user-visible ListSessionNames view (underscore-filtered), so internal sessions are never matchable.
+- Exit codes: UsageError→2, FatalError→1, ErrDoctorUnhealthy silent→1 — consistent with the golang-cli exit-code convention.
