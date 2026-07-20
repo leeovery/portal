@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-20
+
+✨ Added
+- `x work api db` opens several targets at once, each in its own host-terminal window, in one command.
+- Domain-pinning flags on `x`/`portal open`: `-s/--session`, `-p/--path`, `-a/--alias`, `-z/--zoxide` force resolution into one specific domain, and `-f/--filter` skips resolution to open the picker pre-filtered.
+- `portal doctor` gives a scriptable health report (daemon, saver, hooks, state dir, sessions.json, stale entries, host terminal); `portal doctor --fix` applies the low-stakes repairs and re-checks.
+- Tab completion for session names (on `open`/`kill`) and alias keys (on `open --alias`).
+- Exact session names and glob patterns (e.g. `x 'api-*'`) now attach directly through `x`/`portal open` instead of always minting a new session.
+
+🔧 Changed
+- `x`/`portal open` now hard-fails with a clear message when a target resolves to nothing, instead of silently falling back to the picker.
+- `xctl hooks` is renamed to `xctl hook` (singular); `hooks` is kept as a permanent, silent alias so existing scripts keep working.
+- `portal uninstall` replaces `portal state cleanup`: it only stops the save daemon and removes global tmux hooks, and never touches any files — saved sessions and config always survive.
+- Stale project entries are now pruned automatically in the background by the save daemon, in addition to the manual `doctor --fix` sweep.
+- The `portal state` command tree is now hidden from `--help` and shell completion (it's internal plumbing, still fully usable).
+
+🗑️ Removed
+- `portal attach` is retired — the picker's spawned burst windows and manual attaches now go through `portal open --session <name>`.
+- `portal spawn` is retired — multi-window opening is now built into `x`/`portal open` (multi-target) and the picker's multi-select.
+- `portal clean` is retired — stale-project/hook pruning and log sweeping now live under `portal doctor --fix`.
+- `portal state status` is retired — replaced by `portal doctor`.
+- `portal state cleanup --purge` is retired along with the rest of `state cleanup`; `portal uninstall` no longer offers a data-wiping option.
+
 ## [0.9.2] - 2026-07-17
 
 🐛 Fixed
