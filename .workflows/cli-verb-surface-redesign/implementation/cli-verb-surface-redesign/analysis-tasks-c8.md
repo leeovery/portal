@@ -6,7 +6,7 @@ total_proposed: 4
 # Analysis Tasks: CLI Verb Surface Redesign (Cycle 8)
 
 ## Task 1: Introduce a typed Domain across the cmd↔resolver routing boundary
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -37,7 +37,7 @@ sources: architecture
 - A routing test confirming `globExpandableDomain` classifies bare/session/alias identically to the prior string switch and that a glob target still fans out via the burst.
 
 ## Task 2: Extract a shared exact-session-match helper and unify its error handling in the resolver
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -63,7 +63,7 @@ sources: architecture
 - A test exercising a lister-error from `ListSessionNames` across all three entry points, pinning the unified "no match, no error escalation" policy.
 
 ## Task 3: Route doctor's host-terminal Detector/Resolve through the shared spawn-seam bundle
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -93,7 +93,7 @@ sources: architecture
 - (Option B) A test asserting the bundle does not read `terminals.json` until `Resolve` is called (or that a doctor run with an overridden Resolve seam performs no `terminals.json` read).
 
 ## Task 4: Add an explicit sentinel at iota 0 for the doctor checkStatus enum
-status: pending
+status: approved
 severity: low
 sources: standards
 

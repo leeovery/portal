@@ -108,7 +108,12 @@
             "cli-verb-surface-redesign-13-3": "tick-816613",
             "cli-verb-surface-redesign-13-4": "tick-1984f5",
             "cli-verb-surface-redesign-13-5": "tick-e38548",
-            "cli-verb-surface-redesign-13-6": "tick-a0ee34"
+            "cli-verb-surface-redesign-13-6": "tick-a0ee34",
+            "cli-verb-surface-redesign-14": "tick-3b8de7",
+            "cli-verb-surface-redesign-14-1": "tick-deef2b",
+            "cli-verb-surface-redesign-14-2": "tick-ad8fff",
+            "cli-verb-surface-redesign-14-3": "tick-27c8e7",
+            "cli-verb-surface-redesign-14-4": "tick-81d3a5"
           },
           "external_id": "tick-4f7acf"
         }
@@ -120,7 +125,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 8,
           "analysis_cycle_session": 1,
