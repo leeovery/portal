@@ -69,7 +69,7 @@ func TestResolveProcessRole(t *testing.T) {
 //
 // CONTRIBUTOR NOTE: the verbs below mirror the Cobra command registration in
 // cmd/ (root.AddCommand / stateCmd.AddCommand in cmd/state_daemon.go,
-// cmd/state_hydrate.go, cmd/state_signal_hydrate.go, cmd/hooks.go, cmd/clean.go,
+// cmd/state_hydrate.go, cmd/state_signal_hydrate.go, cmd/hooks.go,
 // cmd/open.go, ...). If you rename or add a subcommand that should
 // map to a non-default role, you MUST update BOTH the table in
 // ResolveProcessRole (process_role.go) AND the canonical argv shapes in this
