@@ -96,14 +96,21 @@ type DoctorDeps struct {
 	// independently of the tmux server state.
 	ProjectStore *project.Store
 	// Detector resolves the host-terminal identity for the informational
-	// host-terminal line — the SAME Detect() seam the picker and the multi-target
-	// open burst use (cmd/spawn_seams.go). Production wires spawn.NewDetector over the doctor tmux
-	// client. When nil (a direct-call unit test that does not exercise the line),
-	// the host-terminal line is omitted rather than invoking a real detector.
+	// host-terminal line. Production wires spawn.NewDetector over the doctor tmux
+	// client, constructed INDEPENDENTLY in resolveDoctorDeps — NOT via the shared
+	// buildProductionSpawnSeams bundle (cmd/spawn_seams.go) that the picker and the
+	// multi-target open burst read. It is the same detector primitive, re-built by
+	// hand here (see resolveDoctorDeps for why doctor does not share the bundle).
+	// When nil (a direct-call unit test that does not exercise the line), the
+	// host-terminal line is omitted rather than invoking a real detector.
 	Detector TerminalDetector
-	// Resolve maps a detected identity to its adapter + resolution class — the
-	// SAME config-aware resolver the burst uses (buildResolver().Resolve, loaded
-	// from terminals.json). Only its Resolution is read here (a NULL identity
+	// Resolve maps a detected identity to its adapter + resolution class via
+	// buildResolver().Resolve, wrapped in a closure (in resolveDoctorDeps) so
+	// terminals.json is read LAZILY — only when a non-NULL identity actually
+	// computes the line, and never when a test overrides the seam. That deliberate
+	// laziness is precisely why doctor does NOT adopt the shared
+	// buildProductionSpawnSeams bundle, whose Resolve reads terminals.json eagerly
+	// at construction. Only its Resolution is read here (a NULL identity
 	// short-circuits before Resolve). When nil the host-terminal line is omitted.
 	Resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
 }
@@ -133,12 +140,17 @@ func resolveDoctorDeps() *DoctorDeps {
 			return tmux.PortalHookCountsByEvent(client)
 		},
 		HookLister: client,
-		// The host-terminal line reuses the picker/burst seams verbatim: the
-		// process-tree/tmux detector over the doctor client, and the config-aware
-		// terminals.json resolver. spawn.NewDetector is pure construction (no I/O
-		// until Detect); Resolve is deferred through a closure so buildResolver
-		// only reads terminals.json when the line is actually computed (a
-		// non-null identity), and never when a test overrides the seam.
+		// The host-terminal line re-builds the same detector+resolve primitives
+		// the picker/burst use — the process-tree/tmux detector over the doctor
+		// client, and the config-aware terminals.json resolver — but constructs
+		// them INDEPENDENTLY here, NOT through the shared buildProductionSpawnSeams
+		// bundle (cmd/spawn_seams.go); the two must be kept in sync by hand.
+		// The independence is deliberate: spawn.NewDetector is pure construction
+		// (no I/O until Detect); Resolve is deferred through a closure so
+		// buildResolver only reads terminals.json when the line is actually
+		// computed (a non-null identity), and never when a test overrides the seam
+		// — whereas buildProductionSpawnSeams reads terminals.json eagerly at
+		// construction, which doctor's deferred-read path must not do.
 		Detector: spawn.NewDetector(client),
 		Resolve: func(id spawn.Identity) (spawn.Adapter, spawn.Resolution) {
 			return buildResolver().Resolve(id)
@@ -360,8 +372,10 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 }
 
 // checkHostTerminal reports which host terminal Portal would drive for a
-// multi-window spawn burst, computed from the SAME Detect()+Resolve seams the
-// picker and the multi-target open burst use — no bespoke detection path. It is
+// multi-window spawn burst, computed from the same detection recipe
+// (spawn.NewDetector + buildResolver().Resolve) the picker and open burst use,
+// re-constructed independently in resolveDoctorDeps — no bespoke detection path,
+// but not routed through their shared buildProductionSpawnSeams bundle. It is
 // INFORMATIONAL ONLY (checkInfo, rendered without a pass/fail marker): an
 // unsupported or remote host is an environmental state, not a Portal-health
 // defect (single-target `open` still works — only the multi-window burst is

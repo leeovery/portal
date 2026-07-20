@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: CLI Verb Surface Redesign (Cycle 5)
 
 ## Task 1: Correct doctor's host-terminal seam provenance comments (they claim shared-bundle single-sourcing that does not exist)
-status: pending
+status: approved
 severity: low
 sources: duplication
 

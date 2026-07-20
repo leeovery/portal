@@ -241,3 +241,15 @@ Address findings from Analysis (Cycle 4).
 | cli-verb-surface-redesign-10-1 | Refresh the stale `open` command help text to describe the redesigned verb | Help-metadata only (`Use`/`Short`/`Long`) — do NOT touch `RunE`/`Args`/flag registration/dispatch/resolution; `portal open --help` and bare `portal --help` both name session-name attach, the `-s`/`-p`/`-z`/`-a` pins, `-f`/`--filter`, `-e`/`--` command scoping, and multi-target opening — no single-path `destination` implication; copy stays consistent with the accurate per-flag strings (open.go:976-979) and the spec §405 row; spec dictates no golden string (match intent, not exact copy); guard test asserts `openCmd.Short`/`Long` mentions the redesigned capabilities, and any test asserting the literal `Use`/`Short` strings is updated; full unit+integration suite stays green |
 
 ---
+
+### Phase 11: Analysis (Cycle 5)
+
+Address findings from Analysis (Cycle 5).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cli-verb-surface-redesign-11-1 | Correct doctor's host-terminal seam provenance comments (they claim shared-bundle single-sourcing that does not exist) | Comment-only change; `resolveDoctorDeps`' `Detector`/`Resolve` construction is byte-for-byte unchanged (no behavioral/code change); no comment in cmd/doctor.go implies doctor reads from the shared `buildProductionSpawnSeams` bundle via "the SAME" seam/resolver; comments explicitly state the detector+resolve pair is independently re-constructed in `resolveDoctorDeps` and name the deliberate deferred terminals.json read (behind the lazy `Resolve` closure) as the reason doctor does not adopt the eager bundle, kept in sync by hand; the optional route-through-`buildProductionSpawnSeams` refactor is explicitly NOT required; `go build ./...` succeeds and `golangci-lint run` clean on cmd/doctor.go; no new tests, existing doctor host-terminal suite (cmd/doctor_test.go) stays green |
+
+---
