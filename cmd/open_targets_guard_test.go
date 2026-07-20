@@ -11,6 +11,7 @@ package cmd
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/spf13/pflag"
@@ -85,4 +86,29 @@ func TestOpenTargetPinsCoverValueTakingFlags(t *testing.T) {
 			t.Errorf("openCmd flag --%s is value-taking but %q is absent from openTargetPins — orderedOpenTargets would misroute its value as a positional target; add it to openTargetPins", f.Name, key)
 		}
 	})
+}
+
+// TestOpenTargetPinsKeysAreLiveFlags is the REVERSE of
+// TestOpenTargetPinsCoverValueTakingFlags: it walks every openTargetPins key and
+// fails if the key does not name a LIVE openCmd flag. The forward guard catches a
+// value-taking flag ADDED to openCmd without a matching pin; this one catches a
+// STALE pin (a flag renamed/removed from openCmd but left in openTargetPins),
+// which would make orderedOpenTargets consume a following token as the value of a
+// flag cobra no longer accepts. Every current key — including the
+// emission-excluded empty-domain entries (-e/--exec, -f/--filter, --ack, the
+// last a hidden flag still present in the flag set) — names a live flag, so
+// nothing is excluded.
+func TestOpenTargetPinsKeysAreLiveFlags(t *testing.T) {
+	for key := range openTargetPins {
+		var f *pflag.Flag
+		switch {
+		case strings.HasPrefix(key, "--"):
+			f = openCmd.Flags().Lookup(strings.TrimPrefix(key, "--"))
+		case strings.HasPrefix(key, "-"):
+			f = openCmd.Flags().ShorthandLookup(strings.TrimPrefix(key, "-"))
+		}
+		if f == nil {
+			t.Errorf("openTargetPins key %q does not name a live openCmd flag — a stale pin misroutes argv scanning; remove it or restore the flag", key)
+		}
+	}
 }

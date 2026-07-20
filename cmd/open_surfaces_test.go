@@ -102,6 +102,45 @@ func TestResolveOpenSurfaces_SessionGlobExpandsInPlace(t *testing.T) {
 	assertSurfaces(t, surfaces, want)
 }
 
+func TestResolveOpenSurfaces_SessionPinSurface(t *testing.T) {
+	// The -s session-pin domain in isolation (Domain:"session"): an exact hit is a
+	// single attach surface, and a miss is a COLLECTED miss (a *MissResult, NOT the
+	// single-pin "No session found" hard error — ResolveSessionPinAll's documented
+	// divergence for the multi-target pre-flight). Mirrors the path/alias
+	// single-domain surface tests for the previously-uncovered session surface.
+	qr := newSurfaceResolver(
+		[]string{"dev"},
+		map[string]string{},
+		"",
+		resolver.ErrNoMatch,
+		map[string]bool{},
+	)
+
+	t.Run("exact session pin is one attach surface", func(t *testing.T) {
+		surfaces, misses, err := resolveOpenSurfaces(qr, []Target{{Value: "dev", Domain: "session"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(misses) != 0 {
+			t.Fatalf("misses = %v, want none", misses)
+		}
+		assertSurfaces(t, surfaces, []spawn.Surface{{Kind: spawn.SurfaceAttach, Value: "dev"}})
+	})
+
+	t.Run("session pin miss is a collected miss", func(t *testing.T) {
+		surfaces, misses, err := resolveOpenSurfaces(qr, []Target{{Value: "gone", Domain: "session"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(surfaces) != 0 {
+			t.Errorf("surfaces = %v, want none for a -s miss", surfaces)
+		}
+		if len(misses) != 1 || misses[0] != "gone" {
+			t.Errorf("misses = %v, want [%q]", misses, "gone")
+		}
+	})
+}
+
 func TestResolveOpenSurfaces_AliasKeyGlobExpandsToMints(t *testing.T) {
 	// A -a key glob expands to K mint surfaces, each reduced to the aliased literal
 	// dir. Keys() is sorted, so order is deterministic.

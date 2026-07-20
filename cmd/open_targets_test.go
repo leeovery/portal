@@ -40,6 +40,17 @@ func TestOrderedOpenTargets(t *testing.T) {
 			want: []Target{{Value: "~/new", Domain: "bare"}},
 		},
 		{
+			// An excluded flag's value BETWEEN two positionals is consumed and
+			// dropped, leaving both positionals in left-to-right order — the value
+			// ("claude") is never misrouted as a third bare target.
+			name: "excluded exec value between two positionals",
+			args: []string{"blog", "-e", "claude", "api"},
+			want: []Target{
+				{Value: "blog", Domain: "bare"},
+				{Value: "api", Domain: "bare"},
+			},
+		},
+		{
 			name: "everything after -- excluded",
 			args: []string{"~/new", "--", "claude", "."},
 			want: []Target{{Value: "~/new", Domain: "bare"}},

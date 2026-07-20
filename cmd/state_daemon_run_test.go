@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -752,6 +753,45 @@ func TestDaemonTick_SkipsHookCleanupOnMaxGapCaptureTick(t *testing.T) {
 	}
 	if _, ok := postRun["stale:0.0"]; !ok {
 		t.Errorf("stale hook entry reaped on a max-gap capture tick; cleanup must be skipped; hooks=%v", keysOf(postRun))
+	}
+}
+
+// TestDaemonTick_RunsProjectCleanupOnIdleTick is the stale-project-prune peer of
+// TestDaemonTick_RunsHookCleanupOnIdleTick: on an idle tick (!dirty && !gap,
+// @portal-restoring unset) with the project-prune throttle elapsed,
+// maybeRunProjectCleanup runs on the idle fast path and prunes the gone-dir
+// project while retaining the live one — and it does so WITHOUT a capture cycle
+// (no list-sessions runs that tick). Spec § clean deleted — stale-project pruning
+// folds into the daemon's automation on a slow cadence.
+func TestDaemonTick_RunsProjectCleanupOnIdleTick(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	live := t.TempDir()
+	gone := filepath.Join(t.TempDir(), "gone-dir-does-not-exist")
+	store, _ := seedProjectsJSON(t, live, gone)
+
+	// No sessionsOut — capture must not run on an idle tick.
+	fc := &daemonFakeCommander{}
+	deps := makeDeps(t, dir, fc)
+	deps.ProjectStore = store
+	deps.LastSaveAt = time.Now()                                                    // gap=false
+	deps.MaxGap = 30 * time.Second                                                  // !gap
+	deps.lastProjectCleanup = time.Now().Add(-projectCleanupInterval - time.Second) // throttle elapsed
+	// makeDeps anchors lastCleanup to now, so the hooks-cleanup gate stays throttled
+	// this tick — this test isolates the project prune. No save.requested → !dirty.
+	// @portal-restoring unset (default).
+
+	tick(t.Context(), deps)
+
+	// The gone-dir project is pruned on the idle branch; the live one survives.
+	if paths := projectPaths(t, store); len(paths) != 1 || paths[0] != live {
+		t.Errorf("project prune did not run on the idle branch; paths=%v, want [%s]", paths, live)
+	}
+
+	// Still the idle fast path — no capture cycle ran.
+	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+		t.Errorf("list-sessions invoked on an idle tick (capture must not run): %v", got)
 	}
 }
 

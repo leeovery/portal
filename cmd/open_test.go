@@ -367,6 +367,50 @@ func TestOpenCommand_BareSessionAttach_WithCommand_UsageError(t *testing.T) {
 	}
 }
 
+func TestOpenCommand_BareSessionAttach_WithDashDashCommand_UsageError(t *testing.T) {
+	// The `--` command spelling is the exact sibling of the -e spelling above:
+	// `open <exact-session-name> -- <cmd>` is mint-scoped, so it is the same usage
+	// error (exit 2) with NO attach, proving the mint-scoped guard fires for BOTH
+	// command spellings (spec § Command passthrough — mint-scoped).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{names: []string{"dev"}},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	sessionCalled := false
+	origSession := openSessionFunc
+	openSessionFunc = func(_ *cobra.Command, _ string) error {
+		sessionCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openSessionFunc = origSession })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "dev", "--", "claude"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	want := "a command (-e/--) can only run in a newly-created session, not an existing one"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("expected *UsageError (exit 2), got %T", err)
+	}
+	if sessionCalled {
+		t.Error("openSessionFunc must not be called: no attach may happen when a command targets an existing session")
+	}
+}
+
 func TestOpenCommand_SessionPin_WithCommand_UsageError(t *testing.T) {
 	// The same mint-scoped guard fires for the -s pin: `open -s <session> -e <cmd>`
 	// is a usage error (exit 2), because the -s pin also dispatches its session hit
@@ -636,6 +680,68 @@ func TestOpenCommand_PathPin_GlobNamedDir_Mints(t *testing.T) {
 
 	if mintedPath != globDir {
 		t.Errorf("openPathFunc minted %q, want %q", mintedPath, globDir)
+	}
+}
+
+func TestOpenCommand_PathPin_Miss_HardFailsNoPicker(t *testing.T) {
+	// A -p miss (a non-existent directory) hard-fails with the verbatim
+	// "Directory not found" message and NEVER opens the picker or mints. This is
+	// the path-domain sibling of TestOpenCommand_SessionPin_Miss_HardFailsNoPicker
+	// — spec § Pinned-domain contract: pins never fall back to the picker. -p stats
+	// the LITERAL path via ResolvePath, so the miss dir must genuinely not exist on
+	// disk (the DirValidator seam is not consulted on the -p path).
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	openDeps = &OpenDeps{
+		SessionLister: &testSessionLister{},
+		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator:  &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	// filepath.Join(t.TempDir(), …) is absolute, so ResolvePath's filepath.Abs is a
+	// no-op and the reported path is exactly this string.
+	missDir := filepath.Join(t.TempDir(), "does-not-exist")
+
+	tuiCalled := false
+	origTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origTUI })
+
+	pathCalled := false
+	origPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, _ string, _ []string) error {
+		pathCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origPath })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-p", missDir})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected hard-fail error for a -p miss, got nil")
+	}
+	want := "Directory not found: " + missDir
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	if tuiCalled {
+		t.Error("openTUIFunc must not be called on a -p miss")
+	}
+	if pathCalled {
+		t.Error("openPathFunc must not be called on a -p miss (never mints)")
+	}
+	// A missing directory is a runtime failure → plain error (exit 1), not UsageError.
+	var usageErr *UsageError
+	if errors.As(err, &usageErr) {
+		t.Error("-p miss error must be a plain error, not a *UsageError")
 	}
 }
 
@@ -2876,6 +2982,38 @@ func TestOpenCommand_Filter_ThreadsCommandToPicker(t *testing.T) {
 
 	resetRootCmd()
 	rootCmd.SetArgs([]string{"open", "-f", "web", "-e", "claude"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotFilter != "web" {
+		t.Errorf("initialFilter = %q, want %q", gotFilter, "web")
+	}
+	wantCmd := []string{"claude"}
+	if !slices.Equal(gotCommand, wantCmd) {
+		t.Errorf("command = %v, want %v", gotCommand, wantCmd)
+	}
+}
+
+func TestOpenCommand_Filter_ThreadsDashDashCommandToPicker(t *testing.T) {
+	// The `--` command spelling is the exact sibling of the -e spelling above: -f
+	// threads a `--`-spelled command straight through to the picker just the same,
+	// preserving the command-present ⇒ Projects specialization for both spellings.
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	var gotFilter string
+	var gotCommand []string
+	origFunc := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, initialFilter string, command []string, _ bool) error {
+		gotFilter = initialFilter
+		gotCommand = command
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "-f", "web", "--", "claude"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

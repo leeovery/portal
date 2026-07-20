@@ -4,9 +4,11 @@ package cmd
 // MUST NOT use t.Parallel.
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -276,4 +278,61 @@ func TestCompletionExcludesInternalSessions(t *testing.T) {
 	if want := []string{"my-work"}; !slices.Equal(names, want) {
 		t.Errorf("names = %v, want %v (internal _-prefixed sessions must be filtered)", names, want)
 	}
+}
+
+// completionCandidates drives cobra's hidden __complete request verb through the
+// real root command and returns the candidate tokens (the text before the first
+// TAB on each line), dropping the trailing ":<directive>" line. It is the
+// behavioural probe for "what the shell would be offered", so a hidden flag or a
+// hidden command (filtered by cobra itself) is provably absent from the result.
+// __complete is bootstrap-exempt (skipTmuxCheck), so no tmux client or injected
+// deps are needed on the flag/subcommand paths exercised here.
+func completionCandidates(t *testing.T, args ...string) []string {
+	t.Helper()
+	resetRootCmd()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(new(bytes.Buffer))
+	rootCmd.SetArgs(args)
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("__complete %v: %v", args, err)
+	}
+
+	var cands []string
+	for line := range strings.SplitSeq(buf.String(), "\n") {
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		name, _, _ := strings.Cut(line, "\t")
+		cands = append(cands, name)
+	}
+	return cands
+}
+
+// TestCompletionHidesInternalSurface proves cobra's generated completion never
+// offers Portal's internal surface: the hidden --ack flag is absent from `open`'s
+// flag completion, and the hidden `state` namespace is absent from top-level
+// command completion. Each subtest also asserts a VISIBLE sibling IS offered, so
+// the probe is non-vacuous (it fails if completion produced nothing at all).
+func TestCompletionHidesInternalSurface(t *testing.T) {
+	t.Run("open flag completion excludes the hidden --ack flag", func(t *testing.T) {
+		// toComplete "-" makes cobra emit flag-name candidates for open.
+		cands := completionCandidates(t, "__complete", "open", "-")
+		if slices.Contains(cands, "--ack") {
+			t.Errorf("open flag completion offered the hidden --ack flag; candidates=%v", cands)
+		}
+		if !slices.Contains(cands, "--session") {
+			t.Errorf("open flag completion did not offer the visible --session flag; candidates=%v", cands)
+		}
+	})
+
+	t.Run("top-level completion excludes the hidden state namespace", func(t *testing.T) {
+		cands := completionCandidates(t, "__complete", "")
+		if slices.Contains(cands, "state") {
+			t.Errorf("top-level completion offered the hidden state namespace; candidates=%v", cands)
+		}
+		if !slices.Contains(cands, "open") {
+			t.Errorf("top-level completion did not offer the visible open command; candidates=%v", cands)
+		}
+	})
 }
