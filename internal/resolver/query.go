@@ -111,6 +111,23 @@ func NewQueryResolver(sessions SessionLister, aliases AliasLookup, zoxide Zoxide
 	}
 }
 
+// isExactSession reports whether query is an exact member of the user-visible
+// (leading-underscore-filtered) session set. It is the SINGLE authority for the
+// exact-session-name match rule and its lister-error policy: it owns the
+// ListSessionNames fetch, the slices.Contains membership test, and the one decided
+// error policy — a lister error (or a nil/empty list) collapses to "no match"
+// (false) and is never escalated. Every site that produces the exact-session match
+// (Resolve, ResolveSessionPin, ResolveSessionPinAll) routes through this helper, so
+// the rule and its error handling cannot diverge. Callers keep their own downstream
+// behaviour on a non-match (fall-through, hard-fail, or collected miss).
+func (qr *QueryResolver) isExactSession(query string) bool {
+	names, err := qr.sessions.ListSessionNames()
+	if err != nil {
+		return false
+	}
+	return slices.Contains(names, query)
+}
+
 // Resolve applies the single-target resolution chain for the given query in
 // precedence order: exact session-name match → path detection → alias lookup →
 // zoxide query → total miss (hard fail).
@@ -131,11 +148,10 @@ func NewQueryResolver(sessions SessionLister, aliases AliasLookup, zoxide Zoxide
 // After alias or zoxide resolution, the directory is validated on disk.
 func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 	// Session domain first (spec § Target resolution precedence: exact session
-	// name → path → alias → zoxide). Fetch the user-visible session set once; a
-	// nil/empty list or a lister error collapses to "no sessions" — the tmux
-	// client already returns ([]string{}, nil) when no server runs, and an
-	// error is not surfaced here (treated as no match).
-	if names, err := qr.sessions.ListSessionNames(); err == nil && slices.Contains(names, query) {
+	// name → path → alias → zoxide). isExactSession owns the fetch + membership
+	// test + lister-error policy: a nil/empty list or a lister error collapses to
+	// "no match" and falls through to the directory chain.
+	if qr.isExactSession(query) {
 		return &SessionResult{Name: query, Domain: DomainSession}, nil
 	}
 
@@ -221,13 +237,12 @@ func (qr *QueryResolver) ResolveBareAll(query string) ([]QueryResult, error) {
 // *SessionResult{Domain:DomainGlob} over the user-visible set; an exact hit is a single
 // *SessionResult{Domain:DomainSession}. The returned error is always nil.
 func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, error) {
-	names, _ := qr.sessions.ListSessionNames()
-
 	if HasGlobMeta(query) {
+		names, _ := qr.sessions.ListSessionNames()
 		return expandSessionGlobAll(query, names), nil
 	}
 
-	if slices.Contains(names, query) {
+	if qr.isExactSession(query) {
 		return []QueryResult{&SessionResult{Name: query, Domain: DomainSession}}, nil
 	}
 	return []QueryResult{&MissResult{Target: query}}, nil
@@ -292,12 +307,11 @@ func (qr *QueryResolver) ResolveAliasPinAll(value string) ([]QueryResult, error)
 // gate that normally diverts a glob-bearing -s value to the burst. The pin never
 // mints and never falls back to the picker (spec § Pinned-domain contract).
 func (qr *QueryResolver) ResolveSessionPin(query string) (QueryResult, error) {
-	// Fetch the user-visible session set once. A nil/empty slice or a lister error
-	// collapses to "no sessions" — the same tolerance the bare-target session
-	// pre-check (Resolve) applies.
-	names, _ := qr.sessions.ListSessionNames()
-
-	if slices.Contains(names, query) {
+	// isExactSession owns the fetch + membership test + lister-error policy: a
+	// nil/empty session set or a lister error collapses to "no match" — the same
+	// tolerance the bare-target session pre-check (Resolve) applies — falling
+	// through to the hard-fail miss below.
+	if qr.isExactSession(query) {
 		return &SessionResult{Name: query, Domain: DomainSession}, nil
 	}
 

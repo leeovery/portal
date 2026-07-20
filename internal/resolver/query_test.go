@@ -705,6 +705,129 @@ func TestQueryResolver_ResolveSessionPin(t *testing.T) {
 	})
 }
 
+// TestQueryResolver_ExactSessionMatch_UnifiedAcrossEntryPoints pins the shared
+// exact-session-match rule and its single lister-error policy across the three
+// entry points that consume it — Resolve, ResolveSessionPin, and
+// ResolveSessionPinAll. The match rule (ListSessionNames + membership) and the
+// error policy (a lister error collapses to "no match", never escalates) now live
+// in one helper; these characterization tests lock in that all three sites route
+// through it and stay in sync.
+func TestQueryResolver_ExactSessionMatch_UnifiedAcrossEntryPoints(t *testing.T) {
+	newResolver := func(names []string, err error) *resolver.QueryResolver {
+		return resolver.NewQueryResolver(
+			&mockSessionLister{names: names, err: err},
+			&mockAliasLookup{aliases: map[string]string{}},
+			&mockZoxideQuerier{err: resolver.ErrNoMatch},
+			&mockDirValidator{existing: map[string]bool{}},
+		)
+	}
+
+	t.Run("exact hit resolves via Resolve", func(t *testing.T) {
+		qr := newResolver([]string{"api-x7Kd9a", "web-abc"}, nil)
+
+		result, err := qr.Resolve("api-x7Kd9a")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		sr, ok := result.(*resolver.SessionResult)
+		if !ok {
+			t.Fatalf("expected *SessionResult, got %T", result)
+		}
+		if sr.Name != "api-x7Kd9a" || sr.Domain != resolver.DomainSession {
+			t.Errorf("result = {%q, %q}, want {api-x7Kd9a, session}", sr.Name, sr.Domain)
+		}
+	})
+
+	t.Run("exact hit resolves via ResolveSessionPin", func(t *testing.T) {
+		qr := newResolver([]string{"api-x7Kd9a", "web-abc"}, nil)
+
+		result, err := qr.ResolveSessionPin("api-x7Kd9a")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		sr, ok := result.(*resolver.SessionResult)
+		if !ok {
+			t.Fatalf("expected *SessionResult, got %T", result)
+		}
+		if sr.Name != "api-x7Kd9a" || sr.Domain != resolver.DomainSession {
+			t.Errorf("result = {%q, %q}, want {api-x7Kd9a, session}", sr.Name, sr.Domain)
+		}
+	})
+
+	t.Run("exact hit resolves via ResolveSessionPinAll", func(t *testing.T) {
+		qr := newResolver([]string{"api-x7Kd9a", "web-abc"}, nil)
+
+		results, err := qr.ResolveSessionPinAll("api-x7Kd9a")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("len(results) = %d, want 1", len(results))
+		}
+		sr, ok := results[0].(*resolver.SessionResult)
+		if !ok {
+			t.Fatalf("expected *SessionResult, got %T", results[0])
+		}
+		if sr.Name != "api-x7Kd9a" || sr.Domain != resolver.DomainSession {
+			t.Errorf("result = {%q, %q}, want {api-x7Kd9a, session}", sr.Name, sr.Domain)
+		}
+	})
+
+	// The unified lister-error policy: a ListSessionNames error is treated as "no
+	// match" at every entry point — never escalated to a resolve error. Each site
+	// keeps its own downstream behaviour on the resulting non-match (Resolve falls
+	// through to a miss, ResolveSessionPin hard-fails, ResolveSessionPinAll collects
+	// a miss), but none surfaces the lister error itself.
+	t.Run("lister error is no match with no escalation via Resolve", func(t *testing.T) {
+		qr := newResolver(nil, errors.New("tmux unreachable"))
+
+		result, err := qr.Resolve("anything")
+		if err != nil {
+			t.Fatalf("expected no error escalation, got: %v", err)
+		}
+		if _, ok := result.(*resolver.SessionResult); ok {
+			t.Fatal("expected fall-through on a lister error, got *SessionResult")
+		}
+		if _, ok := result.(*resolver.MissResult); !ok {
+			t.Fatalf("expected *MissResult, got %T", result)
+		}
+	})
+
+	t.Run("lister error is no match with no escalation via ResolveSessionPin", func(t *testing.T) {
+		qr := newResolver(nil, errors.New("tmux unreachable"))
+
+		result, err := qr.ResolveSessionPin("anything")
+		if result != nil {
+			t.Errorf("expected nil result on a lister error, got %T", result)
+		}
+		if err == nil {
+			t.Fatal("expected the miss hard-fail on a lister error, got nil")
+		}
+		if want := "No session found: anything"; err.Error() != want {
+			t.Errorf("error = %q, want %q — the lister error must collapse to the normal miss, not escalate", err.Error(), want)
+		}
+	})
+
+	t.Run("lister error is no match with no escalation via ResolveSessionPinAll", func(t *testing.T) {
+		qr := newResolver(nil, errors.New("tmux unreachable"))
+
+		results, err := qr.ResolveSessionPinAll("anything")
+		if err != nil {
+			t.Fatalf("expected a collected miss, not an error escalation, got: %v", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("len(results) = %d, want 1", len(results))
+		}
+		miss, ok := results[0].(*resolver.MissResult)
+		if !ok {
+			t.Fatalf("expected *MissResult, got %T", results[0])
+		}
+		if miss.Target != "anything" {
+			t.Errorf("miss.Target = %q, want %q", miss.Target, "anything")
+		}
+	})
+}
+
 func TestQueryResolver_ResolvePathPin(t *testing.T) {
 	// newPathPinResolver builds a QueryResolver whose session, alias, and zoxide
 	// seams FAIL the test if consulted — ResolvePathPin is path-domain only (it
