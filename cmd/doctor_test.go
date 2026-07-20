@@ -145,6 +145,10 @@ func seedHealthyStateDir(t *testing.T, dir string) {
 // tests asserting a down/absent runtime override the seams before calling.
 func runDoctor(t *testing.T, dir string) (*bytes.Buffer, *bytes.Buffer, error) {
 	t.Helper()
+	// resolveDoctorDeps now sources the host-terminal seams from the shared
+	// buildProductionSpawnSeams bundle, which reads terminals.json eagerly — isolate
+	// it so the Execute path never touches the developer's real config file.
+	isolateTerminalsFile(t)
 	doctorDeps = withHealthyRuntime(&DoctorDeps{StateDir: dir})
 	t.Cleanup(func() { doctorDeps = nil })
 
@@ -988,6 +992,9 @@ func TestDoctorStaleHooksCheck(t *testing.T) {
 // stores) so no real tmux server or state dir is ever touched.
 func runDoctorFixCmd(t *testing.T, deps *DoctorDeps) (*bytes.Buffer, *bytes.Buffer, error) {
 	t.Helper()
+	// resolveDoctorDeps eagerly builds the shared spawn seams (terminals.json read)
+	// — isolate the file so the Execute path stays hermetic.
+	isolateTerminalsFile(t)
 	doctorDeps = deps
 	t.Cleanup(func() { doctorDeps = nil })
 
@@ -1008,6 +1015,9 @@ func runDoctorFixCmd(t *testing.T, deps *DoctorDeps) (*bytes.Buffer, *bytes.Buff
 // that ends in ErrDoctorUnhealthy rather than the repair path.
 func runDoctorCmd(t *testing.T, deps *DoctorDeps) (*bytes.Buffer, *bytes.Buffer, error) {
 	t.Helper()
+	// resolveDoctorDeps eagerly builds the shared spawn seams (terminals.json read)
+	// — isolate the file so the Execute path stays hermetic.
+	isolateTerminalsFile(t)
 	doctorDeps = deps
 	t.Cleanup(func() { doctorDeps = nil })
 
