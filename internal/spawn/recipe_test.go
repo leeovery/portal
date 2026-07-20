@@ -167,11 +167,11 @@ func TestValidRecipeForEntry(t *testing.T) {
 
 func TestRenderCommandString(t *testing.T) {
 	t.Run("it POSIX-single-quotes each element and space-joins them", func(t *testing.T) {
-		command := []string{"/usr/bin/env", "-u", "TMUX", "PATH=/b", "/abs/portal", "attach", "proj-x", "--spawn-ack", "b1:t1"}
+		command := []string{"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE", "PATH=/b", "/abs/portal", "open", "--session", "proj-x", "--ack", "b1:t1"}
 
 		got := renderCommandString(command)
 
-		want := "'/usr/bin/env' '-u' 'TMUX' 'PATH=/b' '/abs/portal' 'attach' 'proj-x' '--spawn-ack' 'b1:t1'"
+		want := "'/usr/bin/env' '-u' 'TMUX' '-u' 'TMUX_PANE' 'PATH=/b' '/abs/portal' 'open' '--session' 'proj-x' '--ack' 'b1:t1'"
 		if got != want {
 			t.Errorf("renderCommandString = %q, want %q", got, want)
 		}

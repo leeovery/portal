@@ -1,6 +1,6 @@
 //go:build integration
 
-// Phase 5 task 5-10 — `portal open --session NAME` / `portal open` reattach
+// Phase 5 task 5-1 — `portal open --session NAME` / `portal open` reattach
 // integration test. (Originally written for the retired `portal attach NAME`;
 // migrated to `open --session NAME`, its exact replacement, when attach was
 // deleted in cli-verb-surface-redesign Phase 5.)

@@ -154,6 +154,11 @@ func TestUninstall_KillsPortalSaverBeforeRemovingHooks(t *testing.T) {
 		t.Errorf("expected order has-session(%d) < kill-session(%d) < show-hooks(%d) < set-hook(%d); calls=%v",
 			hasSessionIdx, killIdx, showHooksIdx, setHookIdx, cmder.Calls)
 	}
+	// Guard the "leaves the load-bearing _portal-bootstrap anchor running"
+	// criterion: the only kill-session target is the saver, never the anchor.
+	if anchorKillIdx := callIndex(cmder.Calls, "kill-session", tmux.PortalBootstrapName); anchorKillIdx >= 0 {
+		t.Errorf("kill-session must never target %s (the load-bearing anchor); calls=%v", tmux.PortalBootstrapName, cmder.Calls)
+	}
 	if out.String() != wantCompletionMessage {
 		t.Errorf("completion message mismatch:\n got %q\nwant %q", out.String(), wantCompletionMessage)
 	}

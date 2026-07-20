@@ -22,7 +22,7 @@ import (
 // rootCmd declares a PersistentPreRunE but NO Run/RunE, so Runnable()
 // (command.go:1596 — `c.Run != nil || c.RunE != nil`) is false. In execute()
 // the guard `if !c.Runnable() { return flag.ErrHelp }` (command.go:955) fires
-// BEFORE c.preRun() and the PersistentPreRunE loop (command.go:983), so the
+// BEFORE c.preRun() and the PersistentPreRunE loop (command.go:984), so the
 // tmux-bootstrap chain never runs. ExecuteC then catches errors.Is(err,
 // flag.ErrHelp) (command.go:1152), calls HelpFunc(), and returns nil — so bare
 // portal prints help and exits 0.

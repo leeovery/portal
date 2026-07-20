@@ -24,6 +24,12 @@ type Target struct {
 // will treat it as arity-0 and misroute its value as a bare positional target.
 // TestOpenTargetPinsCoverValueTakingFlags (open_targets_guard_test.go) walks the
 // live flag set and fails loudly if the two ever drift out of lockstep.
+//
+// Bundled value shorthands (e.g. `-sf`) are deliberately out of contract (spec
+// § Argv parsing — value pins are written separately, each with its own value):
+// such a token is absent from this map, so it is classified unknown-and-skipped
+// rather than attributed a value. That divergence from cobra's bundling is
+// intended, not a bug.
 var openTargetPins = map[string]string{
 	"-s": "session", "--session": "session",
 	"-p": "path", "--path": "path",

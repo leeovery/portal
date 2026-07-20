@@ -46,8 +46,8 @@ type OpenBurstDeps struct {
 	// NewBurster constructs the burst orchestrator from the resolved adapter.
 	// Defaults to a production spawn.Burster reading the defaulted Ack/ExePath/Getenv.
 	NewBurster func(adapter spawn.Adapter) *spawn.Burster
-	// Logger receives the unsupported-terminal outcome line (Task 3-8 adds the batch
-	// summary). Defaults to the spawn-component logger (log.For("spawn")).
+	// Logger receives the unsupported-terminal outcome line, the batch summary,
+	// and per-window records. Defaults to the spawn-component logger (log.For("spawn")).
 	Logger *slog.Logger
 	// LocalMint self-connects a MINT trigger: it mints a fresh session at the
 	// resolved literal dir in the invoking terminal, threading the mint-scoped
