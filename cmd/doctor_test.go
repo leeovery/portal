@@ -199,6 +199,34 @@ func TestDoctorAllStateChecksPassExitsZero(t *testing.T) {
 	}
 }
 
+// TestDoctorZeroValueCheckResultNotHealthy pins the defensive iota-0 sentinel: a
+// zero-value checkResult{} — the shape a forgotten status assignment would
+// produce — must NOT read as pass and must NOT yield a healthy
+// (doctorUnhealthy == false) result. Without an explicit checkUnknown at iota 0
+// the zero value would silently classify as checkPass, letting the scriptable
+// exit-code contract be satisfied by an unset status.
+func TestDoctorZeroValueCheckResultNotHealthy(t *testing.T) {
+	zero := checkResult{}
+
+	if zero.status == checkPass {
+		t.Errorf("zero-value checkResult{}.status = %v; want a non-pass sentinel, never checkPass", zero.status)
+	}
+	if zero.status != checkUnknown {
+		t.Errorf("zero-value checkResult{}.status = %v; want checkUnknown (iota 0)", zero.status)
+	}
+	if checkUnknown != 0 {
+		t.Errorf("checkUnknown = %d; want the iota-0 value", checkUnknown)
+	}
+
+	if marker := checkMarker(zero.status); marker == "✓" {
+		t.Errorf("checkMarker(zero-value) = %q; a zero-value check must not render the pass marker", marker)
+	}
+
+	if !doctorUnhealthy([]checkResult{zero}) {
+		t.Error("doctorUnhealthy([zero-value]) = false; a forgotten status assignment must not yield a healthy exit")
+	}
+}
+
 func TestDoctorDeadDaemonFailsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	seedDeadDaemonPID(t, dir)

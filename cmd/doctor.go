@@ -36,8 +36,16 @@ const doctorRuntimeNotRunning = "Portal runtime not running — run portal open 
 type checkStatus int
 
 const (
+	// checkUnknown is the zero-value sentinel at iota 0: a checkResult built
+	// without an explicit status (a forgotten assignment) reads as checkUnknown,
+	// never as a passing health check. It renders without a pass marker and
+	// counts as unhealthy (doctorUnhealthy), so the scriptable exit-code contract
+	// can never be silently satisfied by an unset status. No production path
+	// constructs it — every checkResult carries an explicit status — so it is a
+	// defensive floor, not a real diagnostic outcome.
+	checkUnknown checkStatus = iota
 	// checkPass — the check succeeded; the subject is healthy.
-	checkPass checkStatus = iota
+	checkPass
 	// checkFail — the check found a problem; drives a non-zero exit.
 	checkFail
 	// checkInfo — informational only (e.g. host-terminal identity). Rendered
@@ -679,11 +687,15 @@ func checkMarker(s checkStatus) string {
 	}
 }
 
-// doctorUnhealthy reports whether any check failed. checkInfo and
+// doctorUnhealthy reports whether any check failed. A checkFail is the ordinary
+// unhealthy outcome; the checkUnknown zero-value sentinel also counts as
+// unhealthy so a forgotten status assignment actively fails the run rather than
+// silently reading as green (no production path constructs checkUnknown — this
+// is a defensive floor for the exit-code contract). checkInfo and
 // checkNotEvaluable never count toward the exit code.
 func doctorUnhealthy(results []checkResult) bool {
 	for _, r := range results {
-		if r.status == checkFail {
+		if r.status == checkFail || r.status == checkUnknown {
 			return true
 		}
 	}
