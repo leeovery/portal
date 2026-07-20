@@ -62,9 +62,6 @@ var completionAliasKeys = func() []string {
 	if err != nil {
 		return nil
 	}
-	if _, err := store.Load(); err != nil {
-		return nil
-	}
 	return store.Keys()
 }
 

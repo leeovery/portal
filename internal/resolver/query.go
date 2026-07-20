@@ -168,11 +168,11 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 // expandSessionGlobAll expands a session-domain glob pattern against names into
 // the K-surface result slice shared by ResolveBareAll and ResolveSessionPinAll:
 // zero matches is a single collected *MissResult carrying the pattern, otherwise
-// each match (in MatchSessions order) becomes a *SessionResult{Domain:"glob"}.
+// each match (in MatchGlob order) becomes a *SessionResult{Domain:"glob"}.
 // names is passed in because the two callers source it differently (ResolveBareAll
 // fetches it inside its glob branch; ResolveSessionPinAll reuses an earlier fetch).
 func expandSessionGlobAll(pattern string, names []string) []QueryResult {
-	matches := MatchSessions(pattern, names)
+	matches := MatchGlob(pattern, names)
 	if len(matches) == 0 {
 		return []QueryResult{&MissResult{Target: pattern}}
 	}
@@ -240,7 +240,7 @@ func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, erro
 // miss (spec § Atomic pre-flight & partial failure).
 //
 // A glob value expands against the enumerated alias-key namespace (Keys +
-// MatchSessions); each matched key's directory is validated on disk and reduced to
+// MatchGlob); each matched key's directory is validated on disk and reduced to
 // a *PathResult{Domain:"alias"}, but a gone directory for one matched key becomes a
 // *MissResult carrying THAT KEY (the surviving keys still resolve) — the parent
 // reduces every mint to a literal existing dir at resolve time (spec § Burst
@@ -249,7 +249,7 @@ func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, erro
 // is always nil.
 func (qr *QueryResolver) ResolveAliasPinAll(value string) ([]QueryResult, error) {
 	if HasGlobMeta(value) {
-		matches := MatchSessions(value, qr.aliases.Keys())
+		matches := MatchGlob(value, qr.aliases.Keys())
 		if len(matches) == 0 {
 			return []QueryResult{&MissResult{Target: value}}, nil
 		}

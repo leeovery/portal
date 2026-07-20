@@ -56,7 +56,7 @@ func buildProductionSpawnSeams(client *tmux.Client) productionSpawnSeams {
 		Exe:      os.Executable,
 		Getenv:   os.Getenv,
 		Exists:   client.HasSession,
-		Logger:   log.For("spawn"),
+		Logger:   spawnLogger,
 	}
 }
 

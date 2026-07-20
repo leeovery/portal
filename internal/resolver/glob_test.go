@@ -33,7 +33,7 @@ func TestHasGlobMeta(t *testing.T) {
 	}
 }
 
-func TestMatchSessions(t *testing.T) {
+func TestMatchGlob(t *testing.T) {
 	tests := []struct {
 		name     string
 		pattern  string
@@ -68,13 +68,13 @@ func TestMatchSessions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolver.MatchSessions(tt.pattern, tt.names)
+			got := resolver.MatchGlob(tt.pattern, tt.names)
 			if len(got) != len(tt.expected) {
-				t.Fatalf("MatchSessions(%q, %v) = %v, want %v", tt.pattern, tt.names, got, tt.expected)
+				t.Fatalf("MatchGlob(%q, %v) = %v, want %v", tt.pattern, tt.names, got, tt.expected)
 			}
 			for i := range got {
 				if got[i] != tt.expected[i] {
-					t.Errorf("MatchSessions(%q, %v)[%d] = %q, want %q", tt.pattern, tt.names, i, got[i], tt.expected[i])
+					t.Errorf("MatchGlob(%q, %v)[%d] = %q, want %q", tt.pattern, tt.names, i, got[i], tt.expected[i])
 				}
 			}
 		})
