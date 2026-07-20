@@ -435,7 +435,7 @@ func checkStaleHooks(lister AllPaneLister, store *hooks.Store) checkResult {
 	}
 	stale := countStaleHookKeys(persisted, live)
 	if stale > 0 {
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("%d stale hook entries", stale)}
+		return checkResult{name: name, status: checkFail, detail: pluralCount(stale, "stale hook entry", "stale hook entries")}
 	}
 	return checkResult{name: name, status: checkPass, detail: "no stale hooks"}
 }
@@ -485,7 +485,7 @@ func checkStaleProjects(store *project.Store) checkResult {
 		}
 	}
 	if stale > 0 {
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("%d stale projects", stale)}
+		return checkResult{name: name, status: checkFail, detail: pluralCount(stale, "stale project", "stale projects")}
 	}
 	return checkResult{name: name, status: checkPass, detail: "no stale projects"}
 }
@@ -596,6 +596,19 @@ func doctorDaemonVersion(v string) string {
 	return v
 }
 
+// pluralCount renders "<n> <unit>" with the grammatically-correct unit: the
+// singular form when n == 1, the plural form otherwise. Doctor's count
+// diagnostics use it so a single entry reads "1 stale project", not the
+// ungrammatical "1 stale projects". Same singular-only-for-exactly-1 rule as
+// cmd/list.go's window count.
+func pluralCount(n int, singular, plural string) string {
+	unit := plural
+	if n == 1 {
+		unit = singular
+	}
+	return fmt.Sprintf("%d %s", n, unit)
+}
+
 // checkStateDirSane reports whether the state directory is a usable directory.
 // A not-yet-created directory passes ("not created yet") — a fresh install is
 // healthy — while an existing-but-non-directory path or an unreadable stat
@@ -639,7 +652,7 @@ func checkSessionsJSON(dir string, dirErr error) checkResult {
 		return checkResult{
 			name:   name,
 			status: checkPass,
-			detail: fmt.Sprintf("%d sessions, %d panes", len(idx.Sessions), state.CountPanes(idx)),
+			detail: fmt.Sprintf("%s, %s", pluralCount(len(idx.Sessions), "session", "sessions"), pluralCount(state.CountPanes(idx), "pane", "panes")),
 		}
 	}
 }

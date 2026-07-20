@@ -190,7 +190,7 @@ func TestDoctorAllStateChecksPassExitsZero(t *testing.T) {
 	if !strings.Contains(out, wantDaemon) {
 		t.Errorf("report missing daemon detail %q:\n%s", wantDaemon, out)
 	}
-	if !strings.Contains(out, "1 sessions, 1 panes") {
+	if !strings.Contains(out, "1 session, 1 pane") {
 		t.Errorf("report missing sessions detail:\n%s", out)
 	}
 }
@@ -338,6 +338,63 @@ func TestDoctorStateDirSaneHealthyDirPasses(t *testing.T) {
 	if got.status != checkPass {
 		t.Errorf("status = %v; want checkPass for an existing directory", got.status)
 	}
+}
+
+// TestDoctorStateDirSaneFailBranches pins the two checkStateDirSane failure
+// paths: an existing-but-non-directory state-dir path, and an unreadable stat
+// (a non-ErrNotExist os.Stat error). Both are pure unit tests — no real tmux or
+// daemon — driven through runDoctorDiagnosis with a healthy runtime so only the
+// state-dir check is the subject.
+func TestDoctorStateDirSaneFailBranches(t *testing.T) {
+	t.Run("existing path that is not a directory fails", func(t *testing.T) {
+		// A regular file at the state-dir path: os.Stat succeeds but IsDir() is
+		// false → the "not a directory" fail branch.
+		file := filepath.Join(t.TempDir(), "state")
+		if err := os.WriteFile(file, []byte("i am a file, not a dir"), 0o600); err != nil {
+			t.Fatalf("write state file: %v", err)
+		}
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: file}))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "state dir")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail when the state-dir path is a regular file", got.status)
+		}
+		if got.detail != "not a directory" {
+			t.Errorf("detail = %q; want %q", got.detail, "not a directory")
+		}
+	})
+
+	t.Run("unreadable stat fails", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root bypasses 0o000 directory permissions; the stat would not fail")
+		}
+		// A state-dir path nested inside a directory stripped of all permissions:
+		// os.Stat of the child returns EACCES (not ErrNotExist), exercising the
+		// "unreadable" fail branch.
+		blocked := filepath.Join(t.TempDir(), "blocked")
+		if err := os.Mkdir(blocked, 0o700); err != nil {
+			t.Fatalf("mkdir blocked: %v", err)
+		}
+		dir := filepath.Join(blocked, "state")
+		if err := os.Chmod(blocked, 0o000); err != nil {
+			t.Fatalf("chmod 0o000: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(blocked, 0o700) })
+
+		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "state dir")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail on an unreadable stat", got.status)
+		}
+		if got.detail != "unreadable" {
+			t.Errorf("detail = %q; want %q", got.detail, "unreadable")
+		}
+	})
 }
 
 func TestDoctorRegisteredInSkipTmuxCheck(t *testing.T) {
@@ -833,8 +890,25 @@ func TestDoctorStaleHooksCheck(t *testing.T) {
 		if got.status != checkFail {
 			t.Errorf("status = %v; want checkFail for a stale hook entry", got.status)
 		}
-		if got.detail != "1 stale hook entries" {
-			t.Errorf("detail = %q; want %q", got.detail, "1 stale hook entries")
+		if got.detail != "1 stale hook entry" {
+			t.Errorf("detail = %q; want %q", got.detail, "1 stale hook entry")
+		}
+	})
+
+	t.Run("multiple stale entries use the plural count copy", func(t *testing.T) {
+		dir := t.TempDir()
+		hookStore, _ := seedHooksJSON(t, "sessA:0.0", "sessB:0.0")
+		lister := fakeHookLister{keys: []string{"sessC:0.0"}}
+		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale hooks")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail for stale hook entries", got.status)
+		}
+		if got.detail != "2 stale hook entries" {
+			t.Errorf("detail = %q; want %q", got.detail, "2 stale hook entries")
 		}
 	})
 
@@ -925,6 +999,64 @@ func runDoctorFixCmd(t *testing.T, deps *DoctorDeps) (*bytes.Buffer, *bytes.Buff
 	rootCmd.SetArgs([]string{"doctor", "--fix"})
 	err := rootCmd.Execute()
 	return outBuf, errBuf, err
+}
+
+// runDoctorCmd executes plain "portal doctor" (no --fix) with the supplied
+// hermetic DoctorDeps, returning stdout, stderr, and the rootCmd.Execute error.
+// Like runDoctorFixCmd it wires exactly the seams the scenario needs — no real
+// tmux server or state dir is touched — but drives the read-only diagnosis path
+// that ends in ErrDoctorUnhealthy rather than the repair path.
+func runDoctorCmd(t *testing.T, deps *DoctorDeps) (*bytes.Buffer, *bytes.Buffer, error) {
+	t.Helper()
+	doctorDeps = deps
+	t.Cleanup(func() { doctorDeps = nil })
+
+	outBuf := new(bytes.Buffer)
+	errBuf := new(bytes.Buffer)
+	resetRootCmd()
+	rootCmd.SetOut(outBuf)
+	rootCmd.SetErr(errBuf)
+	rootCmd.SetArgs([]string{"doctor"})
+	err := rootCmd.Execute()
+	return outBuf, errBuf, err
+}
+
+// TestDoctorExecuteStaleEntryReturnsUnhealthy Executes plain `portal doctor`
+// (not --fix) over an otherwise-healthy runtime carrying a genuinely stale hook
+// AND a stale project, and asserts the command returns ErrDoctorUnhealthy: the
+// read-only diagnosis surfaces the stale state as a non-zero exit without
+// repairing anything (only --fix prunes).
+func TestDoctorExecuteStaleEntryReturnsUnhealthy(t *testing.T) {
+	dir := t.TempDir()
+	seedHealthyStateDir(t, dir)
+
+	// A persisted hook key with no matching live pane — the live set is non-empty,
+	// so the hazard guard does NOT defer — is genuinely stale.
+	hookStore, _ := seedHooksJSON(t, "sessA:0.0")
+	lister := fakeHookLister{keys: []string{"sessB:0.0"}}
+	// A project whose directory no longer exists is genuinely stale.
+	goneDir := filepath.Join(t.TempDir(), "gone")
+	projectStore, _ := seedProjectsJSON(t, goneDir)
+
+	outBuf, errBuf, err := runDoctorCmd(t, staleDeps(dir, lister, hookStore, projectStore))
+	if err != ErrDoctorUnhealthy {
+		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy on a stale hook/project over a healthy runtime", err)
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("expected silent stderr on unhealthy exit; got %q", errBuf.String())
+	}
+
+	out := outBuf.String()
+	if !strings.Contains(out, "stale hooks: 1 stale hook entry") {
+		t.Errorf("report missing stale-hooks fail line:\n%s", out)
+	}
+	if !strings.Contains(out, "stale projects: 1 stale project") {
+		t.Errorf("report missing stale-projects fail line:\n%s", out)
+	}
+	// Plain doctor is read-only: exactly one report renders (no post-repair pass).
+	if n := strings.Count(out, "Portal doctor:"); n != 1 {
+		t.Errorf("report count = %d; want 1 (plain doctor renders once, no --fix re-diagnosis):\n%s", n, out)
+	}
 }
 
 // TestDoctorFixPrunesStaleEntriesThenRediagnosesClean is the happy path: a stale
@@ -1121,8 +1253,26 @@ func TestDoctorStaleProjectsCheck(t *testing.T) {
 			t.Errorf("status = %v; want checkFail for a gone-dir project", got.status)
 		}
 		// Only the gone dir is stale; the live dir is retained (not counted).
-		if got.detail != "1 stale projects" {
-			t.Errorf("detail = %q; want %q", got.detail, "1 stale projects")
+		if got.detail != "1 stale project" {
+			t.Errorf("detail = %q; want %q", got.detail, "1 stale project")
+		}
+	})
+
+	t.Run("multiple stale projects use the plural count copy", func(t *testing.T) {
+		dir := t.TempDir()
+		goneA := filepath.Join(t.TempDir(), "gone-a")
+		goneB := filepath.Join(t.TempDir(), "gone-b")
+		projectStore, _ := seedProjectsJSON(t, goneA, goneB)
+		results, err := runDoctorDiagnosis(staleDeps(dir, fakeHookLister{}, nil, projectStore))
+		if err != nil {
+			t.Fatalf("runDoctorDiagnosis: %v", err)
+		}
+		got := findCheck(t, results, "stale projects")
+		if got.status != checkFail {
+			t.Errorf("status = %v; want checkFail for gone-dir projects", got.status)
+		}
+		if got.detail != "2 stale projects" {
+			t.Errorf("detail = %q; want %q", got.detail, "2 stale projects")
 		}
 	})
 
