@@ -1,0 +1,16 @@
+---
+topic: cli-verb-surface-redesign
+cycle: 4
+total_findings: 4
+deduplicated_findings: 4
+proposed_tasks: 1
+---
+# Analysis Report: CLI Verb Surface Redesign (Cycle 4)
+
+## Summary
+The feature is exceptionally well-consolidated after cycles 1-3 (12 tasks remediated): the two burst orchestrations and the resolver All-variants single-source every message, count-semantics, and log-emission decision through `internal/spawn` and `cmd` helpers. Cycle 4 surfaced four findings across the three agents, all distinct (no cross-agent duplication). Only one is actionable: the `open` command's top-level `Use`/`Short` help strings still describe the pre-redesign single-destination verb — a genuine, low-risk, user-facing documentation fix on the surface the redesign made more prominent (`portal open --help` / bare `portal` → help).
+
+## Discarded Findings
+- Twin prefix-filter bodies in `completeSessionNames` / `completeAliasKeys` (duplication, low) — Only two instances, below the strict Rule of Three; the two candidate-source seams carry divergent session-vs-alias intent. Discarded in cycles 1 & 3 on the same grounds; still the pragmatic call. Below the extraction bar.
+- Repeated `!serverUp` guard shape across the three doctor runtime checks (duplication, low) — Three short (three-line) guard-and-return blocks with the detail string already single-sourced via `doctorRuntimeNotRunning`. Sits well under the proportionality bar the quality standard sets ("three similar lines is not worth extracting"); each check reads better fully self-contained. Discarded in cycle 3; unchanged.
+- `doctor`'s read-only stale-checks re-derive the stores' staleness classification (architecture, medium) — Assessed against the cycle-4 "extract a pure classifier from CleanStale" framing and discarded. The projects half (`os.Stat` three-way switch) is cleanly extractable, but the hooks half is not: the empty-live-set hazard-guard *policy* is genuinely caller-specific — `runHookStaleCleanup`/daemon must defer-and-warn (never delete), while `doctor.checkStaleHooks` must report `checkNotEvaluable` (never "all stale"). A shared "bake in the guard" primitive returning a plain stale `[]string` would make doctor report `checkPass "no stale hooks"` on an empty live set, regressing the load-bearing honesty property the code comments call out ("NEVER report all stale ... a false failure can never mislead a --fix into a mass-delete"). Preserving that distinction forces either a tri-state API more complex than the current guarded mirror, or leaving doctor's empty-live guard duplicated anyway — so the extraction does not cleanly close the drift on the hooks side. The change would restructure both stores' mutation path (`CleanStale`) plus `runHookStaleCleanup` and their tests, in a converging cycle-4 loop, for duplication that is small (~7-line ∉ loop / ~10-line os.Stat switch, at/below the proportionality bar) and already fenced by explicit "READ-ONLY mirror" comments. The read-only mirror is the pragmatic choice — exactly the fallback the guidance names — so this remains discarded, now with the classifier-extraction path assessed and rejected. Not high-severity, so the never-discard-high rule does not apply.
