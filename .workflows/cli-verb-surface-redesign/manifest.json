@@ -165,7 +165,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 16,
-          "current_task": "cli-verb-surface-redesign-16-2",
+          "current_task": "~",
           "completed_tasks": [
             "cli-verb-surface-redesign-1-1",
             "cli-verb-surface-redesign-1-2",
@@ -229,7 +229,8 @@
             "cli-verb-surface-redesign-14-3",
             "cli-verb-surface-redesign-14-4",
             "cli-verb-surface-redesign-15-1",
-            "cli-verb-surface-redesign-16-1"
+            "cli-verb-surface-redesign-16-1",
+            "cli-verb-surface-redesign-16-2"
           ],
           "completed_phases": [
             1,
@@ -246,7 +247,8 @@
             12,
             13,
             14,
-            15
+            15,
+            16
           ],
           "updated": "2026-07-20"
         }

@@ -52,7 +52,7 @@ func TestResolveOpenSurfaces_MixedOrderedSet(t *testing.T) {
 		{Value: "blog", Domain: "bare"},
 	}
 
-	surfaces, misses, err := resolveOpenSurfaces(qr, targets)
+	surfaces, _, misses, err := resolveOpenSurfaces(qr, targets)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestResolveOpenSurfaces_SessionGlobExpandsInPlace(t *testing.T) {
 		{Value: "tail", Domain: "session"},
 	}
 
-	surfaces, misses, err := resolveOpenSurfaces(qr, targets)
+	surfaces, _, misses, err := resolveOpenSurfaces(qr, targets)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestResolveOpenSurfaces_SessionPinSurface(t *testing.T) {
 	)
 
 	t.Run("exact session pin is one attach surface", func(t *testing.T) {
-		surfaces, misses, err := resolveOpenSurfaces(qr, []Target{{Value: "dev", Domain: "session"}})
+		surfaces, _, misses, err := resolveOpenSurfaces(qr, []Target{{Value: "dev", Domain: "session"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -128,7 +128,7 @@ func TestResolveOpenSurfaces_SessionPinSurface(t *testing.T) {
 	})
 
 	t.Run("session pin miss is a collected miss", func(t *testing.T) {
-		surfaces, misses, err := resolveOpenSurfaces(qr, []Target{{Value: "gone", Domain: "session"}})
+		surfaces, _, misses, err := resolveOpenSurfaces(qr, []Target{{Value: "gone", Domain: "session"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -154,7 +154,7 @@ func TestResolveOpenSurfaces_AliasKeyGlobExpandsToMints(t *testing.T) {
 
 	targets := []Target{{Value: "workflow-*", Domain: "alias"}}
 
-	surfaces, misses, err := resolveOpenSurfaces(qr, targets)
+	surfaces, _, misses, err := resolveOpenSurfaces(qr, targets)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestResolveOpenSurfaces_OverlappingGlobsDuplicate(t *testing.T) {
 		{Value: "api-1", Domain: "session"},
 	}
 
-	surfaces, misses, err := resolveOpenSurfaces(qr, targets)
+	surfaces, _, misses, err := resolveOpenSurfaces(qr, targets)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestResolveOpenSurfaces_MintReducedToLiteralDir(t *testing.T) {
 		{Value: "prj", Domain: "zoxide"},
 	}
 
-	surfaces, _, err := resolveOpenSurfaces(qr, targets)
+	surfaces, _, _, err := resolveOpenSurfaces(qr, targets)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestResolveOpenSurfaces_GlobNamedDir_BareIsMiss_PathIsMint(t *testing.T) {
 	qr := newSurfaceResolver(nil, map[string]string{}, "", resolver.ErrNoMatch, map[string]bool{})
 
 	t.Run("bare positional is a collected miss", func(t *testing.T) {
-		surfaces, misses, err := resolveOpenSurfaces(qr, []Target{{Value: globDir, Domain: "bare"}})
+		surfaces, _, misses, err := resolveOpenSurfaces(qr, []Target{{Value: globDir, Domain: "bare"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -258,7 +258,7 @@ func TestResolveOpenSurfaces_GlobNamedDir_BareIsMiss_PathIsMint(t *testing.T) {
 	})
 
 	t.Run("-p pin mints the literal dir", func(t *testing.T) {
-		surfaces, misses, err := resolveOpenSurfaces(qr, []Target{{Value: globDir, Domain: "path"}})
+		surfaces, _, misses, err := resolveOpenSurfaces(qr, []Target{{Value: globDir, Domain: "path"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -286,7 +286,7 @@ func TestResolveOpenSurfaces_ZoxideNotInstalled_ImmediateHardError(t *testing.T)
 		{Value: "prj", Domain: "zoxide"},
 	}
 
-	surfaces, misses, err := resolveOpenSurfaces(qr, targets)
+	surfaces, _, misses, err := resolveOpenSurfaces(qr, targets)
 	if err == nil {
 		t.Fatal("expected an immediate hard error for ErrZoxideNotInstalled, got nil")
 	}
@@ -320,7 +320,7 @@ func TestResolveOpenSurfaces_CollectedMisses(t *testing.T) {
 		{Value: filePath, Domain: "path"},
 	}
 
-	surfaces, misses, err := resolveOpenSurfaces(qr, targets)
+	surfaces, _, misses, err := resolveOpenSurfaces(qr, targets)
 	if err != nil {
 		t.Fatalf("unexpected error (collected misses must not hard-fail): %v", err)
 	}
@@ -371,7 +371,7 @@ func TestResolveOpenSurfaces_ReadOnly_NoMintOrAttach(t *testing.T) {
 		{Value: "myapp", Domain: "alias"},
 	}
 
-	surfaces, _, err := resolveOpenSurfaces(qr, targets)
+	surfaces, _, _, err := resolveOpenSurfaces(qr, targets)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestResolveOpenSurfaces_ResolveLog_BareNonGlobOnly(t *testing.T) {
 		{Value: "gone", Domain: "bare"},   // bare total miss: line
 	}
 
-	_, _, err := resolveOpenSurfaces(qr, targets)
+	_, _, _, err := resolveOpenSurfaces(qr, targets)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -428,6 +428,66 @@ func TestResolveOpenSurfaces_ResolveLog_BareNonGlobOnly(t *testing.T) {
 	assertResolveAttr(t, recs[2], "target", "gone")
 	assertResolveAttr(t, recs[2], "domain", "miss")
 	assertResolveAttr(t, recs[2], "resolved_path", "")
+}
+
+func TestResolveOpenSurfaces_DegenerateSingle_ThreadsTrueResultDomain(t *testing.T) {
+	// The engine retains the originating resolver.QueryResult alongside each
+	// surface (results[i] produced surfaces[i]). For the degenerate
+	// single-surviving-surface case, dispatchOpenBurst forwards results[0]
+	// VERBATIM into openResolved, so results[0] IS the value at the openResolved
+	// boundary. It must carry the TRUE resolver Domain provenance — a glob
+	// expansion is DomainGlob (attach) / DomainAlias (mint), never a fabricated
+	// DomainSession / DomainPath.
+
+	t.Run("session glob to one attach carries DomainGlob", func(t *testing.T) {
+		qr := newSurfaceResolver([]string{"api-1"}, map[string]string{}, "", resolver.ErrNoMatch, map[string]bool{})
+
+		surfaces, results, misses, err := resolveOpenSurfaces(qr, []Target{{Value: "api-*", Domain: "session"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(misses) != 0 {
+			t.Fatalf("misses = %v, want none", misses)
+		}
+		if len(surfaces) != 1 || len(results) != 1 {
+			t.Fatalf("surfaces=%d results=%d, want exactly 1 each (degenerate single surface)", len(surfaces), len(results))
+		}
+		sr, ok := results[0].(*resolver.SessionResult)
+		if !ok {
+			t.Fatalf("results[0] = %T, want *resolver.SessionResult", results[0])
+		}
+		if sr.Domain != resolver.DomainGlob {
+			t.Errorf("results[0].Domain = %q, want %q (true provenance, not fabricated DomainSession)", sr.Domain, resolver.DomainGlob)
+		}
+	})
+
+	t.Run("alias glob to one mint carries DomainAlias", func(t *testing.T) {
+		qr := newSurfaceResolver(
+			nil,
+			map[string]string{"workflow-a": "/code/wa"},
+			"",
+			resolver.ErrNoMatch,
+			map[string]bool{"/code/wa": true},
+		)
+
+		surfaces, results, misses, err := resolveOpenSurfaces(qr, []Target{{Value: "workflow-*", Domain: "alias"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(misses) != 0 {
+			t.Fatalf("misses = %v, want none", misses)
+		}
+		if len(surfaces) != 1 || len(results) != 1 {
+			t.Fatalf("surfaces=%d results=%d, want exactly 1 each (degenerate single surface)", len(surfaces), len(results))
+		}
+		pr, ok := results[0].(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("results[0] = %T, want *resolver.PathResult", results[0])
+		}
+		if pr.Domain != resolver.DomainAlias {
+			t.Errorf("results[0].Domain = %q, want %q (true provenance, not fabricated DomainPath)", pr.Domain, resolver.DomainAlias)
+		}
+	})
 }
 
 // assertSurfaces asserts got equals want, element by element, in order.

@@ -129,7 +129,7 @@ func dispatchOpenBurst(cmd *cobra.Command, ordered []Target, command []string) e
 		return err
 	}
 
-	surfaces, misses, err := resolveOpenSurfaces(qr, ordered)
+	surfaces, results, misses, err := resolveOpenSurfaces(qr, ordered)
 	if err != nil {
 		// Only resolver.ErrZoxideNotInstalled reaches here — an environment fault
 		// that aborts the whole resolve immediately; nothing opens.
@@ -145,19 +145,16 @@ func dispatchOpenBurst(cmd *cobra.Command, ordered []Target, command []string) e
 	}
 
 	if len(surfaces) == 1 {
-		return openResolved(cmd, surfaceToResult(surfaces[0]), command)
+		// Degenerate single-surviving surface (only reachable from a single glob
+		// expanding to exactly one match). Thread the TRUE resolver result —
+		// results[0] is the exact QueryResult that produced surfaces[0], carrying
+		// its real Domain provenance (DomainGlob for an attach, DomainAlias for a
+		// mint) — rather than fabricating a domain from the lossy Surface. The
+		// upstream resolve-decision line already fired in resolveOpenSurfaces; this
+		// reuse of openResolved is only for the command guard + ack write + connector
+		// dispatch, none of which read Domain, so behaviour is unchanged.
+		return openResolved(cmd, results[0], command)
 	}
 
 	return runOpenBurstFunc(cmd, surfaces, command)
-}
-
-// surfaceToResult converts a resolved Surface back into the resolver.QueryResult
-// shape openResolved dispatches on, for the single-surface degenerate case. An
-// attach surface names an existing session (session domain); a mint surface
-// names a resolved literal directory (path domain).
-func surfaceToResult(s spawn.Surface) resolver.QueryResult {
-	if s.Kind == spawn.SurfaceMint {
-		return &resolver.PathResult{Path: s.Value, Domain: resolver.DomainPath}
-	}
-	return &resolver.SessionResult{Name: s.Value, Domain: resolver.DomainSession}
 }

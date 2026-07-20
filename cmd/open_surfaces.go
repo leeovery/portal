@@ -34,19 +34,28 @@ import (
 //     (Planner note: the tentative split of "non-directory -p" as an immediate
 //     hard error is deliberately folded into COLLECTED MISS here — flagged for
 //     review.)
-func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces []spawn.Surface, misses []string, err error) {
+func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces []spawn.Surface, results []resolver.QueryResult, misses []string, err error) {
 	// collect classifies a []QueryResult from an All-variant into the ordered
 	// surface/miss slices: a SessionResult is an attach surface (Value = name), a
 	// PathResult is a mint surface (Value = the resolved literal dir), a MissResult
 	// appends its raw target. These are the only three shapes the All-variants and
 	// the mint pins produce.
-	collect := func(results []resolver.QueryResult) {
-		for _, r := range results {
+	//
+	// results is retained in LOCKSTEP with surfaces: results[i] is the resolver
+	// QueryResult that produced surfaces[i] (both appended together in the same
+	// switch arm; miss results produce no surface and are NOT retained here). The
+	// degenerate single-surviving-surface dispatch (dispatchOpenBurst) threads
+	// results[0] — the TRUE resolver result, carrying its real Domain provenance —
+	// into openResolved, so no domain is fabricated from the lossy Surface.
+	collect := func(classified []resolver.QueryResult) {
+		for _, r := range classified {
 			switch res := r.(type) {
 			case *resolver.SessionResult:
 				surfaces = append(surfaces, spawn.Surface{Kind: spawn.SurfaceAttach, Value: res.Name})
+				results = append(results, res)
 			case *resolver.PathResult:
 				surfaces = append(surfaces, spawn.Surface{Kind: spawn.SurfaceMint, Value: res.Path})
+				results = append(results, res)
 			case *resolver.MissResult:
 				misses = append(misses, res.Target)
 			}
@@ -88,7 +97,7 @@ func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces
 			r, zerr := qr.ResolveZoxidePin(t.Value)
 			if zerr != nil {
 				if errors.Is(zerr, resolver.ErrZoxideNotInstalled) {
-					return nil, nil, zerr
+					return nil, nil, nil, zerr
 				}
 				misses = append(misses, t.Value)
 				continue
@@ -97,5 +106,5 @@ func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces
 		}
 	}
 
-	return surfaces, misses, nil
+	return surfaces, results, misses, nil
 }
