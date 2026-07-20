@@ -149,9 +149,32 @@ func openSession(cmd *cobra.Command, name string) error {
 }
 
 var openCmd = &cobra.Command{
-	Use:   "open [-e cmd] [destination] [-- cmd args...]",
-	Short: "Open the interactive session picker or start a session at a path",
-	Args:  cobra.ArbitraryArgs,
+	Use:   "open [targets…] [-- cmd args…]",
+	Short: "Open portals to one or more targets, or launch the interactive picker",
+	Long: `Open one or more portals, or launch the interactive session picker.
+
+With no arguments, open launches the TUI picker so you can choose a destination.
+
+A bare target is resolved through the precedence chain — exact session name → path
+→ alias → zoxide query, first match wins. An exact session name attaches that
+existing session; a path, alias, or zoxide match mints a new session there.
+
+Domain pins skip the precedence chain and force a single domain:
+  -s, --session   attach the named session or session glob (never mints)
+  -p, --path      mint a new session at the given directory (must exist)
+  -a, --alias     mint a new session at the given alias key or key glob
+  -z, --zoxide    mint a new session at zoxide's best match
+
+  -f, --filter    skip resolution and open the picker pre-filtered by <text>
+                  (mutually exclusive with a target and every domain pin)
+
+A command to run in a freshly minted session is scoped with -e/--exec or after a
+-- separator; command scoping applies to mint outcomes only, never to an attach.
+
+Passing two or more targets (or one glob that expands to several sessions) opens a
+portal to each: this terminal becomes the first surface and the remaining N−1 open
+in host-terminal windows.`,
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command, destination, err := parseCommandArgs(cmd, args)
 		if err != nil {

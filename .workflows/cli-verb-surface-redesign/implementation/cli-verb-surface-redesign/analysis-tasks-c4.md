@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: CLI Verb Surface Redesign (Cycle 4)
 
 ## Task 1: Refresh the stale `open` command help text to describe the redesigned verb
-status: pending
+status: approved
 severity: low
 sources: standards
 

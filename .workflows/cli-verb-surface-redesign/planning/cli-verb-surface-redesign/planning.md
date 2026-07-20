@@ -229,3 +229,15 @@ Address findings from Analysis (Cycle 2).
 | cli-verb-surface-redesign-8-3 | Refresh stale post-redesign documentation and comments | Comment/doc-only change; process_role.go `roleTUI` mapping and `process_role_test.go` unchanged (comment-only in that file); bare `portal` described as prints help/usage, not TUI picker; CLAUDE.md "Incident of record #2" period-marked or re-anchored so removed `state cleanup` / deleted `TestStateUserFacingSubcommandsExitZero` don't read as current; underlying lesson preserved; no new code test, existing `process_role` tests stay green |
 
 ---
+
+### Phase 10: Analysis (Cycle 4)
+
+Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cli-verb-surface-redesign-10-1 | Refresh the stale `open` command help text to describe the redesigned verb | Help-metadata only (`Use`/`Short`/`Long`) — do NOT touch `RunE`/`Args`/flag registration/dispatch/resolution; `portal open --help` and bare `portal --help` both name session-name attach, the `-s`/`-p`/`-z`/`-a` pins, `-f`/`--filter`, `-e`/`--` command scoping, and multi-target opening — no single-path `destination` implication; copy stays consistent with the accurate per-flag strings (open.go:976-979) and the spec §405 row; spec dictates no golden string (match intent, not exact copy); guard test asserts `openCmd.Short`/`Long` mentions the redesigned capabilities, and any test asserting the literal `Use`/`Short` strings is updated; full unit+integration suite stays green |
+
+---

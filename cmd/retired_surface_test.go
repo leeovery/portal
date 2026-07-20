@@ -164,3 +164,59 @@ func TestRetiredSurface_AbsorbedBehavioursReachableViaOpen(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenHelpMetadata_DescribesRedesignedVerb is a cheap guard against the
+// top-level `open` help re-staling into the pre-redesign single-destination
+// wording (Task 10-1). It asserts the Short/Long copy names the redesigned
+// surface — session-name attach, the domain pins, -f/--filter, -e/-- command
+// scoping, and multi-target opening — and no longer implies a single path
+// "destination". It intentionally pins intent (keywords), not a golden string,
+// so accurate copy edits don't churn the test.
+func TestOpenHelpMetadata_DescribesRedesignedVerb(t *testing.T) {
+	// Use must reflect the target-set shape, not a single [destination].
+	if strings.Contains(openCmd.Use, "destination") {
+		t.Errorf("openCmd.Use still implies a single [destination]: %q", openCmd.Use)
+	}
+
+	// Short must name what the verb does now (multiple targets and/or picker) and
+	// must not carry the stale "start a session at a path" single-destination copy.
+	short := strings.ToLower(openCmd.Short)
+	if strings.Contains(short, "at a path") {
+		t.Errorf("openCmd.Short still reads like the single-path pre-redesign command: %q", openCmd.Short)
+	}
+	if !strings.Contains(short, "target") && !strings.Contains(short, "portal") {
+		t.Errorf("openCmd.Short does not name the multi-target surface: %q", openCmd.Short)
+	}
+	if !strings.Contains(short, "picker") {
+		t.Errorf("openCmd.Short does not mention the interactive picker: %q", openCmd.Short)
+	}
+
+	// Long must describe the full redesigned surface: session-name attach, each of
+	// the four domain pins, -f/--filter, -e/-- command scoping, and multi-target.
+	if openCmd.Long == "" {
+		t.Fatal("openCmd.Long is empty; expected a description of the redesigned surface")
+	}
+	long := strings.ToLower(openCmd.Long)
+	for _, want := range []string{
+		"picker",     // no-args → interactive picker
+		"session",    // session-name attach
+		"attach",     // attach outcome named
+		"mint",       // mint outcome named
+		"-s",         // --session pin
+		"-p",         // --path pin
+		"-a",         // --alias pin
+		"-z",         // --zoxide pin
+		"-f",         // --filter
+		"-e",         // --exec command scoping
+		"--",         // command separator
+		"precedence", // the resolution precedence chain
+	} {
+		if !strings.Contains(long, want) {
+			t.Errorf("openCmd.Long omits %q; full surface not described:\n%s", want, openCmd.Long)
+		}
+	}
+	// Multi-target opening must be described (host-terminal windows / N surfaces).
+	if !strings.Contains(long, "window") && !strings.Contains(long, "surface") {
+		t.Errorf("openCmd.Long does not describe multi-target opening:\n%s", openCmd.Long)
+	}
+}
