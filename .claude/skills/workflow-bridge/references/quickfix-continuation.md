@@ -8,29 +8,15 @@ Route a quick-fix to its next pipeline phase, with an option to revisit earlier 
 
 Quick-fix pipeline: Scoping → Implementation → Review
 
-## Phase Routing
-
-Use `next_phase` from discovery output to determine the target skill:
-
-| next_phase | Target Skill |
-|------------|--------------|
-| scoping | workflow-scoping-entry |
-| implementation | workflow-implementation-entry |
-| review | workflow-review-entry |
-| done | (terminal) |
-
 ## A. Check Terminal
 
 #### If `next_phase` is `done`
 
-Set the work unit status to completed:
+Complete the work unit — one command sets `status: completed`, stamps `completed_at`, and commits:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit} status completed
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit} completed_at $(date +%Y-%m-%d)
+node .claude/skills/workflow-engine/scripts/engine.cjs workunit complete {work_unit} -m "workflow({work_unit}): complete quick-fix pipeline"
 ```
-
-Commit: `workflow({work_unit}): complete quick-fix pipeline`
 
 > *Output the next fenced block as a code block:*
 
@@ -62,7 +48,6 @@ Implementation completed for "{work_unit:(titlecase)}".
 
 - **`y`/`yes`** — Proceed to review
 - **`d`/`done`** — Complete without review
-
 · · · · · · · · · · · ·
 ```
 
@@ -70,14 +55,11 @@ Implementation completed for "{work_unit:(titlecase)}".
 
 **If user chose `d`/`done`:**
 
-Set the work unit status to completed:
+Complete the work unit — one command sets `status: completed`, stamps `completed_at`, and commits:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit} status completed
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit} completed_at $(date +%Y-%m-%d)
+node .claude/skills/workflow-engine/scripts/engine.cjs workunit complete {work_unit} -m "workflow({work_unit}): complete quick-fix pipeline (review skipped)"
 ```
-
-Commit: `workflow({work_unit}): complete quick-fix pipeline (review skipped)`
 
 > *Output the next fenced block as a code block:*
 
@@ -99,13 +81,13 @@ Quick-Fix Completed
 
 ## C. Check for Earlier Phases
 
-Check if there are completed phases earlier in the pipeline that the user could revisit. Look at the discovery output's `phases` data — any phase with status `completed` that comes before `next_phase` in the pipeline order.
+Read the discovery output's `revisitable_phases` — the completed phases the user could revisit, already filtered to quick-fix pipeline phases (specification and planning, written by scoping, are never revisit targets).
 
-#### If no earlier completed phases exist
+#### If `revisitable_phases` is `(none)`
 
 → Proceed to **F. Enter Plan Mode**.
 
-#### If earlier completed phases exist
+#### Otherwise
 
 → Proceed to **D. Offer Revisit**.
 
@@ -119,7 +101,6 @@ Check if there are completed phases earlier in the pipeline that the user could 
 
 - **`y`/`yes`** — Proceed to {next_phase}
 - **`r`/`revisit`** — Revisit an earlier phase
-
 · · · · · · · · · · · ·
 ```
 
@@ -135,21 +116,7 @@ Check if there are completed phases earlier in the pipeline that the user could 
 
 ## E. Select Phase
 
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-· · · · · · · · · · · ·
-Which phase would you like to revisit?
-
-- **`1`** — {phase:(titlecase)} — completed
-- **`2`** — ...
-- **`b`/`back`** — Return to the previous menu
-
-Select an option:
-· · · · · · · · · · · ·
-```
-
-List only completed phases that come before `next_phase`.
+Emit the discovery output's `MENU: revisit phases` section verbatim as markdown (not a code block). Its numbering follows `revisitable_phases` order.
 
 **STOP.** Wait for user response.
 
@@ -159,7 +126,7 @@ List only completed phases that come before `next_phase`.
 
 #### If user chose a phase
 
-Set `target_phase` = selected phase.
+Set `target_phase` = the number's phase in `revisitable_phases`.
 
 → Proceed to **F. Enter Plan Mode**.
 

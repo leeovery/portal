@@ -69,8 +69,8 @@ When naming topics:
 Read filter inputs from the work unit's manifest:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discovery items
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discovery dismissed
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discovery items
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discovery dismissed
 ```
 
 `items` is the active map (an object keyed by topic name). `dismissed` is the array of names previously removed from the map by the user.
@@ -95,15 +95,15 @@ Check if the existing item's `source` field already includes `research-analysis`
 Read the existing source:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discovery.{name} source
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discovery.{name} source
 ```
 
 **If the existing source is empty or the literal string `null`:**
 
-The manifest CLI prints `"null"` for fields that exist with a JSON null value (intentional — `exists` is the way to distinguish missing from null). Treat both empty and `"null"` as "no real source" and set the new value alone:
+`engine manifest get` prints `"null"` for fields that exist with a JSON null value (intentional — `exists` is the way to distinguish missing from null). Treat both empty and `"null"` as "no real source" and set the new value alone:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery.{name} source "research-analysis"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.discovery.{name} source "research-analysis"
 ```
 
 **Otherwise:**
@@ -111,7 +111,7 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.disco
 Set source to `{existing},research-analysis` (comma-joined):
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery.{name} source "{existing},research-analysis"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.discovery.{name} source "{existing},research-analysis"
 ```
 
 Do not change the existing item's routing — the user (or earlier analysis) already set it. Do not stage a candidate.
@@ -172,45 +172,14 @@ Overwrite with the topic list:
 - **Sources**: {filename1}.md, {filename2}.md
 ```
 
-List every topic from **B**, even those that filtered out in **D** — the cache file is the analysis output, not the diff. If re-entered on a reuse boot where **B** did not run this session (a deferred staging file was picked up), source the topic list from the staging file's candidate blocks instead.
+List every topic from **B**, even those that filtered out in **D** — the cache file is the analysis output, not the diff. If re-entered on a reuse boot where **B** did not run this session (a deferred staging file was picked up), source the topic list from the staging file's candidate blocks instead — that file holds only the genuinely-new candidates, so the rebuilt cache is narrower than a fresh pass; the filtered topics' outcomes are already recorded on the map and the dismissed list, and the next content change re-runs the full analysis.
 
-Compute the input checksum from the completed research files only:
-
-```bash
-node -e "
-const fs = require('fs');
-const crypto = require('crypto');
-const path = require('path');
-const manifest = JSON.parse(fs.readFileSync('.workflows/{work_unit}/manifest.json', 'utf8'));
-const items = ((manifest.phases || {}).research || {}).items || {};
-const dir = '.workflows/{work_unit}/research';
-const files = Object.entries(items)
-  .filter(([_, v]) => v && v.status === 'completed')
-  .map(([k]) => k + '.md')
-  .filter(f => fs.existsSync(path.join(dir, f)))
-  .sort();
-const hash = crypto.createHash('md5');
-for (const f of files) hash.update(fs.readFileSync(path.join(dir, f)));
-console.log(hash.digest('hex'));
-"
-```
-
-Update the manifest's analysis_cache:
+Stamp the manifest's analysis_cache — one command checksums the completed research files, writes `checksum`, `generated`, and `files`, and indexes the cache file into the knowledge base so its content surfaces in future contextual queries:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.research analysis_cache.checksum "{computed-checksum}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.research analysis_cache.generated "{ISO timestamp}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.research analysis_cache.files '[]'
-# Push one entry per completed research file:
-node .claude/skills/workflow-manifest/scripts/manifest.cjs push {work_unit}.research analysis_cache.files "{research-file}.md"
+node .claude/skills/workflow-engine/scripts/engine.cjs cache stamp {work_unit} research-analysis
 ```
 
-Index the cache file into the knowledge base so its content surfaces in future contextual queries:
-
-```bash
-node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index .workflows/{work_unit}/.state/research-analysis.md
-```
-
-If the index call fails, surface the error to the user but do not abort — the cache file is already on disk and the manifest is updated; the user can re-run `knowledge index` manually or wait for the next analysis re-run to retry.
+If the response carries `warnings`, surface them to the user but do not abort — the cache file is already on disk and the manifest is updated; indexing retries on the next analysis re-run.
 
 → Return to caller.

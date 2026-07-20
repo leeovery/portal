@@ -1,7 +1,7 @@
 ---
 name: workflow-implementation-analysis-task-writer
 description: Creates plan tasks from approved analysis findings. Reads the staging file, extracts approved tasks, and creates them in the plan using the format's authoring adapter. Invoked by workflow-implementation-process skill after user approves analysis tasks.
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, mcp__linear__list_issues, mcp__linear__get_issue, mcp__linear__create_issue, mcp__linear__create_issue_label
 model: opus
 ---
 
@@ -39,9 +39,9 @@ When creating any new `.md` file with the Write tool, write it to the same path 
 
 Append the new phase and task table to the planning file (path provided in inputs):
 
-- Phase heading: `### Phase {N}: {phase_label}`
+- Phase heading: `### Phase {N}: {phase_label}`, followed by `status: approved` and `approved_at: YYYY-MM-DD` (today's date) — the staging-file gate already approved these tasks
 - Phase goal: `Address findings from {phase_label}.`
-- Task table with Internal ID, Name, and Edge Cases columns
+- Task table under a `#### Tasks` heading with `status: approved`, columns Internal ID, Name, and Edge Cases
 - Internal IDs must match the IDs used in the created task files
 
 ## Update task_map
@@ -50,21 +50,21 @@ After creating task files, record all ID mappings in the manifest via the CLI:
 
 For the phase:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task_map.{phase_internal_id} {phase_external_id}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map.{phase_internal_id} {phase_external_id}
 ```
 
 For each task:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task_map.{internal_id} {external_id}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map.{internal_id} {external_id}
 ```
 
-Check the planning `external_id` via the manifest CLI:
+Check the planning `external_id` in the manifest:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.planning.{topic} external_id
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} external_id
 ```
 If the command errors (field doesn't exist) or returns empty, set it to the external identifier for the plan from the output format:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} external_id "{external_id_value}"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} external_id "{external_id_value}"
 ```
 
 ## Hard Rules

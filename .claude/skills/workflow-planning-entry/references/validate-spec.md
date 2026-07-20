@@ -4,10 +4,10 @@
 
 ---
 
-Check if specification exists and is ready using the manifest CLI.
+Check if specification exists and is ready using `engine manifest`.
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.specification.{topic}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic}
 ```
 
 #### If specification phase doesn't exist or has no status
@@ -50,6 +50,35 @@ hasn't been started yet.
 
 Start the specification first, then return to planning once it
 completes.
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+#### If specification exists and status is `superseded`
+
+> *Output the next fenced block as a code block:*
+
+```
+Specification Superseded
+
+The specification for "{topic:(titlecase)}" was consolidated into
+"{superseded_by:(titlecase)}".
+
+Plan the superseding specification instead.
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+#### If specification exists and status is `promoted`
+
+> *Output the next fenced block as a code block:*
+
+```
+Specification Promoted
+
+"{topic:(titlecase)}" was promoted to the cross-cutting work unit
+"{promoted_to}". Cross-cutting specifications inform other plans —
+they are not planned directly.
 ```
 
 **STOP.** Do not proceed — terminal condition.

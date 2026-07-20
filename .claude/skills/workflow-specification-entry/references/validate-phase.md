@@ -7,7 +7,7 @@
 Read the specification item's status from the manifest — not the file on disk. A `proposed` grouping has no file yet but is a real item:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.specification.{topic} status
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic} status
 ```
 
 #### If the output is empty
@@ -36,10 +36,10 @@ Set verb = "Continuing".
 
 #### If the status is `completed`
 
-Reset to in-progress:
+Reopen it:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{topic} status in-progress
+node .claude/skills/workflow-engine/scripts/engine.cjs topic reopen {work_unit} specification {topic}
 ```
 
 > *Output the next fenced block as a code block:*
@@ -51,3 +51,29 @@ Reopening specification: {work_unit:(titlecase)}
 Set verb = "Continuing".
 
 → Return to caller.
+
+#### If the status is `superseded`
+
+> *Output the next fenced block as a code block:*
+
+```
+Specification Superseded
+
+The specification for "{topic:(titlecase)}" was consolidated into
+"{superseded_by:(titlecase)}". Work on that specification instead.
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+#### If the status is `promoted`
+
+> *Output the next fenced block as a code block:*
+
+```
+Specification Promoted
+
+"{topic:(titlecase)}" was promoted to the cross-cutting work unit
+"{promoted_to}". Continue it from that work unit.
+```
+
+**STOP.** Do not proceed — terminal condition.

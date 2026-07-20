@@ -15,8 +15,7 @@ You receive via the orchestrator's prompt:
 
 1. **Perspective file paths** — paths to all perspective files to synthesize
 2. **Decision topic** — the decision being explored
-3. **Output file path** — where to write your synthesis
-4. **Frontmatter** — the frontmatter block to use in the output file
+3. **Output file path** — where to write your synthesis. A skeleton file with `status: in-flight` frontmatter is already on disk there; your rewrite replaces it
 
 ## Your Process
 
@@ -48,7 +47,7 @@ You receive via the orchestrator's prompt:
 
 Write to the output file path provided — in two steps: write the content to the same path with `.txt` in place of `.md` using the Write tool, then immediately rename it with Bash from the project root (`mv {path}.txt {path}.md`). Report the final `.md` path in your status. Do NOT write the `.md` directly with the Write tool — the harness blocks report-shaped `.md` writes from sub-agents; the `.txt`-then-rename keeps the file out of the orchestrator's context. Bash is for this rename only.
 
-The orchestrator passes skeleton frontmatter (`type`, `status`, `created`, `set`, `decision`, `surfaced: []`, `announced: false`). You must add a `tensions:` list containing one entry per key tension with its stable ID and a short label. The body mirrors the same IDs as section headings under "Key Tensions" so the orchestrator can look up full content for any ID.
+The orchestrator wrote skeleton frontmatter at the output path when it dispatched you (`type`, `status: in-flight`, `created`, `set`, `decision`, empty `tensions:`, `surfaced: []`, `announced: false`). Your rewrite replaces the whole file — the `.txt`-then-rename lands atomically over the skeleton. Keep the skeleton's fields, set `status: pending` (results ready for the orchestrator), and populate `tensions:` with one entry per key tension — stable ID and a short label. The body mirrors the same IDs as section headings under "Key Tensions" so the orchestrator can look up full content for any ID.
 
 ```markdown
 ---
@@ -90,7 +89,7 @@ announced: false
 
 ### T1: Framing alignment _(only if restatements diverged significantly)_
 
-{What divergence the framing check found. Which perspective is answering a different question, and what the actual decision might be. Omit this entire section if restatements aligned and renumber.}
+{What divergence the framing check found. Which perspective is answering a different question, and what the actual decision might be. Omit this entire section if restatements aligned — the first tradeoff then starts at T1.}
 
 ### T1: {label} _(or T2 if Framing alignment is present)_
 

@@ -9,16 +9,19 @@ This skill's purpose is now fulfilled. Construct the handoff and invoke the proc
 Query format from manifest:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.planning.{topic} format
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} format
 ```
 
 **Handoff:**
 ```
 Review session
 Work unit: {work_unit}
+Topic: {topic}
+Scope: single
 
 Plans to review:
   - work_unit: {work_unit}
+    topic: {topic}
     format: {format}
     specification: .workflows/{work_unit}/specification/{topic}/specification.md (exists: {true|false})
 

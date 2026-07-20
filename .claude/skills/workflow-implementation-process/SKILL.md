@@ -1,7 +1,7 @@
 ---
 name: workflow-implementation-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
+allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(tick), Bash(git status), Bash(git log), Bash(git add), Bash(git commit)
 ---
 
 # Implementation Process
@@ -44,13 +44,14 @@ Context refresh (compaction) summarizes the conversation, losing procedural deta
 
 1. **Re-read this skill file completely.** Do not rely on your summary of it. The full process, steps, and rules must be reloaded.
 2. **Check task progress in the plan** — use the plan adapter's instructions to read the plan's current state. Check manifest state for additional context.
-3. **Check gate modes and progress** via manifest CLI:
+3. **Check gate modes and progress** via `engine manifest`:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.implementation.{topic}
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.implementation.{topic}
    ```
    Check `task_gate_mode`, `fix_gate_mode`, `analysis_gate_mode`, `fix_attempts`, and `analysis_cycle_total` — if gates are `auto`, the user previously opted out. If `fix_attempts` > 0, you're mid-fix-loop for the current task. If `analysis_cycle_total` > 0, you've completed analysis cycles — check for findings files on disk (`analysis-*-c{cycle-number}.md` in the implementation directory) to determine mid-analysis state.
 4. **Check git state.** Run `git status` and `git log --oneline -10` to see recent commits. Commit messages follow a conventional pattern that reveals what was completed.
-5. **Announce your position** to the user before continuing: what step you believe you're at, what's been completed, and what comes next. Wait for confirmation.
+5. **Re-fetch lost gate sections.** Gate menus are carried by engine `task` responses the refresh discarded. Re-run the last task verb to re-emit them — `start` with the manifest's `current_task` is non-destructive (an in-flight task's `fix_attempts` and tracking file are preserved), and `init`/`complete` re-runs return the same response. Never re-run `fix-attempt` or `analysis-cycle` to re-fetch — each records a new cycle; their gates re-emerge on the loop's next natural call.
+6. **Announce your position** to the user before continuing: what step you believe you're at, what's been completed, and what comes next. Wait for confirmation.
 
 Do not guess at progress or continue from memory. The files on disk and git history are authoritative — your recollection is not.
 
@@ -60,6 +61,8 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 1. **No autonomous decisions on spec deviations** — when the executor reports a blocker or spec deviation, present to user and STOP. Never resolve on the user's behalf.
 2. **All git operations are the orchestrator's responsibility** — agents never commit, stage, or interact with git.
+
+---
 
 ## Step 0: Resume Detection
 
@@ -77,33 +80,26 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 > for this session.
 ```
 
-Check if an implementation entry exists in the manifest:
+Initialize or resume implementation tracking (idempotent — creates the manifest entry with default gates and counters, or resets the gate modes and session counters of an existing one; lifetime counters and progress are preserved):
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs exists {work_unit}.implementation.{topic}
+node .claude/skills/workflow-engine/scripts/engine.cjs task init {work_unit} {topic}
 ```
 
-#### If implementation entry does not exist
+The response's `MENU: blocked tasks` section serves the task loop's blocked-tasks stop — never emit it at this step.
+
+#### If the response's `mode` is `created`
+
+Commit: `impl({work_unit}): start implementation`
 
 → Proceed to **Step 1**.
 
-#### If implementation entry exists
+#### If the response's `mode` is `resumed`
 
 > *Output the next fenced block as a code block:*
 
 ```
 Found existing implementation for "{topic:(titlecase)}". Resuming from previous session.
 ```
-
-Reset gate modes and counters via manifest CLI (fresh session = fresh gates/cycles):
-```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} task_gate_mode gated
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} fix_gate_mode gated
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} analysis_gate_mode gated
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} fix_attempts 0
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} analysis_cycle_session 0
-```
-
-Reset `analysis_cycle_session` only — never reset `analysis_cycle_total`.
 
 → Proceed to **Step 1**.
 
@@ -151,28 +147,7 @@ Load **[load-plan-adapter.md](references/load-plan-adapter.md)** and follow its 
 
 ---
 
-## Step 3: Initialize Implementation Tracking
-
-> *Output the next fenced block as a code block:*
-
-```
-── Initialize Tracking ──────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Setting up implementation tracking in the manifest.
-> This records progress as tasks are completed.
-```
-
-Load **[initialize-tracking.md](references/initialize-tracking.md)** and follow its instructions as written.
-
-→ Proceed to **Step 4**.
-
----
-
-## Step 4: Project Skills Discovery
+## Step 3: Project Skills Discovery
 
 > *Output the next fenced block as a code block:*
 
@@ -189,11 +164,11 @@ Load **[initialize-tracking.md](references/initialize-tracking.md)** and follow 
 
 Load **[project-skills-discovery.md](references/project-skills-discovery.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+→ Proceed to **Step 4**.
 
 ---
 
-## Step 5: Linter Discovery
+## Step 4: Linter Discovery
 
 > *Output the next fenced block as a code block:*
 
@@ -210,11 +185,11 @@ Load **[project-skills-discovery.md](references/project-skills-discovery.md)** a
 
 Load **[linter-setup.md](references/linter-setup.md)** and follow its instructions as written.
 
-→ Proceed to **Step 6**.
+→ Proceed to **Step 5**.
 
 ---
 
-## Step 6: Knowledge Usage
+## Step 5: Knowledge Usage
 
 > *Output the next fenced block as a code block:*
 
@@ -233,11 +208,11 @@ Load **[linter-setup.md](references/linter-setup.md)** and follow its instructio
 
 Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
 
-→ Proceed to **Step 7**.
+→ Proceed to **Step 6**.
 
 ---
 
-## Step 7: Task Loop
+## Step 6: Task Loop
 
 > *Output the next fenced block as a code block:*
 
@@ -261,17 +236,17 @@ After the loop completes:
 
 #### If the task loop exited early (user chose `stop`)
 
-→ Proceed to **Step 9**.
+→ Proceed to **Step 8**.
 
 #### Otherwise
 
-**CRITICAL**: This routing applies on **every** task loop completion — including after returning from Step 8 with analysis-created tasks. Step 7 and Step 8 form a mandatory cycle: tasks execute → analysis runs → new tasks may be created → tasks execute again → analysis runs again. Never skip Step 8 after a task loop completes.
+**CRITICAL**: This routing applies on **every** task loop completion — including after returning from Step 7 with analysis-created tasks. Step 6 and Step 7 form a mandatory cycle: tasks execute → analysis runs → new tasks may be created → tasks execute again → analysis runs again. Never skip Step 7 after a task loop completes.
 
-→ Proceed to **Step 8**.
+→ Proceed to **Step 7**.
 
 ---
 
-## Step 8: Analysis Loop
+## Step 7: Analysis Loop
 
 > *Output the next fenced block as a code block:*
 
@@ -291,15 +266,15 @@ Load **[analysis-loop.md](references/analysis-loop.md)** and follow its instruct
 
 #### If new tasks were created in the plan
 
-→ Return to **Step 7**.
+→ Return to **Step 6**.
 
 #### If no tasks were created
 
-→ Proceed to **Step 9**.
+→ Proceed to **Step 8**.
 
 ---
 
-## Step 9: Compliance Self-Check
+## Step 8: Compliance Self-Check
 
 > *Output the next fenced block as a code block:*
 
@@ -315,11 +290,11 @@ Load **[analysis-loop.md](references/analysis-loop.md)** and follow its instruct
 
 Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
 
-→ Proceed to **Step 10**.
+→ Proceed to **Step 9**.
 
 ---
 
-## Step 10: Mark Implementation Complete
+## Step 9: Mark Implementation Complete
 
 > *Output the next fenced block as a code block:*
 

@@ -48,7 +48,7 @@ Group discussions into specifications where each grouping represents a **coheren
 - **Don't group too narrowly** — if a grouping is too thin, it may not warrant its own specification cycle
 - **Flag cross-cutting discussions** — discussions about patterns or policies should become cross-cutting specifications rather than being grouped with feature discussions
 
-### Preserve Anchored Names
+**Preserve Anchored Names**
 
 **Anchors** are existing specification items whose status is anything other than `proposed` — `in-progress`, `completed`, `superseded`, or `promoted` — from the discovery `specifications` array. They are specs the user has already started or finished; reconcile preserves them. Proposed items are not anchors — they are freely regenerated.
 
@@ -57,7 +57,7 @@ When forming groupings:
 - Only create new names for genuinely new groupings with no overlap
 - If an anchor's discussions are now scattered across multiple new groupings, note this as a **naming conflict** to present to the user
 
-### Identify Cross-Grouping Hand-offs
+**Identify Cross-Grouping Hand-offs**
 
 A discussion can belong wholly in one grouping yet still impose corrections on a **sibling** grouping (or on an anchored existing spec) — e.g. a decision redesigned in discussion A that supersedes what another grouping's spec documents. Carry these in as **consult references**, not sources: the receiving spec reads only the named slice for the correction and cites it; it does not extract the discussion wholesale.
 
@@ -67,7 +67,7 @@ While grouping, for each discussion check whether it hands work to another group
 
 Record each as a consult reference on the **receiving** grouping (never as a source), capturing which slice/decisions and why.
 
-### Knowledge-Base Advisory Query
+**Knowledge-Base Advisory Query**
 
 Before finalizing groupings, run one query per grouping to surface sibling discussions that may owe it corrections you missed:
 
@@ -91,7 +91,7 @@ Work through these steps in order:
 
 1. **Snapshot existing items.** Read the current specification items and their sources:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs get '{work_unit}.specification.*' status
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest get '{work_unit}.specification.*' status
    ```
    Partition them into **anchors** (status ∉ `proposed`) and **existing-proposed** (status `proposed`). Read sources per item as needed (`get {work_unit}.specification.{name} sources`).
 
@@ -99,7 +99,7 @@ Work through these steps in order:
 
 3. **Augment anchors.** For each grouping mapped to an anchor, add any member discussion not already in that anchor's sources:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{anchor} sources.{discussion}.status pending
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{anchor} sources.{discussion}.status pending
    ```
    Never change an anchor's `status`. Never prune or overwrite an anchor's existing sources.
 
@@ -107,19 +107,19 @@ Work through these steps in order:
 
 5. **Delete stale proposed.** For each existing-proposed item whose name is not in the target set, remove the whole item:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs delete {work_unit}.specification items.{name}
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.specification items.{name}
    ```
 
 6. **Collision guard.** If a target proposed name equals an existing anchor key, do NOT write `proposed` over it. Surface it as a **naming conflict** to the user and drop or rename the colliding target. This protects the invariant — an anchor is never overwritten by a proposed item.
 
 7. **Upsert proposed.** For each surviving target name:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{name} status proposed
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{name} sources.{discussion}.status pending
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{name} status proposed
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{name} sources.{discussion}.status pending
    ```
    Set one `sources.{discussion}.status pending` per grouping member. For an existing-proposed item being regenerated, prune any source no longer in the grouping (allowed only on proposed items, never anchors):
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs delete {work_unit}.specification.{name} sources.{old-discussion}
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.specification.{name} sources.{old-discussion}
    ```
    A **rename** of a proposed grouping is just delete-old (step 5) plus upsert-new — lossless, since a proposed item holds no file or extraction.
 
@@ -167,10 +167,14 @@ The `**Consult**` line is per-grouping — one line per consult reference, omitt
 
 Write the cache metadata to the manifest last:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discussion analysis_cache.checksum "{checksum from current_state.discussions_checksum}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discussion analysis_cache.generated "{ISO date}"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.discussion analysis_cache.checksum "{discussions_checksum from the DATA section}"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.discussion analysis_cache.generated "{ISO date}"
 ```
 
-Commit the whole reconcile as one commit: `spec({work_unit}): reconcile proposed groupings`
+Commit the whole reconcile as one commit:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): reconcile proposed groupings"
+```
 
 → Load **[display-groupings.md](display-groupings.md)** and follow its instructions as written.

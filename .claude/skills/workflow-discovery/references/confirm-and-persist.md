@@ -4,9 +4,9 @@
 
 ---
 
-Persists the topic set produced by [topic-synthesis.md](topic-synthesis.md) to the manifest, writes the **Topics Identified** section of the session log, clears the active-session marker, finalises the **Conclusion** placeholder, and indexes the finalised log into the knowledge base.
+Persists the topic set produced by [topic-synthesis.md](topic-synthesis.md) to the manifest, writes the **Topics Identified** section of the session log, finalises the **Conclusion** placeholder, and closes the session — the close transaction clears the active-session marker and indexes the finalised log into the knowledge base.
 
-Edits to existing items committed via [map-operations.md](map-operations.md) during the session loop. For edits-only sessions, the manifest-writes step is empty but the marker delete and Conclusion finalisation still run.
+Edits to existing items committed via [map-operations.md](map-operations.md) during the session loop. For edits-only sessions, the manifest-writes step is empty but the Conclusion finalisation and the session close still run.
 
 ## A. Persist New Topics
 
@@ -23,12 +23,11 @@ No new topics — this is an edits-only or browse-only session.
 For each topic on the working list, in synthesised order:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs pull {work_unit}.discovery dismissed "{topic}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs create-discovery-topic {work_unit}.{topic} --routing {research|discussion} --source discovery --summary "{one-line summary}" --description "{paragraphs}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery.{topic} brief_path "discovery/briefs/{topic}.md"
+node .claude/skills/workflow-engine/scripts/engine.cjs discovery-map add {work_unit} {topic} {research|discussion} --summary "{one-line summary}" --description "{paragraphs}"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.discovery.{topic} brief_path "discovery/briefs/{topic}.md"
 ```
 
-The `pull` is a no-op if the name isn't in the dismissed list.
+Append `--force-dismissed` for a name the synthesis DATA flagged `matches_dismissed=true` — the user's confirmation at the synthesis gate is the re-add decision; the engine clears the dismissed entry as part of the add.
 
 Summary and description come from the synthesis — derived from the exploration in topic-synthesis. Single-quote any value containing characters zsh would interpret — backticks, `$`, `[]`, `{}`, `~`. Description may span paragraphs.
 
@@ -38,8 +37,9 @@ Notes:
 
 - The topic name is the manifest dict key (the `{topic}` path segment). There is no separate `name` field to set.
 - `routing` is the value confirmed by the user at the synthesis gate.
-- `source: discovery` marks topics the user surfaced during discovery, distinguishing them from items added later with other provenance (e.g. `research-analysis`, `gap-analysis`).
-- `brief_path` is an opaque field set by a post-create `set` — never a `create-discovery-topic` builder flag. It records where the topic's brief lives; the brief file itself was written at harvest by [brief-synthesis.md](brief-synthesis.md).
+- `--source` defaults to `discovery`, marking topics the user surfaced during discovery — distinct from items added later with other provenance (e.g. `research-analysis`, `gap-analysis`). Omit it here.
+- The last map-operation response's `map_total` is `{T}` for the Conclusion line in **C** — no re-read needed.
+- `brief_path` is an opaque field set by a post-create `set` — never an `add` flag. It records where the topic's brief lives; the brief file itself was written at harvest by [brief-synthesis.md](brief-synthesis.md).
 
 → Proceed to **B. Write Topics Identified**.
 
@@ -58,50 +58,55 @@ Populate **Topics Identified** with one section per topic, in synthesised order:
 - Why: {one-line rationale from synthesis}
 ```
 
-→ Proceed to **C. Clear Marker and Finalise**.
+→ Proceed to **C. Finalise and Close**.
 
 #### If the working list was empty
 
 Leave **Topics Identified** as `(none)`.
 
-→ Proceed to **C. Clear Marker and Finalise**.
+→ Proceed to **C. Finalise and Close**.
 
-## C. Clear Marker and Finalise
+## C. Finalise and Close
 
-Clear the active-session marker so resume detection on the next entry sees a closed session. Skip if the log file does not exist (browse-only session — the marker was never set):
+Replace the **Conclusion** `(none)` placeholder. Skip if no log file exists (browse-only session).
 
-```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs delete {work_unit}.discovery active_session
-```
-
-Replace the **Conclusion** `(none)` placeholder. Skip if no log file exists.
-
-- New topics + (optional) edits: `{N_new} topic(s) added{ and M edit(s) applied | }. Map now has {T} topics.` (Re-run discovery to compute `{T}`.)
+- New topics + (optional) edits: `{N_new} topic(s) added{ and M edit(s) applied | }. Map now has {T} topics.`
 - Edits only, no new topics: `{M} edit(s) applied. Map has {T} topics.`
-- Browse only (no log file): no Conclusion to replace.
+- No new topics and no edits: `No map changes — exploration captured in the session log. Map has {T} topics.`
 
-Check `git status`. If the working tree is dirty (manifest writes from **A**, the marker delete, the Topics Identified write, the Conclusion replacement, the briefs written and reconciled at harvest by [brief-synthesis.md](brief-synthesis.md), or any combination), commit. Stage the manifest, the session log, and the briefs directory (so brief files land in the same commit), then pick the appropriate message:
+`{T}` is the `map_total` carried by every map-operation response — take it from the session's last one. A session with no map operations takes `{T}` from Step 7's discovery output (the map is unchanged).
+
+Pick the commit message:
 
 - New topics: `discovery({work_unit}): synthesise {N_new} new topic(s)`
 - Edits only: `discovery({work_unit}): finalise session log`
 
-```bash
-git add .workflows/{work_unit}/manifest.json .workflows/{work_unit}/discovery/
-git commit -m "{message}"
-```
+#### If the log file exists
 
-If `git status` reports nothing to commit, skip the commit entirely.
-
-→ Proceed to **D. Index the Session Log**.
-
-## D. Index the Session Log
-
-Index the finalised session log into the knowledge base so this epic's discovery is retrievable by later phases and sibling epics. Skip for a browse-only session (no log file exists):
+Close the session — one engine transaction clears the active-session marker (resume detection on the next entry sees a closed session) and indexes the finalised log into the knowledge base so this epic's discovery is retrievable by later phases and sibling epics (idempotent — re-indexing the same session replaces its chunks; distinct sessions coexist under their own identity), then commits. One call covers whatever this session left dirty: the manifest writes from **A**, the Topics Identified write, the Conclusion replacement, and the briefs written and reconciled at harvest by [brief-synthesis.md](brief-synthesis.md):
 
 ```bash
-node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index .workflows/{work_unit}/discovery/sessions/session-{session_number:03d}.md
+node .claude/skills/workflow-engine/scripts/engine.cjs discovery-session close {work_unit} -m "{message}"
 ```
 
-Idempotent — re-indexing the same session replaces that session's chunks; distinct sessions coexist under their own identity. No commit — the store lives outside git, like every other indexing call site.
+If the response's `warnings` is non-empty, display them but do not block — the session is closed and committed:
+
+> *Output the next fenced block as a code block:*
+
+```
+⚑ Knowledge indexing warning
+  {warnings}
+  The session is closed. Indexing can be retried later.
+```
+
+→ Return to caller.
+
+#### If no log file exists
+
+Browse-only session — the marker was never set and there is nothing to index. Commit whatever the session left dirty; a clean tree reports `committed: null` and is fine:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "discovery({work_unit}): finalise session log"
+```
 
 → Return to caller.

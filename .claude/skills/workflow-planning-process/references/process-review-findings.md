@@ -6,7 +6,9 @@
 
 Process findings from a review agent interactively with the user. The agent writes findings — with full fix content — to a tracking file. Read the tracking file and present each finding for approval.
 
-**Review type**: `{review_type:[traceability|integrity]}` — set by the calling context (B or C in plan-review.md).
+**Review type**: `{review_type:[traceability|integrity]}` — set by the calling context (C or D in plan-review.md).
+
+**Commits in this file**: applying a finding writes through the format adapter, and the format's task storage may live outside the work unit. Commit with raw git — `git add -- .workflows/{work_unit} {format task storage paths}`, then `git commit` — never the scoped helper.
 
 #### If `STATUS` is `clean`
 
@@ -122,16 +124,21 @@ Present full content from the tracking file. Include **Proposed** for additions,
 
 ### Check Gate Mode
 
-Check `finding_gate_mode` via manifest CLI:
+Check `finding_gate_mode` via `engine manifest`:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.planning.{topic} finding_gate_mode
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} finding_gate_mode
 ```
 
-#### If `finding_gate_mode: auto`
+#### If `finding_gate_mode` is `auto`
 
 1. Apply the fix to the plan (use **Proposed** content exactly as in tracking file)
-2. Update the tracking file: set resolution to "Fixed"
-3. Commit the tracking file and plan changes
+2. Keep `task_map` current — for `add-task`/`add-phase`, record each new internal ID → external ID mapping; for `remove-task`/`remove-phase`, delete each removed ID's entry:
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map.{internal_id} {external_id}
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.planning.{topic} task_map.{internal_id}
+   ```
+3. Update the tracking file: set resolution to "Fixed"
+4. Commit the tracking file and plan changes
 
 > *Output the next fenced block as a code block:*
 
@@ -139,9 +146,15 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.plann
 Finding {N} of {total}: {Brief Title} — approved. Applied to plan.
 ```
 
-→ Present the next pending finding, or proceed to **C. After All Findings Processed**.
+**If pending findings remain:**
 
-#### If `finding_gate_mode: gated`
+→ Return to **B. Process One Item at a Time**.
+
+**If all findings are processed:**
+
+→ Proceed to **C. After All Findings Processed**.
+
+#### If `finding_gate_mode` is `gated`
 
 > *Output the next fenced block as markdown (not a code block):*
 
@@ -155,7 +168,7 @@ Finding {N} of {total}: {Brief Title} — approved. Applied to plan.
 @endif
 - **`a`/`auto`** — Approve this and all remaining findings automatically
 - **`s`/`skip`** — Leave as-is, move to next finding
-- **Provide feedback** — Adjust before approving
+- **Provide feedback** — Tell me what to change before approving
 · · · · · · · · · · · ·
 ```
 
@@ -173,33 +186,40 @@ Incorporate feedback and update the tracking file with the revised content. Re-p
 
 → Return to **B. Process One Item at a Time**.
 
-#### If `approved`
+#### If `yes`
 
 1. Apply the fix to the plan — use the **Proposed** content exactly as shown, using the output format adapter to determine how it's written. Do not modify content between approval and writing.
-2. Update the tracking file: set resolution to "Fixed", add any discussion notes.
-3. Commit the tracking file and any plan changes — ensures progress survives context refresh.
-4. > *Output the next fenced block as a code block:*
+2. Keep `task_map` current — for `add-task`/`add-phase`, record each new internal ID → external ID mapping; for `remove-task`/`remove-phase`, delete each removed ID's entry (same commands as the auto flow above).
+3. Update the tracking file: set resolution to "Fixed", add any discussion notes.
+4. Commit the tracking file and any plan changes — ensures progress survives context refresh.
+5. > *Output the next fenced block as a code block:*
 
    ```
    Finding {N} of {total}: {Brief Title} — fixed.
    ```
 
-→ Present the next pending finding, or proceed to **C. After All Findings Processed**.
+**If pending findings remain:**
+
+→ Return to **B. Process One Item at a Time**.
+
+**If all findings are processed:**
+
+→ Proceed to **C. After All Findings Processed**.
 
 #### If `auto`
 
-1. Apply the fix (same as "If approved" above)
+1. Apply the fix and the `task_map` upkeep (same as "If `yes`" steps 1–2 above)
 2. Update the tracking file: set resolution to "Fixed"
 3. Update `finding_gate_mode` in the manifest:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} finding_gate_mode auto
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} finding_gate_mode auto
    ```
 4. Commit
 5. Process all remaining findings using the auto-mode flow above
 
-→ After all processed, proceed to **C. After All Findings Processed**.
+→ Proceed to **C. After All Findings Processed**.
 
-#### If `skipped`
+#### If `skip`
 
 1. Update the tracking file: set resolution to "Skipped", note the reason.
 2. Commit the tracking file — ensures progress survives context refresh.
@@ -209,7 +229,13 @@ Incorporate feedback and update the tracking file with the revised content. Re-p
    Finding {N} of {total}: {Brief Title} — skipped.
    ```
 
-→ Present the next pending finding, or proceed to **C. After All Findings Processed**.
+**If pending findings remain:**
+
+→ Return to **B. Process One Item at a Time**.
+
+**If all findings are processed:**
+
+→ Proceed to **C. After All Findings Processed**.
 
 ---
 

@@ -74,13 +74,19 @@ Record this to the specification verbatim?
 
 Update the specification with the approved changes. Commit. Continue extraction.
 
+→ Return to **A. Exhaustive Extraction**.
+
 #### If `view full`
 
 Re-present the full updated section in the format it would appear in the specification. Then re-present the approval menu without `v`/`view full`.
 
+→ Return to **A. Exhaustive Extraction**.
+
 #### If the user provides feedback
 
 Work through the changes per **C. Discuss and Refine**, then re-present the diff with the revised content.
+
+→ Return to **A. Exhaustive Extraction**.
 
 Better to resurface and confirm "already covered" than let something slip past.
 
@@ -88,17 +94,19 @@ Better to resurface and confirm "already covered" than let something slip past.
 
 Consult references are sibling discussions that owe this spec a correction — they are **not** sources. Read only the relevant slice, never the whole document.
 
-List the pending ones (`node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.specification.{topic} consult_references` returns names + status). For each still `pending`:
+List the pending ones (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic} consult_references` returns names + status). For each still `pending`:
 
 1. Find its slice hint — the `{ref-topic} — {slice hint}` entry in the handoff's `Consult references` block, or, if the handoff is no longer in context (e.g. after a resume), the `**Consult**` line for it in `.workflows/{work_unit}/.state/discussion-consolidation-analysis.md`.
 2. Open the named sibling discussion and read **only** the decisions the slice hint points to — plus its `## Spec hand-offs` section if the discussion happens to have one. Do not extract it wholesale.
 3. Apply the correction to the affected spec content, or cite the sibling decision where the spec defers to it — cite, don't restate. Corrections to already-logged content go through **Context Resurfacing** above. If the correction targets a topic not yet constructed, leave the reference `pending` and revisit it on that topic's cycle.
 4. Once applied or cited, record what was reconciled (which slice, what changed) in the spec's **Working Notes** section and mark the reference addressed:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{topic} consult_references.{ref}.status addressed
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} consult_references.{ref}.status addressed
    ```
 
 Already-`addressed` references are skipped on later topic cycles.
+
+→ Proceed to **B. Synthesize and Present**.
 
 ---
 
@@ -114,11 +122,17 @@ Here's what I understand about [topic] based on the reference material. This is 
 [content as rendered markdown]
 ```
 
-Then check `construction_gate_mode` via manifest CLI (`node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.specification.{topic} construction_gate_mode`).
+Then check `construction_gate_mode` via `engine manifest` (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic} construction_gate_mode`).
 
 #### If `construction_gate_mode` is `auto`
 
-Skip the menu and STOP. The content presented above is logged exactly as shown — auto adds no output of its own.
+Skip the menu and the STOP gate. The content presented above is logged exactly as shown.
+
+> *Output the next fenced block as a code block:*
+
+```
+{topic:(titlecase)} — auto-approved. Recording to the specification.
+```
 
 **CRITICAL**: Auto removes only the approval STOP — process one topic at a time (extract → present → log → commit → next). Never generate multiple topics, or the whole specification, in a single pass. Commit after each topic.
 
@@ -133,7 +147,7 @@ Skip the menu and STOP. The content presented above is logged exactly as shown �
 Record this to the specification verbatim?
 
 - **`y`/`yes`** — Add exactly as shown, no modifications
-- **`a`/`auto`** — Add this and all remaining topics automatically
+- **`a`/`auto`** — Approve this and all remaining topics automatically
 - **Tell me what to change** — Revise before recording
 · · · · · · · · · · · ·
 ```
@@ -146,7 +160,7 @@ Record this to the specification verbatim?
 
 #### If `auto`
 
-Set `construction_gate_mode` to `auto` via manifest CLI (`node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{topic} construction_gate_mode auto`).
+Set `construction_gate_mode` to `auto` via `engine manifest` (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} construction_gate_mode auto`).
 
 → Proceed to **E. Log and Commit**.
 
@@ -167,6 +181,8 @@ Work through the content together:
 
 This is a **human-level conversation**, not form-filling. The user brings context from across the project that may not be in the reference material — decisions from other topics, implications from later work, or knowledge that can't all fit in context.
 
+→ Proceed to **D. Approval Gate**.
+
 ---
 
 ## D. Approval Gate
@@ -177,13 +193,20 @@ If you are uncertain whether the user approved, **ASK**: "Ready to log it, or do
 
 > **CHECKPOINT**: If you are about to write to the specification and the user's last message was not explicit approval, **STOP**. Present the choices again.
 
+→ Proceed to **E. Log and Commit**.
+
 ---
 
 ## E. Log and Commit
 
 1. Write to the specification — **verbatim** as presented and approved. No silent modifications.
-2. After completing exhaustive extraction from a source (all relevant content presented and logged), update that source's status to `incorporated` via manifest CLI (`node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{topic} sources.{source-name}.status incorporated`). See **[specification-format.md](specification-format.md)** for source status details.
-3. Commit at natural breaks — after significant exchanges, after each major topic, and before any context refresh.
+2. After completing exhaustive extraction from a source (all relevant content presented and logged), update that source's status to `incorporated` via `engine manifest` (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} sources.{source-name}.status incorporated`). See **[specification-format.md](specification-format.md)** for source status details.
+3. Commit at natural breaks — after significant exchanges, after each major topic, and before any context refresh:
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): {what changed}"
+   ```
+
+→ Proceed to **F. Topic Complete**.
 
 ---
 

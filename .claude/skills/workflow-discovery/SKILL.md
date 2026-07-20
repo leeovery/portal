@@ -1,10 +1,8 @@
 ---
 name: workflow-discovery
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-discovery/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(git status), Bash(git add), Bash(git commit), Bash(cp), Bash(mkdir -p .workflows/), Bash(mv .workflows/.inbox/)
+allowed-tools: Bash(node .claude/skills/workflow-discovery/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(git status), Bash(git log), Bash(mkdir -p .workflows/), Bash(rm .workflows/), Bash(rm -f .workflows/)
 ---
-
-# Discovery
 
 The universal first phase. Shape the work the user is bringing — confirm what kind of work it is, sketch its outline — then persist it and route into the pipeline.
 
@@ -67,6 +65,13 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 ```
 ── Dispatch ─────────────────────────────────────
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Determining the invocation mode — brand-new work, or re-shaping
+> an existing epic's map.
 ```
 
 Read the positional arguments:
@@ -212,7 +217,7 @@ Load **[resume-detection.md](references/resume-detection.md)** and follow its in
 Run discovery for the work unit:
 
 ```bash
-node .claude/skills/workflow-discovery/scripts/discovery.cjs {work_unit}
+node .claude/skills/workflow-discovery/scripts/gateway.cjs {work_unit}
 ```
 
 Hold the output in conversation context as **the most recent discovery output**. Downstream steps and references read from it:
@@ -220,9 +225,10 @@ Hold the output in conversation context as **the most recent discovery output**.
 - `discovery_map` — per-topic `tier`, `lifecycle`, `current_phase`, `routing`, `source`, `summary`
 - `map_summary` — counts string used for the opener render
 - `dismissed` — names previously removed from the map
-- `active_session` — in-progress session number set by lazy log creation, cleared at conclude. Authoritative resume signal (read at Step 6).
 - `session_logs` — every session log's number + path (ascending); read from this rather than re-globbing (used by continuity-load.md)
 - `next_session_number` — used to set `session_number` for fresh entries
+
+The authoritative resume signal (`active_session`) is a manifest field, read via `engine manifest` at Step 6 — not carried in this dump.
 
 If `session_number` was not already set (no resume at Step 6, no `macro_continuation` from Step 5), set it now: `session_number` = `next_session_number`. When `macro_continuation` is set, the confirm-trigger already created `session-{session_number}.md` — keep that `session_number` and ignore `next_session_number`.
 

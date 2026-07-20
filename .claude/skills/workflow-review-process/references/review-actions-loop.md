@@ -32,10 +32,16 @@ Check the verdict(s) from the review(s) being analyzed.
 No actionable findings. All reviews passed with no required changes.
 ```
 
-Set the review phase status to completed:
+Mark the review completed — the engine sets the status:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.review.{topic} status completed
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} review {topic}
+```
+
+Commit the completion:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): complete review phase"
 ```
 
 **Pipeline continuation** — Invoke the bridge:
@@ -79,10 +85,16 @@ Proceed with synthesis?
 
 **If `no`:**
 
-Set review status to completed:
+Mark the review completed:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.review.{topic} status completed
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} review {topic}
+```
+
+Commit the completion:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): complete review phase"
 ```
 
 **Pipeline continuation** — Invoke the bridge:
@@ -126,10 +138,16 @@ Synthesize non-blocking findings?
 
 **If `no`:**
 
-Set review status to completed:
+Mark the review completed:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.review.{topic} status completed
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} review {topic}
+```
+
+Commit the completion:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): complete review phase"
 ```
 
 **Pipeline continuation** — Invoke the bridge:
@@ -153,10 +171,16 @@ Invoke the workflow-bridge skill to enter plan mode with completion confirmation
 
 #### If `STATUS` is `clean`
 
-No actionable tasks from synthesis. Set review status to completed:
+No actionable tasks from synthesis. Mark the review completed:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.review.{topic} status completed
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} review {topic}
+```
+
+Commit the completion:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): complete review phase"
 ```
 
 > *Output the next fenced block as a code block:*
@@ -205,6 +229,8 @@ Review synthesis cycle {N}: {K} proposed tasks
 
 → Proceed to **E. Route on Results**.
 
+#### Otherwise
+
 Present the next pending task:
 
 > *Output the next fenced block as markdown (not a code block):*
@@ -252,7 +278,7 @@ Approve this task?
 - **`y`/`yes`** — Approve this task
 - **`a`/`auto`** — Approve this and all remaining tasks automatically
 - **`s`/`skip`** — Skip this task
-- **Comment** — Revise based on feedback
+- **Comment** — Tell me what to change
 · · · · · · · · · · · ·
 ```
 
@@ -292,16 +318,16 @@ Revise the task content in the staging file based on the user's feedback.
 
 #### If all tasks were skipped
 
-Set review status to completed:
+Mark the review completed:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.review.{topic} status completed
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} review {topic}
 ```
 
 Commit the staging file updates:
 
-```
-review({work_unit}): synthesis cycle {N} — tasks skipped
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): synthesis cycle {N} — tasks skipped"
 ```
 
 **Pipeline continuation** — Invoke the bridge:
@@ -325,10 +351,11 @@ Filter staging file to tasks with `status: approved`.
 
 > **CHECKPOINT**: Do not proceed until the task writer has returned.
 
-Commit all changes (staging file, plan tasks, task_map updates):
+Commit all changes (staging file, plan tasks, task_map updates) with raw git — the format's task storage may live outside the work unit, so the scoped helper cannot cover it. Stage the format's storage and the work unit, then commit:
 
-```
-review({work_unit}): add review remediation ({K} tasks)
+```bash
+git add -- .workflows/{work_unit} {format task storage paths}
+git commit -m "review({work_unit}): add review remediation ({K} tasks)"
 ```
 
 → Proceed to **G. Re-open Implementation**.
@@ -340,15 +367,19 @@ review({work_unit}): add review remediation ({K} tasks)
 For each plan that received new tasks:
 
 1. Update the manifest via CLI:
-   - `node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} status in-progress`
-   - `node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} updated {today's date}`
+   - `node .claude/skills/workflow-engine/scripts/engine.cjs topic reopen {work_unit} implementation {topic}`
+   - `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} updated {today's date}`
 2. Commit tracking changes:
 
-```
-review({work_unit}): re-open implementation tracking
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): re-open implementation tracking"
 ```
 
-Then enter plan mode and write the following plan:
+Then enter plan mode and write the following plan. Resolve `{work_type}` from the manifest when not already in context:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit} work_type
+```
 
 ```
 # Review Actions Complete: {work_unit}
@@ -357,12 +388,14 @@ Review findings have been synthesized into {N} implementation tasks.
 
 ## Summary
 
-{Summary, e.g., "tick-core: 3 tasks in Phase 9"}
+{Summary, e.g., "auth-flow: 3 tasks in Phase 9"}
 
-## Instructions
+## Next Step
 
-1. Invoke `workflow-implementation-entry`
-2. The skill will detect the new tasks and start executing them
+Invoke `/workflow-implementation-entry {work_type} {work_unit} {topic}`
+
+Arguments: work_type = {work_type}, work_unit = {work_unit}, topic = {topic}
+The skill will detect the new tasks and start executing them.
 
 ## Context
 

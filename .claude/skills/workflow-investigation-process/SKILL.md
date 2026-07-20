@@ -1,7 +1,7 @@
 ---
 name: workflow-investigation-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
+allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(mkdir -p .workflows/.cache/), Bash(ls .workflows/.cache/), Bash(git status), Bash(git log), Bash(git blame), Bash(git diff), Bash(git bisect), Bash(grep)
 ---
 
 # Investigation Process
@@ -20,7 +20,7 @@ The output becomes source material for a specification focused on the fix approa
 
 - **Topic** (required) - Bug identifier or short description
 - **Bug context** (optional) - Initial symptoms, error messages, reproduction steps
-- **Work type** - Always "bugfix" for investigation
+- **Work type** — Always "bugfix" for investigation
 
 ---
 
@@ -65,7 +65,7 @@ The investigation file is your memory. Context compaction is lossy — what's no
 - Root cause is identified
 - Each significant finding
 
-**After writing, git commit.** Commits let you track and recover after compaction. Don't batch — commit each time you write.
+**After writing, commit** (`node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "investigation({work_unit}): {what changed}"`). Commits let you track and recover after compaction. Don't batch — commit each time you write.
 
 **Create the file early.** After understanding the initial symptoms, create the investigation file with the symptoms section.
 

@@ -8,10 +8,10 @@ Select the plan output format using the same project-default logic as the planni
 
 ## A. Check Format Recommendation
 
-Read the project default `plan_format` via manifest CLI:
+Read the project default `plan_format` via `engine manifest`:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get project.defaults.plan_format
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get project.defaults.plan_format
 ```
 
 #### If output is empty (no project default)
@@ -45,6 +45,8 @@ Project default format is **{format}**. Use the same format?
 
 ## B. Select Format
 
-→ Load **[../../workflow-planning-process/references/output-formats.md](../../workflow-planning-process/references/output-formats.md)** and follow its instructions as written.
+→ Load **[output-formats.md](../../workflow-planning-process/references/output-formats.md)** and follow its instructions as written.
+
+→ Load the chosen format's **[about.md](../../workflow-planning-process/references/output-formats/{chosen-format}/about.md)** and follow its Setup section — complete any prerequisites (installation, initialisation, MCP configuration) before tasks are written.
 
 → Return to caller.

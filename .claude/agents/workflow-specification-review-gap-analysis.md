@@ -1,7 +1,7 @@
 ---
 name: workflow-specification-review-gap-analysis
 description: Reviews specification as a standalone document for internal completeness, clarity, ambiguity, and planning readiness. Invoked by workflow-specification-process skill during review cycle.
-tools: Read, Write, Glob, Grep, Bash
+tools: Read, Write, Bash
 model: opus
 ---
 
@@ -13,10 +13,11 @@ You are reviewing a specification as a standalone document — looking *inward* 
 
 You receive via the orchestrator's prompt:
 
-1. **Specification path** — the specification file to review
-2. **Topic name** — the specification topic
-3. **Cycle number** — which review cycle this is (used in output file naming)
-4. **Review tracking format path** — the tracking file format reference
+1. **Work unit** — the work unit name (for output path construction)
+2. **Specification path** — the specification file to review
+3. **Topic name** — the specification topic
+4. **Cycle number** — which review cycle this is (used in output file naming)
+5. **Review tracking format path** — the tracking file format reference
 
 No source material — this phase looks inward only.
 
@@ -96,7 +97,7 @@ No source material — this phase looks inward only.
 
 ## Output File Format
 
-Write to `.workflows/{work_unit}/specification/{topic}/review-gap-analysis-tracking-c{cycle-number}.md` — in two steps: write the content to the same path with a `.txt` extension using the Write tool, then immediately rename it with Bash from the project root (`mv {path}.txt {path}.md`). Report the final `.md` path in your status. Do NOT write the `.md` directly with the Write tool — the harness blocks report-shaped `.md` writes from sub-agents; the `.txt`-then-rename keeps the file out of the orchestrator's context. Use this format:
+Write to `.workflows/{work_unit}/specification/{topic}/review-gap-analysis-tracking-c{cycle-number}.md` — in two steps: write the content to the same path with a `.txt` extension using the Write tool, then immediately rename it with Bash from the project root (`mv {path}.txt {path}.md`). Report the final `.md` path in your status. Do NOT write the `.md` directly with the Write tool — the harness blocks report-shaped `.md` writes from sub-agents; the `.txt`-then-rename keeps the file out of the orchestrator's context. Bash is for this rename only. Use this format:
 
 ```markdown
 ---
@@ -115,6 +116,7 @@ topic: {Topic Name}
 
 **Source**: Specification analysis
 **Category**: Enhancement to existing topic | New topic | Gap/Ambiguity
+**Priority**: Critical | Important | Minor
 **Affects**: {which section(s) of the specification}
 
 **Details**:

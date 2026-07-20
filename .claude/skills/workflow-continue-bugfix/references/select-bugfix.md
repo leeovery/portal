@@ -24,7 +24,7 @@ Display active bugfixes and let the user select one.
 @endif
 ```
 
-Build from the discovery output's `bugfixes` array. Each bugfix shows `name` (titlecased) and `phase_label` (titlecased). Blank line between each numbered item.
+Build from the discovery output's `=== BUGFIXES (N) ===` section. Each bugfix shows `name` (titlecased) and `phase_label` (titlecased). Blank line between each numbered item.
 
 > *Output the next fenced block as markdown (not a code block):*
 
@@ -58,7 +58,7 @@ Store the selected bugfix's name as `work_unit`.
 
 Set work_type filter = `bugfix`.
 
-→ Load **[../../workflow-start/references/view-completed.md](../../workflow-start/references/view-completed.md)** and follow its instructions as written.
+→ Load **[view-completed.md](../../workflow-start/references/view-completed.md)** and follow its instructions as written.
 
 Re-run discovery to refresh state after potential changes.
 
@@ -66,7 +66,7 @@ Re-run discovery to refresh state after potential changes.
 
 #### If user chose `m`/`manage`
 
-→ Load **[../../workflow-start/references/manage-work-unit.md](../../workflow-start/references/manage-work-unit.md)** and follow its instructions as written.
+→ Load **[manage-work-unit.md](../../workflow-start/references/manage-work-unit.md)** and follow its instructions as written.
 
 Re-run discovery to refresh state after potential changes.
 

@@ -33,6 +33,7 @@ topic: [Topic Name]
 
 **Source**: [Where this came from — file/section reference, or "Specification analysis" for Gap Analysis]
 **Category**: Enhancement to existing topic | New topic | Gap/Ambiguity
+**Priority**: [Gap Analysis only — Critical | Important | Minor. Omit for Input Review.]
 **Affects**: [Which section(s) of the specification]
 
 **Details**:
@@ -67,3 +68,5 @@ topic: [Topic Name]
 5. After all items resolved, mark tracking file `status: complete`
 
 **Why tracking files**: If context refreshes mid-review, you can read the tracking file and continue where you left off. The tracking file shows which items are resolved and which remain. This is especially important when reviews surface 10-20 items that need individual discussion.
+
+→ Return to caller.

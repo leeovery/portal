@@ -1,7 +1,7 @@
 ---
 name: workflow-start
 disable-model-invocation: true
-allowed-tools: Bash(node .claude/skills/workflow-start/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(mkdir -p .workflows/), Bash(mv .workflows/.inbox/), Bash(git add), Bash(git commit), Bash(git rm)
+allowed-tools: Bash(node .claude/skills/workflow-start/scripts/gateway.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(tick), Bash(git status), Bash(git diff)
 ---
 
 Unified workflow entry point. Discovers state, shows all active work, and routes to start or continue skills.
@@ -43,7 +43,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 |__/|__/\____/_/ |_/_/ |_/_/   /_____/\____/ |__/|__//____/
 
 ●─────────────────────────────────────────────────────────────────●
-  Agentic engineering workflows — from idea to implementation.
+  Agentic Engineering Workflows (v0.6.0)
 ●─────────────────────────────────────────────────────────────────●
 ```
 
@@ -53,31 +53,114 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 ── Initialisation ───────────────────────────────
 ```
 
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Setting up the session — shared conventions first, then the
+> system boot checks.
+```
+
 ### Step 0.1: Casing Conventions
 
 Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
 
 → Proceed to **Step 0.2**.
 
-### Step 0.2: Migrations
+### Step 0.2: Boot
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Running migrations to keep workflow files in sync.
+> Checking the workflow system before anything runs — applying any
+> pending migrations, then confirming the knowledge base is ready.
 ```
 
-**Run migrations — this is mandatory. You must complete it before proceeding.**
+**Run the boot pipeline — this is mandatory. You must complete it before proceeding.**
 
-Invoke the `/workflow-migrate` skill and follow its instructions exactly — if it issues a STOP gate, you must stop.
+Run the boot command with sandbox disabled (migrations may need to modify `.claude/settings.json`) and capture its JSON response:
 
-**CRITICAL**: When the migrate skill returns (either after committing changes or reporting no changes needed), you MUST continue to **Step 0.3**. Do not stop after migration completes.
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs boot
+```
+
+**CRITICAL**: Use `dangerouslyDisableSandbox: true` when calling the Bash tool for this command.
+
+#### If the command fails (`ok: false` or non-zero exit)
+
+Migrations must never half-run silently. Surface the reported error to the user.
+
+**STOP.** Do not proceed — terminal condition.
+
+#### If `migrations.changed` is `true`
+
+Files were updated. You MUST complete the steps below before proceeding.
+
+1. Run `git status --short -- .workflows` and `git diff -- .workflows` to see what changed. Status shows moved and newly-created files that diff cannot (untracked destinations render a move as bare deletions) — read both before summarising.
+2. Write a brief natural language summary of what the migrations did (e.g., "Restructured workflow directories, created manifest files, renamed tracking artifacts"). Focus on the nature of the changes, not individual file paths — these are internal workflow state files.
+3. Display the summary (`{N}`/`{M}` come from `migrations.output`):
+
+> *Output the next fenced block as a code block:*
+
+```
+Migrations Applied
+
+{your natural language summary}
+
+{N} migration(s), {M} file(s) updated.
+```
+
+4. Confirm:
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+· · · · · · · · · · · ·
+Ready to continue?
+
+- **`c`/`continue`** — Proceed
+- **Ask** — Ask questions about the changes
+· · · · · · · · · · · ·
+```
+
+**STOP.** Wait for user response.
+
+**If `continue`:**
+
+Commit the migration changes:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit --workflows -m "chore: apply workflow migrations"
+```
 
 → Proceed to **Step 0.3**.
 
-### Step 0.3: Knowledge Check
+**If ask:**
 
-Load **[knowledge-check.md](../workflow-knowledge/references/knowledge-check.md)** and follow its instructions as written.
+Answer the user's question, then re-render the confirmation prompt above.
+
+**STOP.** Wait for user response.
+
+#### Otherwise
+
+> *Output the next fenced block as a code block:*
+
+```
+All documents up to date.
+```
+
+**Do not stop here.** No migrations were needed.
+
+→ Proceed to **Step 0.3**.
+
+### Step 0.3: Knowledge Gate
+
+Branch on the boot response — run no further commands (`compact` already ran inside boot when the knowledge base was ready).
+
+#### If `knowledge` is `not-ready`
+
+The response's `system_config` object carries what the gate needs to branch. Load **[knowledge-gate.md](references/knowledge-gate.md)** and follow its instructions as written.
+
+#### If `knowledge` is `ready`
 
 → Proceed to **Step 1**.
 
@@ -98,38 +181,31 @@ Load **[knowledge-check.md](../workflow-knowledge/references/knowledge-check.md)
 > completed items, and inbox entries to show you the full picture.
 ```
 
-!`node .claude/skills/workflow-start/scripts/discovery.cjs`
+!`node .claude/skills/workflow-start/scripts/gateway.cjs`
 
 If the above shows a script invocation rather than discovery output, the dynamic content preprocessor did not run. Execute the script before continuing:
 
 ```bash
-node .claude/skills/workflow-start/scripts/discovery.cjs
+node .claude/skills/workflow-start/scripts/gateway.cjs
 ```
 
 Parse the output to understand the current workflow state:
 
-**From `epics` section:**
-- `work_units` — name, active_phases (list of phase names with artifacts)
+**From the per-type sections** (`=== EPICS ===` through `=== CROSS-CUTTING ===`):
+- one line per active work unit — the name
 
-**From `features` section:**
-- `work_units` — name, next_phase, phase_label
+**From `=== COMPLETED ===` / `=== CANCELLED ===`** (present only when non-empty):
+- one line per closed work unit — `{name} ({work_type}, last phase: {phase})`
 
-**From `bugfixes` section:**
-- `work_units` — name, next_phase, phase_label
+**From `=== INBOX ===` / `=== ARCHIVED ===`** (present only when items exist):
+- one line per item — `{slug} ({type}, {date}) — {title}`
 
-**From `completed`/`cancelled` arrays:**
-- Non-active work units with name, work_type, status, last_phase
-- `completed_count`, `cancelled_count`
+**From `=== STATE ===`:**
+- `has_any_work` and the per-type counts
+- `completed_count` / `cancelled_count`
+- `has_inbox` / `inbox_count`, `has_archived` / `archived_count`
 
-**From `inbox` section (only present when inbox items exist):**
-- `ideas` — slug, date, title for each idea
-- `bugs` — slug, date, title for each bug
-- `quickfixes` — slug, date, title for each quick-fix
-- `idea_count`, `bug_count`, `quickfix_count`, `total_count`
-
-**From `state` section:**
-- Counts for each work type, `has_any_work` flag
-- `has_inbox`, `inbox_count`
+Display and routing derive from the `view` snapshot at Step 3 — this dump is the index, not the display surface.
 
 → Proceed to **Step 2**.
 

@@ -1,7 +1,7 @@
 ---
 name: workflow-discussion-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-discovery/scripts/discovery.cjs)
+allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-discovery/scripts/gateway.cjs), Bash(node .claude/skills/workflow-discussion-process/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(mkdir -p .workflows/.cache/), Bash(ls .workflows/.cache/), Bash(rm .workflows/.cache/), Bash(rm -rf .workflows/.cache/), Bash(git status), Bash(git log)
 ---
 
 # Discussion Process
@@ -10,7 +10,7 @@ Act as **expert software architect** participating in discussions AND **document
 
 ## Purpose in the Workflow
 
-Follows research (or starts the pipeline for features). Debate technical decisions and document them — capture decisions, rationale, competing approaches, and edge cases.
+The decision phase, entered from discovery — or from research when it ran. Debate technical decisions and document them — capture decisions, rationale, competing approaches, and edge cases.
 
 ### What This Skill Needs
 
@@ -42,9 +42,10 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 Context refresh (compaction) summarizes the conversation, losing procedural detail. When you detect a context refresh has occurred — the conversation feels abruptly shorter, you lack memory of recent steps, or a summary precedes this message — follow this recovery protocol:
 
 1. **Re-read this skill file completely.** Do not rely on your summary of it. The full process, steps, and rules must be reloaded.
-2. **Read the discussion file** at `.workflows/{work_unit}/discussion/{topic}.md`. This is the only working document this skill creates. The Discussion Map section is your primary progress indicator — it shows which subtopics are decided, exploring, converging, or pending.
-3. **Check git state.** Run `git status` and `git log --oneline -10` to see recent commits. Commit messages follow a conventional pattern that reveals what was completed.
-4. **Announce your position** to the user before continuing: render the current Discussion Map, state what step you believe you're at, and what comes next. Wait for confirmation.
+2. **Read the discussion file** at `.workflows/{work_unit}/discussion/{topic}.md`. This is the only working document this skill creates. The Discussion Map is your primary progress indicator — which subtopics are decided, exploring, converging, pending, or deferred. It lives in the manifest; read it with `node .claude/skills/workflow-discussion-process/scripts/gateway.cjs map {work_unit} {topic}`.
+3. **Check agent cache.** Scan `.workflows/.cache/{work_unit}/discussion/{topic}/` for any files whose `status` is anything other than `incorporated` — `in-flight` agents still running, `pending` results unread, `acknowledged` results partially surfaced.
+4. **Check git state.** Run `git status` and `git log --oneline -10` to see recent commits. Commit messages follow a conventional pattern that reveals what was completed.
+5. **Announce your position** to the user before continuing: render the current Discussion Map (the adapter call above — emit its DISPLAY section verbatim as a code block), state what step you believe you're at, and what comes next. Wait for confirmation.
 
 Do not guess at progress or continue from memory. The files on disk and git history are authoritative — your recollection is not.
 
@@ -73,7 +74,15 @@ Check if the discussion file exists at `.workflows/{work_unit}/discussion/{topic
 
 #### If file exists
 
-Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)** with artifact = `discussion`, file = `.workflows/{work_unit}/discussion/{topic}.md`, continue_step = `Step 2`, restart_targets = `the discussion file`, commit = `discussion({work_unit}): restart discussion`.
+Show the current map state so the continue-or-restart choice is informed:
+
+```bash
+node .claude/skills/workflow-discussion-process/scripts/gateway.cjs map {work_unit} {topic}
+```
+
+Emit the DISPLAY section verbatim as a code block — never the `===` marker lines.
+
+Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)** with artifact = `discussion`, file = `.workflows/{work_unit}/discussion/{topic}.md`, continue_step = `Step 2`, restart_targets = `the discussion file, the manifest's map state (node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.discussion.{topic} subtopics), and the phase cache directory (rm -rf .workflows/.cache/{work_unit}/discussion/{topic}/) — stale agent results would poison the restarted session's review gates`, commit = `discussion({work_unit}): restart discussion`.
 
 ---
 

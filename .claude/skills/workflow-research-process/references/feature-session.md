@@ -32,7 +32,7 @@ When the topic feels well-explored or the user indicates they're done:
 
 ## D. In-Flight Agent Handling
 
-Before concluding, check for in-flight agents. Scan the cache directory for review or deep-dive files with `status: pending` in their frontmatter.
+Before concluding, check for in-flight agents. Scan `.workflows/.cache/{work_unit}/research/{topic}/` for review or deep-dive files with `status: in-flight` in their frontmatter — dispatch-time skeletons whose agents haven't returned yet.
 
 #### If no agents are in flight
 
@@ -57,7 +57,7 @@ There are still {N} background agents working.
 
 **If `wait`:**
 
-Check for agent completion. When all agents have returned, delegate surfacing to the shared protocol loaded by review-agent.md and deep-dive-agent.md. The protocol applies the never-dump rules: two-phase surfacing, one finding at a time. Treat the current moment as a natural break — we are at phase conclusion, so the break check will pass.
+Watch for each in-flight file to flip to `status: pending`. When none remain in-flight, delegate surfacing to the shared protocol loaded by review-agent.md and deep-dive-agent.md. The protocol applies the never-dump rules: two-phase surfacing, one finding at a time. Treat the current moment as a natural break — we are at phase conclusion, so the break check will pass.
 
 → Return to **B. Session Loop**.
 
@@ -97,17 +97,16 @@ Capture the concern via the `workflow-log-idea` skill so it lands in the inbox f
 
 **If `pivot`:**
 
-1. Load **[pivot-to-epic.md](../../workflow-shared/references/pivot-to-epic.md)** with work_unit = `{work_unit}`. The work unit is now an epic with this topic on its discovery map.
+1. Load **[pivot-to-epic.md](../../workflow-shared/references/pivot-to-epic.md)** with work_unit = `{work_unit}`. The work unit is now an epic (conversion committed) with this topic on its discovery map.
 
 2. From the context you already have, derive two values: `proposed_name` — a kebab-case topic name for the concern; and `concern` — the concern with the full context discussed about it.
 
 3. Load **[triage-landing.md](../../workflow-shared/references/triage-landing.md)** with work_unit = `{work_unit}`, target = `{proposed_name}`, concern = `{concern}`, origin = `{topic}`, phase = `research`, date = `{today}`. It validates the name against the map and, on a clash, prompts to pick another or cancel. If `result` is `cancelled`, the topic wasn't created — note the concern in the research file so it isn't lost; otherwise the concern landed as the `{landed_topic}` topic.
 
-4. Commit the conversion and the landing:
+4. Commit the landing:
 
    ```bash
-   git add -- .workflows/{work_unit}/
-   git commit -m "research({work_unit}/{topic}): pivot to epic"
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "research({work_unit}/{topic}): reroute concern to {landed_topic}"
    ```
 
 > *Output the next fenced block as markdown (not a code block):*

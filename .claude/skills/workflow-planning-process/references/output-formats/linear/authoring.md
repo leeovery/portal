@@ -2,6 +2,22 @@
 
 Uses the official Linear MCP server (`https://mcp.linear.app/mcp`). Tool names below reflect this server — verify available tools if using a different implementation.
 
+#### If Linear MCP is unavailable
+
+Inform the user that authoring cannot proceed without Linear MCP access. Suggest checking the MCP configuration, or switching formats via the planning process.
+
+**STOP.** Do not proceed — terminal condition.
+
+## Identifiers
+
+`{team_id}` is the project default `linear_team_id` (persisted during setup — see about.md); `{project_id}` is the plan's `external_id`; phase and task issue UUIDs are recorded in `task_map`:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get project.defaults.linear_team_id
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} external_id
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} task_map
+```
+
 ## Plan Structure
 
 Create a Linear project — this is the plan-level entity:
@@ -97,13 +113,12 @@ When creating issues, if something is unclear:
 
 The official Linear MCP server does not support deletion. Ask the user to delete the Linear project manually via the Linear UI.
 
-> "The Linear project **{project:(titlecase)}** needs to be deleted before restarting. Please delete it in the Linear UI (Project Settings → Delete project), then confirm so I can proceed."
+> *Output the next fenced block as a code block:*
+
+```
+The Linear project {project:(titlecase)} needs to be deleted before
+restarting. Please delete it in the Linear UI (Project Settings →
+Delete project), then confirm so I can proceed.
+```
 
 **STOP.** Wait for user response.
-
-### Fallback
-
-If Linear MCP is unavailable:
-- Inform the user
-- Cannot proceed without MCP access
-- Suggest checking MCP configuration or switching to local markdown

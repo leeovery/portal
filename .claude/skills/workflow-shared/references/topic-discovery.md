@@ -31,13 +31,13 @@ The caller provides these via context before loading:
 Run discovery for the work unit:
 
 ```bash
-node .claude/skills/workflow-discovery/scripts/discovery.cjs {work_unit}
+node .claude/skills/workflow-discovery/scripts/gateway.cjs {work_unit}
 ```
 
-Parse `analysis_caches` from the output:
+Parse the `analysis_caches` line from the output (`research_analysis=<status>, gap_analysis=<status>`):
 
-- `analysis_caches.research_analysis` — `{status, generated, files}` for the research-analysis cache. `status` is `valid` | `stale` | `absent`.
-- `analysis_caches.gap_analysis` — same shape for the gap-analysis cache.
+- `research_analysis` — `valid` | `stale` | `absent`
+- `gap_analysis` — same for the gap-analysis cache.
 
 Initialise an in-conversation tracker:
 
@@ -51,7 +51,7 @@ This tracker captures topic names **approved and written** during this run, per 
 
 ## B. Run Research Analysis if Stale
 
-Research-analysis runs first because gap-analysis reads its cache file as a secondary input.
+Research-analysis runs first so that a theme both analyses surface is already on the map when gap-analysis stages — its already-on-map branch then merges provenance instead of staging a duplicate (see **D. Dedupe Sources**).
 
 #### If `analysis_caches.research_analysis.status` is `stale`
 

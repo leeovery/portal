@@ -14,9 +14,13 @@ Assess whether this change is genuinely quick-fix material. Evaluate against the
 
 ## A. Evaluate
 
-If all criteria are met — proceed without comment.
+#### If all criteria are met
 
 → Return to caller.
+
+#### Otherwise
+
+→ Proceed to **B. Complexity Warning**.
 
 ## B. Complexity Warning
 
@@ -53,13 +57,18 @@ How would you like to proceed?
 
 #### If `feature`
 
-Update the work type in the manifest:
+Update the work type in the work-unit manifest and the project registry:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit} work_type feature
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit} work_type feature
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.work_units.{work_unit}.work_type feature
 ```
 
-Commit: `workflow({work_unit}): promote quick-fix to feature`
+Commit both manifests:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit --workflows -m "workflow({work_unit}): promote quick-fix to feature"
+```
 
 Invoke `/workflow-discussion-entry feature {work_unit}`.
 
@@ -67,13 +76,18 @@ Invoke `/workflow-discussion-entry feature {work_unit}`.
 
 #### If `bugfix`
 
-Update the work type in the manifest:
+Update the work type in the work-unit manifest and the project registry:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit} work_type bugfix
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit} work_type bugfix
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.work_units.{work_unit}.work_type bugfix
 ```
 
-Commit: `workflow({work_unit}): promote quick-fix to bugfix`
+Commit both manifests:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit --workflows -m "workflow({work_unit}): promote quick-fix to bugfix"
+```
 
 Invoke `/workflow-investigation-entry bugfix {work_unit}`.
 

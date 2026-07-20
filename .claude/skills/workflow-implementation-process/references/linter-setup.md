@@ -10,10 +10,10 @@ Discover and configure project linters for use during the TDD cycle's LINT step.
 
 ## A. Resolve Configuration
 
-Read topic-level `linters` via manifest CLI:
+Read topic-level `linters` via `engine manifest`:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.implementation.{topic} linters
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.implementation.{topic} linters
 ```
 
 #### If `linters` is populated
@@ -24,31 +24,23 @@ Set `source` = `topic`.
 
 #### Otherwise
 
-Check if project-level default `linters` exists via manifest CLI:
+Read the project-level default `linters` via `engine manifest`:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs exists project.defaults.linters
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get project.defaults.linters
 ```
 
-**If `false`:**
+**If output is empty (never set):**
 
 → Proceed to **C. Discovery**.
 
-**If `true`:**
-
-Read project default `linters` via manifest CLI:
-
-```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get project.defaults.linters
-```
-
-**If project default is populated:**
+**If output is a populated array:**
 
 Set `source` = `project`.
 
 → Proceed to **B. Confirm Linters**.
 
-**If project default is empty:**
+**If output is `[]` (previously skipped):**
 
 > *Output the next fenced block as a code block:*
 
@@ -111,7 +103,7 @@ Use these linters?
 
 Copy to topic level:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} linters '[{project-level values}]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} linters '[{project-level values}]'
 ```
 
 → Return to caller.
@@ -124,7 +116,7 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.imple
 
 Clear topic-level `linters` before re-discovery:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} linters '[]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} linters '[]'
 ```
 
 → Proceed to **C. Discovery**.
@@ -170,8 +162,8 @@ Approve these linters?
 
 Store at topic and project level:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} linters '[...]'
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set project.defaults.linters '[...]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} linters '[...]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.defaults.linters '[...]'
 ```
 
 → Return to caller.
@@ -186,8 +178,8 @@ Adjust based on user input.
 
 Store empty array at topic and project level:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} linters '[]'
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set project.defaults.linters '[]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} linters '[]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.defaults.linters '[]'
 ```
 
 → Return to caller.

@@ -42,26 +42,62 @@ The agent writes all tasks to the task detail file and returns.
 
 ## C. Validate Task Detail File
 
-Read the task detail file and count tasks. Verify task count matches the task table in the planning file for this phase.
-
-#### If `mismatch`
-
-→ Return to **B. Invoke the Agent**.
+Read the task detail file and count tasks. Verify task count matches the task table in the planning file for this phase. Track the number of agent invocations for this phase in-conversation.
 
 #### If `valid`
 
 → Proceed to **D. Check Gate Mode**.
 
+#### If `mismatch` and fewer than 2 agent invocations have been made
+
+→ Return to **B. Invoke the Agent**.
+
+#### If `mismatch` after 2 agent invocations
+
+> *Output the next fenced block as a code block:*
+
+```
+Task count mismatch persists after 2 authoring attempts.
+
+Planning file task table: {N} tasks — {internal IDs from the table}
+Task detail file:         {M} tasks — {internal IDs found in the file}
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+· · · · · · · · · · · ·
+How would you like to proceed?
+
+- **`r`/`retry`** — Re-invoke the author agent once more
+- **Adjust** — Tell me what to correct (the task table or the detail file), and I'll apply it and re-validate
+· · · · · · · · · · · ·
+```
+
+**STOP.** Wait for user response.
+
+**If `retry`:**
+
+→ Return to **B. Invoke the Agent**.
+
+**If adjust:**
+
+Apply the user's correction.
+
+→ Return to **C. Validate Task Detail File**.
+
 ---
 
 ## D. Check Gate Mode
 
-Check `author_gate_mode` via manifest CLI:
+Check `author_gate_mode` via `engine manifest`:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.planning.{topic} author_gate_mode
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} author_gate_mode
 ```
 
 #### If `author_gate_mode` is `auto`
+
+Set every `pending` task in the task detail file to `approved`.
 
 > *Output the next fenced block as a code block:*
 
@@ -97,24 +133,22 @@ Present the full task content:
 {task detail from task detail file}
 ```
 
-**Task {M} of {total}: {Task Name}**
-
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
 · · · · · · · · · · · ·
-Approve this task?
+**Task {M} of {total}: {Task Name}**
 
 - **`y`/`yes`** — Write it to the plan
 - **`a`/`auto`** — Approve this and all remaining tasks automatically
-- **Tell me what to change** — Revise this task's detail
-- **Navigate** — a different phase or task, or the leading edge
+- **Tell me what to change** — what to revise in this task
+- **Navigate** — Tell me where to go: a different phase or task, or the leading edge
 · · · · · · · · · · · ·
 ```
 
 **STOP.** Wait for user response.
 
-**If `approved` (`y`/`yes`):**
+**If `yes`:**
 
 Mark the task `approved` in the task detail file.
 
@@ -124,10 +158,10 @@ Mark the task `approved` in the task detail file.
 
 Mark the task `approved` in the task detail file. Set all remaining `pending` tasks to `approved`. Update `author_gate_mode` in the manifest:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} author_gate_mode auto
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} author_gate_mode auto
 ```
 
-→ Proceed to **G. Write to Plan**.
+→ Proceed to **F. Revision Check** (earlier `rejected` tasks still need revision before writing).
 
 **If the user provides feedback:**
 
@@ -145,6 +179,8 @@ Mark the task `rejected` in the task detail file and add the feedback as a block
 → Return to **E. Approval Loop**.
 
 **If the user navigates:**
+
+Authoring for this phase is **incomplete** — report that to the caller.
 
 → Return to caller.
 
@@ -176,29 +212,25 @@ Check for rejected tasks in the task detail file.
 
 ## G. Write to Plan
 
-> **CHECKPOINT**: If `author_gate_mode: gated`, verify all tasks in the task detail file are marked `approved` before writing.
+> **CHECKPOINT**: Verify all tasks in the task detail file are marked `approved` before writing — both gate modes approve every task before reaching this section.
 
 For each approved task in the task detail file, in order:
 
 1. Read the task content from the task detail file
 2. Write to the output format (format-specific — see the format's **[authoring.md](output-formats/{format}/authoring.md)**)
-3. Record the internal ID → external ID mapping in the manifest:
+3. Record the task's manifest updates in one batched write, all under `{work_unit}.planning.{topic}`:
+   - `task_map.{internal_id}` — this task's external ID
+   - `task` — the next pending task's internal ID (the next phase's position is set by **D. Advance Phase** when this was the phase's last task)
+
+   On the **phase's first task**, fold the once-per-phase phase mapping into the same write — `task_map.{phase_internal_id}` = the phase's external ID (declared in the format's **[authoring.md](output-formats/{format}/authoring.md)** Phase Structure section); it is identical for every task in the phase, so it is written once, not per task. And on the very first task authored for the plan, when the manifest's `external_id` is still empty, also fold in `external_id` = the plan's external identifier as exposed by the output format. Drop each extra field from a task's write once it no longer applies — the phase mapping after the phase's first task, the plan `external_id` once it is set.
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task_map.{internal_id} {external_id}
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map.{internal_id} {external_id} task={next_task_id} task_map.{phase_internal_id}={phase_external_id} external_id={plan_external_id}
    ```
-4. If the manifest's `external_id` is empty, set it to the external identifier for the plan as exposed by the output format:
+4. Commit with raw git — the format's task storage may live outside the work unit, so the scoped helper cannot cover it. Stage the format's storage and the work unit, then commit:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} external_id {external_id}
+   git add -- .workflows/{work_unit} {format task storage paths}
+   git commit -m "planning({work_unit}): author task {internal_id} ({task name})"
    ```
-5. Record the phase's internal ID → external ID mapping in the manifest (the external identifier is declared in the format's **[authoring.md](output-formats/{format}/authoring.md)** Phase Structure section):
-   ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task_map.{phase_internal_id} {phase_external_id}
-   ```
-6. Advance the manifest planning position to the next pending task (or next phase if this was the last task):
-   ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task {next_task_id}
-   ```
-7. Commit: `planning({work_unit}): author task {internal_id} ({task name})`
 
 > *Output the next fenced block as a code block:*
 
@@ -207,5 +239,7 @@ Task {M} of {total}: {Task Name} — authored.
 ```
 
 Repeat for each task.
+
+Authoring for this phase is **complete** — report that to the caller.
 
 → Return to caller.

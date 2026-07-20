@@ -14,7 +14,7 @@
 
 **On length**: Discussions can be thousands of lines. Length = whatever needed to fully capture discussion, debates, edge cases, false paths. Terseness preferred, but comprehensive documentation more important. Don't summarize — document.
 
-See **[meeting-assistant.md](meeting-assistant.md)** for the dual-role approach (expert architect + documentation assistant).
+→ Load **[meeting-assistant.md](meeting-assistant.md)** and follow its instructions as written — the dual-role approach (expert architect + documentation assistant).
 
 ## Organic Flow
 
@@ -34,7 +34,7 @@ The conversation follows the thinking, not a checklist. Subtopics emerge, get ex
 
 **Don't**: Transcribe verbatim, write code/implementation, create build phases, skip context
 
-See **[guidelines.md](guidelines.md)** for best practices and anti-hallucination techniques.
+→ Load **[guidelines.md](guidelines.md)** and follow its instructions as written — best practices and anti-hallucination techniques.
 
 ## Write to Disk and Commit Frequently
 
@@ -43,7 +43,7 @@ The discussion file is your memory. Context compaction is lossy — what's not o
 **Write to the file at natural moments:**
 
 - A subtopic decision is reached (even if provisional)
-- The Discussion Map states change
+- A subtopic's map state changes
 - A piece of the puzzle is solved
 - The discussion is about to branch into a new subtopic
 - A new subtopic is uncovered
@@ -51,8 +51,8 @@ The discussion file is your memory. Context compaction is lossy — what's not o
 
 These are natural pauses, not every exchange. Document the reasoning and context — not a verbatim transcript.
 
-**After writing, git commit.** Commits let you track, backtrack, and recover after compaction. Don't batch — commit each time you write.
+**After writing, commit** (`engine commit {work_unit} -m "discussion({work_unit}/{topic}): {what changed}"`). Commits let you track, backtrack, and recover after compaction. Don't batch — commit each time you write.
 
-**Create the file early.** After understanding the topic and initial seed subtopics, create the discussion file with context and the Discussion Map. Don't wait until you have decisions.
+**Create the file early.** After understanding the topic and initial seed subtopics, create the discussion file with context and seed the Discussion Map (manifest state, via the engine `discussion-map add` command). Don't wait until you have decisions.
 
 → Return to caller.

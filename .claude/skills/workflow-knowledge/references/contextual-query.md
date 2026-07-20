@@ -34,7 +34,7 @@ node .claude/skills/workflow-knowledge/scripts/knowledge.cjs query "<framing 1>"
 
 #### If the command exits with a non-zero code
 
-Load **[knowledge-usage.md](knowledge-usage.md)** for **D. Query failure handling** and follow its instructions. When D returns:
+→ Load **[knowledge-usage.md](knowledge-usage.md)** for **D. Query failure handling** and follow its instructions. When D returns:
 
 - **If the user chose `skip`** — no results to interpret. → Return to caller.
 - **If a retry succeeded** — results are now available. → Proceed to **C. Interpret the results**.
@@ -60,7 +60,8 @@ Briefly acknowledge surfaced context to the user before the main session starts:
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Surfaced prior context from the knowledge base — incorporating into this phase.
+> Surfaced prior context from the knowledge base — incorporating
+> into this phase.
 > {One short line naming the most relevant piece, e.g. "auth-flow decided on UUID identity (spec, 2026-03-15)."}
 ```
 

@@ -4,13 +4,13 @@
 
 ---
 
-Check if a discussion already exists for this work unit and topic.
+Check whether a discussion already exists for this work unit and topic. Branch on the `phase_status` the caller read in Step 1 — no re-read.
 
-Use the manifest CLI to check discussion phase state:
+#### If `phase_status` is empty (discussion doesn't exist — fresh start)
 
-```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discussion.{topic}
-```
+Nothing to validate — `source` keeps the value set in Step 1.
+
+→ Return to caller.
 
 #### If discussion exists and status is `in-progress`
 
@@ -28,10 +28,10 @@ Set source="continue".
 
 #### If discussion exists and status is `completed`
 
-Reset to in-progress:
+Reopen it:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discussion.{topic} status in-progress
+node .claude/skills/workflow-engine/scripts/engine.cjs topic reopen {work_unit} discussion {topic}
 ```
 
 > *Output the next fenced block as a code block:*

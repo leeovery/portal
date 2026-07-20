@@ -82,10 +82,20 @@ If any tracking file still shows `status: in-progress`, mark it complete now.
 
 > **CHECKPOINT**: Do not proceed to sign-off if any tracking files still show `status: in-progress`. They indicate incomplete review work.
 
+Also confirm every source is incorporated:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic} sources
+```
+
+If any show `status: pending`, work them now per **[spec-construction.md](spec-construction.md)** → Exhaustive Extraction — extract the source's relevant content into the specification through the construction cycle, then mark it `incorporated`.
+
+> **CHECKPOINT**: Do not proceed to sign-off while any source is `pending`. Its material has not been extracted into the specification.
+
 Also confirm every consult reference is addressed:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.specification.{topic} consult_references
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic} consult_references
 ```
 
 If any show `status: pending`, work them now per **[spec-construction.md](spec-construction.md)** → Read Consult References Narrowly — read the sibling slice, apply or cite the correction, record it in Working Notes, then mark `addressed`.
@@ -125,11 +135,11 @@ Discuss the user's context and apply any changes.
 
 ## D. Update Manifest and Conclude
 
-Update the specification metadata via manifest CLI:
+Mark the specification completed — the engine sets the status and indexes the artifact into the knowledge base — then stamp the date:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{topic} status completed
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{topic} date $(date +%Y-%m-%d)
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} specification {topic}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} date $(date +%Y-%m-%d)
 ```
 
 Specification is complete when:
@@ -141,15 +151,13 @@ Specification is complete when:
 - User confirms the specification is complete
 - No blocking gaps remain
 
-Commit: `spec({work_unit}): conclude specification`
-
-Index the completed artifact into the knowledge base:
+Commit:
 
 ```bash
-node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index .workflows/{work_unit}/specification/{topic}/specification.md
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): conclude specification"
 ```
 
-If the index command fails, display the error but do not block — the artifact is already saved:
+If the `complete` response carries `warnings`, display them but do not block — the artifact is already saved:
 
 > *Output the next fenced block as a code block:*
 
@@ -169,29 +177,26 @@ If any of your sources were **existing specifications** (as opposed to discussio
 
 Only supersede sources whose status is **not** `proposed`. A proposed source is an analyzed grouping with no specification file — absorbing it is a delete handled by reconcile, never a supersede.
 
-1. Mark each non-proposed source specification as superseded via manifest CLI:
+1. Supersede each non-proposed source specification — one command sets `status: superseded` and `superseded_by`, and removes the source's chunks from the knowledge base:
    ```bash
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{source-topic} status superseded
-   node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{source-topic} superseded_by {topic}
+   node .claude/skills/workflow-engine/scripts/engine.cjs topic supersede {work_unit} specification {source-topic} --by {topic}
    ```
-2. Remove superseded spec chunks from the knowledge base (per source topic):
 
-```bash
-node .claude/skills/workflow-knowledge/scripts/knowledge.cjs remove --work-unit {work_unit} --phase specification --topic {source-topic}
-```
+   If the JSON response's `warnings` is non-empty, display them but do not block — the supersession is already recorded:
 
-If the remove command fails, display the error but do not block — the supersession is already recorded:
+   > *Output the next fenced block as a code block:*
 
-> *Output the next fenced block as a code block:*
+   ```
+   ⚑ Knowledge removal warning
+     {warning}
+     The spec is superseded. The removal has been queued and will retry automatically on the next `knowledge remove` or `knowledge compact` call.
+   ```
 
-```
-⚑ Knowledge removal warning
-  {error details}
-  The spec is superseded. The removal has been queued and will retry automatically on the next `knowledge remove` or `knowledge compact` call.
-```
-
-3. Inform the user which topics were updated
-4. Commit: `spec({work_unit}): mark source specifications as superseded`
+2. Inform the user which topics were updated
+3. Commit:
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): mark source specifications as superseded"
+   ```
 
 → Proceed to **F. Pipeline Continuation**.
 
@@ -202,6 +207,26 @@ If the remove command fails, display the error but do not block — the superses
 #### If work_type is `epic` and assessment was `cross-cutting`
 
 → Load **[promote-to-cross-cutting.md](promote-to-cross-cutting.md)** and follow its instructions as written.
+
+#### If work_type is `cross-cutting`
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Specification complete. The specification is the final artifact
+> for a cross-cutting concern — the pipeline completes here.
+```
+
+Invoke the bridge:
+
+```
+Pipeline bridge for: {work_unit}
+Completed phase: specification
+
+Invoke the workflow-bridge skill to enter plan mode with continuation instructions.
+```
+
+**STOP.** Do not proceed — terminal condition.
 
 #### Otherwise
 

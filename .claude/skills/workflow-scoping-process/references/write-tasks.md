@@ -35,7 +35,7 @@ If a second task is needed (e.g., separate pass for config files, test file upda
 
 ## B. Write Task Files
 
-Load the chosen format's **authoring.md** from `skills/workflow-planning-process/references/output-formats/{format}/authoring.md` and follow its task storage instructions.
+Load the chosen format's **[authoring.md](../../workflow-planning-process/references/output-formats/{format}/authoring.md)** and follow its task storage instructions.
 
 **Task content** — each task file includes:
 
@@ -65,40 +65,42 @@ Load the chosen format's **authoring.md** from `skills/workflow-planning-process
 Capture the current git commit hash: `git rev-parse HEAD`
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs init-phase {work_unit}.planning.{topic}
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} format {chosen-format}
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set project.defaults.plan_format {chosen-format}
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} spec_commit {commit-hash}
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task_list_gate_mode auto
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} author_gate_mode auto
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} finding_gate_mode auto
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} review_cycle 0
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} phase 1
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task '~'
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task_map '{}'
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} external_id {external_id}
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} status completed
+node .claude/skills/workflow-engine/scripts/engine.cjs topic start {work_unit} planning {topic}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} format {chosen-format}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.defaults.plan_format {chosen-format}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} spec_commit {commit-hash}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_list_gate_mode auto
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} author_gate_mode auto
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} finding_gate_mode auto
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} review_cycle 0
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} phase 1
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task '~'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map '{}'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} external_id {external_id}
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} planning {topic}
 ```
 
-Register the task_map entries. For each task, map internal_id to external_id:
+Register the task_map entries. Map the phase's internal ID (`{topic}-1`) to its external ID, then each task's internal_id to external_id:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task_map.{internal_id} {external_id}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map.{topic}-1 {phase_external_id}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map.{internal_id} {external_id}
 ```
 
-Both the plan-level `external_id` and per-task external IDs are determined by the format's authoring instructions (see the Plan Structure and Task Storage sections).
+The plan-level `external_id`, the phase external ID, and per-task external IDs are all determined by the format's authoring instructions (see the Plan Structure, Phase Structure, and Task Storage sections).
 
 ## D. Mark Scoping Complete
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs init-phase {work_unit}.scoping.{topic}
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.scoping.{topic} status completed
+node .claude/skills/workflow-engine/scripts/engine.cjs topic start {work_unit} scoping {topic}
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} scoping {topic}
 ```
 
-Commit all scoping artifacts:
+Commit all scoping artifacts with raw git — the project default lands in `.workflows/manifest.json` and the format's task storage may live outside the work unit, so the scoped helper cannot cover them:
 
-```
-scoping({work_unit}): specification and plan
+```bash
+git add -- .workflows/manifest.json .workflows/{work_unit} {format task storage paths}
+git commit -m "scoping({work_unit}): specification and plan"
 ```
 
 → Return to caller.

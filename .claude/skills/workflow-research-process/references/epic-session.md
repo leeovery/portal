@@ -44,7 +44,7 @@ When a concern surfaces that belongs to a *different* topic — raised in conver
 1. Identify the topic the concern belongs to. Read the live map:
 
    ```bash
-   node .claude/skills/workflow-discovery/scripts/discovery.cjs {work_unit}
+   node .claude/skills/workflow-discovery/scripts/gateway.cjs {work_unit}
    ```
 
    Resolve the target. If one topic clearly matches, propose it and confirm with the user. If nothing fits, propose a new kebab-case name and confirm. If several plausible candidates exist — or a near-match you're unsure of — present them and let the user choose:
@@ -72,8 +72,7 @@ When a concern surfaces that belongs to a *different* topic — raised in conver
 4. Commit:
 
    ```bash
-   git add -- .workflows/{work_unit}/
-   git commit -m "research({work_unit}/{topic}): reroute concern to {landed_topic}"
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "research({work_unit}/{topic}): reroute concern to {landed_topic}"
    ```
 
 → Return to **B. Session Loop**.
@@ -98,7 +97,7 @@ The current file is drifting — multiple exchanges have been adding material th
 
 → Return to **B. Session Loop**.
 
-#### If the current topic is converging (tradeoffs clear, approaching decision territory)
+#### If the current topic is converging (tradeoffs clear, approaching decision territory) or the user indicates they're done
 
 → Proceed to **E. In-Flight Agent Handling**.
 
@@ -106,7 +105,7 @@ The current file is drifting — multiple exchanges have been adding material th
 
 ## E. In-Flight Agent Handling
 
-Before concluding, check for in-flight agents. Scan the cache directory for review or deep-dive files with `status: pending` in their frontmatter.
+Before concluding, check for in-flight agents. Scan `.workflows/.cache/{work_unit}/research/{topic}/` for review or deep-dive files with `status: in-flight` in their frontmatter — dispatch-time skeletons whose agents haven't returned yet.
 
 #### If no agents are in flight
 
@@ -131,7 +130,7 @@ There are still {N} background agents working.
 
 **If `wait`:**
 
-Check for agent completion. When all agents have returned, delegate surfacing to the shared protocol loaded by review-agent.md and deep-dive-agent.md. The protocol applies the never-dump rules: two-phase surfacing, one finding at a time. Treat the current moment as a natural break — we are at phase conclusion, so the break check will pass.
+Watch for each in-flight file to flip to `status: pending`. When none remain in-flight, delegate surfacing to the shared protocol loaded by review-agent.md and deep-dive-agent.md. The protocol applies the never-dump rules: two-phase surfacing, one finding at a time. Treat the current moment as a natural break — we are at phase conclusion, so the break check will pass.
 
 → Return to **B. Session Loop**.
 

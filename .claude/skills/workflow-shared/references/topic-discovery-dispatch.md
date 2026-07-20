@@ -11,7 +11,7 @@ Wraps the cache-status check and conditional dispatch around [topic-discovery.md
 The caller provides these via context before loading:
 
 - `work_unit` — the epic's work unit name. Always present.
-- `analysis_caches` — the `analysis_caches` object from the caller's prior `workflow-continue-epic/scripts/discovery.cjs` invocation. Shape: `{research_analysis: {status, ...}, gap_analysis: {status, ...}}`.
+- `analysis_caches` — the `analysis_caches` line from the caller's prior `workflow-continue-epic/scripts/gateway.cjs` invocation: `research_analysis=<status>, gap_analysis=<status>`.
 
 The caller is also responsible for surfacing `new_arrivals` afterwards (e.g. as a callout above the discovery map).
 
@@ -20,19 +20,19 @@ The caller is also responsible for surfacing `new_arrivals` afterwards (e.g. as 
 Initialise an in-conversation tracker:
 
 ```
-new_arrivals = {}
+new_arrivals = { research_analysis: [], gap_analysis: [] }
 ```
 
-This tracker is populated by `topic-discovery.md` when analyses fire below. The caller reads it after this reference returns.
+This tracker is populated by `topic-discovery.md` when analyses fire below. The caller reads it after this reference returns — the keys exist even when no analysis fires.
 
 → Proceed to **B. Cache Status Check**.
 
 ## B. Cache Status Check
 
-Read `analysis_caches` from the caller's prior discovery output:
+Read the statuses from the caller's `analysis_caches` line:
 
-- `analysis_caches.research_analysis.status` — `valid` | `stale` | `absent`
-- `analysis_caches.gap_analysis.status` — same
+- `research_analysis` — `valid` | `stale` | `absent`
+- `gap_analysis` — same
 
 #### If both caches are `valid` or `absent`
 
@@ -53,7 +53,7 @@ On return, `topic-discovery.md` has populated `new_arrivals` with any items adde
 Re-run discovery so the caller sees fresh state including any auto-added items:
 
 ```bash
-node .claude/skills/workflow-continue-epic/scripts/discovery.cjs {work_unit}
+node .claude/skills/workflow-continue-epic/scripts/gateway.cjs {work_unit}
 ```
 
 → Return to caller.

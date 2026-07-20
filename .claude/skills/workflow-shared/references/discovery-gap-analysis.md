@@ -27,7 +27,7 @@ Analyzing completed research and discussions for coverage gaps...
 Read `.workflows/{work_unit}/research/{name}.md` for each `completed_research` name and `.workflows/{work_unit}/discussion/{name}.md` for each `completed_discussion` name. Skip files missing on disk. Items with `in-progress`, `superseded`, or `cancelled` status are not in the input set.
 
 For each discussion, note:
-- The Discussion Map state (topics and their statuses: pending, exploring, converging, decided)
+- The subtopic map — final states live in the work unit manifest under `phases.discussion.items.{name}.subtopics` (`decided` / `deferred` for completed discussions; legacy files may instead carry a Discussion Map section inline)
 - Key decisions made and their dependencies on other topics
 - Deferred items, open threads, and unresolved questions
 - Integration points with other discussions
@@ -85,8 +85,8 @@ A single analysis may emit a mix of routings — apply the criteria per candidat
 Read filter inputs from the work unit's manifest:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discovery items
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discovery dismissed
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discovery items
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discovery dismissed
 ```
 
 `items` is the active map (an object keyed by topic name). `dismissed` is the array of names previously removed from the map by the user.
@@ -111,15 +111,15 @@ Check if the existing item's `source` field already includes `gap-analysis`. If 
 Read the existing source:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discovery.{name} source
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discovery.{name} source
 ```
 
 **If the existing source is empty or the literal string `null`:**
 
-The manifest CLI prints `"null"` for fields that exist with a JSON null value (intentional — `exists` is the way to distinguish missing from null). Treat both empty and `"null"` as "no real source" and set the new value alone:
+`engine manifest get` prints `"null"` for fields that exist with a JSON null value (intentional — `exists` is the way to distinguish missing from null). Treat both empty and `"null"` as "no real source" and set the new value alone:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery.{name} source "gap-analysis"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.discovery.{name} source "gap-analysis"
 ```
 
 **Otherwise:**
@@ -127,7 +127,7 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.disco
 Set source to `{existing},gap-analysis` (comma-joined):
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery.{name} source "{existing},gap-analysis"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.discovery.{name} source "{existing},gap-analysis"
 ```
 
 Do not change the existing item's routing. Do not stage a candidate.
@@ -188,56 +188,14 @@ Overwrite with the topic list:
 - **Gap type**: {cross-artifact|emergent|integration|uncovered}
 ```
 
-List every topic from **C**, even those that filtered out in **D** — the cache file is the analysis output, not the diff. If re-entered on a reuse boot where **C** did not run this session (a deferred staging file was picked up), source the topic list from the staging file's candidate blocks instead.
+List every topic from **C**, even those that filtered out in **D** — the cache file is the analysis output, not the diff. If re-entered on a reuse boot where **C** did not run this session (a deferred staging file was picked up), source the topic list from the staging file's candidate blocks instead — that file holds only the genuinely-new candidates, so the rebuilt cache is narrower than a fresh pass; the filtered topics' outcomes are already recorded on the map and the dismissed list, and the next content change re-runs the full analysis.
 
-Compute the input checksum from completed research files plus completed discussion files only:
-
-```bash
-node -e "
-const fs = require('fs');
-const crypto = require('crypto');
-const path = require('path');
-const manifest = JSON.parse(fs.readFileSync('.workflows/{work_unit}/manifest.json', 'utf8'));
-const rItems = ((manifest.phases || {}).research || {}).items || {};
-const dItems = ((manifest.phases || {}).discussion || {}).items || {};
-const rDir = '.workflows/{work_unit}/research';
-const dDir = '.workflows/{work_unit}/discussion';
-const inputs = [];
-for (const [k, v] of Object.entries(rItems)) {
-  if (v && v.status === 'completed') {
-    const p = path.join(rDir, k + '.md');
-    if (fs.existsSync(p)) inputs.push(p);
-  }
-}
-for (const [k, v] of Object.entries(dItems)) {
-  if (v && v.status === 'completed') {
-    const p = path.join(dDir, k + '.md');
-    if (fs.existsSync(p)) inputs.push(p);
-  }
-}
-inputs.sort();
-const hash = crypto.createHash('md5');
-for (const f of inputs) hash.update(fs.readFileSync(f));
-console.log(hash.digest('hex'));
-"
-```
-
-Update the manifest's gap_analysis_cache (note: now lives under `phases.discovery`, not `phases.discussion`):
+Stamp the manifest's gap_analysis_cache — one command checksums the completed research plus completed discussion files, writes `checksum`, `generated`, and `input_files`, and indexes the cache file into the knowledge base so its content surfaces in future contextual queries:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery gap_analysis_cache.checksum "{computed-checksum}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery gap_analysis_cache.generated "{ISO timestamp}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery gap_analysis_cache.input_files '[]'
-# Push one entry per input file (completed research + completed discussion):
-node .claude/skills/workflow-manifest/scripts/manifest.cjs push {work_unit}.discovery gap_analysis_cache.input_files "{file}.md"
+node .claude/skills/workflow-engine/scripts/engine.cjs cache stamp {work_unit} gap-analysis
 ```
 
-Index the cache file into the knowledge base so its content surfaces in future contextual queries:
-
-```bash
-node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index .workflows/{work_unit}/.state/discovery-gap-analysis.md
-```
-
-If the index call fails, surface the error to the user but do not abort — the cache file is already on disk and the manifest is updated; the user can re-run `knowledge index` manually or wait for the next analysis re-run to retry.
+If the response carries `warnings`, surface them to the user but do not abort — the cache file is already on disk and the manifest is updated; indexing retries on the next analysis re-run.
 
 → Return to caller.

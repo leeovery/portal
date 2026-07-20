@@ -4,7 +4,7 @@
 
 ---
 
-Drive the per-source iteration: read source, identify themes, early sanity gate, draft cache, propose, edit, validate, apply. Edit operations live in their own lettered sections (K–P) dispatched from G.
+Drive the per-source iteration: read source, identify themes, early sanity gate, draft cache, propose, edit, validate, apply. Edit operations live in their own lettered sections (K, M–P) dispatched from G.
 
 ## A. Iterate
 
@@ -86,8 +86,8 @@ Candidate themes for {current_source}.md:
 ```
 · · · · · · · · · · · ·
 - **`y`/`yes`** — Proceed to draft cache files
-- **Redirect** — Adjust the theme list (rename, merge two, split one, add, remove)
 - **`a`/`abandon`** — Skip this source file
+- **Redirect** — Adjust the theme list (rename, merge two, split one, add, remove)
 · · · · · · · · · · · ·
 ```
 
@@ -188,8 +188,8 @@ Plan for {current_source}.md:
 
 @foreach(theme in plan.themes)
 {N}. {theme.kebab_name}
-   └─ Summary: {theme.summary}
-   └─ Content: {paragraph_count} para(s) — "{content_preview}..."
+   ├─ Summary: {theme.summary}
+   ├─ Content: {paragraph_count} para(s) — "{content_preview}..."
    └─ Cache: .workflows/.cache/{work_unit}/legacy-split/{current_source}/{theme.kebab_name}.md
 @endforeach
 
@@ -201,8 +201,8 @@ Source file will be renamed to {current_source}-superseded-{datetime}.md.
 ```
 · · · · · · · · · · · ·
 - **`y`/`yes`** — Apply this plan
-- **Edit** — Modify cache files or plan.json (rename, merge, split, add, remove). To rewrite a draft, edit the cache file directly between renders.
 - **`a`/`abandon`** — Skip this source file
+- **Edit** — Modify cache files or plan.json (rename, merge, split, add, remove). To rewrite a draft, edit the cache file directly between renders.
 · · · · · · · · · · · ·
 ```
 

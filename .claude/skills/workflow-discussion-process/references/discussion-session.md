@@ -16,24 +16,40 @@ Two types of background agent operate during the discussion. Load their lifecycl
 
 ## B. Session Loop
 
-The discussion is an organic conversation. The Discussion Map is your tracking backbone — it tells you where you are, what's been decided, what's still open, and where to go next. Follow this loop:
+The discussion is an organic conversation. The Discussion Map is your tracking backbone — it tells you where you are, what's been decided, what's still open, and where to go next. It is typed state in the manifest (`phases.discussion.items.{topic}.subtopics`): you make every state call, the engine `discussion-map` commands record it, and the adapter renders it (see **E**). Follow this loop:
 
 1. **Check for findings** — Before each conversational turn, run the check-for-results logic from the background-agent files loaded above. Each file knows its own rules; follow the named section in each:
    - **Review agent**: follow **B. Check and Surface** in **[review-agent.md](review-agent.md)** — delegates to the shared surfacing protocol for review findings.
    - **Perspective agents**: follow **D. Check and Surface** in **[perspective-agents.md](perspective-agents.md)** — promotes completed perspective sets to synthesis, then delegates to the shared surfacing protocol for synthesis findings.
    
    Both enforce the never-dump rules: two-phase surfacing, one finding at a time, mid-thread protection. **Do not surface findings directly — always go through the agent files, which route to the shared protocol.** Skip on the first iteration (no agents have been dispatched yet).
-2. **Discuss** — Engage with the user on the current subtopic or wherever the conversation leads. Challenge thinking, push back, explore edge cases. Participate as an expert architect. Follow interesting threads — tangents that surface new concerns are valuable. New subtopics may emerge; add them to the Discussion Map as `pending`.
-3. **Navigate** — When a subtopic feels explored or a decision lands, update the Discussion Map and guide the user to what's still open. Don't force transitions — suggest them. The user can follow your suggestion or go wherever they want.
-4. **Document** — At natural pauses, update the discussion file. Update the Discussion Map states. When a subtopic reaches `decided`, write up its section (Context → Options → Journey → Decision). Capture provisional thinking for subtopics still in progress if context compaction is a risk.
-5. **Commit & dispatch check** — Git commit after each write. Don't batch. Then immediately evaluate agent dispatch — **CHECKPOINT**: Do not respond to the user until this check is complete. Evaluate the trigger conditions defined in the review agent and perspective agent instructions loaded above. If conditions are met, dispatch before continuing. If not, proceed.
+2. **Discuss** — Engage with the user on the current subtopic or wherever the conversation leads. Challenge thinking, push back, explore edge cases. Participate as an expert architect. Follow interesting threads — tangents that surface new concerns are valuable. New subtopics may emerge; record each on the map as it's identified (kebab-case name; new subtopics start `pending`; `--parent` nests under an existing top-level subtopic):
+
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs discussion-map add {work_unit} {topic} {subtopic} [--parent {parent}]
+   ```
+3. **Navigate** — When a subtopic feels explored or a decision lands, record the transition and guide the user to what's still open:
+
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs discussion-map set {work_unit} {topic} {subtopic} {state}
+   ```
+
+   The command's JSON response carries `all_decided` and `unresolved_count` — no follow-up read needed. Don't force transitions — suggest them. The user can follow your suggestion or go wherever they want.
+4. **Document** — At natural pauses, update the discussion file — it holds the knowledge. When a subtopic reaches `decided`, write up its section (Context → Options → Journey → Decision); keep the Summary current. Capture provisional thinking for subtopics still in progress if context compaction is a risk. The live map state lives in the manifest only — never write a map section into the file.
+5. **Commit & dispatch check** — Commit after each write. Don't batch:
+
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "discussion({work_unit}/{topic}): {what changed}"
+   ```
+
+   Then immediately evaluate agent dispatch — **CHECKPOINT**: Do not respond to the user until this check is complete. Evaluate the trigger conditions defined in the review agent and perspective agent instructions loaded above. If conditions are met, dispatch before continuing. If not, proceed.
 6. **Repeat** — Continue with the next subtopic or follow where the conversation leads.
 
 ---
 
 ## C. Subtopic Lifecycle
 
-Subtopics move through states as the conversation progresses:
+Subtopics move through states as the conversation progresses. The judgment call is yours; recording it is the `discussion-map set` command (session loop step 3):
 
 **pending** → Identified but not yet explored. Sits on the map waiting for attention. New subtopics from tangents, agent findings, or natural discovery start here.
 
@@ -43,7 +59,9 @@ Subtopics move through states as the conversation progresses:
 
 **decided** → Decision reached with rationale. The subtopic section gets written up with the full Context → Options → Journey → Decision structure. This is the terminal state.
 
-**State transitions are judgement calls.** Move a subtopic to `converging` when the viable options are narrowed and the discussion is heading toward resolution. Move to `decided` when there's a clear outcome with rationale — even if provisional. Don't wait for absolute certainty.
+**deferred** → Deliberately set aside. Applied at conclude-anyway time (see **H**) to subtopics still unresolved — each is also noted in Summary → Open Threads.
+
+**State transitions are judgement calls.** Move a subtopic to `converging` when the viable options are narrowed and the discussion is heading toward resolution. Move to `decided` when there's a clear outcome with rationale — even if provisional. Don't wait for absolute certainty. Any state can move to any other — judgment may revisit.
 
 Child subtopics can exist under parents. A parent might be `exploring` while one of its children is already `decided`. The parent reaches `decided` when all its meaningful children are resolved and the overall concern is addressed.
 
@@ -59,7 +77,7 @@ You own transitions between subtopics. The goal is natural flow, not rigid seque
 
 **When a tangent surfaces a new concern:**
 
-Add it to the Discussion Map as `pending`. If it's closely related to the current subtopic, it might become a child. If it's independent, it sits at the top level.
+Record it on the map as `pending` (`discussion-map add`, session loop step 2). If it's closely related to the current subtopic, it might become a child (`--parent`). If it's independent, it sits at the top level.
 
 > "Good catch — I've added {new subtopic} to the map. Let's finish {current} first and we can pick that up after."
 
@@ -77,63 +95,18 @@ If a subtopic was partially explored and the conversation moved on, remember it 
 
 ## E. Status Display
 
-At natural breaks — after a decision, when transitioning between subtopics, or when the user asks — render the current Discussion Map state. This gives the user visibility into where the discussion stands.
+At natural breaks — after a decision, when transitioning between subtopics, or when the user asks — render the current Discussion Map. This gives the user visibility into where the discussion stands.
 
-> *Output the next fenced block as a code block:*
-
-```
-  Discussion Map — {topic:(titlecase)} ({total} subtopics{state_breakdown})
-
-@foreach(parent in subtopics)
-  {parent_branch} {state_glyph} {parent.name:(titlecase)} [{parent.state}]
-@foreach(child in parent.children)
-  {parent_gutter}{child_branch} {state_glyph} {child.name:(titlecase)} [{child.state}]
-@endforeach
-@endforeach
+```bash
+node .claude/skills/workflow-discussion-process/scripts/gateway.cjs map {work_unit} {topic}
 ```
 
-**Render rules — follow exactly. Do not improvise spacing, glyphs, or branches.**
+The output is one snapshot in two demarcated sections:
 
-- **Two-space left indent** on every row (matches the discovery map). Header included.
-- **Header**: `Discussion Map — {topic:(titlecase)} ({total} subtopics{state_breakdown})`. Followed by **one blank line** before the first row.
-  - `{total}` — count of **all subtopics** (parents + children).
-  - `{state_breakdown}` — append ` — {decided} decided · {converging} converging · {exploring} exploring · {pending} pending`, **omitting zero-count categories**. When only one state bucket is non-zero (e.g. every subtopic still `pending`), the breakdown is redundant with the rows; omit it and render just `({total} subtopics)`.
-  - Examples: `Discussion Map — Portal Observability Layer (12 subtopics)` · `Discussion Map — Portal Observability Layer (12 subtopics — 3 decided · 2 converging · 1 exploring · 6 pending)`.
-- **Parent row**: `{parent_branch} {state_glyph} {name:(titlecase)} [{state}]`. **Single space** between each of the four segments. State label in lowercase, wrapped in square brackets.
-  - `{parent_branch}`: `┌─` for the first parent, `└─` for the last parent, `├─` for the rest. **With a single parent, use `└─`** (no upward stroke).
-- **Child row**: `{parent_gutter}{child_branch} {state_glyph} {name:(titlecase)} [{state}]`. Single space between segments after the gutter+branch.
-  - `{parent_gutter}` governs the continuation tree under the parent:
-    - **Parent is not the last parent**: `│  ` — `│` followed by **2 spaces** (3 chars total). The `│` runs continuously down through every child row of that parent so the trunk never breaks.
-    - **Parent is the last parent**: `   ` — **3 spaces** (no `│`), so the tree doesn't dangle below `└─`.
-  - `{child_branch}`: `├─` for a non-final child, `└─` for the final child. **With a single child, use `└─`**.
-  - Children never have grandchildren — the map is two levels deep maximum.
-- **State glyphs** — exactly one character before the name. **Do not substitute.**
-  - `pending` — `○`
-  - `exploring` — `◐`
-  - `converging` — `→`
-  - `decided` — `✓`
-- **Row order** within the map matches the order parents and children appear in the file's Discussion Map section. Do not re-sort.
+- **DATA** — reasoning surface: `counts`, `all_decided`, `unresolved`, `review_cycles`. Reason from it; never display or restate it.
+- **DISPLAY** — the rendered map. Emit verbatim as a code block. Never redraw, reflow, or trim it.
 
-**Single-row case (one parent, no children):**
-
-```
-  Discussion Map — {topic:(titlecase)} (1 subtopic)
-
-  └─ ○ Subsystem Prefix Taxonomy [pending]
-```
-
-**Full example (mixed states, nested children):**
-
-```
-  Discussion Map — Portal Observability Layer (12 subtopics — 3 decided · 2 converging · 1 exploring · 5 pending)
-
-  ┌─ ✓ Subsystem Prefix Taxonomy [decided]
-  ├─ → Decision-Point INFO Line Shape [converging]
-  │  ├─ ✓ Field Order [decided]
-  │  └─ ◐ Truncation Rules [exploring]
-  ├─ → Diagnostic Context Preservation At Boundaries [converging]
-  └─ ○ Rollout Sequencing And Scope Bundling [pending]
-```
+A section is everything beneath its `===` marker up to the next marker — the marker lines themselves are never emitted.
 
 Don't render the map after every exchange — do it at meaningful transitions. If the user has just seen a similar state, skip it.
 
@@ -173,17 +146,16 @@ Capture the concern via the `workflow-log-idea` skill so it lands in the inbox f
 
 **If `pivot`:**
 
-1. Load **[pivot-to-epic.md](../../workflow-shared/references/pivot-to-epic.md)** with work_unit = `{work_unit}`. The work unit is now an epic with this topic on its discovery map.
+1. Load **[pivot-to-epic.md](../../workflow-shared/references/pivot-to-epic.md)** with work_unit = `{work_unit}`. The work unit is now an epic (conversion committed) with this topic on its discovery map.
 
 2. From the context you already have, derive two values: `proposed_name` — a kebab-case topic name for the concern; and `concern` — the concern with the full context discussed about it.
 
 3. Load **[triage-landing.md](../../workflow-shared/references/triage-landing.md)** with work_unit = `{work_unit}`, target = `{proposed_name}`, concern = `{concern}`, origin = `{topic}`, phase = `discussion`, date = `{today}`. It validates the name against the map and, on a clash, prompts to pick another or cancel. If `result` is `cancelled`, the topic wasn't created — note the concern in the Summary so it isn't lost; otherwise the concern landed as the `{landed_topic}` topic.
 
-4. Commit the conversion and the landing:
+4. Commit the landing:
 
    ```bash
-   git add -- .workflows/{work_unit}/
-   git commit -m "discussion({work_unit}/{topic}): pivot to epic"
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "discussion({work_unit}/{topic}): reroute concern to {landed_topic}"
    ```
 
 > *Output the next fenced block as markdown (not a code block):*
@@ -221,7 +193,7 @@ Note the concern in the Summary section for the user to consider separately, and
 1. Identify the topic the concern belongs to. Read the live map:
 
    ```bash
-   node .claude/skills/workflow-discovery/scripts/discovery.cjs {work_unit}
+   node .claude/skills/workflow-discovery/scripts/gateway.cjs {work_unit}
    ```
 
    Resolve the target. If one topic clearly matches, propose it and confirm with the user. If nothing fits, propose a new kebab-case name and confirm. If several plausible candidates exist — or a near-match you're unsure of — present them and let the user choose:
@@ -240,7 +212,7 @@ Note the concern in the Summary section for the user to consider separately, and
 
    **STOP.** Wait for user response.
 
-   A chosen candidate is the target; `new` means propose a kebab-case name and confirm it. If the resolved target is the current topic (`{topic}`), it's a detail of this discussion, not a reroute — add it to the Discussion Map as a `pending` subtopic and → Return to **B. Session Loop**.
+   A chosen candidate is the target; `new` means propose a kebab-case name and confirm it. If the resolved target is the current topic (`{topic}`), it's a detail of this discussion, not a reroute — record it as a `pending` subtopic (`discussion-map add`, session loop step 2) and → Return to **B. Session Loop**.
 
 2. Record the concern with the full context discussed about it as `concern` — the target topic picks it up cold.
 
@@ -249,8 +221,7 @@ Note the concern in the Summary section for the user to consider separately, and
 4. The current Discussion Map is unchanged — rerouting sends the concern away from this topic, it doesn't mark it. Commit:
 
    ```bash
-   git add -- .workflows/{work_unit}/
-   git commit -m "discussion({work_unit}/{topic}): reroute concern to {landed_topic}"
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "discussion({work_unit}/{topic}): reroute concern to {landed_topic}"
    ```
 
 → Return to **B. Session Loop**.
@@ -267,15 +238,19 @@ Leave it as a subtopic on the map.
 
 Convergence is the natural end state — not a forced conclusion. The discussion converges when:
 
-- All subtopics on the Discussion Map are `decided` (or deliberately deferred)
+- All subtopics on the Discussion Map are `decided` (or `deferred`)
 - Neither you nor the user can identify new subtopics without breaking scope
 - At least one review cycle has completed (see safety net below)
 
-**Before rendering the convergence menu, verify:**
+**Before rendering the convergence menu**, run the map call:
 
-Count review files in `.workflows/.cache/{work_unit}/discussion/{topic}/`.
+```bash
+node .claude/skills/workflow-discussion-process/scripts/gateway.cjs map {work_unit} {topic}
+```
 
-#### If zero review files exist
+Its DATA section carries the convergence facts: `all_decided` and `review_cycles`. The DISPLAY section isn't emitted here — this flow reads DATA only.
+
+#### If `review_cycles` is 0
 
 > *Output the next fenced block as a code block:*
 
@@ -289,9 +264,7 @@ Dispatch a review agent as a foreground task (not background — results are nee
 
 → Return to **B. Session Loop**.
 
-#### If review files exist
-
-**When convergence is reached:**
+#### If `review_cycles` is at least 1
 
 > *Output the next fenced block as a code block:*
 
@@ -306,7 +279,7 @@ All subtopics on the Discussion Map are decided.
 Discussion complete. Ready to conclude?
 
 - **`y`/`yes`** — Conclude discussion
-- **Keep going** — Continue discussing to explore further
+- **Keep going** — Tell me what else to explore
 · · · · · · · · · · · ·
 ```
 
@@ -314,7 +287,7 @@ Discussion complete. Ready to conclude?
 
 **If `yes`:**
 
-→ Return to caller.
+→ Proceed to **I. In-Flight Agent Check**.
 
 **If keep going:**
 
@@ -328,9 +301,15 @@ Continue the discussion. The user may want to revisit a decision, explore an edg
 
 When the user indicates they want to conclude the discussion (e.g., "that covers it", "let's wrap up", "I think we're done") before natural convergence:
 
-**First, check the review safety net:** Count review files in `.workflows/.cache/{work_unit}/discussion/{topic}/`.
+**First**, run the map call:
 
-**If zero review files exist:**
+```bash
+node .claude/skills/workflow-discussion-process/scripts/gateway.cjs map {work_unit} {topic}
+```
+
+Its DATA section carries everything this flow needs: `all_decided`, `unresolved`, `review_cycles`.
+
+#### If `review_cycles` is 0
 
 > *Output the next fenced block as a code block:*
 
@@ -342,13 +321,13 @@ When the user indicates they want to conclude the discussion (e.g., "that covers
 
 Dispatch a review agent as a foreground task (not background — results are needed before concluding). Follow **A. Dispatch** in review-agent.md but omit `run_in_background`. When results return, delegate to **B. Check and Surface** in review-agent.md — the shared surfacing protocol applies the never-dump rules and presents findings one at a time. Then continue with the conclusion flow below.
 
-**If review files exist:**
+#### If `review_cycles` is at least 1
 
 Continue with the conclusion flow below.
 
-#### If there are subtopics still `pending` or `exploring`
+#### If `all_decided` is false
 
-Render the Discussion Map and note which subtopics are unresolved.
+Emit the map call's DISPLAY section verbatim as a code block, then ({N} = the length of `unresolved`):
 
 > *Output the next fenced block as markdown (not a code block):*
 
@@ -356,9 +335,11 @@ Render the Discussion Map and note which subtopics are unresolved.
 · · · · · · · · · · · ·
 There are still {N} subtopics not yet decided:
 
-{list of pending/exploring subtopics}
+@foreach(name in unresolved)
+- {name:(titlecase)}
+@endforeach
 
-- **`y`/`yes`** — Conclude anyway (unresolved items noted in Summary)
+- **`y`/`yes`** — Conclude anyway (unresolved items deferred and noted in Summary)
 - **`n`/`no`** — Continue discussing
 · · · · · · · · · · · ·
 ```
@@ -367,17 +348,35 @@ There are still {N} subtopics not yet decided:
 
 **If `yes`:**
 
-Note unresolved subtopics in the Summary → Open Threads section of the discussion file. Commit.
+Set each `unresolved` subtopic to `deferred`:
 
-→ Return to caller.
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs discussion-map set {work_unit} {topic} {subtopic} deferred
+```
+
+Note them in the Summary → Open Threads section of the discussion file. Commit.
+
+→ Proceed to **I. In-Flight Agent Check**.
 
 **If `no`:**
 
 → Return to **B. Session Loop**.
 
-#### If all subtopics are `decided`
+#### If `all_decided` is true
 
-Check for in-flight agents. If agents are still running:
+→ Proceed to **I. In-Flight Agent Check**.
+
+---
+
+## I. In-Flight Agent Check
+
+The last gate before conclusion, whichever path led here. Scan `.workflows/.cache/{work_unit}/discussion/{topic}/` for files with `status: in-flight` in their frontmatter — dispatch-time skeletons whose agents haven't returned yet.
+
+#### If no agents are in flight
+
+→ Return to caller.
+
+#### If agents are still running
 
 > *Output the next fenced block as markdown (not a code block):*
 
@@ -394,14 +393,10 @@ There are still {N} background agents working.
 
 **If `wait`:**
 
-Check for agent completion. When all agents have returned, delegate surfacing to the shared protocol loaded by review-agent.md and perspective-agents.md. The protocol applies the never-dump rules: two-phase surfacing, one finding at a time. Treat the current moment as a natural break — we are at phase conclusion, so the break check will pass.
+Watch for each in-flight file to flip to `status: pending`. When none remain in-flight, delegate surfacing to the shared protocol loaded by review-agent.md and perspective-agents.md. The protocol applies the never-dump rules: two-phase surfacing, one finding at a time. Treat the current moment as a natural break — we are at phase conclusion, so the break check will pass.
 
 → Return to **B. Session Loop**.
 
 **If `proceed`:**
-
-→ Return to caller.
-
-**If no agents are in flight:**
 
 → Return to caller.

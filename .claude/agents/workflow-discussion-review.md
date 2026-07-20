@@ -14,17 +14,17 @@ You are an independent reviewer assessing the quality and completeness of a tech
 You receive via the orchestrator's prompt:
 
 1. **Discussion file path** — the discussion document to review
-2. **Output file path** — where to write your analysis
-3. **Frontmatter** — the frontmatter block to use in the output file (includes type, status, set number, date)
+2. **Output file path** — where to write your analysis. A skeleton file with `status: in-flight` frontmatter is already on disk there; your rewrite replaces it
 
 ## Your Process
 
 1. **Read the discussion file** completely before beginning assessment
-2. **Assess coverage** — are there subtopics still `pending` or `exploring` that should have progressed? Are there obvious adjacent concerns never mentioned on the Discussion Map? (Security, error handling, scalability, observability, migration, rollback — depending on the domain)
-3. **Assess decision quality** — does each decision have rationale? Were alternatives explored? Are trade-offs acknowledged? Is confidence appropriate?
-4. **Assess depth** — are there shallow areas? Are edge cases identified? Were false paths documented?
-5. **Identify gaps** — implicit assumptions never validated, external dependencies not acknowledged, questions the participants should be asking but haven't
-6. **Write findings** to the output file path via the `.txt`-then-rename mechanism (see Output File Format)
+2. **Read the Discussion Map** — subtopic states live in the work unit's manifest, not the discussion file. From the discussion file path `.workflows/{work_unit}/discussion/{topic}.md`, read `.workflows/{work_unit}/manifest.json` → `phases.discussion.items.{topic}.subtopics` (states: `pending`, `exploring`, `converging`, `decided`, `deferred`)
+3. **Assess coverage** — are there subtopics still `pending` or `exploring` that should have progressed? Are there obvious adjacent concerns never mentioned on the Discussion Map? (Security, error handling, scalability, observability, migration, rollback — depending on the domain)
+4. **Assess decision quality** — does each decision have rationale? Were alternatives explored? Are trade-offs acknowledged? Is confidence appropriate?
+5. **Assess depth** — are there shallow areas? Are edge cases identified? Were false paths documented?
+6. **Identify gaps** — implicit assumptions never validated, external dependencies not acknowledged, questions the participants should be asking but haven't
+7. **Write findings** to the output file path via the `.txt`-then-rename mechanism (see Output File Format)
 
 ## Hard Rules
 
@@ -42,7 +42,7 @@ You receive via the orchestrator's prompt:
 
 Write to the output file path provided — in two steps: write the content to the same path with `.txt` in place of `.md` using the Write tool, then immediately rename it with Bash from the project root (`mv {path}.txt {path}.md`). Report the final `.md` path in your status. Do NOT write the `.md` directly with the Write tool — the harness blocks report-shaped `.md` writes from sub-agents; the `.txt`-then-rename keeps the file out of the orchestrator's context. Bash is for this rename only.
 
-The orchestrator passes skeleton frontmatter (`type`, `status`, `created`, `set`, `surfaced: []`, `announced: false`). You must add a `findings:` list containing one entry per gap or question with its stable ID, kind, and a short label. The body mirrors the same IDs as section headings so the orchestrator can look up full content for any ID.
+The orchestrator wrote skeleton frontmatter at the output path when it dispatched you (`type`, `status: in-flight`, `created`, `set`, empty `findings:`, `surfaced: []`, `announced: false`). Your rewrite replaces the whole file — the `.txt`-then-rename lands atomically over the skeleton. Keep the skeleton's fields, set `status: pending` (results ready for the orchestrator), and populate `findings:` with one entry per gap or question — stable ID, kind, and a short label. The body mirrors the same IDs as section headings so the orchestrator can look up full content for any ID.
 
 ```markdown
 ---

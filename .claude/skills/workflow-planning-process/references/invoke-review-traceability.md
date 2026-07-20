@@ -15,8 +15,8 @@ Invoke `workflow-planning-review-traceability` with:
 1. **Review criteria path**: `review-traceability.md` (in this directory)
 2. **Specification path**: `.workflows/{work_unit}/specification/{topic}/specification.md`
 3. **Planning file path**: `.workflows/{work_unit}/planning/{topic}/planning.md`
-4. **Format reading.md path**: read `format` from manifest (`node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.planning.{topic} format`), then pass **[output-formats/{format}/reading.md](output-formats/{format}/reading.md)**
-5. **Cycle number**: current `review_cycle` from the manifest (`node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.planning.{topic} review_cycle`)
+4. **Format reading.md path**: **[output-formats/{format}/reading.md](output-formats/{format}/reading.md)** — `format` is already in session context (read during session setup)
+5. **Cycle number**: the current cycle number `{N}` the caller recorded in **A. Cycle Initialization**
 6. **Topic name**: the topic/work-unit name
 7. **Task design path**: `task-design.md`
 
@@ -30,7 +30,7 @@ The agent returns a brief status:
 STATUS: findings | clean
 CYCLE: {N}
 TRACKING_FILE: {path to tracking file}
-FINDING_COUNT: {N}
+FINDINGS_COUNT: {N}
 ```
 
 - `clean`: plan is a faithful, complete translation of the specification. No findings to process.

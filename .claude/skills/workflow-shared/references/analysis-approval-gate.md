@@ -76,6 +76,8 @@ Set `gate_outcome` to `processed`.
 
 → Return to caller.
 
+#### Otherwise
+
 Render the candidate. `{provenance}` is `derived from research "{parent}"` when `analysis` is `research-analysis` (read `parent` from the block), or `surfaced by gap analysis` when `discovery-gap-analysis`.
 
 > *Output the next fenced block as a code block:*
@@ -130,7 +132,7 @@ Set `gate_mode: auto` in the staging frontmatter so subsequent candidates approv
 Set this block's `status: skipped` in the staging file and add the name to the dismissed list:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs push {work_unit}.discovery dismissed "{name}"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest push {work_unit}.discovery dismissed "{name}"
 ```
 
 → Return to **B. Gate Each Candidate**.
@@ -143,21 +145,39 @@ Revise this block's `routing`, `summary`, or `description` in the staging file p
 
 ## C. Write Approved Candidate
 
-Set this block's `status: approved` in the staging file, then write the discovery item from the block's stored fields in one atomic call:
+Set this block's `status: approved` in the staging file, then write the discovery item from the block's stored fields:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs create-discovery-topic {work_unit}.{name} --routing {routing} --source "{source}" --summary "{summary}" --description "{description}"
+node .claude/skills/workflow-engine/scripts/engine.cjs discovery-map add {work_unit} {name} {routing} --source "{source}" --summary "{summary}" --description "{description}"
 ```
 
 `source` is the block's stored value verbatim — `research-analysis:{parent}` for research-analysis (provenance renders as `from {parent}`), `gap-analysis` for gap-analysis.
 
+#### If the response is `ok: false`
+
+Deferred-reuse boots only — the map can change between staging and this write. Route on the refusal:
+
+**If refused as an active duplicate** (the topic landed on the map via another path since staging):
+
+Merge provenance instead, following the already-on-map branch of the analysis's **D. Filter and Stage** — read the item's `source` and, unless it already includes this analysis, extend it comma-joined. Set this block's `status: resolved`; nothing is added to `tracker`.
+
+→ Return to **B. Gate Each Candidate**.
+
+**If refused as dismissed** (the user dismissed this name since staging):
+
+Honour the dismissal. Set this block's `status: skipped` — the name is already on the dismissed list, no push needed.
+
+→ Return to **B. Gate Each Candidate**.
+
+#### Otherwise
+
 Append `{name}` to the caller's `tracker`.
 
-#### If `analysis` is `research-analysis`
+**If `analysis` is `research-analysis`:**
 
 → Proceed to **D. Fan-Out Parent-Handled Offer**.
 
-#### Otherwise
+**Otherwise:**
 
 → Return to **B. Gate Each Candidate**.
 
@@ -178,7 +198,7 @@ The offer for this parent already ran this session. Skip it (dedup).
 Re-run discovery to read the parent's current lifecycle:
 
 ```bash
-node .claude/skills/workflow-discovery/scripts/discovery.cjs {work_unit}
+node .claude/skills/workflow-discovery/scripts/gateway.cjs {work_unit}
 ```
 
 Find the `parent` row in `discovery_map`.
@@ -208,7 +228,7 @@ handled — fanned out, keep on the map but stop prompting to discuss it?
 **If `yes`:**
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.discovery.{parent} handled true
+node .claude/skills/workflow-engine/scripts/engine.cjs discovery-map handle {work_unit} {parent}
 ```
 
 Set `fanout_offer: marked` on every block sharing this `parent`.

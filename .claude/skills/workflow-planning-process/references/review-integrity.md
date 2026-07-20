@@ -123,5 +123,3 @@ topic: {Topic Name}
 ### 2. [Next Finding]
 ...
 ```
-
-Commit the tracking file after creation: `planning({work_unit}): integrity review cycle {N}`

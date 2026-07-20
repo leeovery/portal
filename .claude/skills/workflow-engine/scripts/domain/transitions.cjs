@@ -1,0 +1,353 @@
+'use strict';
+
+// ---------------------------------------------------------------------------
+// Domain ring: topic transitions — start, complete, reopen, supersede,
+// cancel, and reactivate, each a single transaction from the caller's
+// perspective.
+//
+// start/complete/reopen/supersede are phase-item lifecycle bookkeeping:
+// manifest write plus a knowledge-base sync where the phase is indexed
+// (index on complete, remove on supersede; reopen syncs nothing —
+// re-completion re-indexes over the same identity). No git commit — the
+// calling session's commit cadence picks the manifest change up
+// (supersession is batch-oriented: spec completion supersedes several
+// sources, then commits once). cancel/reactivate are the epic transactions:
+// manifest write, knowledge-base sync, scoped git commit.
+//
+// The manifest write is the source of truth and lands first; the knowledge
+// base is a derived index, so its failures are recorded as warnings, never
+// blocks. Validation throws loud and specific before anything is touched.
+// Every load→mutate→save runs under the work unit's manifest lock (the same
+// lock every manifest writer honours); the KB sync and the commit run after
+// release — the lock protects the manifest read-modify-write, nothing else.
+// ---------------------------------------------------------------------------
+
+const { loadWorkUnitManifest, saveWorkUnitManifest, withWorkUnitLock, ensureContainer } = require('../kernel/manifest.cjs');
+const { commitScopedWithKb, noteIfNothingCommitted } = require('./commit.cjs');
+const { knowledge, INDEXED_ARTIFACTS } = require('./kb.cjs');
+
+const { VALID_PHASES, VALID_PHASE_STATUSES } = require('../kernel/manifest-schema.cjs');
+
+// Phase-item lifecycle operates on WORK phases only. Discovery items are map
+// items (no lifecycle status — computed at render time); they are created and
+// edited by the discovery tooling, never by topic commands.
+const LIFECYCLE_PHASES = VALID_PHASES.filter((p) => p !== 'discovery');
+
+// Refuse any status write the field surface would refuse — the two enforcers
+// share one schema (kernel/manifest-schema.cjs), so the
+// engine can never be the permissive path around a validation refusal.
+/** @param {string} phase @param {string} status */
+function assertLegalWrite(phase, status) {
+  if (!LIFECYCLE_PHASES.includes(phase)) {
+    throw new Error(`unknown or non-lifecycle phase "${phase}" (${LIFECYCLE_PHASES.join('|')}) — discovery items are map items; use the discovery tooling`);
+  }
+  const valid = VALID_PHASE_STATUSES[/** @type {keyof typeof VALID_PHASE_STATUSES} */ (phase)];
+  if (!valid || !valid.includes(status)) {
+    throw new Error(`Invalid status "${status}" for phase "${phase}". Must be one of: ${(valid || []).join(', ')}`);
+  }
+}
+
+/**
+ * @typedef {object} TopicTransitionResult
+ * @property {string} topic
+ * @property {string} phase
+ * @property {string} status     the topic's status after the transition
+ * @property {string|null} committed  short commit sha, or null when nothing was staged
+ * @property {string} [note]     set when committed is null
+ * @property {string[]} warnings non-blocking failures (knowledge-base sync)
+ */
+
+/**
+ * The phase item for `topic`, or a loud error.
+ * @param {object} manifest @param {string} phase @param {string} topic
+ * @returns {{status?: string, previous_status?: string, superseded_by?: string}}
+ */
+function phaseItem(manifest, phase, topic) {
+  assertLegalWrite(phase, 'cancelled');
+  const phases = manifest && manifest.phases;
+  const ph = phases && typeof phases === 'object' ? phases[phase] : undefined;
+  const items = ph && typeof ph === 'object' ? ph.items : undefined;
+  if (!items || typeof items !== 'object') {
+    throw new Error(`no ${phase} items in the manifest (phases.${phase}.items)`);
+  }
+  const item = items[topic];
+  if (!item || typeof item !== 'object') {
+    throw new Error(`no ${phase} item "${topic}" in the manifest (phases.${phase}.items)`);
+  }
+  return item;
+}
+
+/**
+ * @typedef {object} TopicStartResult
+ * @property {string} topic
+ * @property {string} phase
+ * @property {string} status   always `in-progress`
+ * @property {boolean} created true when the phase item was created, false when resumed
+ */
+
+/**
+ * @typedef {object} TopicCompleteResult
+ * @property {string} topic
+ * @property {string} phase
+ * @property {string} status   always `completed`
+ * @property {string[]} warnings non-blocking failures (knowledge-base index)
+ */
+
+/**
+ * Start a phase item: create it with `status: in-progress` when absent
+ * (init-phase semantics), or set an existing item back to `in-progress`.
+ * A completed item must go through reopen — resuming is not starting — and
+ * a cancelled item through reactivate. No git commit.
+ * @param {string} cwd project root
+ * @param {string} workUnit
+ * @param {string} phase
+ * @param {string} topic
+ * @returns {TopicStartResult}
+ */
+function startTopic(cwd, workUnit, phase, topic) {
+  assertLegalWrite(phase, 'in-progress');
+  return withWorkUnitLock(cwd, workUnit, () => {
+    const manifest = loadWorkUnitManifest(cwd, workUnit);
+    const phases = ensureContainer(manifest, 'phases', 'phases');
+    const ph = ensureContainer(phases, phase, `phases.${phase}`);
+    const items = ensureContainer(ph, 'items', `phases.${phase}.items`);
+
+    const existing = items[topic];
+    let created = false;
+    if (!existing || typeof existing !== 'object') {
+      items[topic] = { status: 'in-progress' };
+      created = true;
+    } else if (existing.status === 'completed') {
+      throw new Error(`${phase} item "${topic}" is already completed — reopen it instead`);
+    } else if (existing.status === 'cancelled') {
+      throw new Error(`${phase} item "${topic}" is cancelled — reactivate it instead`);
+    } else if (existing.status === 'superseded') {
+      const by = 'superseded_by' in existing ? ` (by "${existing.superseded_by}")` : '';
+      throw new Error(`${phase} item "${topic}" is superseded${by} — supersession is terminal; work on the absorbing topic instead`);
+    } else {
+      existing.status = 'in-progress';
+    }
+
+    saveWorkUnitManifest(cwd, workUnit, manifest);
+    return { topic, phase, status: 'in-progress', created };
+  });
+}
+
+/**
+ * Complete a phase item: set `status: completed` and, when the phase's
+ * artifact is knowledge-base indexed, index it (warn-don't-block). The item
+ * must exist; a cancelled item must go through reactivate first. No git
+ * commit.
+ * @param {string} cwd project root
+ * @param {string} workUnit
+ * @param {string} phase
+ * @param {string} topic
+ * @returns {TopicCompleteResult}
+ */
+function completeTopic(cwd, workUnit, phase, topic) {
+  assertLegalWrite(phase, 'completed');
+  withWorkUnitLock(cwd, workUnit, () => {
+    const manifest = loadWorkUnitManifest(cwd, workUnit);
+    const item = phaseItem(manifest, phase, topic);
+    if (item.status === 'cancelled') {
+      throw new Error(`${phase} item "${topic}" is cancelled — reactivate it instead`);
+    }
+    if (item.status === 'superseded') {
+      const by = 'superseded_by' in item ? ` (by "${item.superseded_by}")` : '';
+      throw new Error(`${phase} item "${topic}" is superseded${by} — supersession is terminal; work on the absorbing topic instead`);
+    }
+    item.status = 'completed';
+
+    saveWorkUnitManifest(cwd, workUnit, manifest);
+  });
+
+  /** @type {string[]} */
+  const warnings = [];
+  const artifact = INDEXED_ARTIFACTS[/** @type {keyof typeof INDEXED_ARTIFACTS} */ (phase)];
+  if (artifact) {
+    knowledge(cwd, ['index', artifact(workUnit, topic)], 'knowledge index', warnings);
+  }
+
+  return { topic, phase, status: 'completed', warnings };
+}
+
+/**
+ * @typedef {object} TopicReopenResult
+ * @property {string} topic
+ * @property {string} phase
+ * @property {string} status   always `in-progress`
+ */
+
+/**
+ * Reopen a completed phase item: set `status: in-progress`. Only a completed
+ * item reopens — anything else keeps its own flow (a cancelled item must go
+ * through reactivate). No knowledge-base sync — the item's chunks stay live
+ * until re-completion re-indexes over the same identity. No git commit.
+ * @param {string} cwd project root
+ * @param {string} workUnit
+ * @param {string} phase
+ * @param {string} topic
+ * @returns {TopicReopenResult}
+ */
+function reopenTopic(cwd, workUnit, phase, topic) {
+  assertLegalWrite(phase, 'in-progress');
+  return withWorkUnitLock(cwd, workUnit, () => {
+    const manifest = loadWorkUnitManifest(cwd, workUnit);
+    const item = phaseItem(manifest, phase, topic);
+    if (item.status === 'cancelled') {
+      throw new Error(`${phase} item "${topic}" is cancelled — reactivate it instead`);
+    }
+    if (item.status !== 'completed') {
+      throw new Error(`${phase} item "${topic}" is not completed (status: ${item.status ?? 'none'}) — only a completed item can be reopened`);
+    }
+    item.status = 'in-progress';
+
+    saveWorkUnitManifest(cwd, workUnit, manifest);
+    return { topic, phase, status: 'in-progress' };
+  });
+}
+
+/**
+ * @typedef {object} TopicSupersedeResult
+ * @property {string} topic
+ * @property {string} phase
+ * @property {string} status   always `superseded`
+ * @property {string} superseded_by  the topic that absorbed this one
+ * @property {string[]} warnings non-blocking failures (knowledge-base removal)
+ */
+
+/**
+ * Supersede a phase item: set `status: superseded` and `superseded_by` to the
+ * absorbing topic, then remove the item's knowledge-base chunks
+ * (warn-don't-block). Legal only in phases whose shared-schema status
+ * vocabulary contains `superseded` — schema-driven, never a hardcoded phase
+ * list. The absorbing topic must already exist in the same phase (every
+ * supersession runs after the superseding item completed). A proposed item is
+ * refused — it has no artifact; reconcile deletes it instead — and a
+ * cancelled item must go through reactivate. No git commit — supersession is
+ * batch-oriented; the calling flow commits the whole set.
+ * @param {string} cwd project root
+ * @param {string} workUnit
+ * @param {string} phase
+ * @param {string} topic
+ * @param {{by: string}} opts  the absorbing topic
+ * @returns {TopicSupersedeResult}
+ */
+function supersedeTopic(cwd, workUnit, phase, topic, { by }) {
+  assertLegalWrite(phase, 'superseded');
+  withWorkUnitLock(cwd, workUnit, () => {
+    const manifest = loadWorkUnitManifest(cwd, workUnit);
+    const item = phaseItem(manifest, phase, topic);
+    if (topic === by) {
+      throw new Error(`${phase} item "${topic}" cannot supersede itself`);
+    }
+    if (item.status === 'superseded') {
+      const already = 'superseded_by' in item ? ` (by "${item.superseded_by}")` : '';
+      throw new Error(`${phase} item "${topic}" is already superseded${already}`);
+    }
+    if (item.status === 'proposed') {
+      throw new Error(`${phase} item "${topic}" is proposed — a proposed item has no artifact to supersede; reconcile removes it instead`);
+    }
+    if (item.status === 'cancelled') {
+      throw new Error(`${phase} item "${topic}" is cancelled — reactivate it instead`);
+    }
+    const items = manifest.phases[phase].items;
+    if (!items[by] || typeof items[by] !== 'object') {
+      throw new Error(`no ${phase} item "${by}" to supersede toward — the absorbing item must exist first`);
+    }
+    item.status = 'superseded';
+    item.superseded_by = by;
+
+    saveWorkUnitManifest(cwd, workUnit, manifest);
+  });
+
+  /** @type {string[]} */
+  const warnings = [];
+  knowledge(cwd, ['remove', '--work-unit', workUnit, '--phase', phase, '--topic', topic], 'knowledge remove', warnings);
+
+  return { topic, phase, status: 'superseded', superseded_by: by, warnings };
+}
+
+/**
+ * Cancel an epic topic: stash the current status into `previous_status`, set
+ * `status: cancelled`, drop the topic's discovery-map `order`, remove its
+ * knowledge-base chunks (warn-don't-block), commit scoped to the work unit.
+ * @param {string} cwd project root
+ * @param {string} workUnit
+ * @param {string} phase
+ * @param {string} topic
+ * @returns {TopicTransitionResult}
+ */
+function cancelTopic(cwd, workUnit, phase, topic) {
+  withWorkUnitLock(cwd, workUnit, () => {
+    const manifest = loadWorkUnitManifest(cwd, workUnit);
+    const item = phaseItem(manifest, phase, topic);
+    if (item.status === 'cancelled') {
+      throw new Error(`${phase} item "${topic}" is already cancelled`);
+    }
+    item.previous_status = item.status;
+    item.status = 'cancelled';
+
+    const discovery = manifest.phases && manifest.phases.discovery;
+    const mapItem = discovery && discovery.items ? discovery.items[topic] : undefined;
+    if (mapItem && typeof mapItem === 'object' && 'order' in mapItem) delete mapItem.order;
+
+    saveWorkUnitManifest(cwd, workUnit, manifest);
+  });
+
+  /** @type {string[]} */
+  const warnings = [];
+  knowledge(cwd, ['remove', '--work-unit', workUnit, '--phase', phase, '--topic', topic], 'knowledge remove', warnings);
+
+  const committed = commitScopedWithKb(cwd, `.workflows/${workUnit}`, `workflow(${workUnit}): cancel ${topic} (${phase})`);
+  /** @type {TopicTransitionResult} */
+  const result = { topic, phase, status: 'cancelled', committed, warnings };
+  noteIfNothingCommitted(result, committed);
+  return result;
+}
+
+/**
+ * Reactivate a cancelled epic topic: restore `previous_status` to `status`,
+ * delete the stash, re-index the artifact when the restored status is
+ * `completed` in an indexed phase (warn-don't-block), commit scoped to the
+ * work unit.
+ * @param {string} cwd project root
+ * @param {string} workUnit
+ * @param {string} phase
+ * @param {string} topic
+ * @returns {TopicTransitionResult}
+ */
+function reactivateTopic(cwd, workUnit, phase, topic) {
+  const restored = withWorkUnitLock(cwd, workUnit, () => {
+    const manifest = loadWorkUnitManifest(cwd, workUnit);
+    const item = phaseItem(manifest, phase, topic);
+    if (item.status !== 'cancelled') {
+      throw new Error(`${phase} item "${topic}" is not cancelled (status: ${item.status ?? 'none'})`);
+    }
+    const previous = item.previous_status;
+    if (!previous) {
+      throw new Error(`${phase} item "${topic}" has no previous_status to restore`);
+    }
+    assertLegalWrite(phase, previous);
+    item.status = previous;
+    delete item.previous_status;
+
+    saveWorkUnitManifest(cwd, workUnit, manifest);
+    return previous;
+  });
+
+  /** @type {string[]} */
+  const warnings = [];
+  const artifact = INDEXED_ARTIFACTS[/** @type {keyof typeof INDEXED_ARTIFACTS} */ (phase)];
+  if (restored === 'completed' && artifact) {
+    knowledge(cwd, ['index', artifact(workUnit, topic)], 'knowledge index', warnings);
+  }
+
+  const committed = commitScopedWithKb(cwd, `.workflows/${workUnit}`, `workflow(${workUnit}): reactivate ${topic} (${phase})`);
+  /** @type {TopicTransitionResult} */
+  const result = { topic, phase, status: restored, committed, warnings };
+  noteIfNothingCommitted(result, committed);
+  return result;
+}
+
+module.exports = { startTopic, completeTopic, reopenTopic, supersedeTopic, cancelTopic, reactivateTopic };

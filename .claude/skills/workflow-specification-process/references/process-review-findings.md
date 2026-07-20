@@ -6,7 +6,7 @@
 
 Process findings from a review phase interactively with the user. The analysis phase writes findings to a tracking file. Read the tracking file and present each finding for approval.
 
-**Review type**: `{review_type:[Input Review|Gap Analysis]}` — set by the calling context (B or C in spec-review.md).
+**Review type**: `{review_type:[Input Review|Gap Analysis]}` — set by the calling context (C or D in spec-review.md).
 
 Check if the tracking file exists at the expected path.
 
@@ -114,9 +114,9 @@ Present the changes as a diff. Read Current and Proposed Addition from the track
 
 ### Check Gate Mode
 
-Check `finding_gate_mode` via manifest CLI (`node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.specification.{topic} finding_gate_mode`).
+Check `finding_gate_mode` via `engine manifest` (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic} finding_gate_mode`).
 
-#### If `finding_gate_mode: auto`
+#### If `finding_gate_mode` is `auto`
 
 1. Log the proposed content to the specification verbatim
 2. Update the tracking file: set resolution to "Approved"
@@ -128,9 +128,15 @@ Check `finding_gate_mode` via manifest CLI (`node .claude/skills/workflow-manife
 Finding {N} of {total}: {brief_title:(titlecase)} — approved. Added to specification.
 ```
 
-→ Return to **B. Process One Item at a Time** for the next pending finding, or proceed to **C. After All Findings Processed**.
+**If pending findings remain:**
 
-#### If `finding_gate_mode: gated`
+→ Return to **B. Process One Item at a Time**.
+
+**If all findings are processed:**
+
+→ Proceed to **C. After All Findings Processed**.
+
+#### If `finding_gate_mode` is `gated`
 
 > *Output the next fenced block as markdown (not a code block):*
 
@@ -162,7 +168,7 @@ Incorporate feedback and update the tracking file with the revised content. Re-p
 
 → Return to **B. Process One Item at a Time**.
 
-#### If `approved`
+#### If `yes`
 
 1. Log the content to the specification verbatim
 2. Update the tracking file: set resolution to "Approved", add any discussion notes
@@ -174,19 +180,25 @@ Incorporate feedback and update the tracking file with the revised content. Re-p
 Finding {N} of {total}: {brief_title:(titlecase)} — added.
 ```
 
-→ Return to **B. Process One Item at a Time** for the next pending finding, or proceed to **C. After All Findings Processed**.
+**If pending findings remain:**
+
+→ Return to **B. Process One Item at a Time**.
+
+**If all findings are processed:**
+
+→ Proceed to **C. After All Findings Processed**.
 
 #### If `auto`
 
-1. Log the content (same as "If approved" above)
+1. Log the content (same as "If `yes`" above)
 2. Update the tracking file: set resolution to "Approved"
-3. Update `finding_gate_mode` to `auto` via manifest CLI (`node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.specification.{topic} finding_gate_mode auto`)
+3. Update `finding_gate_mode` to `auto` via `engine manifest` (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} finding_gate_mode auto`)
 4. Commit
 5. Process all remaining findings using the auto-mode flow above
 
-→ After all processed, proceed to **C. After All Findings Processed**.
+→ Proceed to **C. After All Findings Processed**.
 
-#### If `skipped`
+#### If `skip`
 
 1. Update the tracking file: set resolution to "Skipped", note the reason
 2. Commit — ensures progress survives context refresh
@@ -197,7 +209,13 @@ Finding {N} of {total}: {brief_title:(titlecase)} — added.
 Finding {N} of {total}: {brief_title:(titlecase)} — skipped.
 ```
 
-→ Return to **B. Process One Item at a Time** for the next pending finding, or proceed to **C. After All Findings Processed**.
+**If pending findings remain:**
+
+→ Return to **B. Process One Item at a Time**.
+
+**If all findings are processed:**
+
+→ Proceed to **C. After All Findings Processed**.
 
 ---
 

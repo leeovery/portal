@@ -8,7 +8,7 @@ Check if source material exists and is ready.
 
 #### If `work_type` is `feature`
 
-Check if discussion exists and is completed. Read status via manifest CLI: `node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discussion.{topic} status`.
+Check if discussion exists and is completed. Read status via `engine manifest`: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discussion.{topic} status`.
 
 **If discussion doesn't exist:**
 
@@ -44,7 +44,7 @@ The discussion must be completed before specification can begin.
 
 #### If `work_type` is `bugfix`
 
-Check if investigation exists and is completed. Read status via manifest CLI: `node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.investigation.{topic} status`.
+Check if investigation exists and is completed. Read status via `engine manifest`: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.investigation.{topic} status`.
 
 **If investigation doesn't exist:**
 
@@ -80,7 +80,7 @@ The investigation must be completed before specification can begin.
 
 #### If `work_type` is `epic`
 
-Check if at least one completed discussion exists for this work unit. Read discussion phase items via manifest CLI: `node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.discussion`.
+Check if at least one completed discussion exists for this work unit. Read discussion phase items via `engine manifest`: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discussion`.
 
 **If no discussions exist:**
 
@@ -112,5 +112,41 @@ Run /workflow-start to continue an in-progress discussion.
 **STOP.** Do not proceed — terminal condition.
 
 **If at least one completed discussion exists:**
+
+→ Return to caller.
+
+#### If `work_type` is `cross-cutting`
+
+Check if discussion exists and is completed. Read status via `engine manifest`: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discussion.{topic} status`.
+
+**If discussion doesn't exist:**
+
+> *Output the next fenced block as a code block:*
+
+```
+Source Material Missing
+
+No discussion found for "{work_unit:(titlecase)}".
+
+A completed discussion is required before specification can begin.
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+**If discussion exists but status is "in-progress":**
+
+> *Output the next fenced block as a code block:*
+
+```
+Discussion In Progress
+
+The discussion for "{work_unit:(titlecase)}" is not yet completed.
+
+The discussion must be completed before specification can begin.
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+**If discussion exists and status is "completed":**
 
 → Return to caller.

@@ -1,5 +1,16 @@
 # Tick: Reading
 
+## Identifiers
+
+`<topic-tick-id>` is the plan's `external_id` in the manifest; phase and task tick IDs are recorded in `task_map` (internal ID → tick ID):
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} external_id
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} task_map
+```
+
+`tick list` output does not include refs — correlate internal IDs through `task_map`, or use `tick show <tick-id>` to see a single task's refs.
+
 ## Listing Tasks
 
 To retrieve all tasks for a topic:
@@ -40,25 +51,31 @@ Returns: id, title, status, priority, created/updated timestamps, parent, blocke
 
 To find the next task to implement:
 
-```bash
-tick ready --parent <phase-tick-id> --count 1
-```
+1. **Check for a task already in flight** — a prior session may have started a task and ended before completing it:
 
-This returns the single next task that is:
+   ```bash
+   tick list --parent <phase-tick-id> --status in_progress
+   ```
 
-1. Status is `open` (not started, not done, not cancelled)
-2. No unresolved blockers (all `blocked_by` tasks are `done`)
-3. No open children (leaf tasks, or parent tasks whose children are all complete)
-4. Within the specified phase (scoped by `--parent`)
+   `tick start` cascades `in_progress` up the hierarchy, so containers appear alongside the task actually in flight. Exclude any result that has an `open` or `in_progress` child — check each result's children (`tick show <tick-id>`); the open children of a cascaded container are not themselves in this result set, so comparing results against each other is not enough. Only a childless-or-all-done result is resumable. If a task remains, it is the next task: it is already `in_progress` in tick, so skip the format's mark-in-progress transition — the engine `task start` still runs (its task record and gate bookkeeping are separate from tick status).
 
-Results are sorted by priority (lower number = higher priority), then creation date. `--count 1` limits output to the first result.
+2. **Otherwise, take the next ready task:**
 
-To find the next task across all phases of a topic:
+   ```bash
+   tick ready --parent <phase-tick-id> --count 1
+   ```
 
-```bash
-tick ready --parent <topic-tick-id> --count 1
-```
+   This returns the single next task that is:
 
-If `tick ready` returns no results, either all tasks are complete or remaining tasks are blocked.
+   1. Status is `open` (not started, not done, not cancelled)
+   2. No unresolved blockers (all `blocked_by` tasks are `done`)
+   3. No open children (leaf tasks, or parent tasks whose children are all complete)
+   4. Within the specified phase (scoped by `--parent`)
+
+   Results are sorted by priority (lower number = higher priority), then creation date. `--count 1` limits output to the first result.
+
+To find the next task across all phases of a topic, run the same two checks with `--parent <topic-tick-id>`.
+
+If neither check returns a task, either all tasks are complete or remaining tasks are blocked.
 
 **Natural ordering convention**: `tick ready` always returns results in the correct execution order — by priority, then creation date. Consumers should take the first result as the next task. Because creation date preserves authoring order, sequential intra-phase tasks execute in natural order without needing explicit dependencies. Only add dependencies when the correct order differs from the natural order.

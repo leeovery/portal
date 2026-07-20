@@ -19,16 +19,19 @@ Ready to mark implementation as completed?
 
 #### If `no`
 
-→ Return to **[the skill](../SKILL.md)** for **Step 7**.
+→ Return to **[the skill](../SKILL.md)** for **Step 6**.
 
 #### If `yes`
 
-Update implementation status via manifest CLI:
+Complete the phase item:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} status completed
+node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} implementation {topic}
 ```
 
-Commit: `impl({work_unit}): complete implementation`
+Commit:
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): complete implementation"
+```
 
 **Pipeline continuation**:
 

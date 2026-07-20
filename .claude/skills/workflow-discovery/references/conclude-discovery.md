@@ -8,21 +8,18 @@ Finalise the discovery session and hand off through the bridge. Used by every wo
 
 Two anti-patterns (all work types):
 
-- **Don't index here.** Epic discovery indexing is the harvest's job — `confirm-and-persist.md` §D indexes each finalised epic session log into the knowledge base. Single-phase discovery logs are thin shape-and-route and aren't indexed at all. Either way, conclusion does not call `knowledge index`.
+- **Don't index here.** Epic discovery indexing is the harvest's job — `confirm-and-persist.md` §C's `discovery-session close` indexes each finalised epic session log into the knowledge base. Single-phase discovery logs are thin shape-and-route and aren't indexed at all. Either way, conclusion does not call `knowledge index`.
 - **Do not set a phase-level `status: completed`.** Discovery is alive as long as the work unit is in-progress; phase completion is emergent from the items themselves, not a manifest field on the phase.
 
 `next_phase` is set by the single-phase endpoints (`research` / `discussion` / `investigation` / `scoping`); epic leaves it unset.
 
 ## A. Final Sweep
 
-Check `git status`. If the working tree is dirty (e.g. an endpoint's Conclusion write or marker clear), commit the residual changes:
+Commit any residual changes (e.g. an endpoint's Conclusion write or marker clear) — a clean tree reports `committed: null` and is fine:
 
 ```bash
-git add -- .workflows/{work_unit}/
-git commit -m "discovery({work_unit}): finalise session log"
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "discovery({work_unit}): finalise session log"
 ```
-
-If the working tree is already clean, skip the commit.
 
 → Proceed to **B. Bridge**.
 

@@ -1,6 +1,6 @@
 ---
 name: workflow-review-task-verifier
-description: Verifies a single plan task was implemented correctly. Checks implementation, tests, and code quality against the task's acceptance criteria and spec context. Writes structured findings to file, returns brief status to orchestrator.
+description: Verifies a single plan task was implemented correctly. Checks implementation, tests, and code quality against the task's acceptance criteria and spec context. Writes structured findings to file, returns brief status to orchestrator. Invoked by workflow-review-process skill for each task in scope.
 tools: Read, Write, Glob, Grep, Bash
 model: opus
 ---
@@ -16,10 +16,12 @@ You receive:
 2. **Specification path**: For loading context about this task's feature/requirement
 3. **Plan path**: The full plan for additional context
 4. **Project skill paths**: Relevant `.claude/skills/` paths for framework conventions
-5. **Review checklist path**: Path to the review checklist (`skills/workflow-review-process/references/review-checklist.md`) — read this for detailed verification criteria
+5. **Review checklist path**: Path to the review checklist (`.claude/skills/workflow-review-process/references/review-checklist.md`) — read this for detailed verification criteria
 6. **Work unit**: The work unit name (for path construction)
 7. **Topic**: The plan topic name (used for output directory)
 8. **Task suffix**: The `{phase_id}-{task_id}` portion of the internal ID (for output file naming, e.g., `1-1`)
+9. **Work type**: `quick-fix` tasks are deliberately authored without acceptance criteria — verify them by the quick-fix branches in Steps 3 and 4, never report the missing criteria as a finding
+10. **Implementation files**: the files the plan's task commits touched — your starting set for locating this task's code (search wider when the task's implementation isn't among them)
 
 ## Your Task
 
@@ -61,6 +63,11 @@ Search the codebase:
 - Does it align with the spec's expected behavior?
 - Any drift from what was planned?
 
+**For quick-fix work**: Instead of acceptance criteria, verify completeness against the task's Verification section:
+- Are all target files updated?
+- Do any occurrences of the old pattern remain in scope?
+- Were exclusions respected?
+
 ### Step 4: Verify Tests
 
 You assess tests by **reading** them — running tests is not your job; your only shell use is the output-file rename. Do not attempt to execute the suite.
@@ -71,6 +78,11 @@ Evaluate test coverage critically:
 - **Not under-tested**: Are edge cases from the spec covered?
 - **Not over-tested**: Are tests focused and necessary, or bloated with redundant checks?
 - Would the test fail if the feature broke?
+
+**For quick-fix work**: Instead of new test coverage, verify the existing suite still holds:
+- Do all previously passing tests still pass (judge by reading — did the change break any assertion)?
+- If tests were updated (e.g., to reference a new API), are the updates correct?
+- Do not flag the absence of new tests — mechanical changes are verified by test baselines, not new coverage.
 
 ### Step 5: Check Code Quality
 
@@ -111,7 +123,7 @@ TASK: [Task name/description]
 
 ACCEPTANCE CRITERIA: [List from plan]
 
-STATUS: Complete | Incomplete | Issues Found
+STATUS: complete | incomplete | issues_found
 
 SPEC CONTEXT: [Brief summary of relevant spec context]
 
@@ -145,7 +157,7 @@ NON-BLOCKING NOTES:
 Return a brief status to the orchestrator:
 
 ```
-STATUS: Complete | Incomplete | Issues Found
+STATUS: complete | incomplete | issues_found
 FINDINGS_COUNT: {N blocking issues}
 SUMMARY: {1 sentence}
 ```

@@ -4,12 +4,12 @@
 
 ---
 
-Caller passes `downstream_phase` = `research` | `discussion` — the phase whose downstream item may carry the flag.
+Caller passes `work_type`, `work_unit`, `topic`, and `downstream_phase` = `research` | `discussion` — the phase whose downstream item may carry the flag.
 
 Read the reconcile flag on the downstream item:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.{downstream_phase}.{topic} reconcile_needed
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.{downstream_phase}.{topic} reconcile_needed
 ```
 
 `get` returns empty on an absent field.
@@ -37,7 +37,7 @@ The discovery brief was regenerated after this work started. Surface a non-block
 Clear the flag:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs delete {work_unit}.{downstream_phase}.{topic} reconcile_needed
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.{downstream_phase}.{topic} reconcile_needed
 ```
 
 → Return to caller.

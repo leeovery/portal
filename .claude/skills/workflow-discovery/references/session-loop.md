@@ -30,9 +30,9 @@ What do you want to dig into first?
 
 → Proceed to **B. Session Loop**.
 
-#### If a resume was selected at Step 6, or a context refresh recovered a pre-synthesis session (the map is empty and the session log holds Exploration)
+#### If a resume was selected at Step 6, or — with an empty map — a context refresh recovered a pre-synthesis session (the session log holds Exploration)
 
-The session is picked up from disk — either the user chose `continue` at resume detection, or a context refresh recovered a discovery session that was confirmed but not yet synthesised (e.g. a new epic whose in-memory `macro_continuation` was lost). The active session log on disk is the working state — the highest-numbered `.workflows/{work_unit}/discovery/sessions/session-NNN.md`, whose number is `session_number`. Read it to load **Exploration**, **Edits**, and any partially-filled **Topics Identified** into context.
+The session is picked up from disk — either the user chose `continue` at resume detection, or a context refresh recovered a discovery session that was confirmed but not yet synthesised (e.g. a new epic whose in-memory `macro_continuation` was lost). A continuing epic whose map has items is **not** this branch — prior session logs alone don't make a resume; fall through to the populated-map branch, which reads them via continuity-load after the map anchor. The active session log on disk is the working state — the highest-numbered `.workflows/{work_unit}/discovery/sessions/session-NNN.md`, whose number is `session_number`. Read it to load **Exploration**, **Edits**, and any partially-filled **Topics Identified** into context.
 
 Brief across the prior sessions, then ask where to pick up:
 
@@ -50,34 +50,13 @@ Where do you want to take it from here?
 
 #### If `discovery_map` is non-empty (map already populated)
 
-The map exists; editing existing items is available alongside new exploration. Render the map as an anchor using the discovery output from Step 7, then open the conversation:
+The map exists; editing existing items is available alongside new exploration. Render the map as an anchor, then open the conversation:
 
-> *Output the next fenced block as a code block:*
-
-```
-●───────────────────────────────────────────────●
-  Discovery — {work_unit:(titlecase)}
-●───────────────────────────────────────────────●
-
-  Discovery Map ({total} topics{tier_breakdown})
-
-@foreach(topic in discovery_map)
-  {branch} {topic.tier} {topic.name:(titlecase)} [{lifecycle_label}]
-@endforeach
+```bash
+node .claude/skills/workflow-discovery/scripts/gateway.cjs map-view {work_unit}
 ```
 
-Render rules:
-
-- `tier_breakdown` — append ` — {decided} decided · {in_flight} in flight · {ready} ready · {fresh} fresh · {handled} handled · {cancelled} cancelled` (omitting zero-count categories) only when more than one tier bucket is non-zero. When only one bucket is non-zero, omit the breakdown and render just `Discovery Map ({total} topics)`.
-- `{branch}` — `┌─` for the first row, `└─` for the last, `├─` for the rest. With a single row, use `└─` (no upward stroke).
-- Tier ordering — discovery output is already tier-sorted (`→ ◐ ✓ ○ ⊙ ⊘`, suggested execution order within tier). Render in the order given.
-- `lifecycle_label` by tier (wrapped in square brackets per the row template):
-  - `→` — `research complete · ready for discussion`
-  - `◐` — `researching` or `discussing` (use `topic.current_phase`)
-  - `✓` — `decided`
-  - `○` — `fresh · routed to {topic.routing}` (omit ` · routed to ...` if `topic.routing` is null)
-  - `⊙` — `handled · research fanned out`
-  - `⊘` — `cancelled`
+The output arrives in demarcated sections: read `=== DATA` to reason from (never display it); emit the `=== DISPLAY` section verbatim **as a code block**.
 
 With the map rendered, read the prior sessions to resume the conversation:
 
@@ -91,7 +70,7 @@ Then frame the opener:
 You can open a fresh thread — a new area of the work you want
 to sketch out — and we'll explore it the same way we did first
 time, then synthesise topics at the end. Or you can name changes
-to existing items: add, remove, rename, re-route, edit summary,
+to existing items: remove, rename, re-route, edit summary,
 edit description, mark handled. Both in one go is fine.
 
 Say "show map" anytime to pull the map back up.
@@ -149,7 +128,7 @@ No fixed cadence — follow the conversation, not a checklist. **The loop is the
 2. **Recognise intent.** The user's message may contain:
    - **Exploration content** — answers to your questions, new surfaces, descriptions of how parts work or connect, positions taken on a decision. Continue the conversation: push on the thread the user opened, counter-frame, follow where it leads. See [discovery-guidelines.md](discovery-guidelines.md) → *The Exploration Stance — How* for the register and where to push.
    - **An edit operation on an existing map item** — *"remove X"*, *"rename X to Y"*, *"edit summary of X"*, etc. Only possible when the map is non-empty. Delegate to [map-operations.md](map-operations.md) — it handles the operation, writes to the **Edits** section, commits.
-   - **A request to see the map** — *"show map"*, *"what's on the map"*. Re-render using the opener's render rules. No STOP gate; just render and continue.
+   - **A request to see the map** — *"show map"*, *"what's on the map"*. Re-run `gateway.cjs map-view {work_unit}` and emit its `=== DISPLAY` section verbatim as a code block. No STOP gate; just render and continue.
    - **A request to see dismissed items** — *"show dismissed"*, *"what was removed"*. Load [show-dismissed.md](show-dismissed.md).
    - **A KB query for prior context** — when a conversational thread would benefit from prior work on this or sibling work units, invoke `knowledge query` with a query derived from the thread (see [contextual-query.md](../../workflow-knowledge/references/contextual-query.md) for the pattern).
    - **A harvest pull** — *"let's pull topics"*, *"that covers it"*, *"good enough to start"*, *"let's wrap"*, *"done"*, *"ready to go"*. Route to **C. Harvest**.
@@ -164,11 +143,10 @@ No fixed cadence — follow the conversation, not a checklist. **The loop is the
 
 5. **Keep the running record.** The **Exploration** section is a constant running record of the conversation — not verbatim, but **not summarised away; nothing of substance is lost.** Write to it at natural pauses (a thread worked through, the conversation about to branch, detail accumulating, context-compaction risk). Capture the journey: the ideas, the objections, the pivots, the route taken, the **false paths and failed designs** (with why they were dropped), the soft decisions reached, and the **answers to any research or investigation done in-session**. Append-forward — add depth by **layering down**, never by editing earlier entries back. Prose, not transcript; the log survives context refresh, in-context memory does not. Lossiness defeats the point: if the detail of the discovery is lost, the session was wasted.
 
-   The lazy-creation rule applies: this may create the session log file if it doesn't exist yet — see [template.md](template.md) → *Lazy creation and finalisation*, which sets the active-session marker on first creation. After writing, commit:
+   The lazy-creation rule applies: this may create the session log file if it doesn't exist yet — see [template.md](template.md) → *Lazy creation and finalisation*, which opens the session via `engine discovery-session open` (installing the log and setting the active-session marker). After writing, commit:
 
    ```bash
-   git add -- .workflows/{work_unit}/
-   git commit -m "discovery({work_unit}): exploration notes — session-{session_number:03d}"
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "discovery({work_unit}): exploration notes — session-{session_number:03d}"
    ```
 
 → Proceed to **C. Harvest** when the user pulls the harvest (a harvest pull recognised in step 2). Otherwise loop within **B** — convergence (step 4) cues the nudge but stays in the loop.

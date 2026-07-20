@@ -33,7 +33,7 @@ Want to split these into separate research files?
 
 **STOP.** Wait for user response.
 
-#### If yes
+#### If `yes`
 
 For each split topic:
 
@@ -54,8 +54,7 @@ Abandon this thread and continue the loop with the next.
 Once all accepted threads have been processed, single commit covering the manifest writes and the new research files:
 
 ```bash
-git add -- .workflows/{work_unit}/manifest.json .workflows/{work_unit}/research/
-git commit -m "research({work_unit}/{parent_topic}): split into {N} topic(s)"
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "research({work_unit}/{parent_topic}): split into {N} topic(s)"
 ```
 
 Then offer the user a choice of which topic to continue with:
@@ -67,7 +66,7 @@ Then offer the user a choice of which topic to continue with:
 Which topic would you like to continue with?
 
 @foreach(topic in available_topics)
-**{N}. {topic:(titlecase)}** — {status:[in-progress]}
+- **`{N}`** — {topic:(titlecase)} [in-progress]
 @endforeach
 
 Select an option (enter number):
@@ -76,8 +75,10 @@ Select an option (enter number):
 
 **STOP.** Wait for user response.
 
+Make the selected topic the active session focus — continue in its research file at `.workflows/{work_unit}/research/{selected_topic}.md`.
+
 → Return to caller.
 
-#### If no
+#### If `no`
 
 → Return to caller.

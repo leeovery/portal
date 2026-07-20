@@ -6,10 +6,10 @@
 
 ## A. Resolve Configuration
 
-Read topic-level `project_skills` via manifest CLI:
+Read topic-level `project_skills` via `engine manifest`:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.implementation.{topic} project_skills
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.implementation.{topic} project_skills
 ```
 
 #### If `project_skills` is populated
@@ -20,31 +20,24 @@ Set `source` = `topic`.
 
 #### Otherwise
 
-Check if project-level default `project_skills` exists via manifest CLI:
+Check whether a project-level default `project_skills` exists and read its value via `engine manifest`:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs exists project.defaults.project_skills
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest exists project.defaults.project_skills
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get project.defaults.project_skills
 ```
 
 **If `false`:**
 
 → Proceed to **C. Discovery**.
 
-**If `true`:**
-
-Read project default `project_skills` via manifest CLI:
-
-```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get project.defaults.project_skills
-```
-
-**If project default is populated:**
+**If `true` and project default is populated:**
 
 Set `source` = `project`.
 
 → Proceed to **B. Confirm Skills**.
 
-**If project default is empty:**
+**If `true` and project default is empty:**
 
 > *Output the next fenced block as a code block:*
 
@@ -107,7 +100,7 @@ Use these project skills?
 
 Copy to topic level:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} project_skills '[{project-level values}]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} project_skills '[{project-level values}]'
 ```
 
 → Return to caller.
@@ -120,7 +113,7 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.imple
 
 Clear topic-level `project_skills` before re-discovery:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} project_skills '[]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} project_skills '[]'
 ```
 
 → Proceed to **C. Discovery**.
@@ -139,8 +132,8 @@ No project skills found. Proceeding without project-specific conventions.
 
 Store empty array at topic and project level:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} project_skills '[]'
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set project.defaults.project_skills '[]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} project_skills '[]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.defaults.project_skills '[]'
 ```
 
 → Return to caller.
@@ -177,19 +170,19 @@ Which project skills should be used?
 
 Store empty array at topic and project level:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} project_skills '[]'
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set project.defaults.project_skills '[]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} project_skills '[]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.defaults.project_skills '[]'
 ```
 
 → Return to caller.
 
 #### Otherwise
 
-Store the selected skill paths via manifest CLI, pushing each path individually to topic level and setting the project default:
+Store the selected skill paths via `engine manifest`, pushing each path individually to topic level and setting the project default:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs push {work_unit}.implementation.{topic} project_skills "{path1}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs push {work_unit}.implementation.{topic} project_skills "{path2}"
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set project.defaults.project_skills '["{path1}","{path2}"]'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest push {work_unit}.implementation.{topic} project_skills "{path1}"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest push {work_unit}.implementation.{topic} project_skills "{path2}"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.defaults.project_skills '["{path1}","{path2}"]'
 ```
 
 → Return to caller.

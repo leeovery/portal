@@ -8,29 +8,15 @@ Route a cross-cutting concern to its next pipeline phase, with an option to revi
 
 Cross-cutting pipeline: (Research) → Discussion → Specification (terminal)
 
-## Phase Routing
-
-Use `next_phase` from discovery output to determine the target skill:
-
-| next_phase | Target Skill |
-|------------|--------------|
-| research | workflow-research-entry |
-| discussion | workflow-discussion-entry |
-| specification | workflow-specification-entry |
-| done | (terminal) |
-
 ## A. Check Terminal
 
 #### If `next_phase` is `done`
 
-Set the work unit status to completed:
+Complete the work unit — one command sets `status: completed`, stamps `completed_at`, and commits:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit} status completed
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit} completed_at $(date +%Y-%m-%d)
+node .claude/skills/workflow-engine/scripts/engine.cjs workunit complete {work_unit} -m "workflow({work_unit}): complete cross-cutting pipeline"
 ```
-
-Commit: `workflow({work_unit}): complete cross-cutting pipeline`
 
 > *Output the next fenced block as a code block:*
 
@@ -50,13 +36,13 @@ Set `target_phase` = `next_phase`.
 
 ## B. Check for Earlier Phases
 
-Check if there are completed phases earlier in the pipeline that the user could revisit. Look at the discovery output's `phases` data — any phase with status `completed` that comes before `next_phase` in the pipeline order.
+Read the discovery output's `revisitable_phases` — the completed phases the user could revisit.
 
-#### If no earlier completed phases exist
+#### If `revisitable_phases` is `(none)`
 
 → Proceed to **E. Enter Plan Mode**.
 
-#### If earlier completed phases exist
+#### Otherwise
 
 → Proceed to **C. Offer Revisit**.
 
@@ -85,21 +71,7 @@ Check if there are completed phases earlier in the pipeline that the user could 
 
 ## D. Select Phase
 
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-· · · · · · · · · · · ·
-Which phase would you like to revisit?
-
-- **`1`** — {phase:(titlecase)} — completed
-- **`2`** — ...
-- **`b`/`back`** — Return to the previous menu
-
-Select an option:
-· · · · · · · · · · · ·
-```
-
-List only completed phases that come before `next_phase`.
+Emit the discovery output's `MENU: revisit phases` section verbatim as markdown (not a code block). Its numbering follows `revisitable_phases` order.
 
 **STOP.** Wait for user response.
 
@@ -109,7 +81,7 @@ List only completed phases that come before `next_phase`.
 
 #### If user chose a phase
 
-Set `target_phase` = selected phase.
+Set `target_phase` = the number's phase in `revisitable_phases`.
 
 → Proceed to **E. Enter Plan Mode**.
 

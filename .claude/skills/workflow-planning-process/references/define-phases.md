@@ -34,7 +34,7 @@ independently testable stages.
 
 Read `work_type` from the manifest:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit} work_type
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit} work_type
 ```
 
 Invoke `workflow-planning-phase-designer` with these file paths:
@@ -48,13 +48,15 @@ Invoke `workflow-planning-phase-designer` with these file paths:
 
 The agent returns phases only — goals, ordering rationale, and acceptance criteria. **Task lists are designed separately in a later step; do not request or include them.** Write the phase structure directly to the planning file body.
 
-Update the manifest planning position:
+Update the manifest planning position — one batched write:
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} phase 1
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} task '~'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} phase 1 task='~'
 ```
 
-Commit: `planning({work_unit}): draft phase structure`
+Commit:
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "planning({work_unit}): draft phase structure"
+```
 
 → Proceed to **B. Review and Approve**.
 
@@ -71,8 +73,8 @@ Present the phase structure to the user as rendered markdown (not in a code bloc
 Approve this phase structure?
 
 - **`y`/`yes`** — Proceed to task breakdown
-- **Tell me what to change** — reorder, split, merge, add, edit, or remove phases
-- **Navigate** — a different phase or task, or the leading edge
+- **Tell me what to change** — which phases to reorder, split, merge, add, edit, or remove
+- **Navigate** — Tell me where to go: a different phase or task, or the leading edge
 · · · · · · · · · · · ·
 ```
 
@@ -88,12 +90,21 @@ Update the planning file with the revised output.
 
 → Return to **B. Review and Approve**.
 
-#### If `approved`
+#### If navigate
+
+Resolve the destination per the caller's **Navigation** section — the user's position moves, the leading edge does not.
+
+→ Return to caller for **B. Process Current Phase**.
+
+#### If `yes`
 
 **If the phase structure is new or was amended:**
 
 1. Update each phase in the planning file: set `status: approved` and `approved_at: YYYY-MM-DD` (use today's actual date)
-2. Commit: `planning({work_unit}): approve phase structure`
+2. Commit:
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "planning({work_unit}): approve phase structure"
+   ```
 
 If the phase structure was already approved and unchanged, no updates are needed.
 

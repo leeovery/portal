@@ -9,7 +9,7 @@ Check if plan exists and is ready.
 ## A. Plan Check
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.planning.{topic} status
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} status
 ```
 
 #### If output is empty (plan doesn't exist)
@@ -45,7 +45,7 @@ The plan for "{topic:(titlecase)}" is not yet completed.
 ## B. Implementation Check
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.implementation.{topic} status
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.implementation.{topic} status
 ```
 
 #### If output is empty (implementation does not exist)
@@ -56,10 +56,10 @@ Proceed normally (new entry).
 
 #### If status is `completed`
 
-Reset to in-progress:
+Reopen it:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.implementation.{topic} status in-progress
+node .claude/skills/workflow-engine/scripts/engine.cjs topic reopen {work_unit} implementation {topic}
 ```
 
 > *Output the next fenced block as a code block:*

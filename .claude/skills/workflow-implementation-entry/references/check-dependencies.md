@@ -9,27 +9,29 @@
 Query the external dependencies:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.planning.{topic} external_dependencies
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} external_dependencies
 ```
 
 Evaluate each dependency and collect any that are blocking into a list:
 
 - **`state: satisfied_externally`** — skip, not blocking
 - **`state: unresolved`** — add to the blocking list
-- **`state: resolved`** — check the dependency topic's implementation status and completed tasks:
+- **`state: resolved`** — check the dependency topic's implementation status:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.implementation.{dep_topic} status
-node .claude/skills/workflow-manifest/scripts/manifest.cjs get {work_unit}.implementation.{dep_topic} completed_tasks
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.implementation.{dep_topic} status
 ```
 
-**If status is `completed`, or `internal_id` is in the completed tasks list:**
+**If status is `completed`:**
 
 Skip, not blocking. A completed implementation satisfies the dependency even if the referenced task was skipped.
 
-**If status is not `completed` and `internal_id` is not in the list, or the implementation entry does not exist:**
+**If status is not `completed` or the implementation entry does not exist:**
 
-Add to the blocking list.
+Read the referenced task's status from the dependency's plan. Read the dep plan's `format` (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{dep_topic} format`), load the format's **reading.md** (`../workflow-planning-process/references/output-formats/{format}/reading.md`), and look up the task by `internal_id` — resolving to its external ID via `node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{dep_topic} task_map.{internal_id}` when the format needs one.
+
+- Task status is the format's completed status → skip, not blocking.
+- Any other status (open, in-progress, skipped/cancelled), or no plan or task found → add to the blocking list. A skipped or cancelled task does not satisfy a dependency while its implementation is still in progress.
 
 ---
 
@@ -58,13 +60,13 @@ Missing Dependencies
 
 @foreach(dep in blocking_list where state is unresolved)
   {dep_topic:(titlecase)}
-  └─ {description}
+  ├─ {description}
   └─ No plan exists
 
 @endforeach
 @foreach(dep in blocking_list where state is resolved)
   {dep_topic:(titlecase)}
-  └─ {description}
+  ├─ {description}
   └─ Waiting on {topic}:{internal_id}
 
 @endforeach
@@ -141,10 +143,10 @@ Set `selected_topic` = the chosen dependency's topic.
 
 ## D. Mark as Satisfied
 
-Update the selected dependency's state via manifest CLI:
+Update the selected dependency's state via `engine manifest`:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.planning.{topic} external_dependencies.{selected_topic}.state satisfied_externally
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} external_dependencies.{selected_topic}.state satisfied_externally
 ```
 
 Commit: `impl({work_unit}): mark {selected_topic} dependency as satisfied externally`

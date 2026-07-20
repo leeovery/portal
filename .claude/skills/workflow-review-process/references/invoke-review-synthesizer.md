@@ -10,10 +10,10 @@ This step dispatches a `workflow-review-findings-synthesizer` agent to read revi
 
 ## Determine Cycle Number
 
-Count existing `review-tasks-c*.md` files in `.workflows/{work_unit}/implementation/{topic}/` and add 1.
+Count existing `review-report-c*.md` files in `.workflows/{work_unit}/implementation/{topic}/` and add 1. The report is written every cycle — staging files are only written when tasks are proposed, so counting them would reuse a cycle number after a `clean` cycle.
 
 ```bash
-ls .workflows/{work_unit}/implementation/{topic}/review-tasks-c*.md 2>/dev/null | wc -l
+ls .workflows/{work_unit}/implementation/{topic}/review-report-c*.md 2>/dev/null | wc -l
 ```
 
 ---
@@ -29,8 +29,7 @@ The synthesizer receives:
 1. **Work unit** — the work unit name (for path construction)
 2. **Plan topic** — the plan being synthesized
 3. **Review path** — path to `review/{topic}/` directory (review summary + QA files)
-4. **Specification path** — from the manifest
-5. **Cycle number** — the review remediation cycle number
+4. **Cycle number** — the review remediation cycle number
 
 ---
 
@@ -46,8 +45,8 @@ If the agent fails (error, timeout), record the failure and report "synthesis fa
 
 Commit the report and staging file (if created):
 
-```
-review({scope}): synthesis cycle {N} — findings
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): synthesis cycle {N} — findings"
 ```
 
 ---

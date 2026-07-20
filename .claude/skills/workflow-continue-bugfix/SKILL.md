@@ -1,7 +1,7 @@
 ---
 name: workflow-continue-bugfix
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-continue-bugfix/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
+allowed-tools: Bash(node .claude/skills/workflow-continue-bugfix/scripts/gateway.cjs), Bash(node .claude/skills/workflow-start/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(tick)
 ---
 
 Continue an in-progress bugfix. Determines current phase and routes to the appropriate phase skill.
@@ -42,6 +42,12 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 ── Initialisation ───────────────────────────────
 ```
 
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Loading shared display conventions for this session.
+```
+
 Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
 
 → Proceed to **Step 1**.
@@ -62,29 +68,27 @@ Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.
 > Scanning for active bugfixes and their current progress.
 ```
 
-!`node .claude/skills/workflow-continue-bugfix/scripts/discovery.cjs`
+!`node .claude/skills/workflow-continue-bugfix/scripts/gateway.cjs`
 
 If the above shows a script invocation rather than discovery output, the dynamic content preprocessor did not run. Execute the script before continuing:
 
 ```bash
-node .claude/skills/workflow-continue-bugfix/scripts/discovery.cjs
+node .claude/skills/workflow-continue-bugfix/scripts/gateway.cjs
 ```
 
 If discovery output is already displayed, it has been run on your behalf.
 
 Parse the discovery output to understand:
 
-**From `bugfixes` array:**
-- `name` - the work unit name
-- `next_phase` - the phase to route to
-- `phase_label` - human-readable phase status
-- `completed_phases` - list of completed phases (for backwards navigation)
+**From the `=== BUGFIXES (N) ===` section:**
+- one line per active bugfix — `{name}: {phase_label}`
+- `count` — the header count of active bugfixes
 
-**From top-level fields:**
-- `count` - number of active bugfixes
-- `summary` - human-readable state summary
-- `completed` / `cancelled` - arrays of non-active bugfixes with name, status, last_phase
-- `completed_count` / `cancelled_count` - counts for each
+**From the `=== COMPLETED (N) ===` / `=== CANCELLED (N) ===` sections:**
+- one line per closed bugfix — `{name} (last phase: {phase})`
+- `completed_count` / `cancelled_count` — the header counts
+
+Anything richer (next phase, completed phases, revisit routes) comes from the `view` snapshot at Step 5 — this dump is the index, not the state surface.
 
 **IMPORTANT**: Use ONLY this script for discovery. Do NOT run additional bash commands (ls, head, cat, etc.) to gather state.
 
@@ -170,54 +174,42 @@ Load **[validate-selection.md](references/validate-selection.md)** and follow it
 
 ---
 
-## Step 5: Backwards Navigation
+## Step 5: Display State and Menu
 
 > *Output the next fenced block as a code block:*
 
 ```
-── Check Progress ───────────────────────────────
+── Display State and Menu ───────────────────────
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Checking whether earlier phases are available to revisit.
+> Showing the bugfix's pipeline state and available actions.
 ```
 
-Load **[revisit-phase.md](references/revisit-phase.md)** and follow its instructions as written.
+Load **[bugfix-display-and-menu.md](references/bugfix-display-and-menu.md)** and follow its instructions as written.
 
 → Proceed to **Step 6**.
 
 ---
 
-## Step 6: Route to Phase Skill
+## Step 6: Route Selection
 
 > *Output the next fenced block as a code block:*
 
 ```
-── Route to Phase ───────────────────────────────
+── Route Selection ──────────────────────────────
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Handing off to the next phase for this bugfix.
+> Handing off to the selected phase for this bugfix.
 ```
 
-Using the selected bugfix's `next_phase`, invoke the appropriate phase skill:
-
-| next_phase | Invoke |
-|------------|--------|
-| investigation | `/workflow-investigation-entry bugfix {work_unit}` |
-| specification | `/workflow-specification-entry bugfix {work_unit}` |
-| planning | `/workflow-planning-entry bugfix {work_unit}` |
-| implementation | `/workflow-implementation-entry bugfix {work_unit}` |
-| review | `/workflow-review-entry bugfix {work_unit}` |
+Invoke the `route` stored for the user's selection — the selected `ACTIONS` entry's route from bugfix-display-and-menu.md (e.g. `/workflow-specification-entry bugfix {work_unit}`).
 
 Skills receive positional arguments: `$0` = work_type (`bugfix`), `$1` = work_unit. Topic is inferred from work_unit.
 
-If the user chose to revisit a completed phase in Step 5, use that phase instead of `next_phase`.
-
-Invoke the skill.
-
-**STOP.** Do not proceed — terminal condition.
+This skill ends. The invoked skill will load into context and provide additional instructions. Terminal.
