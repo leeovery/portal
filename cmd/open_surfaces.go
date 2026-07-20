@@ -55,7 +55,7 @@ func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces
 
 	for _, t := range targets {
 		switch t.Domain {
-		case "bare":
+		case resolver.DomainBare:
 			// The bare guessing chain. Emit the single resolve decision line ONCE
 			// per non-glob bare target (spec § Wrong-guess feedback), single-sourced
 			// via emitResolveDecision (it owns the !HasGlobMeta gate + the locked
@@ -66,13 +66,13 @@ func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces
 			results, _ := qr.ResolveBareAll(t.Value)
 			emitResolveDecision(t.Value, results[0])
 			collect(results)
-		case "session":
+		case resolver.DomainSession:
 			results, _ := qr.ResolveSessionPinAll(t.Value)
 			collect(results)
-		case "alias":
+		case resolver.DomainAlias:
 			results, _ := qr.ResolveAliasPinAll(t.Value)
 			collect(results)
-		case "path":
+		case resolver.DomainPath:
 			// Single-domain: reuse the existing single-result pin. A resolution
 			// failure (non-existent dir, non-directory file) is a collected miss.
 			r, perr := qr.ResolvePathPin(t.Value)
@@ -81,7 +81,7 @@ func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces
 				continue
 			}
 			collect([]resolver.QueryResult{r})
-		case "zoxide":
+		case resolver.DomainZoxide:
 			// Single-domain: reuse the existing single-result pin. Only
 			// ErrZoxideNotInstalled (an environment fault) aborts the whole resolve;
 			// a no-match or gone best-match dir is a collected miss.

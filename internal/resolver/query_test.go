@@ -69,7 +69,7 @@ func TestQueryResolver_Resolve(t *testing.T) {
 		zoxideErr    error
 		existingDirs map[string]bool
 		wantPath     string
-		wantDomain   string
+		wantDomain   resolver.Domain
 		wantMiss     bool
 		wantTarget   string
 		wantErr      string

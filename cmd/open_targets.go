@@ -1,14 +1,18 @@
 package cmd
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/leeovery/portal/internal/resolver"
+)
 
 // Target is one element of the ordered open target-set union: a value plus the
-// domain it resolves under. Domain is a plain-string domain matching the
-// resolver's vocabulary ("session"/"path"/"zoxide"/"alias") plus "bare" for a
-// positional that runs the full precedence chain.
+// domain it resolves under. Domain is the typed resolver.Domain matching the
+// resolver's vocabulary (DomainSession/DomainPath/DomainZoxide/DomainAlias) plus
+// DomainBare for a positional that runs the full precedence chain.
 type Target struct {
 	Value  string
-	Domain string
+	Domain resolver.Domain
 }
 
 // openTargetPins maps every known value-taking open flag (both long and short
@@ -30,11 +34,15 @@ type Target struct {
 // such a token is absent from this map, so it is classified unknown-and-skipped
 // rather than attributed a value. That divergence from cobra's bundling is
 // intended, not a bug.
-var openTargetPins = map[string]string{
-	"-s": "session", "--session": "session",
-	"-p": "path", "--path": "path",
-	"-z": "zoxide", "--zoxide": "zoxide",
-	"-a": "alias", "--alias": "alias",
+//
+// The keys are cobra flag names (legitimately strings — cobra flag names are
+// strings); the values are the typed resolver.Domain. An excluded flag maps to
+// the empty domain (resolver.Domain zero value), never emitted as a target.
+var openTargetPins = map[string]resolver.Domain{
+	"-s": resolver.DomainSession, "--session": resolver.DomainSession,
+	"-p": resolver.DomainPath, "--path": resolver.DomainPath,
+	"-z": resolver.DomainZoxide, "--zoxide": resolver.DomainZoxide,
+	"-a": resolver.DomainAlias, "--alias": resolver.DomainAlias,
 	"-e": "", "--exec": "",
 	"-f": "", "--filter": "",
 	"--ack": "",
@@ -66,7 +74,7 @@ func orderedOpenTargets(args []string) []Target {
 		// precedence chain. A lone "-" is not a flag either. The spec guarantees
 		// no positional begins with "-".
 		if !strings.HasPrefix(tok, "-") || tok == "-" {
-			targets = append(targets, Target{Value: tok, Domain: "bare"})
+			targets = append(targets, Target{Value: tok, Domain: resolver.DomainBare})
 			continue
 		}
 

@@ -40,21 +40,21 @@ type QueryResult interface {
 
 // PathResult indicates the query resolved to a directory path that should be
 // minted as a fresh session (Axiom 2: directory-domain hits always mint).
-// Domain records which arm produced it ("path" / "alias" / "zoxide") for the
-// caller's resolution log line.
+// Domain records which arm produced it (DomainPath / DomainAlias / DomainZoxide)
+// for the caller's resolution log line.
 type PathResult struct {
 	Path   string
-	Domain string
+	Domain Domain
 }
 
 func (*PathResult) queryResult() {}
 
 // SessionResult indicates the query resolved to an existing running session in
-// the session domain. Domain is "session" for an exact-name hit; a later task
-// also produces SessionResult with Domain "glob" for glob expansion.
+// the session domain. Domain is DomainSession for an exact-name hit and
+// DomainGlob for a glob-expansion match.
 type SessionResult struct {
 	Name   string
-	Domain string
+	Domain Domain
 }
 
 func (*SessionResult) queryResult() {}
@@ -136,7 +136,7 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 	// client already returns ([]string{}, nil) when no server runs, and an
 	// error is not surfaced here (treated as no match).
 	if names, err := qr.sessions.ListSessionNames(); err == nil && slices.Contains(names, query) {
-		return &SessionResult{Name: query, Domain: "session"}, nil
+		return &SessionResult{Name: query, Domain: DomainSession}, nil
 	}
 
 	if IsPathArgument(query) {
@@ -144,19 +144,19 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &PathResult{Path: resolved, Domain: "path"}, nil
+		return &PathResult{Path: resolved, Domain: DomainPath}, nil
 	}
 
 	// Alias lookup
 	if path, ok := qr.aliases.Get(query); ok {
-		return qr.validatedPath(path, "alias")
+		return qr.validatedPath(path, DomainAlias)
 	}
 
 	// Zoxide query. A zoxide error (not installed / no match) is swallowed here
 	// so the bare-target chain continues to the miss tail — unlike the pinned
 	// -z, which errors explicitly (spec § Domain-pinning flags).
 	if path, err := qr.zoxide.Query(query); err == nil {
-		return qr.validatedPath(path, "zoxide")
+		return qr.validatedPath(path, DomainZoxide)
 	}
 
 	// No domain resolved the target: a total miss. The caller turns this into
@@ -168,7 +168,7 @@ func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
 // expandSessionGlobAll expands a session-domain glob pattern against names into
 // the K-surface result slice shared by ResolveBareAll and ResolveSessionPinAll:
 // zero matches is a single collected *MissResult carrying the pattern, otherwise
-// each match (in MatchGlob order) becomes a *SessionResult{Domain:"glob"}.
+// each match (in MatchGlob order) becomes a *SessionResult{Domain:DomainGlob}.
 // names is passed in because the two callers source it differently (ResolveBareAll
 // fetches it inside its glob branch; ResolveSessionPinAll reuses an earlier fetch).
 func expandSessionGlobAll(pattern string, names []string) []QueryResult {
@@ -178,7 +178,7 @@ func expandSessionGlobAll(pattern string, names []string) []QueryResult {
 	}
 	results := make([]QueryResult, 0, len(matches))
 	for _, m := range matches {
-		results = append(results, &SessionResult{Name: m, Domain: "glob"})
+		results = append(results, &SessionResult{Name: m, Domain: DomainGlob})
 	}
 	return results
 }
@@ -192,7 +192,7 @@ func expandSessionGlobAll(pattern string, names []string) []QueryResult {
 // *MissResult carrying the raw target.
 //
 // A glob value is session-domain by construction (spec § Glob targets): it expands
-// against the user-visible session set to K *SessionResult{Domain:"glob"} — the
+// against the user-visible session set to K *SessionResult{Domain:DomainGlob} — the
 // per-match window fan-out this whole task exists to produce — and zero matches is
 // a single collected miss. A non-glob value defers to Resolve for the full
 // session→path→alias→zoxide→miss chain and wraps the outcome as a single result.
@@ -218,8 +218,8 @@ func (qr *QueryResolver) ResolveBareAll(query string) ([]QueryResult, error) {
 // zero-match glob, or empty session set) is a COLLECTED MISS (a *MissResult), NOT
 // the "No session found" hard error — multi-target pre-flight collects every miss
 // (spec § Atomic pre-flight & partial failure). A glob expands to K
-// *SessionResult{Domain:"glob"} over the user-visible set; an exact hit is a single
-// *SessionResult{Domain:"session"}. The returned error is always nil.
+// *SessionResult{Domain:DomainGlob} over the user-visible set; an exact hit is a single
+// *SessionResult{Domain:DomainSession}. The returned error is always nil.
 func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, error) {
 	names, _ := qr.sessions.ListSessionNames()
 
@@ -228,7 +228,7 @@ func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, erro
 	}
 
 	if slices.Contains(names, query) {
-		return []QueryResult{&SessionResult{Name: query, Domain: "session"}}, nil
+		return []QueryResult{&SessionResult{Name: query, Domain: DomainSession}}, nil
 	}
 	return []QueryResult{&MissResult{Target: query}}, nil
 }
@@ -241,7 +241,7 @@ func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, erro
 //
 // A glob value expands against the enumerated alias-key namespace (Keys +
 // MatchGlob); each matched key's directory is validated on disk and reduced to
-// a *PathResult{Domain:"alias"}, but a gone directory for one matched key becomes a
+// a *PathResult{Domain:DomainAlias}, but a gone directory for one matched key becomes a
 // *MissResult carrying THAT KEY (the surviving keys still resolve) — the parent
 // reduces every mint to a literal existing dir at resolve time (spec § Burst
 // exec-argv & mint responsibility). An exact key resolves the same way, collecting
@@ -257,7 +257,7 @@ func (qr *QueryResolver) ResolveAliasPinAll(value string) ([]QueryResult, error)
 		for _, k := range matches {
 			// matches are drawn from Keys(), so Get always finds the key.
 			path, _ := qr.aliases.Get(k)
-			r, err := qr.validatedPath(path, "alias")
+			r, err := qr.validatedPath(path, DomainAlias)
 			if err != nil {
 				results = append(results, &MissResult{Target: k})
 				continue
@@ -271,7 +271,7 @@ func (qr *QueryResolver) ResolveAliasPinAll(value string) ([]QueryResult, error)
 	if !ok {
 		return []QueryResult{&MissResult{Target: value}}, nil
 	}
-	r, err := qr.validatedPath(path, "alias")
+	r, err := qr.validatedPath(path, DomainAlias)
 	if err != nil {
 		return []QueryResult{&MissResult{Target: value}}, nil
 	}
@@ -282,7 +282,7 @@ func (qr *QueryResolver) ResolveAliasPinAll(value string) ([]QueryResult, error)
 // pin (spec § Domain-pinning flags). It matches the value against the
 // user-visible session set by EXACT name and never consults aliases / zoxide /
 // the filesystem: a pin names its domain explicitly. An exact hit yields a
-// SessionResult with Domain "session".
+// SessionResult with Domain DomainSession.
 //
 // ResolveSessionPin does NOT glob-expand: glob fan-out is EXCLUSIVELY the burst's
 // job (ResolveSessionPinAll → expandSessionGlobAll, the all-match primitive). A
@@ -298,7 +298,7 @@ func (qr *QueryResolver) ResolveSessionPin(query string) (QueryResult, error) {
 	names, _ := qr.sessions.ListSessionNames()
 
 	if slices.Contains(names, query) {
-		return &SessionResult{Name: query, Domain: "session"}, nil
+		return &SessionResult{Name: query, Domain: DomainSession}, nil
 	}
 
 	// Miss: no exact match, a glob value (never a literal session name), or an empty
@@ -316,7 +316,7 @@ func (qr *QueryResolver) ResolveSessionPin(query string) (QueryResult, error) {
 // Domain-pinning flags). It reuses ResolvePath (tilde/relative expansion +
 // existence + is-directory validation) and never consults the glob pre-check, the
 // session set, aliases, or zoxide: a pin names its domain explicitly. A hit always
-// mints (Axiom 2: a directory-domain hit → PathResult with Domain "path"). Because
+// mints (Axiom 2: a directory-domain hit → PathResult with Domain DomainPath). Because
 // ResolvePath stats the LITERAL path, a directory whose name contains glob
 // metacharacters (e.g. ~/tmp/foo[1]) is reachable here — the metacharacters are
 // never expanded — whereas the same value as a bare positional hard-fails via the
@@ -329,7 +329,7 @@ func (qr *QueryResolver) ResolvePathPin(dir string) (QueryResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &PathResult{Path: resolved, Domain: "path"}, nil
+	return &PathResult{Path: resolved, Domain: DomainPath}, nil
 }
 
 // ResolveAliasPin resolves value in the alias domain ONLY — the -a/--alias pin
@@ -337,7 +337,7 @@ func (qr *QueryResolver) ResolvePathPin(dir string) (QueryResult, error) {
 // by EXACT key, bypassing the session→path→alias→zoxide precedence, so it is the
 // ONLY way to reach an alias key SHADOWED by a same-named session. The resolved
 // key's directory is validated on disk via validatedPath: a hit always mints
-// (Axiom 2 — PathResult with Domain "alias"), a gone directory hard-fails with
+// (Axiom 2 — PathResult with Domain DomainAlias), a gone directory hard-fails with
 // *DirNotFoundError (distinct from the unknown-key miss), and an unknown key
 // hard-fails with a plain "No alias found" error.
 //
@@ -354,7 +354,7 @@ func (qr *QueryResolver) ResolveAliasPin(value string) (QueryResult, error) {
 	if !ok {
 		return nil, unknownAliasError(value)
 	}
-	return qr.validatedPath(path, "alias")
+	return qr.validatedPath(path, DomainAlias)
 }
 
 // ResolveZoxidePin resolves query in the zoxide domain ONLY — the -z/--zoxide pin
@@ -365,7 +365,7 @@ func (qr *QueryResolver) ResolveAliasPin(value string) (QueryResult, error) {
 // — a script sees WHY, distinct from the silent fall-through), and any other query
 // failure (a no-match) hard-fails with a plain "No zoxide match" error (exit 1). On
 // a hit the best-match directory is validated on disk via validatedPath: a hit
-// always mints (Axiom 2 — PathResult with Domain "zoxide"), and a gone best-match
+// always mints (Axiom 2 — PathResult with Domain DomainZoxide), and a gone best-match
 // dir hard-fails with *DirNotFoundError (distinct from the no-match). It never
 // consults qr.sessions or qr.aliases — zoxide-domain only — and never falls back to
 // the picker (spec § Pinned-domain contract).
@@ -381,7 +381,7 @@ func (qr *QueryResolver) ResolveZoxidePin(query string) (QueryResult, error) {
 		// staticcheck ST1005, silenced per the directive.
 		return nil, fmt.Errorf("No zoxide match for: %s", query) //nolint:staticcheck // user-facing message per spec
 	}
-	return qr.validatedPath(path, "zoxide")
+	return qr.validatedPath(path, DomainZoxide)
 }
 
 // unknownAliasError is the alias-pin hard-fail for an unknown key or a glob
@@ -397,7 +397,7 @@ func unknownAliasError(value string) error {
 // validatedPath returns a PathResult (tagged with the resolving domain) after
 // verifying the directory exists on disk. A non-existent directory is a hard
 // error (DirNotFoundError), distinct from a miss.
-func (qr *QueryResolver) validatedPath(path, domain string) (QueryResult, error) {
+func (qr *QueryResolver) validatedPath(path string, domain Domain) (QueryResult, error) {
 	if !qr.dirValidator.Exists(path) {
 		return nil, &DirNotFoundError{Path: path}
 	}

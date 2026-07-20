@@ -73,9 +73,9 @@ func isMultiTarget(ordered []Target) bool {
 // finite Portal-owned namespace. Bare positionals are session-domain by glob
 // construction; -s and -a expand over the session-name / alias-key sets. -p and
 // -z never glob-expand (a literal path / a zoxide subsequence query).
-func globExpandableDomain(domain string) bool {
+func globExpandableDomain(domain resolver.Domain) bool {
 	switch domain {
-	case "bare", "session", "alias":
+	case resolver.DomainBare, resolver.DomainSession, resolver.DomainAlias:
 		return true
 	default:
 		return false
@@ -157,7 +157,7 @@ func dispatchOpenBurst(cmd *cobra.Command, ordered []Target, command []string) e
 // names a resolved literal directory (path domain).
 func surfaceToResult(s spawn.Surface) resolver.QueryResult {
 	if s.Kind == spawn.SurfaceMint {
-		return &resolver.PathResult{Path: s.Value, Domain: "path"}
+		return &resolver.PathResult{Path: s.Value, Domain: resolver.DomainPath}
 	}
-	return &resolver.SessionResult{Name: s.Value, Domain: "session"}
+	return &resolver.SessionResult{Name: s.Value, Domain: resolver.DomainSession}
 }

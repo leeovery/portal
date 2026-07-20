@@ -429,23 +429,26 @@ func emitResolveDecision(target string, result resolver.QueryResult) {
 		return
 	}
 	domain, resolvedPath := resolveDecision(result)
-	resolveLogger.Info("resolved", "target", target, "domain", domain, "resolved_path", resolvedPath)
+	// domain.String() yields the spec-governed closed-taxonomy attr value
+	// (session/path/alias/zoxide/miss) as a plain string, so the emitted log line
+	// is byte-identical to the pre-typed-Domain wording.
+	resolveLogger.Info("resolved", "target", target, "domain", domain.String(), "resolved_path", resolvedPath)
 }
 
 // resolveDecision derives the (domain, resolved_path) attrs for the resolve
 // decision log line from a completed classification result. resolved_path is
 // overloaded per the spec: the resolved directory for a path/alias/zoxide hit,
 // the session name for a session hit, and empty for a miss. It reads the domain
-// off the already-obtained result (r.Domain / the "miss" literal) — it does not
+// off the already-obtained result (r.Domain / resolver.DomainMiss) — it does not
 // re-run the classification.
-func resolveDecision(result resolver.QueryResult) (domain, resolvedPath string) {
+func resolveDecision(result resolver.QueryResult) (domain resolver.Domain, resolvedPath string) {
 	switch r := result.(type) {
 	case *resolver.SessionResult:
 		return r.Domain, r.Name
 	case *resolver.PathResult:
 		return r.Domain, r.Path
 	case *resolver.MissResult:
-		return "miss", ""
+		return resolver.DomainMiss, ""
 	default:
 		return "", ""
 	}

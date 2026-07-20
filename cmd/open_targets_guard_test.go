@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/spf13/pflag"
 )
 
@@ -24,7 +25,9 @@ import (
 // skipped by orderedOpenTargets, so this predicate returns nil for it. A
 // value-taking flag already fully covered by `pins` also returns nil. It is the
 // shared predicate driving both the live-openCmd guard and its drift unit below.
-func valueTakingFlagMissingPins(f *pflag.Flag, pins map[string]string) []string {
+// pins is keyed by cobra flag name (strings, legitimately) — this guard covers
+// flag-name↔pin drift and never inspects the pin's typed resolver.Domain value.
+func valueTakingFlagMissingPins(f *pflag.Flag, pins map[string]resolver.Domain) []string {
 	if f.Value.Type() == "bool" || f.NoOptDefVal != "" {
 		return nil
 	}
