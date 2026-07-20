@@ -30,7 +30,7 @@ type OpenBurstDeps struct {
 	Detector TerminalDetector
 	// Resolve maps an identity to its window-opening adapter plus the resolution
 	// classification. Defaults to the config-aware buildResolver().Resolve.
-	Resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	Resolve spawn.AdapterResolver
 	// Connector self-connects an ATTACH trigger (switch-client inside tmux / exec
 	// attach outside). Defaults to buildSessionConnector(tmuxClient(cmd)).
 	Connector SessionConnector

@@ -462,7 +462,7 @@ type Model struct {
 	// terminal is non-NULL yet resolves unsupported. A later burst REUSES this cache;
 	// no rebuild re-detects or re-resolves.
 	detector         TerminalDetector
-	resolve          func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	resolve          spawn.AdapterResolver
 	detectIdentity   spawn.Identity
 	detectResolution spawn.Resolution
 	// detectAdapter is the Adapter half of the SAME single resolve that produced

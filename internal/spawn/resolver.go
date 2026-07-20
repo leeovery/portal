@@ -18,6 +18,16 @@ const (
 	ResolutionUnsupported Resolution = "unsupported"
 )
 
+// AdapterResolver is the host-terminal identity→adapter resolution seam shared by
+// the picker, the multi-target open burst, and doctor: it maps a detected host
+// Identity to the Adapter that opens windows for it plus the Resolution
+// classifying how the mapping was made. Resolver.Resolve is the production
+// implementation (NewResolver builds one from the loaded terminals.json). Naming
+// the seam — mirroring the single-return ExecutableResolver precedent — gives it
+// one compiler-anchored definition every caller references instead of respelling
+// the func signature at each injection site.
+type AdapterResolver func(Identity) (Adapter, Resolution)
+
 // nativeAdapter is one entry in the ordered native-adapter registry: a bundle-id
 // family glob and the constructor that builds its driver on a family hit.
 type nativeAdapter struct {

@@ -33,7 +33,7 @@ type TerminalDetector interface {
 // source both read.
 type productionSpawnSeams struct {
 	Detector *spawn.Detector
-	Resolve  func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	Resolve  spawn.AdapterResolver
 	Ack      spawn.AckChannelFull
 	Exe      spawn.ExecutableResolver
 	Getenv   func(string) string

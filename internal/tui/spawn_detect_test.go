@@ -41,7 +41,7 @@ func (f *fakeDetector) Detect() spawn.Identity {
 // re-resolves.
 type countingResolve struct {
 	calls int
-	fn    func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	fn    spawn.AdapterResolver
 }
 
 func (c *countingResolve) resolve(id spawn.Identity) (spawn.Adapter, spawn.Resolution) {
@@ -55,7 +55,7 @@ func (c *countingResolve) resolve(id spawn.Identity) (spawn.Adapter, spawn.Resol
 // Using the production resolver keeps DetectUnsupported's truth table honest:
 // a recognised-but-undriven terminal (com.apple.Terminal) is non-NULL yet
 // resolves unsupported, which IsNull() alone would miss.
-func nativeResolve() func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
+func nativeResolve() spawn.AdapterResolver {
 	return spawn.NewResolver(spawn.TerminalsConfig{}).Resolve
 }
 
@@ -79,7 +79,7 @@ func oneNamedSession() []tmux.Session { return []tmux.Session{{Name: "alpha", Wi
 // (the warm entry point), and returns the model plus the batched cmd the
 // SessionsMsg arm emitted — WITHOUT draining it, so the caller can observe the
 // in-flight window before the async Detect() resolves.
-func dispatchWarmDetection(t *testing.T, det TerminalDetector, res func(spawn.Identity) (spawn.Adapter, spawn.Resolution)) (Model, tea.Cmd) {
+func dispatchWarmDetection(t *testing.T, det TerminalDetector, res spawn.AdapterResolver) (Model, tea.Cmd) {
 	t.Helper()
 	m := New(fakeLister{},
 		WithProjectStore(stubProjectStore{}),
@@ -94,7 +94,7 @@ func dispatchWarmDetection(t *testing.T, det TerminalDetector, res func(spawn.Id
 
 // warmResolvedModel drives the warm-direct route all the way through the async
 // Detect() resolution and returns the model with detection cached.
-func warmResolvedModel(t *testing.T, det TerminalDetector, res func(spawn.Identity) (spawn.Adapter, spawn.Resolution)) Model {
+func warmResolvedModel(t *testing.T, det TerminalDetector, res spawn.AdapterResolver) Model {
 	t.Helper()
 	m, cmd := dispatchWarmDetection(t, det, res)
 	return drainBatchToModel(t, m, cmd)

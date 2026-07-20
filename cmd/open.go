@@ -659,7 +659,7 @@ type tuiConfig struct {
 	// tui.Deps. This is the SINGLE injection site — the picker burst reuses the
 	// model's cached resolution and never re-injects.
 	detector tui.TerminalDetector
-	resolve  func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	resolve  spawn.AdapterResolver
 	// §6-3 N≥2 picker-burst seams. Built once here (defaults from the shared
 	// productionSpawnSeams bundle, cmd/spawn_seams.go: client.HasSession / a shared
 	// server-option ack channel / os.Executable / os.Getenv — the same bundle the

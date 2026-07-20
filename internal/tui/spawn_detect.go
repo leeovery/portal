@@ -39,7 +39,7 @@ func WithTerminalDetector(d TerminalDetector) Option {
 // unsupported), loaded once from terminals.json at TUI construction. The picker never re-injects
 // it: the terminalDetectedMsg arm caches the Resolution and the later burst reuses
 // the cached value.
-func WithResolve(fn func(spawn.Identity) (spawn.Adapter, spawn.Resolution)) Option {
+func WithResolve(fn spawn.AdapterResolver) Option {
 	return func(m *Model) {
 		m.resolve = fn
 	}

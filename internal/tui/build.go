@@ -51,7 +51,7 @@ type Deps struct {
 	// nil in the offline capture harness. Nil-tolerant: a nil Detector leaves
 	// detection unwired.
 	Detector TerminalDetector
-	Resolve  func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	Resolve  spawn.AdapterResolver
 
 	// §6-3 N≥2 picker-burst seams. Injected together by cmd/open.go (defaults
 	// client.HasSession / a shared server-option ack channel / os.Executable /

@@ -126,7 +126,7 @@ type DoctorDeps struct {
 	// burst construct the resolver identically. Only its Resolution is read here (a
 	// NULL identity short-circuits before Resolve). When nil the host-terminal line
 	// is omitted.
-	Resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)
+	Resolve spawn.AdapterResolver
 }
 
 // doctorDeps is the package-level DI seam; nil in production.
@@ -401,7 +401,7 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 //
 // A NULL identity short-circuits before Resolve is consulted, so even a config
 // `*` catch-all can never reclassify a remote client as supported.
-func checkHostTerminal(detector TerminalDetector, resolve func(spawn.Identity) (spawn.Adapter, spawn.Resolution)) checkResult {
+func checkHostTerminal(detector TerminalDetector, resolve spawn.AdapterResolver) checkResult {
 	const name = "host terminal"
 	id := detector.Detect()
 	if id.IsNull() {
