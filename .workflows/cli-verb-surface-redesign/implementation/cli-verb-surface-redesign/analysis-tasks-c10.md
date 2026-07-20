@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: cli-verb-surface-redesign (Cycle 10)
 
 ## Task 1: Extract shared down-server result helper in doctor.go
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -31,7 +31,7 @@ sources: duplication
 - Add or extend a focused unit test asserting `runtimeDownResult(name)` returns `checkFail` + `doctorRuntimeNotRunning` for each of the three check names.
 
 ## Task 2: Remove the fabricated-Domain latent trap in the degenerate single-surface burst
-status: pending
+status: approved
 severity: low
 sources: architecture
 
