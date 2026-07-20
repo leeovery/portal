@@ -261,7 +261,7 @@
     "review": {
       "items": {
         "cli-verb-surface-redesign": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "cli-verb-surface-redesign-1-1",
             "cli-verb-surface-redesign-1-2",
