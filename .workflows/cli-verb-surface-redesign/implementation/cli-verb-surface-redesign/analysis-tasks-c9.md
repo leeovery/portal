@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: CLI Verb-Surface Redesign (Cycle 9)
 
 ## Task 1: Extract a store-owned staleness predicate so doctor's diagnosis and the prune cannot drift
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 

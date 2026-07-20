@@ -297,3 +297,15 @@ Address findings from Analysis (Cycle 8).
 | cli-verb-surface-redesign-14-4 | Add an explicit sentinel at iota 0 for the doctor checkStatus enum | severity low; defensive/convention fix (no active bug — every `checkResult` is constructed with an explicit status today); insert `checkUnknown checkStatus = iota` first in the const block (doctor.go:38) and shift `checkPass`/`checkFail`/`checkInfo`/`checkNotEvaluable` up one so a zero-value `checkResult{}` can never read as pass; rely on the existing default arms of `checkMarker`/`doctorUnhealthy` (no new call-site handling) but verify the sentinel renders without a pass marker and does not count toward a healthy (`doctorUnhealthy == false`) exit; the four real statuses render + drive the exit code exactly as before; `go build`/`go test ./...`/`golangci-lint run` clean |
 
 ---
+
+### Phase 15: Analysis (Cycle 9)
+
+Address findings from Analysis (Cycle 9).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| cli-verb-surface-redesign-15-1 | Extract a store-owned staleness predicate so doctor's diagnosis and the prune cannot drift | severity medium; sources duplication+architecture; extract the hooks ∉ classification into one store-owned predicate in `internal/hooks` (e.g. pure `StaleKeys(persisted, live)`) consumed by both `hooks.Store.CleanStale` and doctor's `checkStaleHooks` (delete `countStaleHookKeys`, doctor.go:445-460); extract the projects `os.Stat` tri-state (nil→live / `ErrNotExist`→stale / other-error→retained, store.go:202-213) into a store-owned predicate in `internal/project` consumed by both `project.Store.CleanStale` and `checkStaleProjects` (delete the duplicated switch, doctor.go:477-488); do NOT fold in or relocate the mass-deletion hazard guard — leave the empty-live-set deferral in `checkStaleHooks` (doctor.go:429-437) and `runHookStaleCleanup` (:119-126); doctor stays strictly read-only (no Save/prune) with identical `checkResult` status/detail strings incl. guard paths (`checkNotEvaluable` on live-enum error / len(live)==0 with persisted present; `checkPass` "no hooks"); preserve the projects retained-on-permission-denied semantics on both diagnosis and prune paths; update the now-stale "mirror"/"re-implement" doc comments to "derive"; predicate unit tests + doctor parity tests for both stores (projects.json unmodified after the read-only check), existing doctor/`--fix`/down-server hook-prune-safety tests stay green; `go build`/`go test ./...`/`golangci-lint run` clean |
+
+---
