@@ -205,9 +205,7 @@ in host-terminal windows.`,
 		// mirroring the empty -e guard.
 		if cmd.Flags().Changed("filter") {
 			filterVal, _ := cmd.Flags().GetString("filter")
-			anyPin := cmd.Flags().Changed("session") || cmd.Flags().Changed("path") ||
-				cmd.Flags().Changed("zoxide") || cmd.Flags().Changed("alias")
-			if destination != "" || anyPin {
+			if destination != "" || anyOpenDomainPin(cmd) {
 				return NewUsageError("cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)")
 			}
 			if filterVal == "" {
@@ -235,39 +233,18 @@ in host-terminal windows.`,
 		// Domain-pinning flags (spec § Domain-pinning flags): each pin resolves its
 		// value in ONE domain only and dispatches the hit through the shared outcome
 		// switch (openResolved) via resolvePinAndOpen. Checked in a FIXED precedence
-		// order — session → path → alias → zoxide — and the first changed pin short-
-		// circuits. A pin never mints-to-picker (spec § Pinned-domain contract): a
-		// miss hard-fails and no resolve line is emitted (pins are deterministic, not
-		// guesses). The block sits BEFORE the no-target early-return so `open -s
-		// <name>` with an empty positional resolves the pin rather than launching the
-		// picker. A future pin is added in ONE place: this table.
-		//
-		//   -s/--session  attach the named session / glob; never mints.
-		//   -p/--path     mint at the LITERAL dir via ResolvePathPin (reuses
-		//                 ResolvePath for tilde/relative expansion + existence + is-
-		//                 directory validation). Because it stats the literal path, a
-		//                 glob-named dir (~/tmp/foo[1]) is reachable here, bypassing
-		//                 the bare-positional glob pre-check (spec § Glob targets).
-		//   -a/--alias    look the key up directly in the alias store, bypassing the
-		//                 session→path→alias precedence — the ONLY way to reach an
-		//                 alias key shadowed by a same-named session (glob expands
-		//                 against the finite alias-key namespace).
-		//   -z/--zoxide   query zoxide and make its outcome EXPLICIT — zoxide-not-
-		//                 installed surfaces ErrZoxideNotInstalled verbatim — unlike
-		//                 the bare chain, which swallows the error and falls through
-		//                 to the miss tail.
-		pinDispatch := []struct {
-			flag    string
-			resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error)
-		}{
-			{"session", (*resolver.QueryResolver).ResolveSessionPin},
-			{"path", (*resolver.QueryResolver).ResolvePathPin},
-			{"alias", (*resolver.QueryResolver).ResolveAliasPin},
-			{"zoxide", (*resolver.QueryResolver).ResolveZoxidePin},
-		}
-		for _, pin := range pinDispatch {
-			if cmd.Flags().Changed(pin.flag) {
-				return resolvePinAndOpen(cmd, pin.flag, pin.resolve, command)
+		// order — session → path → alias → zoxide, the order of openDomainPinFlags —
+		// and the first changed pin short-circuits. A pin never mints-to-picker (spec
+		// § Pinned-domain contract): a miss hard-fails and no resolve line is emitted
+		// (pins are deterministic, not guesses). The block sits BEFORE the no-target
+		// early-return so `open -s <name>` with an empty positional resolves the pin
+		// rather than launching the picker. A future pin is added in ONE place: it is
+		// declared in openDomainPinFlags (which the exclusivity guard anyOpenDomainPin
+		// also iterates) and paired with its resolver in pinResolvers, so the guard
+		// and the dispatch table cannot drift.
+		for _, flag := range openDomainPinFlags {
+			if cmd.Flags().Changed(flag) {
+				return resolvePinAndOpen(cmd, flag, pinResolvers[flag], command)
 			}
 		}
 
@@ -304,6 +281,44 @@ in host-terminal windows.`,
 		}
 		return openResolved(cmd, result, command)
 	},
+}
+
+// openDomainPinFlags is the canonical, precedence-ordered set of open
+// domain-pin flag names — the SINGLE source of the pin set, consumed by BOTH the
+// exclusivity guard (anyOpenDomainPin, cmd/root.go) and openCmd.RunE's dispatch
+// loop. Declaring the names once here is what closes the drift the guard
+// previously invited: a future pin added to this list is automatically covered
+// by anyOpenDomainPin (which consults this slice), so it can never be silently
+// omitted from the exclusivity guard. Order is load-bearing — it is the fixed
+// session → path → alias → zoxide precedence the RunE dispatch loop short-
+// circuits in.
+var openDomainPinFlags = []string{"session", "path", "alias", "zoxide"}
+
+// pinResolvers maps each open domain-pin flag to the QueryResolver method that
+// resolves its value in that ONE domain. It is keyed by the same flag names
+// enumerated in openDomainPinFlags (the RunE loop iterates that slice for
+// precedence order and looks the resolver up here); the two are locked in
+// lockstep by the drift guards in open_pin_source_guard_test.go, so a listed
+// flag always has a resolver and a resolver is never orphaned outside the guard.
+//
+//	-s/--session  attach the named session / glob; never mints.
+//	-p/--path     mint at the LITERAL dir via ResolvePathPin (reuses ResolvePath
+//	              for tilde/relative expansion + existence + is-directory
+//	              validation). Because it stats the literal path, a glob-named dir
+//	              (~/tmp/foo[1]) is reachable here, bypassing the bare-positional
+//	              glob pre-check (spec § Glob targets).
+//	-a/--alias    look the key up directly in the alias store, bypassing the
+//	              session→path→alias precedence — the ONLY way to reach an alias
+//	              key shadowed by a same-named session (glob expands against the
+//	              finite alias-key namespace).
+//	-z/--zoxide   query zoxide and make its outcome EXPLICIT — zoxide-not-installed
+//	              surfaces ErrZoxideNotInstalled verbatim — unlike the bare chain,
+//	              which swallows the error and falls through to the miss tail.
+var pinResolvers = map[string]func(*resolver.QueryResolver, string) (resolver.QueryResult, error){
+	"session": (*resolver.QueryResolver).ResolveSessionPin,
+	"path":    (*resolver.QueryResolver).ResolvePathPin,
+	"alias":   (*resolver.QueryResolver).ResolveAliasPin,
+	"zoxide":  (*resolver.QueryResolver).ResolveZoxidePin,
 }
 
 // resolvePinAndOpen is the single body behind all four -s/-p/-a/-z domain-pin

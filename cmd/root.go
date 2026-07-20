@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -311,9 +312,12 @@ func isTUIPath(cmd *cobra.Command, args []string) bool {
 // the picker, so they are NOT domain pins and do not flip isTUIPath. At
 // PersistentPreRunE time cobra has already parsed flags, so Flags().Changed is
 // populated on the matched openCmd.
+//
+// It consults openDomainPinFlags (cmd/open.go) — the SINGLE canonical pin-name
+// list also driving openCmd.RunE's dispatch loop — so a future pin added to that
+// list is covered by this guard automatically and can never be silently omitted.
 func anyOpenDomainPin(cmd *cobra.Command) bool {
-	return cmd.Flags().Changed("session") || cmd.Flags().Changed("path") ||
-		cmd.Flags().Changed("zoxide") || cmd.Flags().Changed("alias")
+	return slices.ContainsFunc(openDomainPinFlags, cmd.Flags().Changed)
 }
 
 // shouldRunConcurrentBootstrap is the routing decider for the §10.2 startup
