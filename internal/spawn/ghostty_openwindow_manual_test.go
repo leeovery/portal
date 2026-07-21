@@ -18,10 +18,11 @@ import "testing"
 //	go test -tags manual -run TestManual_OpenWindow_OpensRealGhosttyWindow -v ./internal/spawn/
 //
 // Then visually confirm a NEW Ghostty window opened running the command below
-// (it prints the marker line; the `wait after command:true` property keeps the
-// window up after the command exits so it stays observable). The automated
-// assertion only checks OpenWindow reported success — the real-window-opened
-// check is the human's eyes.
+// (it prints the marker line; the adapter now wraps the command in the
+// shell-fallback layer, so after the command exits the window lands at an
+// interactive login shell prompt — `wait after command` is no longer set —
+// keeping it observable). The automated assertion only checks OpenWindow
+// reported success — the real-window-opened check is the human's eyes.
 func TestManual_OpenWindow_OpensRealGhosttyWindow(t *testing.T) {
 	// A representative env-self-sufficient argv (the shape composeOpenArgv
 	// produces): TMUX/TMUX_PANE stripped, run verbatim as a real argv. It runs a
@@ -35,8 +36,9 @@ func TestManual_OpenWindow_OpensRealGhosttyWindow(t *testing.T) {
 	// reproduces the exact argv, so an element carrying spaces or shell
 	// metacharacters (e.g. a `My Project-abc123` session name) survives intact
 	// rather than being shredded. This marker uses plain word tokens purely for a
-	// simple, readable observable command; `wait after command:true` holds the
-	// window open after it exits, so no `sleep` is needed to observe the window.
+	// simple, readable observable command; the shell-fallback wrapper execs an
+	// interactive login shell after the command exits, so the window stays open
+	// at a prompt and no `sleep` is needed to observe it.
 	argv := []string{
 		"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
 		"echo", "portal", "spawn", "manual", "verification",

@@ -9,32 +9,76 @@ import (
 // window running an embedded command. It passes a `surface configuration` record
 // literal directly to `new window`'s `with configuration` parameter — the only
 // form Ghostty's scripting dictionary defines (there is no `make` command and no
-// `with properties` terminology). The record carries exactly the two fields the
-// sdef defines on `surface configuration`: `command` (text) and
-// `wait after command:true` — the latter keeps the window up after its command
-// exits (the normal-detach window lifecycle for a spawned session).
+// `with properties` terminology). The record carries a SINGLE field: `command`
+// (text).
+//
+// `wait after command` is deliberately NOT set: the window is kept alive not by
+// that flag but by the shell-fallback wrapper ghosttyEmbed builds — after the
+// session's exec chain finishes, `exec "$SHELL" -il` replaces the wrapper with
+// the user's interactive login shell, so the window stays visible AND usable.
+// The dropped flag is what produced the "Process exited. Press any key to close
+// the terminal." dead-end. Omitting this optional field does not alter the
+// terminology the template resolves against Ghostty's dictionary.
 //
 // The single %s is the AppleScript-escaped, per-element-shell-quoted composed
 // argv from ghosttyEmbed; it is a fmt.Sprintf format ARGUMENT (never a verb
 // source), so a `%` in the payload is inert.
 const ghosttyScriptTemplate = `tell application "Ghostty"
-	new window with configuration {command:"%s", wait after command:true}
+	new window with configuration {command:"%s"}
 end tell`
+
+// wrapWithShellFallback wraps the composed open argv in an explicit
+// `bash -lc '<composed open argv>; exec "$SHELL" -il'` so a burst-spawned
+// (N−1 external) Ghostty window lands at the user's interactive login shell
+// after its session's exec chain finishes, instead of dead-ending on Ghostty's
+// "Process exited. Press any key to close the terminal." keypress.
+//
+// It returns the wrapper as a REAL 3-element argv ["bash", "-lc", PAYLOAD] and
+// leaves PAYLOAD un-quoted here on purpose: the caller renders the whole argv
+// through the shared shell-quote helper (renderCommandString), which owns the
+// nesting — re-single-quoting PAYLOAD so every single quote the inner
+// per-element quoting already emitted is re-escaped via the POSIX
+// close-escape-reopen idiom ('\''). Hand-rolled concatenation of the schematic
+// form would let the first inner single quote terminate the outer quote and
+// corrupt the command — the exact failure class this fix removes.
+//
+// PAYLOAD is the rendered composed argv (renderCommandString(command), which
+// keeps the /usr/bin/env … PATH=<…> -u TMUX -u TMUX_PANE prefix intact so tmux
+// still resolves) followed by the literal `; exec "$SHELL" -il`. Ghostty runs a
+// window command by prepending `exec -l`, replacing the outer bash with OUR
+// inner bash, which runs the session command as a child then execs the user's
+// login+interactive shell. The explicit wrapper form is required for that reason
+// (an implicit `<argv>; exec "$SHELL"` append would be unreachable under
+// `exec -l`). $SHELL is populated by /usr/bin/login, so no $SHELL fallback is
+// specified; a degenerate exec failure closes the window cleanly (an accepted
+// fallback, no dead-end). The wrap is argv-agnostic — it applies identically to
+// mint (`open --path <dir>`) and attach (`open --session <name>`) surfaces.
+func wrapWithShellFallback(command []string) []string {
+	payload := renderCommandString(command) + `; exec "$SHELL" -il`
+	return []string{"bash", "-lc", payload}
+}
 
 // ghosttyEmbed renders the composed argv into the single string Ghostty's
 // `command` property expects. Ghostty runs that string via `bash -c`, which
-// word-splits it, so it starts from renderCommandString — each argv element
-// POSIX-single-quoted, preserving element boundaries so a session name or path
-// containing a space is reproduced intact rather than shredded into separate
-// words — then AppleScript-string-escapes the result so it embeds safely inside
-// the double-quoted AppleScript literal.
+// word-splits it, so it FIRST wraps the composed argv in the shell-fallback
+// layer (wrapWithShellFallback → ["bash", "-lc", "<rendered argv>; exec
+// \"$SHELL\" -il"]) so a spawned window lands at an interactive login shell
+// after its session exits rather than dead-ending. It then renders THAT wrapped
+// argv through renderCommandString — each element POSIX-single-quoted, preserving
+// element boundaries so a session name or path containing a space is reproduced
+// intact rather than shredded — which also re-escapes the inner per-element
+// single quotes for the outer `-lc` payload's single-quote layer via the shared
+// helper's '\'' close-escape-reopen idiom (correct nesting, not naive
+// concatenation). Finally it AppleScript-string-escapes the result so it embeds
+// safely inside the double-quoted AppleScript literal.
 //
 // Escape ORDER is load-bearing: backslash (`\` -> `\\`) MUST run before quote
 // (`"` -> `\"`). Escaping the quote first would then double the escaping
 // backslash the quote-escape introduced, corrupting the literal. The order holds
-// even over the backslashes shellQuote introduces for an embedded single quote.
+// even over the EXTRA backslashes the wrapper's second single-quote layer
+// introduces for each inner embedded single quote.
 func ghosttyEmbed(command []string) string {
-	embedded := renderCommandString(command)
+	embedded := renderCommandString(wrapWithShellFallback(command))
 	embedded = strings.ReplaceAll(embedded, `\`, `\\`)
 	embedded = strings.ReplaceAll(embedded, `"`, `\"`)
 	return embedded

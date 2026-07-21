@@ -52,16 +52,50 @@
       "items": {
         "spawned-window-dead-ends-on-session-exit": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 0,
           "analysis_cycle_session": 0,
-          "linters": [],
-          "project_skills": [],
+          "linters": [
+            {
+              "name": "go vet",
+              "command": "go vet ./..."
+            },
+            {
+              "name": "gofmt",
+              "command": "gofmt -l ."
+            },
+            {
+              "name": "golangci-lint",
+              "command": "golangci-lint run ./..."
+            }
+          ],
+          "project_skills": [
+            ".claude/skills/golang-how-to",
+            ".claude/skills/golang-testing",
+            ".claude/skills/golang-code-style",
+            ".claude/skills/golang-naming",
+            ".claude/skills/golang-error-handling",
+            ".claude/skills/golang-design-patterns",
+            ".claude/skills/golang-structs-interfaces",
+            ".claude/skills/golang-dependency-injection",
+            ".claude/skills/golang-safety",
+            ".claude/skills/golang-concurrency",
+            ".claude/skills/golang-context",
+            ".claude/skills/golang-cli",
+            ".claude/skills/golang-spf13-cobra",
+            ".claude/skills/golang-dependency-management"
+          ],
           "current_phase": 1,
-          "current_task": null
+          "current_task": null,
+          "completed_tasks": [
+            "spawned-window-dead-ends-on-session-exit-1-1"
+          ],
+          "completed_phases": [
+            1
+          ]
         }
       }
     }
