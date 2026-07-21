@@ -25,3 +25,17 @@ approved_at: 2026-07-21
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
 | spawned-window-dead-ends-on-session-exit-1-1 | Wrap Ghostty window command in shell fallback and drop `wait after command` | quote-sensitive argv element (single quote, `;`, `$`, `"`) via mint `-- <command…>` passthrough round-tripping through the added `bash -lc` layer's `'\''` double-escaping; mint surface argv (`--path`) wrapped identically to attach (argv-agnostic) |
+
+### Phase 2: Analysis (Cycle 1)
+status: approved
+approved_at: 2026-07-21
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+status: approved
+approved_at: 2026-07-21
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| spawned-window-dead-ends-on-session-exit-2-1 | Pin an escaped golden literal in the Ghostty command-composition tests and correct the stale attach fixture | `'\''`-escaped, AppleScript-escaped hand-written golden literal for both the canonical attach argv and the quote-sensitive mint fixture; golden literals independent of `renderCommandString` / `wrapWithShellFallback` / `decodeRenderedArgv` (no symmetric mirroring); guard-strength check that perturbing `renderCommandString` single-quote escaping fails the assertion; stale `realAttachArgv()` fixture using retired `attach` verb corrected to `open --session … --ack …`; no production code changes |

@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: Spawned Window Dead-Ends On Session Exit (Cycle 1)
 
 ## Task 1: Pin an escaped golden literal in the Ghostty command-composition tests and correct the stale attach fixture
-status: pending
+status: approved
 severity: medium
 sources: standards, architecture
 

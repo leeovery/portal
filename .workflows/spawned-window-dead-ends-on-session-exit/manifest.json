@@ -42,7 +42,9 @@
           "task": null,
           "task_map": {
             "spawned-window-dead-ends-on-session-exit-1-1": "tick-5f6bf3",
-            "spawned-window-dead-ends-on-session-exit-1": "tick-d2ea1f"
+            "spawned-window-dead-ends-on-session-exit-1": "tick-d2ea1f",
+            "spawned-window-dead-ends-on-session-exit-2": "tick-3fb99d",
+            "spawned-window-dead-ends-on-session-exit-2-1": "tick-cab364"
           },
           "external_id": "tick-07773e"
         }
@@ -54,7 +56,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,
