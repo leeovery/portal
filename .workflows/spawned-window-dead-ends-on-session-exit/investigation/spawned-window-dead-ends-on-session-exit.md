@@ -376,17 +376,39 @@ windows carry PATH, so tmux resolves. The Ghostty wrapper's `--noprofile --norc`
 default PATH is why a PATH-less command can't find tmux — reinforcing that the composed
 command must keep carrying PATH.
 
-### Open Item (pending user verification)
+### Open Item — Close-confirm prompt (cause identified; resolution pending user decision)
 
-**Close-confirm prompt.** After landing at the fallback zsh prompt, closing the Ghostty
-window prompts "are you sure?" (normally only shown when a process is running).
-**Hypothesis:** `wait after command:true`. Ghostty sees the command's pid still alive
-(the exec chain replaced bash→zsh in-place, same pid) and, told to *wait after command*,
-treats the surface as "the awaited command is still running" → confirms on close. Since
-the shell-fallback keeps the window open on its own, `wait after command` is no longer
-needed; **dropping it** should keep the window visible AND remove the confirm (and, once
-the user finally exits the fallback shell, let Ghostty close the window cleanly). To
-confirm live before locking the final command shape.
+After landing at the fallback zsh prompt, closing the Ghostty window shows Ghostty's
+standard confirm: *"Close Window? All terminal sessions in this window will be
+terminated."* — normally suppressed at an idle prompt.
+
+**`wait after command` hypothesis DISPROVEN (sandbox).** Re-ran the explicit-wrapper
+command with `wait after command` omitted; the close-confirm **still fired**. So it is
+not wait-after-command, and not a nested subprocess (the exec chain replaces
+bash→bash→zsh in-place, same pid, no children at the prompt).
+
+**Actual cause (strongest inference — Ghostty source not in repo): missing shell
+integration.** Ghostty suppresses `confirm-close-surface` at an idle prompt only when it
+can see the shell is idle, which it learns via **shell integration** injected when *it*
+launches the shell (zsh: a `ZDOTDIR` trick). A surface launched via a custom `command`
+does **not** get that injection, so Ghostty has no idle/busy signal and conservatively
+confirms. Verifiable by contrast: a normal `Cmd-N` window at idle does not prompt; a
+command-launched one does.
+
+**Intrinsic, not approach-specific.** ANY approach that lands the user in a shell
+Ghostty did not launch itself hits this — including the rejected Option A (fork/wait →
+exec `$SHELL`). It is not switchable per-window (the sdef exposes only `command` +
+`wait after command`).
+
+**Resolution options (user to decide):**
+1. **Accept it** — the fix still converts a dead-end into a usable shell (the win); the
+   prompt is one extra click and is *honest* (a live shell really is running). Zero
+   fragility. (Leaning.)
+2. **Re-inject Ghostty shell integration into the fallback** (e.g. restore Ghostty's
+   `ZDOTDIR`/`GHOSTTY_RESOURCES_DIR` integration before exec) — Ghostty-version-specific,
+   fragile, risks double-sourcing/config breakage on updates. Not recommended to ship.
+3. **`confirm-close-surface = false`** — user's Ghostty config, global (drops the prompt
+   for all their windows incl. ones with real running processes). Not Portal's call.
 
 ### Testing Recommendations
 
