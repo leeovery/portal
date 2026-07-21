@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "spawned-window-dead-ends-on-session-exit": {
-          "status": "in-progress",
+          "status": "completed",
           "sources": {
             "spawned-window-dead-ends-on-session-exit": {
               "status": "incorporated"
