@@ -376,7 +376,15 @@ windows carry PATH, so tmux resolves. The Ghostty wrapper's `--noprofile --norc`
 default PATH is why a PATH-less command can't find tmux — reinforcing that the composed
 command must keep carrying PATH.
 
-### Open Item — Close-confirm prompt (cause identified; resolution pending user decision)
+### Close-confirm prompt — ACCEPTED (resolved)
+
+**Decision: accept the close-confirm (option 1 below).** The fix converts the dead-end
+into a usable shell — the goal; the residual one-click confirm when closing from the
+idle fallback is minor and honest (a live shell really is running). The final Ghostty
+command shape is therefore **locked**: `bash -lc '<composed open argv>; exec "$SHELL"
+-il'`, with `wait after command` dropped. No shell-integration hack ships.
+
+Detail retained below for the record.
 
 After landing at the fallback zsh prompt, closing the Ghostty window shows Ghostty's
 standard confirm: *"Close Window? All terminal sessions in this window will be
@@ -409,6 +417,30 @@ exec `$SHELL`). It is not switchable per-window (the sdef exposes only `command`
    fragile, risks double-sourcing/config breakage on updates. Not recommended to ship.
 3. **`confirm-close-surface = false`** — user's Ghostty config, global (drops the prompt
    for all their windows incl. ones with real running processes). Not Portal's call.
+
+### Discussion (findings-review journey)
+
+- **Started at "bug or feature / won't-fix?"** The user reflected that the window
+  *persisting* after a session ends is arguably good UX (a clean close is worse — with
+  multiple/scattered Ghostty windows you lose track of which one vanished). The dead-end
+  isn't the persistence; it's that the persisted window is *unusable*. That reframed the
+  goal as "persist AND be usable," not "close."
+- **The `terminals.json` contract killed Option A.** The user's key insight: Portal's
+  job ends at "open a window running this command"; how the window *ends* belongs to the
+  command + terminal. That model makes Option A (Portal centrally intercepting the
+  lifecycle for all terminals) an overreach, and makes a shared-composition shell-wrap a
+  contract breakage for custom terminals (shell metacharacters in `{command}` only work
+  if the terminal runs it through a shell — not guaranteed). The clean landing:
+  **scope the shell-wrap to the native Ghostty adapter**, leave custom terminals to the
+  user's own recipe.
+- **Sandbox testing did real work.** The safe half confirmed `exec "$SHELL" -il` lands
+  in the user's full zsh/Oh My Zsh (not bash). The real-Ghostty half's *failure* (Plan A)
+  was the most valuable result — it exposed Ghostty's `exec -l` command model, ruling out
+  the implicit-append form and confirming the explicit `bash -lc` wrapper.
+- **Close-confirm: hypothesis tested and revised.** Predicted `wait after command:true`;
+  sandbox disproved it; traced the real cause to missing Ghostty shell integration on a
+  command-launched surface. User accepted it as a minor, honest trade for a usable
+  window.
 
 ### Testing Recommendations
 
