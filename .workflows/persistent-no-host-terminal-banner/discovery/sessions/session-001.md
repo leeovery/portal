@@ -41,4 +41,4 @@ Scope boundary noted and kept: the CLI multi-target `portal open <a> <b> …` (N
 
 ## Conclusion
 
-(none)
+Routed to investigation.
