@@ -90,13 +90,15 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 1,
+          "current_phase": 2,
           "current_task": null,
           "completed_tasks": [
-            "spawned-window-dead-ends-on-session-exit-1-1"
+            "spawned-window-dead-ends-on-session-exit-1-1",
+            "spawned-window-dead-ends-on-session-exit-2-1"
           ],
           "completed_phases": [
-            1
+            1,
+            2
           ]
         }
       }

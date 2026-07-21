@@ -6,14 +6,22 @@ import (
 	"testing"
 )
 
-// realAttachArgv is a representative composed attach argv (as Task 2.3 builds
-// it) — it carries no quotes or backslashes, so its embedding is escape-neutral.
+// realAttachArgv is a representative composed attach argv, built through the real
+// composeOpenArgv for a SurfaceAttach surface exactly as a spawned window's
+// command is composed — the env-self-sufficient `/usr/bin/env … PATH=… -u TMUX
+// -u TMUX_PANE` prefix in front of `open --session <name> --ack <batch>:<token>`
+// (the retired `attach` verb is never emitted). None of its elements carry a
+// single quote or backslash, so its embedding exercises the escape-neutral path
+// — contrast mintArgvWithSpecials, whose passthrough element drives the nested
+// single-quote escaping.
 func realAttachArgv() []string {
-	return []string{
-		"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
-		"PATH=/opt/homebrew/bin:/usr/bin",
-		"/abs/portal", "attach", "proj-abc123",
-	}
+	return composeOpenArgv(
+		"/abs/portal",
+		"/opt/homebrew/bin:/usr/bin",
+		Surface{Kind: SurfaceAttach, Value: "proj-abc123"},
+		"batch1", "tok1",
+		nil,
+	)
 }
 
 // mintArgvWithSpecials is a composed mint argv whose `-- <command…>` passthrough
@@ -34,6 +42,25 @@ func mintArgvWithSpecials() []string {
 // after the composed argv rendering. It is duplicated here (not imported) so the
 // test pins the exact expected bytes independently of the production constant.
 const shellFallbackSuffix = `; exec "$SHELL" -il`
+
+// wantAttachCommandBody and wantMintCommandBody are hand-authored golden literals:
+// the EXACT bytes ghosttyEmbed must place inside the AppleScript `command:"…"`
+// property for the canonical attach argv (realAttachArgv) and the quote-sensitive
+// mint fixture (mintArgvWithSpecials). They were derived by hand-applying the two
+// escaping layers ghosttyEmbed composes — the outer renderCommandString over the
+// [bash -lc PAYLOAD] wrapper (POSIX single-quoting, re-escaping every inner single
+// quote via the close-escape-reopen idiom '\'') then the AppleScript escape
+// (backslash → doubled, then double-quote → \") — and are stored as fixed raw
+// string literals. Nothing here recomputes the value from renderCommandString /
+// wrapWithShellFallback / ghosttyEmbed / decodeRenderedArgv, so these constants
+// are an INDEPENDENT oracle: a subtle change in renderCommandString's single-quote
+// or the AppleScript escaping is caught by a mismatch rather than mirrored on both
+// sides. The '\\''  runs are the doubled-backslash signature of the outer render
+// re-escaping the wrapper's own single quotes, and \"$SHELL\" is the fallback
+// tail's AppleScript-escaped double quotes.
+const wantAttachCommandBody = `'bash' '-lc' ''\\''/usr/bin/env'\\'' '\\''-u'\\'' '\\''TMUX'\\'' '\\''-u'\\'' '\\''TMUX_PANE'\\'' '\\''PATH=/opt/homebrew/bin:/usr/bin'\\'' '\\''/abs/portal'\\'' '\\''open'\\'' '\\''--session'\\'' '\\''proj-abc123'\\'' '\\''--ack'\\'' '\\''batch1:tok1'\\''; exec \"$SHELL\" -il'`
+
+const wantMintCommandBody = `'bash' '-lc' ''\\''/usr/bin/env'\\'' '\\''-u'\\'' '\\''TMUX'\\'' '\\''-u'\\'' '\\''TMUX_PANE'\\'' '\\''PATH=/opt/homebrew/bin:/usr/bin'\\'' '\\''/abs/portal'\\'' '\\''open'\\'' '\\''--path'\\'' '\\''/abs/dir'\\'' '\\''--ack'\\'' '\\''batch1:tok1'\\'' '\\''--'\\'' '\\''echo '\\''\\'\\'''\\''a'\\''\\'\\'''\\'';$x\"b\"'\\''; exec \"$SHELL\" -il'`
 
 // reverseAppleScriptEscape reverses ghosttyEmbed's AppleScript-string escaping,
 // undoing its two ReplaceAll passes in REVERSE order (quote-unescape before
@@ -307,6 +334,42 @@ func TestGhosttyEmbed(t *testing.T) {
 			if !strings.Contains(embed, frag) {
 				t.Errorf("embed dropped env-prefix fragment %q; embed:\n%s", frag, embed)
 			}
+		}
+	})
+}
+
+// TestGhosttyEmbedGoldenLiteral pins the exact escaped bytes ghosttyEmbed emits
+// against a hand-authored golden literal — the PRIMARY oracle (acceptance
+// criterion #7). Unlike the decoder round-trips above (kept as supplementary
+// coverage), it never recomputes the expected value from a production function,
+// so a symmetric encode/decode escaping bug cannot pass falsely: a change in
+// renderCommandString's single-quote nesting or ghosttyEmbed's AppleScript escape
+// diverges from the frozen literal and fails.
+func TestGhosttyEmbedGoldenLiteral(t *testing.T) {
+	t.Run("it emits the exact '\\''-escaped, AppleScript-escaped body for the canonical attach argv", func(t *testing.T) {
+		body := ghosttyEmbed(realAttachArgv())
+
+		if body != wantAttachCommandBody {
+			t.Fatalf("attach command body mismatch:\n got: %s\nwant: %s", body, wantAttachCommandBody)
+		}
+
+		// The golden IS what lands inside the AppleScript command:"…" property.
+		script := ghosttyOpenScript(realAttachArgv())
+		if want := `command:"` + wantAttachCommandBody + `"`; !strings.Contains(script, want) {
+			t.Errorf("script does not carry the golden command body verbatim; script:\n%s", script)
+		}
+	})
+
+	t.Run("it emits the exact '\\''-escaped, AppleScript-escaped body for the quote-sensitive mint fixture", func(t *testing.T) {
+		body := ghosttyEmbed(mintArgvWithSpecials())
+
+		if body != wantMintCommandBody {
+			t.Fatalf("mint command body mismatch:\n got: %s\nwant: %s", body, wantMintCommandBody)
+		}
+
+		script := ghosttyOpenScript(mintArgvWithSpecials())
+		if want := `command:"` + wantMintCommandBody + `"`; !strings.Contains(script, want) {
+			t.Errorf("script does not carry the golden command body verbatim; script:\n%s", script)
 		}
 	})
 }
