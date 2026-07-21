@@ -61,19 +61,6 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 ## Step 1: Dispatch
 
-> *Output the next fenced block as a code block:*
-
-```
-── Dispatch ─────────────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Determining the invocation mode — brand-new work, or re-shaping
-> an existing epic's map.
-```
-
 Read the positional arguments:
 
 - `$0` — **work_type pre-seed**: one of `epic` / `feature` / `bugfix` / `quick-fix` / `cross-cutting`, or `none` (the `s`/start path, no hint). A hint, not a given — still confirmed in new mode.
@@ -98,22 +85,9 @@ New work — nothing is on disk yet; pre-confirmation shaping is ephemeral.
 
 ## Step 2: Load Detection Core
 
-> *Output the next fenced block as a code block:*
-
-```
-── Load Detection Core ──────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Getting ready to work out what kind of work this is — feature,
-> bugfix, epic, quick-fix, or cross-cutting.
-```
-
 Load **[detection-core.md](references/detection-core.md)** and follow its instructions as written.
 
-→ Proceed to **Step 3**.
+→ On return, proceed to **Step 3**.
 
 ---
 
@@ -134,7 +108,7 @@ Load **[detection-core.md](references/detection-core.md)** and follow its instru
 
 Load **[opener-pattern.md](references/opener-pattern.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+→ On return, proceed to **Step 4**.
 
 ---
 
@@ -155,7 +129,7 @@ Load **[opener-pattern.md](references/opener-pattern.md)** and follow its instru
 
 Load **[shape-and-confirm.md](references/shape-and-confirm.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+→ On return, proceed to **Step 5**.
 
 ---
 
@@ -180,39 +154,13 @@ Load **[confirm-trigger.md](references/confirm-trigger.md)** and follow its inst
 
 ## Step 6: Resume Detection
 
-> *Output the next fenced block as a code block:*
-
-```
-── Resume Detection ─────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Checking whether an earlier session for this epic was left
-> unfinished.
-```
-
 Load **[resume-detection.md](references/resume-detection.md)** and follow its instructions as written.
 
-→ Proceed to **Step 7**.
+→ On return, proceed to **Step 7**.
 
 ---
 
 ## Step 7: Run Discovery
-
-> *Output the next fenced block as a code block:*
-
-```
-── Run Discovery ────────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading the discovery map for the session — the topics so far
-> and anything previously dismissed.
-```
 
 Run discovery for the work unit:
 
@@ -240,43 +188,17 @@ If `session_number` was not already set (no resume at Step 6, no `macro_continua
 
 ## Step 8: Initialize Discovery
 
-> *Output the next fenced block as a code block:*
-
-```
-── Initialize Discovery ─────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Setting up the discovery session. The session log is written on
-> the first change, not up front.
-```
-
 Load **[initialize-discovery.md](references/initialize-discovery.md)** and follow its instructions as written.
 
-→ Proceed to **Step 9**.
+→ On return, proceed to **Step 9**.
 
 ---
 
 ## Step 9: Load Discovery Guidelines
 
-> *Output the next fenced block as a code block:*
-
-```
-── Load Discovery Guidelines ────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading the guidelines for shaping topics — how to explore, and
-> what to leave for later phases.
-```
-
 Load **[discovery-guidelines.md](references/discovery-guidelines.md)** and follow its instructions as written.
 
-→ Proceed to **Step 10**.
+→ On return, proceed to **Step 10**.
 
 ---
 
@@ -285,7 +207,7 @@ Load **[discovery-guidelines.md](references/discovery-guidelines.md)** and follo
 > *Output the next fenced block as a code block:*
 
 ```
-── Session Loop ─────────────────────────────────
+── Discovery Session ────────────────────────────
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
@@ -298,7 +220,7 @@ Load **[discovery-guidelines.md](references/discovery-guidelines.md)** and follo
 
 Load **[session-loop.md](references/session-loop.md)** and follow its instructions as written.
 
-→ Proceed to **Step 11**.
+→ On return, proceed to **Step 11**.
 
 ---
 
@@ -320,7 +242,7 @@ Load **[session-loop.md](references/session-loop.md)** and follow its instructio
 
 Load **[document-review.md](references/document-review.md)** and follow its instructions as written.
 
-→ Proceed to **Step 12**.
+→ On return, proceed to **Step 12**.
 
 ---
 
@@ -341,7 +263,7 @@ Load **[document-review.md](references/document-review.md)** and follow its inst
 
 Load **[confirm-and-persist.md](references/confirm-and-persist.md)** and follow its instructions as written.
 
-→ Proceed to **Step 14**.
+→ On return, proceed to **Step 14**.
 
 ---
 
@@ -365,7 +287,7 @@ Reached only for single-phase work — feature, cross-cutting, bugfix, quick-fix
 
 Load **[first-phase-routing.md](references/first-phase-routing.md)** and follow its instructions as written.
 
-→ Proceed to **Step 14**.
+→ On return, proceed to **Step 14**.
 
 ---
 
@@ -373,22 +295,9 @@ Load **[first-phase-routing.md](references/first-phase-routing.md)** and follow 
 
 Reached before concluding by both paths — the epic topic path from Step 12, the single-phase endpoint from Step 13.
 
-> *Output the next fenced block as a code block:*
-
-```
-── Compliance Self-Check ────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Checking the session followed the discovery conventions before
-> moving on.
-```
-
 Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
 
-→ Proceed to **Step 15**.
+→ On return, proceed to **Step 15**.
 
 ---
 

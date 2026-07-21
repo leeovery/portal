@@ -84,19 +84,6 @@ Follow every step in sequence. No steps are optional.
 
 ## Step 0: Resume Detection
 
-> *Output the next fenced block as a code block:*
-
-```
-── Resume Detection ─────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Checking for an existing plan. If one exists, you can
-> pick up where you left off or start fresh.
-```
-
 Read the planning entry from the manifest as one subtree — empty means no entry exists:
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic}
@@ -107,6 +94,19 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.
 → Proceed to **Step 1**.
 
 #### Otherwise (planning entry exists)
+
+> *Output the next fenced block as a code block:*
+
+```
+── Resume Detection ─────────────────────────────
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> An in-progress plan exists for this topic — choose whether
+> to pick it up or start fresh.
+```
 
 The subtree carries the current `phase` and `task` position (for the resume prompt below) and the `spec_commit` baseline (for spec-change detection).
 
@@ -161,108 +161,41 @@ If spec-change-detection reported changes, carry them into the walkthrough: reco
 
 ## Step 1: Initialize Plan
 
-> *Output the next fenced block as a code block:*
-
-```
-── Initialize Plan ──────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Setting up the plan. Selecting an output format and creating
-> the planning file structure.
-```
-
 Load **[initialize-plan.md](references/initialize-plan.md)** and follow its instructions as written.
 
-→ Proceed to **Step 2**.
+→ On return, proceed to **Step 2**.
 
 ---
 
 ## Step 2: Session Setup
 
-> *Output the next fenced block as a code block:*
-
-```
-── Session Setup ────────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading context from previous work. Reading the specification
-> and any existing planning progress.
-```
-
 Load **[session-setup.md](references/session-setup.md)** and follow its instructions as written.
 
-→ Proceed to **Step 3**.
+→ On return, proceed to **Step 3**.
 
 ---
 
 ## Step 3: Load Planning Principles
 
-> *Output the next fenced block as a code block:*
-
-```
-── Load Planning Principles ─────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading the guidelines for how plans are structured.
-> These ensure tasks are well-scoped, testable, and sequenced
-> correctly.
-```
-
 Load **[planning-principles.md](references/planning-principles.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+→ On return, proceed to **Step 4**.
 
 ---
 
 ## Step 4: Knowledge Usage
 
-> *Output the next fenced block as a code block:*
-
-```
-── Knowledge Usage ──────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading the usage guide for the knowledge base. Planning operates
-> from the spec as the golden source — the guide documents the narrow
-> cases where a KB query is warranted, and those where it is not.
-```
-
 Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+→ On return, proceed to **Step 5**.
 
 ---
 
 ## Step 5: Verify Source Material
 
-> *Output the next fenced block as a code block:*
-
-```
-── Verify Source Material ───────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Reading the specification that drives this plan. Everything
-> in the plan traces back to the specification.
-```
-
 Load **[verify-source-material.md](references/verify-source-material.md)** and follow its instructions as written.
 
-→ Proceed to **Step 6**.
+→ On return, proceed to **Step 6**.
 
 ---
 
@@ -284,7 +217,7 @@ Load **[verify-source-material.md](references/verify-source-material.md)** and f
 
 Load **[plan-construction.md](references/plan-construction.md)** and follow its instructions as written.
 
-→ Proceed to **Step 7**.
+→ On return, proceed to **Step 7**.
 
 ---
 
@@ -305,11 +238,17 @@ Load **[plan-construction.md](references/plan-construction.md)** and follow its 
 
 Load **[analyze-task-graph.md](references/analyze-task-graph.md)** and follow its instructions as written.
 
-→ Proceed to **Step 8**.
+→ On return, proceed to **Step 8**.
 
 ---
 
 ## Step 8: Resolve External Dependencies
+
+#### If work_type is not `epic`
+
+→ Proceed to **Step 9**.
+
+#### Otherwise
 
 > *Output the next fenced block as a code block:*
 
@@ -320,19 +259,13 @@ Load **[analyze-task-graph.md](references/analyze-task-graph.md)** and follow it
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Checking for dependencies on other plans. For epics,
-> tasks in one plan may depend on tasks in another.
+> Checking for dependencies on other plans — tasks in one plan
+> may depend on tasks in another.
 ```
-
-#### If work_type is not `epic`
-
-→ Proceed to **Step 9**.
-
-#### Otherwise
 
 Load **[resolve-dependencies.md](references/resolve-dependencies.md)** and follow its instructions as written.
 
-→ Proceed to **Step 9**.
+→ On return, proceed to **Step 9**.
 
 ---
 
@@ -354,27 +287,15 @@ Load **[resolve-dependencies.md](references/resolve-dependencies.md)** and follo
 
 Load **[plan-review.md](references/plan-review.md)** and follow its instructions as written.
 
-→ Proceed to **Step 10**.
+→ On return, proceed to **Step 10**.
 
 ---
 
 ## Step 10: Compliance Self-Check
 
-> *Output the next fenced block as a code block:*
-
-```
-── Compliance Self-Check ────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Verifying the plan follows workflow conventions.
-```
-
 Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
 
-→ Proceed to **Step 11**.
+→ On return, proceed to **Step 11**.
 
 ---
 

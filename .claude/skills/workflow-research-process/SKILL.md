@@ -54,6 +54,14 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 ## Step 0: Resume Detection
 
+Check if the research file exists at `.workflows/{work_unit}/research/{topic}.md`.
+
+#### If no file exists
+
+→ Proceed to **Step 1**.
+
+#### If file exists
+
 > *Output the next fenced block as a code block:*
 
 ```
@@ -63,17 +71,9 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Checking for existing research. If it exists, you can
-> pick up where you left off or start fresh.
+> An in-progress research file exists for this topic — choose
+> whether to pick it up or start fresh.
 ```
-
-Check if the research file exists at `.workflows/{work_unit}/research/{topic}.md`.
-
-#### If no file exists
-
-→ Proceed to **Step 1**.
-
-#### If file exists
 
 Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)** with artifact = `research`, file = `.workflows/{work_unit}/research/{topic}.md`, continue_step = `Step 2`, restart_targets = `the research file and the phase cache directory (rm -rf .workflows/.cache/{work_unit}/research/{topic}/) — stale agent results would poison the restarted session's review gates`, commit = `research({work_unit}): restart research`.
 
@@ -81,106 +81,41 @@ Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)*
 
 ## Step 1: Initialize Research
 
-> *Output the next fenced block as a code block:*
-
-```
-── Initialize Research ──────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Creating the research file and seeding it with initial
-> context from the handoff.
-```
-
 Load **[initialize-research.md](references/initialize-research.md)** and follow its instructions as written.
 
-→ Proceed to **Step 2**.
+→ On return, proceed to **Step 2**.
 
 ---
 
 ## Step 2: File Strategy
 
-> *Output the next fenced block as a code block:*
-
-```
-── File Strategy ────────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Confirming where the research file lives — one topic,
-> one file.
-```
-
 Load **[file-strategy.md](references/file-strategy.md)** and follow its instructions as written.
 
-→ Proceed to **Step 3**.
+→ On return, proceed to **Step 3**.
 
 ---
 
 ## Step 3: Research Guidelines
 
-> *Output the next fenced block as a code block:*
-
-```
-── Research Guidelines ──────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading the guidelines that shape how research is
-> conducted and documented.
-```
-
 Load **[research-guidelines.md](references/research-guidelines.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+→ On return, proceed to **Step 4**.
 
 ---
 
 ## Step 4: Knowledge Usage
 
-> *Output the next fenced block as a code block:*
-
-```
-── Knowledge Usage ──────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading the usage guide for the knowledge base so
-> proactive querying is available throughout the phase.
-```
-
 Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+→ On return, proceed to **Step 5**.
 
 ---
 
 ## Step 5: Contextual Query
 
-> *Output the next fenced block as a code block:*
-
-```
-── Contextual Query ─────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Checking the knowledge base for prior work that relates
-> to this research topic before the session begins.
-```
-
 Load **[contextual-query.md](../workflow-knowledge/references/contextual-query.md)** and follow its instructions as written.
 
-→ Proceed to **Step 6**.
+→ On return, proceed to **Step 6**.
 
 ---
 

@@ -64,6 +64,14 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 ## Step 0: Resume Detection
 
+Check if a review file exists at `.workflows/{work_unit}/review/{topic}/report.md`.
+
+#### If no review file exists
+
+→ Proceed to **Step 1**.
+
+#### If review file exists
+
 > *Output the next fenced block as a code block:*
 
 ```
@@ -73,17 +81,9 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Checking for an existing review. If one exists, you can
-> continue reviewing unreviewed tasks or start fresh.
+> An in-progress review exists for this topic — choose whether
+> to pick it up or start fresh.
 ```
-
-Check if a review file exists at `.workflows/{work_unit}/review/{topic}/report.md`.
-
-#### If no review file exists
-
-→ Proceed to **Step 1**.
-
-#### If review file exists
 
 Gather coverage state. Read `completed_tasks` from the implementation manifest:
 
@@ -169,18 +169,6 @@ Set `unreviewed_tasks` = `[{list of unreviewed internal IDs}]`.
 
 ## Step 1: Initialize Review
 
-> *Output the next fenced block as a code block:*
-
-```
-── Initialize Review ────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Registering the review phase in the manifest.
-```
-
 Check if review phase is registered in manifest:
 
 ```bash
@@ -205,66 +193,25 @@ node .claude/skills/workflow-engine/scripts/engine.cjs topic start {work_unit} r
 
 ## Step 2: Read Plan(s) and Specification(s)
 
-> *Output the next fenced block as a code block:*
-
-```
-── Read Plans and Specifications ────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Reading the plan and specification that the
-> implementation was built from.
-```
-
 Load **[read-plans.md](references/read-plans.md)** and follow its instructions as written.
 
-→ Proceed to **Step 3**.
+→ On return, proceed to **Step 3**.
 
 ---
 
 ## Step 3: Load Project Skills
 
-> *Output the next fenced block as a code block:*
-
-```
-── Load Project Skills ──────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading project-level skills that inform
-> quality expectations.
-```
-
 Load **[load-project-skills.md](references/load-project-skills.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+→ On return, proceed to **Step 4**.
 
 ---
 
 ## Step 4: Knowledge Usage
 
-> *Output the next fenced block as a code block:*
-
-```
-── Knowledge Usage ──────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading the usage guide for the knowledge base. Review verifies
-> against the current spec — that's in scope without the KB. The guide
-> documents the narrow case where a cross-work-unit consistency check
-> is warranted.
-```
-
 Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+→ On return, proceed to **Step 5**.
 
 ---
 
@@ -288,7 +235,7 @@ Load **[invoke-task-verifiers.md](references/invoke-task-verifiers.md)** and fol
 
 *Knowledge-base nudge — use only for cross-work-unit consistency checks ("does this mirror how similar decisions were made elsewhere?"). Consistency with the current spec is already in scope — no KB needed. See **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)**.*
 
-→ Proceed to **Step 6**.
+→ On return, proceed to **Step 6**.
 
 ---
 
@@ -309,7 +256,7 @@ Load **[invoke-task-verifiers.md](references/invoke-task-verifiers.md)** and fol
 
 Load **[produce-review.md](references/produce-review.md)** and follow its instructions as written.
 
-→ Proceed to **Step 7**.
+→ On return, proceed to **Step 7**.
 
 ---
 
@@ -330,27 +277,15 @@ Load **[produce-review.md](references/produce-review.md)** and follow its instru
 
 Load **[present-review.md](references/present-review.md)** and follow its instructions as written.
 
-→ Proceed to **Step 8**.
+→ On return, proceed to **Step 8**.
 
 ---
 
 ## Step 8: Compliance Self-Check
 
-> *Output the next fenced block as a code block:*
-
-```
-── Compliance Self-Check ────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Verifying the review follows workflow conventions.
-```
-
 Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
 
-→ Proceed to **Step 9**.
+→ On return, proceed to **Step 9**.
 
 ---
 

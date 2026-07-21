@@ -66,20 +66,6 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 ## Step 0: Resume Detection
 
-> *Output the next fenced block as a code block:*
-
-```
-── Resume Detection ─────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Checking for existing implementation progress. If a
-> previous session exists, gates and counters will be reset
-> for this session.
-```
-
 Initialize or resume implementation tracking (idempotent — creates the manifest entry with default gates and counters, or resets the gate modes and session counters of an existing one; lifetime counters and progress are preserved):
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs task init {work_unit} {topic}
@@ -107,108 +93,41 @@ Found existing implementation for "{topic:(titlecase)}". Resuming from previous 
 
 ## Step 1: Environment Setup
 
-> *Output the next fenced block as a code block:*
-
-```
-── Environment Setup ────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Checking for environment setup instructions. Any
-> first-time setup will be handled before tasks begin.
-```
-
 Load **[environment-setup.md](references/environment-setup.md)** and follow its instructions as written.
 
-→ Proceed to **Step 2**.
+→ On return, proceed to **Step 2**.
 
 ---
 
 ## Step 2: Read Plan + Load Plan Adapter
 
-> *Output the next fenced block as a code block:*
-
-```
-── Read Plan ────────────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Reading the plan and loading the format adapter.
-> This determines how tasks are extracted and tracked.
-```
-
 Load **[load-plan-adapter.md](references/load-plan-adapter.md)** and follow its instructions as written.
 
-→ Proceed to **Step 3**.
+→ On return, proceed to **Step 3**.
 
 ---
 
 ## Step 3: Project Skills Discovery
 
-> *Output the next fenced block as a code block:*
-
-```
-── Project Skills Discovery ─────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Discovering project-level skills that agents should
-> use during implementation.
-```
-
 Load **[project-skills-discovery.md](references/project-skills-discovery.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+→ On return, proceed to **Step 4**.
 
 ---
 
 ## Step 4: Linter Discovery
 
-> *Output the next fenced block as a code block:*
-
-```
-── Linter Discovery ─────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Discovering linters and formatters that should be
-> run after each task to ensure code quality.
-```
-
 Load **[linter-setup.md](references/linter-setup.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+→ On return, proceed to **Step 5**.
 
 ---
 
 ## Step 5: Knowledge Usage
 
-> *Output the next fenced block as a code block:*
-
-```
-── Knowledge Usage ──────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Loading the usage guide for the knowledge base. Implementation reads
-> the code as the source of truth for *what* exists — the guide
-> documents the rare cases where the KB is useful for the *why*
-> behind an existing pattern.
-```
-
 Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
 
-→ Proceed to **Step 6**.
+→ On return, proceed to **Step 6**.
 
 ---
 
@@ -276,21 +195,9 @@ Load **[analysis-loop.md](references/analysis-loop.md)** and follow its instruct
 
 ## Step 8: Compliance Self-Check
 
-> *Output the next fenced block as a code block:*
-
-```
-── Compliance Self-Check ────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Verifying the implementation follows workflow conventions.
-```
-
 Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
 
-→ Proceed to **Step 9**.
+→ On return, proceed to **Step 9**.
 
 ---
 

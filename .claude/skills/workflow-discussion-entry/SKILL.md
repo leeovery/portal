@@ -43,19 +43,6 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them. Presen
 
 ## Step 1: Parse Arguments
 
-> *Output the next fenced block as a code block:*
-
-```
-── Parse Arguments ──────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Reading the handoff context and determining which
-> discussion to work with.
-```
-
 Arguments: work_type = `$0`, work_unit = `$1`, topic = `$2` (optional).
 Resolve topic: topic = `$2`, or if not provided and work_type is not `epic`, topic = `$1`.
 
@@ -77,11 +64,11 @@ Set `source = "topic-provided"`.
 
 Load **[ensure-discovery-item.md](../workflow-shared/references/ensure-discovery-item.md)** with work_type = `{work_type}`, work_unit = `{work_unit}`, topic = `{topic}`, routing = `discussion`.
 
-→ Proceed to **Step 3** (Gather Context).
+→ On return, proceed to **Step 3** (Gather Context).
 
 **Otherwise (an entry exists):**
 
-→ Proceed to **Step 2** (Validate Phase).
+→ On return, proceed to **Step 2** (Validate Phase).
 
 #### If no `topic`
 
@@ -111,24 +98,11 @@ Store the result as `phase_status`.
 
 ## Step 2: Validate Phase
 
-> *Output the next fenced block as a code block:*
-
-```
-── Validate Phase ───────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Checking the status of this discussion — new,
-> in progress, or completed.
-```
-
 Load **[ensure-discovery-item.md](../workflow-shared/references/ensure-discovery-item.md)** with work_type = `{work_type}`, work_unit = `{work_unit}`, topic = `{topic}`, routing = `discussion`. On the direct-entry path (`source = "fresh"`), also pass summary = `{direct_entry_summary}`, description = `{direct_entry_description}`. On the topic-resolved path, omit both — the caller didn't derive them.
 
 Load **[validate-phase.md](references/validate-phase.md)** with phase_status = `{phase_status}`.
 
-→ Proceed to **Step 3**.
+→ On return, proceed to **Step 3**.
 
 ---
 
@@ -176,7 +150,7 @@ No usable carrier — the log is missing or has no **Exploration**. Gather conte
 
 Load **[gather-context.md](references/gather-context.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+→ On return, proceed to **Step 4**.
 
 #### If `work_type` is `epic`
 
@@ -192,7 +166,7 @@ The topic was started fresh, not shaped on the map — there is no curated carri
 
 Load **[gather-context.md](references/gather-context.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+→ On return, proceed to **Step 4**.
 
 **Otherwise:**
 
@@ -202,23 +176,10 @@ Load **[read-brief-context.md](../workflow-shared/references/read-brief-context.
 
 Do not re-ask; live conversation context, when present, supplements the carrier.
 
-→ Proceed to **Step 4**.
+→ On return, proceed to **Step 4**.
 
 ---
 
 ## Step 4: Invoke the Skill
-
-> *Output the next fenced block as a code block:*
-
-```
-── Invoke Discussion ────────────────────────────
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Handing off to the discussion process with all
-> gathered context.
-```
 
 Load **[invoke-skill.md](references/invoke-skill.md)** and follow its instructions as written.
