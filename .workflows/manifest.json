@@ -161,6 +161,9 @@
     },
     "spawned-window-dead-ends-on-session-exit": {
       "work_type": "bugfix"
+    },
+    "persistent-no-host-terminal-banner": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
