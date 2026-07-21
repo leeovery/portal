@@ -158,6 +158,9 @@
     },
     "ghostty-spawn-zero-windows": {
       "work_type": "bugfix"
+    },
+    "spawned-window-dead-ends-on-session-exit": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
