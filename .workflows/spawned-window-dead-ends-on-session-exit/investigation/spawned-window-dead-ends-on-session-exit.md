@@ -209,19 +209,124 @@ a clean close or a shell. Neither alone is the whole bug; together they produce 
 dead-end. This also explains "observed after the multi-window spawn feature started
 working (post recent patch)" — the `wait after command:true` fix is that patch.
 
-### Root Cause
+### Contributing Factors
 
-_(to be determined)_
+- **The spawned command is a single, one-shot argv with no shell fallback.** The
+  `composeOpenArgv` contract is deliberately "a real argv, run verbatim" (so it drops
+  cleanly into config-`terminals.json` recipes). That correctness for composition is
+  exactly what leaves the exec chain (`bash -c` → env → portal → tmux) with no parent
+  to return to.
+- **`portal open` uses `syscall.Exec`, not fork/wait.** The tmux client *replaces* the
+  process rather than running as a child, so there is no portal (or shell) frame left
+  after tmux exits. Correct and intentional for the trigger/bare-shell case (returns to
+  the parent shell); load-bearing only because the spawned window lacks that parent.
+- **Ghostty `wait after command:true`.** Turns "command finished" into a keypress
+  dead-end instead of a clean close. Introduced deliberately by
+  `ghostty-spawn-zero-windows` (2026-07-16) as "the normal-detach window lifecycle."
+- **The trigger vs spawned asymmetry is structural, not incidental.** The trigger is a
+  child of an interactive login shell; the spawned windows are not. Any fix must add a
+  parent/fallback to the spawned path without touching the (correct) trigger path.
+
+### Why It Wasn't Caught
+
+- **The osascript / Ghostty boundary has no automated coverage.** The only test that
+  exercises real Ghostty is `//go:build manual` (per `ghostty-spawn-zero-windows`), so
+  neither the unit nor integration lane observes what a spawned window does after its
+  command exits.
+- **The dead-end is a *post-exit lifecycle* behaviour, not a spawn failure.** The burst
+  succeeds — windows open, acks land, `spawn: opened N/N`. The defect only appears
+  later, when the user exits the session inside a spawned window — outside anything the
+  spawn feature tests or logs observe.
+- **Newly-composed behaviour.** `wait after command:true` was added days before the
+  report; the interaction with the one-shot exec chain was never exercised end-to-end
+  on a real Mac before shipping.
+
+### Blast Radius
+
+**Directly affected:**
+- Every burst-spawned (N−1 external) window on the **native Ghostty adapter** — both
+  the picker multi-select burst and the `portal open` multi-target burst route through
+  the same `internal/spawn` composition + adapter.
+
+**Not affected:**
+- The **trigger** window (self-connects from the parent interactive shell — clean
+  landing).
+- **Single-session** `portal open`/attach (run from a shell, same as the trigger).
+- Detection, pre-flight, ack channel, selection mutation — all correct; this is purely
+  post-exit window lifecycle.
+
+**Potentially affected (verify during fix):**
+- **Config-`terminals.json` adapters** share `composeOpenArgv` / `renderCommandString`.
+  Whether they dead-end depends on the user's terminal's post-command behaviour. A fix
+  placed in composition (or in portal itself) would cover them; a Ghostty-adapter-only
+  fix would not. Scope decision needed at findings review.
 
 ---
 
 ## Fix Direction
 
-_(to be determined — user has a preferred outcome: spawned window lands in a real
-interactive shell like the trigger; no fixed mechanism. Feasibility/approach
-questions were explicitly deferred to investigation. User also wants
-correctly-written test commands, sandboxed on a throwaway `-L` tmux socket — never
-the live server, which hosts ~31 real sessions.)_
+**User's desired outcome (from discovery, not yet a mechanism decision):** the spawned
+window should behave "as if I opened Ghostty myself" — a standard interactive shell
+(zsh) with the session launched into it, so exiting the session lands back at a normal
+prompt. Closing cleanly is an acceptable fallback. The user explicitly deferred the
+"is this possible / what's the standard approach" mechanism choice to this phase and
+wants to weigh in.
+
+### Options Explored
+
+**Option A — Portal owns the fallback: a spawned-window flag that fork/waits tmux then
+execs an interactive shell.**
+Add an internal flag (e.g. `--fallback-shell`, alongside `--ack`) that changes only the
+spawned-window attach path: instead of `syscall.Exec`ing tmux, portal fork/execs the
+tmux client, waits for it, then `exec`s an interactive login `$SHELL` → prompt.
+- **Pros:** Keeps `composeOpenArgv` a real argv (no shell syntax); works across ALL
+  adapters (native + config) uniformly; portal owns the behaviour, so it's testable in
+  Go; ack write is unaffected; even an attach *error* lands in a shell (no dead-end on
+  failure). Best match for "as if I opened Ghostty myself."
+- **Cons:** Touches `cmd/open.go` attach path with a spawned-only branch; must ensure
+  the trigger path is untouched.
+
+**Option B — Wrap the spawned command in a shell fallback at composition.**
+Compose the spawned command as a shell invocation, e.g. `$SHELL -lc '<open argv>; exec
+$SHELL -l'`. The wrapping shell fork/waits the `open` child (which execs tmux), then
+execs an interactive shell on return.
+- **Pros:** Lands at a prompt; no portal code change.
+- **Cons:** Breaks the "real argv, never shell syntax" contract; collides with
+  `renderCommandString`'s per-element single-quoting and the config-recipe `{command}`
+  substitution semantics; shell-quoting/escaping across native + config adapters is
+  fiddle-prone (this is the same class of escaping bug that already bit the Ghostty
+  template). Riskier than A for the same outcome.
+
+**Option C — Ghostty adapter sets `wait after command:false`.**
+Let the window close cleanly when the command exits.
+- **Pros:** One-line change; satisfies "close cleanly."
+- **Cons:** Does NOT land at a prompt (misses the primary desired outcome);
+  Ghostty-only (config terminals unaffected); reverses a deliberate
+  `ghostty-spawn-zero-windows` decision — need to confirm nothing depended on the
+  window persisting after detach (e.g. seeing a fast spawn/attach error before the
+  window vanishes). Could pair with A/B as a secondary.
+
+**Leaning:** Option A best matches the user's stated outcome and the codebase's
+"env-self-sufficient real argv" design, and it generalises beyond Ghostty. To confirm
+with the user at findings review (mechanism was explicitly deferred to them).
+
+### Testing Recommendations
+
+- Provide **sandboxed validation commands on a throwaway `-L <socket>` tmux server**
+  (never the live default server — ~31 real sessions) that reproduce the exec chain a
+  spawned window runs and demonstrate the fix lands at a shell prompt on session
+  exit/detach. (To be authored with the chosen mechanism.)
+- Add Go coverage for the chosen fallback path (e.g. the fork/wait-then-exec-shell
+  branch under Option A) at the seam level, since the real Ghostty boundary stays
+  manual-only.
+
+### Risk Assessment
+
+- **Fix complexity:** Low–Medium (Option A: a scoped spawned-only attach branch).
+- **Regression risk:** Low–Medium — must not perturb the trigger/self-attach path or
+  the single-session `open`; the spawned-only flag keeps the blast radius contained.
+- **Recommended approach:** Regular release (UX polish on a shipped feature; not a
+  hotfix).
 
 ---
 
