@@ -86,9 +86,36 @@ burst windows now run `portal open --session <name> --ack <batch>:<token>`. The
 investigation must trace the *current* command composition and exec path, not the
 historical one.
 
+### Prior Context (knowledge base)
+
+**`ghostty-spawn-zero-windows` (investigation + spec, 2026-07-16) — highly relevant.**
+That fix rewrote the Ghostty adapter's AppleScript to the sdef-correct form:
+
+```applescript
+tell application "Ghostty"
+	new window with configuration {command:"%s", wait after command:true}
+end tell
+```
+
+The spec explicitly documents `wait after command:true` as intentional — *"keeps the
+window up after its command exits, the normal-detach lifecycle for a spawned
+session."* This is the strongest candidate for the mechanism producing "Process
+exited. Press any key to close the terminal." — that is Ghostty's `wait-after-command`
+end-of-command message. It also matches the seed's "observed after the multi-window
+spawn feature started working (post recent patch)": this bug is a direct consequence
+of that 2026-07-16 fix landing.
+
+**`restore-host-terminal-windows` (spec, 2026-07-11) — adapter contract.** The spawn
+layer *composes the command* and hands `{command}` to the adapter verbatim; the
+adapter only opens a window running that command (`OpenWindow(command)`). So the fix
+lever — if it's in the composed command rather than the terminal config — lives in
+`internal/spawn` command composition, not in the adapter.
+
 ### Code Trace
 
-_(to be filled during code analysis)_
+_(to be filled during code analysis — confirm the actual current command
+composition + exec path; the seed's `portal attach` references are stale, current is
+`portal open --session … --ack …`.)_
 
 ### Root Cause
 
