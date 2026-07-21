@@ -165,6 +165,18 @@ Any validation commands that touch tmux must run on a throwaway `-L <socket>` tm
 
 ---
 
+### Acceptance Criteria
+
+1. When a session running inside a burst-spawned (N−1 external) native-Ghostty window exits or detaches, the window lands at the user's normal interactive login shell prompt (`$SHELL`, login + interactive) — not the "Process exited. Press any key to close the terminal." dead-end.
+2. The native Ghostty adapter's window command is the explicit wrapper form `bash -lc '<composed open argv>; exec "$SHELL" -il'`, and the adapter no longer emits `wait after command`.
+3. The composed open argv inside the wrapper is unchanged from today — same `open --session <name> --ack <batch>:<token>` argv, same `/usr/bin/env … PATH=<picker PATH> -u TMUX -u TMUX_PANE` prefix; `tmux` resolves in the fallback shell's environment.
+4. The `@portal-spawn-<batch>-<token>` ack marker is still written before the attach handoff; the burst still confirms each window and logs `spawn: opened N/N`.
+5. Both burst entry points (picker multi-select and `portal open` multi-target) exhibit the fixed behaviour, via the shared adapter.
+6. The trigger window, single-session `portal open`/attach, custom `terminals.json` adapters, shared `composeOpenArgv`/`renderCommandString`, and the `syscall.Exec` attach path are all unchanged in behaviour.
+7. Unit tests at the command-composition seam assert the wrapper shape, the absence of `wait after command`, the preserved PATH/`-u TMUX` prefix, and correct quote nesting.
+8. The documented sandboxed manual-validation commands reproduce the clean shell landing on a throwaway `-L` tmux socket.
+9. Known accepted residual: closing the window from the idle fallback prompt shows Ghostty's one-click close confirm. This is expected and not a defect.
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._

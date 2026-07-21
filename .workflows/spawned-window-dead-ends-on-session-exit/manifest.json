@@ -18,7 +18,7 @@
           "status": "in-progress",
           "sources": {
             "spawned-window-dead-ends-on-session-exit": {
-              "status": "pending"
+              "status": "incorporated"
             }
           },
           "review_cycle": 0,
