@@ -4,7 +4,15 @@
   "status": "in-progress",
   "created": "2026-07-21",
   "description": "Split the picker proactive no-host-terminal banner by identity (drop for NULL/remote, keep for named unsupported) and disable multi-select outright on unsupported terminals via a transient self-clearing flash, hiding m from the help keymap when unavailable",
-  "phases": {},
+  "phases": {
+    "investigation": {
+      "items": {
+        "persistent-no-host-terminal-banner": {
+          "status": "in-progress"
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-07-16-persistent-no-host-terminal-banner.md",
