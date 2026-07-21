@@ -19,7 +19,8 @@ approved_at: 2026-07-21
 - [ ] Shared `composeOpenArgv` / `renderCommandString`, the `syscall.Exec` attach path, the `@portal-spawn-<batch>-<token>` ack marker ordering, the trigger path, single-session `portal open`/attach, and custom `terminals.json` adapters are all unchanged in behaviour, and the full test suite passes with no regressions
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-21
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|

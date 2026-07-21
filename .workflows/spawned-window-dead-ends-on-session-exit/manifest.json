@@ -34,12 +34,12 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "365f4d8d61dfbd8ce02e3f7f1105b426c4b8f46f",
-          "task_list_gate_mode": "gated",
+          "task_list_gate_mode": "auto",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": null,
+          "task": "spawned-window-dead-ends-on-session-exit-1-1",
           "task_map": {}
         }
       }
