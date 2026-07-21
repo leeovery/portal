@@ -61,6 +61,49 @@ _(This section is contextual background for planning; the fix itself is specifie
 
 ---
 
+### The Fix — Ghostty-Adapter-Scoped Shell Fallback
+
+The native Ghostty adapter wraps the command it opens the window with so that, after the session's `portal open` exec chain finishes, the window lands in a full interactive login shell instead of dead-ending. Concretely, the adapter composes its window command as:
+
+```
+bash -lc '<composed open argv>; exec "$SHELL" -il'
+```
+
+where `<composed open argv>` is the existing env-self-sufficient argv (`/usr/bin/env -u TMUX -u TMUX_PANE PATH=<picker PATH> <exePath> open --session <name> --ack <batch>:<token>`), rendered exactly as it is today. The wrapper runs the session command as a child; when that command finishes (session exit/detach), `exec "$SHELL" -il` replaces the wrapper with the user's interactive login shell, so the window stays visible **and usable** at a normal prompt.
+
+Alongside the wrap, **`wait after command` is dropped** from the Ghostty osascript — it is no longer needed once the exec'd shell keeps the window alive, and it is what produced the "Press any key to close" dead-end.
+
+#### Guiding model (why this scoping)
+
+Portal's job ends at "open a window running this command." How the window behaves when the command ends is a property of the command + terminal, not something Portal should centrally control. Portal therefore only shapes end-of-window behaviour for the command it **authors** — the native Ghostty adapter — and leaves custom-terminal users in full control of their own recipe.
+
+#### Why the explicit `bash -lc` wrapper (not implicit-append)
+
+Ghostty executes a window's `command` by prepending `exec -l`, effectively:
+
+```
+/usr/bin/login -flp <user> /bin/bash --noprofile --norc -c "exec -l <command>"
+```
+
+`exec -l` replaces the outer bash with the command's **first token**. This rules out the implicit-append form `<argv>; exec "$SHELL" -il` — the `; exec` fallback would be unreachable, and if the first token weren't found Ghostty would fatal ("failed to launch"). The explicit-wrapper form works because Ghostty's `exec -l bash -lc '…'` replaces the outer bash with *our* inner bash, which runs the session command as a child and then execs `$SHELL`. This shape is sandbox-validated live (see Testing).
+
+#### Constraints the implementation must preserve
+
+- **PATH must still be carried.** The composed argv keeps its `/usr/bin/env … PATH=<picker PATH> -u TMUX -u TMUX_PANE …` prefix. Ghostty's inner bash runs `--noprofile --norc` with a login default PATH, so a PATH-less command cannot find `tmux`. This constraint is unchanged from today — the wrap must not strip it.
+- **Quoting must nest correctly.** The composed argv (already POSIX-single-quoted per element) is embedded inside `bash -lc '…'`, which is itself embedded into the osascript `command:"…"` string. All three quoting layers must compose correctly.
+- **The `--ack` marker ordering is unchanged.** `portal open` still writes its `@portal-spawn-<batch>-<token>` marker before the attach handoff; the wrapper does not alter that.
+- **The `syscall.Exec` attach path is untouched.** No change to `AttachConnector`, the connector selection, or the exec into tmux — the fix lives entirely in the Ghostty adapter's command composition.
+
+#### Where the change lives
+
+Scoped to the native Ghostty adapter (`internal/spawn/ghostty.go`). Both burst entry points (picker multi-select and `portal open` multi-target) benefit automatically because they share this adapter. The shared `composeOpenArgv` / `renderCommandString` are **not** changed (see Scope & Non-Goals).
+
+#### Resulting shell
+
+The fallback lands in `/bin/zsh` as an **interactive login** shell with the user's full environment sourced (Oh My Zsh in the validated environment); `$SHELL` propagates correctly. It is the user's real shell, not bash.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
