@@ -104,6 +104,27 @@ The fallback lands in `/bin/zsh` as an **interactive login** shell with the user
 
 ---
 
+### Scope & Non-Goals
+
+#### In scope
+
+- Wrapping the native Ghostty adapter's window command in `bash -lc '<composed open argv>; exec "$SHELL" -il'`.
+- Dropping `wait after command` from the Ghostty osascript.
+- Unit coverage at the command-composition seam (see Testing Requirements).
+- Shipping the validated sandboxed manual-test commands as the documented manual validation for this fix.
+
+#### Explicitly out of scope (non-goals)
+
+- **No change to shared composition.** `composeOpenArgv` / `renderCommandString` stay as they are. Placing the shell wrap in *shared* composition was considered and rejected: it would inject shell metacharacters (`;`, `exec`) into the `{command}` string handed to config-`terminals.json` adapters, which only work if the terminal runs `{command}` through a shell — a guarantee `terminals.json` does **not** make. A direct-exec custom terminal would silently break. Scoping the wrap to the Ghostty adapter avoids this entirely.
+- **No change for custom `terminals.json` terminals.** How a custom terminal's window ends is the user's own command/recipe's business. Custom-terminal users keep full control, including a deliberate close-on-exit if they chose it. Portal does not impose a shell fallback on them.
+- **Portal does not centrally own the window lifecycle.** The rejected Option A (Portal fork/waits tmux then execs `$SHELL` behind a spawned-only flag) is not pursued: it contradicts the guiding model, would override custom-terminal users' choices, and carried tty/signal-proxy risk from Portal parenting a full-screen tty app.
+- **The window is not closed on exit.** Option C (`wait after command:false`, close cleanly) is not pursued: an abrupt close is worse than the dead-end when multiple/scattered Ghostty windows make it easy to lose track of which one vanished. Keeping the window visible is a property to preserve; a live shell delivers "visible AND usable." (Note: dropping `wait after command` here is different from Option C — the window still stays visible because the exec'd *shell* keeps it alive.)
+- **No change to the trigger path.** The trigger window self-connects in-process and already lands cleanly; it must not be touched.
+- **No change to single-session `portal open`/attach**, detection, pre-flight, the ack channel, or selection mutation.
+- **No new automated real-Ghostty test lane.** The osascript boundary stays `//go:build manual`.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
