@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Ghostty Adapter Shell-Fallback Wrapper
-status: draft
+status: approved
+approved_at: 2026-07-21
 
 **Goal**: Wrap the native Ghostty adapter's window command as `bash -lc '<composed open argv>; exec "$SHELL" -il'` and drop `wait after command` from its osascript, so that when the session inside a burst-spawned (N−1 external) Ghostty window exits or detaches, the exec'd interactive login shell keeps the window visible and usable at the user's normal prompt instead of the "Process exited. Press any key to close the terminal." dead-end. Add unit coverage at the existing command-composition seam. The change is scoped entirely to `internal/spawn/ghostty.go`; both burst entry points benefit automatically through the shared adapter.
 
