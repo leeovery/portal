@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-21
 cycle: 1
 phase: Plan Integrity Review
@@ -36,7 +36,7 @@ The canonical task template (task-design.md, Field Requirements) lists **Outcome
 **Do**:
 1. In `internal/spawn/ghostty.go` add a pure helper `wrapWithShellFallback(command []string) []string`...
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim — `Outcome` field inserted into the tick task (tick-5f6bf3) between Solution and Do. Approved via auto mode.
 
 ---

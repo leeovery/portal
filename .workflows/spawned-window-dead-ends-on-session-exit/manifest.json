@@ -36,7 +36,7 @@
           "spec_commit": "365f4d8d61dfbd8ce02e3f7f1105b426c4b8f46f",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
-          "finding_gate_mode": "gated",
+          "finding_gate_mode": "auto",
           "review_cycle": 1,
           "phase": 2,
           "task": null,
