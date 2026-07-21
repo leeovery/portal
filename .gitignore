@@ -40,7 +40,6 @@ Thumbs.db
 # Build
 dist/
 build/
-.workflows/.cache/
 /portal
 # the offline capture-harness binary, pre-built before vhs runs so the tape's
 # `go run` is warm; always rm'd after, but ignored so a stray copy is never staged.
