@@ -57,21 +57,25 @@ On remote/unsupported terminals the picker should behave sensibly:
 
 **Checkpoint depth:** straight-through — the bug is contained to `internal/tui`, the mechanism is near-confirmed from recon (discovery framed this a light confirm pass); the genuine design forks belong to the spec, not the trace.
 
-- **H1 — Persistent NULL banner** [suspected]
+- **H1 — Persistent NULL banner** [confirmed]
   The section-header swap gates only on `DetectUnsupported()` (resolution-based, TRUE for NULL/remote), with no identity-shape discriminator, so the NULL/remote resolution claims the header row permanently and drops `Sessions ··· N`.
   _Basis:_ `unsupportedBannerActive()` = `DetectUnsupported() && !multiSelectMode` (model.go:4681); `DetectUnsupported` = `detectResolved && detectResolution == ResolutionUnsupported` (spawn_detect.go:117), true for both NULL and named-unsupported.
+  _Evidence:_ `applySectionHeader` (model.go:4780) swaps in `renderUnsupportedHeader` whenever `unsupportedBannerActive()` — and `renderUnsupportedHeader` (section_header.go:178) ALREADY branches on `bundleID == ""` to draw the NULL variant `⚠ no host-local terminal` (no identity, no `see docs`). The single predicate is also read by `activeNoticeBand` (notice_band.go:371) to suppress the By-Tag signpost, so the two consumers can never drift. Adding `!m.detectIdentity.IsNull()` to `unsupportedBannerActive()` drops NULL (standard header returns) while keeping named — the render already knows the split; only the gate lacks the discriminator.
 
-- **H2 — `m` enters unconditionally** [suspected]
+- **H2 — `m` enters unconditionally** [confirmed]
   `handleMultiSelectToggle`'s entry branch has NO `DetectUnsupported()` gate; the only unsupported gate is downstream at `decideBurst`'s N≥2 Enter (the reactive `— nothing opened` no-op).
   _Basis:_ model.go:3508-3524 (entry, ungated); burst_progress.go:425 (reactive arm).
+  _Evidence:_ the `!m.multiSelectMode` entry branch (model.go:3509) sets `multiSelectMode=true` + mark-on-entry with no detection read. The sole live entry point is this handler (dispatched at model.go:3433); `WithInitialMultiSelect` (model.go:1006) is a construction/capture-harness option, not a keypress path. The reactive gate at `decideBurst` (burst_progress.go:425) fires only at the N≥2 Enter — so the user walks enter → mark → Enter before hitting it.
 
-- **H3 — `m` shows in `?` help unconditionally** [suspected]
+- **H3 — `m` shows in `?` help unconditionally** [confirmed]
   The help modal is fed the static `sessionsKeymap()` with no detection-aware filtering; `m` is a help-only (non-Core) entry, so the FOOTER is unaffected — only the help modal.
   _Basis:_ keymap.go:89-105; help modal call model.go:4547.
+  _Evidence:_ `m` is `{Key:"m", ..., }` with no `Core:true` (keymap.go:97), so `renderCondensedFooter` (footer.go:65) never lists it — the footer needs no change. The help modal renders EVERY descriptor entry (help_modal.go:141) from `sessionsKeymap()` passed at model.go:4547. **Suppression mechanism confirmed viable:** filtering `m` out of the descriptor slice passed to `renderHelpModalOnClearedCanvas` when `DetectUnsupported()` keeps `sessionsKeymap()` static, so `keymap_dispatch_guard_test.go` (which probes the static descriptor with an unwired-detection model → `m` supported → enters mode) still passes. A parameterised `sessionsKeymap()` that conditionally omits `m` would instead break that guard — so the call-site filter is the guard-safe shape.
 
-- **H4 — (contributing/edge) async detection keeps the reactive backstop load-bearing** [suspected]
+- **H4 — (contributing/edge) async detection keeps the reactive backstop load-bearing** [confirmed]
   Detection is ASYNC — `DetectUnsupported()` is false until resolved, so an entry-time `m`-block cannot fully replace the reactive `decideBurst` no-op: the in-flight→resolve race keeps the reactive backstop load-bearing, and raises a UX fork (eject from the mode when detection resolves unsupported mid-mode?).
   _Basis:_ async dispatch spawn_detect.go:83-92; `TestBurstUnsupported_DeferredThenUnsupported`.
+  _Evidence:_ detection runs on Bubble Tea's command goroutine (`maybeDispatchDetectionCmd`, spawn_detect.go:83), resolving later via `terminalDetectedMsg` (model.go:2460). Before it resolves, `detectResolved==false` → `DetectUnsupported()==false` → the entry-block does NOT fire, so the user CAN enter multi-select in the in-flight window. The `terminalDetectedMsg` arm (model.go:2471-2485) caches the resolution but does NOT eject an already-open multi-select mode (it only resolves a `pendingBurstEnter` deferral via `decideBurst`). So `decideBurst`'s unsupported arm remains the backstop for "entered before resolve, then Enter". The fix ADDS a proactive entry-block; it must RETAIN the reactive no-op.
 
 ### Trace lines (agreed order)
 
@@ -83,7 +87,36 @@ On remote/unsupported terminals the picker should behave sensibly:
 
 ### Code Trace
 
-_(to be populated)_
+**Locus 1 — Banner (persistent NULL band).**
+- `Model.View` (sessions arm) → `applySectionHeader(listView)` — model.go:4720.
+- `applySectionHeader` §6.2 branch (model.go:4780): `if m.unsupportedBannerActive() → replaceHeaderLine(listView, renderUnsupportedHeader(name, bundleID, …))`. Replaces the FIRST list line (the title row) so the `Sessions ··· N` header is gone for the session.
+- `unsupportedBannerActive()` (model.go:4681) = `DetectUnsupported() && !multiSelectMode` — **no identity-shape check.**
+- `DetectUnsupported()` (spawn_detect.go:117) = `detectResolved && detectResolution == ResolutionUnsupported` → TRUE for NULL (remote/mosh) AND named-undriven alike.
+- `renderUnsupportedHeader` (section_header.go:178) + `unsupportedLeftCluster` (section_header.go:223) already split on `bundleID == ""`: NULL → `⚠ no host-local terminal` (no identity, no `see docs`); named → `⚠ unsupported terminal — <name> · <bundleID>` + `see docs`.
+- Second consumer: `activeNoticeBand` (notice_band.go:371) reads the SAME `unsupportedBannerActive()` to suppress the By-Tag signpost. Fixing the one predicate fixes both surfaces coherently.
+
+**Locus 2 — `m`-entry (no proactive block).**
+- Dispatch: `updateSessionList` `case isRuneKey(msg, "m") → handleMultiSelectToggle()` — model.go:3433.
+- `handleMultiSelectToggle` entry branch (model.go:3509-3524): `if !m.multiSelectMode { multiSelectMode=true; … mark-on-entry … }` — **no `DetectUnsupported()` read.**
+- Reactive gate downstream: `handleMultiSelectEnter` → `beginBurst`/`decideBurst` (burst_progress.go:414); `if m.DetectUnsupported() { …preflight…; emitUnsupportedNoop; setFlash(unsupportedFlashText(id)); return }` (burst_progress.go:425-445). Fires only at N≥2 Enter.
+- Live entry point is unique: `WithInitialMultiSelect` (model.go:1006) is construction-time (capture harness), not a keypress.
+
+**Locus 3 — `?` help lists `m` unconditionally.**
+- Footer: `renderSessionsFooter → renderCondensedFooter(sessionsKeymap(), …)` (footer.go:65) lists only `Core` entries; `m` is non-Core (keymap.go:97) → **absent from footer already** (no footer change needed).
+- Help modal: `Model.View` modalHelp arm → `renderHelpModalOnClearedCanvas(sessionsKeymap(), …)` (model.go:4547) → `helpModalBodyRows` renders every non-`RightAligned` entry (help_modal.go:141) → `m` always shown.
+- Guard: `keymap_dispatch_guard_test.go:143` probes `m` against a plain `sessionsGuardModel` (detection unwired → supported) and asserts `MultiSelectActive()`. It reads the **static** `sessionsKeymap()` (line 184), so a call-site descriptor filter (drop `m` only in the help-modal feed when `DetectUnsupported()`) leaves the guard green; a parameterised keymap would not.
+
+**Locus 4 — async race / reactive backstop.**
+- `maybeDispatchDetectionCmd` (spawn_detect.go:83) dispatches `Detect()` on the command goroutine on reaching PageSessions; resolves later via `terminalDetectedMsg` (model.go:2460).
+- The arm caches identity/adapter/resolution (model.go:2471-2473) and, only if `pendingBurstEnter`, calls `decideBurst` (model.go:2482-2484). It does **not** eject an open multi-select mode.
+- Consequence: the proactive entry-block (gated on `DetectUnsupported()`) is inert during the in-flight window, so `decideBurst`'s unsupported arm stays load-bearing for "entered-before-resolve → Enter".
+
+**Copy source.**
+- `unsupportedFlashText(id)` (burst_progress.go:460) → `spawn.UnsupportedNoopMessage(id)` (message.go:77): NULL → `no host-local terminal — nothing opened`; named → `unsupported terminal — <name> · <bundleID> — nothing opened`. Same renderer feeds the CLI open burst (`cmd/open_burst_run.go:168`). The `— nothing opened` clause is a burst RESPONSE — semantically off for a pre-emptive `m`-entry block that attempts nothing (design fork for the spec).
+
+**Flash lifecycle (self-clear on next keypress — already satisfied).**
+- `setFlash` (model.go:1969) records `flashText`; `activeNoticeBand` (notice_band.go:361) gives the flash the §11 notice-band slot (a SEPARATE row below the title separator — co-renders with a named banner on the header row).
+- Auto-clear: `updateSessionList` (model.go:3328) `if m.flashText != "" && isActionableKey(msg) { clearFlash() }` — an actionable key clears the flash and falls through to its handler. So a blocked-`m` flash self-clears on the next keypress with no new mechanism.
 
 ### Root Cause
 
