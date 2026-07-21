@@ -35,12 +35,16 @@
           "format": "tick",
           "spec_commit": "365f4d8d61dfbd8ce02e3f7f1105b426c4b8f46f",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
           "task": "spawned-window-dead-ends-on-session-exit-1-1",
-          "task_map": {}
+          "task_map": {
+            "spawned-window-dead-ends-on-session-exit-1-1": "tick-5f6bf3",
+            "spawned-window-dead-ends-on-session-exit-1": "tick-d2ea1f"
+          },
+          "external_id": "tick-07773e"
         }
       }
     }
