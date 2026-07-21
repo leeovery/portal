@@ -8,7 +8,6 @@
     "discovery": {
       "items": {
         "agent-state": {
-          "status": "in-progress",
           "routing": "discussion",
           "source": "discovery",
           "summary": "Host-side agent-state spine: the state model and capture every other surface reads from",
@@ -16,7 +15,6 @@
           "order": 1
         },
         "agent-state-surfacing": {
-          "status": "in-progress",
           "routing": "discussion",
           "source": "discovery",
           "summary": "Desktop and terminal display of agent state: picker glyph, needs-attention view, status-line segment, notifications",
@@ -24,7 +22,6 @@
           "order": 2
         },
         "session-control-overlay": {
-          "status": "in-progress",
           "routing": "discussion",
           "source": "discovery",
           "summary": "In-tmux Portal pop-up replacing the Alt+M tool for rename/detach/quit of panes, windows and sessions",
@@ -32,7 +29,6 @@
           "order": 6
         },
         "resume-hook-internalisation": {
-          "status": "in-progress",
           "routing": "discussion",
           "source": "discovery",
           "summary": "Make resume-hook registration internal and managed by Portal rather than hand-wired by the user",
@@ -40,7 +36,6 @@
           "order": 5
         },
         "mobile-client": {
-          "status": "in-progress",
           "routing": "research",
           "source": "discovery",
           "summary": "Structured-first phone app: control tower, approvals, compose box, embedded terminal, diff viewer, browser preview",
@@ -48,7 +43,6 @@
           "order": 4
         },
         "transport": {
-          "status": "in-progress",
           "routing": "research",
           "source": "discovery",
           "summary": "Phone-to-host connectivity: Tailscale data plane, hosted relay (Pro), push path, launchd boot agent, optional protocol",
@@ -56,7 +50,6 @@
           "order": 3
         },
         "productisation": {
-          "status": "in-progress",
           "routing": "discussion",
           "source": "discovery",
           "summary": "Free/Pro packaging, one-line installer, pricing posture, agent-first repositioning, parked team story",
@@ -68,7 +61,37 @@
     "discussion": {
       "items": {
         "agent-state": {
-          "status": "in-progress"
+          "status": "in-progress",
+          "subtopics": {
+            "state-model-semantics": {
+              "status": "pending",
+              "parent": null
+            },
+            "event-capture-hook-state-mapping": {
+              "status": "pending",
+              "parent": null
+            },
+            "hook-to-daemon-ipc-transport": {
+              "status": "pending",
+              "parent": null
+            },
+            "pane-session-correlation": {
+              "status": "pending",
+              "parent": null
+            },
+            "adapter-interface-multi-agent-normalisation": {
+              "status": "pending",
+              "parent": null
+            },
+            "agent-store-persistence": {
+              "status": "pending",
+              "parent": null
+            },
+            "consumer-read-contract": {
+              "status": "pending",
+              "parent": null
+            }
+          }
         },
         "agent-state-surfacing": {
           "status": "in-progress"
