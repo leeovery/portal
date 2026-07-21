@@ -106,7 +106,7 @@
     "review": {
       "items": {
         "spawned-window-dead-ends-on-session-exit": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "spawned-window-dead-ends-on-session-exit-1-1",
             "spawned-window-dead-ends-on-session-exit-2-1"
