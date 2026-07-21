@@ -120,19 +120,43 @@ On remote/unsupported terminals the picker should behave sensibly:
 
 ### Root Cause
 
-_(to be populated)_
+Two independent design gaps in the `restore-host-terminal-windows` unsupported-terminal UX, both stemming from the single decision to key everything off the coarse **resolution** (`DetectUnsupported`) without distinguishing the two shapes an unsupported resolution can take (NULL/remote vs named-undriven), and from placing the multi-select unsupported gate **reactively** (at N≥2 Enter) rather than at mode entry:
+
+1. **Banner has no identity-shape gate.** `unsupportedBannerActive()` (model.go:4681) fires on `DetectUnsupported()` for *any* unsupported resolution, so the NULL/remote identity permanently claims the section-header row and drops `Sessions ··· N` + the grouping suffix. The renderer already knows the NULL/named split (`renderUnsupportedHeader` branches on `bundleID == ""`); only the *gate* is blind to it. For NULL the banner carries no actionable content (no bundle id, no `see docs`), so it is pure noise.
+
+2. **Multi-select is gated reactively, not at entry.** `handleMultiSelectToggle`'s entry branch (model.go:3509) has no `DetectUnsupported()` read, and `m` is listed unconditionally in the `?` help (help_modal.go via model.go:4547). The only unsupported gate is `decideBurst`'s N≥2-Enter no-op (burst_progress.go:425). So on any unsupported terminal (NULL or named) the user can enter the mode, mark sessions, and walk to the last keypress before the burst reveals it can never fire — a misleading affordance.
+
+**Why this happens:** the feature modelled "unsupported" as one flat state served by one banner and one reactive burst-time no-op. That is correct for the *named-undriven* case (the banner is actionable, the no-op is a rare last-mile guard) but wrong for the *NULL/remote* case and wrong as the *primary* multi-select gate — the affordance should never be reachable when detection has already resolved unsupported.
 
 ### Contributing Factors
 
-_(to be populated)_
+- **Coarse `DetectUnsupported()` predicate.** A single resolution-based boolean collapses NULL and named-undriven, which the banner needs to tell apart. `IsNull()` exists (identity.go:24) but is not consulted at the banner gate.
+- **Reactive placement of the burst-time gate.** `decideBurst` was the natural (and, for the async race, still-necessary) gate, so no proactive entry gate was added — the affordance was left fully walkable.
+- **Async detection.** `DetectUnsupported()` is false until `terminalDetectedMsg` resolves, so any proactive entry-block is inert in the in-flight window — a proactive block is additive, it cannot replace the reactive backstop.
+- **Static keymap descriptor.** `sessionsKeymap()` is a pure constant with no detection input, so the help modal cannot drop `m` without a call-site filter.
+- **Behaving-as-designed.** Not a regression: every surface works to its original spec; the spec simply did not cover the NULL/remote case or treat multi-select as unreachable-when-unsupported.
 
 ### Why It Wasn't Caught
 
-_(to be populated)_
+- **Spec scope.** `restore-host-terminal-windows` designed the unsupported banner for the *named* identity (the delivered `sessions-unsupported-terminal.png` frame is Apple Terminal) and accepted the reactive no-op as the multi-select guard; the NULL/remote-only picker and the "walkable dead-end" UX were simply out of the frame.
+- **Detection environment.** On the reporter's normal (mixed) setup a local Ghostty resolves *supported*, so the NULL banner never showed in day-to-day dev use; it only surfaces on a pure-remote client (mosh/SSH), an under-exercised path. (And `2026-07-15--remote-trigger-spawns-on-local-terminal` currently masks it further — its fix will make every remote login resolve NULL.)
+- **Tests encode the old contract.** `burst_unsupported_noop_test.go` asserts the reactive no-op *as the intended behaviour* — the dead-end walk was tested-in, not caught.
 
 ### Blast Radius
 
-_(to be populated)_
+**Directly affected (the fix touches these):**
+- `internal/tui/spawn_detect.go` / `model.go` — `unsupportedBannerActive()` gains an `IsNull()` discriminator (banner split).
+- `internal/tui/model.go` — `handleMultiSelectToggle` entry branch gains a proactive `DetectUnsupported()` block + blocked-entry `setFlash`.
+- `internal/tui/model.go:4547` (help-modal feed) — call-site descriptor filter dropping `m` when `DetectUnsupported()`.
+- `internal/tui/burst_progress.go` — `decideBurst` unsupported arm RETAINED (async-race backstop); possibly a new blocked-entry copy distinct from `spawn.UnsupportedNoopMessage`.
+- Tests: `burst_unsupported_noop_test.go` (rework the "resolved-unsupported → enter → mark → Enter" fixtures to route through the in-flight path, since entry is now blocked post-resolve); new coverage for banner-split, `m`-block flash, help-suppression.
+
+**Potentially affected (share the code/pattern, verify no drift):**
+- `activeNoticeBand` (notice_band.go:371) — reads the same `unsupportedBannerActive()`; the By-Tag signpost suppression must track the banner split (NULL now shows the signpost again when applicable).
+- Visual fixtures / Paper frames referencing the unsupported banner (`sessions-unsupported-terminal`); a NULL fixture would now render the standard header.
+- Consistency with the CLI unsupported message owned by `cli-verb-surface-redesign` (shared `spawn.UnsupportedNoopMessage`) — keep copy coherent, do not silently diverge.
+
+**Explicitly NOT affected (scope boundary):** the CLI multi-target `portal open <a> <b> …` N≥2 burst block (owned by `cli-verb-surface-redesign`); `sessions.json`, the daemon capture loop, restore, `prefs.json` (spawn's near-zero state footprint is unchanged).
 
 ---
 
