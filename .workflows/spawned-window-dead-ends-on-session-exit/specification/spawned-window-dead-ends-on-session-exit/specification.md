@@ -90,7 +90,7 @@ Ghostty executes a window's `command` by prepending `exec -l`, effectively:
 #### Constraints the implementation must preserve
 
 - **PATH must still be carried.** The composed argv keeps its `/usr/bin/env … PATH=<picker PATH> -u TMUX -u TMUX_PANE …` prefix. Ghostty's inner bash runs `--noprofile --norc` with a login default PATH, so a PATH-less command cannot find `tmux`. This constraint is unchanged from today — the wrap must not strip it.
-- **Quoting must nest correctly.** The composed argv (already POSIX-single-quoted per element) is embedded inside `bash -lc '…'`, which is itself embedded into the osascript `command:"…"` string. All three quoting layers must compose correctly.
+- **Quoting must nest correctly — the `bash -lc '…'` form is schematic, not a literal byte template.** The composed argv is already POSIX-single-quoted per element by the shared shell-quote helper (`renderCommandString`/`shellQuote`), so it cannot be pasted verbatim inside an outer single-quoted `bash -lc '…'` — the first inner `'` would terminate the outer quote. The implementation must escape the inner single quotes for the outer single-quote layer using the standard POSIX `'\''` (close-escape-reopen) idiom that the shared helper already emits. **Recommended mechanism:** build the wrapper as a real argv `["bash", "-lc", <payload>]`, where `<payload>` is the string `<rendered composed argv>` followed by `; exec "$SHELL" -il`, and render that whole 3-element argv through the existing shell-quote helper — so the helper handles the nesting (inner per-element quotes → the `-lc` payload's single-quote layer) rather than hand-rolled string concatenation. The osascript `command:"…"` double-quote/backslash layer then wraps the result as today. Naive concatenation of the illustrative form would emit a corrupted command that fails at Ghostty launch — the exact failure class this fix removes.
 - **The `--ack` marker ordering is unchanged.** `portal open` still writes its `@portal-spawn-<batch>-<token>` marker before the attach handoff; the wrapper does not alter that.
 - **The `syscall.Exec` attach path is untouched.** No change to `AttachConnector`, the connector selection, or the exec into tmux — the fix lives entirely in the Ghostty adapter's command composition.
 
@@ -98,9 +98,13 @@ Ghostty executes a window's `command` by prepending `exec -l`, effectively:
 
 Scoped to the native Ghostty adapter (`internal/spawn/ghostty.go`). Both burst entry points (picker multi-select and `portal open` multi-target) benefit automatically because they share this adapter. The shared `composeOpenArgv` / `renderCommandString` are **not** changed (see Scope & Non-Goals).
 
+The wrap is **argv-agnostic**: it applies identically to mint surfaces (whose composed argv is `open --path <dir> --ack <batch>:<token>`, optionally carrying a `-- <command…>` passthrough) as to attach surfaces, because it lives at the adapter and wraps whatever argv it is handed. Mint windows therefore get the same fallback shell, and any `-- <command…>` passthrough element must survive the same quote nesting as any other argv element (see the quoting constraint above).
+
 #### Resulting shell
 
 The fallback lands in `/bin/zsh` as an **interactive login** shell with the user's full environment sourced (Oh My Zsh in the validated environment); `$SHELL` propagates correctly. It is the user's real shell, not bash.
+
+`$SHELL` is populated by `/usr/bin/login` (which Ghostty uses to launch the window), so `exec "$SHELL" -il` is reliable and **no `$SHELL` fallback is specified**. In the theoretical degenerate case where `exec "$SHELL"` fails, the inner bash exits with nothing left to run and the window closes rather than landing at a shell — an acceptable outcome: a clean close is already an accepted fallback (see Expected Behaviour) and no "Press any key" dead-end reappears.
 
 ---
 
@@ -168,12 +172,12 @@ Any validation commands that touch tmux must run on a throwaway `-L <socket>` tm
 ### Acceptance Criteria
 
 1. When a session running inside a burst-spawned (N−1 external) native-Ghostty window exits or detaches, the window lands at the user's normal interactive login shell prompt (`$SHELL`, login + interactive) — not the "Process exited. Press any key to close the terminal." dead-end. On the detach path, tmux's own `[detached (from session <name>)]` line may still print above the fallback prompt; this is expected tmux client-detach output, outside the fix's scope, and does not indicate an incomplete fix.
-2. The native Ghostty adapter's window command is the explicit wrapper form `bash -lc '<composed open argv>; exec "$SHELL" -il'`, and the adapter no longer emits `wait after command`.
-3. The composed open argv inside the wrapper is unchanged from today — same `open --session <name> --ack <batch>:<token>` argv, same `/usr/bin/env … PATH=<picker PATH> -u TMUX -u TMUX_PANE` prefix; `tmux` resolves in the fallback shell's environment.
+2. The native Ghostty adapter's window command is the explicit wrapper form `bash -lc '<composed open argv>; exec "$SHELL" -il'` (logical form — the on-disk command is this form with the inner argv's single quotes correctly escaped/re-quoted via the shared shell-quote helper, not a naive byte concatenation), and the adapter no longer emits `wait after command`.
+3. The composed open argv inside the wrapper is unchanged from today — the same argv for both surface kinds (attach: `open --session <name> --ack <batch>:<token>`; mint: `open --path <dir> --ack <batch>:<token>`, optionally with a `-- <command…>` passthrough), same `/usr/bin/env … PATH=<picker PATH> -u TMUX -u TMUX_PANE` prefix; `tmux` resolves in the fallback shell's environment.
 4. The `@portal-spawn-<batch>-<token>` ack marker is still written before the attach handoff; the burst still confirms each window and logs `spawn: opened N/N`.
 5. Both burst entry points (picker multi-select and `portal open` multi-target) exhibit the fixed behaviour, via the shared adapter.
 6. The trigger window, single-session `portal open`/attach, custom `terminals.json` adapters, shared `composeOpenArgv`/`renderCommandString`, and the `syscall.Exec` attach path are all unchanged in behaviour.
-7. Unit tests at the command-composition seam assert the wrapper shape, the absence of `wait after command`, the preserved PATH/`-u TMUX` prefix, and correct quote nesting.
+7. Unit tests at the command-composition seam assert the wrapper shape against the correctly-escaped expected string (the `'\''`-escaped nesting, not the schematic form), the absence of `wait after command`, the preserved PATH/`-u TMUX` prefix, and that the embedded argv round-trips uncorrupted through the added `bash -lc` layer.
 8. The documented sandboxed manual-validation commands reproduce the clean shell landing on a throwaway `-L` tmux socket.
 9. Known accepted residual: closing the window from the idle fallback prompt shows Ghostty's one-click close confirm. This is expected and not a defect.
 
