@@ -4,7 +4,15 @@
   "status": "in-progress",
   "created": "2026-07-21",
   "description": "Spawned multi-select burst windows dead-end on 'Process exited. Press any key to close' when their session exits, because portal attach execs into tmux with no fallback interactive shell; land them in a real shell like the trigger window",
-  "phases": {},
+  "phases": {
+    "investigation": {
+      "items": {
+        "spawned-window-dead-ends-on-session-exit": {
+          "status": "in-progress"
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-07-17-spawned-window-dead-ends-on-session-exit.md",
