@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-21
 cycle: 2
 phase: Gap Analysis
@@ -30,9 +30,9 @@ All three reference "the validated sandboxed manual-test commands" as a concrete
 This does not affect the core code fix (fully specified) or the automated unit coverage; it only leaves the in-scope documentation deliverable (and its acceptance criterion #8) under-plannable.
 
 **Proposed Addition**:
-{leave blank until discussed — options: (a) inline the concrete sandboxed command sequence in the Manual validation section, and/or (b) state the deliverable's home/form, e.g. "documented in a `//go:build manual` test comment in internal/spawn" vs a doc file.}
+Resolved by removing the deliverable, not pinning it. Per user clarification, the fix mechanism was **already validated live** during the investigation (sandbox validation), so there is no outstanding manual-test artifact to ship. Reframed the Manual validation subsection to "already performed (during investigation)"; removed the In-scope "ship manual-test commands" bullet; removed AC #8 (documented commands reproduce landing) and added a note that no manual-validation deliverable is gated — only the code change + unit coverage (AC 2/3/7) remain. Sandbox rule kept, reframed as applying to any future re-validation.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Adjusted
+**Notes**: User clarified the functionality is already tested (investigation §Sandbox Validation). The finding correctly caught an under-specified "deliverable" — the right fix was to drop the deliverable framing, since it does not exist, rather than pin its home/form.
 
 ---

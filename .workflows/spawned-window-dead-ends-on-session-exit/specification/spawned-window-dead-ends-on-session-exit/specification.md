@@ -115,7 +115,6 @@ The fallback lands in `/bin/zsh` as an **interactive login** shell with the user
 - Wrapping the native Ghostty adapter's window command in `bash -lc '<composed open argv>; exec "$SHELL" -il'`.
 - Dropping `wait after command` from the Ghostty osascript.
 - Unit coverage at the command-composition seam (see Testing Requirements).
-- Shipping the validated sandboxed manual-test commands as the documented manual validation for this fix.
 
 #### Explicitly out of scope (non-goals)
 
@@ -159,13 +158,15 @@ The native Ghostty osascript boundary has no automatable lane (stays `//go:build
 - Assert the composed argv inside the wrapper still carries its `PATH=<…>` / `-u TMUX -u TMUX_PANE` prefix (PATH is not stripped by the wrap).
 - Assert quoting nests correctly — the embedded argv is not corrupted by the added `bash -lc '…'` layer.
 
-#### Manual validation (documented, sandboxed)
+#### Manual validation — already performed (during investigation)
 
-Ship the validated sandboxed Ghostty test commands as the documented manual validation for this fix. The implicit-vs-explicit wrapper distinction is exactly what a future regression could reintroduce, so the manual test must exercise the explicit `bash -lc '…'` form end-to-end: open a Ghostty window via the adapter's command shape, kill/detach the session, and confirm the window lands at the user's normal interactive login shell (`$SHELL`, login+interactive) rather than a "Press any key to close" dead-end. On the detach path, tmux's `[detached (from session <name>)]` line prints above the fallback prompt — that is expected tmux output, not a sign the fix failed.
+The fix mechanism has already been validated live, sandboxed on a throwaway `-L` tmux socket, during the investigation: the explicit `bash -lc '<composed open argv>; exec "$SHELL" -il'` wrapper was run end-to-end and, after the session was killed, the window landed at the user's normal interactive login shell (`$SHELL`, login+interactive) — not the "Press any key to close" dead-end. The implicit-append form was ruled out live (Ghostty's `exec -l` command model). **No further manual-validation deliverable is required for this fix** — the functionality is already tested.
 
-#### Sandbox rule (mandatory)
+On the detach path, tmux's `[detached (from session <name>)]` line prints above the fallback prompt — that is expected tmux output, not a sign the fix failed.
 
-Any validation commands that touch tmux must run on a throwaway `-L <socket>` tmux server, **never** the live default server (which hosts the user's real sessions). Earlier Ghostty spawn misfires must not be repeated.
+#### Sandbox rule (mandatory for any re-validation)
+
+If the fix is ever re-validated against tmux, those commands must run on a throwaway `-L <socket>` tmux server, **never** the live default server (which hosts the user's real sessions). Earlier Ghostty spawn misfires must not be repeated.
 
 ---
 
@@ -178,8 +179,9 @@ Any validation commands that touch tmux must run on a throwaway `-L <socket>` tm
 5. Both burst entry points (picker multi-select and `portal open` multi-target) exhibit the fixed behaviour, via the shared adapter.
 6. The trigger window, single-session `portal open`/attach, custom `terminals.json` adapters, shared `composeOpenArgv`/`renderCommandString`, and the `syscall.Exec` attach path are all unchanged in behaviour.
 7. Unit tests at the command-composition seam assert the wrapper shape against the correctly-escaped expected string (the `'\''`-escaped nesting, not the schematic form), the absence of `wait after command`, the preserved PATH/`-u TMUX` prefix, and that the embedded argv round-trips uncorrupted through the added `bash -lc` layer.
-8. The documented sandboxed manual-validation commands reproduce the clean shell landing on a throwaway `-L` tmux socket.
-9. Known accepted residual: closing the window from the idle fallback prompt shows Ghostty's one-click close confirm. This is expected and not a defect.
+8. Known accepted residual: closing the window from the idle fallback prompt shows Ghostty's one-click close confirm. This is expected and not a defect.
+
+_Note: the fix mechanism itself was already validated live during the investigation (see Testing Requirements → Manual validation), so no manual-validation deliverable is gated by these acceptance criteria — only the code change and its unit coverage (criteria 2, 3, 7) remain to be built and verified._
 
 ## Working Notes
 
