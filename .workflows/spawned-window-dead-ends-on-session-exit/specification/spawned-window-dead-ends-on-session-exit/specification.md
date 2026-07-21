@@ -41,7 +41,7 @@ Low — a cosmetic/UX rough edge with no data loss. Ships as a regular release, 
 
 ### Root Cause
 
-Two design choices compose into the bug; neither alone is the whole cause.
+Several composing factors produce the bug; no single one alone is the whole cause.
 
 1. **The spawned command is a single, one-shot argv with no shell fallback.** `internal/spawn` composes the spawned window's command as an env-self-sufficient argv — `/usr/bin/env -u TMUX -u TMUX_PANE PATH=<picker PATH> <exePath> open --session <name> --ack <batch>:<token>` — deliberately a *real argv run verbatim* (so it drops cleanly into config-`terminals.json` recipes). Ghostty runs that command string via `bash -c`, so the window's root process is a single non-interactive command with no surrounding interactive shell.
 
