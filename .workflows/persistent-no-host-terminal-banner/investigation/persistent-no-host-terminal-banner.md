@@ -128,6 +128,8 @@ Two independent design gaps in the `restore-host-terminal-windows` unsupported-t
 
 **Why this happens:** the feature modelled "unsupported" as one flat state served by one banner and one reactive burst-time no-op. That is correct for the *named-undriven* case (the banner is actionable, the no-op is a rare last-mile guard) but wrong for the *NULL/remote* case and wrong as the *primary* multi-select gate — the affordance should never be reachable when detection has already resolved unsupported.
 
+**Causal-precision note (from validation).** The banner's *permanence* is produced by the once-only detection cache (`detectDispatched` latch → cached `detectResolved`/`detectResolution`, spawn_detect.go:84-87; nothing re-detects, and `rebuildSessionList` does not re-run detection), which is re-read every frame. The missing `IsNull()` gate decides only *whether* that cached unsupported resolution renders as the banner. The fix (add `!IsNull()` to the gate) still fully resolves the NULL symptom — the cache is not itself a defect — but the exact chain is "once-cached unsupported resolution × identity-blind gate", not "the gate makes it permanent".
+
 ### Contributing Factors
 
 - **Coarse `DetectUnsupported()` predicate.** A single resolution-based boolean collapses NULL and named-undriven, which the banner needs to tell apart. `IsNull()` exists (identity.go:24) but is not consulted at the banner gate.
@@ -175,3 +177,11 @@ _(to be populated after findings sign-off)_
 **Investigation expectation (from discovery):** light confirm pass over the code loci (`unsupportedBannerActive` in `model.go`, the `m`-entry handler, `burst_unsupported_noop_test.go`, the help modal) — the spec does the real design work.
 
 **Deferred design detail (from discovery):** exact flash copy (a variant suited to a blocked mode-entry vs the current `— nothing opened` burst wording) and the help-suppression mechanics.
+
+**Spec forks surfaced by investigation (for the spec to resolve, not investigation blockers):**
+- **Blocked-entry flash copy.** `spawn.UnsupportedNoopMessage`'s `— nothing opened` is a burst RESPONSE (something was attempted). A pre-emptive `m`-entry block attempts nothing, so it needs distinct copy — likely naming the identity + a `terminals.json`/docs pointer for the named case, and an honest no-host-local line for NULL. Keep coherent with the CLI unsupported message (shared source today; may legitimately diverge since the CLI burst *does* attempt).
+- **Repeated `m` while the block flash is showing.** An actionable key clears the flash (model.go:3328) before its handler runs, so a second `m` clears then re-blocks + re-flashes. Behaviourally fine; the spec should state this is intentional so the copy/behaviour on repeated `m` is deliberate.
+- **Detection-resolves-unsupported-mid-mode.** If the user entered multi-select during the async in-flight window and detection then resolves unsupported, the current `terminalDetectedMsg` arm does NOT eject the mode. Decide whether the fix should eject (and flash) on resolve, or leave the reactive `decideBurst` no-op as the only backstop at Enter.
+- **Dead NULL banner branch.** If the NULL banner is dropped at the gate, `renderUnsupportedHeader`/`unsupportedLeftCluster`'s `bundleID == ""` branch + `unsupportedNullLabel` become unreachable from the picker — spec decides remove vs retain.
+
+**Validation:** independent root-cause validation ran (`.workflows/.cache/.../root-cause-validation-001.md`) — STATUS validated, high confidence, root cause explains all symptoms with no competing hypothesis. Three surfaced items were precision/framing nuances (help-modal-as-discoverability vs enabler; causal precision on "permanent"; repeated-`m` flash ordering) — the two substantive ones are folded into the causal-precision note above and the spec forks here.
