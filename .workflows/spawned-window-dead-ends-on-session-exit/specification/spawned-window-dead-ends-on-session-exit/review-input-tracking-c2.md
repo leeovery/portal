@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-21
 cycle: 2
 phase: Input Review
@@ -25,9 +25,9 @@ That framing under-represents the source: per the investigation, a custom termin
 - **No change for custom `terminals.json` terminals.** How a custom terminal's window ends is the user's own command/recipe's business. Custom-terminal users keep full control, including a deliberate close-on-exit if they chose it. Portal does not impose a shell fallback on them.
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+Applied (auto). Reframed the "No change for custom `terminals.json` terminals" bullet as a known, accepted residual: a custom terminal with wait-after-command-style behaviour can still dead-end unintentionally (as pre-fix Ghostty did); Portal deliberately does not cover that; and this is also why the shared-composition fix was rejected (would cover them but break the `{command}` contract).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Traceable to investigation §Blast Radius "Potentially affected"; makes the scope boundary honest for planning.
 
 ---
