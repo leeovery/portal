@@ -1,0 +1,3 @@
+AGENT: architecture
+FINDINGS: none
+SUMMARY: Implementation architecture is sound — the shell-fallback wrap is correctly scoped to the native Ghostty adapter (shared composeOpenArgv/renderCommandString and the config recipe adapters are untouched, preserving the {command} contract), reuses the existing shell-quote helper for the nested quoting rather than hand-rolling it, keeps the Adapter public surface and []string boundaries unchanged, and covers the command-composition seam with an independent golden-literal oracle plus round-trip/quote-sensitive fixtures while leaving the osascript boundary manual per spec.
