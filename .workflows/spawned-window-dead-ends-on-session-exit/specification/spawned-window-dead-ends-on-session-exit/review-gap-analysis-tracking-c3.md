@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-21
 cycle: 3
 phase: Gap Analysis
@@ -27,9 +27,9 @@ An attach-surface argv (session name, batch:token, PATH, exePath) typically carr
 This is a strengthening of an already-present coverage bullet rather than a wholly missing requirement, hence Minor.
 
 **Proposed Addition**:
-{Leave blank until discussed.}
+Applied (auto). Strengthened the Unit-coverage quote-nesting bullet to require a **quote-sensitive fixture** (an argv element with shell-special characters — `'`, `;`, `$`, `"` — ideally the mint `-- <command…>` passthrough, e.g. `-- sh -c 'echo hi'`) so the `'\''` double-escaping path is actually exercised. Amended AC #7 to require that fixture.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Quality strengthening of an existing coverage requirement, within already-made decisions; closes the exact failure class the spec's quoting constraint identifies.
 
 ---

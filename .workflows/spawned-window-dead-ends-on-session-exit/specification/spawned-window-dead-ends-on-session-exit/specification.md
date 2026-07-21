@@ -156,7 +156,7 @@ The native Ghostty osascript boundary has no automatable lane (stays `//go:build
 - Assert the Ghostty adapter emits the `bash -lc '<composed open argv>; exec "$SHELL" -il'` wrapper.
 - Assert the adapter no longer emits `wait after command`.
 - Assert the composed argv inside the wrapper still carries its `PATH=<…>` / `-u TMUX -u TMUX_PANE` prefix (PATH is not stripped by the wrap).
-- Assert quoting nests correctly — the embedded argv is not corrupted by the added `bash -lc '…'` layer.
+- Assert quoting nests correctly using a **quote-sensitive fixture** — an argv element containing shell-special characters (a single quote, `;`, `$`, `"`), ideally the mint `-- <command…>` passthrough (e.g. `-- sh -c 'echo hi'`) — so the `'\''` double-escaping path is actually exercised, not merely an attach-only argv that carries no special characters. Assert the embedded argv round-trips uncorrupted through the added `bash -lc '…'` layer.
 
 #### Manual validation — already performed (during investigation)
 
@@ -178,7 +178,7 @@ If the fix is ever re-validated against tmux, those commands must run on a throw
 4. The `@portal-spawn-<batch>-<token>` ack marker is still written before the attach handoff; the burst still confirms each window and logs `spawn: opened N/N`.
 5. Both burst entry points (picker multi-select and `portal open` multi-target) exhibit the fixed behaviour, via the shared adapter.
 6. The trigger window, single-session `portal open`/attach, custom `terminals.json` adapters, shared `composeOpenArgv`/`renderCommandString`, and the `syscall.Exec` attach path are all unchanged in behaviour.
-7. Unit tests at the command-composition seam assert the wrapper shape against the correctly-escaped expected string (the `'\''`-escaped nesting, not the schematic form), the absence of `wait after command`, the preserved PATH/`-u TMUX` prefix, and that the embedded argv round-trips uncorrupted through the added `bash -lc` layer.
+7. Unit tests at the command-composition seam assert the wrapper shape against the correctly-escaped expected string (the `'\''`-escaped nesting, not the schematic form), the absence of `wait after command`, the preserved PATH/`-u TMUX` prefix, and that the embedded argv round-trips uncorrupted through the added `bash -lc` layer. The quote-nesting assertion uses a quote-sensitive fixture (an argv element with shell-special characters, e.g. the mint `-- <command…>` passthrough) so the `'\''` double-escaping path is actually exercised.
 8. Known accepted residual: closing the window from the idle fallback prompt shows Ghostty's one-click close confirm. This is expected and not a defect.
 
 _Note: the fix mechanism itself was already validated live during the investigation (see Testing Requirements → Manual validation), so no manual-validation deliverable is gated by these acceptance criteria — only the code change and its unit coverage (criteria 2, 3, 7) remain to be built and verified._
