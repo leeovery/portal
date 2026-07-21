@@ -55,9 +55,31 @@ On remote/unsupported terminals the picker should behave sensibly:
 
 ### Hypotheses
 
-**Checkpoint depth:** {tbd}
+**Checkpoint depth:** straight-through — the bug is contained to `internal/tui`, the mechanism is near-confirmed from recon (discovery framed this a light confirm pass); the genuine design forks belong to the spec, not the trace.
 
-_(to be populated during code analysis)_
+- **H1 — Persistent NULL banner** [suspected]
+  The section-header swap gates only on `DetectUnsupported()` (resolution-based, TRUE for NULL/remote), with no identity-shape discriminator, so the NULL/remote resolution claims the header row permanently and drops `Sessions ··· N`.
+  _Basis:_ `unsupportedBannerActive()` = `DetectUnsupported() && !multiSelectMode` (model.go:4681); `DetectUnsupported` = `detectResolved && detectResolution == ResolutionUnsupported` (spawn_detect.go:117), true for both NULL and named-unsupported.
+
+- **H2 — `m` enters unconditionally** [suspected]
+  `handleMultiSelectToggle`'s entry branch has NO `DetectUnsupported()` gate; the only unsupported gate is downstream at `decideBurst`'s N≥2 Enter (the reactive `— nothing opened` no-op).
+  _Basis:_ model.go:3508-3524 (entry, ungated); burst_progress.go:425 (reactive arm).
+
+- **H3 — `m` shows in `?` help unconditionally** [suspected]
+  The help modal is fed the static `sessionsKeymap()` with no detection-aware filtering; `m` is a help-only (non-Core) entry, so the FOOTER is unaffected — only the help modal.
+  _Basis:_ keymap.go:89-105; help modal call model.go:4547.
+
+- **H4 — (contributing/edge) async detection keeps the reactive backstop load-bearing** [suspected]
+  Detection is ASYNC — `DetectUnsupported()` is false until resolved, so an entry-time `m`-block cannot fully replace the reactive `decideBurst` no-op: the in-flight→resolve race keeps the reactive backstop load-bearing, and raises a UX fork (eject from the mode when detection resolves unsupported mid-mode?).
+  _Basis:_ async dispatch spawn_detect.go:83-92; `TestBurstUnsupported_DeferredThenUnsupported`.
+
+### Trace lines (agreed order)
+
+1. Banner predicate chain — `unsupportedBannerActive` → `applySectionHeader` AND `activeNoticeBand` (the single predicate both read); confirm an `IsNull()` discriminator drops NULL while keeping named.
+2. `m`-entry handler — `handleMultiSelectToggle` entry vs toggle branch; confirm the live entry point is the only ungated site (`WithInitialMultiSelect` is capture-harness only).
+3. Help-modal descriptor feed — `sessionsKeymap()` → `renderHelpModalOnClearedCanvas`; confirm `keymap_dispatch_guard_test` tolerates a conditionally-absent `m`.
+4. Reactive backstop + async race — why the entry-block does NOT remove `decideBurst`'s unsupported arm; scope the in-flight window.
+5. Flash lifecycle + copy — `setFlash` self-clears on next actionable key (model.go:3328); the blocked-entry copy variant vs `spawn.UnsupportedNoopMessage`'s `— nothing opened` burst-response wording (design fork for the spec).
 
 ### Code Trace
 
