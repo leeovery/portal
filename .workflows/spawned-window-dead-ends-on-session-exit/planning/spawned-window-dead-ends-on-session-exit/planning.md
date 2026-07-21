@@ -17,3 +17,10 @@ approved_at: 2026-07-21
 - [ ] A unit test at the command-composition seam (around the existing `ghosttyEmbed` / template tests) asserts the wrapper shape against the correctly-escaped expected string, the absence of `wait after command`, and the preserved PATH/`-u TMUX` prefix
 - [ ] The quote-nesting assertion uses a quote-sensitive fixture — an argv element containing shell-special characters (a single quote, `;`, `$`, `"`), e.g. the mint `-- <command…>` passthrough — and proves the embedded argv round-trips uncorrupted through the added `bash -lc '…'` layer, actually exercising the `'\''` double-escaping path
 - [ ] Shared `composeOpenArgv` / `renderCommandString`, the `syscall.Exec` attach path, the `@portal-spawn-<batch>-<token>` ack marker ordering, the trigger path, single-session `portal open`/attach, and custom `terminals.json` adapters are all unchanged in behaviour, and the full test suite passes with no regressions
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| spawned-window-dead-ends-on-session-exit-1-1 | Wrap Ghostty window command in shell fallback and drop `wait after command` | quote-sensitive argv element (single quote, `;`, `$`, `"`) via mint `-- <command…>` passthrough round-tripping through the added `bash -lc` layer's `'\''` double-escaping; mint surface argv (`--path`) wrapped identically to attach (argv-agnostic) |
