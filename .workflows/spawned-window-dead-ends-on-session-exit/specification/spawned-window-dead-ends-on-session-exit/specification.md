@@ -125,6 +125,25 @@ The fallback lands in `/bin/zsh` as an **interactive login** shell with the user
 
 ---
 
+### Accepted Trade-off: Close-Confirm Prompt
+
+After the fix lands the window at the fallback zsh prompt, closing that Ghostty window shows Ghostty's standard confirm — *"Close Window? All terminal sessions in this window will be terminated."* — a prompt that is normally suppressed at an idle prompt.
+
+**This is accepted as-is.** The fix converts a dead-end into a usable shell (the goal); the residual one-click confirm when closing from the idle fallback is minor and honest — a live shell really is running. No shell-integration workaround ships.
+
+#### Cause (for the record)
+
+- The `wait after command` flag is **not** the cause — the confirm still fires with the flag omitted (sandbox-disproven), and there is no nested subprocess (the exec chain replaces bash→bash→zsh in place, same pid, no children at the prompt).
+- The strongest inference (Ghostty source not in repo) is **missing shell integration**: Ghostty suppresses `confirm-close-surface` at an idle prompt only when it can see the shell is idle, which it learns via shell integration injected when *it* launches the shell. A surface launched via a custom `command` does not get that injection, so Ghostty has no idle/busy signal and conservatively confirms.
+- This is **intrinsic to landing in a shell Ghostty did not launch itself** — any approach that does so hits it (including the rejected Option A). It is not switchable per-window (the sdef exposes only `command` + `wait after command`).
+
+#### Rejected mitigations (do not ship)
+
+- Re-injecting Ghostty shell integration into the fallback (e.g. restoring `ZDOTDIR`/`GHOSTTY_RESOURCES_DIR`) — Ghostty-version-specific, fragile, risks double-sourcing/config breakage on updates.
+- Setting `confirm-close-surface = false` — that is the user's global Ghostty config and would drop the prompt for all their windows, including ones with real running processes. Not Portal's call.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
