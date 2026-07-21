@@ -164,7 +164,50 @@ Two independent design gaps in the `restore-host-terminal-windows` unsupported-t
 
 ## Fix Direction
 
-_(to be populated after findings sign-off)_
+### Chosen Approach
+
+Four coordinated TUI-side sub-fixes, plus two forks resolved to their recommended options. No CLI change, no state footprint (spawn's near-zero footprint is unchanged).
+
+1. **Banner split by identity.** Add an `IsNull()` discriminator to `unsupportedBannerActive()` (model.go:4681) so it is true only for a NAMED unsupported identity. The named banner (bundle id + `see docs`) is unchanged; NULL/remote falls through to the standard `Sessions ··· N` header, and because `activeNoticeBand` reads the same predicate, the By-Tag no-tags signpost returns for a NULL client. Single-point change covering both consumers coherently.
+
+2. **Proactive `m`-entry block.** Gate `handleMultiSelectToggle`'s entry branch (model.go:3509) on `DetectUnsupported()` — the mode does not open on any unsupported terminal (NULL or named); a transient flash fires instead. `decideBurst`'s reactive no-op (burst_progress.go:425) is **retained** as the async-race backstop (the entry-block is inert while detection is in flight, so the reactive path still catches an entered-before-resolve → Enter).
+
+3. **Help-modal `m`-suppression.** Filter `m` out of the descriptor passed to the help modal at the call site (model.go:4547) when `DetectUnsupported()`. `sessionsKeymap()` stays static so `keymap_dispatch_guard_test` stays green; the footer is unaffected (`m` is non-Core).
+
+4. **Blocked-entry flash copy.** New copy distinct from `spawn.UnsupportedNoopMessage`'s `— nothing opened` (a burst response, semantically wrong for a pre-emptive block). Exact wording is spec detail; keep coherent with the CLI unsupported message.
+
+**Fork A — resolve-unsupported-mid-mode → A1 (leave the reactive backstop).** No eject on resolve; `decideBurst` catches it at Enter. The in-flight window is tiny and ejecting a user mid-interaction is jarring.
+
+**Fork B — `m` on a NULL/remote terminal → B1 (honest explanatory flash).** Pressing `m` on NULL flashes an explanatory line (e.g. "no host-local terminal — multi-select unavailable") so a silent `m` doesn't read as broken; it self-clears on the next key. (NULL has no `terminals.json` remedy, so the flash explains rather than guides.)
+
+**Deciding factor:** the direction was carried in from the report and re-affirmed in discovery; investigation confirmed every locus is TUI-local and each sub-fix is small and independently testable. A1/B1 keep the change minimal and avoid mid-interaction state jolts while still making `m` honestly unavailable.
+
+### Options Explored
+
+- **Fork A2 (eject on resolve).** More consistent (multi-select never survives an unsupported resolve) but introduces a mid-interaction state change for a tiny in-flight window. Not chosen.
+- **Fork B2 (silent no-op for NULL).** Quieter, but a silent `m` reads as broken. Not chosen.
+- **Parameterised `sessionsKeymap()` (drop `m` inside the descriptor fn).** Rejected in favour of the call-site filter: parameterising the descriptor would break `keymap_dispatch_guard_test` (which probes the static descriptor), and the descriptor is meant to be the single static source for dispatch parity.
+- **Removing `decideBurst`'s reactive no-op** once the entry-block lands. Rejected: async detection makes the reactive arm load-bearing for the entered-before-resolve race.
+
+### Discussion
+
+The direction was pre-shaped (report → discovery), so the exploration focused on the two behavioural forks investigation surfaced rather than re-deriving the approach. The user accepted the recommended A1/B1 on first pass. Key edge cases surfaced and carried to the spec: async in-flight entry (why the reactive backstop stays), repeated `m` while the block flash is showing (actionable-key clear then re-block/re-flash — intentional), and the now-dead NULL banner render branch (remove vs retain).
+
+### Testing Recommendations
+
+- **Rework `burst_unsupported_noop_test.go`:** the "resolved-unsupported → enter → mark → Enter" fixtures must now route through the in-flight path (enter multi-select BEFORE resolving detection), since entry is blocked once resolved. Keep the deferred-Enter → unsupported no-op coverage (the retained backstop).
+- **New: banner split.** NULL identity → standard `Sessions ··· N` header renders (not the banner) + By-Tag signpost returns; named identity → banner unchanged.
+- **New: `m`-entry block.** `m` on a resolved-unsupported terminal does NOT enter multi-select and sets the blocked flash (both NULL and named); flash self-clears on next actionable key.
+- **New: help suppression.** `?` help omits the `m` row when `DetectUnsupported()`, lists it when supported; `keymap_dispatch_guard_test` still green.
+- **Guard:** supported (native/config) terminal path unchanged — banner absent, `m` enters, help lists `m`.
+- **Visual:** add a NULL-identity fixture (standard header); existing `sessions-unsupported-terminal` (named) fixture stays valid.
+
+### Risk Assessment
+
+- **Fix complexity:** Low — four small, independent TUI changes; no new packages, no state/daemon surface.
+- **Regression risk:** Low — the banner gate can only fire on an unsupported resolution (supported terminals never reach it); the reactive backstop is retained; the guard test constrains the help/keymap change.
+- **Recommended approach:** Regular release. No hotfix, no feature flag.
+- **Sequencing note (not a blocker):** `cli-verb-surface-redesign` (CLI burst) is expected to land first; keep the blocked-entry / unsupported copy coherent with the CLI's. Related bug `2026-07-15--remote-trigger-spawns-on-local-terminal` will make every remote login resolve NULL — increasing this fix's reach — but does not gate it.
 
 ---
 
