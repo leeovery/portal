@@ -139,39 +139,59 @@ tell application "Ghostty"
 end tell
 ```
 
-Per the file's own comment (`ghostty.go:24-40`): **Ghostty runs the `command` string
-via `bash -c`**, which word-splits it. So the window's root process is effectively
+Per the file's own comment (`ghostty.go:24-40`), Ghostty runs the `command` string via
+`bash -c`, which word-splits it. So the window's root process is effectively
 `bash -c "/usr/bin/env … <exe> open --session <name> --ack …"` — a **single**
-command, so `bash -c` exec-optimises (replaces itself with the command chain) rather
-than staying as a parent. There is **no surrounding interactive shell**.
+non-interactive command with **no surrounding interactive shell**.
+
+_(Inference, not repo-verified: whether `bash -c` exec-optimises the single command by
+replacing itself, or fork/waits it, does not change the outcome — a `bash -c "<single
+cmd>"` is non-interactive and terminates when its command terminates either way, so
+there is nothing to fall back to. The `bash -c` wrapper itself is sourced from the
+`ghostty.go` comment, not the Ghostty source, which is not in this repo.)_
 
 **3. The exec into tmux (why nothing is left behind).**
 `bash -c` → `env` → `portal open --session`. In `cmd/open.go`, `openResolved`
 (`:360`) hits the `*resolver.SessionResult` arm, writes the ack marker
 (`writeAckMarker`, `:369` — the LAST act before handoff), then calls
-`openSessionFunc` → `AttachConnector.Connect` (`:107`). Outside tmux this does
-`syscall.Exec("tmux", ["tmux","attach-session","-t","=<name>"], os.Environ())`
-(`:124-131`) — **replacing the process image with the tmux client**. The tmux client
-is now the window's one-and-only process.
+`openSessionFunc` → `AttachConnector.Connect` (`:107`). Outside tmux this builds
+`["tmux","attach-session","-t","=<name>"]` (`:124`) and execs it via `ex.Exec` (`:131`)
+→ production `realExecer.Exec` → `syscall.Exec` (`cmd/open.go:544`) — **replacing the
+process image with the tmux client**. The tmux client is now the window's one-and-only
+process. (Note: the spawned window is *always* outside tmux — `composeOpenArgv` strips
+`TMUX`/`TMUX_PANE` — so a spawned `open` always takes this `AttachConnector` branch;
+`SwitchConnector` is unreachable for it.)
 
 **4. Session exit / detach → dead-end.**
-When `tmux attach-session` returns (session detach — `[detached (from session …)]` —
-or session end), the exec'd process exits. `bash -c` is done. Because the adapter set
-`wait after command:true`, Ghostty does **not** close the window and does **not** drop
-to a shell — it shows its wait-after-command end-of-command prompt: **"Process exited.
-Press any key to close the terminal."** A keypress then closes the window. This is the
-reported dead-end, verbatim.
+When `tmux attach-session` returns (session detach — `[detached (from session …)]`,
+tmux's own client-detach output — or session end), the exec'd process exits. `bash -c`
+is done. Because the adapter set `wait after command:true`, Ghostty does **not** close
+the window and does **not** drop to a shell — it holds the window awaiting a keypress:
+**"Process exited. Press any key to close the terminal."** A keypress then closes the
+window. This is the reported dead-end, verbatim.
+
+_(Inference: attributing the exact "Process exited. Press any key…" string to Ghostty's
+`wait after command:true` is unverifiable from this repo — no Ghostty source is present
+— but it is unmistakably a wait-after-command end-of-command prompt, and the
+`ghostty-spawn-zero-windows` spec describes that flag's purpose in exactly these terms.
+The `[detached …]` line above it is confirmed tmux client-detach output.)_
 
 **5. Why the trigger window is exempt (the asymmetry).**
 The trigger window is **never spawned via the Ghostty adapter and never runs
-`composeOpenArgv`**. It self-connects **in-process**:
-`cmd/open_burst_run.go:267` calls `deps.Connector.Connect(trigger.Value)` from the
-already-running portal process — a child of the user's **existing interactive login
-shell** (bare-shell → `AttachConnector`/`syscall.Exec`; inside-tmux →
-`SwitchConnector`/`switch-client`). When tmux exits, control returns to that parent
-interactive shell → prompt. The spawned windows have no such parent: their root
-process is a one-shot `bash -c` that gets replaced by the exec chain, so there is
-nothing to fall back to.
+`composeOpenArgv`**. It self-connects **in-process** from the already-running portal
+process — a child of the user's **existing interactive login shell** (bare-shell →
+`AttachConnector`/`syscall.Exec`; inside-tmux → `SwitchConnector`/`switch-client`).
+When tmux exits, control returns to that parent interactive shell → prompt. The spawned
+windows have no such parent: their root process is a one-shot `bash -c` that gets
+replaced by the exec chain, so there is nothing to fall back to.
+
+Confirmed for **both** burst entry points (they share the `AttachConnector` type and
+the in-process parent-shell context):
+- **`portal open` multi-target burst:** `cmd/open_burst_run.go:267` —
+  `deps.Connector.Connect(trigger.Value)`.
+- **Picker multi-select burst (the reported repro):** on the all-confirmed
+  `spawnCompleteMsg`, `internal/tui/model.go:2525` sets `m.selected = m.burstTrigger`
+  and quits → `processTUIResult` (`cmd/open.go:755`) → `connector.Connect`.
 
 **Key files involved:**
 - `internal/spawn/command.go` — `composeOpenArgv`, the spawned `open` argv (the
@@ -281,10 +301,24 @@ spawned-window attach path: instead of `syscall.Exec`ing tmux, portal fork/execs
 tmux client, waits for it, then `exec`s an interactive login `$SHELL` → prompt.
 - **Pros:** Keeps `composeOpenArgv` a real argv (no shell syntax); works across ALL
   adapters (native + config) uniformly; portal owns the behaviour, so it's testable in
-  Go; ack write is unaffected; even an attach *error* lands in a shell (no dead-end on
-  failure). Best match for "as if I opened Ghostty myself."
-- **Cons:** Touches `cmd/open.go` attach path with a spawned-only branch; must ensure
-  the trigger path is untouched.
+  Go; ack write is unaffected (`writeAckMarker` fires before the connect regardless of
+  exec vs fork/wait — confirmed at `open.go:369`); even an attach *error* lands in a
+  shell (no dead-end on failure). Best match for "as if I opened Ghostty myself."
+- **Cons / implementation risks (surfaced by synthesis validation):**
+  - **Shared-connector coupling.** `AttachConnector` / `buildSessionConnector` are
+    *shared* between the spawned connect and the trigger self-connect. The fork/wait
+    fallback MUST be gated on the flag value threaded through the spawned `open`
+    (`RunE → openSessionFunc → openSession → buildSessionConnector → AttachConnector`,
+    touching those signatures) — **not** on the connector type. An unconditional change
+    to `AttachConnector.Connect` would regress the (correct) trigger path. Containment
+    helper: only the `AttachConnector` (exec-attach) branch needs it, since a spawned
+    window is always outside tmux.
+  - **tty / signal semantics.** `syscall.Exec` currently sidesteps job-control/tty
+    proxying by fully *replacing* portal with the tmux client. A fork/wait wrapper
+    leaves portal as the parent of a full-screen tty app (tmux attach) and must pass
+    through the controlling tty and forward signals (SIGWINCH resize, SIGINT, SIGTSTP).
+    `exec.Command(...).Run()` with inherited std fds generally works for a foreground
+    tty child, but this is a real behavioural surface to validate in the sandbox.
 
 **Option B — Wrap the spawned command in a shell fallback at composition.**
 Compose the spawned command as a shell invocation, e.g. `$SHELL -lc '<open argv>; exec
