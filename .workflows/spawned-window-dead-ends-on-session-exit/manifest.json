@@ -31,9 +31,9 @@
     "planning": {
       "items": {
         "spawned-window-dead-ends-on-session-exit": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
-          "spec_commit": "365f4d8d61dfbd8ce02e3f7f1105b426c4b8f46f",
+          "spec_commit": "abcd61f72d8e9e5e1349ec1e7e67c9530b2fa032",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "auto",
