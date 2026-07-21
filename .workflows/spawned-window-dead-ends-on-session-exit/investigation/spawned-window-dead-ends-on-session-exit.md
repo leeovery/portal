@@ -292,73 +292,119 @@ prompt. Closing cleanly is an acceptable fallback. The user explicitly deferred 
 "is this possible / what's the standard approach" mechanism choice to this phase and
 wants to weigh in.
 
+### Chosen Approach (from findings-review discussion)
+
+**A Ghostty-adapter-scoped shell fallback: the native Ghostty adapter composes its
+window command as `bash -lc '<the composed open argv>; exec "$SHELL" -il'`, and
+`wait after command` is dropped (no longer needed once a shell keeps the window
+alive).** Custom `terminals.json` terminals are left untouched — how *their* window
+ends is the user's own command/recipe's business.
+
+**Deciding factor / model (user's framing):** Portal's job ends at "open a window
+running this command." How the window behaves when the command ends is a property of
+the command + terminal, not something Portal should centrally control. Under that
+model, Portal should only shape end-of-window behaviour for the command it *authors*
+(the native Ghostty adapter), and leave custom-terminal users in full control. This
+retired Option A (below), which had Portal centrally intercept the process lifecycle
+for *all* terminals — overreach under this model, and it would impose a shell fallback
+even on custom-terminal users who may have deliberately chosen close-on-exit.
+
 ### Options Explored
 
-**Option A — Portal owns the fallback: a spawned-window flag that fork/waits tmux then
-execs an interactive shell.**
-Add an internal flag (e.g. `--fallback-shell`, alongside `--ack`) that changes only the
-spawned-window attach path: instead of `syscall.Exec`ing tmux, portal fork/execs the
-tmux client, waits for it, then `exec`s an interactive login `$SHELL` → prompt.
-- **Pros:** Keeps `composeOpenArgv` a real argv (no shell syntax); works across ALL
-  adapters (native + config) uniformly; portal owns the behaviour, so it's testable in
-  Go; ack write is unaffected (`writeAckMarker` fires before the connect regardless of
-  exec vs fork/wait — confirmed at `open.go:369`); even an attach *error* lands in a
-  shell (no dead-end on failure). Best match for "as if I opened Ghostty myself."
-- **Cons / implementation risks (surfaced by synthesis validation):**
-  - **Shared-connector coupling.** `AttachConnector` / `buildSessionConnector` are
-    *shared* between the spawned connect and the trigger self-connect. The fork/wait
-    fallback MUST be gated on the flag value threaded through the spawned `open`
-    (`RunE → openSessionFunc → openSession → buildSessionConnector → AttachConnector`,
-    touching those signatures) — **not** on the connector type. An unconditional change
-    to `AttachConnector.Connect` would regress the (correct) trigger path. Containment
-    helper: only the `AttachConnector` (exec-attach) branch needs it, since a spawned
-    window is always outside tmux.
-  - **tty / signal semantics.** `syscall.Exec` currently sidesteps job-control/tty
-    proxying by fully *replacing* portal with the tmux client. A fork/wait wrapper
-    leaves portal as the parent of a full-screen tty app (tmux attach) and must pass
-    through the controlling tty and forward signals (SIGWINCH resize, SIGINT, SIGTSTP).
-    `exec.Command(...).Run()` with inherited std fds generally works for a foreground
-    tty child, but this is a real behavioural surface to validate in the sandbox.
+**Chosen — Ghostty-adapter-scoped shell wrap (Option B, correctly scoped).** Wrap ONLY
+in the native Ghostty adapter's command, not in the shared `composeOpenArgv` /
+`renderCommandString`. Scoping is the whole point: a wrap in *shared* composition would
+re-leak shell syntax into `terminals.json` `{command}` (the very custom-terminal
+contract breakage the user rejected). Scoped to the adapter, only Portal's own Ghostty
+command changes.
+- Native Ghostty is a terminal Portal controls the invocation of, so a shell wrap is
+  safe there; it isn't safe as a shared-composition change (see rejected B-shared).
+- Validated end-to-end in the sandbox (see below): lands in the user's full zsh /
+  Oh My Zsh.
 
-**Option B — Wrap the spawned command in a shell fallback at composition.**
-Compose the spawned command as a shell invocation, e.g. `$SHELL -lc '<open argv>; exec
-$SHELL -l'`. The wrapping shell fork/waits the `open` child (which execs tmux), then
-execs an interactive shell on return.
-- **Pros:** Lands at a prompt; no portal code change.
-- **Cons:** Breaks the "real argv, never shell syntax" contract; collides with
-  `renderCommandString`'s per-element single-quoting and the config-recipe `{command}`
-  substitution semantics; shell-quoting/escaping across native + config adapters is
-  fiddle-prone (this is the same class of escaping bug that already bit the Ghostty
-  template). Riskier than A for the same outcome.
+**Rejected — Option A (Portal owns the fallback via a spawned-only flag).** Portal
+fork/waits tmux then execs `$SHELL`. Rejected because it has Portal *centrally* control
+window-end lifecycle for every terminal — contradicts the chosen model and would
+override custom-terminal users' own choices. (Also carried tty/signal-proxy risk, since
+fork/wait leaves Portal parenting a full-screen tty app.)
 
-**Option C — Ghostty adapter sets `wait after command:false`.**
-Let the window close cleanly when the command exits.
-- **Pros:** One-line change; satisfies "close cleanly."
-- **Cons:** Does NOT land at a prompt (misses the primary desired outcome);
-  Ghostty-only (config terminals unaffected); reverses a deliberate
-  `ghostty-spawn-zero-windows` decision — need to confirm nothing depended on the
-  window persisting after detach (e.g. seeing a fast spawn/attach error before the
-  window vanishes). Could pair with A/B as a secondary.
+**Rejected — Option B in *shared composition*.** Same shell-wrap idea but placed in
+`composeOpenArgv`. Rejected: injects shell metacharacters (`;`, `exec`) into
+`{command}`, which only work if the terminal runs `{command}` through a shell — a
+guarantee `terminals.json` does NOT make. A direct-exec custom terminal would silently
+break. Scoping the wrap to the Ghostty adapter avoids this entirely.
 
-**Leaning:** Option A best matches the user's stated outcome and the codebase's
-"env-self-sufficient real argv" design, and it generalises beyond Ghostty. To confirm
-with the user at findings review (mechanism was explicitly deferred to them).
+**Rejected — Option C (`wait after command:false`, close cleanly).** The user judged an
+abrupt close *worse* than the dead-end: with multiple/scattered Ghostty windows you can
+lose track of which one vanished. Keeping the window visible was a property to preserve;
+a live shell delivers "visible AND usable," strictly better than both close and the
+dead-end. (Note: dropping `wait after command` in the chosen approach is different — the
+window still stays visible because the exec'd *shell* keeps it alive.)
+
+### Sandbox Validation (performed during investigation)
+
+Validated the shell-fallback mechanism directly (Ghostty + shell — no Portal), per the
+user's request, sandboxed (no live tmux server touched).
+
+**Confirmed — the fallback lands in the user's full shell.** A wrapper running a command
+then `exec "$SHELL" -il` lands in `/bin/zsh` as an **interactive login** shell with
+**Oh My Zsh sourced** (`$ZSH=/Users/leeovery/.oh-my-zsh`, `$ZSH_VERSION=5.9`,
+`login=yes`, `interactive=yes`). `$SHELL` propagates correctly. NOT bash.
+
+**Confirmed — how Ghostty runs the `command` (revealed by a failed implicit-append
+attempt).** Ghostty executes the window command as:
+```
+/usr/bin/login -flp <user> /bin/bash --noprofile --norc -c "exec -l <command>"
+```
+i.e. it **prepends `exec -l`** so the command *replaces* the bash wrapper and becomes
+the window's process. Two consequences:
+- **The implicit-append form (`<argv>; exec "$SHELL" -il`) is RULED OUT.** `exec -l`
+  applies to the FIRST token (`exec -l <argv-first-word> …`), replacing bash with that
+  command — so the `; exec "$SHELL"` fallback is unreachable, and if the first token
+  isn't found it fatals (`exec: <cmd>: not found`, window "failed to launch"). Confirmed
+  live.
+- **The explicit-wrapper form (`bash -lc '<argv>; exec "$SHELL" -il'`) WORKS.** Ghostty's
+  `exec -l bash -lc '…'` replaces the outer bash with our inner bash, which runs the
+  session command (as a child) then execs the interactive `$SHELL`. Confirmed live: the
+  window landed at the user's normal zsh prompt after the session was killed. **This is
+  the shape to ship.**
+
+**Test artifact, not a defect:** the implicit-attempt also showed `tmux: not found` —
+because the hand-test omitted the `PATH=<picker PATH>` injection that the real
+`composeOpenArgv` always includes (`/usr/bin/env … PATH=… -u TMUX …`). Real Portal
+windows carry PATH, so tmux resolves. The Ghostty wrapper's `--noprofile --norc` + login
+default PATH is why a PATH-less command can't find tmux — reinforcing that the composed
+command must keep carrying PATH.
+
+### Open Item (pending user verification)
+
+**Close-confirm prompt.** After landing at the fallback zsh prompt, closing the Ghostty
+window prompts "are you sure?" (normally only shown when a process is running).
+**Hypothesis:** `wait after command:true`. Ghostty sees the command's pid still alive
+(the exec chain replaced bash→zsh in-place, same pid) and, told to *wait after command*,
+treats the surface as "the awaited command is still running" → confirms on close. Since
+the shell-fallback keeps the window open on its own, `wait after command` is no longer
+needed; **dropping it** should keep the window visible AND remove the confirm (and, once
+the user finally exits the fallback shell, let Ghostty close the window cleanly). To
+confirm live before locking the final command shape.
 
 ### Testing Recommendations
 
-- Provide **sandboxed validation commands on a throwaway `-L <socket>` tmux server**
-  (never the live default server — ~31 real sessions) that reproduce the exec chain a
-  spawned window runs and demonstrate the fix lands at a shell prompt on session
-  exit/detach. (To be authored with the chosen mechanism.)
-- Add Go coverage for the chosen fallback path (e.g. the fork/wait-then-exec-shell
-  branch under Option A) at the seam level, since the real Ghostty boundary stays
-  manual-only.
+- Ship the validated **sandboxed Ghostty test commands** (throwaway `-L` socket) as the
+  manual validation for this fix — the implicit-vs-explicit distinction is exactly what
+  a future regression could reintroduce.
+- The native Ghostty osascript boundary stays `//go:build manual` (no automatable lane),
+  so add unit coverage at the **command-composition** seam: assert the Ghostty adapter
+  emits the `bash -lc '…; exec "$SHELL" -il'` wrapper (and no `wait after command`),
+  around the existing `ghosttyEmbed` / template tests.
 
 ### Risk Assessment
 
-- **Fix complexity:** Low–Medium (Option A: a scoped spawned-only attach branch).
-- **Regression risk:** Low–Medium — must not perturb the trigger/self-attach path or
-  the single-session `open`; the spawned-only flag keeps the blast radius contained.
+- **Fix complexity:** Low — a scoped change to the native Ghostty adapter's command
+  composition (+ drop `wait after command`). No Portal core / connector / composition
+  changes; `syscall.Exec` attach path untouched, so no tty/signal-proxy risk.
+- **Regression risk:** Low — adapter-local; custom `terminals.json` path unchanged; the
+  trigger and single-session `open` paths never touch this code.
 - **Recommended approach:** Regular release (UX polish on a shipped feature; not a
   hotfix).
 
