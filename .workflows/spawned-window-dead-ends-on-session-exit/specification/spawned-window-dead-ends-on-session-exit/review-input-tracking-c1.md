@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-21
 cycle: 1
 phase: Input Review
@@ -33,7 +33,7 @@ The fix removes only the second line. On the **detach** path (as opposed to a cl
 **Proposed Addition**:
 (leave blank until discussed — likely a one-clause note that the tmux `[detached (from session <name>)]` line still prints above the fallback prompt on the detach path and is expected, since it is tmux's own client-detach output and outside the fix's scope)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Added a clause to Acceptance Criteria #1 and to the Manual validation text noting that tmux's `[detached (from session <name>)]` line still prints above the fallback prompt on the detach path — expected tmux output, outside the fix's scope, not a sign of an incomplete fix.
 
 ---

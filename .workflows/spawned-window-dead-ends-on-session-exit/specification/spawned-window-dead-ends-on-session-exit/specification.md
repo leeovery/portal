@@ -157,7 +157,7 @@ The native Ghostty osascript boundary has no automatable lane (stays `//go:build
 
 #### Manual validation (documented, sandboxed)
 
-Ship the validated sandboxed Ghostty test commands as the documented manual validation for this fix. The implicit-vs-explicit wrapper distinction is exactly what a future regression could reintroduce, so the manual test must exercise the explicit `bash -lc '…'` form end-to-end: open a Ghostty window via the adapter's command shape, kill/detach the session, and confirm the window lands at the user's normal interactive login shell (`$SHELL`, login+interactive) rather than a "Press any key to close" dead-end.
+Ship the validated sandboxed Ghostty test commands as the documented manual validation for this fix. The implicit-vs-explicit wrapper distinction is exactly what a future regression could reintroduce, so the manual test must exercise the explicit `bash -lc '…'` form end-to-end: open a Ghostty window via the adapter's command shape, kill/detach the session, and confirm the window lands at the user's normal interactive login shell (`$SHELL`, login+interactive) rather than a "Press any key to close" dead-end. On the detach path, tmux's `[detached (from session <name>)]` line prints above the fallback prompt — that is expected tmux output, not a sign the fix failed.
 
 #### Sandbox rule (mandatory)
 
@@ -167,7 +167,7 @@ Any validation commands that touch tmux must run on a throwaway `-L <socket>` tm
 
 ### Acceptance Criteria
 
-1. When a session running inside a burst-spawned (N−1 external) native-Ghostty window exits or detaches, the window lands at the user's normal interactive login shell prompt (`$SHELL`, login + interactive) — not the "Process exited. Press any key to close the terminal." dead-end.
+1. When a session running inside a burst-spawned (N−1 external) native-Ghostty window exits or detaches, the window lands at the user's normal interactive login shell prompt (`$SHELL`, login + interactive) — not the "Process exited. Press any key to close the terminal." dead-end. On the detach path, tmux's own `[detached (from session <name>)]` line may still print above the fallback prompt; this is expected tmux client-detach output, outside the fix's scope, and does not indicate an incomplete fix.
 2. The native Ghostty adapter's window command is the explicit wrapper form `bash -lc '<composed open argv>; exec "$SHELL" -il'`, and the adapter no longer emits `wait after command`.
 3. The composed open argv inside the wrapper is unchanged from today — same `open --session <name> --ack <batch>:<token>` argv, same `/usr/bin/env … PATH=<picker PATH> -u TMUX -u TMUX_PANE` prefix; `tmux` resolves in the fallback shell's environment.
 4. The `@portal-spawn-<batch>-<token>` ack marker is still written before the attach handoff; the burst still confirms each window and logs `spawn: opened N/N`.
