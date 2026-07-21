@@ -144,6 +144,27 @@ After the fix lands the window at the fallback zsh prompt, closing that Ghostty 
 
 ---
 
+### Testing Requirements
+
+#### Unit coverage (automated)
+
+The native Ghostty osascript boundary has no automatable lane (stays `//go:build manual`), so add coverage at the **command-composition seam**, around the existing `ghosttyEmbed` / template tests:
+
+- Assert the Ghostty adapter emits the `bash -lc '<composed open argv>; exec "$SHELL" -il'` wrapper.
+- Assert the adapter no longer emits `wait after command`.
+- Assert the composed argv inside the wrapper still carries its `PATH=<…>` / `-u TMUX -u TMUX_PANE` prefix (PATH is not stripped by the wrap).
+- Assert quoting nests correctly — the embedded argv is not corrupted by the added `bash -lc '…'` layer.
+
+#### Manual validation (documented, sandboxed)
+
+Ship the validated sandboxed Ghostty test commands as the documented manual validation for this fix. The implicit-vs-explicit wrapper distinction is exactly what a future regression could reintroduce, so the manual test must exercise the explicit `bash -lc '…'` form end-to-end: open a Ghostty window via the adapter's command shape, kill/detach the session, and confirm the window lands at the user's normal interactive login shell (`$SHELL`, login+interactive) rather than a "Press any key to close" dead-end.
+
+#### Sandbox rule (mandatory)
+
+Any validation commands that touch tmux must run on a throwaway `-L <socket>` tmux server, **never** the live default server (which hosts the user's real sessions). Earlier Ghostty spawn misfires must not be repeated.
+
+---
+
 ## Working Notes
 
 _Optional - capture in-progress discussion if needed._
