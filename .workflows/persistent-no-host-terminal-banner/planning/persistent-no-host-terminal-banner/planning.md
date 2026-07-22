@@ -77,7 +77,8 @@ approved_at: 2026-07-22
 - [ ] Full unit suite and the CLI open-burst copy tests green.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-22
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
