@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-22
 cycle: 3
 phase: Gap Analysis
@@ -27,9 +27,9 @@ topic: Persistent No Host Terminal Banner
 A reader relying on §1's Solution Shape in isolation would under-scope the task set (missing the `internal/spawn/message.go` edit and its test/copy fallout) and would not anticipate the `cli-verb-surface-redesign` coordination that §8 flags. The full spec (§5/§8) is internally correct and unambiguous; the defect is confined to §1's summary being looser than — and on the CLI point, in tension with — the sections it summarises. Because §5/§8 fully and correctly scope the spawn change, a thorough whole-spec reader is not misled, which keeps this Minor rather than Important — but for a spec otherwise meticulous about scope enumeration and single-sourcing, tightening the orienting summary removes a real cross-section inconsistency.
 
 **Proposed Addition**:
-Tighten §1 Solution Shape so it (a) acknowledges the `internal/spawn/message.go` `UnsupportedNoopMessage` plain-language rewrite as an in-scope change beyond the four TUI sub-fixes, and (b) replaces the blanket "No CLI change" with the precise form already stated in §8 — no change to the CLI's burst/block **logic**, but the shared unsupported-message copy the CLI open-burst renders is rewritten and must stay coherent with `cli-verb-surface-redesign`. Leave blank pending discussion.
+§1 Solution Shape tightened: adds the `internal/spawn/message.go` `UnsupportedNoopMessage` rewrite as in-scope (beyond the four TUI sub-fixes) and replaces the blanket "No CLI change" with the precise form — no change to CLI burst/block **logic**, but the shared message the CLI open-burst renders is rewritten and must stay coherent with `cli-verb-surface-redesign`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied (Minor). Consequence of the Topic 5 copy-scope widening; §1 summary brought in line with §5/§8.
 
 ---

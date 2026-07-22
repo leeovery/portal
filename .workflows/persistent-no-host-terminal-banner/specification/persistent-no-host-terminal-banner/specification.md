@@ -23,7 +23,7 @@ On a picker session where detection has resolved an unsupported terminal:
 
 ### Solution Shape
 
-Four coordinated, independently-testable TUI-side sub-fixes (banner split, proactive `m`-entry block, help-modal `m`-suppression, blocked-entry flash copy). No CLI change; no state/daemon/`sessions.json`/`prefs.json` footprint — spawn's near-zero state footprint is unchanged.
+Four coordinated, independently-testable TUI-side sub-fixes (banner split, proactive `m`-entry block, help-modal `m`-suppression, blocked-entry flash copy), plus a plain-language rewrite of the shared `UnsupportedNoopMessage` in `internal/spawn/message.go` (in scope — see §5/§8). No change to the CLI's burst/block **logic**, but that shared message is rendered by the CLI open-burst too, so its rewritten copy must stay coherent with `cli-verb-surface-redesign` (the one cross-package, coordination-sensitive dimension of this fix). No state/daemon/`sessions.json`/`prefs.json` footprint — spawn's near-zero state footprint is unchanged.
 
 ---
 
