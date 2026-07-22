@@ -10,17 +10,19 @@ import (
 	"github.com/leeovery/portal/internal/tui/theme"
 )
 
-// The §6.2 proactive unsupported/NULL terminal banner: a filter-line analogue that
+// The §6.2 proactive unsupported terminal banner: a filter-line analogue that
 // REPLACES the standard `Sessions ··· N` section header when detection has resolved
-// the host terminal to an unsupported resolution (a NULL remote/mosh identity OR a
-// non-NULL recognised-but-undriven identity like com.apple.Terminal). Named
-// identity: amber `⚠ unsupported terminal` + a dim `— <name> · <bundleID>` identity
-// (copy-paste key) on the left, a right-anchored blue `see docs` hint. NULL
-// identity: the honest `⚠ no host-local terminal` line, no identity, no `see docs`.
-// NO `▌` left-bar (it is a section-header analogue, not a §11 notice band). These
-// tests pin the colour roles, the exact copy, the right-alignment, the NULL branch,
-// the single-row height, the NO_COLOR carve-out, and the applySectionHeader
-// precedence (below multi-select, above the standard header).
+// the host terminal to a NAMED unsupported resolution (a non-NULL
+// recognised-but-undriven identity like com.apple.Terminal). It is named-only: amber
+// `⚠ unsupported terminal` + a dim `— <name> · <bundleID>` identity (copy-paste key)
+// on the left, a right-anchored blue `see docs` hint. NO `▌` left-bar (it is a
+// section-header analogue, not a §11 notice band). A NULL (remote/mosh) identity is
+// no longer a banner case — the gate (unsupportedBannerActive) carries the !IsNull()
+// discriminator, so a NULL client renders the standard `Sessions ··· N` header
+// (covered by TestApplySectionHeader_UnsupportedNullShowsStandardHeader). These
+// tests pin the colour roles, the exact copy, the right-alignment, the single-row
+// height, the NO_COLOR carve-out, and the applySectionHeader precedence (below
+// multi-select, above the standard header).
 //
 // No t.Parallel() — the package-level mock convention and shared canvas helpers
 // make parallelism unsafe across this package's tests.
@@ -83,29 +85,6 @@ func TestUnsupportedHeader_NamedIdentityAmberDimSeeDocs(t *testing.T) {
 	}
 }
 
-// TestUnsupportedHeader_NullIdentityNoHostLocal asserts the NULL (remote/mosh)
-// branch — detected via bundleID == "" — renders the honest
-// `⚠ no host-local terminal` line in accent.orange, with NO identity string and NO
-// `see docs` hint (matching CLI task 2-7's IsNull copy branch).
-func TestUnsupportedHeader_NullIdentityNoHostLocal(t *testing.T) {
-	header := renderUnsupportedHeader("", "", sectionHeaderWidth, theme.Dark, false)
-
-	if !strings.Contains(ansi.Strip(header), "⚠ no host-local terminal") {
-		t.Errorf("NULL banner must read %q:\n%s", "⚠ no host-local terminal", ansi.Strip(header))
-	}
-	if strings.Contains(header, "see docs") {
-		t.Errorf("NULL banner must NOT show the %q hint:\n%s", "see docs", ansi.Strip(header))
-	}
-	if strings.Contains(header, "unsupported terminal") {
-		t.Errorf("NULL banner must NOT use the named %q copy:\n%s", "unsupported terminal", ansi.Strip(header))
-	}
-	// The honest label is accent.orange.
-	amberRun := headerStyle(theme.MV.AccentOrange, theme.Dark, false).Render(flashWarningGlyph + " " + "no host-local terminal")
-	if !strings.Contains(header, amberRun) {
-		t.Errorf("NULL banner missing the accent.orange label run:\n%s", header)
-	}
-}
-
 // TestUnsupportedHeader_RightAlignedSeeDocs asserts the `see docs` hint is
 // right-aligned (the left cluster and the hint are separated by a flex spacer to
 // the content width) and the single rendered row is exactly the content width.
@@ -125,16 +104,15 @@ func TestUnsupportedHeader_RightAlignedSeeDocs(t *testing.T) {
 	}
 }
 
-// TestUnsupportedHeader_ExactlyOneRow asserts the banner is exactly one rendered
-// row for both the named and NULL branches — it REPLACES the section-header row and
-// must not perturb the one-row-per-delegate pagination budget (§3.5).
+// TestUnsupportedHeader_ExactlyOneRow asserts the named banner is exactly one
+// rendered row — it REPLACES the section-header row and must not perturb the
+// one-row-per-delegate pagination budget (§3.5).
 func TestUnsupportedHeader_ExactlyOneRow(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		bundleID string
 	}{
 		{"named", "com.apple.Terminal"},
-		{"null", ""},
 	} {
 		header := renderUnsupportedHeader("Apple Terminal", tc.bundleID, sectionHeaderWidth, theme.Dark, false)
 		if got := lipgloss.Height(header); got != 1 {

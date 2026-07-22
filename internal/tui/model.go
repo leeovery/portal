@@ -4783,8 +4783,8 @@ func (m Model) applySectionHeader(listView string) string {
 	// unsupported still shows the banner) but FOLLOWS multi-select (the `N selected`
 	// banner outranks it — the gate is false in the mode). An in-flight detection
 	// (not yet resolved) leaves DetectUnsupported false, so the standard header shows.
-	// (The now-unreachable NULL render branch inside renderUnsupportedHeader /
-	// unsupportedLeftCluster is removed in Task 1.2, not here.)
+	// renderUnsupportedHeader / unsupportedLeftCluster are named-only (bundleID != ""
+	// always holds here), so the `see docs` hint is unconditional.
 	if m.unsupportedBannerActive() {
 		return replaceHeaderLine(listView, renderUnsupportedHeader(
 			m.detectIdentity.Name,
