@@ -21,6 +21,15 @@ approved_at: 2026-07-22
 - [ ] The once-only detection cache is left untouched — no re-detection is added on `rebuildSessionList`.
 - [ ] Full unit suite green; no regression in the named-banner, supported-header, or multi-select-steps-aside tests.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| persistent-no-host-terminal-banner-1-1 | Add IsNull() discriminator to unsupportedBannerActive() so NULL keeps the standard header and signpost | multi-select mode still outranks (predicate false in mode), in-flight/unresolved detection renders standard header, NULL + zero-tags By-Tag signpost returns, named identity banner + see docs unchanged, detection cache left untouched (no re-detection on rebuild) |
+| persistent-no-host-terminal-banner-1-2 | Remove the unreachable NULL banner render branch (renderers named-only, see docs unconditional) | renderers only reached with non-empty bundleID, see docs always present, ExactlyOneRow "null" subcase converted/removed, no remaining `no host-local terminal` / unsupportedNullLabel reference |
+| persistent-no-host-terminal-banner-1-3 | Add the sessions-unsupported-null capture fixture + committed reference PNG | empty Identity{} → IsNull() true seed path, no banner intrudes on resolved-NULL seed, offline harness (no tmux server / no ~/.config), verify fresh PNG write (VHS silent-write flake), no NO_COLOR variant required |
+
 ### Phase 2: Proactive Multi-Select Entry Block + Help Suppression
 status: approved
 approved_at: 2026-07-22
