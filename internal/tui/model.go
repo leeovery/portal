@@ -4591,8 +4591,11 @@ func (m Model) viewSessionList() string {
 		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget, m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	case modalHelp:
 		// §8.5 per-page help: the Sessions keymap descriptor, descriptor-driven, in
-		// the help modal's own zero-h-padding panel (FIX 4).
-		return renderHelpModalOnClearedCanvas(sessionsKeymap(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
+		// the help modal's own zero-h-padding panel (FIX 4). §4: the descriptor is
+		// filtered through m.sessionsHelpKeymap(), which drops the `m` multi-select
+		// row when it is blocked (unsupported terminal, not already in the mode) —
+		// the static sessionsKeymap() constant is unchanged.
+		return renderHelpModalOnClearedCanvas(m.sessionsHelpKeymap(), m.contentWidth(), m.contentHeight(), m.canvasMode, m.colourless)
 	}
 	listView := m.sessionList.View()
 	// §3.2 / §4.2: replace the plain bubbles/list title line with the restyled
@@ -4732,6 +4735,40 @@ func (m Model) renderHeader() string {
 // banner owns the row) read, so the two can never drift.
 func (m Model) unsupportedBannerActive() bool {
 	return m.DetectUnsupported() && !m.multiSelectMode && !m.detectIdentity.IsNull()
+}
+
+// sessionsHelpKeymap returns the descriptor slice fed to the Sessions `?` help
+// modal, with the §4 `m`-suppression filter applied to the copy only:
+// sessionsKeymap() itself stays a pure static constant. The `m` (multi-select)
+// entry is dropped IFF `DetectUnsupported() && !m.multiSelectMode` — exactly "`m`
+// appears in `?` help iff `m` is functional". It is hidden only when it would
+// actually be blocked (unsupported AND not already in the mode); the A1 in-flight
+// path (§3) can resolve unsupported WHILE multi-select is already open, and there
+// `m` is a live row-toggle, so the `!multiSelectMode` leg keeps it listed. On any
+// other resolution (supported, or in-flight before resolve) DetectUnsupported() is
+// false and the filter is inert.
+//
+// The filter lives at the CALL SITE (not inside sessionsKeymap) deliberately:
+// keymap_dispatch_guard_test probes the STATIC descriptor with detection unwired
+// (so DetectUnsupported() is false → the filter is inert → the `m` dispatch probe
+// still enters the mode). Parameterising sessionsKeymap() would break that guard.
+func (m Model) sessionsHelpKeymap() []keymapEntry {
+	entries := sessionsKeymap()
+	// mBlocked is true exactly when `m` would be a dead-end: an unsupported terminal
+	// and not already in the mode. Its inverse is "`m` is functional" — the states
+	// where the help must keep listing it (supported, in-flight, or already open).
+	mBlocked := m.DetectUnsupported() && !m.multiSelectMode
+	if !mBlocked {
+		return entries
+	}
+	filtered := make([]keymapEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.Key == "m" {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	return filtered
 }
 
 // replaceHeaderLine swaps header in for the FIRST line of listView (a
