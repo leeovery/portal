@@ -22,7 +22,8 @@ approved_at: 2026-07-22
 - [ ] Full unit suite green; no regression in the named-banner, supported-header, or multi-select-steps-aside tests.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-22
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
