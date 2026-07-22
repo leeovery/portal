@@ -170,6 +170,8 @@ func FixtureByName(name string) (*Fixture, error) {
 		return sessionsMultiSelectActiveFixture(), nil
 	case "sessions-unsupported-terminal":
 		return sessionsUnsupportedTerminalFixture(), nil
+	case "sessions-unsupported-null":
+		return sessionsUnsupportedNullFixture(), nil
 	case "sessions-multi-select-preflight-abort":
 		return sessionsMultiSelectPreflightAbortFixture(), nil
 	case "sessions-burst-opening":
@@ -197,7 +199,7 @@ func FixtureByName(name string) (*Fixture, error) {
 // (a standalone tea.Model resolved by the capture tool, NOT a tui.Model-backed
 // *Fixture) so the swatch is discoverable from the same listing.
 func FixtureNames() []string {
-	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-multi-select-active", "sessions-unsupported-terminal", "sessions-multi-select-preflight-abort", "sessions-burst-opening", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", "loading-error", ContrastValidationFixture}
+	names := []string{"sessions-flat", "sessions-empty", "sessions-by-project", "sessions-by-tag", "sessions-paged", "sessions-inline-flash", "sessions-multi-select-active", "sessions-unsupported-terminal", "sessions-unsupported-null", "sessions-multi-select-preflight-abort", "sessions-burst-opening", "sessions-no-tags-signpost", "projects", "projects-command-pending", "preview-screen", "loading-screen", "loading-error", ContrastValidationFixture}
 	sort.Strings(names)
 	return names
 }
@@ -463,6 +465,29 @@ func sessionsUnsupportedTerminalFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-unsupported-terminal"
 	fx.initialDetection = &spawn.Identity{Name: "Apple Terminal", BundleID: "com.apple.Terminal"}
+	return fx
+}
+
+// sessionsUnsupportedNullFixture builds the deterministic "sessions-unsupported-null"
+// fixture: the sessions-flat set opened in Flat mode in the NORMAL list (no
+// multi-select), with the §6.2 host-terminal detection cache seeded to an EMPTY
+// spawn.Identity{}. An empty BundleID makes IsNull() true, so spawn.ResolveAdapter
+// resolves it UNSUPPORTED (the NULL — no host-local terminal — shape), yet the §7
+// banner split means a NULL identity renders the STANDARD `Sessions ··· N` header
+// with NO banner — so this frame is visually identical to sessions-flat. It is the
+// regression anchor that the resolved-unsupported NULL seed path does not intrude a
+// banner.
+//
+// Detection is otherwise an async lifecycle dispatched on reaching PageSessions, so it
+// is seeded via the same InitialDetection seed seam the named unsupported-terminal
+// fixture uses — the only way to render the resolved detection in the inert harness. It
+// reuses sessionsFlatFixture's session set verbatim; only the seed-seam field and the
+// fixture name differ. Like the other fixtures it NEVER opens a tmux server or touches
+// ~/.config/portal.
+func sessionsUnsupportedNullFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "sessions-unsupported-null"
+	fx.initialDetection = &spawn.Identity{}
 	return fx
 }
 

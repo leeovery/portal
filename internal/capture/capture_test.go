@@ -921,6 +921,63 @@ func TestFixtureNamesIncludesUnsupportedTerminal(t *testing.T) {
 	assertFixtureNameListed(t, "sessions-unsupported-terminal")
 }
 
+// TestSessionsUnsupportedNullFixture verifies the §7 NULL-identity fixture: it
+// reuses the sessions-flat set (NORMAL mode, no multi-select) and seeds the
+// detection cache with an EMPTY spawn.Identity{} (empty BundleID → IsNull() true),
+// which resolves unsupported-NULL through the production resolver. So the built
+// model has DetectResolved()/DetectUnsupported() true and a NULL DetectedIdentity —
+// yet renders the STANDARD `Sessions ··· N` header with no banner (visually
+// identical to sessions-flat). The no-banner render assertion is the Part B visual
+// gate; here the code-level proxy is that the seed path resolves NULL-unsupported
+// while the title stays plain `Sessions` (Flat).
+func TestSessionsUnsupportedNullFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-unsupported-null")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-unsupported-null): %v", err)
+	}
+
+	assertFlatFixtureSet(t, fx)
+
+	deps := fx.Deps()
+	if deps.InitialDetection == nil {
+		t.Fatal("Deps().InitialDetection = nil, want a seeded empty (NULL) identity")
+	}
+	if got := deps.InitialDetection.BundleID; got != "" {
+		t.Errorf("Deps().InitialDetection.BundleID = %q, want \"\" (NULL identity)", got)
+	}
+	// It must NOT be in multi-select mode — the NULL case is the normal list with
+	// no banner.
+	if len(deps.InitialMultiSelect) != 0 {
+		t.Errorf("Deps().InitialMultiSelect = %v, want empty (NORMAL mode)", deps.InitialMultiSelect)
+	}
+
+	m := tui.Build(deps)
+	if m.ActivePage() != tui.PageSessions {
+		t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+	}
+	if !m.DetectResolved() {
+		t.Error("DetectResolved() = false, want true (the NULL identity is seeded resolved)")
+	}
+	if !m.DetectUnsupported() {
+		t.Error("DetectUnsupported() = false, want true (a NULL identity resolves unsupported)")
+	}
+	if !m.DetectedIdentity().IsNull() {
+		t.Error("DetectedIdentity().IsNull() = false, want true (empty BundleID → NULL)")
+	}
+	if got, want := m.SessionListTitle(), "Sessions"; got != want {
+		t.Errorf("SessionListTitle() = %q, want %q (Flat — standard header, no banner)", got, want)
+	}
+	if m.MultiSelectActive() {
+		t.Error("MultiSelectActive() = true, want false (the NULL case is the normal list)")
+	}
+}
+
+// TestFixtureNamesIncludesUnsupportedNull pins the NULL-identity fixture into the
+// discoverable name list.
+func TestFixtureNamesIncludesUnsupportedNull(t *testing.T) {
+	assertFixtureNameListed(t, "sessions-unsupported-null")
+}
+
 // TestSessionsMultiSelectPreflightAbortFixture verifies the §6.7 pre-flight abort
 // fixture: it reuses the sessions-flat set, opens in multi-select mode with the three
 // marked sessions, anchors the cursor on fab-flowx-explore (the gone row), and seeds
