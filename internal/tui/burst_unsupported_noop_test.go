@@ -7,8 +7,9 @@ package tui
 // decideBurst's unsupported arm (DetectUnsupported() true) and assert the ATOMIC
 // no-op: no burst pipe, no adapter resolve/call, no self-attach (Selected()==""),
 // no tea.Quit, still in multi-select mode with the selection INTACT, and the
-// re-asserted warning flash naming the identity (named) or the honest no-host-local
-// line (NULL). A supported (ghostty) identity still dispatches the burst (unchanged).
+// re-asserted warning flash naming the identity (named) or the plain
+// remote-connection line (NULL). A supported (ghostty) identity still dispatches the
+// burst (unchanged).
 //
 // No t.Parallel: consistent with the rest of the tui test surface.
 
@@ -82,7 +83,7 @@ func assertAtomicNoOp(t *testing.T, m Model, adapter *spawntest.FakeAdapter) {
 // TestUnsupportedFlashText pins the exact §6-9 flash copy at the pure-function
 // level: the named-identity form mirrors the shared spawn.UnsupportedNoopMessage
 // (the same copy the open burst's unsupported gate emits) without the `spawn:`
-// prefix, the NULL form is the honest no-host-local line, and
+// prefix, the NULL form is the plain remote-connection line, and
 // BOTH carry the `— nothing opened` RESPONSE suffix. No literal ⚠ (the band adds it).
 func TestUnsupportedFlashText(t *testing.T) {
 	tests := []struct {
@@ -93,12 +94,12 @@ func TestUnsupportedFlashText(t *testing.T) {
 		{
 			name: "named undriven identity",
 			id:   appleTerminalIdentity(),
-			want: "unsupported terminal — Apple Terminal · com.apple.Terminal — nothing opened",
+			want: "can't open new windows in Apple Terminal · com.apple.Terminal — nothing opened",
 		},
 		{
 			name: "NULL identity (remote/mosh or transient error)",
 			id:   spawn.Identity{},
-			want: "no host-local terminal — nothing opened",
+			want: "can't open new windows over a remote connection — nothing opened",
 		},
 	}
 	for _, tc := range tests {
@@ -141,7 +142,7 @@ func TestBurstUnsupported_NonNullAtomicNoOp(t *testing.T) {
 	if isQuitCmd(cmd) {
 		t.Error("unsupported N≥2 Enter must NOT tea.Quit")
 	}
-	const want = "unsupported terminal — Apple Terminal · com.apple.Terminal — nothing opened"
+	const want = "can't open new windows in Apple Terminal · com.apple.Terminal — nothing opened"
 	if m.flashText != want {
 		t.Errorf("flashText = %q, want %q (named identity, ⚠ added by the warning band)", m.flashText, want)
 	}
@@ -178,9 +179,9 @@ func TestBurstUnsupported_NullFlash(t *testing.T) {
 	if isQuitCmd(cmd) {
 		t.Error("NULL N≥2 Enter must NOT tea.Quit")
 	}
-	const want = "no host-local terminal — nothing opened"
+	const want = "can't open new windows over a remote connection — nothing opened"
 	if m.flashText != want {
-		t.Errorf("flashText = %q, want %q (NULL identity honest line)", m.flashText, want)
+		t.Errorf("flashText = %q, want %q (NULL identity plain remote-connection line)", m.flashText, want)
 	}
 }
 
@@ -225,7 +226,7 @@ func TestBurstUnsupported_DeferredThenUnsupported(t *testing.T) {
 	if isQuitCmd(cmd2) {
 		t.Error("deferred unsupported resolution must NOT tea.Quit")
 	}
-	const want = "unsupported terminal — Apple Terminal · com.apple.Terminal — nothing opened"
+	const want = "can't open new windows in Apple Terminal · com.apple.Terminal — nothing opened"
 	if m.flashText != want {
 		t.Errorf("flashText = %q, want %q (deferred → unsupported re-asserts the named flash)", m.flashText, want)
 	}

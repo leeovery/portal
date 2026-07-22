@@ -66,17 +66,19 @@ func PartialFailureMessage(failed []string, othersOpened bool) string {
 }
 
 // UnsupportedNoopMessage is the single renderer for the N≥2 unsupported-terminal
-// atomic no-op outcome sentence. A NULL identity (remote/mosh, or a transient
-// detection error folded to Identity{}) gets the honest "no host-local terminal
-// — nothing opened" line; a recognised-but-undriven identity names its friendly
-// name and bundle id, separated by the U+00B7 middle dot that mirrors the
-// host-terminal identity echo and the design banner. Both callers (the open burst's
-// unsupported message and the picker's re-asserted flash) render through it. The body
-// carries no "spawn:" prefix and no ⚠ glyph: the log emitters add the prefix and the
-// notice band prepends the glyph via statusGlyph.
+// atomic no-op outcome sentence, in plain language. A NULL identity (remote/mosh, or
+// a transient detection error folded to Identity{}) gets the plain "can't open new
+// windows over a remote connection — nothing opened" line; a recognised-but-undriven
+// identity gets "can't open new windows in <name> · <bundleID> — nothing opened",
+// naming its friendly name and bundle id separated by the U+00B7 middle dot that
+// mirrors the host-terminal identity echo and the design banner (in the CLI this named
+// line is the only place the user sees the bundle id — the terminals.json key). Both
+// callers (the open burst's unsupported message and the picker's re-asserted flash)
+// render through it. The body carries no "spawn:" prefix and no ⚠ glyph: the log
+// emitters add the prefix and the notice band prepends the glyph via statusGlyph.
 func UnsupportedNoopMessage(id Identity) string {
 	if id.IsNull() {
-		return "no host-local terminal — nothing opened"
+		return "can't open new windows over a remote connection — nothing opened"
 	}
-	return fmt.Sprintf("unsupported terminal — %s · %s — nothing opened", id.Name, id.BundleID)
+	return fmt.Sprintf("can't open new windows in %s · %s — nothing opened", id.Name, id.BundleID)
 }

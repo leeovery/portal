@@ -104,15 +104,15 @@ func TestPartialFailureMessage(t *testing.T) {
 }
 
 func TestUnsupportedNoopMessage(t *testing.T) {
-	t.Run("it renders the honest no-host-local body for a NULL identity", func(t *testing.T) {
-		const want = "no host-local terminal — nothing opened"
+	t.Run("it renders the plain remote-connection body for a NULL identity", func(t *testing.T) {
+		const want = "can't open new windows over a remote connection — nothing opened"
 		if got := UnsupportedNoopMessage(Identity{}); got != want {
 			t.Errorf("UnsupportedNoopMessage(NULL) = %q, want %q", got, want)
 		}
 	})
 
 	t.Run("it names the terminal and bundle id for a recognised identity", func(t *testing.T) {
-		const want = "unsupported terminal — Apple Terminal · com.apple.Terminal — nothing opened"
+		const want = "can't open new windows in Apple Terminal · com.apple.Terminal — nothing opened"
 		id := Identity{Name: "Apple Terminal", BundleID: "com.apple.Terminal"}
 		if got := UnsupportedNoopMessage(id); got != want {
 			t.Errorf("UnsupportedNoopMessage(id) = %q, want %q", got, want)
