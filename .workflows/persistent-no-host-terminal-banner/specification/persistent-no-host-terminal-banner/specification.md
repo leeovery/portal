@@ -49,4 +49,28 @@ The renderer already knows the NULL/named split (`renderUnsupportedHeader` / `un
 
 ---
 
+## 3. Sub-fix 2 — Proactive Multi-Select Entry Block
+
+### Change
+
+Gate the entry branch of `handleMultiSelectToggle` (`internal/tui/model.go`) on `DetectUnsupported()`. Today the entry branch (`if !m.multiSelectMode { multiSelectMode = true; …mark-on-entry… }`) has **no** detection read; the only unsupported gate is downstream at `decideBurst`'s N≥2 Enter. The fix adds a proactive check: when `DetectUnsupported()` is true, pressing `m` does **not** open the mode — it sets a transient blocked-entry flash instead (copy defined in Topic 5) and returns.
+
+Applies to **both** unsupported shapes (NULL and named) — `DetectUnsupported()` is the coarse resolution predicate; the entry block is deliberately identity-blind (only the *flash copy* differs by shape, Topic 5).
+
+### Retain the reactive backstop (Fork A → A1)
+
+`decideBurst`'s reactive unsupported no-op (`internal/tui/burst_progress.go`, the N≥2-Enter arm that emits `spawn.UnsupportedNoopMessage` and flashes) is **retained**. It is not redundant: detection is asynchronous, so the entry block cannot fully replace it.
+
+### Async in-flight window (why the backstop is load-bearing)
+
+- Detection dispatches on Bubble Tea's command goroutine on reaching the Sessions page and resolves later via `terminalDetectedMsg`. Until it resolves, `detectResolved == false` → `DetectUnsupported() == false` → the entry block does **not** fire, so a user *can* enter multi-select during the in-flight window.
+- **Fork A resolved to A1 (leave the reactive backstop; no mid-mode eject).** If the user entered multi-select during the in-flight window and detection then resolves unsupported, the mode is **not** ejected. The `terminalDetectedMsg` arm continues to only cache identity/adapter/resolution (and resolve a `pendingBurstEnter` deferral) — it does not close an open multi-select mode. The reactive `decideBurst` no-op remains the sole backstop for the "entered-before-resolve → Enter" path.
+- Rationale: the in-flight window is tiny and ejecting a user mid-interaction is jarring. A2 (eject on resolve) was explored and rejected for that reason.
+
+### Net effect
+
+Once detection has resolved unsupported, `m` is proactively blocked at entry. Before resolution, the mode is enterable but the burst is still caught reactively at Enter. Supported terminals are unaffected — `m` enters and dispatches as today.
+
+---
+
 ## Working Notes
