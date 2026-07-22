@@ -170,4 +170,30 @@ After removal the two renderers are **named-only** — `bundleID != ""` always h
 
 ---
 
+## 8. Scope, Non-Goals & Risks
+
+### In scope
+
+- **`internal/tui`** — the four coordinated sub-fixes: `unsupportedBannerActive()` gains the `IsNull()` discriminator (banner split); `handleMultiSelectToggle` entry branch gains the proactive `DetectUnsupported()` block + blocked-entry flash; the help-modal call-site descriptor filter drops `m` when `DetectUnsupported()`; `decideBurst`'s reactive no-op is retained (async-race backstop); removal of the dead NULL banner render branch.
+- **`internal/spawn/message.go`** — the plain-language rewrite of `UnsupportedNoopMessage` (both shapes). This widens the fix beyond the TUI, as decided in Topic 5.
+- Test rework/removal/additions and a new NULL visual fixture (Topic 7).
+
+### Non-goals / explicitly out of scope
+
+- **The CLI multi-target `portal open <a> <b> …` (N≥2) burst *block*** — owned by the in-flight `cli-verb-surface-redesign` feature. This bugfix does **not** change the CLI's block logic; it only touches the *shared message renderer*, which must be coordinated with that feature (below).
+- **The `see docs` clickable link + `terminals.json` setup docs page** — logged as the separate quickfix `custom-terminal-docs-and-clickable-see-docs`. The named banner (including its current `see docs` text) is unchanged here.
+- **Adjacent spawn copy** (session-gone, failed-to-open, permission guidance) — different scenarios, already plain, not rewritten.
+- **No state footprint change** — `sessions.json`, the daemon capture loop, restore, and `prefs.json` are untouched; spawn's near-zero state footprint is unchanged.
+
+### Risks & coordination
+
+- **Complexity: Low.** Small, independent changes; no new packages, no state/daemon surface.
+- **Regression: Low.** The banner gate can only fire on an unsupported resolution (supported terminals never reach it); the reactive backstop is retained; the guard test constrains the help/keymap change.
+- **CLI copy coordination.** `UnsupportedNoopMessage` is shared with the CLI open-burst. The rewritten wording must read correctly for the CLI's "something was attempted" case and be coordinated with `cli-verb-surface-redesign` so the two surfaces stay coherent.
+- **Latent guard coupling** (carry as an inline source note): sub-fix 3's guard-safety depends on `sessionsGuardModel` (`NewModelWithSessions`) keeping detection unwired so the `m` dispatch probe still enters the mode. Sub-fix 2's entry block makes `keymap_dispatch_guard_test` newly sensitive to that seed state; a future change wiring detection into `NewModelWithSessions` would break the probe. Not introduced by this fix — noted so a later reader understands the dependency.
+- **Sequencing (not a blocker):** `cli-verb-surface-redesign` is expected to land first — keep the blocked-entry / unsupported copy coherent with the CLI's. Related bug `2026-07-15--remote-trigger-spawns-on-local-terminal` will make every remote login resolve NULL, increasing this fix's reach, but does not gate it.
+- **Release:** regular release — no hotfix, no feature flag.
+
+---
+
 ## Working Notes
