@@ -164,6 +164,9 @@
     },
     "persistent-no-host-terminal-banner": {
       "work_type": "bugfix"
+    },
+    "remote-trigger-spawns-on-local-terminal": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
