@@ -85,13 +85,18 @@ Once detection has resolved unsupported, `m` is proactively blocked at entry. Be
 
 ### Change
 
-When `DetectUnsupported()` is true, filter the `m` (multi-select) entry out of the keymap descriptor slice passed to the help modal **at the call site** (`renderHelpModalOnClearedCanvas`, `internal/tui/model.go`). `sessionsKeymap()` itself stays a pure static constant — the filter is applied to the copy fed to the modal, not baked into the descriptor function.
+When `DetectUnsupported() && !m.multiSelectMode` is true, filter the `m` (multi-select) entry out of the keymap descriptor slice passed to the help modal **at the call site** (`renderHelpModalOnClearedCanvas`, `internal/tui/model.go`). `sessionsKeymap()` itself stays a pure static constant — the filter is applied to the copy fed to the modal, not baked into the descriptor function.
 
 ### Behaviour
 
-- **Unsupported (NULL or named):** the `?` help body omits the `m` row (consistent with `m` being blocked at entry).
+- **Unsupported (NULL or named), not in multi-select:** the `?` help body omits the `m` row — `m` cannot be entered here.
+- **In multi-select mode (any terminal, however entered):** `?` help lists `m` — it is a live row-toggle.
 - **Supported:** `?` help lists `m` as today.
 - **Footer unchanged either way.** `m` is a non-`Core` descriptor entry, so `renderCondensedFooter` never lists it — the footer needs no change under any resolution.
+
+### Consistency with A1 (in-flight entry)
+
+The filter is gated on `!m.multiSelectMode` as well as `DetectUnsupported()` so the rule is exactly "`m` appears in `?` help iff `m` is functional." A1 (§3) permits a state where detection resolves unsupported *while* multi-select is already open (entered during the async in-flight window, not ejected); in that state `m` is a live row-toggle, so it stays listed in help. `m` is hidden only when it would actually be blocked — unsupported **and** not already in the mode. This keeps §4 consistent with §3/A1: the help never hides a working key. (The extra `&& !m.multiSelectMode` is guard-safe — `keymap_dispatch_guard_test` probes with detection unwired, so `DetectUnsupported()` is false and the filter is inert regardless.)
 
 ### Why call-site filter, not a parameterised keymap
 
@@ -121,7 +126,8 @@ All user-facing copy in the unsupported-terminal family is rewritten in plain la
 
 - **"can't open new windows"** is the plain statement of what multi-select does and can't do here. **"nothing opened"** stays — it is plain and honestly signals an attempt occurred (distinguishing the reactive no-op from the pre-emptive block, which says "isn't available").
 - The named reactive/CLI line keeps `<name> · <bundleID>` because in the CLI there is no banner — that line is the only place the user gets the bundle id (the `terminals.json` key).
-- **Blocked-entry flash behaviour** (settled): distinct from the reactive no-op (a pre-emptive block attempts nothing, so no `— nothing opened`); uses the existing §11 notice-band flash slot and self-clears on the next actionable key; on a named terminal it co-renders two-row with the persistent banner (banner on the header row, flash on the notice-band row); repeated `m` while the flash shows clears then re-blocks + re-flashes (intentional).
+- **Blocked-entry flash behaviour** (settled): distinct from the reactive no-op (a pre-emptive block attempts nothing, so no `— nothing opened`); uses the existing §11 notice-band flash slot and self-clears on the **next actionable key** (the authoritative trigger — matching the existing `setFlash` / `isActionableKey` lifecycle; "next keypress" elsewhere is shorthand for this); on a named terminal it co-renders two-row with the persistent banner (banner on the header row, flash on the notice-band row); repeated `m` while the flash shows clears then re-blocks + re-flashes (intentional). Reusing the §11 flash slot also inherits its existing auto-clear timer — that is expected and not forbidden; the "self-clears on the next actionable key" acceptance wording is the *key-driven* clear path, not a prohibition on the timer.
+- **Blocked-entry flash renderer (TUI-local).** The two blocked-entry strings live in `internal/tui` (not `internal/spawn`), rendered by a new TUI-local helper (e.g. `multiSelectBlockedFlashText(id)`) that selects the shape via `m.detectIdentity.IsNull()` — mirroring `unsupportedFlashText`'s shape branch. Unlike `UnsupportedNoopMessage`, this copy is **not** shared with the CLI and needs no `cli-verb-surface-redesign` coordination.
 - **`UnsupportedNoopMessage` is in scope.** Rewriting it widens this bugfix into `internal/spawn`, and its wording is **shared with the CLI open-burst** (partly owned by `cli-verb-surface-redesign`) — the rewrite must be coordinated with that feature so the CLI copy stays coherent.
 - **Setup guidance retained for named-unsupported:** the persistent banner carries the terminal name + bundle id (the copy-paste key for `terminals.json`) and the `see docs` hint. NULL/remote has no remedy, so it gets no pointer — only the plain explanation.
 - **`see docs` left unchanged here.** It currently renders no concrete URL/path and there is no `terminals.json` setup doc in the repo. Making it a real (ideally clickable, OSC 8) link to a new custom-terminal setup page is **logged separately as a quickfix** (`custom-terminal-docs-and-clickable-see-docs`) and is out of scope for this bugfix.
@@ -147,7 +153,7 @@ After removal the two renderers are **named-only** — `bundleID != ""` always h
 
 - Standard `Sessions ··· N` header (count + grouping-mode suffix); **no persistent banner**.
 - `m` absent from the `?` help and from the footer (`m` is never a footer key regardless; on remote it appears in neither).
-- Pressing `m` does nothing but show the **transient flash** `multi-select isn't available over a remote connection` — no mode entered, nothing marked — which self-clears on the next keypress.
+- Pressing `m` does nothing but show the **transient flash** `multi-select isn't available over a remote connection` — no mode entered, nothing marked — which self-clears on the next actionable key.
 
 ("Banner" always denotes the *persistent* section-header element; the momentary message on `m` is the *transient flash*. On remote only the flash can appear; the persistent banner is retained only for *named* unsupported terminals, where it is actionable.)
 
@@ -174,7 +180,7 @@ After removal the two renderers are **named-only** — `bundleID != ""` always h
 
 **Guard (unchanged path):** supported (native/config) terminal — banner absent, `m` enters, help lists `m`, burst dispatches.
 
-**Visual:** add a NULL-identity fixture (standard header, no banner); the existing `sessions-unsupported-terminal` (named) fixture stays valid.
+**Visual:** add a NULL-identity capture fixture — name `sessions-unsupported-null`, seeded via the existing detection seed seam with `InitialDetection = &spawn.Identity{}` (empty `BundleID` → `IsNull()` true), the same seam the named fixture uses. It renders the **standard `Sessions ··· N` header with no banner** — visually identical to `sessions-flat`. The **render-level banner-split test (above) is the primary NULL assertion**; the fixture + committed reference PNG are added for parity with `sessions-unsupported-terminal` and as a regression anchor that the resolved-unsupported NULL seed path does not intrude a banner. The existing `sessions-unsupported-terminal` (named) fixture stays valid.
 
 ---
 
