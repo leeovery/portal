@@ -176,7 +176,7 @@ After removal the two renderers are **named-only** — `bundleID != ""` always h
 
 - **Banner split:** NULL identity → standard `Sessions ··· N` header renders (not the banner) **and** the By-Tag "no tags yet" signpost returns (mirror of `TestActiveNoticeBand_SuppressesSignpostWhenUnsupported`, which uses a *named* identity and stays valid — assert the NULL case now returns the signpost); named identity → banner unchanged.
 - **`m`-entry block:** `m` on a resolved-unsupported terminal does **not** enter multi-select and sets the blocked flash (both NULL and named); flash self-clears on the next actionable key. Plus a **named co-render** assertion: a blocked `m` on a named unsupported terminal yields the two-row state (persistent banner on the header row + block flash on the notice-band row).
-- **Help suppression:** `?` help omits the `m` row when `DetectUnsupported()`, lists it when supported; `keymap_dispatch_guard_test` stays green.
+- **Help suppression:** `?` help omits the `m` row **iff** `DetectUnsupported() && !m.multiSelectMode`. Cover all three cases: (a) unsupported + not in multi-select → `m` omitted; (b) supported → `m` listed; (c) **unsupported + in multi-select mode (the A1 in-flight-entered state) → `m` listed** — the help never hides the working row-toggle. `keymap_dispatch_guard_test` stays green (it runs with detection unwired, so the filter is inert).
 - **Copy:** the new blocked-entry flash returns the correct plain strings per shape; the rewritten `UnsupportedNoopMessage` returns the correct plain strings per shape.
 
 **Guard (unchanged path):** supported (native/config) terminal — banner absent, `m` enters, help lists `m`, burst dispatches.

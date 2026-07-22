@@ -30,10 +30,10 @@ The consequence is a planning-readiness hole precisely on the behaviour that cyc
 Fix direction: restate §7's help-suppression bullet to mirror §4 exactly — help omits `m` iff `DetectUnsupported() && !m.multiSelectMode`; help lists `m` when supported **or** when in multi-select mode — and add explicit coverage for the in-mode-unsupported case (help lists `m`) alongside the existing omit/supported cases.
 
 **Proposed Addition**:
-{leave blank until discussed}
+§7 "Help suppression" bullet restated to mirror §4: help omits `m` iff `DetectUnsupported() && !m.multiSelectMode`, with three explicit cases — (a) unsupported + not in multi-select → omitted; (b) supported → listed; (c) unsupported + in multi-select (A1) → listed; guard test still green (detection unwired).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied — direct consequence of the cycle-1 §4 Option-A change. Logged to §7.
 
 ---
 
