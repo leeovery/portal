@@ -474,19 +474,25 @@ func TestRunOpenBurst_DuplicatesHonored_NoDedup(t *testing.T) {
 	}
 }
 
-func TestRunOpenBurst_UnsupportedTerminal_AtomicNoop(t *testing.T) {
-	// A recognised-but-undriven terminal (Apple Terminal → unsupported) at N≥2 is an
-	// atomic no-op: nothing opens, the trigger does NOT half-connect, and the error
-	// names the identity. The burster is never constructed or run.
+// runUnsupportedOpenBurstNoOp arranges the shared unsupported N≥2 open-burst scaffold
+// (recording adapter/connector/local-mint over openBurstDepsForTest + the NewBurster
+// spy + a two-attach surfaces slice) for the given detected identity, executes the
+// burst through runOpenBurstWithDeps, and returns the recorders and the burster-built
+// flag alongside the resulting error (error last, per ST1008). It is the cmd-side
+// counterpart of the tui side's assertAtomicNoOp scaffold. The identity is a parameter
+// so both the named and the NULL/remote identity shapes route through the identical
+// arrange + execute path; each caller keeps only its own divergent err.Error()
+// assertion (computed spawn.UnsupportedNoopMessage vs a byte-literal spec-copy string).
+func runUnsupportedOpenBurstNoOp(t *testing.T, id spawn.Identity) (*spawntest.FakeAdapter, *recordingConnector, *recordingMint, bool, error) {
+	t.Helper()
 	events := &openBurstEvents{}
 	inner := &spawntest.FakeAdapter{}
 	adapter := &recordingAdapter{events: events, inner: inner}
 	conn := &recordingConnector{events: events}
 	mint := &recordingMint{events: events}
-	id := appleTerminalIdentity()
 	deps := openBurstDepsForTest(id, spawn.ResolutionUnsupported, adapter, conn, mint.mint)
 
-	// Spy: the burster must never be built on the unsupported path.
+	// Spy: the burster must never be built on the unsupported no-op path.
 	bursterBuilt := false
 	deps.NewBurster = func(spawn.Adapter) *spawn.Burster {
 		bursterBuilt = true
@@ -498,15 +504,21 @@ func TestRunOpenBurst_UnsupportedTerminal_AtomicNoop(t *testing.T) {
 		{Kind: spawn.SurfaceAttach, Value: "b"},
 	}
 	err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps)
+	return inner, conn, mint, bursterBuilt, err
+}
 
+// assertOpenBurstAtomicNoOp asserts the structural atomic-no-op invariants shared by
+// both unsupported-terminal open-burst cases: an error surfaced, the burster was never
+// built, and nothing opened, self-connected, or minted. The distinct message assertion
+// (computed spawn.UnsupportedNoopMessage vs a byte-literal spec-copy string) stays at
+// each call site.
+func assertOpenBurstAtomicNoOp(t *testing.T, err error, inner *spawntest.FakeAdapter, conn *recordingConnector, mint *recordingMint, bursterBuilt bool) {
+	t.Helper()
 	if err == nil {
 		t.Fatal("expected an atomic no-op error for the unsupported terminal, got nil")
 	}
-	if want := spawn.UnsupportedNoopMessage(id); err.Error() != want {
-		t.Errorf("error = %q, want %q (names the detected identity)", err.Error(), want)
-	}
 	if bursterBuilt {
-		t.Error("NewBurster must not be called on the unsupported no-op path")
+		t.Error("NewBurster must not be built on the unsupported no-op path")
 	}
 	if len(inner.Calls) != 0 {
 		t.Errorf("OpenWindow called %d times, want 0 (nothing opens)", len(inner.Calls))
@@ -516,6 +528,22 @@ func TestRunOpenBurst_UnsupportedTerminal_AtomicNoop(t *testing.T) {
 	}
 	if len(mint.calls) != 0 {
 		t.Errorf("LocalMint called %d times, want 0 (trigger must NOT half-connect)", len(mint.calls))
+	}
+}
+
+func TestRunOpenBurst_UnsupportedTerminal_AtomicNoop(t *testing.T) {
+	// A recognised-but-undriven terminal (Apple Terminal → unsupported) at N≥2 is an
+	// atomic no-op: nothing opens, the trigger does NOT half-connect, and the error
+	// names the identity. The burster is never constructed or run.
+	id := appleTerminalIdentity()
+	inner, conn, mint, bursterBuilt, err := runUnsupportedOpenBurstNoOp(t, id)
+
+	assertOpenBurstAtomicNoOp(t, err, inner, conn, mint, bursterBuilt)
+	// Computed message — spawn.UnsupportedNoopMessage(id) — so a renderer drift (the
+	// picker/CLI share this renderer) is caught here. The byte-literal spec-copy drift
+	// is pinned separately by TestRunOpenBurst_UnsupportedTerminal_CopyIsPlainLanguage.
+	if want := spawn.UnsupportedNoopMessage(id); err.Error() != want {
+		t.Errorf("error = %q, want %q (names the detected identity)", err.Error(), want)
 	}
 }
 
@@ -548,46 +576,14 @@ func TestRunOpenBurst_UnsupportedTerminal_CopyIsPlainLanguage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			events := &openBurstEvents{}
-			inner := &spawntest.FakeAdapter{}
-			adapter := &recordingAdapter{events: events, inner: inner}
-			conn := &recordingConnector{events: events}
-			mint := &recordingMint{events: events}
-			deps := openBurstDepsForTest(tt.id, spawn.ResolutionUnsupported, adapter, conn, mint.mint)
+			inner, conn, mint, bursterBuilt, err := runUnsupportedOpenBurstNoOp(t, tt.id)
 
-			// Spy: the burster must never be built on the unsupported no-op path.
-			bursterBuilt := false
-			deps.NewBurster = func(spawn.Adapter) *spawn.Burster {
-				bursterBuilt = true
-				return nil
-			}
-
-			surfaces := []spawn.Surface{
-				{Kind: spawn.SurfaceAttach, Value: "a"},
-				{Kind: spawn.SurfaceAttach, Value: "b"},
-			}
-			err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps)
-
-			if err == nil {
-				t.Fatal("expected an atomic no-op error for the unsupported terminal, got nil")
-			}
+			// Atomic no-op is preserved: nothing built, nothing opened, no half-connect.
+			assertOpenBurstAtomicNoOp(t, err, inner, conn, mint, bursterBuilt)
 			// Byte-literal want — NOT spawn.UnsupportedNoopMessage(tt.id) — so a copy
 			// drift from spec §5 is caught here rather than silently tracked.
 			if err.Error() != tt.want {
 				t.Errorf("error = %q, want the plain-language literal %q", err.Error(), tt.want)
-			}
-			// Atomic no-op is preserved: nothing built, nothing opened, no half-connect.
-			if bursterBuilt {
-				t.Error("NewBurster must not be built on the unsupported no-op path")
-			}
-			if len(inner.Calls) != 0 {
-				t.Errorf("OpenWindow called %d times, want 0 (nothing opens)", len(inner.Calls))
-			}
-			if len(conn.calls) != 0 {
-				t.Errorf("Connector.Connect targets = %#v, want none (trigger must NOT half-connect)", conn.calls)
-			}
-			if len(mint.calls) != 0 {
-				t.Errorf("LocalMint called %d times, want 0 (trigger must NOT half-connect)", len(mint.calls))
 			}
 		})
 	}
