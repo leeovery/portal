@@ -116,6 +116,10 @@ func TestUnsupportedFlashText(t *testing.T) {
 // TestBurstUnsupported_NonNullAtomicNoOp is the core §6-9 assertion for a resolved-
 // unsupported non-NULL undriven identity (Apple Terminal / com.apple.Terminal): the
 // N≥2 Enter is an atomic no-op and re-asserts the named unsupported flash.
+//
+// Multi-select is entered during the async in-flight window (A1 — markTwo runs BEFORE
+// detection resolves, so the proactive entry block is inert), then detection resolves
+// unsupported and the Enter drives decideBurst's retained reactive unsupported arm.
 func TestBurstUnsupported_NonNullAtomicNoOp(t *testing.T) {
 	sessions := []tmux.Session{
 		{Name: "alpha", Windows: 1},
@@ -125,12 +129,12 @@ func TestBurstUnsupported_NonNullAtomicNoOp(t *testing.T) {
 	adapter := &spawntest.FakeAdapter{Ack: ack}
 	m := NewModelWithSessions(sessions)
 	wireUnsupportedBurstSeams(&m, adapter, ack)
+	m = markTwo(t, m)
 	m = resolveDetection(t, m, appleTerminalIdentity())
 	if !m.DetectUnsupported() {
 		t.Fatal("precondition: com.apple.Terminal must resolve unsupported")
 	}
 
-	m = markTwo(t, m)
 	m, cmd := pressEnter(t, m)
 
 	assertAtomicNoOp(t, m, adapter)
@@ -146,6 +150,10 @@ func TestBurstUnsupported_NonNullAtomicNoOp(t *testing.T) {
 // TestBurstUnsupported_NullFlash covers a resolved NULL identity (remote/mosh — and
 // identically a transient detection error, which folds to the same Identity{}): the
 // same atomic no-op with the honest no-host-local flash (no identity string).
+//
+// Multi-select is entered during the async in-flight window (A1 — markTwo runs BEFORE
+// detection resolves, so the proactive entry block is inert), then detection resolves
+// unsupported and the Enter drives decideBurst's retained reactive unsupported arm.
 func TestBurstUnsupported_NullFlash(t *testing.T) {
 	sessions := []tmux.Session{
 		{Name: "alpha", Windows: 1},
@@ -155,6 +163,7 @@ func TestBurstUnsupported_NullFlash(t *testing.T) {
 	adapter := &spawntest.FakeAdapter{Ack: ack}
 	m := NewModelWithSessions(sessions)
 	wireUnsupportedBurstSeams(&m, adapter, ack)
+	m = markTwo(t, m)
 	// spawn.Identity{} is the NULL identity for BOTH a remote/mosh client AND a
 	// transient detection error (Phase-1 folds the error to Identity{}), so this one
 	// input pins the transient-error edge case too.
@@ -163,7 +172,6 @@ func TestBurstUnsupported_NullFlash(t *testing.T) {
 		t.Fatal("precondition: a NULL identity must resolve unsupported")
 	}
 
-	m = markTwo(t, m)
 	m, cmd := pressEnter(t, m)
 
 	assertAtomicNoOp(t, m, adapter)
