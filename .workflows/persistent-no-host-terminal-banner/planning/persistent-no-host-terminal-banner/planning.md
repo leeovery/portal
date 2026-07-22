@@ -75,3 +75,11 @@ approved_at: 2026-07-22
 - [ ] The rewritten wording reads correctly for the CLI's "something was attempted" case and is coherent with `cli-verb-surface-redesign`.
 - [ ] Adjacent spawn copy (gone-session, failed-to-open, permission guidance) is unchanged.
 - [ ] Full unit suite and the CLI open-burst copy tests green.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| persistent-no-host-terminal-banner-3-1 | Rewrite UnsupportedNoopMessage (both shapes) + lockstep copy assertions | NULL shape covers remote/mosh + transient-detection-error folded to Identity{}; named shape preserves `<name> · <bundleID>` (U+00B7) and the `— nothing opened` clause; adjacent spawn copy (gone / failed-to-open / permission) untouched; observability log line `unsupported terminal — nothing opened` (logemit) is not the message and stays untouched; function + spawn-suite + tui-reactive-backstop literals must land in one green commit |
+| persistent-no-host-terminal-banner-3-2 | Lock CLI open-burst copy coherence (regression + wording check) | CLI assertion self-references the shared function so it auto-tracks and silently accepts drift (literal regression enforces the coordination contract); `can't open new windows … — nothing opened` must read correctly for the CLI's attempted-open case; cli-verb-surface-redesign shares ownership and lands first (no CLI block-logic change); NULL shape uncovered by the current named-only CLI test |
