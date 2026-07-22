@@ -27,4 +27,26 @@ Four coordinated, independently-testable TUI-side sub-fixes (banner split, proac
 
 ---
 
+## 2. Sub-fix 1 — Banner Split by Identity Shape
+
+### Change
+
+Add an `IsNull()` identity-shape discriminator to `unsupportedBannerActive()` (`internal/tui/model.go`) so the predicate is true **only for a named-unsupported identity**, false for NULL/remote. Currently it is `DetectUnsupported() && !multiSelectMode`, which fires for *any* unsupported resolution; the new form additionally requires `!m.detectIdentity.IsNull()`.
+
+### Behaviour
+
+- **Named-unsupported:** predicate stays true → the banner still replaces the section header, unchanged (`⚠ unsupported terminal — <name> · <bundleID>` + right-anchored `see docs`).
+- **NULL/remote:** predicate now false → the banner never activates; the standard `Sessions ··· N` header (count + grouping-mode suffix) renders normally.
+
+### Why one gate covers both surfaces
+
+`unsupportedBannerActive()` is the single predicate read by **two** consumers, so the discriminator fixes both coherently in one place:
+
+1. **`applySectionHeader`** — swaps in the unsupported banner in place of the title row. With the split, NULL no longer claims the header row.
+2. **`activeNoticeBand`** — reads the same predicate to *suppress* the By-Tag "no tags yet" signpost while the banner is active. With the split, a NULL/remote client that has no tags now shows the signpost again (correct — there is no banner competing for the slot).
+
+The renderer already knows the NULL/named split (`renderUnsupportedHeader` / `unsupportedLeftCluster` branch on `bundleID == ""`); only the *gate* was blind to it. This sub-fix adds the missing discriminator at the gate — it does not change the renderers (the fate of the now-unreachable NULL render branch is Topic 6).
+
+---
+
 ## Working Notes
