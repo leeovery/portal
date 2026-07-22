@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-07-22
+
+✨ Added
+- New `sessions-unsupported-null` capture fixture — pins the "remote client with no local terminal" screen state for visual regression checks.
+
+🔧 Changed
+- Unsupported-terminal messaging now speaks plainly — "can't open new windows over a remote connection" / "can't open new windows in `<name>` · `<bundleID>`" — instead of the old "no host-local terminal" / "unsupported terminal" phrasing.
+- The unsupported-terminal banner now shows only for a named terminal (e.g. Terminal.app); a remote/mosh connection with no local terminal keeps the normal `Sessions ··· N` header instead of a banner with nothing actionable in it.
+- Pressing `m` for multi-select on an unsupported terminal now shows a clear "isn't available" message and refuses to enter the mode, instead of letting you mark sessions for a burst that can never open — the `m` entry also drops out of the `?` help in that state.
+
 ## [0.10.1] - 2026-07-21
 
 🐛 Fixed
