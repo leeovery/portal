@@ -75,12 +75,15 @@ func TestBurstUnsupported_PreflightAbortBeforeNoop(t *testing.T) {
 	wireUnsupportedBurstSeams(&m, adapter, ack)
 	// bravo vanished between marking and Enter.
 	m.sessionExists = func(name string) bool { return name != "bravo" }
+	// Enter multi-select during the async in-flight window (markTwo runs BEFORE
+	// detection resolves, so the §3 proactive entry block is inert), then resolve
+	// unsupported — the Enter still exercises decideBurst's retained reactive path.
+	m = markTwo(t, m)
 	m = resolveDetection(t, m, appleTerminalIdentity())
 	if !m.DetectUnsupported() {
 		t.Fatal("precondition: com.apple.Terminal must resolve unsupported")
 	}
 
-	m = markTwo(t, m)
 	m, cmd := pressEnter(t, m)
 
 	assertUnsupportedPreflightAbort(t, m, adapter)

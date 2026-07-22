@@ -3494,6 +3494,32 @@ func (m Model) handleSwitchViewKey() (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// multiSelectBlockedRemoteFlash / multiSelectBlockedNamedFlash are the §5
+// blocked-entry flash strings for the proactive multi-select entry block — the
+// visible honest signal shown when `m` is pressed on a resolved-unsupported
+// terminal (spec §3, Fork B → B1: a visible flash, never a silent swallow). They
+// are TUI-local (not shared with the CLI — unlike spawn.UnsupportedNoopMessage)
+// and intent-only: NO ⚠ glyph (the §11 warning band prepends it) and NO
+// `— nothing opened` suffix — a pre-emptive block attempts nothing, so it says
+// "isn't available", distinct from the reactive no-op's "nothing opened". On a
+// named terminal this flash co-renders two-row with the persistent banner, so per
+// the §5 non-repetition constraint it names neither the identity nor `see docs`
+// (the banner already supplies both) — just the multi-select intent.
+const (
+	multiSelectBlockedRemoteFlash = "multi-select isn't available over a remote connection"
+	multiSelectBlockedNamedFlash  = "multi-select isn't available on this terminal"
+)
+
+// multiSelectBlockedFlashText selects the §5 blocked-entry flash by identity
+// shape, mirroring unsupportedFlashText's IsNull() branch: a NULL/remote identity
+// gets the "remote connection" copy, any named identity the "this terminal" copy.
+func multiSelectBlockedFlashText(id spawn.Identity) string {
+	if id.IsNull() {
+		return multiSelectBlockedRemoteFlash
+	}
+	return multiSelectBlockedNamedFlash
+}
+
 // handleMultiSelectToggle drives the §5 multi-select `m` key. The first press
 // from the normal list ENTERS the mode and marks the currently-highlighted session
 // as the first selection (mark-on-entry) — the common "I'm looking at this session
@@ -3507,6 +3533,28 @@ func (m Model) handleSwitchViewKey() (tea.Model, tea.Cmd) {
 // (tea.Model, tea.Cmd) to match the updateSessionList dispatch arms.
 func (m Model) handleMultiSelectToggle() (tea.Model, tea.Cmd) {
 	if !m.multiSelectMode {
+		// §3 proactive entry block: once detection has resolved unsupported (NULL or
+		// named), `m` must NOT open a walkable dead-end mode whose N≥2 Enter can never
+		// fire a burst. Fail immediately with a visible honest per-shape flash (Fork B →
+		// B1 — never a silent swallow) and return, leaving the mode closed. The retained
+		// reactive backstop (decideBurst) still catches the async in-flight window, where
+		// DetectUnsupported() is false and this block is inert. setFlash is a pointer
+		// method (called via (&m)) and the post-bump flashGen feeds flashTickCmd so the
+		// block flash inherits the standard auto-clear timer, exactly like the
+		// session-gone bail — the authoritative clear stays the next-actionable-key path
+		// at the top of updateSessionList.
+		//
+		// Latent guard coupling (spec §4 / §8): keymap_dispatch_guard_test's `m` dispatch
+		// probe drives sessionsGuardModel (NewModelWithSessions) with detection UNWIRED,
+		// so DetectUnsupported() is false here and this block is inert (the probe still
+		// enters the mode, keeping descriptor↔dispatch parity green). A future change
+		// that wires detection into NewModelWithSessions (or defaults DetectUnsupported()
+		// true) would make the `m` probe hit this block and fail — keep the guard seed
+		// detection-unwired.
+		if m.DetectUnsupported() {
+			(&m).setFlash(multiSelectBlockedFlashText(m.detectIdentity))
+			return m, flashTickCmd(m.flashGen)
+		}
 		m.multiSelectMode = true
 		m.selectedSessions = map[string]struct{}{}
 		// Mark-on-entry: seed the set with the currently-highlighted session so the

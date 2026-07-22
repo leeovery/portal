@@ -251,6 +251,10 @@ func TestBurstObservability_UnsupportedNoopNoPerWindow(t *testing.T) {
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
 	wireUnsupportedBurstSeams(&m, adapter, ack)
+	// Enter multi-select during the async in-flight window (markTwo BEFORE
+	// resolveDetection, so the §3 proactive entry block is inert), then resolve
+	// unsupported — the Enter drives decideBurst's retained reactive no-op.
+	m = markTwo(t, m)
 	m = resolveDetection(t, m, appleTerminalIdentity())
 	if !m.DetectUnsupported() {
 		t.Fatal("precondition: com.apple.Terminal must resolve unsupported")
@@ -258,7 +262,6 @@ func TestBurstObservability_UnsupportedNoopNoPerWindow(t *testing.T) {
 	logger, sink := logtest.NewCaptureLogger(t)
 	m.spawnLogger = logger
 
-	m = markTwo(t, m)
 	m, _ = pressEnter(t, m)
 
 	info := onlyInfoRecord(t, sink)
@@ -332,9 +335,11 @@ func TestBurstObservability_OnlyClosedSpawnAttrKeys(t *testing.T) {
 	unsupAck := &spawntest.FakeAckChannel{}
 	unsup := NewModelWithSessions(obsTwoSessions())
 	wireUnsupportedBurstSeams(&unsup, &spawntest.FakeAdapter{Ack: unsupAck}, unsupAck)
+	// Enter multi-select in-flight (markTwo BEFORE resolveDetection → §3 entry block
+	// inert), then resolve unsupported so the Enter drives the reactive no-op.
+	unsup = markTwo(t, unsup)
 	unsup = resolveDetection(t, unsup, appleTerminalIdentity())
 	unsup.spawnLogger = logger
-	unsup = markTwo(t, unsup)
 	unsup, _ = pressEnter(t, unsup)
 
 	// Pre-flight abort.
