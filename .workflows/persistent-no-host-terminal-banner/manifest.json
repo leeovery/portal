@@ -120,6 +120,24 @@
           ]
         }
       }
+    },
+    "review": {
+      "items": {
+        "persistent-no-host-terminal-banner": {
+          "status": "in-progress",
+          "reviewed_tasks": [
+            "persistent-no-host-terminal-banner-1-1",
+            "persistent-no-host-terminal-banner-1-2",
+            "persistent-no-host-terminal-banner-1-3",
+            "persistent-no-host-terminal-banner-2-1",
+            "persistent-no-host-terminal-banner-2-2",
+            "persistent-no-host-terminal-banner-2-3",
+            "persistent-no-host-terminal-banner-3-1",
+            "persistent-no-host-terminal-banner-3-2",
+            "persistent-no-host-terminal-banner-4-1"
+          ]
+        }
+      }
     }
   },
   "seeds": [
