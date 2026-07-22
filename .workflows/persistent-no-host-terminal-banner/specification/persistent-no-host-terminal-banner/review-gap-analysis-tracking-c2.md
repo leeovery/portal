@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-22
 cycle: 2
 phase: Gap Analysis
@@ -52,9 +52,9 @@ The named two-row co-render is a *new* rendering combination this fix introduces
 Given the spec's explicit attention to non-redundancy in exactly this state, confirm the intended glyph treatment for the named two-row co-render (accept two `⚠`, or drop/alter the flash glyph).
 
 **Proposed Addition**:
-{leave blank until discussed}
+New §5 bullet "Shared `⚠` glyph in the two-row co-render (accepted)": both surfaces carry the shared warning glyph by design; the named two-row state momentarily shows two `⚠` (banner + flash) until the flash self-clears; accepted (glyph is a marker not information; each row an independent warning; flash transient); flash not special-cased to drop its glyph; subject to visual-gate confirmation. §7 named co-render assertion updated to require both rows carry `⚠`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: User chose "keep both" (recommended) and confirmed the persistent-banner / transient-flash model. Logged to §5 and §7.
 
 ---
