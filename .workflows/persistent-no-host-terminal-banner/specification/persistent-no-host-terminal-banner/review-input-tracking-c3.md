@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-22
 cycle: 3
 phase: Input Review
@@ -29,9 +29,9 @@ Note the *adjacent* NULL reasoning **is** already in the spec — §5's "Accepte
 > The fix adds a proactive check: when `DetectUnsupported()` is true, pressing `m` does **not** open the mode — it sets a transient blocked-entry flash instead (copy defined in Topic 5) and returns.
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+New §3 subsection "### Visible flash, not a silent no-op (Fork B → B1)": records that Fork B resolved to B1 (visible flash) and B2 (silent no-op) was rejected because a silent `m` reads as broken; notes the flash must fire even on NULL/remote (no remedy) so the keypress isn't silently swallowed; warns against "simplifying" to silence — parity with §3's A2 treatment.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied. Source-derived rationale (not a new decision). Logged to §3.
 
 ---

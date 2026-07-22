@@ -75,6 +75,10 @@ Applies to **both** unsupported shapes (NULL and named) — `DetectUnsupported()
 - **Fork A resolved to A1 (leave the reactive backstop; no mid-mode eject).** If the user entered multi-select during the in-flight window and detection then resolves unsupported, the mode is **not** ejected. The `terminalDetectedMsg` arm continues to only cache identity/adapter/resolution (and resolve a `pendingBurstEnter` deferral) — it does not close an open multi-select mode. The reactive `decideBurst` no-op remains the sole backstop for the "entered-before-resolve → Enter" path.
 - Rationale: the in-flight window is tiny and ejecting a user mid-interaction is jarring. A2 (eject on resolve) was explored and rejected for that reason.
 
+### Visible flash, not a silent no-op (Fork B → B1)
+
+The block produces a **visible** transient flash rather than silently swallowing the keypress. **Fork B resolved to B1 (honest explanatory flash).** B2 (silent no-op) was explored and rejected because a silent `m` reads as broken — the user gets no signal for why nothing happened. This matters most on NULL/remote, where there is no `terminals.json` remedy: the flash *explains* rather than guides (its copy is settled in §5/§6), but it must still fire so the keypress is not silently swallowed. This is the sole reason the pre-emptive entry block surfaces any feedback at all — do **not** "simplify" it to a silent no-op.
+
 ### Net effect
 
 Once detection has resolved unsupported, `m` is proactively blocked at entry. Before resolution, the mode is enterable but the burst is still caught reactively at Enter. Supported terminals are unaffected — `m` enters and dispatches as today.
