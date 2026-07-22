@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-22
 cycle: 2
 phase: Input Review
@@ -29,9 +29,9 @@ This constraint is load-bearing and explains a non-obvious copy choice. The inve
 > - **Blocked-entry flash behaviour** (settled): distinct from the reactive no-op (a pre-emptive block attempts nothing, so no `— nothing opened`); uses the existing §11 notice-band flash slot and self-clears on the **next actionable key** (the authoritative trigger — matching the existing `setFlash` / `isActionableKey` lifecycle; "next keypress" elsewhere is shorthand for this); on a named terminal it co-renders two-row with the persistent banner (banner on the header row, flash on the notice-band row); repeated `m` while the flash shows clears then re-blocks + re-flashes (intentional). Reusing the §11 flash slot also inherits its existing auto-clear timer — that is expected and not forbidden; the "self-clears on the next actionable key" acceptance wording is the *key-driven* clear path, not a prohibition on the timer.
 
 **Proposed Addition**:
-{leave blank until discussed — likely a clause appended to the named co-render note in §5 stating that, in the named two-row state, the block flash carries only the "multi-select isn't available" intent and must not repeat the banner's "unsupported terminal"/bundle-id/`see docs` content, since the co-rendered banner already supplies the identity and remedy}
+New §5 bullet "Named non-repetition constraint (from fix validation)": in the named two-row state the block flash carries only the "multi-select isn't available" intent and must not repeat the banner's `unsupported terminal`/identity/`see docs`; explains why the named flash is bare (no bundle id, no docs pointer), rejecting the early spec-fork suggestion; keeps the two rows non-redundant.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied. Logged to §5.
 
 ---
