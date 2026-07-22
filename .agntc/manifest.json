@@ -1,7 +1,7 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.6.3",
-    "commit": "e64fe6b7718a65ddc94510c3039e4172252c3a0a",
+    "ref": "v0.6.5",
+    "commit": "75b88b5b15c9cc334226f060de9c45ed5ad51029",
     "agents": [
       "claude"
     ],
@@ -134,11 +134,15 @@
       ".claude/skills/workflow-engine/scripts/domain/projections/discovery-map.cjs",
       ".claude/skills/workflow-engine/scripts/domain/projections/discussion-map.cjs",
       ".claude/skills/workflow-engine/scripts/domain/projections/epic.cjs",
+      ".claude/skills/workflow-engine/scripts/domain/projections/selection.cjs",
       ".claude/skills/workflow-engine/scripts/domain/projections/specification.cjs",
       ".claude/skills/workflow-engine/scripts/domain/projections/start.cjs",
+      ".claude/skills/workflow-engine/scripts/domain/projections/surfaces.cjs",
       ".claude/skills/workflow-engine/scripts/domain/projections/tasks.cjs",
+      ".claude/skills/workflow-engine/scripts/domain/projections/transactions.cjs",
       ".claude/skills/workflow-engine/scripts/domain/projections/workunit.cjs",
       ".claude/skills/workflow-engine/scripts/domain/reads.cjs",
+      ".claude/skills/workflow-engine/scripts/domain/render.cjs",
       ".claude/skills/workflow-engine/scripts/domain/specification.cjs",
       ".claude/skills/workflow-engine/scripts/domain/start.cjs",
       ".claude/skills/workflow-engine/scripts/domain/tasks.cjs",
@@ -289,6 +293,7 @@
       ".claude/skills/workflow-migrate/scripts/migrations/047-discussion-map-to-manifest.cjs",
       ".claude/skills/workflow-migrate/scripts/migrations/048-strip-discovery-item-status.cjs",
       ".claude/skills/workflow-migrate/scripts/migrations/049-nested-workflows-gitignore.cjs",
+      ".claude/skills/workflow-migrate/scripts/migrations/050-purge-closed-workunit-caches.cjs",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
@@ -519,7 +524,7 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "installedAt": "2026-07-21T20:40:31.813Z",
+    "installedAt": "2026-07-22T19:57:48.318Z",
     "constraint": "^0.6.0"
   },
   "samber/cc-skills-golang": {

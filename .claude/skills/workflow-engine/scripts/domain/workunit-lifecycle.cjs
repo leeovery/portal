@@ -27,6 +27,7 @@ const {
   ensureContainer,
 } = require('../kernel/manifest.cjs');
 const { commitScopedWithKb, noteIfNothingCommitted } = require('./commit.cjs');
+const { purgeWorkUnitCache } = require('./cache.cjs');
 const { knowledge } = require('./kb.cjs');
 const { addItem } = require('./discovery-map.cjs');
 const { todayStamp } = require('./dates.cjs');
@@ -46,6 +47,7 @@ function assertLegalStatus(status) {
 /**
  * @typedef {object} WorkUnitLifecycleResult
  * @property {string} work_unit
+ * @property {string} [work_type]  complete: the unit's work type (drives the pipeline banner)
  * @property {string} status     the work unit's status after the transition
  * @property {string} [completed_at]      complete: the stamped date
  * @property {string} [previous_status]   reactivate: the status the unit came from
@@ -71,7 +73,7 @@ function assertLegalStatus(status) {
  */
 function completeWorkUnit(cwd, workUnit, { message }) {
   assertLegalStatus('completed');
-  const { completedAt, previous } = withWorkUnitLock(cwd, workUnit, () => {
+  const { completedAt, previous, workType } = withWorkUnitLock(cwd, workUnit, () => {
     const loaded = loadWorkUnitManifest(cwd, workUnit);
     if (loaded.status === 'completed') {
       throw new Error(`work unit "${workUnit}" is already completed`);
@@ -85,7 +87,7 @@ function completeWorkUnit(cwd, workUnit, { message }) {
     loaded.completed_at = stamped;
 
     saveWorkUnitManifest(cwd, workUnit, loaded);
-    return { completedAt: stamped, previous: from };
+    return { completedAt: stamped, previous: from, workType: loaded.work_type };
   });
 
   /** @type {string[]} */
@@ -94,9 +96,10 @@ function completeWorkUnit(cwd, workUnit, { message }) {
     reindexWorkUnit(cwd, workUnit, warnings);
   }
 
-  const committed = commitScopedWithKb(cwd, `.workflows/${workUnit}`, message);
+  const cacheSpec = purgeWorkUnitCache(cwd, workUnit);
+  const committed = commitScopedWithKb(cwd, cacheSpec ? [`.workflows/${workUnit}`, cacheSpec] : `.workflows/${workUnit}`, message);
   /** @type {WorkUnitLifecycleResult} */
-  const result = { work_unit: workUnit, status: 'completed', completed_at: completedAt, committed, warnings };
+  const result = { work_unit: workUnit, work_type: workType, status: 'completed', completed_at: completedAt, committed, warnings };
   noteIfNothingCommitted(result, committed);
   return result;
 }
@@ -129,7 +132,8 @@ function cancelWorkUnit(cwd, workUnit) {
   const warnings = [];
   knowledge(cwd, ['remove', '--work-unit', workUnit], 'knowledge remove', warnings);
 
-  const committed = commitScopedWithKb(cwd, `.workflows/${workUnit}`, `workflow(${workUnit}): mark as cancelled`);
+  const cacheSpec = purgeWorkUnitCache(cwd, workUnit);
+  const committed = commitScopedWithKb(cwd, cacheSpec ? [`.workflows/${workUnit}`, cacheSpec] : `.workflows/${workUnit}`, `workflow(${workUnit}): mark as cancelled`);
   /** @type {WorkUnitLifecycleResult} */
   const result = { work_unit: workUnit, status: 'cancelled', committed, warnings };
   noteIfNothingCommitted(result, committed);
