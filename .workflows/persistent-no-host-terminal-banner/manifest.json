@@ -98,7 +98,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 3,
-          "current_task": "persistent-no-host-terminal-banner-3-2",
+          "current_task": null,
           "completed_tasks": [
             "persistent-no-host-terminal-banner-1-1",
             "persistent-no-host-terminal-banner-1-2",
@@ -106,11 +106,13 @@
             "persistent-no-host-terminal-banner-2-1",
             "persistent-no-host-terminal-banner-2-2",
             "persistent-no-host-terminal-banner-2-3",
-            "persistent-no-host-terminal-banner-3-1"
+            "persistent-no-host-terminal-banner-3-1",
+            "persistent-no-host-terminal-banner-3-2"
           ],
           "completed_phases": [
             1,
-            2
+            2,
+            3
           ]
         }
       }

@@ -519,6 +519,80 @@ func TestRunOpenBurst_UnsupportedTerminal_AtomicNoop(t *testing.T) {
 	}
 }
 
+func TestRunOpenBurst_UnsupportedTerminal_CopyIsPlainLanguage(t *testing.T) {
+	// Explicit byte-literal copy regression pinning the rewritten plain-language
+	// unsupported no-op strings on the CLI open-burst surface (spec §5 copy set,
+	// §7 CLI copy assertions). TestRunOpenBurst_UnsupportedTerminal_AtomicNoop
+	// asserts want := spawn.UnsupportedNoopMessage(id) — it SELF-REFERENCES the
+	// shared renderer and so silently tracks any wording change. Each `want` here is
+	// a hardcoded literal (NOT spawn.UnsupportedNoopMessage(id)), so this test FAILS
+	// if the copy drifts from spec §5. It drives the same N≥2 unsupported atomic
+	// no-op path for BOTH message shapes: the named terminal AND the NULL/remote
+	// identity — closing the gap the named-only existing test leaves uncovered.
+	tests := []struct {
+		name string
+		id   spawn.Identity
+		want string
+	}{
+		{
+			name: "named unsupported terminal",
+			id:   appleTerminalIdentity(), // spawn.NewIdentity("com.apple.Terminal", "Apple Terminal")
+			want: "can't open new windows in Apple Terminal · com.apple.Terminal — nothing opened",
+		},
+		{
+			name: "null remote identity",
+			id:   spawn.Identity{}, // empty BundleID → IsNull() true
+			want: "can't open new windows over a remote connection — nothing opened",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := &openBurstEvents{}
+			inner := &spawntest.FakeAdapter{}
+			adapter := &recordingAdapter{events: events, inner: inner}
+			conn := &recordingConnector{events: events}
+			mint := &recordingMint{events: events}
+			deps := openBurstDepsForTest(tt.id, spawn.ResolutionUnsupported, adapter, conn, mint.mint)
+
+			// Spy: the burster must never be built on the unsupported no-op path.
+			bursterBuilt := false
+			deps.NewBurster = func(spawn.Adapter) *spawn.Burster {
+				bursterBuilt = true
+				return nil
+			}
+
+			surfaces := []spawn.Surface{
+				{Kind: spawn.SurfaceAttach, Value: "a"},
+				{Kind: spawn.SurfaceAttach, Value: "b"},
+			}
+			err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps)
+
+			if err == nil {
+				t.Fatal("expected an atomic no-op error for the unsupported terminal, got nil")
+			}
+			// Byte-literal want — NOT spawn.UnsupportedNoopMessage(tt.id) — so a copy
+			// drift from spec §5 is caught here rather than silently tracked.
+			if err.Error() != tt.want {
+				t.Errorf("error = %q, want the plain-language literal %q", err.Error(), tt.want)
+			}
+			// Atomic no-op is preserved: nothing built, nothing opened, no half-connect.
+			if bursterBuilt {
+				t.Error("NewBurster must not be built on the unsupported no-op path")
+			}
+			if len(inner.Calls) != 0 {
+				t.Errorf("OpenWindow called %d times, want 0 (nothing opens)", len(inner.Calls))
+			}
+			if len(conn.calls) != 0 {
+				t.Errorf("Connector.Connect targets = %#v, want none (trigger must NOT half-connect)", conn.calls)
+			}
+			if len(mint.calls) != 0 {
+				t.Errorf("LocalMint called %d times, want 0 (trigger must NOT half-connect)", len(mint.calls))
+			}
+		})
+	}
+}
+
 func TestRunOpenBurst_PreSpawnBursterError_TriggerNotConnected(t *testing.T) {
 	// A pre-spawn Burster error (the executable fails to resolve before any window
 	// opens) aborts before the self-connect: the error propagates and the trigger
