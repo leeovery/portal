@@ -84,3 +84,16 @@ approved_at: 2026-07-22
 |-------------|------|------------|
 | persistent-no-host-terminal-banner-3-1 | Rewrite UnsupportedNoopMessage (both shapes) + lockstep copy assertions | NULL shape covers remote/mosh + transient-detection-error folded to Identity{}; named shape preserves `<name> · <bundleID>` (U+00B7) and the `— nothing opened` clause; adjacent spawn copy (gone / failed-to-open / permission) untouched; observability log line `unsupported terminal — nothing opened` (logemit) is not the message and stays untouched; function + spawn-suite + tui-reactive-backstop literals must land in one green commit |
 | persistent-no-host-terminal-banner-3-2 | Lock CLI open-burst copy coherence (regression + wording check) | CLI assertion self-references the shared function so it auto-tracks and silently accepts drift (literal regression enforces the coordination contract); `can't open new windows … — nothing opened` must read correctly for the CLI's attempted-open case; cli-verb-surface-redesign shares ownership and lands first (no CLI block-logic change); NULL shape uncovered by the current named-only CLI test |
+
+### Phase 4: Analysis (Cycle 1)
+status: approved
+approved_at: 2026-07-22
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+status: approved
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| persistent-no-host-terminal-banner-4-1 | Extract a shared cmd-side unsupported-burst no-op test helper | shared helper pair owns arrange + Execute + structural no-op invariants; both tests keep their divergent err assertions at the call site (computed `spawn.UnsupportedNoopMessage(id)` for AtomicNoop vs byte-literal `want` + NULL row for CopyIsPlainLanguage); no production (non-test) code changes; both divergent assertions stay independently load-bearing; `go test ./cmd` passes |

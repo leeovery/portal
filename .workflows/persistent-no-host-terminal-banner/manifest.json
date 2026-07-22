@@ -51,7 +51,9 @@
             "persistent-no-host-terminal-banner-2-3": "tick-bf8fcc",
             "persistent-no-host-terminal-banner-3-1": "tick-45dc48",
             "persistent-no-host-terminal-banner-3": "tick-1b7793",
-            "persistent-no-host-terminal-banner-3-2": "tick-a0b82f"
+            "persistent-no-host-terminal-banner-3-2": "tick-a0b82f",
+            "persistent-no-host-terminal-banner-4": "tick-cf46d4",
+            "persistent-no-host-terminal-banner-4-1": "tick-2b34c3"
           },
           "external_id": "tick-4427fd"
         }
@@ -63,7 +65,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,

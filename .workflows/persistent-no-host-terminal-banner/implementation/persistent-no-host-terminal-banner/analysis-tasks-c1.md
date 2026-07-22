@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: persistent-no-host-terminal-banner (Cycle 1)
 
 ## Task 1: Extract a shared cmd-side unsupported-burst no-op test helper
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
