@@ -27,6 +27,22 @@
           "date": "2026-07-22"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "persistent-no-host-terminal-banner": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "a454e0f4314c96c553ff73509c9715f7a9228b79",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": null,
+          "task_map": {}
+        }
+      }
     }
   },
   "seeds": [
