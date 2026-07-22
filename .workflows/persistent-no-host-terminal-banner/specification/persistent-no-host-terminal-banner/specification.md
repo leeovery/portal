@@ -95,4 +95,34 @@ Sub-fix 3's guard-safety depends on `sessionsGuardModel` (`NewModelWithSessions`
 
 ---
 
+## 5. Unsupported-Terminal Copy (Plain-Language Rewrite)
+
+### Principle
+
+All user-facing copy in the unsupported-terminal family is rewritten in plain language — no jargon. Every message must make clear *what happened, why, and (where applicable) what to do*. `<name>`/`<bundleID>` are filled at render.
+
+### The copy set
+
+| Message | NULL / remote | Named-unsupported |
+|---|---|---|
+| **Blocked-entry flash** *(new — `m` pressed after detection resolves unsupported)* | `multi-select isn't available over a remote connection` | `multi-select isn't available on this terminal` |
+| **Reactive no-op** *(`spawn.UnsupportedNoopMessage` — async-race path + shared with the CLI open-burst)* | `can't open new windows over a remote connection — nothing opened` | `can't open new windows in <name> · <bundleID> — nothing opened` |
+| **Named banner** *(kept, persistent, named-only)* | — *(no NULL banner — Topic 2)* | `⚠ unsupported terminal — <name> · <bundleID>` + `see docs` |
+
+### Notes & decisions
+
+- **"can't open new windows"** is the plain statement of what multi-select does and can't do here. **"nothing opened"** stays — it is plain and honestly signals an attempt occurred (distinguishing the reactive no-op from the pre-emptive block, which says "isn't available").
+- The named reactive/CLI line keeps `<name> · <bundleID>` because in the CLI there is no banner — that line is the only place the user gets the bundle id (the `terminals.json` key).
+- **Blocked-entry flash behaviour** (settled): distinct from the reactive no-op (a pre-emptive block attempts nothing, so no `— nothing opened`); uses the existing §11 notice-band flash slot and self-clears on the next actionable key; on a named terminal it co-renders two-row with the persistent banner (banner on the header row, flash on the notice-band row); repeated `m` while the flash shows clears then re-blocks + re-flashes (intentional).
+- **`UnsupportedNoopMessage` is in scope.** Rewriting it widens this bugfix into `internal/spawn`, and its wording is **shared with the CLI open-burst** (partly owned by `cli-verb-surface-redesign`) — the rewrite must be coordinated with that feature so the CLI copy stays coherent.
+- **Setup guidance retained for named-unsupported:** the persistent banner carries the terminal name + bundle id (the copy-paste key for `terminals.json`) and the `see docs` hint. NULL/remote has no remedy, so it gets no pointer — only the plain explanation.
+- **`see docs` left unchanged here.** It currently renders no concrete URL/path and there is no `terminals.json` setup doc in the repo. Making it a real (ideally clickable, OSC 8) link to a new custom-terminal setup page is **logged separately as a quickfix** (`custom-terminal-docs-and-clickable-see-docs`) and is out of scope for this bugfix.
+- **Accepted minor imprecision:** NULL is almost always remote/mosh, but can rarely be a detection error folding to a null identity, where "over a remote connection" is slightly off (still directionally correct — the actionable truth, "multi-select isn't available / nothing opened", holds either way).
+
+### Out of scope (copy)
+
+Adjacent spawn messages for *different* scenarios — session killed mid-burst (`'…' is gone — nothing opened`), a window `failed to open`, macOS permission guidance — are already plain and separately owned; not rewritten here.
+
+---
+
 ## Working Notes
