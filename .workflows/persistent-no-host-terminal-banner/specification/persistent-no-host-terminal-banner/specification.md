@@ -145,4 +145,29 @@ After removal the two renderers are **named-only** — `bundleID != ""` always h
 
 ---
 
+## 7. Testing Requirements
+
+**Rework (existing tests encoding the old contract):**
+
+- `internal/tui/burst_unsupported_noop_test.go` — `TestBurstUnsupported_NonNullAtomicNoOp` and `TestBurstUnsupported_NullFlash` enter multi-select *after* `resolveDetection`; the post-resolve `m` is now blocked, so their `markTwo` precondition fails. Rework both to enter multi-select **before** resolving detection (the in-flight path). `TestBurstUnsupported_DeferredThenUnsupported` (already in-flight) and `TestBurstUnsupported_SupportedStillDispatches` (supported) stay valid. Keep the deferred-Enter → reactive no-op coverage (the retained backstop).
+- `internal/tui/unsupported_banner_test.go` — `TestApplySectionHeader_UnsupportedNullShowsHonestLine` currently asserts a resolved NULL renders `⚠ no host-local terminal` with `Sessions` absent; sub-fix 1 inverts this → assert NULL now renders the standard `Sessions ··· N` header.
+- **Copy assertions:** any test asserting the old `UnsupportedNoopMessage` strings (in `internal/spawn` and the CLI open-burst suites) updates to the new plain-language strings.
+
+**Remove:**
+
+- The render-level `TestUnsupportedHeader_NullIdentityNoHostLocal` — it exercises the deleted NULL render branch (Topic 6).
+
+**New coverage:**
+
+- **Banner split:** NULL identity → standard `Sessions ··· N` header renders (not the banner) **and** the By-Tag "no tags yet" signpost returns (mirror of `TestActiveNoticeBand_SuppressesSignpostWhenUnsupported`, which uses a *named* identity and stays valid — assert the NULL case now returns the signpost); named identity → banner unchanged.
+- **`m`-entry block:** `m` on a resolved-unsupported terminal does **not** enter multi-select and sets the blocked flash (both NULL and named); flash self-clears on the next actionable key. Plus a **named co-render** assertion: a blocked `m` on a named unsupported terminal yields the two-row state (persistent banner on the header row + block flash on the notice-band row).
+- **Help suppression:** `?` help omits the `m` row when `DetectUnsupported()`, lists it when supported; `keymap_dispatch_guard_test` stays green.
+- **Copy:** the new blocked-entry flash returns the correct plain strings per shape; the rewritten `UnsupportedNoopMessage` returns the correct plain strings per shape.
+
+**Guard (unchanged path):** supported (native/config) terminal — banner absent, `m` enters, help lists `m`, burst dispatches.
+
+**Visual:** add a NULL-identity fixture (standard header, no banner); the existing `sessions-unsupported-terminal` (named) fixture stays valid.
+
+---
+
 ## Working Notes
