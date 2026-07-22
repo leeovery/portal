@@ -4671,15 +4671,19 @@ func (m Model) renderHeader() string {
 }
 
 // unsupportedBannerActive reports whether the §6.2 proactive unsupported-terminal
-// banner owns the Sessions section-header row: detection has resolved to an
-// unsupported resolution (a NULL remote/mosh identity OR a non-NULL undriven
-// identity like com.apple.Terminal — the resolution-based DetectUnsupported test,
-// NOT IsNull) AND multi-select mode is not active (the §5 `N selected` banner
-// outranks it). It is the SINGLE predicate both applySectionHeader (which swaps in
-// the banner) and activeNoticeBand (which suppresses the By-Tag signpost while the
+// banner owns the Sessions section-header row. The banner is NAMED-ONLY: it fires
+// only when detection has resolved to an unsupported resolution (the resolution-
+// based DetectUnsupported test) AND the resolved identity is NOT NULL (a named
+// undriven terminal like com.apple.Terminal — !detectIdentity.IsNull()) AND
+// multi-select mode is not active (the §5 `N selected` banner outranks it). The
+// !IsNull() discriminator keeps a NULL/remote (mosh/SSH) client from claiming the
+// header row: its banner carries nothing actionable (no bundle id, no `see docs`),
+// so a NULL client keeps its standard `Sessions ··· N` header and its By-Tag
+// signpost. It is the SINGLE predicate both applySectionHeader (which swaps in the
+// banner) and activeNoticeBand (which suppresses the By-Tag signpost while the
 // banner owns the row) read, so the two can never drift.
 func (m Model) unsupportedBannerActive() bool {
-	return m.DetectUnsupported() && !m.multiSelectMode
+	return m.DetectUnsupported() && !m.multiSelectMode && !m.detectIdentity.IsNull()
 }
 
 // replaceHeaderLine swaps header in for the FIRST line of listView (a
@@ -4770,13 +4774,17 @@ func (m Model) applySectionHeader(listView string) string {
 			m.colourless,
 		))
 	}
-	// §6.2 proactive unsupported/NULL banner: once detection has resolved to an
-	// unsupported resolution, swap in the `⚠ unsupported terminal — <name> ·
-	// <bundleID>` (named) / `⚠ no host-local terminal` (NULL) banner. This PRECEDES
-	// the FilterApplied branch (a committed filter WHILE unsupported still shows the
-	// banner) but FOLLOWS multi-select (the `N selected` banner outranks it — the
-	// gate is unsupportedBannerActive, false in the mode). An in-flight detection
+	// §6.2 proactive unsupported banner (NAMED-ONLY): once detection has resolved to a
+	// named-unsupported identity, swap in the `⚠ unsupported terminal — <name> ·
+	// <bundleID>` banner. The gate (unsupportedBannerActive) now carries the
+	// !IsNull() discriminator, so ONLY the named shape is reachable here — a
+	// NULL/remote identity falls through to the standard `Sessions ··· N` header
+	// below. This PRECEDES the FilterApplied branch (a committed filter WHILE
+	// unsupported still shows the banner) but FOLLOWS multi-select (the `N selected`
+	// banner outranks it — the gate is false in the mode). An in-flight detection
 	// (not yet resolved) leaves DetectUnsupported false, so the standard header shows.
+	// (The now-unreachable NULL render branch inside renderUnsupportedHeader /
+	// unsupportedLeftCluster is removed in Task 1.2, not here.)
 	if m.unsupportedBannerActive() {
 		return replaceHeaderLine(listView, renderUnsupportedHeader(
 			m.detectIdentity.Name,

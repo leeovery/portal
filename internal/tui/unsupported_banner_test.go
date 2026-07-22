@@ -235,24 +235,26 @@ func TestApplySectionHeader_UnsupportedShowsBanner(t *testing.T) {
 	}
 }
 
-// TestApplySectionHeader_UnsupportedNullShowsHonestLine asserts a resolved NULL
-// (remote/mosh) identity renders the honest `⚠ no host-local terminal` line at the
-// section-header row (no identity, no `see docs`, no `Sessions`).
-func TestApplySectionHeader_UnsupportedNullShowsHonestLine(t *testing.T) {
+// TestApplySectionHeader_UnsupportedNullShowsStandardHeader asserts a resolved NULL
+// (remote/mosh) identity now renders the standard `Sessions ··· N` header at the
+// section-header row. The IsNull() discriminator on unsupportedBannerActive() makes
+// the banner named-only, so a NULL client keeps its session count and grouping
+// indicator — no banner, no `no host-local terminal` / `unsupported terminal` /
+// `see docs`.
+func TestApplySectionHeader_UnsupportedNullShowsStandardHeader(t *testing.T) {
 	m := unsupportedResolvedModel(t, spawn.Identity{}) // NULL (remote/mosh)
 	if !m.DetectUnsupported() {
 		t.Fatalf("precondition: a NULL identity must resolve unsupported")
 	}
 
 	first := ansi.Strip(bannerFirstLine(m))
-	if !strings.Contains(first, "no host-local terminal") {
-		t.Errorf("NULL section-header row must read the honest line:\n%s", first)
+	if !strings.Contains(first, "Sessions") {
+		t.Errorf("NULL section-header row must show the standard %q header:\n%s", "Sessions", first)
 	}
-	if strings.Contains(first, "see docs") {
-		t.Errorf("NULL section-header row must NOT show the %q hint:\n%s", "see docs", first)
-	}
-	if strings.Contains(first, "Sessions") {
-		t.Errorf("NULL section-header row must NOT show the standard %q header:\n%s", "Sessions", first)
+	for _, absent := range []string{"no host-local terminal", "unsupported terminal", "see docs"} {
+		if strings.Contains(first, absent) {
+			t.Errorf("NULL section-header row must NOT show %q (banner is named-only):\n%s", absent, first)
+		}
 	}
 }
 
@@ -338,6 +340,30 @@ func TestActiveNoticeBand_SuppressesSignpostWhenUnsupported(t *testing.T) {
 
 	if _, _, ok := m.activeNoticeBand(); ok {
 		t.Errorf("the unsupported banner must suppress the By-Tag signpost notice band")
+	}
+}
+
+// TestActiveNoticeBand_NullReturnsSignpost asserts a resolved-unsupported NULL
+// (remote/mosh) identity does NOT suppress the By-Tag "No tags yet" signpost. With
+// the banner gate now named-only (unsupportedBannerActive() false for NULL), no
+// banner competes for the section-header row, so the signpost owns the notice slot
+// again. Mirror of TestActiveNoticeBand_SuppressesSignpostWhenUnsupported (which
+// uses a named identity and stays valid).
+func TestActiveNoticeBand_NullReturnsSignpost(t *testing.T) {
+	m := signpostModel(t)
+	if _, _, ok := m.activeNoticeBand(); !ok {
+		t.Fatalf("precondition: the signpost must own the slot before detection resolves")
+	}
+
+	m.detectIdentity = spawn.Identity{} // NULL (remote/mosh)
+	m.detectResolution = spawn.ResolutionUnsupported
+	m.detectResolved = true
+	if m.unsupportedBannerActive() {
+		t.Fatalf("unsupportedBannerActive() must be false for a resolved-unsupported NULL identity")
+	}
+
+	if _, _, ok := m.activeNoticeBand(); !ok {
+		t.Errorf("a NULL client with no tags must show the By-Tag signpost (no banner competing for the slot)")
 	}
 }
 
