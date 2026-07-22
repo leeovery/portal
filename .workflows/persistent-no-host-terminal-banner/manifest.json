@@ -39,7 +39,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 3,
-          "task": "persistent-no-host-terminal-banner-3-1",
+          "task": "persistent-no-host-terminal-banner-3-2",
           "task_map": {
             "persistent-no-host-terminal-banner-1-1": "tick-8c87fb",
             "persistent-no-host-terminal-banner-1": "tick-7b8028",
@@ -48,7 +48,9 @@
             "persistent-no-host-terminal-banner-2-1": "tick-68e162",
             "persistent-no-host-terminal-banner-2": "tick-b3a546",
             "persistent-no-host-terminal-banner-2-2": "tick-ad5a58",
-            "persistent-no-host-terminal-banner-2-3": "tick-bf8fcc"
+            "persistent-no-host-terminal-banner-2-3": "tick-bf8fcc",
+            "persistent-no-host-terminal-banner-3-1": "tick-45dc48",
+            "persistent-no-host-terminal-banner-3": "tick-1b7793"
           },
           "external_id": "tick-4427fd"
         }
