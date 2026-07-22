@@ -47,6 +47,10 @@ Add an `IsNull()` identity-shape discriminator to `unsupportedBannerActive()` (`
 
 The renderer already knows the NULL/named split (`renderUnsupportedHeader` / `unsupportedLeftCluster` branch on `bundleID == ""`); only the *gate* was blind to it. This sub-fix adds the missing discriminator at the gate — it does not change the renderers (the fate of the now-unreachable NULL render branch is Topic 6).
 
+### Scope guard — the detection cache is not the defect
+
+The banner's *permanence* comes from the once-only detection cache (the `detectDispatched` latch → cached `detectResolved`/`detectResolution`; nothing re-detects, and `rebuildSessionList` does not re-run detection), which is re-read every frame. The missing `IsNull()` gate decides only *whether* that cached unsupported resolution renders as the banner — the exact chain is "once-cached unsupported resolution × identity-blind gate", **not** "the gate makes it permanent." The `!IsNull()` gate change alone fully resolves the NULL symptom; the once-only detection cache is **not** itself a defect and must be left untouched (do not add re-detection on rebuild).
+
 ---
 
 ## 3. Sub-fix 2 — Proactive Multi-Select Entry Block
@@ -56,6 +60,10 @@ The renderer already knows the NULL/named split (`renderUnsupportedHeader` / `un
 Gate the entry branch of `handleMultiSelectToggle` (`internal/tui/model.go`) on `DetectUnsupported()`. Today the entry branch (`if !m.multiSelectMode { multiSelectMode = true; …mark-on-entry… }`) has **no** detection read; the only unsupported gate is downstream at `decideBurst`'s N≥2 Enter. The fix adds a proactive check: when `DetectUnsupported()` is true, pressing `m` does **not** open the mode — it sets a transient blocked-entry flash instead (copy defined in Topic 5) and returns.
 
 Applies to **both** unsupported shapes (NULL and named) — `DetectUnsupported()` is the coarse resolution predicate; the entry block is deliberately identity-blind (only the *flash copy* differs by shape, Topic 5).
+
+### Only the keypress entry is gated
+
+`handleMultiSelectToggle` is the sole *live* entry point for opening multi-select. `WithInitialMultiSelect` is a construction-time option used only by the capture harness (not a keypress) and is a separate `multiSelectMode = true` setter that is deliberately **not** gated — so the existing multi-select capture fixtures (e.g. `sessions-multi-select-active`) are unaffected by the entry block regardless of detection state. Do **not** gate `WithInitialMultiSelect`.
 
 ### Retain the reactive backstop (Fork A → A1)
 

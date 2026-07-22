@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-22
 cycle: 1
 phase: Input Review
@@ -27,9 +27,10 @@ This matters because the spec's §1 describes the banner showing "permanently" /
 > The renderer already knows the NULL/named split (`renderUnsupportedHeader` / `unsupportedLeftCluster` branch on `bundleID == ""`); only the *gate* was blind to it. This sub-fix adds the missing discriminator at the gate — it does not change the renderers (the fate of the now-unreachable NULL render branch is Topic 6).
 
 **Proposed Addition**:
+Added to §2 as a new subsection "### Scope guard — the detection cache is not the defect".
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Logged verbatim to §2.
 
 ---
 
@@ -50,8 +51,9 @@ Two reasons this is worth capturing: (a) it prevents a scope error where an impl
 > Gate the entry branch of `handleMultiSelectToggle` (`internal/tui/model.go`) on `DetectUnsupported()`. Today the entry branch (`if !m.multiSelectMode { multiSelectMode = true; …mark-on-entry… }`) has **no** detection read; the only unsupported gate is downstream at `decideBurst`'s N≥2 Enter.
 
 **Proposed Addition**:
+Added to §3 as a new subsection "### Only the keypress entry is gated".
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Logged verbatim to §3.
 
 ---
