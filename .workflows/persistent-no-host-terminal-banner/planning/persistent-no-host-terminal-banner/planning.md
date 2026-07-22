@@ -51,7 +51,8 @@ approved_at: 2026-07-22
 - [ ] Supported terminals are unaffected: `m` enters, `?` help lists `m`, and the burst dispatches; full unit suite green.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-22
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
