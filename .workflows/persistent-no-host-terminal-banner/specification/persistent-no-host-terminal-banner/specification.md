@@ -125,4 +125,24 @@ Adjacent spawn messages for *different* scenarios — session killed mid-burst (
 
 ---
 
+## 6. Dead NULL Banner Render Branch — Removed
+
+**Decision: remove.** With the NULL banner gate dropped (Topic 2), the NULL render path is unreachable from the picker (the gate is its only caller) and is deleted:
+
+- the `unsupportedNullLabel = "no host-local terminal"` constant;
+- the `bundleID == ""` branches in `unsupportedLeftCluster` and `renderUnsupportedHeader` (the NULL banner render + its no-`see docs` handling);
+- the render-level test that exercises them directly (`TestUnsupportedHeader_NullIdentityNoHostLocal`).
+
+After removal the two renderers are **named-only** — `bundleID != ""` always holds when they are reached, so the `see docs` hint is unconditional. This also deletes the last live copy of the `no host-local terminal` jargon string (aligns with the plain-language rewrite, Topic 5). Retaining the branch as defensive dead code was rejected — it is genuinely unreachable and would rot.
+
+### Confirmed end-state behaviour (NULL / remote)
+
+- Standard `Sessions ··· N` header (count + grouping-mode suffix); **no persistent banner**.
+- `m` absent from the `?` help and from the footer (`m` is never a footer key regardless; on remote it appears in neither).
+- Pressing `m` does nothing but show the **transient flash** `multi-select isn't available over a remote connection` — no mode entered, nothing marked — which self-clears on the next keypress.
+
+("Banner" always denotes the *persistent* section-header element; the momentary message on `m` is the *transient flash*. On remote only the flash can appear; the persistent banner is retained only for *named* unsupported terminals, where it is actionable.)
+
+---
+
 ## Working Notes
