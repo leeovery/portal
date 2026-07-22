@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Banner Split by Identity Shape
-status: draft
+status: approved
+approved_at: 2026-07-22
 
 **Goal**: A NULL/remote unsupported client keeps its standard `Sessions ··· N` section header (count + grouping-mode suffix) and its By-Tag "no tags yet" signpost, while the named-unsupported banner remains unchanged. The now-unreachable NULL banner render branch is deleted, and a NULL visual fixture anchors the regression.
 
@@ -21,7 +22,8 @@ status: draft
 - [ ] Full unit suite green; no regression in the named-banner, supported-header, or multi-select-steps-aside tests.
 
 ### Phase 2: Proactive Multi-Select Entry Block + Help Suppression
-status: draft
+status: approved
+approved_at: 2026-07-22
 
 **Goal**: On any resolved-unsupported terminal (NULL or named), pressing `m` fails immediately with an honest transient flash instead of opening a walkable dead-end multi-select mode, and `m` is omitted from the `?` help while it is unavailable. The reactive burst-time no-op backstop is retained for the async in-flight window.
 
@@ -39,7 +41,8 @@ status: draft
 - [ ] Supported terminals are unaffected: `m` enters, `?` help lists `m`, and the burst dispatches; full unit suite green.
 
 ### Phase 3: Shared Reactive/CLI Copy Rewrite (plain-language `UnsupportedNoopMessage`)
-status: draft
+status: approved
+approved_at: 2026-07-22
 
 **Goal**: Rewrite the shared `UnsupportedNoopMessage` (both shapes) in `internal/spawn/message.go` to plain language, and update every copy assertion across the spawn, picker reactive-flash, and CLI open-burst suites so the two surfaces stay coherent.
 
