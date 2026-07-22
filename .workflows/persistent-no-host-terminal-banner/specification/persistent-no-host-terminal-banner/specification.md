@@ -73,4 +73,26 @@ Once detection has resolved unsupported, `m` is proactively blocked at entry. Be
 
 ---
 
+## 4. Sub-fix 3 — Help-Modal `m`-Suppression
+
+### Change
+
+When `DetectUnsupported()` is true, filter the `m` (multi-select) entry out of the keymap descriptor slice passed to the help modal **at the call site** (`renderHelpModalOnClearedCanvas`, `internal/tui/model.go`). `sessionsKeymap()` itself stays a pure static constant — the filter is applied to the copy fed to the modal, not baked into the descriptor function.
+
+### Behaviour
+
+- **Unsupported (NULL or named):** the `?` help body omits the `m` row (consistent with `m` being blocked at entry).
+- **Supported:** `?` help lists `m` as today.
+- **Footer unchanged either way.** `m` is a non-`Core` descriptor entry, so `renderCondensedFooter` never lists it — the footer needs no change under any resolution.
+
+### Why call-site filter, not a parameterised keymap
+
+A parameterised `sessionsKeymap()` (dropping `m` inside the descriptor function) is **rejected**. `keymap_dispatch_guard_test.go` probes the *static* descriptor against an unwired-detection model (where `DetectUnsupported()` is false → `m` supported → dispatch enters the mode) to guard descriptor↔dispatch parity. A call-site filter leaves that static descriptor — and therefore the guard — green; parameterising the descriptor would break it. The descriptor is meant to remain the single static source for dispatch parity.
+
+### Latent guard-coupling note (carry into implementation)
+
+Sub-fix 3's guard-safety depends on `sessionsGuardModel` (`NewModelWithSessions`) keeping detection **unwired**, so `DetectUnsupported()` is false and the `m` dispatch probe still enters the mode. This is true today. Sub-fix 2's entry block makes `keymap_dispatch_guard_test` newly sensitive to that seed state: a future change that wires detection into `NewModelWithSessions` (or defaults `DetectUnsupported()` true) would make the `m` probe hit the block and fail. This coupling is **not introduced** by this fix, but an inline source note near the entry-block gate / the guard probe should record it so a later reader understands the dependency.
+
+---
+
 ## Working Notes
