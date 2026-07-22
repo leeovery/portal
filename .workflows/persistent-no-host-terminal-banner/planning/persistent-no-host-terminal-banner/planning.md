@@ -50,6 +50,15 @@ approved_at: 2026-07-22
 - [ ] The reactive `decideBurst` unsupported no-op backstop is retained; `burst_unsupported_noop_test.go` is reworked so the two post-resolve-entry tests (`TestBurstUnsupported_NonNullAtomicNoOp`, `TestBurstUnsupported_NullFlash`) enter multi-select before resolving detection (the in-flight path), while the deferred-Enter → reactive no-op and supported-dispatch coverage stay valid.
 - [ ] Supported terminals are unaffected: `m` enters, `?` help lists `m`, and the burst dispatches; full unit suite green.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| persistent-no-host-terminal-banner-2-1 | Rework reactive-backstop no-op tests onto the in-flight entry path | in-flight entry before resolve (NonNull + Null), deferred-Enter no-op retained, supported-still-dispatches unchanged, backstop copy unchanged (Phase 3), ordered before the entry block to keep the suite green |
+| persistent-no-host-terminal-banner-2-2 | Proactive multi-select entry block + TUI-local blocked-entry flash helper | NULL vs named flash copy via IsNull, intent-only copy (no bundle id / no see docs / no "— nothing opened"), named two-row co-render both rows carry ⚠, self-clears on next actionable key, repeated m re-blocks + re-flashes, in-flight window still enters mode, WithInitialMultiSelect not gated, supported terminal unaffected, inline guard-coupling source note |
+| persistent-no-host-terminal-banner-2-3 | Help-modal m-suppression at the call site | unsupported + not in multi-select omits m, supported lists m, unsupported + in multi-select (A1 in-flight-entered) lists m, footer unchanged (m non-Core), sessionsKeymap() stays static (call-site filter only), keymap_dispatch_guard_test stays green (detection unwired), Projects help call-site untouched |
+
 ### Phase 3: Shared Reactive/CLI Copy Rewrite (plain-language `UnsupportedNoopMessage`)
 status: approved
 approved_at: 2026-07-22
