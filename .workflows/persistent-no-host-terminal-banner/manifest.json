@@ -124,7 +124,7 @@
     "review": {
       "items": {
         "persistent-no-host-terminal-banner": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "persistent-no-host-terminal-banner-1-1",
             "persistent-no-host-terminal-banner-1-2",
