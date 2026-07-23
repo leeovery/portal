@@ -147,11 +147,47 @@ In the mixed case — a remote client triggers the burst while a host-local clie
 
 ## Fix Direction
 
-{Written only after the fix discussion concludes.}
+### Chosen Approach
+
+**Gate host-terminal locality on the triggering (most-active) client — flip the filter-then-tiebreak order in `detectInsideTmux`.**
+
+Instead of dropping remote/mosh clients first and picking the most-active *local* survivor, select the most-active client across **all** clients attached to the triggering pane's session (local and remote), then locality-check that single winner:
+- winner walks to a local `.app` → **drive it** (supported host terminal).
+- winner walks to NULL (remote/mosh) → **honest no-op** (unsupported — the same atomic no-op as the pure-remote case).
+- winner's locality can't be determined (transient `ps`/walk failure) → **NULL + transient WARN** (fail safe — never open windows on uncertainty).
+
+**Deciding factor:** it is the only option correct in **both** mixed directions — a remote trigger with an idle local bystander no-ops (fixes the bug), *and* a local trigger with an idle remote bystander still drives (preserves the user's legitimate local spawn, which they routinely hit given their dual-attach workflow). It is also a single localized change (`internal/spawn/detect_inside.go`) that corrects all three `Detect()` consumers (CLI burst, TUI burst, `portal doctor`) in lockstep and re-arms the silently-defeated TUI `m`-entry safeguard automatically.
+
+### Options Explored
+
+- **A — Gate on the triggering (most-active) client** *(chosen)*. See above.
+- **B — Conservative: any remote client on the session → no-op** *(rejected)*. Over-blocks this user specifically: they routinely have both a local terminal and the iPad attached, so a burst triggered *from the Mac* (local) with the iPad idle-attached would be refused — punishing a legitimate local spawn for a remote bystander's mere presence. Breaks the local-trigger-with-remote-bystander case that A handles correctly.
+- **C — Only drive if all clients are local** *(rejected)*. Same defect as B, inverted framing — a single remote bystander disables local spawn.
+
+### Discussion
+
+- The direction rests on "most-active client = the trigger." The user's key challenge — since two clients mirror one session, does a keystroke on the remote client also register as activity on the mirrored local client? — was pressure-tested in a sandbox (`-L` socket, tmux 3.7b): `client_activity` tracks a client's **sent input**, not the **received redraws** it gets from mirroring, so a remote trigger keystroke bumps only the remote's activity. Concern resolved (see H3 evidence).
+- **Residual same-second edge — explicitly out of scope by user decision.** If a person were actively typing on the local terminal in the same epoch-second the remote triggers, the local could tie/win. The user ruled this a non-issue: two people interacting with the same mirrored session simultaneously is inherently a mess regardless, and not Portal's to arbitrate. No workaround will be built for it.
+- **Fail-safe principle agreed:** when the winner's locality is indeterminate, resolve to the honest no-op rather than risk a wrong-machine spawn.
+
+### Testing Recommendations
+
+- **Invert the codified-bug test** `internal/spawn/detect_inside_test.go:133` ("it drops remote clients but still resolves a mixed local+remote client set"): with the remote as the most-active client, expect **NULL/no-op** (currently asserts the local wins). This assertion currently locks in the bug.
+- **Add** a "local is most-active, remote is idle bystander" case → expect the **local drives** (guards against an Option-B-style over-correction).
+- **Add** a "remote is most-active, local idle" case → expect **NULL** (the reported bug's shape).
+- **Preserve** existing invariants: pure-remote → NULL; single-local → drives; transient-on-winner → NULL + WARN.
+
+### Risk Assessment
+
+- **Fix complexity:** Low — localized to `internal/spawn/detect_inside.go`; `detect.go` and callers unchanged.
+- **Regression risk:** Low — single-client and pure-remote paths are behaviourally unchanged; only the mixed case flips (wrong → correct).
+- **Recommended approach:** Regular release. No feature flag, no hotfix urgency (no data loss; misplaced windows are recoverable by closing them).
+- **Deferred to spec (implementation sub-choice, not a direction decision):** (A1) reimplement most-active selection over the existing `ListClients` set and walk the winner, vs. (A2) delegate to tmux's own best-client via `display-message -p '#{client_pid}'` and walk that pid. Leaning A1 (reuses existing data, no extra tmux round-trip).
 
 ---
 
 ## Notes
 
-- Scope confirmed in discovery: cover **both** burst surfaces (TUI multi-select picker burst and CLI multi-target `portal open` N≥2 burst) — they share the identical `internal/spawn` detection gate.
+- Scope confirmed in discovery: cover **both** burst surfaces (TUI multi-select picker burst and CLI multi-target `portal open` N≥2 burst) — they share the identical `internal/spawn` detection gate. The chosen fix (single change in `detect_inside.go`) covers both plus `portal doctor` in lockstep.
 - Out of scope: adding a mobile-terminal (Blink) spawn adapter — judged infeasible elsewhere (no host→device control channel). This bug is about the detection locality gate only.
+- **Spec coherence check:** interaction with `persistent-no-host-terminal-banner` (spec 2026-07-22) — after this fix the mixed case resolves NULL, flowing into that bug's NULL/remote branch (no persistent banner, honest no-op). The two compose cleanly; that bug already anticipates it. Confirm coherence at spec time.
