@@ -20,3 +20,12 @@ approved_at: 2026-07-23
 - [ ] The `detect_inside.go` docstring contract — both the algorithm description and the Outcomes list — is rewritten to describe most-active-winner selection and winner-only walk with fail-safe-to-NULL-on-transient-winner; the two directly-inverted sentences ("NULL-filtering is the primary signal" and "client_activity is used ONLY to disambiguate among host-local clients — never as a cross-client primary signal") are gone, leaving no stale contract text
 - [ ] The fast hermetic unit lane (`go test ./...`) passes; `internal/spawn/detect.go` and the `Detect()` consumers (CLI burst, TUI picker burst, `portal doctor`) are unchanged
 - [ ] Manual end-to-end verification in the reported reproduction setup: trigger a burst (either surface) from a remote SSH/mosh client while a host-local terminal is attached to the same session, and confirm the honest no-op — no windows open on the host machine
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| remote-trigger-spawns-on-local-terminal-1-1 | Reproduce the bug and invert the locality gate in detectInsideTmux | empty client list → clean NULL nil-error, winner walk transient-fail → NULL + ErrDetectTransient, exact activity tie → first-listed wins, list-clients enumeration failure → NULL + transient, single-client walk failure → NULL + transient (retained) |
+| remote-trigger-spawns-on-local-terminal-1-2 | Guard the fix against over-correction with a local-most-active regression test | remote idle bystander attached but local still drives |
+| remote-trigger-spawns-on-local-terminal-1-3 | Manually verify the honest no-op end-to-end in the reported reproduction setup | none |
