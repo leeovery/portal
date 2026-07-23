@@ -11,6 +11,22 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "remote-trigger-spawns-on-local-terminal": {
+          "status": "in-progress",
+          "sources": {
+            "remote-trigger-spawns-on-local-terminal": {
+              "status": "pending"
+            }
+          },
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "construction_gate_mode": "gated",
+          "date": "2026-07-23"
+        }
+      }
     }
   },
   "seeds": [
