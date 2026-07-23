@@ -44,7 +44,9 @@
             "remote-trigger-spawns-on-local-terminal-1-1": "tick-6ac27b",
             "remote-trigger-spawns-on-local-terminal-1": "tick-382c6d",
             "remote-trigger-spawns-on-local-terminal-1-2": "tick-932c5e",
-            "remote-trigger-spawns-on-local-terminal-1-3": "tick-d11c21"
+            "remote-trigger-spawns-on-local-terminal-1-3": "tick-d11c21",
+            "remote-trigger-spawns-on-local-terminal-2": "tick-091149",
+            "remote-trigger-spawns-on-local-terminal-2-1": "tick-727eb3"
           },
           "external_id": "tick-1655ae"
         }
@@ -56,7 +58,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,

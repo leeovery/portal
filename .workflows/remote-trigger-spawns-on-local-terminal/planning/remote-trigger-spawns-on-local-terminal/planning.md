@@ -30,3 +30,17 @@ approved_at: 2026-07-23
 | remote-trigger-spawns-on-local-terminal-1-1 | Reproduce the bug and invert the locality gate in detectInsideTmux | empty client list → clean NULL nil-error, winner walk transient-fail → NULL + ErrDetectTransient, exact activity tie → first-listed wins, list-clients enumeration failure → NULL + transient, single-client walk failure → NULL + transient (retained) |
 | remote-trigger-spawns-on-local-terminal-1-2 | Guard the fix against over-correction with a local-most-active regression test | remote idle bystander attached but local still drives |
 | remote-trigger-spawns-on-local-terminal-1-3 | Manually verify the honest no-op end-to-end in the reported reproduction setup | none |
+
+### Phase 2: Analysis (Cycle 1)
+status: approved
+approved_at: 2026-07-23
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+status: approved
+approved_at: 2026-07-23
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| remote-trigger-spawns-on-local-terminal-2-1 | Clean up T1-1 gate-inversion residues in detect_inside.go | out-of-scope `tmux.ClientInfo` doc in clients.go left untouched; no behaviour change to resolved→drive / clean-NULL→no-op / transient→NULL+ErrDetectTransient outcomes |

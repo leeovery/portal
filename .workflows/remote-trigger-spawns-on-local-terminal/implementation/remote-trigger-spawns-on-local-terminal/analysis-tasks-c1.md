@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: Remote Trigger Spawns On Local Terminal (Cycle 1)
 
 ## Task 1: Clean up T1-1 gate-inversion residues in detect_inside.go
-status: pending
+status: approved
 severity: low
 sources: architecture, duplication
 
