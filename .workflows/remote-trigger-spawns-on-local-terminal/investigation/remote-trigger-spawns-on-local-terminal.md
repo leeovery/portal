@@ -103,19 +103,42 @@ Both burst surfaces resolve the host terminal through the same `Detector.Detect(
 
 ### Root Cause
 
-{Synthesised at Step 7.}
+`detectInsideTmux` (`internal/spawn/detect_inside.go:86-105`) decides host-terminal locality in the **wrong order**: it treats client *locality* as a pre-filter (drop every remote/mosh client) and client *activity* as a tiebreak applied only **among the surviving local clients**. It therefore answers **"is there any host-local client attached to the triggering pane's session?"** rather than **"is the client that triggered this burst host-local?"**
+
+In the mixed case — a remote client triggers the burst while a host-local client is also attached to the same session — the remote (triggering) client is dropped by the NULL walk at line 98 *before* its higher `client_activity` can be consulted at line 100, so `best` becomes the local client. `Detect()` returns that non-NULL identity, the burst treats the host terminal as **supported**, and the N−1 windows open on the local machine the triggering user is not at.
+
+**Why this happens:** the correct discriminator — "which client is the user acting through?" — is exactly the most-recently-active client on the session (tmux's own `server_client_best` heuristic, confirmed via the `display-message -p '#{client_pid}'` probe). The code has that signal (`client_activity`) but applies it *after* locality instead of *before*, so the one client whose locality actually matters is discarded first. The fix is to select the triggering client first (max activity across **all** clients) and locality-check that single winner (NULL → honest no-op; local → drive).
 
 ### Contributing Factors
 
-{Synthesised at Step 7.}
+- **Over-broad proxy baked into the original design.** The inside-tmux client-walk (introduced by `restore-host-terminal-windows`, commit `45010cf3`) correctly solved NULL-filtering for the *pure-remote* case, but framed activity as a *local-only tiebreak* — encoding the implicit assumption "if any local client is attached, the user is at a local terminal." That assumption holds for a single-user-at-the-desk model and fails for the remote-trigger-plus-idle-local-client model.
+- **tmux exposes no hard triggering-client binding for a pane-run command.** A process inside a pane knows its pane (`$TMUX_PANE`) and session (`$TMUX`) but not "the client that launched me," so the design leaned on client enumeration + a heuristic. The available heuristic (most-active client) was under-used (as a tiebreak) rather than used as the primary discriminator.
+- **`client_activity` is epoch-seconds-granular** — not a cause, but a residual edge the fix inherits: a local client active in the same/later second as the remote trigger could still win. Acceptable (a local terminal actively used in that second is arguably not "the wrong machine").
 
 ### Why It Wasn't Caught
 
-{Synthesised at Step 7.}
+- **The buggy outcome is codified as intended behaviour in a unit test.** `internal/spawn/detect_inside_test.go:133` — subtest *"it drops remote clients but still resolves a mixed local+remote client set"* — deliberately seeds `{PID:601, Activity:9999}` (remote) + `{PID:501, Activity:1}` (local) and asserts the **local** wins, with the comment *"proving the NULL-filter runs first and activity is only a local tiebreak"* and the error message *"want the local … despite the remote client's higher activity."* The mixed case was considered and the wrong answer was chosen and locked in. **The fix must invert this test's assertion** (mixed set with the remote as most-active → NULL/no-op).
+- **No test models "the remote client is the user."** The suite frames remote clients uniformly as noise to filter out, never as the triggering actor. There is no "remote trigger + local bystander" scenario asserting a no-op.
+- **Not reproducible without a real multi-client setup.** Reproduction needs an actual remote client (SSH/mosh) plus a host-local client on the same session — outside unit-test reach and easy to miss in manual testing (the developer is usually sitting at the local terminal, i.e. the local *is* the trigger, which resolves correctly).
 
 ### Blast Radius
 
-{Synthesised at Step 7.}
+**Directly affected:**
+- **Both burst surfaces, inside tmux, mixed remote-trigger + host-local-client-on-same-session:**
+  - CLI multi-target `portal open <a> <b> …` (N≥2) — `cmd/open_burst_run.go:158`.
+  - TUI multi-select picker burst — `internal/tui/spawn_detect.go:90` (detection cached at picker startup).
+- Windows open on the local machine; the trigger window self-attaches remotely (partial-success illusion); host windows linger (Portal never tears down host windows).
+
+**Also affected (same `Detect()`):**
+- **`portal doctor` host-terminal line** (`cmd/doctor.go:406`) — would report a driveable host terminal for a remote session with a local client attached. Read-only diagnostic misreport, not a spawn, but the fix corrects it in lockstep (single gate).
+
+**Not affected:**
+- **Outside-tmux detection** (`internal/spawn/detect_outside.go`) — walks the portal process's *own* ancestry (env fast-path / self-walk), which reflects the actual launching terminal. No client enumeration, no locality-ordering bug. Only the inside-tmux client-walk is defective.
+- **Pure-remote case** (no local client on the session) — already resolves clean NULL → correct honest no-op. Unchanged by the fix.
+- **Single-local-client case** (developer at the desk) — the trigger *is* the local client (most-active), resolves local → drives. Unchanged.
+
+**Interaction to carry into spec (not a defect):**
+- **`persistent-no-host-terminal-banner`** (spec 2026-07-22) splits detection outcomes into supported / named-unsupported / NULL-remote, dropping the persistent banner for NULL/remote and keeping it for named-unsupported. After **this** fix, a remote trigger with a local client attached resolves **NULL** (instead of the local's *named/supported* identity), so the mixed case now flows into that bug's NULL/remote branch — the two fixes compose cleanly (remote users get the honest no-op + no noise banner). That bug's own note already anticipates this ("once its trigger-locality gate is fixed, every remote login resolves NULL"). No conflict; worth a coherence check at spec time.
 
 ---
 
