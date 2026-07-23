@@ -153,6 +153,35 @@ func TestDetectInsideTmux(t *testing.T) {
 		}
 	})
 
+	t.Run("it drives the local client when it is most-active despite an idle remote bystander", func(t *testing.T) {
+		// The mirror of the reported bug: a LOCAL client is the most-active
+		// (triggering) client while a lower-activity REMOTE client is merely a
+		// bystander attached to the same session. Winner-first locality gating
+		// must select and walk the local winner and resolve its .app identity —
+		// it must NOT refuse a legitimate local spawn just because a remote
+		// client is attached. The remote is listed FIRST and the local SECOND
+		// so a pass proves max-by-activity selection, not first-listed luck.
+		lister := &fakeClientLister{clients: []ClientActivity{
+			{PID: 601, Activity: 50},  // remote/mosh, idle bystander — listed first
+			{PID: 501, Activity: 200}, // local Ghostty, most active — the trigger
+		}}
+		walker, reader := localWalkSeams()
+
+		got, err := detectInsideTmux("dev", lister, walker, reader)
+		if err != nil {
+			t.Fatalf("detectInsideTmux returned error: %v, want nil", err)
+		}
+		if got.IsNull() {
+			t.Errorf("identity = %+v, want the local Ghostty — it is the most-active client", got)
+		}
+		if got.BundleID != "com.mitchellh.ghostty" {
+			t.Errorf("BundleID = %q, want the local %q", got.BundleID, "com.mitchellh.ghostty")
+		}
+		if got.Name != "Ghostty" {
+			t.Errorf("Name = %q, want %q", got.Name, "Ghostty")
+		}
+	})
+
 	t.Run("it returns a transient error when list-clients fails", func(t *testing.T) {
 		listFailure := errors.New("list-clients: server not found")
 		lister := &fakeClientLister{err: listFailure}
