@@ -131,6 +131,7 @@ In the mixed case — a remote client triggers the burst while a host-local clie
 
 **Also affected (same `Detect()`):**
 - **`portal doctor` host-terminal line** (`cmd/doctor.go:406`) — would report a driveable host terminal for a remote session with a local client attached. Read-only diagnostic misreport, not a spawn, but the fix corrects it in lockstep (single gate).
+- **The TUI proactive multi-select `m`-entry block is silently defeated** (confirmed by validation). The block keys on `DetectUnsupported()` (`internal/tui/spawn_detect.go:117-119`), which is **false** in the mixed case because detection resolves a *supported* local terminal — so `m` is *not* pre-blocked, the user walks the full multi-select flow, and the burst fires onto the wrong machine. The same root cause that mis-resolves the identity also disarms the safeguard that would otherwise stop the burst. Fixing detection re-arms it automatically (mixed case → NULL → `DetectUnsupported()` true → `m` blocked).
 
 **Not affected:**
 - **Outside-tmux detection** (`internal/spawn/detect_outside.go`) — walks the portal process's *own* ancestry (env fast-path / self-walk), which reflects the actual launching terminal. No client enumeration, no locality-ordering bug. Only the inside-tmux client-walk is defective.
