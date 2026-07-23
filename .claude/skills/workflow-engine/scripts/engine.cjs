@@ -22,7 +22,7 @@ const { signpost, box, wrapWithPrefix, renderTree, WIDTH } = require('./kernel/r
 const { commitScopedWithKb } = require('./domain/commit.cjs');
 const { recordSubtopicAdd, recordSubtopicState, SUBTOPIC_STATES } = require('./domain/discussion-map.cjs');
 const { VALID_ROUTINGS } = require('./kernel/manifest-schema.cjs');
-const { sequenceMap, addItem, editItem, removeItem, renameItem, rerouteItem, handleItem, unhandleItem } = require('./domain/discovery-map.cjs');
+const { sequenceMap, addItem, addItemsBatch, editItem, removeItem, renameItem, rerouteItem, handleItem, unhandleItem } = require('./domain/discovery-map.cjs');
 const { startTopic, completeTopic, reopenTopic, supersedeTopic, cancelTopic, reactivateTopic } = require('./domain/transitions.cjs');
 const { initTasks, startTask, fixAttempt, completeTask, analysisCycle } = require('./domain/tasks.cjs');
 const taskSections = require('./domain/projections/tasks.cjs');
@@ -104,10 +104,12 @@ const USAGE = `Usage: engine <command> [args]
 Commands:
   boot
   manifest get    <dotpath> [<field.path>]
-  manifest set    <dotpath> <field> <value> [<field>=<value> …]
+  manifest set    <dotpath> <field> <value>
+  manifest set    <dotpath> <field>=<value> [<field>=<value> …]
   manifest push   <dotpath> <field> <value>
   manifest pull   <dotpath> <field> <value>
   manifest delete <dotpath> <field.path>
+  manifest apply  <work-unit> --file <ops.json>
   manifest exists <dotpath> [<field.path>]
   manifest list   [--status <s>] [--work-type <t>]
   manifest key-of <dotpath> <field.path> <value>
@@ -126,6 +128,7 @@ Commands:
   discovery-map add <work-unit> <name> <research|discussion>
                 (--summary <text> [--description <text>] | --backfill)
                 [--source <tag>] [--force-dismissed]
+  discovery-map add-batch <work-unit> --file <topics.json>
   discovery-map edit <work-unit> <name> [--summary <text>] [--description <text>]
   discovery-map remove <work-unit> <name>
   discovery-map rename <work-unit> <old> <new>
@@ -150,7 +153,7 @@ Commands:
   inbox restore <path> [<path> …]
   inbox delete <path> [<path> …]
   cache stamp <work-unit> (research-analysis|gap-analysis)
-  commit <work-unit> -m <message>
+  commit <work-unit> -m <message> [--plan <topic>]
   commit --inbox -m <message>
   commit --workflows -m <message>
   render resume-gate <wu.phase.topic> [--triage N] [--variant plan|review|scoping|session]  (session: bare <wu>)
@@ -347,6 +350,18 @@ function runDiscoveryMap(argv) {
   try {
     const { opts, flags, positional } = parseArgs(rest, ['force-dismissed', 'backfill']);
     const [workUnit] = positional;
+    if (command === 'add-batch') {
+      if (!workUnit) throw new Error('Usage: engine discovery-map add-batch <work-unit> --file <topics.json>');
+      if (!opts.file) throw new Error('discovery-map add-batch: --file <topics.json> is required');
+      let parsed;
+      try {
+        parsed = JSON.parse(fs.readFileSync(path.resolve(cwd, opts.file), 'utf8'));
+      } catch (err) {
+        throw new Error(`discovery-map add-batch: cannot read payload: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      respond(addItemsBatch(cwd, workUnit, parsed));
+      return;
+    }
     if (command === 'sequence') {
       if (!workUnit || positional.length < 2) {
         throw new Error('Usage: engine discovery-map sequence <work-unit> <topic>=<order> [<topic>=<order> …]');
@@ -642,33 +657,73 @@ function runCommit(argv) {
   try {
     /** @type {string|null} */ let workUnit = null;
     /** @type {string|null} */ let message = null;
+    /** @type {string|null} */ let plan = null;
     let inbox = false;
     let workflows = false;
     for (let i = 0; i < argv.length; i++) {
       const a = argv[i];
       if (a === '-m' || a === '--message') message = argv[++i];
+      else if (a === '--plan') plan = argv[++i];
       else if (a === '--inbox') inbox = true;
       else if (a === '--workflows') workflows = true;
       else if (workUnit === null) workUnit = a;
       else throw new Error(`unexpected argument "${a}"`);
     }
     const scopeCount = [inbox, workflows, workUnit !== null].filter(Boolean).length;
-    if (!message || scopeCount !== 1) {
-      throw new Error('Usage: engine commit <work-unit> -m <message> | engine commit --inbox -m <message> | engine commit --workflows -m <message>');
+    if (!message || scopeCount !== 1 || (plan !== null && workUnit === null) || plan === '' || plan === undefined) {
+      throw new Error('Usage: engine commit <work-unit> -m <message> [--plan <topic>] | engine commit --inbox -m <message> | engine commit --workflows -m <message>');
     }
     const cwd = process.cwd();
-    let scope;
+    /** @type {string|string[]} */ let scope;
     if (workflows) {
       scope = '.workflows';
     } else if (inbox) {
       scope = '.workflows/.inbox';
     } else {
       const wu = /** @type {string} */ (workUnit);
-      if (wu.includes('/') || wu.includes('..')) throw new Error(`invalid work unit name "${wu}"`);
+      if (wu === '' || wu.includes('/') || wu.includes('..')) throw new Error(`invalid work unit name "${wu}"`);
       if (!fs.existsSync(path.join(cwd, '.workflows', wu))) {
         throw new Error(`no work unit directory: .workflows/${wu}`);
       }
       scope = `.workflows/${wu}`;
+      if (plan !== null) {
+        // --plan: the plan's declared storage pathspecs (recorded at plan
+        // init from the format's authoring doc) plus the project manifest
+        // (plan init writes project defaults). A pathspec that neither exists
+        // on disk nor has index entries is skipped — `git add` would refuse
+        // it — while a deleted-but-tracked path still stages its deletions
+        // (the restart-cleanup commits depend on that).
+        const manifestFile = path.join(cwd, '.workflows', wu, 'manifest.json');
+        /** @type {any} */ let planItem;
+        try {
+          planItem = JSON.parse(fs.readFileSync(manifestFile, 'utf8')).phases?.planning?.items?.[plan];
+        } catch {
+          throw new Error(`commit --plan: cannot read .workflows/${wu}/manifest.json`);
+        }
+        if (!planItem) throw new Error(`commit --plan: no planning item "${plan}" in "${wu}"`);
+        const declared = planItem.storage_paths;
+        if (declared === undefined) {
+          throw new Error(`commit --plan: planning item "${plan}" has no storage_paths — a pre-upgrade plan; record the format's declared pathspecs once: engine manifest set ${wu}.planning.${plan} storage_paths '[…]' (the format's authoring.md names them; '[]' when it stores inside the work unit)`);
+        }
+        if (!Array.isArray(declared) || declared.some((p) => typeof p !== 'string')) {
+          throw new Error(`commit --plan: planning item "${plan}" has a malformed storage_paths (${JSON.stringify(declared)}) — must be an array of relative pathspec strings`);
+        }
+        for (const p of declared) {
+          if (p === '' || p === '.' || p.startsWith('/') || p.split('/').includes('..')) {
+            throw new Error(`commit --plan: illegal storage_paths entry ${JSON.stringify(p)} — pathspecs are relative, never ".", "..", or absolute`);
+          }
+        }
+        const { execFileSync } = require('child_process');
+        const stageable = ['.workflows/manifest.json', ...declared].filter((p) => {
+          if (fs.existsSync(path.join(cwd, p))) return true;
+          try {
+            return execFileSync('git', ['ls-files', '--', p], { cwd, encoding: 'utf8' }).trim() !== '';
+          } catch {
+            return false;
+          }
+        });
+        scope = [scope, ...stageable];
+      }
     }
     const committed = commitScopedWithKb(cwd, scope, message);
     if (committed === null) respond({ committed: null, note: 'nothing to commit' });

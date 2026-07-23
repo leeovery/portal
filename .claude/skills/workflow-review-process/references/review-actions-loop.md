@@ -44,14 +44,7 @@ Commit the completion:
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): complete review phase"
 ```
 
-**Pipeline continuation** — Invoke the bridge:
-
-```
-Pipeline bridge for: {work_unit}
-Completed phase: review
-
-Invoke the workflow-bridge skill to enter plan mode with completion confirmation.
-```
+**Pipeline continuation** — Invoke `/workflow-bridge {work_unit} review`.
 
 **STOP.** Do not proceed — terminal condition.
 
@@ -97,14 +90,7 @@ Commit the completion:
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): complete review phase"
 ```
 
-**Pipeline continuation** — Invoke the bridge:
-
-```
-Pipeline bridge for: {work_unit}
-Completed phase: review
-
-Invoke the workflow-bridge skill to enter plan mode with continuation instructions.
-```
+**Pipeline continuation** — Invoke `/workflow-bridge {work_unit} review`.
 
 **STOP.** Do not proceed — terminal condition.
 
@@ -150,20 +136,15 @@ Commit the completion:
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): complete review phase"
 ```
 
-**Pipeline continuation** — Invoke the bridge:
-
-```
-Pipeline bridge for: {work_unit}
-Completed phase: review
-
-Invoke the workflow-bridge skill to enter plan mode with completion confirmation.
-```
+**Pipeline continuation** — Invoke `/workflow-bridge {work_unit} review`.
 
 **STOP.** Do not proceed — terminal condition.
 
 ---
 
 ## B. Dispatch Review Synthesizer
+
+**If an in-flight staging file exists** (`review-tasks-c{N}.md` with any task still `pending` — a crash-resume): do not re-dispatch. Resume that cycle at **C. Approval Overview** with the existing file — its frontmatter `gate_mode` and per-task decisions are the durable carrier.
 
 → Load **[invoke-review-synthesizer.md](invoke-review-synthesizer.md)** and follow its instructions as written.
 
@@ -189,14 +170,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "re
 No actionable tasks synthesized. Review complete.
 ```
 
-**Pipeline continuation** — Invoke the bridge:
-
-```
-Pipeline bridge for: {work_unit}
-Completed phase: review
-
-Invoke the workflow-bridge skill to enter plan mode with continuation instructions.
-```
+**Pipeline continuation** — Invoke `/workflow-bridge {work_unit} review`.
 
 **STOP.** Do not proceed — terminal condition.
 
@@ -290,14 +264,7 @@ Commit the staging file updates:
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): synthesis cycle {N} — tasks skipped"
 ```
 
-**Pipeline continuation** — Invoke the bridge:
-
-```
-Pipeline bridge for: {work_unit}
-Completed phase: review
-
-Invoke the workflow-bridge skill to enter plan mode with continuation instructions.
-```
+**Pipeline continuation** — Invoke `/workflow-bridge {work_unit} review`.
 
 **STOP.** Do not proceed — terminal condition.
 
@@ -311,11 +278,16 @@ Filter staging file to tasks with `status: approved`.
 
 > **CHECKPOINT**: Do not proceed until the task writer has returned.
 
-Commit all changes (staging file, plan tasks, task_map updates) with raw git — the format's task storage may live outside the work unit, so the scoped helper cannot cover it. Stage the format's storage and the work unit, then commit:
+**If the planning item carries no `storage_paths`** (a plan initialised before the field existed): record it now — read the format's authoring.md → Storage Pathspecs and copy the fenced array:
 
 ```bash
-git add -- .workflows/{work_unit} {format task storage paths}
-git commit -m "review({work_unit}): add review remediation ({K} tasks)"
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} storage_paths '{format storage pathspecs}'
+```
+
+Commit all changes (staging file, plan tasks, task_map updates) — `--plan` stages the work unit and the plan's declared storage in one scoped call:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): add review remediation ({K} tasks)" --plan {topic}
 ```
 
 → On return, proceed to **G. Re-open Implementation**.

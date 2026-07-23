@@ -109,20 +109,17 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest exists {work_uni
 
 Leave the dependency as `state: unresolved`. It will be resolved when that topic is planned.
 
-→ Proceed to **E. Reverse Check**.
+→ Return to **D. Resolve Current Plan's Dependencies** for the next unresolved dependency; when all have been checked, proceed to **E. Reverse Check**.
 
 #### Otherwise
 
 Read the plan's task table and find the task that best satisfies the dependency by matching the task name against the dependency description. Use the matched task's Internal ID from the plan table.
 
-Update the dependency:
+Add the resolution to the working list — persisted in one batch at **E**'s end:
 
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} external_dependencies.{dep_topic}.state resolved
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} external_dependencies.{dep_topic}.internal_id {internal_id}
-```
+- `{work_unit}.planning.{topic}` → `external_dependencies.{dep_topic}.state: resolved`, `external_dependencies.{dep_topic}.internal_id: {internal_id}`
 
-→ Proceed to **E. Reverse Check**.
+→ Return to **D. Resolve Current Plan's Dependencies** for the next unresolved dependency; when all have been checked, proceed to **E. Reverse Check**.
 
 ---
 
@@ -144,19 +141,28 @@ Nothing to reverse-check for this topic.
 
 For each dependency in the other topic's `external_dependencies`, route on state:
 
-- **`state: unresolved` matching current topic** — find the best matching task in the current plan by name against the dependency description. Resolve using the task's Internal ID:
+- **`state: unresolved` matching current topic** — find the best matching task in the current plan by name against the dependency description. Add the resolution to the working list using the task's Internal ID:
 
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{other_topic} external_dependencies.{topic}.state resolved
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{other_topic} external_dependencies.{topic}.internal_id {internal_id}
-```
+  - `{work_unit}.planning.{other_topic}` → `external_dependencies.{topic}.state: resolved`, `external_dependencies.{topic}.internal_id: {internal_id}`
 
-- **`state: resolved` pointing at current plan's tasks** — validate that the `internal_id` still refers to a task that semantically matches the dependency description. If the task name no longer matches (stale reference), re-resolve by finding the correct task and updating the `internal_id`.
+- **`state: resolved` pointing at current plan's tasks** — validate that the `internal_id` still refers to a task that semantically matches the dependency description. If the task name no longer matches (stale reference), find the correct task and add the corrected pair to the working list:
+
+  - `{work_unit}.planning.{other_topic}` → `external_dependencies.{topic}.internal_id: {corrected_internal_id}`
+
 - **`state: satisfied_externally`** — skip.
 
 → Return to **E. Reverse Check** for the next topic.
 
-When all topics have been checked:
+When all topics have been checked, persist the working list — if it is non-empty, write one `set` op per resolution to `.workflows/.cache/{work_unit}/planning/{topic}/dependency-ops.json` with the Write tool (fields grouped per path), then apply the batch in one atomic call:
+
+```json
+[{"op": "set", "path": "{work_unit}.planning.{topic}", "fields": {"external_dependencies.{dep_topic}.state": "resolved", "external_dependencies.{dep_topic}.internal_id": "{internal_id}"}},
+ {"op": "set", "path": "{work_unit}.planning.{other_topic}", "fields": {"external_dependencies.{topic}.state": "resolved", "external_dependencies.{topic}.internal_id": "{internal_id}"}}]
+```
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest apply {work_unit} --file .workflows/.cache/{work_unit}/planning/{topic}/dependency-ops.json
+```
 
 → Proceed to **F. Summary and Commit**.
 

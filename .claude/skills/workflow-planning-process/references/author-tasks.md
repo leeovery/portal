@@ -207,7 +207,7 @@ Check for rejected tasks in the task detail file.
 
 > **CHECKPOINT**: Verify all tasks in the task detail file are marked `approved` before writing — both gate modes approve every task before reaching this section.
 
-For each approved task in the task detail file, in order:
+For each approved task in the task detail file, in order (crash-resume guard: a task whose internal id is already in `task_map` was written before an interruption — skip its format write and continue with the next; re-creating it would duplicate the task in external backends):
 
 1. Read the task content from the task detail file
 2. Write to the output format (format-specific — see the format's **[authoring.md](output-formats/{format}/authoring.md)**)
@@ -215,14 +215,13 @@ For each approved task in the task detail file, in order:
    - `task_map.{internal_id}` — this task's external ID
    - `task` — the next pending task's internal ID (the next phase's position is set by **D. Advance Phase** when this was the phase's last task)
 
-   On the **phase's first task**, fold the once-per-phase phase mapping into the same write — `task_map.{phase_internal_id}` = the phase's external ID (declared in the format's **[authoring.md](output-formats/{format}/authoring.md)** Phase Structure section); it is identical for every task in the phase, so it is written once, not per task. And on the very first task authored for the plan, when the manifest's `external_id` is still empty, also fold in `external_id` = the plan's external identifier as exposed by the output format. Drop each extra field from a task's write once it no longer applies — the phase mapping after the phase's first task, the plan `external_id` once it is set.
+   On the **phase's first task**, fold the once-per-phase phase mapping into the same write — `task_map.{phase_internal_id}` = the phase's external ID (declared in the format's **[authoring.md](output-formats/{format}/authoring.md)** Phase Structure section); it is identical for every task in the phase, so it is written once, not per task. And on the very first task authored for the plan, when the manifest's `external_id` is still empty, also fold in `external_id` = the plan's external identifier as exposed by the output format. Drop each extra field from a task's write once it no longer applies — the phase mapping after the phase's first task, the plan `external_id` once it is set, and `task=` on the phase's last task (D. Advance Phase sets the next position).
    ```bash
-   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map.{internal_id} {external_id} task={next_task_id} task_map.{phase_internal_id}={phase_external_id} external_id={plan_external_id}
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} task_map.{internal_id}={external_id} task={next_task_id} task_map.{phase_internal_id}={phase_external_id} external_id={plan_external_id}
    ```
-4. Commit with raw git — the format's task storage may live outside the work unit, so the scoped helper cannot cover it. Stage the format's storage and the work unit, then commit:
+4. Commit — `--plan` stages the work unit, the project manifest, and the plan's declared storage in one scoped call:
    ```bash
-   git add -- .workflows/{work_unit} {format task storage paths}
-   git commit -m "planning({work_unit}): author task {internal_id} ({task name})"
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "planning({work_unit}): author task {internal_id} ({task name})" --plan {topic}
    ```
 
 > *Output the next fenced block as a code block:*

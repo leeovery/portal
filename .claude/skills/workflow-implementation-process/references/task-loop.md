@@ -6,6 +6,8 @@
 
 Follow stages A through H sequentially for each task. Do not abbreviate, skip, or compress stages based on previous iterations.
 
+At loop entry (crash-resume healing): if the plan marks tasks done that the manifest's `completed_tasks` lacks, run `engine task complete` for each missing internal id before retrieving the next task — the push is an idempotent no-op for ids already recorded, and this reseals the seam a crash between the plan mark and the bookkeeping can leave.
+
 ```
 A. Retrieve next task + mark in-progress
 B. Execute task → invoke-executor.md
@@ -19,6 +21,8 @@ H. Update progress + phase check + commit
 ```
 
 **Engine gate sections**: `engine task` responses carry rendered `=== DISPLAY … ===` / `=== MENU … ===` sections after their JSON line — the loop's state-derived gates, parameterised from manifest state. Emit a section only where a stage below prescribes it: DISPLAY verbatim as a code block, MENU verbatim as markdown (not a code block). A section is everything beneath its `===` marker up to the next marker or the end of the response — the marker lines themselves are never emitted. Section content is emitted byte-for-byte — never redrawn, reflowed, or re-derived.
+
+→ Load **[product-lens.md](../../workflow-shared/references/product-lens.md)** and follow its instructions as written — the register for the review and task-result retellings in **E** and **G**. Findings cache files and records stay fully technical.
 
 Read `work_type` once here at loop entry — it selects the executor's workflow reference (TDD vs verification) for every task and never changes mid-loop, so **[invoke-executor.md](invoke-executor.md)** consumes it from session context rather than re-reading it per invocation:
 
@@ -193,12 +197,9 @@ Emit the response's `DISPLAY: fix threshold` section.
 
 ```
 Review for Task {internal_id}: {Task Name} — needs changes (attempt {N})
-
-{ISSUES from reviewer, including FIX, ALTERNATIVE, and CONFIDENCE for each}
-
-Notes (non-blocking):
-{NOTES from reviewer}
 ```
+
+Retell the reviewer's findings as a product-lens markdown narrative (not a code block): each issue as what is wrong or at risk in what was built, with the proposed fix, any alternative, and the reviewer's confidence; non-blocking notes last.
 
 → On return, proceed to **F. Fix Approval Gate**.
 
@@ -208,12 +209,9 @@ Notes (non-blocking):
 
 ```
 Review for Task {internal_id}: {Task Name} — needs changes (attempt {N})
-
-{ISSUES from reviewer, including FIX, ALTERNATIVE, and CONFIDENCE for each}
-
-Notes (non-blocking):
-{NOTES from reviewer}
 ```
+
+Retell the reviewer's findings as a product-lens markdown narrative (not a code block): each issue as what is wrong or at risk in what was built, with the proposed fix, any alternative, and the reviewer's confidence; non-blocking notes last.
 
 Branch on the response's `fix_gate_mode`.
 
@@ -249,6 +247,14 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.
 
 → Proceed to **G. Task Gate**.
 
+#### If `technical`
+
+→ Load **[technical-lens.md](../../workflow-shared/references/technical-lens.md)** and follow its instructions as written.
+
+Retell the reviewer's findings through the technical lens — mechanism-first, from the attempt findings.
+
+→ Return to **F. Fix Approval Gate**.
+
 #### If ask
 
 Answer the user's questions about the review.
@@ -273,8 +279,9 @@ After the reviewer approves a task, present the result:
 Task {internal_id}: {Task Name} — approved
 
 Phase: {phase number} — {phase name}
-{executor's SUMMARY — brief commentary, decisions, implementation notes}
 ```
+
+Retell the executor's SUMMARY as a product-lens markdown narrative (not a code block): what the product now does that it didn't before, the decisions worth knowing, and how it was verified. After a fix round, include what changed since the last gate.
 
 Branch on the `task_gate_mode` carried by this task's `start` response.
 
@@ -299,6 +306,14 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.
 ```
 
 → Proceed to **H. Update Progress and Commit**.
+
+**If `technical`:**
+
+→ Load **[technical-lens.md](../../workflow-shared/references/technical-lens.md)** and follow its instructions as written.
+
+Retell the same result through the technical lens — mechanism-first, from the executor's SUMMARY and the changes on disk.
+
+→ Return to **G. Task Gate**.
 
 **If ask:**
 
@@ -329,7 +344,7 @@ The response also carries the `MENU: blocked tasks` section that **A. Retrieve N
 
 **Internal ID convention**: The internal ID used with the engine and in commit messages MUST use the format `{topic}-{phase_id}-{task_id}`. If only the format adapter's external ID is at hand, pass `--external {external_id}` in place of `{internal_id}` — the engine resolves it through the plan's task map and reports the internal id in its response.
 
-**Commit all changes** with raw git — stage the task's code and tests, the plan format's tracking state, and the work unit's manifest, then commit:
+**Commit all changes** with raw git — stage the task's code and tests, the plan's `storage_paths` (recorded on the planning item), and the work unit's manifest, then commit:
 
 ```
 impl({work_unit}): T{internal_id} — {brief description}

@@ -28,7 +28,7 @@ Branch on the response's `created` flag:
 
 #### If `created` is `true`
 
-The item is genuinely new (feature/bugfix, or a fresh single-discussion create). Add every source with `status: pending`:
+The item is genuinely new (feature/bugfix, or a fresh single-discussion create). Add every source with `status: pending`. For a bugfix the single source is the investigation and its `{source-name}` is `{topic}` — the same name must be used when marking it incorporated:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} sources.{source-name}.status pending
@@ -53,7 +53,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.
 Set review state and gate modes (both branches) — one batched write, all same-path fields:
 
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} review_cycle 0 finding_gate_mode=gated construction_gate_mode=gated date=$(date +%Y-%m-%d)
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} review_cycle=0 finding_gate_mode=gated construction_gate_mode=gated date=$(date +%Y-%m-%d)
 ```
 
 Commit:

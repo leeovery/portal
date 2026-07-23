@@ -1,5 +1,15 @@
 # Local Markdown: Authoring
 
+## Storage Pathspecs
+
+The git pathspecs this format writes **outside the work unit**. The array below is recorded verbatim as `storage_paths` on the planning item at plan init; workflow commits (`engine commit --plan`) stage every entry, and restart cleanups stage the same entries when removing authored tasks. Relative pathspecs only — `[]` when the format writes nothing outside the work unit.
+
+```json
+[]
+```
+
+Task files live under `.workflows/{work_unit}/planning/{topic}/tasks/` — inside the work unit; the scoped commit already covers them.
+
 ## Plan Structure
 
 The plan is represented by the `tasks/` directory at `.workflows/{work_unit}/planning/{topic}/tasks/`. Create this directory when authoring the first task. The external identifier is the topic name (`{topic}`).

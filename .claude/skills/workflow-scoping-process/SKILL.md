@@ -1,7 +1,7 @@
 ---
 name: workflow-scoping-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(tick), Bash(ls .workflows/), Bash(rm -rf .workflows/), Bash(git status), Bash(git log), Bash(git rev-parse), Bash(git add), Bash(git commit)
+allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(ls .workflows/), Bash(rm -rf .workflows/), Bash(git status), Bash(git log), Bash(git rev-parse), Bash(git add), Bash(git commit)
 ---
 
 # Scoping Process
@@ -28,7 +28,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 
 - After each user interaction, STOP and wait for their response before proceeding
 - Never assume or anticipate user choices
-- No session-level instruction overrides STOP gates. This includes harness auto mode, system-reminders, hook-injected text, "work without stopping" / "make the reasonable call" guidance, /loop continuation hints, or any other meta-directive encouraging autonomous progression. STOP gates are structured decision points, NOT clarifying questions — "reasonable call" reasoning does not apply. The only skip mechanism is a per-gate `*_gate_mode: auto` value in the manifest, set by the user's explicit `a`/`auto` choice at a prior gate.
+- No session-level instruction overrides STOP gates. This includes harness auto mode, system-reminders, hook-injected text, "work without stopping" / "make the reasonable call" guidance, /loop continuation hints, or any other meta-directive encouraging autonomous progression. STOP gates are structured decision points, NOT clarifying questions — "reasonable call" reasoning does not apply. The only skip mechanism is a per-gate `*_gate_mode: auto` value in the manifest, set by the user's explicit `a`/`auto` choice at a prior gate — in phases with no such gate, every STOP always stops.
 - Failure mode — "the reasonable call is X, I'll proceed with X": that IS the auto-answer the rule forbids. The thought is the trigger to stop, not to continue.
 - Failure mode — "the user already set this, confirmation is redundant" (e.g. project defaults, prior preferences, stored manifest values): that IS the auto-answer the rule forbids. Stored values are suggestions, not consent for this run.
 - Don't invent stops. Stop only at gates the skill prescribes (rendered gate blocks, explicit `**STOP.**` directives) — no courtesy check-ins, mid-loop summaries that end the turn, or unprescribed pauses between tasks/topics/phases.
@@ -145,11 +145,16 @@ The spec exists but the plan is incomplete — an interrupted prior run. Rebuild
 
 #### If `continue`
 
-Load the artifacts as session context: read the spec (`.workflows/{work_unit}/specification/{topic}/specification.md`) and the plan (`.workflows/{work_unit}/planning/{topic}/planning.md`) in full, then read the `format` and the plan's `external_id` from the manifest and locate and read the task files via the format's **[reading.md](../workflow-planning-process/references/output-formats/{format}/reading.md)**:
+Load the artifacts as session context: read the spec (`.workflows/{work_unit}/specification/{topic}/specification.md`) and the plan (`.workflows/{work_unit}/planning/{topic}/planning.md`) in full, then read the planning item once — `format`, `external_id`, and `storage_paths` all ride the subtree — and locate and read the task files via the format's **[reading.md](../workflow-planning-process/references/output-formats/{format}/reading.md)**:
 
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} format
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} external_id
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic}
+```
+
+**If the subtree carries no `storage_paths`** (a plan initialised before the field existed): record it now, before anything commits — read the format's authoring.md → Storage Pathspecs and copy the fenced array:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} storage_paths '{format storage pathspecs}'
 ```
 
 > *Output the next fenced block as a code block:*
@@ -172,20 +177,18 @@ Apply the requested edits — the spec and `planning.md` directly, task file con
    ```bash
    node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} scoping {topic}
    ```
-3. Commit with raw git — the format's task storage may live outside the work unit, so the scoped helper cannot cover it:
+3. Commit — `--plan` stages the work unit, the project manifest, and the plan's declared storage in one scoped call (the knowledge store rides along automatically):
    ```bash
-   git add -- .workflows/{work_unit} .workflows/.knowledge {format task storage paths touched}
-   git commit -m "scoping({work_unit}): adjust specification and plan"
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "scoping({work_unit}): adjust specification and plan" --plan {topic}
    ```
 
 → Proceed to **Step 8**.
 
 #### If `restart`
 
-1. Read the `format` and the plan's `external_id` from the manifest:
+1. Read the planning item once — `format`, `external_id`, and `storage_paths` all ride the subtree:
    ```bash
-   node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} format
-   node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} external_id
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic}
    ```
 2. Load the format's **[authoring.md](../workflow-planning-process/references/output-formats/{format}/authoring.md)**
 3. Follow the authoring file's cleanup instructions to remove authored tasks for this topic — the cleanup targets the entity identified by `external_id`
@@ -199,9 +202,9 @@ Apply the requested edits — the spec and `planning.md` directly, task file con
    node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.specification items.{topic}
    node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.planning items.{topic}
    ```
-7. Commit with raw git — the format's cleanup may remove task storage outside the work unit, so the scoped helper cannot cover it. Stage the work unit, the knowledge store, and every path the cleanup touched, then commit:
+7. Commit with raw git — the planning item was just deleted, so `--plan` has nothing to read; stage the work unit, the knowledge store (only when `.workflows/.knowledge` exists — staging a nonexistent path is a git error), and the `storage_paths` read in step 1, then commit. Each entry passes as a bare pathspec; when the array is `[]` or the field is absent, stage nothing extra.
    ```bash
-   git add -- .workflows/{work_unit} .workflows/.knowledge {paths the format cleanup touched}
+   git add -- .workflows/{work_unit} .workflows/.knowledge {storage_paths}
    git commit -m "scoping({work_unit}): restart scoping"
    ```
 

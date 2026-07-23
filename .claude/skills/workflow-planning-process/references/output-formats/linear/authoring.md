@@ -18,6 +18,16 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.
 node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} task_map
 ```
 
+## Storage Pathspecs
+
+The git pathspecs this format writes **outside the work unit**. The array below is recorded verbatim as `storage_paths` on the planning item at plan init; workflow commits (`engine commit --plan`) stage every entry, and restart cleanups stage the same entries when removing authored tasks. Relative pathspecs only — `[]` when the format writes nothing outside the work unit.
+
+```json
+[]
+```
+
+Tasks live in Linear; nothing lands on disk.
+
 ## Plan Structure
 
 Create a Linear project — this is the plan-level entity:

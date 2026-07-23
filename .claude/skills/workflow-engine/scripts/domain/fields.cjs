@@ -92,6 +92,12 @@ function parseProjectPath(pathArg) {
  */
 function parsePath(pathArg) {
   const parts = pathArg.split('.');
+  // An empty segment collapses path.join onto the project manifest through
+  // the work-unit code path (wrong file, wrong lock) — refuse it loudly.
+  // Reachable via unset shell variables (`set "$wu" …`).
+  if (parts.some((p) => p === '')) {
+    fail(`Invalid path "${pathArg}". Expected: <work-unit>[.<phase>[.<topic>]] — empty segments are refused`);
+  }
   if (parts.length === 1) return { workUnit: parts[0], phase: null, topic: null };
   if (parts.length === 2) {
     validatePhase(parts[1]);
@@ -236,6 +242,42 @@ function validateSet(segments, value) {
     if (segments.length === 5 && segments[2] === 'items' && segments[4] === 'status') {
       validatePhaseStatus(phase, value);
       return;
+    }
+
+    // phases.<phase>.items.<item>.storage_paths — the format's declared
+    // pathspecs, staged by `engine commit --plan`. Guarded at write time so a
+    // bad entry can never reach a commit: relative, no traversal, never the
+    // whole tree.
+    if (segments.length === 5 && segments[2] === 'items' && segments[4] === 'storage_paths') {
+      validateStoragePaths(value);
+      return;
+    }
+  }
+}
+
+// A work-unit-level field whose first segment names a phase builds a shadow
+// tree beside `phases.*` that no read ever joins — a typo'd dot-path
+// (`set wu specification.x` for `set wu.specification.topic x`) must fail
+// loudly, not land silently. Mutations only (set, push, pull, apply set-ops);
+// reads and delete stay free so a stray tree can still be inspected and
+// repaired.
+/** @param {string|null} phase @param {string[]} fieldSegments */
+function refuseShadowField(phase, fieldSegments) {
+  if (phase !== null) return;
+  const head = fieldSegments[0];
+  if (VALID_PHASES.includes(head)) {
+    fail(`Invalid field "${fieldSegments.join('.')}" at work-unit level: "${head}" is a phase — use the dot-path (<work-unit>.${head}[.<topic>] <field>) so the write lands under phases with validation`);
+  }
+}
+
+/** @param {*} value */
+function validateStoragePaths(value) {
+  if (!Array.isArray(value) || value.some((p) => typeof p !== 'string')) {
+    fail(`Invalid storage_paths ${JSON.stringify(value)}. Must be an array of relative pathspec strings (may be empty)`);
+  }
+  for (const p of value) {
+    if (p === '' || p === '.' || p.startsWith('/') || p.split('/').includes('..')) {
+      fail(`Invalid storage_paths entry ${JSON.stringify(p)}: pathspecs are relative, never ".", "..", or absolute`);
     }
   }
 }
@@ -668,10 +710,17 @@ function manifestTarget(cwd, isProject, workUnit) {
   };
 }
 
+const SET_USAGE =
+  'Usage: engine manifest set <path> <field> <value>  (single field)\n' +
+  '       engine manifest set <path> <field>=<value> [<field>=<value> …]  (uniform batch)';
+
 /**
- * `set <path> <field> <value> [<field>=<value> …]` — batched writes land in
- * one lock/read/write. Project paths embed the first field in the dot-path:
- * `set project.<field.path> <value> [<field.path>=<value> …]`.
+ * Two grammars, never mixed: the three-arg positional form is the
+ * single-field shorthand; a batch is uniform `<field>=<value>` pairs
+ * (routed on `=` in the first field argument — field names never carry
+ * one). Batched writes land in one lock/read/write. Project paths embed
+ * the field in the dot-path and take the single form only:
+ * `set project.<field.path> <value>`.
  * @param {string} cwd @param {string[]} args
  * @returns {object}
  */
@@ -679,13 +728,10 @@ function cmdSet(cwd, args) {
   // Project manifest routing
   const proj = parseProjectPath(args[0] || '');
   if (proj.isProject) {
-    if (proj.fieldSegments.length === 0 || args.length < 2) {
-      fail('Usage: engine manifest set project.<field.path> <value> [<field.path>=<value> …]');
+    if (proj.fieldSegments.length === 0 || args.length !== 2) {
+      fail('Usage: engine manifest set project.<field.path> <value>');
     }
-    const writes = [
-      { field: proj.fieldSegments.join('.'), value: parseValue(args[1]) },
-      ...parseFieldValuePairs(args.slice(2)),
-    ];
+    const writes = [{ field: proj.fieldSegments.join('.'), value: parseValue(args[1]) }];
     manifestTarget(cwd, true).transact((manifest, save) => {
       for (const write of writes) {
         setByPath(manifest, write.field.split('.'), write.value);
@@ -695,13 +741,19 @@ function cmdSet(cwd, args) {
     return { path: 'project', set: Object.fromEntries(writes.map(w => [w.field, w.value])) };
   }
 
-  if (args.length < 3) fail('Usage: engine manifest set <path> <field> <value> [<field>=<value> …]');
+  if (args.length < 2) fail(SET_USAGE);
 
   const { workUnit, phase, topic } = parsePath(args[0]);
-  const writes = [
-    { field: args[1], value: parseValue(args[2]) },
-    ...parseFieldValuePairs(args.slice(3)),
-  ];
+  const rest = args.slice(1);
+  /** @type {{field: string, value: *}[]} */
+  let writes;
+  if (rest[0].includes('=')) {
+    writes = parseFieldValuePairs(rest);
+  } else if (rest.length === 2) {
+    writes = [{ field: rest[0], value: parseValue(rest[1]) }];
+  } else {
+    fail(`set: positional and assigned pairs never mix — one field is \`set <path> <field> <value>\`, a batch is uniform \`<field>=<value>\` pairs\n${SET_USAGE}`);
+  }
 
   requireWorkUnit(cwd, workUnit);
 
@@ -710,7 +762,9 @@ function cmdSet(cwd, args) {
   // checked whatever type that parse produced (a bare number/boolean/~ would
   // otherwise slip past a string-only guard and corrupt a typed field).
   const planned = writes.map((write) => {
-    const segments = resolveSegments(phase, topic, write.field.split('.'));
+    const fieldSegments = write.field.split('.');
+    refuseShadowField(phase, fieldSegments);
+    const segments = resolveSegments(phase, topic, fieldSegments);
     validateSet(segments, write.value);
     return { segments, value: write.value };
   });
@@ -764,6 +818,7 @@ function cmdPush(cwd, args) {
 
   requireWorkUnit(cwd, workUnit);
 
+  refuseShadowField(phase, fieldSegments);
   const segments = resolveSegments(phase, topic, fieldSegments);
 
   const length = manifestTarget(cwd, false, workUnit).transact((manifest, save) => {
@@ -818,6 +873,7 @@ function cmdPull(cwd, args) {
 
   requireWorkUnit(cwd, workUnit);
 
+  refuseShadowField(phase, fieldSegments);
   const segments = resolveSegments(phase, topic, fieldSegments);
 
   const result = manifestTarget(cwd, false, workUnit).transact((manifest, save) => {
@@ -869,15 +925,102 @@ function cmdDelete(cwd, args) {
   return { path: args[0], field: args[1], deleted: true };
 }
 
+/**
+ * `apply <work-unit> --file <ops.json>` — the batch form of set/delete across
+ * one work unit (D7: one task, one call). Ops:
+ *   {"op": "set",    "path": "<wu>[.<phase>[.<topic>]]", "fields": {"<field.path>": <value>, …}}
+ *   {"op": "delete", "path": "<wu>[.<phase>[.<topic>]]", "field": "<field.path>"}
+ * Every op is validated before anything is written — the same per-field
+ * guards as `set`, every path inside <work-unit> (one lock, one manifest,
+ * one atomic write; the project manifest is outside a work-unit batch) —
+ * and a delete whose target is missing fails the whole batch before the
+ * save, so a failing entry means nothing persisted. Values are native JSON
+ * (no shell parsing — `null` is `null`, not `'~'`). No git commit — the
+ * calling flow's commit covers the batch.
+ * @param {string} cwd @param {string[]} args
+ * @returns {object}
+ */
+function cmdApply(cwd, args) {
+  const positional = args.filter((a) => !a.startsWith('--'));
+  const fileIdx = args.indexOf('--file');
+  const file = fileIdx !== -1 ? args[fileIdx + 1] : undefined;
+  const workUnit = positional[0];
+  if (!workUnit || !file) fail('Usage: engine manifest apply <work-unit> --file <ops.json>');
+  requireWorkUnit(cwd, workUnit);
+
+  let ops;
+  try {
+    ops = JSON.parse(fs.readFileSync(path.resolve(cwd, file), 'utf8'));
+  } catch (err) {
+    fail(`apply: cannot read payload: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!Array.isArray(ops) || ops.length === 0) {
+    fail('apply: payload must be a non-empty array of {op, path, …} operations');
+  }
+
+  const planned = ops.map((op, i) => {
+    const at = `op ${i + 1}`;
+    if (!op || typeof op !== 'object' || Array.isArray(op)) fail(`apply: ${at} must be an object`);
+    if (op.op !== 'set' && op.op !== 'delete') {
+      fail(`apply: ${at} — "op" must be "set" or "delete", got ${JSON.stringify(op.op ?? null)}`);
+    }
+    if (typeof op.path !== 'string' || parseProjectPath(op.path).isProject) {
+      fail(`apply: ${at} — "path" must be a <work-unit>[.<phase>[.<topic>]] dot-path (the project manifest is outside a work-unit batch)`);
+    }
+    const { workUnit: wu, phase, topic } = parsePath(op.path);
+    if (wu !== workUnit) {
+      fail(`apply: ${at} — path "${op.path}" is outside work unit "${workUnit}" — one batch, one manifest`);
+    }
+    if (op.op === 'set') {
+      const fields = op.fields && typeof op.fields === 'object' && !Array.isArray(op.fields) ? op.fields : null;
+      const entries = fields ? Object.entries(fields) : [];
+      if (entries.length === 0) {
+        fail(`apply: ${at} — "fields" must be a non-empty object of {"<field.path>": value}`);
+      }
+      const writes = entries.map(([field, value]) => {
+        const fieldSegments = field.split('.');
+        refuseShadowField(phase, fieldSegments);
+        const segments = resolveSegments(phase, topic, fieldSegments);
+        validateSet(segments, value);
+        return { segments, value };
+      });
+      return { kind: /** @type {const} */ ('set'), path: op.path, fields, writes };
+    }
+    if (typeof op.field !== 'string' || op.field === '') {
+      fail(`apply: ${at} — "field" must be a non-empty field path`);
+    }
+    return { kind: /** @type {const} */ ('delete'), path: op.path, field: op.field, segments: resolveSegments(phase, topic, op.field.split('.')) };
+  });
+
+  manifestTarget(cwd, false, workUnit).transact((manifest, save) => {
+    for (const op of planned) {
+      if (op.kind === 'set') {
+        for (const write of /** @type {{segments: string[], value: unknown}[]} */ (op.writes)) {
+          setByPath(manifest, write.segments, write.value);
+        }
+      } else if (!deleteByPath(manifest, /** @type {string[]} */ (op.segments))) {
+        fail(`apply: delete "${op.path}" ${op.field} — path not found in "${workUnit}" — nothing was applied`);
+      }
+    }
+    save();
+  });
+
+  return {
+    work_unit: workUnit,
+    applied: planned.length,
+    ops: planned.map((op) => (op.kind === 'set' ? { path: op.path, set: op.fields } : { path: op.path, deleted: op.field })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
 const READS = { get: cmdGet, exists: cmdExists, list: cmdList, 'key-of': cmdKeyOf, resolve: cmdResolve };
-const MUTATIONS = { set: cmdSet, push: cmdPush, pull: cmdPull, delete: cmdDelete };
+const MUTATIONS = { set: cmdSet, push: cmdPush, pull: cmdPull, delete: cmdDelete, apply: cmdApply };
 
 const USAGE =
-  'Usage: engine manifest <get|set|push|pull|delete|exists|list|key-of|resolve> …\n' +
+  'Usage: engine manifest <get|set|push|pull|delete|apply|exists|list|key-of|resolve> …\n' +
   'Dot-path addressing: <work-unit>[.<phase>[.<topic>]]; the `project` prefix routes to the project manifest.';
 
 /** @param {string} command */

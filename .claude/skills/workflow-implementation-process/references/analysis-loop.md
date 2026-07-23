@@ -22,6 +22,8 @@ H. Create tasks in plan → invoke-task-writer.md
 
 ## A. Cycle Gate
 
+Crash-resume: if the previous cycle's findings are already committed but its synthesis never ran, do not record a new cycle — resume at **D. Dispatch Synthesis Agent** over the existing findings.
+
 Record the cycle via the engine (increments both the lifetime and session counters):
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs task analysis-cycle {work_unit} {topic}
@@ -261,7 +263,7 @@ impl({work_unit}): analysis cycle {N} — tasks skipped
 
 > **CHECKPOINT**: Do not proceed until the task writer has returned.
 
-Commit all analysis and plan changes:
+Commit all analysis and plan changes with raw git — stage the analysis outputs, the plan's `storage_paths` (recorded on the planning item), and the work unit, then commit:
 
 ```
 impl({work_unit}): add analysis phase {N} ({K} tasks)

@@ -1,7 +1,7 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.6.5",
-    "commit": "75b88b5b15c9cc334226f060de9c45ed5ad51029",
+    "ref": "v0.6.8",
+    "commit": "5adb457a6e9ef9dfea4c59481c34679277d839ee",
     "agents": [
       "claude"
     ],
@@ -424,6 +424,7 @@
       ".claude/skills/workflow-shared/references/final-review-menu.md",
       ".claude/skills/workflow-shared/references/natural-breaks.md",
       ".claude/skills/workflow-shared/references/pivot-to-epic.md",
+      ".claude/skills/workflow-shared/references/product-lens.md",
       ".claude/skills/workflow-shared/references/read-brief-context.md",
       ".claude/skills/workflow-shared/references/reconcile-advisory.md",
       ".claude/skills/workflow-shared/references/research-analysis.md",
@@ -431,6 +432,7 @@
       ".claude/skills/workflow-shared/references/routing-decision.md",
       ".claude/skills/workflow-shared/references/seed-context.md",
       ".claude/skills/workflow-shared/references/sequence-discovery-map.md",
+      ".claude/skills/workflow-shared/references/technical-lens.md",
       ".claude/skills/workflow-shared/references/topic-discovery-dispatch.md",
       ".claude/skills/workflow-shared/references/topic-discovery.md",
       ".claude/skills/workflow-shared/references/topic-granularity.md",
@@ -524,7 +526,7 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "installedAt": "2026-07-22T19:57:48.318Z",
+    "installedAt": "2026-07-23T19:10:09.504Z",
     "constraint": "^0.6.0"
   },
   "samber/cc-skills-golang": {
