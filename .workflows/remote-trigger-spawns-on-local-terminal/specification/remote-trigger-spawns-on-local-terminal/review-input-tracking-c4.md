@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-23
 cycle: 4
 phase: Input Review
@@ -27,7 +27,7 @@ The resolution is unchanged either way (explicitly out of scope, no workaround b
 **Proposed Addition**:
 {leave blank until discussed — likely widen "the same `client_activity` second" to "the same or a later `client_activity` second (between the remote trigger and the detection read)" in the Out of Scope bullet, and align the "same-second residual edge" phrasing in Edge Contracts to Pin.}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Widened the Out of Scope bullet to "same or a later `client_activity` second than the remote trigger" and aligned the Edge Contracts phrasing to "same-or-later-second residual edge".
 
 ---

@@ -70,7 +70,7 @@ These edges are part of the behavioural contract and must be preserved exactly:
 
 - **Empty client list → clean NULL, nil error.** No winner exists to select; this is the honest no-op, not a transient error.
 - **Deterministic winner tie-break: first-listed wins on an exact `client_activity` tie.** This keeps the existing multi-local behaviour stable. (The remote/local same-epoch-second tie is explicitly *don't-care* per the scope decision below, but the code must still apply *some* deterministic rule — first-listed.)
-- **`client_activity` is epoch-seconds-granular.** This is not a defect and needs no workaround; it is only the source of the acknowledged same-second residual edge (below).
+- **`client_activity` is epoch-seconds-granular.** This is not a defect and needs no workaround; it is only the source of the acknowledged same-or-later-second residual edge (below).
 
 ## Scope: Affected Surfaces (all corrected in lockstep by the single change)
 
@@ -96,7 +96,7 @@ That prior fix split detection outcomes into supported / named-unsupported / NUL
 ## Out of Scope
 
 - **A mobile-terminal (Blink) spawn adapter** — judged infeasible (no host→device control channel). This bug is about the detection locality gate only.
-- **The same-epoch-second residual edge** — if a person were actively typing on the local terminal in the same `client_activity` second the remote triggers, the local could tie/win. Explicitly ruled a non-issue: two people interacting with one mirrored session simultaneously is inherently ambiguous and not Portal's to arbitrate. **No workaround will be built for it.** The deterministic first-listed tie-break is the only rule applied.
+- **The same-or-later-second residual edge** — if a person were actively typing on the local terminal in the same `client_activity` second as, or a later second than, the remote trigger, the local could tie or win the selection (and thus drive). Explicitly ruled a non-issue: two people interacting with one mirrored session simultaneously is inherently ambiguous and not Portal's to arbitrate. **No workaround will be built for it.** The deterministic first-listed tie-break is the only rule applied.
 
 ## Testing Requirements
 
