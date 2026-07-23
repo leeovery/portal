@@ -130,21 +130,26 @@ func TestDetectInsideTmux(t *testing.T) {
 		}
 	})
 
-	t.Run("it drops remote clients but still resolves a mixed local+remote client set", func(t *testing.T) {
-		// The remote client has FAR higher activity than the local one — proving
-		// the NULL-filter runs first and activity is only a local tiebreak.
+	t.Run("it returns NULL when the most-active client is remote even with a local bystander", func(t *testing.T) {
+		// The remote client is the most-active — it is the triggering client.
+		// Under winner-first locality gating it is selected and walked, and its
+		// ancestry resolves a clean NULL, so detection is an honest no-op even
+		// though a lower-activity local client is also attached to the session.
+		// This is the reported bug's shape: before the fix the local bystander
+		// was (wrongly) driven, spawning windows on a machine the triggering
+		// user is not at.
 		lister := &fakeClientLister{clients: []ClientActivity{
-			{PID: 601, Activity: 9999}, // remote/mosh, high activity
-			{PID: 501, Activity: 1},    // local Ghostty, low activity
+			{PID: 601, Activity: 9999}, // remote/mosh, most active — the trigger
+			{PID: 501, Activity: 1},    // local Ghostty, idle bystander
 		}}
 		walker, reader := localWalkSeams()
 
 		got, err := detectInsideTmux("dev", lister, walker, reader)
 		if err != nil {
-			t.Fatalf("detectInsideTmux returned error: %v, want nil", err)
+			t.Fatalf("detectInsideTmux returned error: %v, want nil (clean NULL no-op)", err)
 		}
-		if got.BundleID != "com.mitchellh.ghostty" {
-			t.Errorf("BundleID = %q, want the local %q despite the remote client's higher activity", got.BundleID, "com.mitchellh.ghostty")
+		if !got.IsNull() {
+			t.Errorf("identity = %+v, want NULL — the most-active client is remote", got)
 		}
 	})
 
@@ -193,12 +198,17 @@ func TestDetectInsideTmux(t *testing.T) {
 		}
 	})
 
-	t.Run("it resolves a local client despite a transient walk on another client", func(t *testing.T) {
-		// A flaky ps on one client must not mask a resolvable local client.
+	t.Run("it fails safe to NULL when the most-active winner walk transiently fails", func(t *testing.T) {
+		// Under walk-only-the-winner the flaky high-activity client IS the
+		// winner, so a transient walk failure on it fails safe to NULL + an
+		// ErrDetectTransient-wrapped error (which Detect() folds to a spawn
+		// WARN) rather than falling back to the resolvable lower-activity local.
+		// This is the deliberately-dropped walk-resilience property — never
+		// spawn on uncertainty — locked in on purpose.
 		psFailure := errors.New("ps: operation not permitted")
 		lister := &fakeClientLister{clients: []ClientActivity{
-			{PID: 601, Activity: 100}, // transient walk failure
-			{PID: 501, Activity: 50},  // local Ghostty resolves
+			{PID: 601, Activity: 100}, // most active — winner — transient walk failure
+			{PID: 501, Activity: 50},  // local Ghostty resolves, but is never walked
 		}}
 		walker := &fakeWalker{procs: map[int]fakeProc{
 			601: {err: psFailure},
@@ -209,11 +219,17 @@ func TestDetectInsideTmux(t *testing.T) {
 		}}
 
 		got, err := detectInsideTmux("dev", lister, walker, reader)
-		if err != nil {
-			t.Fatalf("detectInsideTmux returned error: %v, want nil (the local client resolved)", err)
+		if err == nil {
+			t.Fatalf("detectInsideTmux returned nil error, want an ErrDetectTransient failure")
 		}
-		if got.BundleID != "com.mitchellh.ghostty" {
-			t.Errorf("BundleID = %q, want %q despite the transient walk on the other client", got.BundleID, "com.mitchellh.ghostty")
+		if !errors.Is(err, ErrDetectTransient) {
+			t.Errorf("errors.Is(err, ErrDetectTransient) = false, want true; err = %v", err)
+		}
+		if !errors.Is(err, psFailure) {
+			t.Errorf("underlying ps failure not preserved in the chain; err = %v", err)
+		}
+		if !got.IsNull() {
+			t.Errorf("identity = %+v, want NULL alongside the transient error", got)
 		}
 	})
 

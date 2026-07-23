@@ -48,71 +48,85 @@ func (l tmuxClientLister) ListClients(session string) ([]ClientActivity, error) 
 
 // detectInsideTmux resolves the host-terminal Identity for a Portal process
 // running INSIDE tmux, where the picker's own ancestry leads to the tmux server
-// rather than the launching terminal. It instead enumerates the current
-// session's clients and walks each client's process tree:
+// rather than the launching terminal. It must therefore gate locality on the
+// client that *triggered* this burst, not on "is any host-local client attached
+// to the session?".
 //
-//   - A client that walks to a resolved (non-NULL) identity is host-local — its
-//     app is a terminal on this machine. NULL-filtering is the primary signal.
-//   - A client that walks to a clean NULL is remote/mosh (its ancestry never
-//     reaches a local `.app`); it is dropped.
-//   - A transient walk failure (a flaky `ps`) is recorded but does not abort the
-//     scan, so one bad `ps` cannot mask a resolvable local client.
+// The triggering client is the most-active one: client_activity tracks a
+// client's sent input (not the received redraws a passive mirror gets), and
+// detection runs immediately after the user's trigger keystroke, so the
+// just-bumped triggering client is reliably the freshest at detection time.
+// The algorithm is therefore select-winner-then-locality-check — the inverse of
+// the old filter-then-tiebreak order:
+//
+//  1. Enumerate the session's clients via lister.ListClients.
+//  2. Select the winner: the client with the greatest client_activity across
+//     ALL enumerated clients — local and remote alike — with the first-listed
+//     client winning an exact tie. No walking happens during selection.
+//  3. Walk ONLY that winner's process tree and branch on its locality:
+//     a resolved (non-NULL) identity means the trigger is host-local → drive;
+//     a clean NULL means the trigger is remote/mosh → honest no-op; a transient
+//     walk failure fails safe to NULL + WARN (never spawn on uncertainty).
+//
+// Because only the winner is walked, the old "one flaky `ps` cannot mask a
+// resolvable local client" guarantee is deliberately DROPPED for the winner: a
+// legitimate local burst with 2+ local clients, where the most-active client's
+// `ps` transiently flakes, now refuses (NULL + WARN) instead of falling back to
+// a resolvable lower-activity local. This is an owned, deliberate trade of
+// walk-resilience for correctness — the fail-safe is to never spawn on
+// uncertainty rather than risk spawning on the wrong machine.
 //
 // Outcomes:
 //
-//   - list-clients failure: NULL identity, ErrDetectTransient-wrapped error.
-//   - zero host-local clients, no transient seen: clean NULL, nil error (the
-//     honest "no host-local terminal" no-op — a purely-remote trigger).
-//   - zero host-local clients, a transient walk was seen: NULL identity, the
-//     transient walk error (already ErrDetectTransient-wrapped) — detection
-//     genuinely could not complete.
-//   - exactly one host-local client: its Identity (no tiebreak).
-//   - 2+ host-local clients: the one with the highest client_activity, first
-//     listed winning an exact tie. client_activity is used ONLY to disambiguate
-//     among host-local clients — never as a cross-client primary signal.
+//   - list-clients failure: NULL identity, ErrDetectTransient-wrapped error (the
+//     winner is only computed after a successful enumeration).
+//   - empty client list: clean NULL, nil error — no winner to select, the
+//     honest "no host-local terminal" no-op.
+//   - winner walks to a resolved identity: that Identity (the trigger is
+//     host-local — drive the burst).
+//   - winner walks to a clean NULL: NULL identity, nil error — the trigger is a
+//     remote/mosh client, an honest no-op.
+//   - winner walk transiently fails: NULL identity, the ErrDetectTransient-
+//     wrapped walk error (folds to a spawn WARN) — the dropped-resilience
+//     fail-safe.
 func detectInsideTmux(session string, lister clientLister, walker ProcessWalker, reader BundleReader) (Identity, error) {
 	clients, err := lister.ListClients(session)
 	if err != nil {
 		return Identity{}, transient(fmt.Sprintf("list tmux clients for session %q", session), err)
 	}
 
-	var (
-		best         Identity
-		bestActivity int64
-		localFound   bool
-		firstWalkErr error
-	)
-
-	for _, client := range clients {
-		id, werr := walkToBundle(client.PID, walker, reader)
-		if werr != nil {
-			// Record the first transient failure but keep scanning: a flaky ps
-			// on one client must not mask a resolvable local client.
-			if firstWalkErr == nil {
-				firstWalkErr = werr
-			}
-			continue
-		}
-		if id.IsNull() {
-			// Remote/mosh client — no host-local terminal in its ancestry.
-			continue
-		}
-		if !localFound || client.Activity > bestActivity {
-			best = id
-			bestActivity = client.Activity
-			localFound = true
-		}
-	}
-
-	if !localFound {
-		if firstWalkErr != nil {
-			// Nothing local resolved and a walk genuinely failed: surface the
-			// transient error (already ErrDetectTransient-wrapped) so the caller
-			// WARNs rather than silently reporting no terminal.
-			return Identity{}, firstWalkErr
-		}
+	if len(clients) == 0 {
+		// No winner to select — the honest no-op, not a transient error.
 		return Identity{}, nil
 	}
 
-	return best, nil
+	winner := selectTriggeringClient(clients)
+
+	id, werr := walkToBundle(winner.PID, walker, reader)
+	if werr != nil {
+		// The triggering client's walk transiently failed. Fail safe to NULL +
+		// WARN (already ErrDetectTransient-wrapped) rather than falling back to
+		// a lower-activity local — never spawn on uncertainty.
+		return Identity{}, werr
+	}
+	if id.IsNull() {
+		// The triggering client is remote/mosh — no host-local terminal in its
+		// ancestry. Honest no-op.
+		return Identity{}, nil
+	}
+	return id, nil
+}
+
+// selectTriggeringClient picks the burst's triggering client from a non-empty
+// enumeration: the client with the strictly-greatest client_activity, with the
+// first-listed client winning an exact tie (deterministic, and stable with the
+// existing multi-local behaviour). It performs no process walking.
+func selectTriggeringClient(clients []ClientActivity) ClientActivity {
+	winner := clients[0]
+	for _, client := range clients[1:] {
+		if client.Activity > winner.Activity {
+			winner = client
+		}
+	}
+	return winner
 }
