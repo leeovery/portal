@@ -22,7 +22,7 @@ In the mixed case the remote (triggering) client — which has the highest `clie
 
 The correct discriminator — *"which client is the user acting through?"* — is exactly the most-recently-active client on the session (tmux's own `server_client_best` heuristic). The code already has that signal but applies it *after* locality instead of *before*, so the one client whose locality actually matters is discarded first.
 
-**Validated mechanism:** `client_activity` tracks a client's **sent input**, not the **received redraws** it gets from mirroring another client's session. A trigger keystroke on the remote client bumps only the remote's activity; a passively-mirroring local client stays stale. So "most-active client on the session" reliably fingers the remote trigger.
+**Validated mechanism:** `client_activity` tracks a client's **sent input**, not the **received redraws** it gets from mirroring another client's session. A trigger keystroke on the remote client bumps only the remote's activity; a passively-mirroring local client stays stale. **Detection also runs immediately after the user's trigger action** — picker startup for the TUI (where the identity is cached at that moment), command entry for the CLI — so the just-bumped triggering client is still the freshest at detection time. Together these make "most-active client on the session" reliably finger the remote trigger.
 
 ## The Fix: Gate Locality on the Triggering (Most-Active) Client
 
@@ -78,7 +78,7 @@ The fix is a single localized change to `detectInsideTmux` in `internal/spawn/de
 
 1. **CLI multi-target burst** — `cmd/open_burst_run.go` (`deps.Detector.Detect()`). Mixed case → NULL → atomic no-op with the honest "no host-local terminal" message.
 2. **TUI multi-select picker burst** — `internal/tui/spawn_detect.go` (`detector.Detect()`, cached once at picker startup). Mixed case → NULL.
-3. **`portal doctor` host-terminal line** — `cmd/doctor.go` `checkHostTerminal`. Read-only diagnostic; the mixed case now reports "unsupported (remote session)" instead of misreporting a driveable host terminal. Corrected in lockstep (informational only — never drives the exit code).
+3. **`portal doctor` host-terminal line** — `cmd/doctor.go` `checkHostTerminal`. Read-only diagnostic; the mixed case now falls into `checkHostTerminal`'s existing NULL branch and reports its output — "unsupported (remote session)" (verified against current `checkHostTerminal`, which short-circuits on `IsNull()`) — instead of misreporting a driveable host terminal. Corrected in lockstep (informational only — never drives the exit code).
 
 **Automatically re-armed safeguard (no extra code):**
 - **The TUI proactive multi-select `m`-entry block** keys on `DetectUnsupported()` (`m.detectResolution == spawn.ResolutionUnsupported`). Today the mixed case resolves a *supported* local terminal, so the block is silently defeated and the user walks the full multi-select flow into a wrong-machine burst. After the fix the mixed case resolves NULL → `ResolutionUnsupported` → `DetectUnsupported()` true → `m` is pre-blocked. Fixing detection re-arms this safeguard with no separate change.
@@ -126,6 +126,8 @@ Whether those are done as in-place edits or as renamed replacements is an implem
 - `ListClients` enumeration failure → NULL + `ErrDetectTransient`-wrapped error (currently ~`:151`). Unaffected by the A1 change (the winner is computed after a successful enumeration), but part of the pinned outcome set.
 
 *(Line numbers are current-location hints as of writing; identify the tests by their subtest description.)*
+
+**Verification scope.** The unit tests above cover the **selection / locality-ordering logic** via the seeded `clientLister` / `walker` / `reader` fakes — they lock in the fix's decision surface. The **real multi-client end-to-end scenario** — an actual remote SSH/mosh client plus a host-local client on the same session, confirming the N−1 windows genuinely do *not* open on the host machine — is **out of unit-test reach** and easy to miss in manual testing. It should be **verified manually** in the reported reproduction setup once the fix lands: trigger a burst (either surface) from a remote client while a host-local terminal is attached to the same session, and confirm the honest no-op (no host windows open).
 
 **Release approach:** regular release — no feature flag, no hotfix urgency. Nothing is destroyed; misplaced windows are recoverable by closing them.
 

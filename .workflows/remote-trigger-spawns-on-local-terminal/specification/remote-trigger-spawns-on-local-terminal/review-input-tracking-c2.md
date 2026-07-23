@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-23
 cycle: 2
 phase: Input Review
@@ -23,9 +23,10 @@ The whole fix rests on the equivalence "most-recently-active client == the clien
 > **Validated mechanism:** `client_activity` tracks a client's **sent input**, not the **received redraws** it gets from mirroring another client's session. A trigger keystroke on the remote client bumps only the remote's activity; a passively-mirroring local client stays stale. So "most-active client on the session" reliably fingers the remote trigger.
 
 **Proposed Addition**:
+Added a temporal-premise sentence to the Validated mechanism paragraph: detection runs immediately after the trigger action (picker startup / CLI command entry), so the just-bumped triggering client is freshest at detection time.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -39,9 +40,10 @@ The whole fix rests on the equivalence "most-recently-active client == the clien
 The spec asserts a concrete post-fix output: the mixed case "now reports 'unsupported (remote session)' instead of misreporting a driveable host terminal." That specific string appears nowhere in the investigation — the source only characterises the *before* state (misreports a driveable terminal) and that the diagnostic is corrected in lockstep, never the exact *after* text `checkHostTerminal` renders. An implementer taking the quoted string literally could hard-code / assert wording that differs from what `checkHostTerminal` actually produces. Either the string should be grounded (verified against `cmd/doctor.go` `checkHostTerminal`) or softened to a behavioural claim (reports unsupported rather than a driveable terminal) to match what the source actually supports.
 
 **Proposed Addition**:
+Reworded Scope item 3 to ground the string as checkHostTerminal's existing NULL-branch output, verified against current code (short-circuits on IsNull()).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -55,8 +57,9 @@ The spec asserts a concrete post-fix output: the mixed case "now reports 'unsupp
 The spec's Testing Requirements are entirely unit-level (invert `:133`, reframe `:196`, add the local-most-active case, preserve invariants) — which correctly locks the *selection/locality-ordering logic* via the seeded `clientLister`/`walker`/`reader` fakes. But the investigation explicitly flags that the actual defect — a real remote client resolving NULL and the N-1 windows genuinely not opening on the host machine — is "outside unit-test reach and easy to miss in manual testing." The spec never acknowledges this limit: it does not note that the end-to-end wrong-machine behaviour (the user's real remote + host-local workflow) is not exercised by the unit suite, nor whether a manual verification in the real multi-client setup is expected. Given this is the reported bug's actual reproduction condition, the testing section reads as complete when a whole verification dimension (the real-environment fix confirmation) is silently unaddressed. Worth either an explicit "unit tests cover the selection logic; the real multi-client scenario is out of unit-test reach — verify manually" caveat, or a conscious decision to accept unit coverage as sufficient.
 
 **Proposed Addition**:
+Added a 'Verification scope' note to Testing Requirements: unit tests cover the selection/locality logic; the real multi-client end-to-end scenario is out of unit-test reach and must be verified manually in the reproduction setup.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
