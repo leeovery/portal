@@ -57,7 +57,7 @@
     "implementation": {
       "items": {
         "remote-trigger-spawns-on-local-terminal": {
-          "status": "in-progress",
+          "status": "completed",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "auto",
