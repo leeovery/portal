@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Gate Locality on the Triggering (Most-Active) Client
-status: draft
+status: approved
+approved_at: 2026-07-23
 
 **Goal**: Invert `detectInsideTmux` (`internal/spawn/detect_inside.go`) so it selects the triggering client — the one with the highest `client_activity` across ALL enumerated clients (local and remote alike, first-listed winning an exact tie) — and then walks ONLY that winner, branching on the winner's locality. A remote-triggered burst with a host-local client also on the session now resolves NULL (the same atomic no-op as the pure-remote case) instead of driving the N−1 windows onto a machine the user is not at, while a legitimate local trigger still drives. The owned trade — winner-only walk drops the "one flaky ps cannot mask a resolvable local" resilience for the winner (fail-safe to NULL + WARN on a transient winner walk) — is made explicit in the rewritten docstring contract and locked in by the reframed regression test.
 
