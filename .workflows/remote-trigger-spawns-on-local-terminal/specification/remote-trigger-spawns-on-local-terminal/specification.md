@@ -24,6 +24,36 @@ The correct discriminator — *"which client is the user acting through?"* — i
 
 **Validated mechanism:** `client_activity` tracks a client's **sent input**, not the **received redraws** it gets from mirroring another client's session. A trigger keystroke on the remote client bumps only the remote's activity; a passively-mirroring local client stays stale. So "most-active client on the session" reliably fingers the remote trigger.
 
+## The Fix: Gate Locality on the Triggering (Most-Active) Client
+
+`detectInsideTmux` (`internal/spawn/detect_inside.go`) must select the **triggering client first, then locality-check that single winner** — inverting the current filter-then-tiebreak order.
+
+1. Enumerate the clients attached to the triggering pane's session (unchanged — `ListClients(session)`).
+2. Select the **triggering client** = the client with the highest `client_activity` across **all** enumerated clients (local and remote alike). On an exact activity tie, the **first-listed** client wins (deterministic rule; preserves the existing multi-local tie-break behaviour).
+3. Walk **only that winner's** process tree and branch on the result:
+   - Winner resolves to a local `.app` bundle → **drive it** (supported host terminal — return its `Identity`).
+   - Winner walks to a clean NULL (remote/mosh — ancestry never reaches a local `.app`) → **honest no-op** (NULL identity, nil error — the same atomic no-op as the pure-remote case).
+   - Winner's walk fails transiently (`ps`/`defaults` error) → **NULL + transient error** (`ErrDetectTransient`-wrapped), so `Detect()` emits a `spawn` WARN and folds to the unsupported no-op. **Never open windows on uncertainty.**
+4. **Empty client list** (no clients on the session) → clean NULL, nil error (no winner to select).
+
+This selects the client the user is acting through and gates the burst on *that* client's locality: a remote trigger → no-op (bug fixed); a local trigger → drives (legitimate local spawn preserved). The change is behaviourally *"sometimes no-op where it used to drive, never drive where it shouldn't"* — no new false-drive is possible.
+
+### Behavioural outcomes by scenario
+
+| Scenario | Selected winner | Result |
+|---|---|---|
+| Pure remote (no local client on session) | remote | NULL → no-op (unchanged) |
+| Single local client (developer at desk) | local | drive (unchanged) |
+| **Mixed: remote most-active, local idle** | remote | **NULL → no-op (bug fixed)** |
+| **Mixed: local most-active, remote idle** | local | **drive (legitimate local spawn preserved)** |
+| 2+ all-local clients | highest-activity local (first-listed on tie) | drive that one (unchanged) |
+| Winner's walk transient-fails | — | NULL + WARN (fail-safe) |
+| Empty client list | — | clean NULL (unchanged) |
+
+### Implementation approach
+
+Compute the most-active winner over the **existing `ListClients(session)` enumeration** — it already returns each client's PID and `client_activity` — selecting the max-activity client (first-listed winning an exact tie) in Go, then walking **only that winner**. This reuses the data already fetched (no extra tmux round-trip) and keeps the existing `clientLister` DI seam and the `detectInsideTmux(session, lister, walker, reader)` signature intact, so the unit tests and their deterministic tie-break assertions remain meaningful. Delegating to tmux's own best-client resolution (`display-message -p '#{client_pid}'`) was considered and rejected: it adds a round-trip, cannot expose a controllable tie-break, and would restructure the seam.
+
 ---
 
 ## Working Notes
