@@ -34,12 +34,12 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "4c74bbc1631e9e208b93b3905859115306920f45",
-          "task_list_gate_mode": "gated",
+          "task_list_gate_mode": "auto",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": null,
+          "task": "remote-trigger-spawns-on-local-terminal-1-1",
           "task_map": {}
         }
       }

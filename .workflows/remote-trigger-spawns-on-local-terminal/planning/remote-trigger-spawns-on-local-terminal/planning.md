@@ -22,7 +22,8 @@ approved_at: 2026-07-23
 - [ ] Manual end-to-end verification in the reported reproduction setup: trigger a burst (either surface) from a remote SSH/mosh client while a host-local terminal is attached to the same session, and confirm the honest no-op — no windows open on the host machine
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-07-23
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
