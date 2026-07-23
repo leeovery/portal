@@ -31,9 +31,9 @@
     "planning": {
       "items": {
         "remote-trigger-spawns-on-local-terminal": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
-          "spec_commit": "4c74bbc1631e9e208b93b3905859115306920f45",
+          "spec_commit": "0475852df9d78894b2c73cb24e148e197872c5ab",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
