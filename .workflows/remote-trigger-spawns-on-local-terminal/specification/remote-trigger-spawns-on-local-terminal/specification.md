@@ -61,7 +61,9 @@ The current code walks **all** clients specifically so that *"one flaky `ps` can
 
 This is the intended fail-safe (**never spawn on uncertainty**), accepted explicitly as a deliberate trade of resilience for correctness — not a silent side effect. It must be **owned**, not slipped in:
 
-- **The `detect_inside.go` docstring contract (the current lines 56–59 describing the all-clients walk and the "one bad `ps` cannot mask a resolvable local" guarantee) must be rewritten** to describe the new winner-only walk and the fail-safe-to-NULL-on-transient-winner behaviour. Do not leave the old contract text in place describing behaviour the code no longer has.
+- **The entire `detect_inside.go` docstring contract (roughly the current lines 49–72 — the algorithm description AND the "Outcomes" list) must be rewritten** to describe the new most-active-winner selection and winner-only walk with fail-safe-to-NULL-on-transient-winner. Do not leave the old contract text in place describing behaviour the code no longer has. The sentences the fix directly inverts sit **outside** the "one bad `ps` cannot mask a resolvable local" guarantee (~lines 56–59) and are the most important to change:
+  - *"NULL-filtering is the primary signal"* (~line 55) — false after the fix; `client_activity` selection is now the primary cross-client signal.
+  - *"client_activity is used ONLY to disambiguate among host-local clients — never as a cross-client primary signal"* (~lines 70–72) — the exact inversion of the new rule (activity now selects the winner across **all** clients, local and remote alike).
 - The lost resilience is **locked in on purpose by a new regression test** (see Testing Requirements), rather than being discovered later as a broken assumption.
 
 ## Edge Contracts to Pin
@@ -124,6 +126,7 @@ Whether those are done as in-place edits or as renamed replacements is an implem
 - 2+ all-local clients → highest-activity local wins (currently ~`:83` / `:101`).
 - Exact activity tie among locals → **first-listed wins** (currently ~`:117`).
 - `ListClients` enumeration failure → NULL + `ErrDetectTransient`-wrapped error (currently ~`:151`). Unaffected by the A1 change (the winner is computed after a successful enumeration), but part of the pinned outcome set.
+- Single-client walk failure → NULL + `ErrDetectTransient`-wrapped error (currently ~`:171`). Preserved unchanged: with one client it is the winner, so its walk-failure already maps to the winner-walk-transient row. Must **not** be deleted as a supposed duplicate of the reframed `:196` — it is the single-client variant of the transient-winner case and its coverage is distinct.
 
 *(Line numbers are current-location hints as of writing; identify the tests by their subtest description.)*
 

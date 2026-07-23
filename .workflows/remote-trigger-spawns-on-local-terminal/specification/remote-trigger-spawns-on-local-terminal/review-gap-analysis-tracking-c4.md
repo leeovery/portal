@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-23
 cycle: 4
 phase: Gap Analysis
@@ -25,10 +25,10 @@ Under the fix this test still passes unchanged (single client → it is the winn
 - The implementer is told to "identify the tests by their subtest description," so an unlisted-but-present test is easy to overlook when reconciling the file against the spec.
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+Added a `:171` single-client-walk-failure bullet to the 'must stay green' invariants, with an explicit 'do not delete as a duplicate of the reframed :196' warning.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -49,9 +49,9 @@ However, the docstring statements that are *semantically inverted* by the fix si
 An implementer who trusts the "lines 56–59" pointer literally would perform a narrow rewrite that leaves lines 55 and 69–72 intact — leaving a docstring that actively contradicts the code, which is precisely the outcome this section exists to prevent. The section's general directive covers it, but the specific line pointer under-scopes the rewrite and points away from the most important line to change.
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+Broadened the docstring-rewrite scope to the whole contract (~lines 49–72) and called out the two directly-inverted sentences: line 55 ('NULL-filtering is the primary signal') and lines 70–72 ('client_activity ... never as a cross-client primary signal').
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
