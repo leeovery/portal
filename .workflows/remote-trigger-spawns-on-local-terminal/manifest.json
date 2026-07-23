@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "remote-trigger-spawns-on-local-terminal": {
-          "status": "in-progress",
+          "status": "completed",
           "sources": {
             "remote-trigger-spawns-on-local-terminal": {
               "status": "incorporated"
