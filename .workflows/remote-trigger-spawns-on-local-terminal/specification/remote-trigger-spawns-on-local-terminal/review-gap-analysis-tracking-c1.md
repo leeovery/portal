@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-23
 cycle: 1
 phase: Gap Analysis
@@ -50,9 +50,9 @@ Only the third new test — "Local most-active, remote idle bystander → local 
 Because the spec lists these as two separate obligations (transform an existing test AND add a new one) without stating they land on the same scenario, an implementer planning the suite is left to guess whether the reframed test *satisfies* the new-test requirement or whether a second, near-duplicate test is expected. Impact is low (worst case a redundant test), but it is a real planning-readiness ambiguity: the "New tests to add" list overstates how much net-new coverage is required.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Reworded the "New tests to add" block: the only net-new test ("local most-active, remote idle → drives") now stands alone, and the other two scenarios are explicitly attributed to the inverted `:133` and reframed `:196` transforms (no separate near-duplicate test required).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Replaced the "New tests to add" block in Testing Requirements.
 
 ---

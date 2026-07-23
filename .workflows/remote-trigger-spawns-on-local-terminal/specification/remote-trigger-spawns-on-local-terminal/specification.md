@@ -105,11 +105,16 @@ Two existing unit tests in `internal/spawn/detect_inside_test.go` currently **co
 - **Invert the codified-bug test** — the subtest *"it drops remote clients but still resolves a mixed local+remote client set"* (currently ~`:133`). It seeds a high-activity remote client + a low-activity local and asserts the **local** wins ("proving the NULL-filter runs first and activity is only a local tiebreak"). Under the fix, with the remote as most-active the expectation becomes **NULL / no-op**. This assertion currently locks in the bug.
 - **Reframe the resilience test** — the subtest *"it resolves a local client despite a transient walk on another client"* (currently ~`:196`). It seeds a high-activity client whose walk transiently fails **+** a lower-activity local, and asserts the local resolves with a nil error. Under walk-only-the-winner the flaky high-activity client **is** the winner → **NULL + `ErrDetectTransient`-wrapped error** (which `Detect()` folds to a `spawn` WARN). Reframe it to the new fail-safe expectation.
 
-**New tests to add:**
+**New coverage to add** (beyond the two transforms above):
 
-- **Local most-active, remote idle bystander** → the **local drives** (guards against an over-correction that would refuse a legitimate local spawn because a remote client is merely attached).
-- **Remote most-active, local idle** → **NULL** (the reported bug's shape — the primary regression test).
-- **Fail-safe on transient winner walk** → most-active client's walk transient-fails **+** a lower-activity resolvable local present → **NULL + `ErrDetectTransient`-wrapped error** (locks in the deliberately-dropped resilience property on purpose, rather than discovering it later as a broken assumption).
+- **Local most-active, remote idle bystander** → the **local drives**. This is the only genuinely net-new scenario (no existing subtest covers it) — it guards against an over-correction that would refuse a legitimate local spawn because a remote client is merely attached.
+
+The other two target scenarios are **the same scenarios** as the transforms above and need no separate near-duplicate test:
+
+- *Remote most-active, local idle* → **NULL** (the reported bug's shape — the primary regression case) is exactly the inverted `:133` test.
+- *Transient winner walk + a lower-activity resolvable local present* → **NULL + `ErrDetectTransient`-wrapped error** (the deliberately-dropped resilience property, locked in on purpose) is exactly the reframed `:196` test.
+
+Whether those are done as in-place edits or as renamed replacements is an implementation detail; either way the coverage comes from the transforms, not from additional tests.
 
 **Existing invariants that must stay green** (the max-across-all selection must not regress them — with no remote present, max-across-all == max-among-locals):
 
