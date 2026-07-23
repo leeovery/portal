@@ -8,9 +8,9 @@ import (
 
 // ClientActivity is one tmux client's detection-relevant data: the client's
 // process id (the walk entry point) and its last-activity timestamp (the
-// local-only tiebreak). It is the spawn-package mirror of tmux.ClientInfo,
-// declared here so the inside-tmux resolution is unit-testable without a tmux
-// dependency.
+// cross-client winner-selection signal — the most-active client is the burst's
+// trigger). It is the spawn-package mirror of tmux.ClientInfo, declared here so
+// the inside-tmux resolution is unit-testable without a tmux dependency.
 type ClientActivity struct {
 	PID      int
 	Activity int64
@@ -102,19 +102,13 @@ func detectInsideTmux(session string, lister clientLister, walker ProcessWalker,
 
 	winner := selectTriggeringClient(clients)
 
-	id, werr := walkToBundle(winner.PID, walker, reader)
-	if werr != nil {
-		// The triggering client's walk transiently failed. Fail safe to NULL +
-		// WARN (already ErrDetectTransient-wrapped) rather than falling back to
-		// a lower-activity local — never spawn on uncertainty.
-		return Identity{}, werr
-	}
-	if id.IsNull() {
-		// The triggering client is remote/mosh — no host-local terminal in its
-		// ancestry. Honest no-op.
-		return Identity{}, nil
-	}
-	return id, nil
+	// Walk ONLY the winner and propagate walkToBundle's three-shape contract
+	// verbatim, exactly as detectOutsideTmux does: a resolved identity drives
+	// the burst (the trigger is host-local); a clean NULL is the honest no-op
+	// (a remote/mosh trigger); a transient walk failure fails safe to NULL +
+	// WARN — never fall back to a lower-activity local, never spawn on
+	// uncertainty.
+	return walkToBundle(winner.PID, walker, reader)
 }
 
 // selectTriggeringClient picks the burst's triggering client from a non-empty
