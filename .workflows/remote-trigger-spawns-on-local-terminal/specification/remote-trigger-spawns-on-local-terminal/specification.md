@@ -76,7 +76,7 @@ These edges are part of the behavioural contract and must be preserved exactly:
 
 The fix is a single localized change to `detectInsideTmux` in `internal/spawn/detect_inside.go`. `detect.go` and all three `Detect()` consumers are unchanged; they inherit the corrected resolution automatically:
 
-1. **CLI multi-target burst** — `cmd/open_burst_run.go` (`deps.Detector.Detect()`). Mixed case → NULL → atomic no-op with the honest "no host-local terminal" message.
+1. **CLI multi-target burst** — `cmd/open_burst_run.go` (`deps.Detector.Detect()`). Mixed case → NULL → atomic no-op, surfacing the shared `spawn.UnsupportedNoopMessage` NULL copy ("can't open new windows over a remote connection — nothing opened"), consistent with the Coherence section below.
 2. **TUI multi-select picker burst** — `internal/tui/spawn_detect.go` (`detector.Detect()`, cached once at picker startup). Mixed case → NULL.
 3. **`portal doctor` host-terminal line** — `cmd/doctor.go` `checkHostTerminal`. Read-only diagnostic; the mixed case now falls into `checkHostTerminal`'s existing NULL branch and reports its output — "unsupported (remote session)" (verified against current `checkHostTerminal`, which short-circuits on `IsNull()`) — instead of misreporting a driveable host terminal. Corrected in lockstep (informational only — never drives the exit code).
 

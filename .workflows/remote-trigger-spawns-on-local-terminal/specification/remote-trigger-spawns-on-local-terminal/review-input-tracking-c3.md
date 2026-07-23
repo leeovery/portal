@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-07-23
 cycle: 3
 phase: Input Review
@@ -24,9 +24,9 @@ However, the spec's own "Coherence with `persistent-no-host-terminal-banner`" se
 The spec therefore presents two different user-facing strings for the same NULL no-op: the CLI scope item says "no host-local terminal," while the coherence section says "can't open new windows over a remote connection." The investigation's `no host-local terminal` phrasing predates the banner fix it flags for coherence, so the CLI scope item appears to have carried forward a stale string rather than the reconciled shared copy. Which message the CLI mixed-case user actually sees is left ambiguous. Both surfaces should state the honest no-op identically, pinned to the single shared `spawn.UnsupportedNoopMessage` copy the coherence section already establishes — otherwise an implementer could hard-code / assert the stale "no host-local terminal" wording for the CLI burst.
 
 **Proposed Addition**:
-[blank until discussed]
+Reworded Scope item 1 to surface the shared `spawn.UnsupportedNoopMessage` NULL copy ("can't open new windows over a remote connection — nothing opened"), consistent with the Coherence section; removed the stale "no host-local terminal" phrase.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Grounded against `cmd/open_burst_run.go:168`, which returns `spawn.UnsupportedNoopMessage(id)`.
 
 ---
