@@ -97,6 +97,31 @@ That prior fix split detection outcomes into supported / named-unsupported / NUL
 - **A mobile-terminal (Blink) spawn adapter** — judged infeasible (no host→device control channel). This bug is about the detection locality gate only.
 - **The same-epoch-second residual edge** — if a person were actively typing on the local terminal in the same `client_activity` second the remote triggers, the local could tie/win. Explicitly ruled a non-issue: two people interacting with one mirrored session simultaneously is inherently ambiguous and not Portal's to arbitrate. **No workaround will be built for it.** The deterministic first-listed tie-break is the only rule applied.
 
+## Testing Requirements
+
+Two existing unit tests in `internal/spawn/detect_inside_test.go` currently **codify the buggy behaviour** and will break under the fix — they must be inverted/reframed, not deleted:
+
+- **Invert the codified-bug test** — the subtest *"it drops remote clients but still resolves a mixed local+remote client set"* (currently ~`:133`). It seeds a high-activity remote client + a low-activity local and asserts the **local** wins ("proving the NULL-filter runs first and activity is only a local tiebreak"). Under the fix, with the remote as most-active the expectation becomes **NULL / no-op**. This assertion currently locks in the bug.
+- **Reframe the resilience test** — the subtest *"it resolves a local client despite a transient walk on another client"* (currently ~`:196`). It seeds a high-activity client whose walk transiently fails **+** a lower-activity local, and asserts the local resolves with a nil error. Under walk-only-the-winner the flaky high-activity client **is** the winner → **NULL + `ErrDetectTransient`-wrapped error** (which `Detect()` folds to a `spawn` WARN). Reframe it to the new fail-safe expectation.
+
+**New tests to add:**
+
+- **Local most-active, remote idle bystander** → the **local drives** (guards against an over-correction that would refuse a legitimate local spawn because a remote client is merely attached).
+- **Remote most-active, local idle** → **NULL** (the reported bug's shape — the primary regression test).
+- **Fail-safe on transient winner walk** → most-active client's walk transient-fails **+** a lower-activity resolvable local present → **NULL + `ErrDetectTransient`-wrapped error** (locks in the deliberately-dropped resilience property on purpose, rather than discovering it later as a broken assumption).
+
+**Existing invariants that must stay green** (the max-across-all selection must not regress them — with no remote present, max-across-all == max-among-locals):
+
+- Pure-remote (every client remote/mosh) → NULL (currently ~`:46`).
+- Single local client → drives, no tiebreak (currently ~`:65`).
+- Empty client list → clean NULL (currently ~`:220`).
+- 2+ all-local clients → highest-activity local wins (currently ~`:83` / `:101`).
+- Exact activity tie among locals → **first-listed wins** (currently ~`:117`).
+
+*(Line numbers are current-location hints as of writing; identify the tests by their subtest description.)*
+
+**Release approach:** regular release — no feature flag, no hotfix urgency. Nothing is destroyed; misplaced windows are recoverable by closing them.
+
 ---
 
 ## Working Notes

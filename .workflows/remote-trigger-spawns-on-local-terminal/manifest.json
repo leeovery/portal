@@ -18,7 +18,7 @@
           "status": "in-progress",
           "sources": {
             "remote-trigger-spawns-on-local-terminal": {
-              "status": "pending"
+              "status": "incorporated"
             }
           },
           "review_cycle": 0,
