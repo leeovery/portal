@@ -39,10 +39,11 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "remote-trigger-spawns-on-local-terminal-1-2",
+          "task": "remote-trigger-spawns-on-local-terminal-1-3",
           "task_map": {
             "remote-trigger-spawns-on-local-terminal-1-1": "tick-6ac27b",
-            "remote-trigger-spawns-on-local-terminal-1": "tick-382c6d"
+            "remote-trigger-spawns-on-local-terminal-1": "tick-382c6d",
+            "remote-trigger-spawns-on-local-terminal-1-2": "tick-932c5e"
           },
           "external_id": "tick-1655ae"
         }
