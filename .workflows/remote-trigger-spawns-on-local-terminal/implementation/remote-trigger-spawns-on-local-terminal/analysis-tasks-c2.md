@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: Remote Trigger Spawns On Local Terminal (Cycle 2)
 
 ## Task 1: Collapse the seven happy-path detectInsideTmux subtests into one table-driven test
-status: pending
+status: approved
 severity: medium
 sources: duplication
 

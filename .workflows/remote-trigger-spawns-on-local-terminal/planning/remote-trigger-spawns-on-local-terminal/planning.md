@@ -44,3 +44,17 @@ approved_at: 2026-07-23
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
 | remote-trigger-spawns-on-local-terminal-2-1 | Clean up T1-1 gate-inversion residues in detect_inside.go | out-of-scope `tmux.ClientInfo` doc in clients.go left untouched; no behaviour change to resolved→drive / clean-NULL→no-op / transient→NULL+ErrDetectTransient outcomes |
+
+### Phase 3: Analysis (Cycle 2)
+status: approved
+approved_at: 2026-07-23
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+status: approved
+approved_at: 2026-07-23
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| remote-trigger-spawns-on-local-terminal-3-1 | Collapse the seven happy-path detectInsideTmux subtests into one table-driven test | test-only structural change, no production code touched; error-path subtests (list-clients failure, single-client walk failure, winner-walk transient → ErrDetectTransient) kept separate; zero-clients clean-NULL coverage retained; session-passthrough assertion (`lister.calls == [dev]`) preserved; exact activity tie → first-listed wins |
