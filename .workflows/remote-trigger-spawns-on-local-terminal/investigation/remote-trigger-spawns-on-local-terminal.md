@@ -51,11 +51,27 @@ Firing a multi-window spawn burst from a remote tmux client while a host-local t
 
 ### Hypotheses
 
-**Checkpoint depth:** {TBD at investigation-plan step}
+**Checkpoint depth:** check-ins
 
 {Live ledger — statuses evolve through the analysis:}
-- **Inside-tmux detection (`internal/spawn/detect_inside.go`) answers "does any host-local terminal exist on this server?" rather than "is the triggering client local?"** [suspected]
-  Basis (from discovery, unvalidated): detection enumerates `list-clients`, filters to host-local clients (remote/mosh clients walk to a NULL identity and are excluded), and uses `client_activity` only as a tiebreak *among locals*. The remote trigger's own locality never gates the decision, so the burst resolves to whatever local terminal happens to be attached and drives it.
+
+- **H1 — `detectInsideTmux` gates on "any host-local client on the current session" not "the triggering client's locality"** [suspected, near-confirmed at recon]
+  Basis: `internal/spawn/detect_inside.go` enumerates `ListClients(session)`, NULL-filters to host-local clients, and picks the highest `client_activity`. The triggering client's own locality never enters the decision — so a remote trigger + a local client on the same session resolves the local terminal and the burst drives it.
+
+- **H2 — the exact repro precondition is "a host-local client shares the triggering session"** [suspected]
+  Basis: `tmux.ListClients` runs `list-clients -t <session>` (session-scoped), `session = CurrentSessionName`. Need to pin what "current session" resolves to inside tmux and whether the local client must be on that same session for the bug to fire.
+
+- **H3 — the triggering client IS identifiable at detection time (or, if not, the fix must take a conservative stance)** [open — informs fix]
+  Basis: portal inside tmux has `$TMUX` / `$TMUX_PANE`; tmux exposes `client_tty` / `client_pid` per client. Whether we can pin *which* client triggered (vs. "is any local client present") decides precise-vs-conservative fix shape. Establishing what tmux gives us is investigation; choosing the stance is fix exploration.
+
+- **H4 — recent spawn bugfixes did not fix this** [near-confirmed at recon]
+  Basis: `detect_inside.go` has one commit ever (original impl `45010cf3`, `restore-host-terminal-windows`). The recent `spawned-window-dead-ends-on-session-exit` fix touched `ghostty.go` window lifecycle; the `persistent-no-host-terminal-banner` fix is TUI-side. Neither touched detection locality.
+
+**Trace lines (agreed order):**
+1. `detectInsideTmux` / `Detect` / `resolve` — formalise the locality gate (H1)
+2. `tmux.ListClients` scoping + `CurrentSessionName` — pin repro precondition (H2)
+3. `$TMUX` / `$TMUX_PANE` / `client_tty` / `client_pid` — triggering-client identifiability (H3, feasibility scouting)
+4. Both surfaces share `Detect()` [done: `cmd/open_burst_run.go:158`, `internal/tui/spawn_detect.go:90`] + no detection change since (H4) [done: git log]
 
 ### Code Trace
 
