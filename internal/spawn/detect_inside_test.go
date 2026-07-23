@@ -19,7 +19,8 @@ func (f *fakeClientLister) ListClients(session string) ([]ClientActivity, error)
 	return f.clients, f.err
 }
 
-// ghosttyProc/terminalProc are single-hop ancestries that resolve to a .app.
+// ghosttyCommand/terminalCommand are single-hop ancestries (paired with their
+// .app bundle paths) that resolve to a .app.
 var (
 	ghosttyCommand  = "/Applications/Ghostty.app/Contents/MacOS/ghostty"
 	ghosttyAppPath  = "/Applications/Ghostty.app"

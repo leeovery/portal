@@ -9,7 +9,8 @@ import (
 // ClientInfo is one tmux client attached to a session: the client's process id
 // and its last-activity timestamp (tmux's #{client_activity}, epoch seconds).
 // PID is the walk entry point for inside-tmux host-terminal detection; Activity
-// is the local-only tiebreak used to choose among 2+ host-local clients.
+// is the cross-client winner-selection signal — the most-active client is the
+// burst's trigger, and only that winner's locality is walked.
 type ClientInfo struct {
 	PID      int
 	Activity int64
