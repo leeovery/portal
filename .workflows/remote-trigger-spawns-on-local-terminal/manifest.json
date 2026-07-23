@@ -110,6 +110,20 @@
           ]
         }
       }
+    },
+    "review": {
+      "items": {
+        "remote-trigger-spawns-on-local-terminal": {
+          "status": "in-progress",
+          "reviewed_tasks": [
+            "remote-trigger-spawns-on-local-terminal-1-1",
+            "remote-trigger-spawns-on-local-terminal-1-2",
+            "remote-trigger-spawns-on-local-terminal-1-3",
+            "remote-trigger-spawns-on-local-terminal-2-1",
+            "remote-trigger-spawns-on-local-terminal-3-1"
+          ]
+        }
+      }
     }
   },
   "seeds": [
