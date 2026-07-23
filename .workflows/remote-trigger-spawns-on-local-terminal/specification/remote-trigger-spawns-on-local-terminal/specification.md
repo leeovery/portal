@@ -54,6 +54,23 @@ This selects the client the user is acting through and gates the burst on *that*
 
 Compute the most-active winner over the **existing `ListClients(session)` enumeration** — it already returns each client's PID and `client_activity` — selecting the max-activity client (first-listed winning an exact tie) in Go, then walking **only that winner**. This reuses the data already fetched (no extra tmux round-trip) and keeps the existing `clientLister` DI seam and the `detectInsideTmux(session, lister, walker, reader)` signature intact, so the unit tests and their deterministic tie-break assertions remain meaningful. Delegating to tmux's own best-client resolution (`display-message -p '#{client_pid}'`) was considered and rejected: it adds a round-trip, cannot expose a controllable tie-break, and would restructure the seam.
 
+## Owned Behaviour Change: Dropped Walk-Resilience Property
+
+The current code walks **all** clients specifically so that *"one flaky `ps` cannot mask a resolvable local client"* (documented in the `detect_inside.go` docstring, lines 56–59, and enforced at the per-client loop). Walking **only the winner** deliberately **drops that property for the winner**: a legitimate local burst with 2+ local clients, where the most-active client's `ps` transiently flakes, now **refuses** (NULL + WARN) instead of falling back to a resolvable lower-activity local.
+
+This is the intended fail-safe (**never spawn on uncertainty**), accepted explicitly as a deliberate trade of resilience for correctness — not a silent side effect. It must be **owned**, not slipped in:
+
+- **The `detect_inside.go` docstring contract (the current lines 56–59 describing the all-clients walk and the "one bad `ps` cannot mask a resolvable local" guarantee) must be rewritten** to describe the new winner-only walk and the fail-safe-to-NULL-on-transient-winner behaviour. Do not leave the old contract text in place describing behaviour the code no longer has.
+- The lost resilience is **locked in on purpose by a new regression test** (see Testing Requirements), rather than being discovered later as a broken assumption.
+
+## Edge Contracts to Pin
+
+These edges are part of the behavioural contract and must be preserved exactly:
+
+- **Empty client list → clean NULL, nil error.** No winner exists to select; this is the honest no-op, not a transient error.
+- **Deterministic winner tie-break: first-listed wins on an exact `client_activity` tie.** This keeps the existing multi-local behaviour stable. (The remote/local same-epoch-second tie is explicitly *don't-care* per the scope decision below, but the code must still apply *some* deterministic rule — first-listed.)
+- **`client_activity` is epoch-seconds-granular.** This is not a defect and needs no workaround; it is only the source of the acknowledged same-second residual edge (below).
+
 ---
 
 ## Working Notes
