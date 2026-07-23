@@ -1,7 +1,7 @@
 {
   "name": "remote-trigger-spawns-on-local-terminal",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-07-22",
   "description": "Remote-triggered multi-window spawn burst opens its windows on a host-local terminal instead of taking the honest unsupported no-op, so windows land on a machine the triggering user is not at; fix covers both the TUI multi-select and CLI multi-target open burst surfaces.",
   "phases": {
@@ -132,5 +132,6 @@
       "source": "inbox:bug",
       "seeded_at": "2026-07-22T20:13:18Z"
     }
-  ]
+  ],
+  "completed_at": "2026-07-23"
 }
