@@ -43,7 +43,8 @@
           "task_map": {
             "remote-trigger-spawns-on-local-terminal-1-1": "tick-6ac27b",
             "remote-trigger-spawns-on-local-terminal-1": "tick-382c6d",
-            "remote-trigger-spawns-on-local-terminal-1-2": "tick-932c5e"
+            "remote-trigger-spawns-on-local-terminal-1-2": "tick-932c5e",
+            "remote-trigger-spawns-on-local-terminal-1-3": "tick-d11c21"
           },
           "external_id": "tick-1655ae"
         }
