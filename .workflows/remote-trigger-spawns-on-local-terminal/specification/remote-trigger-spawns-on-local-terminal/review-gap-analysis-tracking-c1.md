@@ -25,10 +25,10 @@ The change (compute the winner in Go from the already-fetched slice, then walk o
 Note the adjacent single-client-walk-failure subtest (`:171`) is, by contrast, covered — it collapses into the "winner's walk transient-fails → NULL + WARN" row — so only the enumeration-failure outcome is genuinely missing from the contract.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Added an enumeration-failure row to the scenario table (`ListClients` fails → NULL + transient error → `spawn` WARN) and a matching bullet to the preserved-invariants list (currently ~`:151`).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Applied to the scenario table and the "existing invariants that must stay green" list.
 
 ---
 

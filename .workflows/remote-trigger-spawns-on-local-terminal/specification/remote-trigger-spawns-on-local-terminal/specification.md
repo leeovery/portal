@@ -47,6 +47,7 @@ This selects the client the user is acting through and gates the burst on *that*
 | **Mixed: remote most-active, local idle** | remote | **NULL → no-op (bug fixed)** |
 | **Mixed: local most-active, remote idle** | local | **drive (legitimate local spawn preserved)** |
 | 2+ all-local clients | highest-activity local (first-listed on tie) | drive that one (unchanged) |
+| `ListClients` enumeration fails | — | NULL + transient error → `spawn` WARN (unchanged) |
 | Winner's walk transient-fails | — | NULL + WARN (fail-safe) |
 | Empty client list | — | clean NULL (unchanged) |
 
@@ -117,6 +118,7 @@ Two existing unit tests in `internal/spawn/detect_inside_test.go` currently **co
 - Empty client list → clean NULL (currently ~`:220`).
 - 2+ all-local clients → highest-activity local wins (currently ~`:83` / `:101`).
 - Exact activity tie among locals → **first-listed wins** (currently ~`:117`).
+- `ListClients` enumeration failure → NULL + `ErrDetectTransient`-wrapped error (currently ~`:151`). Unaffected by the A1 change (the winner is computed after a successful enumeration), but part of the pinned outcome set.
 
 *(Line numbers are current-location hints as of writing; identify the tests by their subtest description.)*
 
