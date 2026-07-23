@@ -71,6 +71,32 @@ These edges are part of the behavioural contract and must be preserved exactly:
 - **Deterministic winner tie-break: first-listed wins on an exact `client_activity` tie.** This keeps the existing multi-local behaviour stable. (The remote/local same-epoch-second tie is explicitly *don't-care* per the scope decision below, but the code must still apply *some* deterministic rule — first-listed.)
 - **`client_activity` is epoch-seconds-granular.** This is not a defect and needs no workaround; it is only the source of the acknowledged same-second residual edge (below).
 
+## Scope: Affected Surfaces (all corrected in lockstep by the single change)
+
+The fix is a single localized change to `detectInsideTmux` in `internal/spawn/detect_inside.go`. `detect.go` and all three `Detect()` consumers are unchanged; they inherit the corrected resolution automatically:
+
+1. **CLI multi-target burst** — `cmd/open_burst_run.go` (`deps.Detector.Detect()`). Mixed case → NULL → atomic no-op with the honest "no host-local terminal" message.
+2. **TUI multi-select picker burst** — `internal/tui/spawn_detect.go` (`detector.Detect()`, cached once at picker startup). Mixed case → NULL.
+3. **`portal doctor` host-terminal line** — `cmd/doctor.go` `checkHostTerminal`. Read-only diagnostic; the mixed case now reports "unsupported (remote session)" instead of misreporting a driveable host terminal. Corrected in lockstep (informational only — never drives the exit code).
+
+**Automatically re-armed safeguard (no extra code):**
+- **The TUI proactive multi-select `m`-entry block** keys on `DetectUnsupported()` (`m.detectResolution == spawn.ResolutionUnsupported`). Today the mixed case resolves a *supported* local terminal, so the block is silently defeated and the user walks the full multi-select flow into a wrong-machine burst. After the fix the mixed case resolves NULL → `ResolutionUnsupported` → `DetectUnsupported()` true → `m` is pre-blocked. Fixing detection re-arms this safeguard with no separate change.
+
+## Coherence with `persistent-no-host-terminal-banner` (confirmed at spec time)
+
+That prior fix split detection outcomes into supported / named-unsupported / NULL-remote, showing the persistent `⚠ unsupported terminal — <name> · <bundleID>` banner only for a *named-undriven* terminal and dropping it for NULL/remote (its gate `unsupportedBannerActive()` carries a `!m.detectIdentity.IsNull()` discriminator). After **this** fix, the mixed case resolves **NULL** (not the local's named/supported identity), so it flows into the NULL/remote branch: **no persistent banner, standard header, and the reactive no-op copy** (`spawn.UnsupportedNoopMessage` → "can't open new windows over a remote connection — nothing opened"). The two fixes compose cleanly — remote users get the honest no-op with no noise banner. **Verified against current code:** `unsupportedBannerActive()` = `DetectUnsupported() && !multiSelectMode && !detectIdentity.IsNull()`, and `checkHostTerminal` short-circuits on `IsNull()` before consulting `Resolve`. No conflict.
+
+## Unaffected Paths (must remain unchanged)
+
+- **Outside-tmux detection** (`internal/spawn/detect_outside.go`) — walks Portal's own process ancestry (env fast-path / self-walk), which reflects the actual launching terminal. No client enumeration, no locality-ordering bug. Untouched.
+- **Pure-remote case** (no local client on the session) — already resolves clean NULL → correct honest no-op. Unchanged.
+- **Single-local-client case** (developer at the desk) — the trigger *is* the local client → drives. Unchanged.
+
+## Out of Scope
+
+- **A mobile-terminal (Blink) spawn adapter** — judged infeasible (no host→device control channel). This bug is about the detection locality gate only.
+- **The same-epoch-second residual edge** — if a person were actively typing on the local terminal in the same `client_activity` second the remote triggers, the local could tie/win. Explicitly ruled a non-issue: two people interacting with one mirrored session simultaneously is inherently ambiguous and not Portal's to arbitrate. **No workaround will be built for it.** The deterministic first-listed tie-break is the only rule applied.
+
 ---
 
 ## Working Notes
