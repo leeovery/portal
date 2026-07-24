@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.4] - 2026-07-24
+
+✨ Added
+- Custom-terminal setup guide moved to a dedicated page (`docs/custom-terminals.md`) covering recipe formats, identity keys, matching precedence, and troubleshooting.
+- The "see docs" link in the unsupported-terminal banner is now a clickable hyperlink to the custom-terminal setup guide.
+
 ## [0.10.3] - 2026-07-23
 
 🐛 Fixed
