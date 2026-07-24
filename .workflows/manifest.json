@@ -167,6 +167,9 @@
     },
     "remote-trigger-spawns-on-local-terminal": {
       "work_type": "bugfix"
+    },
+    "custom-terminal-docs-and-clickable-see-docs": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {

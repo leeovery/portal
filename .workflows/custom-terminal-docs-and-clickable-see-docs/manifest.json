@@ -1,0 +1,15 @@
+{
+  "name": "custom-terminal-docs-and-clickable-see-docs",
+  "work_type": "quick-fix",
+  "status": "in-progress",
+  "created": "2026-07-24",
+  "description": "Write terminals.json custom-terminal setup docs and make the picker's unsupported-terminal 'see docs' banner hint resolve to them — an OSC 8 clickable link if feasible, otherwise leaving the bare 'see docs' word; the banner never prints a URL or path.",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-07-22-custom-terminal-docs-and-clickable-see-docs.md",
+      "source": "inbox:quickfix",
+      "seeded_at": "2026-07-24T10:09:00Z"
+    }
+  ]
+}
