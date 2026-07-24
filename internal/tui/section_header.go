@@ -62,6 +62,14 @@ const (
 	// accent.blue — carried unconditionally by the named-only banner (its actionable
 	// terminals.json pointer). It is the single source of the wording.
 	unsupportedDocsHint = "see docs"
+	// unsupportedDocsURL is the OSC 8 hyperlink target the `see docs` hint wraps —
+	// the dedicated custom-terminal setup guide on GitHub. The link is emitted
+	// unconditionally (OSC 8 is orthogonal to colour, so it rides the
+	// NO_COLOR/colourless carve-out and still degrades to the bare `see docs` word
+	// where the terminal does not render OSC 8). The banner NEVER prints this URL as
+	// visible text — it is link-or-bare-word only. It stays local to this call site
+	// (no shared/exported constant).
+	unsupportedDocsURL = "https://github.com/leeovery/portal/blob/main/docs/custom-terminals.md"
 	// unsupportedIdentityDash / unsupportedIdentityMiddot are the §6.2 identity
 	// separators, matching the delivered frame EXACTLY: a spaced em-dash (U+2014)
 	// before the friendly name and a spaced middot (U+00B7) before the bundle id, so
@@ -170,7 +178,13 @@ func renderOpeningBand(done, total, width int, mode theme.Mode, colourless bool)
 // (glyph-backed, never colour-only).
 func renderUnsupportedHeader(name, bundleID string, width int, mode theme.Mode, colourless bool) string {
 	left := unsupportedLeftCluster(name, bundleID, mode, colourless)
-	hint := headerStyle(theme.MV.AccentBlue, mode, colourless).Render(unsupportedDocsHint)
+	// The `see docs` hint carries an OSC 8 hyperlink to the custom-terminal docs page,
+	// emitted UNCONDITIONALLY — OSC 8 is orthogonal to colour, so it rides the
+	// NO_COLOR/colourless carve-out and degrades to the bare `see docs` word where the
+	// terminal does not render OSC 8 (never a printed URL/path — link-or-bare-word only).
+	hint := headerStyle(theme.MV.AccentBlue, mode, colourless).
+		Hyperlink(unsupportedDocsURL).
+		Render(unsupportedDocsHint)
 	return renderRightAnchoredSectionRow(left, hint, width, mode, colourless)
 }
 

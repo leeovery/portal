@@ -84,9 +84,13 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 1,
-          "current_task": "custom-terminal-docs-and-clickable-see-docs-1-2",
+          "current_task": null,
           "completed_tasks": [
-            "custom-terminal-docs-and-clickable-see-docs-1-1"
+            "custom-terminal-docs-and-clickable-see-docs-1-1",
+            "custom-terminal-docs-and-clickable-see-docs-1-2"
+          ],
+          "completed_phases": [
+            1
           ]
         }
       }

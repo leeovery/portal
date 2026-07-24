@@ -76,10 +76,10 @@ func TestUnsupportedHeader_NamedIdentityAmberDimSeeDocs(t *testing.T) {
 			if !strings.Contains(header, dimRun) {
 				t.Errorf("banner missing the text.detail identity run:\n%s", header)
 			}
-			// The `see docs` hint is accent.blue.
-			blueRun := headerStyle(theme.MV.AccentBlue, tc.mode, false).Render("see docs")
+			// The `see docs` hint is accent.blue and carries the OSC 8 hyperlink wrapper.
+			blueRun := headerStyle(theme.MV.AccentBlue, tc.mode, false).Hyperlink(unsupportedDocsURL).Render("see docs")
 			if !strings.Contains(header, blueRun) {
-				t.Errorf("banner missing the accent.blue %q run:\n%s", "see docs", header)
+				t.Errorf("banner missing the hyperlinked accent.blue %q run:\n%s", "see docs", header)
 			}
 		})
 	}
