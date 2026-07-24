@@ -46,7 +46,7 @@
     "implementation": {
       "items": {
         "custom-terminal-docs-and-clickable-see-docs": {
-          "status": "in-progress",
+          "status": "completed",
           "task_gate_mode": "gated",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
