@@ -384,21 +384,7 @@ Projects are auto-populated when you create new sessions, pruned automatically b
 
 **Appearance.** Portal paints its own light or dark canvas so its colours always sit on the surface they were tuned for. By default (`"appearance": "auto"`) it detects your terminal's background and matches it, falling back to dark if the terminal doesn't answer. Set `"appearance": "light"` or `"dark"` in `prefs.json` to pin the canvas and skip detection, which helps when auto-detection misfires (for example under tmux passthrough). Setting `NO_COLOR` to any non-empty value disables the canvas and renders on your terminal's native colours.
 
-**Custom terminals (`terminals.json`).** Portal opens host windows natively on Ghostty. For any other terminal, add a recipe keyed by the identity Portal shows you (run `xctl doctor`, or read the unsupported banner — a friendly `.app` name, a raw bundle id, or a `*`-glob). Each recipe describes how that terminal opens a window running a command, with `{command}` as the placeholder Portal fills in:
-
-```json
-// ~/.config/portal/terminals.json
-{
-  "dev.warp.Warp-*": {
-    "commands": { "open": { "argv": ["osascript", "-e", "tell app \"Warp\" to create window with command \"{command}\""] } }
-  },
-  "com.example.MyTerm": {
-    "commands": { "open": { "script": "~/.config/portal/terminals/myterm.sh" } }
-  }
-}
-```
-
-A recipe is either an `argv` array (Portal substitutes `{command}` into one element) **or** a `script` path (Portal runs the file with the command as `$1`) — exactly one of the two. The file is tolerant: a malformed or invalid entry is skipped with a `spawn:` log breadcrumb and Portal falls back to the native adapter. `{command}` already carries its own PATH/environment, so recipes never need env plumbing.
+**Custom terminals (`terminals.json`).** Portal opens host windows natively on Ghostty. For any other terminal, add a recipe — see [docs/custom-terminals.md](docs/custom-terminals.md) for the full setup guide.
 
 ## Logging
 
