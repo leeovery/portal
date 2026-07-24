@@ -28,7 +28,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 
 - After each user interaction, STOP and wait for their response before proceeding
 - Never assume or anticipate user choices
-- No session-level instruction overrides STOP gates. This includes harness auto mode, system-reminders, hook-injected text, "work without stopping" / "make the reasonable call" guidance, /loop continuation hints, or any other meta-directive encouraging autonomous progression. STOP gates are structured decision points, NOT clarifying questions — "reasonable call" reasoning does not apply. The only skip mechanism is a per-gate `*_gate_mode: auto` value in the manifest, set by the user's explicit `a`/`auto` choice at a prior gate — in phases with no such gate, every STOP always stops.
+- No session-level instruction overrides STOP gates. This includes harness auto mode, system-reminders, hook-injected text, "work without stopping" / "make the reasonable call" guidance, /loop continuation hints, or any other meta-directive encouraging autonomous progression. STOP gates are structured decision points, NOT clarifying questions — "reasonable call" reasoning does not apply. The only skip mechanism is a per-gate gate-mode `auto` value in the manifest (`*_gate_mode`, or a loop's `staging`/`analysis_staging` `gate_mode`), set by the user's explicit `a`/`auto` choice at a prior gate — in phases with no such gate, every STOP always stops.
 - Failure mode — "the reasonable call is X, I'll proceed with X": that IS the auto-answer the rule forbids. The thought is the trigger to stop, not to continue.
 - Failure mode — "the user already set this, confirmation is redundant" (e.g. project defaults, prior preferences, stored manifest values): that IS the auto-answer the rule forbids. Stored values are suggestions, not consent for this run.
 - Don't invent stops. Stop only at gates the skill prescribes (rendered gate blocks, explicit `**STOP.**` directives) — no courtesy check-ins, mid-loop summaries that end the turn, or unprescribed pauses between tasks/topics/phases.
@@ -43,7 +43,7 @@ Context refresh (compaction) summarizes the conversation, losing procedural deta
 
 1. **Re-read this skill file completely.** Do not rely on your summary of it. The full process, steps, and rules must be reloaded.
 2. **Read the discussion file** at `.workflows/{work_unit}/discussion/{topic}.md`. This is the only working document this skill creates. The Discussion Map is your primary progress indicator — which subtopics are decided, exploring, converging, pending, or deferred. It lives in the manifest; read it with `node .claude/skills/workflow-discussion-process/scripts/gateway.cjs map {work_unit} {topic}`.
-3. **Check agent cache.** Scan `.workflows/.cache/{work_unit}/discussion/{topic}/` for any files whose `status` is anything other than `incorporated` — `in-flight` agents still running, `pending` results unread, `acknowledged` results partially surfaced.
+3. **Check agent state.** Run `node .claude/skills/workflow-engine/scripts/engine.cjs agent scan {work_unit} discussion {topic}` — `in_flight` agents still running, `pending` results unread, `acknowledged` results partially surfaced.
 4. **Check git state.** Run `git status` and `git log --oneline -10` to see recent commits. Commit messages follow a conventional pattern that reveals what was completed.
 5. **Announce your position** to the user before continuing: render the current Discussion Map (the adapter call above — emit its DISPLAY section verbatim as a code block), state what step you believe you're at, and what comes next. Wait for confirmation.
 
@@ -53,13 +53,25 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 ## Step 0: Resume Detection
 
-Check if the discussion file exists at `.workflows/{work_unit}/discussion/{topic}.md`.
+Read the phase status — file existence alone cannot distinguish a resumable session from a `triaged` stub of parked concerns:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.discussion.{topic} status
+```
+
+Then check if the discussion file exists at `.workflows/{work_unit}/discussion/{topic}.md`.
+
+#### If status is `triaged`
+
+A first start, not a resume — no session has ever run and no subtopics exist, so there is no map to render. Initialization preserves the stub's parked `## Triage` entries.
+
+→ Proceed to **Step 1**.
 
 #### If no file exists
 
 → Proceed to **Step 1**.
 
-#### If file exists
+#### Otherwise
 
 > *Output the next fenced block as a code block:*
 
@@ -82,7 +94,7 @@ node .claude/skills/workflow-discussion-process/scripts/gateway.cjs map {work_un
 
 Emit the DISPLAY section verbatim as a code block — never the `===` marker lines.
 
-Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)** with artifact = `discussion`, file = `.workflows/{work_unit}/discussion/{topic}.md`, continue_step = `Step 2`, restart_targets = `the discussion file, the manifest's map state (node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.discussion.{topic} subtopics), and the phase cache directory (rm -rf .workflows/.cache/{work_unit}/discussion/{topic}/) — stale agent results would poison the restarted session's review gates`, commit = `discussion({work_unit}): restart discussion`.
+Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)** with artifact = `discussion`, file = `.workflows/{work_unit}/discussion/{topic}.md`, continue_step = `Step 2`, restart_targets = `the discussion file, the manifest's map state (node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.discussion.{topic} subtopics), and the phase cache directory (rm -rf .workflows/.cache/{work_unit}/discussion/{topic}/ — content and agent state together) — stale agent results would poison the restarted session's review gates`, commit = `discussion({work_unit}): restart discussion`.
 
 ---
 

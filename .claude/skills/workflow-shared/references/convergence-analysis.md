@@ -17,7 +17,7 @@ The caller provides these via context before loading:
 
 ## Threshold Check
 
-Cross-cycle analysis requires at least 2 data points. Determine the number of available cycles from how the loop type stores them: the `fix` loop appends every cycle as an `## Attempt {N}` section inside its single tracking file — count those sections; the other three loop types write one numbered `-c{N}` file per cycle — count the files.
+Cross-cycle analysis requires at least 2 data points. Determine the number of available cycles from how the loop type stores them: the `fix` loop appends every cycle as an `## Attempt {N}` section inside its single tracking file — count those sections; the other three loop types write numbered `-c{N}` files, up to two per cycle — count the **distinct `{N}` suffixes**, never the files.
 
 #### If fewer than 2 cycles of data exist
 
@@ -35,9 +35,9 @@ Read tracking data from all available cycles. Extract only finding titles, key i
 
 #### If `loop_type` is `fix`
 
-Read the fix tracking cache file:
+Read the fix tracking file:
 ```
-.workflows/.cache/{work_unit}/implementation/{topic}/fix-tracking-{internal_id}.md
+.workflows/{work_unit}/implementation/{topic}/fix-tracking-{internal_id}.md
 ```
 
 For each `## Attempt {N}` section, extract:
@@ -55,8 +55,8 @@ Read analysis reports and task staging files for all available cycles:
 ```
 
 For each cycle, extract:
-- From report frontmatter: `total_findings`, `deduplicated_findings`, `proposed_tasks`
-- From staging file: each task's title, severity, sources, and status (approved/skipped)
+- From the report's **Stats** section: total findings, deduplicated findings, proposed tasks
+- From the staging file: each task's title, severity, and sources; its approved/skipped outcome from the manifest's `staging.c{N}.tasks` (`manifest get {work_unit}.implementation.{topic} staging`)
 
 → Proceed to **B. Classify Findings**.
 

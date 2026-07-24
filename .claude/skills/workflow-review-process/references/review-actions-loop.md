@@ -22,7 +22,13 @@ G. Re-open implementation + plan mode handoff
 
 ## A. Verdict Gate
 
-Check the verdict(s) from the review(s) being analyzed.
+Check the verdict(s) from the review(s) being analyzed — arms in order, the resume guard first (on a resume a verdict arm also matches; the guard wins).
+
+#### If a prior session's staging cycle is still mid-flight
+
+Read `manifest get {work_unit}.review.{topic} staging` — `{N}` is the latest cycle present there; with no cycle in `staging`, only the file-with-no-cycle clause can hold. Mid-flight means any of: a cycle's `tasks` still hold a `pending` row; the latest cycle has approvals but the planning file carries no `Review Remediation (Cycle {N})` phase; that phase exists and none of its task ids appear in `{work_unit}.implementation.{topic}` `completed_tasks` (the re-open never ran); or a `review-tasks-c*.md` file exists in `.workflows/{work_unit}/implementation/{topic}/` with no matching manifest cycle. The synthesis decision was already made — do not re-ask; **B**'s guards resume it precisely.
+
+→ Proceed to **B. Dispatch Review Synthesizer**.
 
 #### If all verdicts are `Approve` with no required changes
 
@@ -144,7 +150,33 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "re
 
 ## B. Dispatch Review Synthesizer
 
-**If an in-flight staging file exists** (`review-tasks-c{N}.md` with any task still `pending` — a crash-resume): do not re-dispatch. Resume that cycle at **C. Approval Overview** with the existing file — its frontmatter `gate_mode` and per-task decisions are the durable carrier.
+Crash-resume guards — read `manifest get {work_unit}.review.{topic} staging` and check in order. On a resume, `{N}` is the resumed cycle's number and its file is `review-tasks-c{N}.md`. "The latest cycle" always means the latest cycle present in `staging` — with none there, only the file-with-no-cycle guard can hold.
+
+#### If a staging cycle's `tasks` still hold a `pending` row
+
+The cycle is mid-approval — do not re-dispatch. Its `staging.c{N}` subtree carries `gate_mode` and the per-task decisions.
+
+→ Proceed to **C. Approval Overview**.
+
+#### If the latest cycle holds no `pending` row and at least one `approved` and the planning file carries no `Review Remediation (Cycle {N})` phase
+
+The session died between the last gate decision and the plan write — the approvals are recorded but unrealised.
+
+→ Proceed to **F. Create Tasks in Plan**.
+
+#### If a staging file exists on disk with no matching manifest cycle
+
+A crash between the synthesizer's write and the init — initialise the cycle now from the file's task count (the batched `pending` set from **[invoke-review-synthesizer.md](invoke-review-synthesizer.md)**).
+
+→ Proceed to **C. Approval Overview**.
+
+#### If the latest cycle's remediation phase is in the plan and none of its tasks are in `completed_tasks`
+
+The session died between **F**'s plan write and **G**'s re-open (task ids land in `completed_tasks` when the re-opened implementation runs them, skips included). Re-enter **F** — the task writer is idempotent and completes any partial `task_map`, and its commit picks up whatever the crash left unstaged.
+
+→ Proceed to **F. Create Tasks in Plan**.
+
+#### Otherwise
 
 → Load **[invoke-review-synthesizer.md](invoke-review-synthesizer.md)** and follow its instructions as written.
 
@@ -182,7 +214,7 @@ No actionable tasks synthesized. Review complete.
 
 ## C. Approval Overview
 
-Read the staging file from `.workflows/{work_unit}/implementation/{topic}/review-tasks-c{cycle-number}.md`.
+Read the staging file from `.workflows/{work_unit}/implementation/{topic}/review-tasks-c{N}.md` (task content) and the cycle's state from `manifest get {work_unit}.review.{topic} staging.c{N}` (statuses + `gate_mode`).
 
 Write the overview payload to `.workflows/.cache/{work_unit}/review/{topic}/tasks-overview.json` with the Write tool (`{"label": "Review synthesis cycle {N}", "tasks": [{"title": "…", "severity": "…"}]}`), render, and emit the section verbatim:
 
@@ -202,7 +234,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render tasks-overview {wo
 
 #### Otherwise
 
-Present the next pending task. Write its payload to `.workflows/.cache/{work_unit}/review/{topic}/proposed-task.json` with the Write tool — `{"current": …, "total": …, "title": "…", "severity": "…", "sources": "…", "problem": "…", "solution": "…", "outcome": "…", "steps": […], "criteria": […], "tests": […]}` from the staging file — then render with the `gate_mode` from the staging-file frontmatter, and emit each section verbatim at its marked instruction:
+Present the next pending task. Write its payload to `.workflows/.cache/{work_unit}/review/{topic}/proposed-task.json` with the Write tool — `{"current": …, "total": …, "title": "…", "severity": "…", "sources": "…", "problem": "…", "solution": "…", "outcome": "…", "steps": […], "criteria": […], "tests": […]}` from the staging file — then render with the `gate_mode` from the manifest's `staging.c{N}` subtree, and emit each section verbatim at its marked instruction:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render proposed-task {work_unit}.review.{topic} --file .workflows/.cache/{work_unit}/review/{topic}/proposed-task.json --gate {gate_mode}
@@ -210,7 +242,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render proposed-task {wor
 
 #### If the response carried `DISPLAY: task auto-approved`
 
-Update `status: approved` in the staging file, then emit the section per its marker.
+Record the approval (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.review.{topic} staging.c{N}.tasks.{n} approved`), then emit the section per its marker.
 
 → Return to **D. Process Task**.
 
@@ -220,19 +252,19 @@ Update `status: approved` in the staging file, then emit the section per its mar
 
 **If `yes`:**
 
-Update `status: approved` in the staging file.
+Record the approval: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.review.{topic} staging.c{N}.tasks.{n} approved`.
 
 → Return to **D. Process Task**.
 
 **If `auto`:**
 
-Update `status: approved` in the staging file. Update `gate_mode: auto` in the staging file frontmatter.
+Record both in one write: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.review.{topic} staging.c{N}.tasks.{n}=approved staging.c{N}.gate_mode=auto`.
 
 → Return to **D. Process Task**.
 
 **If `skip`:**
 
-Update `status: skipped` in the staging file.
+Record the skip: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.review.{topic} staging.c{N}.tasks.{n} skipped`.
 
 → Return to **D. Process Task**.
 
@@ -246,7 +278,7 @@ Revise the task content in the staging file based on the user's feedback.
 
 ## E. Route on Results
 
-#### If any tasks have `status: approved`
+#### If the manifest's `staging.c{N}.tasks` marks any task `approved`
 
 → Proceed to **F. Create Tasks in Plan**.
 
@@ -258,7 +290,7 @@ Mark the review completed:
 node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit} review {topic}
 ```
 
-Commit the staging file updates:
+Commit the cycle's decisions (the scoped commit covers the manifest):
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "review({work_unit}): synthesis cycle {N} — tasks skipped"
@@ -272,7 +304,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "re
 
 ## F. Create Tasks in Plan
 
-Filter staging file to tasks with `status: approved`.
+Filter to the tasks the manifest's `staging.c{N}.tasks` marks `approved`, taking their content from the staging file.
 
 → Load **[invoke-review-task-writer.md](invoke-review-task-writer.md)** and follow its instructions as written.
 

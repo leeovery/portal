@@ -91,7 +91,9 @@ function safeName(value, label) {
 
 /** @param {string} cwd @param {string} workUnit @param {string} topic @param {string} internalId */
 function fixTrackingPath(cwd, workUnit, topic, internalId) {
-  return path.join(cwd, '.workflows', '.cache', workUnit, 'implementation', topic, `fix-tracking-${internalId}.md`);
+  safeName(topic, 'topic');
+  safeName(workUnit, 'work unit');
+  return path.join(cwd, '.workflows', workUnit, 'implementation', topic, `fix-tracking-${internalId}.md`);
 }
 
 /**
@@ -189,7 +191,7 @@ function initTasks(cwd, workUnit, topic) {
 
 /**
  * Start a task: record it as the manifest's `current_task`, reset
- * `fix_attempts` and drop the task's fix-tracking cache file (clean slate per
+ * `fix_attempts` and drop the task's fix-tracking file (clean slate per
  * task), report the gate modes the task loop branches on. When the internal
  * id IS already `current_task` AND its tracking file exists — a true resume:
  * a crash-resumed session restarting the task in flight, or a post-compaction
@@ -207,17 +209,16 @@ function initTasks(cwd, workUnit, topic) {
 function startTask(cwd, workUnit, topic, internalId) {
   safeName(internalId, 'internal id');
   const file = fixTrackingPath(cwd, workUnit, topic, internalId);
-  const { item, restarting } = withWorkUnitLock(cwd, workUnit, () => {
+  const item = withWorkUnitLock(cwd, workUnit, () => {
     const manifest = loadWorkUnitManifest(cwd, workUnit);
     const found = implementationItem(manifest, topic);
     const resumed = found.current_task === internalId && fs.existsSync(file);
     if (!resumed) found.fix_attempts = 0;
     found.current_task = internalId;
+    if (!resumed && fs.existsSync(file)) fs.unlinkSync(file);
     saveWorkUnitManifest(cwd, workUnit, manifest);
-    return { item: found, restarting: resumed };
+    return found;
   });
-
-  if (!restarting && fs.existsSync(file)) fs.unlinkSync(file);
 
   return {
     task: internalId,
@@ -227,7 +228,7 @@ function startTask(cwd, workUnit, topic, internalId) {
 
 /**
  * Record a fix attempt: increment `fix_attempts` and append the findings
- * file's content verbatim to the task's fix-tracking cache file under a
+ * file's content verbatim to the task's fix-tracking file under a
  * `## Attempt {N}` section (file and parent dirs created as needed).
  * @param {string} cwd project root
  * @param {string} workUnit
@@ -358,7 +359,11 @@ function completeTask(cwd, workUnit, topic, { internalId = null, externalId = nu
     const recorded = { completed_task: id };
     if (skipped) recorded.skipped = true;
     pushTo(item, 'completed_tasks', id);
-    item.fix_attempts = 0;
+    // Only the in-flight task's completion clears its counter — completing a
+    // different id (an out-of-band skip) must not reset a live fix loop.
+    if (item.current_task === undefined || item.current_task === null || item.current_task === id) {
+      item.fix_attempts = 0;
+    }
     if (phase !== undefined) {
       item.current_phase = phase;
       recorded.current_phase = phase;

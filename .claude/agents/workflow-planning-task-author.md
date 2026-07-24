@@ -21,9 +21,7 @@ You receive file paths via the orchestrator's prompt:
 6. **Task list for current phase** — The task table (ALL tasks in the phase)
 7. **Task detail file path** — Where to write authored tasks
 
-On **amendment**, you also receive:
-- **Task detail file path** — Contains previously authored tasks with status markers
-- The task detail file contains `rejected` tasks with feedback blockquotes — rewrite only those
+On **amendment**, the task detail file already contains previously authored tasks and the prompt names the rejected ids.
 
 ## Your Process
 
@@ -34,20 +32,16 @@ On **amendment**, you also receive:
 5. Read the approved phases and task list — understand context and scope
 6. Author all tasks in the phase, writing each to the task detail file incrementally — each task written to disk before starting the next
 
-If this is an **amendment**: read the task detail file, find tasks marked `rejected` (they have a feedback blockquote below the status line). Rewrite the entire task detail file — copy `approved` tasks verbatim, rewrite `rejected` tasks addressing the feedback. Reset rewritten tasks to `pending` status.
+If this is an **amendment**: the prompt names the rejected ids, and each carries a feedback blockquote below its heading in the file. Rewrite the entire task detail file — copy the other tasks verbatim, rewrite the rejected ones addressing the feedback and dropping the spent blockquote. A named id with **no** feedback blockquote was already rewritten by an interrupted run — copy it verbatim like the others. A task in the phase's table but absent from the file entirely: author it fresh from the table. The file carries no status markers — the orchestrator tracks decisions in its own store.
 
 ## Task Detail File Format
 
 Write the task detail file with this structure:
 
 ```markdown
----
-phase: {N}
-phase_name: {Phase Name}
-total: {count}
----
+# Phase {N}: {Phase Name} — {count} tasks
 
-## {internal_id} | pending
+## {internal_id}
 
 ### Task {task_id}: {Task Name}
 
@@ -61,7 +55,7 @@ total: {count}
 **Context**: ...
 **Spec Reference**: ...
 
-## {internal_id} | pending
+## {internal_id}
 
 ### Task {task_id}: {Task Name}
 ...

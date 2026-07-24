@@ -1,7 +1,7 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.6.8",
-    "commit": "5adb457a6e9ef9dfea4c59481c34679277d839ee",
+    "ref": "v0.6.10",
+    "commit": "b2b7a98d06f8ec7910d99a29766b9c6884451752",
     "agents": [
       "claude"
     ],
@@ -116,6 +116,7 @@
       ".claude/skills/workflow-engine/references/library-and-gateway.md",
       ".claude/skills/workflow-engine/scripts/",
       ".claude/skills/workflow-engine/scripts/domain/",
+      ".claude/skills/workflow-engine/scripts/domain/agent-state.cjs",
       ".claude/skills/workflow-engine/scripts/domain/boot.cjs",
       ".claude/skills/workflow-engine/scripts/domain/cache.cjs",
       ".claude/skills/workflow-engine/scripts/domain/commit.cjs",
@@ -294,6 +295,8 @@
       ".claude/skills/workflow-migrate/scripts/migrations/048-strip-discovery-item-status.cjs",
       ".claude/skills/workflow-migrate/scripts/migrations/049-nested-workflows-gitignore.cjs",
       ".claude/skills/workflow-migrate/scripts/migrations/050-purge-closed-workunit-caches.cjs",
+      ".claude/skills/workflow-migrate/scripts/migrations/051-frontmatter-state-to-stores.cjs",
+      ".claude/skills/workflow-migrate/scripts/migrations/052-phantom-triage-stubs.cjs",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
@@ -526,7 +529,7 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "installedAt": "2026-07-23T19:10:09.504Z",
+    "installedAt": "2026-07-24T12:51:52.041Z",
     "constraint": "^0.6.0"
   },
   "samber/cc-skills-golang": {

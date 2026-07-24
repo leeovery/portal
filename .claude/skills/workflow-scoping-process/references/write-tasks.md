@@ -18,7 +18,6 @@ Create the planning file at `.workflows/{work_unit}/planning/{topic}/planning.md
 {One-line goal — e.g., "Replace all occurrences of interface{} with any across Go source files"}
 
 #### Tasks
-status: approved
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
@@ -62,7 +61,13 @@ Load the chosen format's **[authoring.md](../../workflow-planning-process/refere
 
 ## C. Register Plan in Manifest
 
-Capture the current git commit hash: `git rev-parse HEAD`
+Commit the scoping work on disk first — the baseline hash must name a commit that contains the specification:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "scoping({work_unit}): specification baseline"
+```
+
+Capture the resulting commit hash: `git rev-parse HEAD`
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs topic start {work_unit} planning {topic}
@@ -91,7 +96,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs topic complete {work_unit
 Commit all scoping artifacts — `--plan` stages the work unit, the project manifest, and the plan's declared storage in one scoped call:
 
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "scoping({work_unit}): specification and plan" --plan {topic}
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "scoping({work_unit}): register plan" --plan {topic}
 ```
 
 → Return to caller.

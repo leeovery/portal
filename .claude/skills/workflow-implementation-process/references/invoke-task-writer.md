@@ -16,17 +16,18 @@ Pass via the orchestrator's prompt:
 
 1. **Work unit** — the work unit name (for path construction)
 2. **Topic name** — the implementation topic
-3. **Staging file path** — `.workflows/{work_unit}/implementation/{topic}/analysis-tasks-c{cycle-number}.md`
+3. **Staging file path** — `.workflows/{work_unit}/implementation/{topic}/analysis-tasks-c{N}.md`
 4. **Planning file path** — `.workflows/{work_unit}/planning/{topic}/planning.md`
 5. **Plan format reading adapter path** — `../../workflow-planning-process/references/output-formats/{format}/reading.md`
 6. **Plan format authoring adapter path** — `../../workflow-planning-process/references/output-formats/{format}/authoring.md`
 7. **Phase label** — `Analysis (Cycle {N})`
+8. **Approved task numbers** — read `manifest get {work_unit}.implementation.{topic} staging.c{N}` and pass the task numbers whose rows are `approved`
 
 ---
 
 ## Expected Result
 
-The agent creates tasks in the plan for all approved entries in the staging file.
+The agent creates exactly the approved tasks passed in the prompt; if the cycle's phase already exists in the plan, it creates only those not yet present.
 
 Returns a brief status:
 

@@ -22,14 +22,38 @@ H. Create tasks in plan → invoke-task-writer.md
 
 ## A. Cycle Gate
 
-Crash-resume: if the previous cycle's findings are already committed but its synthesis never ran, do not record a new cycle — resume at **D. Dispatch Synthesis Agent** over the existing findings.
+Crash-resume guards — read `manifest get {work_unit}.implementation.{topic} staging` and check in order. On a resume, `{N}` is the resumed cycle's number and `{analysis_gate_mode}` comes from the manifest's topic-level `analysis_gate_mode` (no cycle response exists to carry either).
+
+#### If the latest `staging.c{N}` still holds a `pending` task
+
+The cycle is mid-approval — do not record a new one.
+
+→ Proceed to **E. Approval Overview**.
+
+#### If the latest `staging.c{N}` holds no `pending` task and at least one `approved` and the planning file carries no `Analysis (Cycle {N})` phase
+
+The session died between the last gate decision and the plan write — the approvals are recorded but unrealised.
+
+→ Proceed to **H. Create Tasks in Plan**.
+
+#### If an `analysis-tasks-c{N}.md` staging file exists on disk with no matching manifest cycle
+
+A crash between the synthesizer's write and the init — initialise the cycle from the file's task count. Only the `analysis-tasks-` family counts: `review-tasks-c*.md` files in the same directory belong to the review item.
+
+→ Proceed to **E. Approval Overview**.
+
+#### If the previous cycle's findings are committed and its synthesis never ran
+
+→ Proceed to **D. Dispatch Synthesis Agent** over the existing findings.
+
+#### Otherwise
 
 Record the cycle via the engine (increments both the lifetime and session counters):
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs task analysis-cycle {work_unit} {topic}
 ```
 
-`{N}` and `{cycle-number}` throughout this loop refer to the response's `cycle_total`; **F. Process Task** branches on its `analysis_gate_mode`.
+`{N}` throughout this loop refers to the response's `cycle_total`; **F. Process Task**'s `{analysis_gate_mode}` is the response's `analysis_gate_mode`.
 
 #### If the response's `over_session_limit` is `false`
 
@@ -133,10 +157,10 @@ impl({work_unit}): pre-analysis checkpoint
 
 > **CHECKPOINT**: Do not proceed until all agents have returned.
 
-Commit the analysis findings:
+Commit the analysis findings — the scoped commit covers the findings files and the manifest's cycle counters:
 
-```
-impl({work_unit}): analysis cycle {N} — findings
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): analysis cycle {N} — findings"
 ```
 
 #### If all three agents returned `STATUS: clean`
@@ -155,10 +179,10 @@ impl({work_unit}): analysis cycle {N} — findings
 
 > **CHECKPOINT**: Do not proceed until the synthesizer has returned.
 
-Commit the synthesis output:
+Commit the synthesis output — the scoped commit covers the report, any staging file, and the manifest's gate state:
 
-```
-impl({work_unit}): analysis cycle {N} — synthesis
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): analysis cycle {N} — synthesis"
 ```
 
 #### If `STATUS` is `clean`
@@ -173,7 +197,7 @@ impl({work_unit}): analysis cycle {N} — synthesis
 
 ## E. Approval Overview
 
-Read the staging file from `.workflows/{work_unit}/implementation/{topic}/analysis-tasks-c{cycle-number}.md`.
+Read the staging file from `.workflows/{work_unit}/implementation/{topic}/analysis-tasks-c{N}.md` (task content) and the cycle's statuses from `manifest get {work_unit}.implementation.{topic} staging.c{N}`.
 
 Write the overview payload to `.workflows/.cache/{work_unit}/implementation/{topic}/tasks-overview.json` with the Write tool (`{"label": "Analysis cycle {N}", "tasks": [{"title": "…", "severity": "…"}]}`), render, and emit the section verbatim:
 
@@ -193,7 +217,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render tasks-overview {wo
 
 #### Otherwise
 
-Present the next pending task. Write its payload to `.workflows/.cache/{work_unit}/implementation/{topic}/proposed-task.json` with the Write tool — `{"current": …, "total": …, "title": "…", "severity": "…", "sources": "…", "problem": "…", "solution": "…", "outcome": "…", "steps": […], "criteria": […], "tests": […]}` from the staging file — then render with the gate mode carried by this cycle's response (or `auto` if the user opted in at a previous task this cycle), and emit each section verbatim at its marked instruction:
+Present the next pending task. Write its payload to `.workflows/.cache/{work_unit}/implementation/{topic}/proposed-task.json` with the Write tool — `{"current": …, "total": …, "title": "…", "severity": "…", "sources": "…", "problem": "…", "solution": "…", "outcome": "…", "steps": […], "criteria": […], "tests": […]}` from the staging file — then render with `{analysis_gate_mode}` (`auto` from the moment the user opts in mid-cycle), and emit each section verbatim at its marked instruction:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render proposed-task {work_unit}.implementation.{topic} --file .workflows/.cache/{work_unit}/implementation/{topic}/proposed-task.json --gate {analysis_gate_mode} --comment-hint "Provide feedback to adjust"
@@ -201,7 +225,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render proposed-task {wor
 
 #### If the response carried `DISPLAY: task auto-approved`
 
-Update `status: approved` in the staging file, then emit the section per its marker.
+Record the approval (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} staging.c{N}.tasks.{n} approved`), then emit the section per its marker.
 
 → Return to **F. Process Task**.
 
@@ -211,13 +235,13 @@ Update `status: approved` in the staging file, then emit the section per its mar
 
 **If `yes`:**
 
-Update `status: approved` in the staging file.
+Record the approval: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} staging.c{N}.tasks.{n} approved`.
 
 → Return to **F. Process Task**.
 
 **If `auto`:**
 
-Update `status: approved` in the staging file.
+Record the approval: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} staging.c{N}.tasks.{n} approved`.
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} analysis_gate_mode auto
@@ -227,7 +251,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.
 
 **If `skip`:**
 
-Update `status: skipped` in the staging file.
+Record the skip: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} staging.c{N}.tasks.{n} skipped`.
 
 → Return to **F. Process Task**.
 
@@ -241,16 +265,16 @@ Revise the task content in the staging file based on the user's feedback.
 
 ## G. Route on Results
 
-#### If any tasks have `status: approved`
+#### If the manifest's `staging.c{N}.tasks` marks any task `approved`
 
 → Proceed to **H. Create Tasks in Plan**.
 
 #### If all tasks were skipped
 
-Commit the staging file updates:
+Commit the cycle's decisions (the scoped commit covers the manifest):
 
-```
-impl({work_unit}): analysis cycle {N} — tasks skipped
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): analysis cycle {N} — tasks skipped"
 ```
 
 → Return to **[the skill](../SKILL.md)** for **Step 8**.
@@ -263,10 +287,16 @@ impl({work_unit}): analysis cycle {N} — tasks skipped
 
 > **CHECKPOINT**: Do not proceed until the task writer has returned.
 
-Commit all analysis and plan changes with raw git — stage the analysis outputs, the plan's `storage_paths` (recorded on the planning item), and the work unit, then commit:
+**If the planning item carries no `storage_paths`** (a plan initialised before the field existed): record it now — read the format's authoring.md → Storage Pathspecs and copy the fenced array:
 
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} storage_paths '{format storage pathspecs}'
 ```
-impl({work_unit}): add analysis phase {N} ({K} tasks)
+
+Commit all analysis and plan changes — `--plan` stages the work unit and the plan's declared storage in one scoped call:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): add analysis phase {N} ({K} tasks)" --plan {topic}
 ```
 
 → Return to caller.

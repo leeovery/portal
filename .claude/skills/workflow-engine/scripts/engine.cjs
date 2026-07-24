@@ -23,12 +23,13 @@ const { commitScopedWithKb } = require('./domain/commit.cjs');
 const { recordSubtopicAdd, recordSubtopicState, SUBTOPIC_STATES } = require('./domain/discussion-map.cjs');
 const { VALID_ROUTINGS } = require('./kernel/manifest-schema.cjs');
 const { sequenceMap, addItem, addItemsBatch, editItem, removeItem, renameItem, rerouteItem, handleItem, unhandleItem } = require('./domain/discovery-map.cjs');
-const { startTopic, completeTopic, reopenTopic, supersedeTopic, cancelTopic, reactivateTopic } = require('./domain/transitions.cjs');
+const { startTopic, triageTopic, completeTopic, reopenTopic, supersedeTopic, cancelTopic, reactivateTopic } = require('./domain/transitions.cjs');
 const { initTasks, startTask, fixAttempt, completeTask, analysisCycle } = require('./domain/tasks.cjs');
 const taskSections = require('./domain/projections/tasks.cjs');
 const txSections = require('./domain/projections/transactions.cjs');
 const { archiveItems, restoreItems, deleteItems } = require('./domain/inbox.cjs');
 const { stampAnalysisCache } = require('./domain/cache.cjs');
+const agentState = require('./domain/agent-state.cjs');
 const { boot } = require('./domain/boot.cjs');
 const { createWorkUnit } = require('./domain/workunit-create.cjs');
 const { completeWorkUnit, cancelWorkUnit, reactivateWorkUnit, pivotWorkUnit } = require('./domain/workunit-lifecycle.cjs');
@@ -138,6 +139,7 @@ Commands:
   discovery-session open  <work-unit> --session-log-file <path>
   discovery-session close <work-unit> -m <message>
   topic start <work-unit> <phase> <topic>
+  topic triage <work-unit> <phase> <topic>
   topic complete <work-unit> <phase> <topic>
   topic reopen <work-unit> <phase> <topic>
   topic supersede <work-unit> <phase> <topic> --by <topic>
@@ -153,6 +155,12 @@ Commands:
   inbox restore <path> [<path> …]
   inbox delete <path> [<path> …]
   cache stamp <work-unit> (research-analysis|gap-analysis)
+  agent dispatch <work-unit> <phase> <topic> --kind <kind> [--label <slug> …] [--set <NNN>]
+  agent scan     <work-unit> <phase> <topic>
+  agent ack      <work-unit> <phase> <topic> <id> (--findings <F1,F2,…> | --clean)
+  agent announce <work-unit> <phase> <topic> <id>
+  agent surface  <work-unit> <phase> <topic> <id> <finding>
+  agent incorporate <work-unit> <phase> <topic> <id>
   commit <work-unit> -m <message> [--plan <topic>]
   commit --inbox -m <message>
   commit --workflows -m <message>
@@ -479,7 +487,7 @@ function runDiscoverySession(argv) {
 }
 
 // ---------------------------------------------------------------------------
-// topic — phase-item transitions. start/complete/reopen/supersede are
+// topic — phase-item transitions. start/triage/complete/reopen/supersede are
 // manifest-side lifecycle bookkeeping (KB sync where the phase is indexed:
 // index on complete, remove on supersede; reopen syncs nothing —
 // warn-don't-block) with no git commit — the calling session's commit
@@ -489,7 +497,7 @@ function runDiscoverySession(argv) {
 // happened — no follow-up read needed.
 // ---------------------------------------------------------------------------
 
-const TOPIC_COMMANDS = { start: startTopic, complete: completeTopic, reopen: reopenTopic, cancel: cancelTopic, reactivate: reactivateTopic };
+const TOPIC_COMMANDS = { start: startTopic, triage: triageTopic, complete: completeTopic, reopen: reopenTopic, cancel: cancelTopic, reactivate: reactivateTopic };
 
 /** @param {string[]} argv */
 function runTopic(argv) {
@@ -505,7 +513,7 @@ function runTopic(argv) {
       return;
     }
     if (!Object.prototype.hasOwnProperty.call(TOPIC_COMMANDS, command)) {
-      throw new Error('Usage: engine topic <start|complete|reopen|supersede|cancel|reactivate> <work-unit> <phase> <topic>');
+      throw new Error('Usage: engine topic <start|triage|complete|reopen|supersede|cancel|reactivate> <work-unit> <phase> <topic>');
     }
     const fn = TOPIC_COMMANDS[/** @type {keyof typeof TOPIC_COMMANDS} */ (command)];
     const [workUnit, phase, topic] = rest;
@@ -627,6 +635,61 @@ function runCache(argv) {
       throw new Error('Usage: engine cache stamp <work-unit> <research-analysis|gap-analysis>');
     }
     respond(stampAnalysisCache(process.cwd(), workUnit, kind));
+  } catch (err) {
+    failJson(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// agent — the background-agent lifecycle store (domain/agent-state.cjs).
+// ---------------------------------------------------------------------------
+
+/** @param {string[]} argv */
+function runAgent(argv) {
+  const [command, ...rest] = argv;
+  try {
+    const { opts, flags, lists, positional } = parseArgs(rest, ['clean'], ['label']);
+    const [workUnit, phase, topic, id, finding] = positional;
+    const cwd = process.cwd();
+    if (command === 'dispatch') {
+      if (!workUnit || !phase || !topic || positional.length !== 3 || !opts.kind) {
+        throw new Error('Usage: engine agent dispatch <work-unit> <phase> <topic> --kind <kind> [--label <slug> …] [--set <NNN>]');
+      }
+      respond(agentState.dispatchAgent(cwd, workUnit, phase, topic, { kind: opts.kind, labels: lists.label || [], set: opts.set }));
+      return;
+    }
+    if (command === 'scan') {
+      if (!workUnit || !phase || !topic || positional.length !== 3) {
+        throw new Error('Usage: engine agent scan <work-unit> <phase> <topic>');
+      }
+      respond(agentState.scanAgents(cwd, workUnit, phase, topic));
+      return;
+    }
+    if (command === 'ack') {
+      const hasFindings = opts.findings !== undefined;
+      if (!workUnit || !phase || !topic || !id || positional.length !== 4 || hasFindings === flags.has('clean')) {
+        throw new Error('Usage: engine agent ack <work-unit> <phase> <topic> <id> (--findings <F1,F2,…> | --clean)');
+      }
+      const findings = hasFindings ? opts.findings.split(',').map((f) => f.trim()) : [];
+      respond(agentState.ackAgent(cwd, workUnit, phase, topic, id, { findings }));
+      return;
+    }
+    if (command === 'announce' || command === 'incorporate') {
+      if (!workUnit || !phase || !topic || !id || positional.length !== 4) {
+        throw new Error(`Usage: engine agent ${command} <work-unit> <phase> <topic> <id>`);
+      }
+      const fn = command === 'announce' ? agentState.announceAgent : agentState.incorporateAgent;
+      respond(fn(cwd, workUnit, phase, topic, id));
+      return;
+    }
+    if (command === 'surface') {
+      if (!workUnit || !phase || !topic || !id || !finding || positional.length !== 5) {
+        throw new Error('Usage: engine agent surface <work-unit> <phase> <topic> <id> <finding>');
+      }
+      respond(agentState.surfaceFinding(cwd, workUnit, phase, topic, id, finding));
+      return;
+    }
+    throw new Error('Usage: engine agent <dispatch|scan|ack|announce|surface|incorporate> <work-unit> <phase> <topic> …');
   } catch (err) {
     failJson(err);
   }
@@ -813,6 +876,9 @@ function runCli(argv) {
       break;
     case 'cache':
       runCache(rest);
+      break;
+    case 'agent':
+      runAgent(rest);
       break;
     case 'commit':
       runCommit(rest);

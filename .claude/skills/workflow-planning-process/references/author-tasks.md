@@ -12,11 +12,27 @@ This step uses the `workflow-planning-task-author` agent (`../../../agents/workf
 
 Task detail file path: `.workflows/{work_unit}/planning/{topic}/phase-{N}-tasks.md`
 
+#### If the file exists and any `staging.author-p{N}` row is `rejected`
+
+A prior session ended mid-revision — the amendment is still owed.
+
+→ Proceed to **F. Revision Check**.
+
+#### If the file exists and `staging.author-p{N}` rows exist and none are `rejected`
+
+Mid-authoring resume — the text and its decisions already stand; re-invoking would rewrite text the user already approved.
+
+→ Proceed to **D. Check Gate Mode**.
+
+#### Otherwise
+
 → Proceed to **B. Invoke the Agent**.
 
 ---
 
 ## B. Invoke the Agent
+
+**Amendment runs** — when `staging.author-p{N}` carries `rejected` rows (arrival from **F. Revision Check**, or a mismatch retry from **C** during an amendment), the invocation is an amendment: name those ids via input item 8. All other arrivals are full runs — omit item 8.
 
 > *Output the next fenced block as a code block:*
 
@@ -33,6 +49,7 @@ Invoke `workflow-planning-task-author` with these file paths:
 5. **All approved phases**: the complete phase structure from the planning file body
 6. **Task list for current phase**: the task table for this specific phase from the planning file
 7. **Task detail file path**: `.workflows/{work_unit}/planning/{topic}/phase-{N}-tasks.md`
+8. **Amendment context** (amendment runs only): the rejected internal ids being rewritten — any surviving feedback blockquotes sit under their headings in the detail file
 
 The agent writes all tasks to the task detail file and returns.
 
@@ -45,6 +62,8 @@ The agent writes all tasks to the task detail file and returns.
 Read the task detail file and count tasks. Verify task count matches the task table in the planning file for this phase. Track the number of agent invocations for this phase in-conversation.
 
 #### If `valid`
+
+**On an amendment run** (the manifest still carries `rejected` rows): the rewrite is validated — reset each rejected row to `pending` (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} staging.author-p{N}.tasks.{internal_id} pending` per id); in auto mode they approve automatically, like any pending row.
 
 → Proceed to **D. Check Gate Mode**.
 
@@ -90,6 +109,12 @@ Apply the user's correction.
 
 ## D. Check Gate Mode
 
+Register the phase's authoring state. Read the subtree first (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} staging.author-p{N}` — `set` overwrites, so existing rows carry decisions a resume must keep), then batch-set `pending` for the ids not yet present; skip the call entirely when none are missing:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} staging.author-p{N}.tasks.{internal_id}=pending …
+```
+
 Check `author_gate_mode` via `engine manifest`:
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} author_gate_mode
@@ -97,7 +122,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.
 
 #### If `author_gate_mode` is `auto`
 
-Set every `pending` task in the task detail file to `approved`.
+Approve every `pending` row in one batched write — skip the call entirely when none are `pending` (an all-approved crash resume): `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} staging.author-p{N}.tasks.{internal_id}=approved …`.
 
 > *Output the next fenced block as a code block:*
 
@@ -115,15 +140,21 @@ Phase {N}: {count} tasks authored. Auto-approved. Writing to plan.
 
 ## E. Approval Loop
 
-For each task in the task detail file, in order:
+For each task in the task detail file, in order, branching on its row in the manifest's `staging.author-p{N}.tasks`:
 
-#### If task status is `approved`
+#### If the row is `approved`
 
 Skip — already approved from a previous pass.
 
 → Return to **E. Approval Loop**.
 
-#### If task status is `pending`
+#### If the row is `rejected`
+
+Skip — **F. Revision Check** sweeps it into the amendment.
+
+→ Return to **E. Approval Loop**.
+
+#### If the row is `pending`
 
 Present the full task content:
 
@@ -143,25 +174,25 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render author-task-gate {
 
 **If `yes`:**
 
-Mark the task `approved` in the task detail file.
+Record the approval: `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} staging.author-p{N}.tasks.{internal_id} approved`.
 
 → Return to **E. Approval Loop**.
 
 **If `auto`:**
 
-Mark the task `approved` in the task detail file. Set all remaining `pending` tasks to `approved`. Update `author_gate_mode` in the manifest:
+Record this task and every remaining `pending` row `approved`, and the gate mode, in one batched write:
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} author_gate_mode auto
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} author_gate_mode=auto staging.author-p{N}.tasks.{internal_id}=approved …
 ```
 
 → Proceed to **F. Revision Check** (earlier `rejected` tasks still need revision before writing).
 
 **If the user provides feedback:**
 
-Mark the task `rejected` in the task detail file and add the feedback as a blockquote:
+Record the rejection (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} staging.author-p{N}.tasks.{internal_id} rejected`) and add the feedback as a blockquote under the task's heading in the detail file:
 
 ```markdown
-## {internal_id} | rejected
+## {internal_id}
 
 > **Feedback**: {user's feedback here}
 
@@ -185,7 +216,7 @@ When all tasks are processed:
 
 ## F. Revision Check
 
-Check for rejected tasks in the task detail file.
+Read the manifest's `staging.author-p{N}.tasks` for `rejected` rows.
 
 #### If no rejected tasks
 
@@ -196,18 +227,18 @@ Check for rejected tasks in the task detail file.
 > *Output the next fenced block as a code block:*
 
 ```
-{N} tasks need revision. Re-invoking author agent...
+{count} tasks need revision. Re-invoking author agent...
 ```
 
-→ Return to **B. Invoke the Agent**.
+→ Return to **B. Invoke the Agent** for an amendment run.
 
 ---
 
 ## G. Write to Plan
 
-> **CHECKPOINT**: Verify all tasks in the task detail file are marked `approved` before writing — both gate modes approve every task before reaching this section.
+> **CHECKPOINT**: Verify the manifest marks every `staging.author-p{N}` row `approved` before writing — both gate modes approve every task before reaching this section. A `pending` row means the loop was interrupted — return to **E. Approval Loop**; a `rejected` row still owes its amendment — return to **F. Revision Check**. Never write a partial phase.
 
-For each approved task in the task detail file, in order (crash-resume guard: a task whose internal id is already in `task_map` was written before an interruption — skip its format write and continue with the next; re-creating it would duplicate the task in external backends):
+For each approved task in the task detail file, in order (crash-resume guard: a task whose internal id is already in `task_map` was written before an interruption — skip its format write and continue with the next; a task missing from `task_map` may still exist in the backend from a crash between its format write and the manifest record — check per the format's **[reading.md](output-formats/{format}/reading.md)** first and, when present, record its external id instead of re-creating):
 
 1. Read the task content from the task detail file
 2. Write to the output format (format-specific — see the format's **[authoring.md](output-formats/{format}/authoring.md)**)
@@ -232,6 +263,10 @@ Task {M} of {total}: {Task Name} — authored.
 
 Repeat for each task.
 
-Authoring for this phase is **complete** — report that to the caller.
+Authoring for this phase is **complete** — the plan's tasks are the record, so clear the spent authoring state and report completion to the caller:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.planning.{topic} staging.author-p{N}
+```
 
 → Return to caller.

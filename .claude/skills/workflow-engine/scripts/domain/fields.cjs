@@ -12,7 +12,7 @@
 //   prose substitution surfaces. Their errors keep the `Error: …` stderr
 //   convention (exit 1 = real error, exit 2 = expected miss) via the
 //   `exitCode` carried on the throw.
-//   Mutations (set, push, pull, delete) return a decision-ready object for
+//   Mutations (set, push, pull, delete, apply) return a decision-ready object for
 //   the engine's one-line JSON response; their failures are the engine's
 //   `{ok:false}` stderr exit 1 like every other verb.
 // ---------------------------------------------------------------------------
@@ -76,7 +76,11 @@ function parseProjectPath(pathArg) {
   }
   if (pathArg.startsWith('project.')) {
     const remainder = pathArg.slice('project.'.length);
-    return { isProject: true, fieldSegments: remainder.split('.') };
+    const fieldSegments = remainder.split('.');
+    if (remainder === '' || fieldSegments.some((seg) => seg === '')) {
+      fail(`Invalid path "${pathArg}": empty segments are refused`);
+    }
+    return { isProject: true, fieldSegments };
   }
   return { isProject: false, fieldSegments: [] };
 }
@@ -179,6 +183,15 @@ function validateWorkUnitStatus(value) {
   }
 }
 
+// A field path with an empty segment writes under a "" key — the same silent
+// misplacement parsePath refuses on the dot-path side.
+/** @param {string} field @param {string[]} fieldSegments */
+function refuseEmptyFieldSegments(field, fieldSegments) {
+  if (fieldSegments.some((seg) => seg === '')) {
+    fail(`Invalid field "${field}": empty segments are refused`);
+  }
+}
+
 /** @param {string} phase */
 function validatePhase(phase) {
   if (!VALID_PHASES.includes(phase)) {
@@ -205,15 +218,16 @@ function validatePhaseStatus(phase, value) {
 }
 
 /**
- * Validate a set operation from the resolved internal path and value. Every
+ * Validate a set operation from the resolved internal path, the caller's
+ * field segments, and the value. Every
  * planned write runs through here regardless of value type: a field whose
  * schema declares a vocabulary is enforced against it even when the JSON-parsed
  * value is a number, boolean, ~→null, array, or object — those are refused, not
  * waved through. Untyped fields (counters, nullable pointers, task maps) match
  * no guarded branch and pass, so legitimate non-string writes are unaffected.
- * @param {string[]} segments @param {*} value
+ * @param {string[]} segments @param {*} value @param {string[]} [fieldSegments]
  */
-function validateSet(segments, value) {
+function validateSet(segments, value, fieldSegments = segments) {
   // Top-level status
   if (segments.length === 1 && segments[0] === 'status') {
     validateWorkUnitStatus(value);
@@ -244,6 +258,35 @@ function validateSet(segments, value) {
       return;
     }
 
+    // Staging task decisions (field staging.<cycle>.tasks.<n>)
+    if (fieldSegments[0] === 'staging' && fieldSegments.length >= 2
+        && fieldSegments[fieldSegments.length - 2] === 'tasks') {
+      if (typeof value !== 'string' || !['pending', 'approved', 'skipped', 'rejected'].includes(value)) {
+        fail(`Invalid staging task status ${JSON.stringify(value)}. Must be one of: pending, approved, skipped, rejected`);
+      }
+      return;
+    }
+
+    // Analysis candidate gate state (field analysis_staging.<analysis>.candidates.<name>.…)
+    if (fieldSegments[0] === 'analysis_staging' && fieldSegments.length >= 2) {
+      const leaf = fieldSegments[fieldSegments.length - 1];
+      if (leaf === 'status' && (typeof value !== 'string' || !['pending', 'approved', 'skipped', 'resolved'].includes(value))) {
+        fail(`Invalid candidate status ${JSON.stringify(value)}. Must be one of: pending, approved, skipped, resolved`);
+      }
+      if (leaf === 'fanout_offer' && (typeof value !== 'string' || !['pending', 'marked', 'declined'].includes(value))) {
+        fail(`Invalid fanout_offer ${JSON.stringify(value)}. Must be one of: pending, marked, declined`);
+      }
+      return;
+    }
+
+    // Tracking-file completion state (field tracking.<stem>)
+    if (fieldSegments[0] === 'tracking' && fieldSegments.length === 2) {
+      if (typeof value !== 'string' || !['in-progress', 'complete'].includes(value)) {
+        fail(`Invalid tracking status ${JSON.stringify(value)}. Must be one of: in-progress, complete`);
+      }
+      return;
+    }
+
     // phases.<phase>.items.<item>.storage_paths — the format's declared
     // pathspecs, staged by `engine commit --plan`. Guarded at write time so a
     // bad entry can never reach a commit: relative, no traversal, never the
@@ -258,15 +301,36 @@ function validateSet(segments, value) {
 // A work-unit-level field whose first segment names a phase builds a shadow
 // tree beside `phases.*` that no read ever joins — a typo'd dot-path
 // (`set wu specification.x` for `set wu.specification.topic x`) must fail
-// loudly, not land silently. Mutations only (set, push, pull, apply set-ops);
-// reads and delete stay free so a stray tree can still be inspected and
-// repaired.
-/** @param {string|null} phase @param {string[]} fieldSegments */
-function refuseShadowField(phase, fieldSegments) {
-  if (phase !== null) return;
+// loudly, not land silently. The same rule refuses the non-canonical
+// spellings of real tree locations (`phases.…` at work-unit level, `items.…`
+// at phase level): they resolve, but field-relative vocabulary validation
+// can't see them, so a validated write would become a silent unvalidated
+// one. Mutations only (set, push, pull, apply set-ops); reads and delete
+// stay free so a stray tree can still be inspected and repaired.
+/** @param {string|null} phase @param {string|null} topic @param {string[]} fieldSegments */
+function refuseShadowField(phase, topic, fieldSegments) {
   const head = fieldSegments[0];
-  if (VALID_PHASES.includes(head)) {
-    fail(`Invalid field "${fieldSegments.join('.')}" at work-unit level: "${head}" is a phase — use the dot-path (<work-unit>.${head}[.<topic>] <field>) so the write lands under phases with validation`);
+  if (phase === null) {
+    if (head === 'phases') {
+      fail('"phases" is the phase tree itself — address it as <work-unit>.<phase>[.<topic>] <field>, never through a phases.-prefixed field');
+    }
+    if (VALID_PHASES.includes(head)) {
+      fail(`Invalid field "${fieldSegments.join('.')}" at work-unit level: "${head}" is a phase — use the dot-path (<work-unit>.${head}[.<topic>] <field>) so the write lands under phases with validation`);
+    }
+    return;
+  }
+  if (topic === null && head === 'items') {
+    fail(`Invalid field "${fieldSegments.join('.')}" at phase level: "items" is the topic tree — use the dot-path (<work-unit>.<phase>.<topic> <field>) so the write lands with validation`);
+  }
+}
+
+// Vocabulary-guarded state containers take leaf writes only — a wholesale
+// set could land any shape unvalidated. Delete clears them; apply/set write
+// their leaves.
+/** @param {string[]} fieldSegments */
+function refuseContainerWrite(fieldSegments) {
+  if (fieldSegments.length === 1 && ['staging', 'tracking', 'analysis_staging'].includes(fieldSegments[0])) {
+    fail(`"${fieldSegments[0]}" is a guarded state container — write its leaf fields (or delete to clear); a wholesale set would bypass validation`);
   }
 }
 
@@ -763,9 +827,11 @@ function cmdSet(cwd, args) {
   // otherwise slip past a string-only guard and corrupt a typed field).
   const planned = writes.map((write) => {
     const fieldSegments = write.field.split('.');
-    refuseShadowField(phase, fieldSegments);
+    refuseEmptyFieldSegments(write.field, fieldSegments);
+    refuseShadowField(phase, topic, fieldSegments);
+    refuseContainerWrite(fieldSegments);
     const segments = resolveSegments(phase, topic, fieldSegments);
-    validateSet(segments, write.value);
+    validateSet(segments, write.value, fieldSegments);
     return { segments, value: write.value };
   });
 
@@ -818,8 +884,17 @@ function cmdPush(cwd, args) {
 
   requireWorkUnit(cwd, workUnit);
 
-  refuseShadowField(phase, fieldSegments);
+  refuseEmptyFieldSegments(args[1], fieldSegments);
+  refuseShadowField(phase, topic, fieldSegments);
+  if (['staging', 'tracking', 'analysis_staging'].includes(fieldSegments[0])) {
+    fail(`"${fieldSegments[0]}" is a guarded state container — its fields take vocabulary values via set, never array pushes`);
+  }
   const segments = resolveSegments(phase, topic, fieldSegments);
+  // storage_paths is guarded at write time on every route — set validates the
+  // whole array; push validates the one entry it appends.
+  if (segments.length === 5 && segments[2] === 'items' && segments[4] === 'storage_paths') {
+    validateStoragePaths([value]);
+  }
 
   const length = manifestTarget(cwd, false, workUnit).transact((manifest, save) => {
     const current = getByPath(manifest, segments);
@@ -873,7 +948,7 @@ function cmdPull(cwd, args) {
 
   requireWorkUnit(cwd, workUnit);
 
-  refuseShadowField(phase, fieldSegments);
+  refuseShadowField(phase, topic, fieldSegments);
   const segments = resolveSegments(phase, topic, fieldSegments);
 
   const result = manifestTarget(cwd, false, workUnit).transact((manifest, save) => {
@@ -979,9 +1054,11 @@ function cmdApply(cwd, args) {
       }
       const writes = entries.map(([field, value]) => {
         const fieldSegments = field.split('.');
-        refuseShadowField(phase, fieldSegments);
+        refuseEmptyFieldSegments(field, fieldSegments);
+        refuseShadowField(phase, topic, fieldSegments);
+        refuseContainerWrite(fieldSegments);
         const segments = resolveSegments(phase, topic, fieldSegments);
-        validateSet(segments, value);
+        validateSet(segments, value, fieldSegments);
         return { segments, value };
       });
       return { kind: /** @type {const} */ ('set'), path: op.path, fields, writes };
