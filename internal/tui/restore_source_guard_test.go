@@ -3,8 +3,6 @@ package tui_test
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,12 +35,7 @@ var restoreLaunchSites = []string{
 }
 
 func TestRestorePath_ReadsNoTheme(t *testing.T) {
-	fset := token.NewFileSet()
-	path := filepath.Join(".", restoreFileName)
-	file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("parse %s: %v", restoreFileName, err)
-	}
+	file := sourceguardtest.PackageSource(t, ".", restoreFileName).File
 
 	t.Run("the exit path imports no theme package", func(t *testing.T) {
 		for _, imp := range file.Imports {

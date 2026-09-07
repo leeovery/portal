@@ -61,7 +61,7 @@ func TestInstallIsTheOnlyRouteToACaptureHandler(t *testing.T) {
 		if strings.HasPrefix(source.Path, logOwnerDir+string(filepath.Separator)) {
 			continue
 		}
-		installs = append(installs, handlerInstallsIn(source.Path, source)...)
+		installs = append(installs, handlerInstallsIn(source)...)
 	}
 
 	scanned, defects := auditHandlerInstalls(installs)
@@ -74,12 +74,12 @@ func TestInstallIsTheOnlyRouteToACaptureHandler(t *testing.T) {
 
 // handlerInstallsIn records every handler swap one parsed file makes, attributed
 // to the declaration holding it.
-func handlerInstallsIn(rel string, source sourceguardtest.ParsedSource) []handlerInstall {
+func handlerInstallsIn(source sourceguardtest.ParsedSource) []handlerInstall {
 	var installs []handlerInstall
 	sourceguardtest.ForEachFuncCall(source.File, func(funcName string, call *ast.CallExpr) bool {
 		if sourceguardtest.CalleeName(call) == setTestHandlerFunc {
 			installs = append(installs, handlerInstall{
-				File: rel,
+				File: source.Path,
 				Func: funcName,
 				Line: source.Fset.Position(call.Pos()).Line,
 			})
@@ -150,5 +150,5 @@ func stageHandlerInstalls(t *testing.T, rel, src string) []handlerInstall {
 	if err != nil {
 		t.Fatalf("parse fixture source: %v", err)
 	}
-	return handlerInstallsIn(rel, sourceguardtest.ParsedSource{Path: rel, Fset: fset, File: parsed})
+	return handlerInstallsIn(sourceguardtest.ParsedSource{Path: rel, Fset: fset, File: parsed})
 }

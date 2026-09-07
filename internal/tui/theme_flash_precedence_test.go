@@ -191,13 +191,13 @@ func TestThemeFlash_AllSixUseSetThemeFlash(t *testing.T) {
 	})
 
 	t.Run("no theme copy reaches setFlash directly", func(t *testing.T) {
-		files := parsePackageFilesByName(t)
-		vocabulary := themeCopyVocabulary(files)
+		parsed := sourceguardtest.ParsePackageSources(t, ".", false)
+		vocabulary := themeCopyVocabulary(filesByName(parsed))
 		if len(vocabulary) == 0 {
 			t.Fatal("the theme-copy vocabulary is empty, so this guard forbids nothing")
 		}
 
-		for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
+		for _, source := range parsed {
 			name := filepath.Base(source.Path)
 			ast.Inspect(source.File, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)

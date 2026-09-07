@@ -124,11 +124,11 @@ func TestOrchestratorLiteralGuard_FatalsWhenItEnumeratesNoTestFiles(t *testing.T
 }
 
 // scanTestOrchestratorLiterals reports every composite literal of the
-// orchestrator type in a _test.go the scan reaches, as "<file>:<line>". It reads the
-// AST rather than the text, so a mention of the type inside a string — this
-// guard's own fixtures — is not a finding. Every lane is policed: the
-// integration-tagged files are most of the subject, and an unpinned literal is
-// as silent in one lane as the other.
+// orchestrator type in a _test.go the scan reaches, as "<file>:<line>:<column>".
+// It reads the AST rather than the text, so a mention of the type inside a
+// string — this guard's own fixtures — is not a finding. Every lane is policed:
+// the integration-tagged files are most of the subject, and an unpinned literal
+// is as silent in one lane as the other.
 func scanTestOrchestratorLiterals(t harnesstest.TestingT, opts ...sourceguardtest.ScanOption) (scanned int, findings []string) {
 	t.Helper()
 

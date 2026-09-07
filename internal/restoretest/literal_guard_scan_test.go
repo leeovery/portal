@@ -14,10 +14,10 @@ import (
 // site.
 const restorePkg = "restore"
 
-// scanGuardTestFiles parses every _test.go the scan reaches that include accepts and
-// returns what collect finds in them, along with how many files were scanned —
-// a caller treats a zero count as its own failure, since a guard that has
-// stopped finding sources reports a clean tree forever.
+// scanGuardTestFiles parses every _test.go the scan reaches that include
+// accepts, and returns what collect finds in them along with how many files were
+// scanned — a caller treats a zero count as its own failure, since a guard that
+// has stopped finding sources reports a clean tree forever.
 //
 // Build tags are not honoured by the walk itself: a guard decides through
 // include which lane's files it polices, so the unit lane can police both.

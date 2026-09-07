@@ -251,7 +251,12 @@ func packageCalls(t *testing.T) map[string][]string {
 func parsePackageFilesByName(t *testing.T) map[string]*ast.File {
 	t.Helper()
 
-	sources := sourceguardtest.ParsePackageSources(t, ".", false)
+	return filesByName(sourceguardtest.ParsePackageSources(t, ".", false))
+}
+
+// filesByName keys an already-parsed set by base name, so a guard that needs
+// both the set and the lookup parses the package once.
+func filesByName(sources []sourceguardtest.ParsedSource) map[string]*ast.File {
 	files := make(map[string]*ast.File, len(sources))
 	for _, source := range sources {
 		files[filepath.Base(source.Path)] = source.File

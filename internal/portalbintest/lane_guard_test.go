@@ -59,7 +59,7 @@ func TestBuildHelpersStayInTheIntegrationLane(t *testing.T) {
 		files = append(files, scannedTestFile{
 			Rel:      source.Path,
 			UnitLane: compiledInUnitLane(source.File),
-			Refs:     buildHelperRefsIn(source.Path, source),
+			Refs:     buildHelperRefsIn(source),
 		})
 	}
 
@@ -69,13 +69,13 @@ func TestBuildHelpersStayInTheIntegrationLane(t *testing.T) {
 }
 
 // buildHelperRefsIn records every build-helper call one parsed file makes.
-func buildHelperRefsIn(rel string, source sourceguardtest.ParsedSource) []helperRef {
+func buildHelperRefsIn(source sourceguardtest.ParsedSource) []helperRef {
 	var refs []helperRef
 	sourceguardtest.ForEachFuncCall(source.File, func(funcName string, call *ast.CallExpr) bool {
 		callee := sourceguardtest.CalleeName(call)
 		if slices.Contains(buildHelperNames, callee) {
 			refs = append(refs, helperRef{
-				File:   rel,
+				File:   source.Path,
 				Func:   funcName,
 				Helper: callee,
 				Line:   source.Fset.Position(call.Pos()).Line,
@@ -155,6 +155,6 @@ func stageTestFile(t *testing.T, rel, src string) scannedTestFile {
 	return scannedTestFile{
 		Rel:      rel,
 		UnitLane: compiledInUnitLane(parsed),
-		Refs:     buildHelperRefsIn(rel, source),
+		Refs:     buildHelperRefsIn(source),
 	}
 }

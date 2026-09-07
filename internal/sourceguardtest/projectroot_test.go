@@ -8,8 +8,8 @@ import (
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
-// The guard family reaches the module root through this one resolution, whether
-// it goes on to scan the tree or merely to name a path within it.
+// A guard reaches the module root through this resolution, whether it goes on to
+// scan the tree or merely to name a path within it.
 func TestProjectRoot(t *testing.T) {
 	t.Run("it resolves the module root the scan is anchored at", func(t *testing.T) {
 		root := sourceguardtest.ProjectRoot(t)

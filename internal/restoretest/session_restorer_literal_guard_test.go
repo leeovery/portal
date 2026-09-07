@@ -149,8 +149,8 @@ func TestSessionRestorerLiteralGuard_FatalsWhenItEnumeratesNoIntegrationTestFile
 
 // scanIntegrationSessionRestorerLiterals reports every composite literal of the
 // session-restorer type in an integration-tagged _test.go the scan reaches, as
-// "<file>:<line>". It reads the AST rather than the text, so a mention of the
-// type inside a string — this guard's own fixtures — is not a finding.
+// "<file>:<line>:<column>". It reads the AST rather than the text, so a mention
+// of the type inside a string — this guard's own fixtures — is not a finding.
 func scanIntegrationSessionRestorerLiterals(t harnesstest.TestingT, opts ...sourceguardtest.ScanOption) (scanned int, findings []string) {
 	t.Helper()
 
