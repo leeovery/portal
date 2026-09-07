@@ -315,11 +315,11 @@
       "items": {
         "resume-hooks-silently-lost": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
-          "fix_gate_mode": "gated",
+          "task_gate_mode": "auto",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
           "consolidation_gate_mode": "gated",
-          "fix_attempts": 1,
+          "fix_attempts": 0,
           "analysis_cycle_total": 4,
           "analysis_cycle_session": 0,
           "linters": [
@@ -353,7 +353,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 9,
-          "current_task": "resume-hooks-silently-lost-9-18",
+          "current_task": "resume-hooks-silently-lost-9-19",
           "completed_tasks": [
             "resume-hooks-silently-lost-1-1",
             "resume-hooks-silently-lost-1-2",
@@ -530,7 +530,8 @@
             "resume-hooks-silently-lost-9-14",
             "resume-hooks-silently-lost-9-15",
             "resume-hooks-silently-lost-9-16",
-            "resume-hooks-silently-lost-9-17"
+            "resume-hooks-silently-lost-9-17",
+            "resume-hooks-silently-lost-9-18"
           ],
           "staging": {
             "p1": {
@@ -1178,6 +1179,160 @@
                 "internal/sourceguardtest/reposources.go",
                 "internal/portalbintest/build.go",
                 "CLAUDE.md"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "executor",
+              "summary": "Two routes to a parsed source position coexist across the guard family",
+              "detail": "ParsedSource.Position exists (root-relative Filename), but ~15 guards still reach source.Fset.Position(...) for a bare line — e.g. internal/theme/leaf_guard_test.go:76, internal/theme/embedded_test.go:162, internal/portalbintest/lane_guard_test.go:81, internal/logtest/install_guard_test.go:84, internal/hooks/cleanstale_staleness_guard_test.go:20",
+              "files": [
+                "internal/theme/leaf_guard_test.go",
+                "internal/theme/embedded_test.go",
+                "internal/theme/badge_test.go",
+                "internal/theme/resolution_test.go",
+                "internal/theme/broken_builtin_test.go",
+                "internal/portalbintest/lane_guard_test.go",
+                "internal/logtest/install_guard_test.go",
+                "internal/hooks/cleanstale_staleness_guard_test.go",
+                "internal/hooksweep/decline_error_guard_test.go",
+                "cmd/seam_guard_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "executor",
+              "summary": "Four rel := source.Path aliases name a value that is already relative",
+              "detail": "internal/tui/restore_source_guard_test.go:173, internal/theme/broken_builtin_test.go:266, internal/theme/loader_construction_guard_test.go:21, internal/portaltest/teardown_guard_coverage_test.go:165",
+              "files": [
+                "internal/tui/restore_source_guard_test.go",
+                "internal/theme/broken_builtin_test.go",
+                "internal/theme/loader_construction_guard_test.go",
+                "internal/portaltest/teardown_guard_coverage_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "executor",
+              "summary": "One internal/tui guard parses its package twice within a single test",
+              "detail": "internal/tui/theme_flash_precedence_test.go:194-201 calls parsePackageFilesByName(t) and then sourceguardtest.ParsePackageSources(t, \".\", false) in the same subtest",
+              "files": [
+                "internal/tui/theme_flash_precedence_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "reviewer",
+              "summary": "A path-only sibling to RepoSources for the text-scanning guards, which now parse the whole repo to get a list of names",
+              "detail": "Four guards use the driver purely for its root-relative Path and then re-read each file's bytes from disk — internal/prefs/appearance_api_guard_test.go:31-38, internal/log/discard_guard_test.go:19-27, internal/log/migration_guard_test.go:22-30 and internal/tui/restore_source_guard_test.go:96-101. Each pays a full-tree parse it never reads: measured at 322ms for 1000 sources, plus a second read of every file. A RepoPaths(t, sel, opts...) (root string, paths []string) sibling composing ProjectRoot -> GoSourceFiles -> selection would serve them with the same single relativisation rule and no AST.",
+              "files": [
+                "internal/sourceguardtest/reposources.go",
+                "internal/prefs/appearance_api_guard_test.go",
+                "internal/log/discard_guard_test.go",
+                "internal/log/migration_guard_test.go",
+                "internal/tui/restore_source_guard_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "reviewer",
+              "summary": "internal/tui keeps two name-keyed map[string]*ast.File builders and pays a double parse because the map discards the file set",
+              "detail": "internal/tui/nomination_test.go:251 (parsePackageFilesByName, package tui) and internal/tui/theme_source_guard_test.go:70-74 (an inline loop, package tui_test) are the same six lines over ParsePackageSources, unshareable only because they sit in different test packages. Because the map drops the Fset, internal/tui/theme_flash_precedence_test.go:194,200 parses the package twice inside one subtest. Re-shaping themeCopyVocabulary and collectThemeSources to take []ParsedSource would collapse both builders and the double parse.",
+              "files": [
+                "internal/tui/nomination_test.go",
+                "internal/tui/theme_source_guard_test.go",
+                "internal/tui/theme_flash_precedence_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "reviewer",
+              "summary": "One directory enumeration is still re-authored where PackageGoFiles is the declared primitive",
+              "detail": "cmd/hook_sweep_caller_guard_test.go:22-30 hand-rolls os.ReadDir(\"bootstrap\") plus the .go/_test.go suffix filters that sourceguardtest.PackageGoFiles(bootstrapDir, false) already applies, including its own empty-match tripwire at :48 that the primitive provides as an error. It parses nothing (it regex-scans bytes), so it sits just outside this task's stated target of enumerate-then-parse loops.",
+              "files": [
+                "cmd/hook_sweep_caller_guard_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "executor",
+              "summary": "Two routes to a parsed source position coexist across the guard family (restated, attempt 2)",
+              "detail": "ParsedSource.Position exists (root-relative Filename), yet ~15 guards still reach source.Fset.Position(...) for a bare line — internal/theme/leaf_guard_test.go:76, internal/theme/embedded_test.go:162, internal/portalbintest/lane_guard_test.go:81, internal/logtest/install_guard_test.go:84, internal/hooks/cleanstale_staleness_guard_test.go:20, cmd/seam_guard_test.go:66",
+              "files": [
+                "internal/theme/leaf_guard_test.go",
+                "internal/theme/embedded_test.go",
+                "internal/theme/badge_test.go",
+                "internal/theme/resolution_test.go",
+                "internal/theme/broken_builtin_test.go",
+                "internal/portalbintest/lane_guard_test.go",
+                "internal/logtest/install_guard_test.go",
+                "internal/hooks/cleanstale_staleness_guard_test.go",
+                "internal/hooksweep/decline_error_guard_test.go",
+                "cmd/seam_guard_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "executor",
+              "summary": "Four rel := source.Path aliases name a value that is already relative (restated, attempt 2 line numbers)",
+              "detail": "internal/tui/restore_source_guard_test.go:168, internal/theme/broken_builtin_test.go:266, internal/theme/loader_construction_guard_test.go:21, internal/portaltest/teardown_guard_coverage_test.go:165",
+              "files": [
+                "internal/tui/restore_source_guard_test.go",
+                "internal/theme/broken_builtin_test.go",
+                "internal/theme/loader_construction_guard_test.go",
+                "internal/portaltest/teardown_guard_coverage_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "reviewer",
+              "summary": "Three routes still exist to the bytes of a package own .go files, none of them the consolidated one",
+              "detail": "internal/tui/pagepreview_hermetic_test.go:106 uses filepath.Glob(\"*.go\") with its own _test.go filter and its own scanned-nothing check; internal/tui/builtin_theme_table_test.go:66 and internal/capture/theme_panel_message_fixtures_test.go:327 both use sourceguardtest.PackageGoFiles then read bytes themselves. A paths-only sibling in internal/sourceguardtest (package- and repo-scoped) would give the text guards the same single home the AST guards now have — and would let the four repo-wide text guards (internal/log/discard_guard_test.go:19, internal/log/migration_guard_test.go:22, internal/prefs/appearance_api_guard_test.go:31, internal/tui/restore_source_guard_test.go:89) stop paying a full 999-file parse they never read.",
+              "files": [
+                "internal/tui/pagepreview_hermetic_test.go",
+                "internal/tui/builtin_theme_table_test.go",
+                "internal/capture/theme_panel_message_fixtures_test.go",
+                "internal/log/discard_guard_test.go",
+                "internal/log/migration_guard_test.go",
+                "internal/prefs/appearance_api_guard_test.go",
+                "internal/tui/restore_source_guard_test.go",
+                "internal/sourceguardtest/"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "executor",
+              "summary": "The by-base-name lookup over parsed package sources is declared twice, once per test package in internal/tui",
+              "detail": "filesByName (internal/tui/nomination_test.go:257, package tui) and the inline build at internal/tui/theme_source_guard_test.go:37-41 (package tui_test) are the same three lines; sharing them needs the helper hoisted into sourceguardtest beside ParsePackageSources, which is outside this task surface.",
+              "files": [
+                "internal/tui/nomination_test.go",
+                "internal/tui/theme_source_guard_test.go",
+                "internal/sourceguardtest/parsesources.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "executor",
+              "summary": "Five source.Path aliases survive as pure restatement, in files round 3 did not open",
+              "detail": "internal/tui/restore_source_guard_test.go:166, internal/theme/broken_builtin_test.go:266, internal/theme/loader_construction_guard_test.go:21, internal/portaltest/teardown_guard_coverage_test.go:165, cmd/state_daemon_lock_pid_ordering_test.go:90",
+              "files": [
+                "internal/tui/restore_source_guard_test.go",
+                "internal/theme/broken_builtin_test.go",
+                "internal/theme/loader_construction_guard_test.go",
+                "internal/portaltest/teardown_guard_coverage_test.go",
+                "cmd/state_daemon_lock_pid_ordering_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-18",
+              "source": "reviewer",
+              "summary": "The by-base-name file map is authored three times across two packages and one package boundary",
+              "detail": "filesByName at internal/tui/nomination_test.go:259-266 (package tui), the same four lines inline at internal/tui/theme_source_guard_test.go:36-40 (package tui_test, which cannot reach the unexported helper), and again at cmd/open_theme_nomination_test.go:242-249 (package cmd). The fix that reaches all three is an exported sourceguardtest.FilesByName([]ParsedSource) map[string]*ast.File beside PackageSource — outside this task Do list, and it touches a sibling task files.",
+              "files": [
+                "internal/tui/nomination_test.go",
+                "internal/tui/theme_source_guard_test.go",
+                "cmd/open_theme_nomination_test.go",
+                "internal/sourceguardtest/parsesources.go"
               ]
             }
           ]
