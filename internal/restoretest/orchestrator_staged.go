@@ -13,10 +13,8 @@ import (
 
 // NewRestoreOrchestrator is how a test builds an orchestrator it will drive a
 // real restore with against a live server. binDir must hold a built portal
-// binary: Exe is pinned to it through StagedHydrateExe, so the arming of every
-// restored pane reaches that binary rather than os.Executable(). Under `go test`
-// os.Executable() is the test binary, and a pane armed with it re-runs the suite
-// inside itself and exits 0 — a vanished session, with no error anywhere.
+// binary: Exe is pinned to it through StagedHydrateExe, whose doc states what
+// an unpinned one costs.
 //
 // Taking binDir rather than a resolver is what makes the pinning structural: a
 // caller cannot reach this constructor and still forget the field.

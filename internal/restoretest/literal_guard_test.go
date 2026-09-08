@@ -11,12 +11,9 @@ import (
 )
 
 // TestNoTestComposesAPaneArmingRestoreType is the standing guard over the one
-// field whose omission is silent. Both guarded types take an optional Exe that
-// falls back to os.Executable(); under `go test` that resolves to the test
-// binary, so a pane armed by a value with no Exe respawns into the suite
-// itself, which stops flag parsing at the leading `state` positional, re-runs
-// its own tests inside the tmux pane and exits 0. The symptom is a session that
-// quietly disappeared — no error, no failure, nothing in the log.
+// field whose omission is silent: both guarded types take an optional Exe,
+// whose fallback — and what it costs a test driving a real restore —
+// restoretest.StagedHydrateExe documents.
 //
 // The rule is therefore not "set Exe" but "never compose the struct": a rule
 // about a field that may legitimately be absent cannot be checked, while a rule

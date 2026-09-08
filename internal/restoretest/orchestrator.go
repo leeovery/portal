@@ -10,11 +10,8 @@ import (
 
 // FakeHydrateExePath is what an orchestrator built by NewFakeExeOrchestrator
 // arms its panes with. It is absolute and names nothing on any machine on
-// purpose: a test that does not stage a binary must not silently fall back to
-// os.Executable() — under `go test` that is the test binary, which stops flag
-// parsing at the leading `state` positional, re-runs its own suite inside the
-// pane and exits 0, taking the session with it. A pane armed with this path
-// dies visibly instead.
+// purpose: a pane armed with it dies visibly, rather than taking the
+// os.Executable() fallback StagedHydrateExe documents.
 const FakeHydrateExePath = "/portal-test-no-such-binary/portal"
 
 // NewFakeExeOrchestrator builds a restore.Orchestrator for a test that never

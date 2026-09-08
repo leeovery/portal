@@ -53,9 +53,13 @@ func BuildPortalBinaryStable() (string, error) {
 
 // StagedHydrateExe points a restore's pane-arming at the freshly-built binary in
 // binDir, standing in for the os.Executable() a production restore resolves.
-// Any test driving a real restore needs it: without it the panes respawn into
-// the test binary, which stops flag parsing at the leading `state` positional,
-// re-runs its own suite inside the pane and exits — taking the session with it.
+//
+// Every test driving a real restore needs it, because Exe is opt-in on the
+// restore types and an absent (or nil) one falls back to os.Executable(). Under
+// `go test` that is the test binary, which stops flag parsing at the leading
+// `state` positional: the armed pane re-runs the suite inside itself and exits
+// 0, taking the session with it. The symptom is a session that quietly
+// disappeared — no error, no failure, nothing in the log.
 //
 // An empty binDir is fatal, not tolerated: filepath.Join would fold it to the
 // bare name and silently restore the PATH lookup this exists to replace, so a
