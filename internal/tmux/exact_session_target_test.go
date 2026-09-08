@@ -102,7 +102,7 @@ func targetArgOf(t *testing.T, call []string) string {
 func TestSessionTargetsAreComposedExactly(t *testing.T) {
 	for _, route := range perSessionRoutes {
 		t.Run(route.name, func(t *testing.T) {
-			mock := commandertest.Quiet()
+			mock := commandertest.New(t, commandertest.Returns("", route.command))
 			route.invoke(tmux.NewClient(mock))
 
 			if len(mock.Calls()) != 1 {

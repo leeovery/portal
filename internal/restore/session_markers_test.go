@@ -74,7 +74,7 @@ func allSetOptionCalls(calls [][]string) []int {
 }
 
 func TestApplySkeletonMarkers_SetsOneMarkerPerSuppliedLivePane(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -108,7 +108,7 @@ func TestApplySkeletonMarkers_SetsOneMarkerPerSuppliedLivePane(t *testing.T) {
 }
 
 func TestApplySkeletonMarkers_UsesLivePaneKey(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	logger := restoretest.OpenTestLogger(t, dir)
@@ -129,7 +129,7 @@ func TestApplySkeletonMarkers_UsesLivePaneKey(t *testing.T) {
 }
 
 func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 	client := tmux.NewClient(mock)
 	logger, sink := logtest.NewCaptureLogger(t)
 
@@ -149,7 +149,7 @@ func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T)
 }
 
 func TestApplySkeletonMarkers_UsesServerScopeFlagAndNeverGlobal(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -206,7 +206,7 @@ func TestApplySkeletonMarkers_ContinuesWhenOneSetOptionFails(t *testing.T) {
 }
 
 func TestApplySkeletonMarkers_SetsMarkerValueToLiteralOne(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -231,7 +231,7 @@ func TestApplySkeletonMarkers_SetsMarkerValueToLiteralOne(t *testing.T) {
 }
 
 func TestApplySkeletonMarkers_UsesHashedPaneKeyForCollisionSession(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -254,7 +254,7 @@ func TestApplySkeletonMarkers_UsesHashedPaneKeyForCollisionSession(t *testing.T)
 }
 
 func TestApplySkeletonMarkers_EnumeratesLivePanesInSuppliedOrder(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -289,7 +289,7 @@ func TestApplySkeletonMarkers_EnumeratesLivePanesInSuppliedOrder(t *testing.T) {
 }
 
 func TestApplySkeletonMarkers_MarksExtraLivePanesWhenLiveCountExceedsSaved(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	logger := restoretest.OpenTestLogger(t, dir)

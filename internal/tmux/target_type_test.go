@@ -115,7 +115,7 @@ func TestTargetTakingMethodsComposeUnchangedArgv(t *testing.T) {
 	t.Run("it composes byte-identical argv for every -t-taking client method", func(t *testing.T) {
 		for _, route := range targetTakingRoutes {
 			t.Run(route.name, func(t *testing.T) {
-				mock := commandertest.Quiet()
+				mock := commandertest.New(t, commandertest.Returns("", route.want[0]))
 
 				route.invoke(tmux.NewClient(mock))
 
@@ -130,7 +130,10 @@ func TestTargetTakingMethodsComposeUnchangedArgv(t *testing.T) {
 	})
 
 	t.Run("it composes byte-identical argv for the two reads a hook key resolves through", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t,
+			commandertest.Returns("", "show-options"),
+			commandertest.Returns("", "display-message"),
+		)
 
 		_, _ = tmux.NewClient(mock).ResolveHookKey(tmux.PaneIDTarget("%7"))
 

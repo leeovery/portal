@@ -4,29 +4,18 @@ import (
 	"errors"
 	"slices"
 	"testing"
+
+	"github.com/leeovery/portal/internal/commandertest"
 )
-
-type internalMockCommander struct {
-	Output string
-	Err    error
-}
-
-func (m *internalMockCommander) Run(args ...string) (string, error) {
-	return m.Output, m.Err
-}
-
-func (m *internalMockCommander) RunRaw(args ...string) (string, error) {
-	return m.Output, m.Err
-}
 
 func TestGetServerOption_DiscriminatorSet(t *testing.T) {
 	for _, pat := range optionAbsentStderrPatterns {
 		t.Run(pat, func(t *testing.T) {
 			stderr := pat + " @foo"
-			mock := &internalMockCommander{Err: &CommandError{
+			mock := commandertest.New(t, commandertest.Fails(&CommandError{
 				Stderr: stderr,
 				Err:    errors.New("exit status 1"),
-			}}
+			}, "show-option", "-sv", "@foo"))
 			client := NewClient(mock)
 
 			got, err := client.GetServerOption("@foo")
@@ -43,7 +32,7 @@ func TestGetServerOption_DiscriminatorSet(t *testing.T) {
 	t.Run("unrelated_stderr_does_not_match", func(t *testing.T) {
 		stderr := "some unrelated error: connection refused"
 		cmdErr := &CommandError{Stderr: stderr, Err: errors.New("exit status 1")}
-		mock := &internalMockCommander{Err: cmdErr}
+		mock := commandertest.New(t, commandertest.Fails(cmdErr, "show-option", "-sv", "@foo"))
 		client := NewClient(mock)
 
 		got, err := client.GetServerOption("@foo")

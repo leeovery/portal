@@ -15,7 +15,7 @@ func TestShowGlobalHooksForEvent(t *testing.T) {
 		// trailing newline the read through Run trims — so a move to RunRaw is
 		// visible here rather than silent.
 		raw := "pane-focus-out[0] run-shell 'command -v portal'\npane-focus-out[1] run-shell 'echo hi'\n"
-		mock := commandertest.Quiet(commandertest.Returns(raw))
+		mock := commandertest.New(t, commandertest.Returns(raw, "show-hooks"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ShowGlobalHooksForEvent("pane-focus-out")
@@ -42,7 +42,7 @@ func TestShowGlobalHooksForEvent(t *testing.T) {
 	})
 
 	t.Run("returns empty string without error when output is empty", func(t *testing.T) {
-		mock := commandertest.Quiet(commandertest.Returns(""))
+		mock := commandertest.New(t, commandertest.Returns("", "show-hooks"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ShowGlobalHooksForEvent("window-renamed")
@@ -57,7 +57,7 @@ func TestShowGlobalHooksForEvent(t *testing.T) {
 
 	t.Run("propagates commander error wrapped via %w", func(t *testing.T) {
 		sentinel := errors.New("tmux exec failed")
-		mock := commandertest.Quiet(commandertest.Fails(sentinel))
+		mock := commandertest.New(t, commandertest.Fails(sentinel, "show-hooks"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ShowGlobalHooksForEvent("window-resized")
@@ -79,7 +79,7 @@ func TestShowGlobalHooksForEvent(t *testing.T) {
 
 func TestAppendGlobalHook(t *testing.T) {
 	t.Run("calls set-hook -ga with event and command as separate argv elements", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t, commandertest.Returns("", "set-hook", "-ga"))
 		client := tmux.NewClient(mock)
 
 		event := "session-created"
@@ -106,7 +106,7 @@ func TestAppendGlobalHook(t *testing.T) {
 	})
 
 	t.Run("preserves single quotes inside the hook command argument", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t, commandertest.Returns("", "set-hook", "-ga"))
 		client := tmux.NewClient(mock)
 
 		command := `run-shell 'command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}'`
@@ -130,7 +130,7 @@ func TestAppendGlobalHook(t *testing.T) {
 
 	t.Run("wraps commander error with the event name", func(t *testing.T) {
 		sentinel := errors.New("tmux failed")
-		mock := commandertest.Quiet(commandertest.Fails(sentinel))
+		mock := commandertest.New(t, commandertest.Fails(sentinel, "set-hook", "-ga"))
 		client := tmux.NewClient(mock)
 
 		err := client.AppendGlobalHook("session-renamed", "run-shell 'noop'")
@@ -152,7 +152,7 @@ func TestAppendGlobalHook(t *testing.T) {
 
 func TestUnsetGlobalHookAt(t *testing.T) {
 	t.Run("formats target as event[index] for set-hook -gu", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t, commandertest.Returns("", "set-hook", "-gu"))
 		client := tmux.NewClient(mock)
 
 		err := client.UnsetGlobalHookAt("session-created", 2)
@@ -177,7 +177,7 @@ func TestUnsetGlobalHookAt(t *testing.T) {
 
 	t.Run("wraps commander error with event and index", func(t *testing.T) {
 		sentinel := errors.New("tmux failed")
-		mock := commandertest.Quiet(commandertest.Fails(sentinel))
+		mock := commandertest.New(t, commandertest.Fails(sentinel, "set-hook", "-gu"))
 		client := tmux.NewClient(mock)
 
 		err := client.UnsetGlobalHookAt("client-attached", 5)

@@ -11,7 +11,7 @@ import (
 
 func TestListAllPaneHookKeys_Rows(t *testing.T) {
 	t.Run("it returns one row per live pane", func(t *testing.T) {
-		mock := commandertest.Quiet(commandertest.Returns("tokA|alpha:0.0\n|beta:1.2\ntokC|gamma:0.0"))
+		mock := commandertest.New(t, commandertest.Returns("tokA|alpha:0.0\n|beta:1.2\ntokC|gamma:0.0", "list-panes"))
 		client := tmux.NewClient(mock)
 
 		rows, err := client.ListAllPaneHookKeys()
@@ -28,7 +28,7 @@ func TestListAllPaneHookKeys_Rows(t *testing.T) {
 	})
 
 	t.Run("it keeps an unstamped pane's row rather than dropping it", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.Quiet(commandertest.Returns("|sess:0.0")))
+		client := tmux.NewClient(commandertest.New(t, commandertest.Returns("|sess:0.0", "list-panes")))
 
 		rows, err := client.ListAllPaneHookKeys()
 		if err != nil {
@@ -38,7 +38,7 @@ func TestListAllPaneHookKeys_Rows(t *testing.T) {
 	})
 
 	t.Run("it splits on the first separator only", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.Quiet(commandertest.Returns("tokA|pipe|name:0.0\n|dot.sess:1.3")))
+		client := tmux.NewClient(commandertest.New(t, commandertest.Returns("tokA|pipe|name:0.0\n|dot.sess:1.3", "list-panes")))
 
 		rows, err := client.ListAllPaneHookKeys()
 		if err != nil {
@@ -51,7 +51,7 @@ func TestListAllPaneHookKeys_Rows(t *testing.T) {
 	})
 
 	t.Run("it errors on a row with no separator", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.Quiet(commandertest.Returns("tokA|alpha:0.0\nmalformed-row")))
+		client := tmux.NewClient(commandertest.New(t, commandertest.Returns("tokA|alpha:0.0\nmalformed-row", "list-panes")))
 
 		rows, err := client.ListAllPaneHookKeys()
 		if err == nil {
@@ -66,7 +66,7 @@ func TestListAllPaneHookKeys_Rows(t *testing.T) {
 	})
 
 	t.Run("it returns a non-nil empty slice for empty output", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.Quiet(commandertest.Returns("")))
+		client := tmux.NewClient(commandertest.New(t, commandertest.Returns("", "list-panes")))
 
 		rows, err := client.ListAllPaneHookKeys()
 		if err != nil {
@@ -81,7 +81,7 @@ func TestListAllPaneHookKeys_Rows(t *testing.T) {
 	})
 
 	t.Run("it reads the pane token through the single option constant", func(t *testing.T) {
-		mock := commandertest.Quiet(commandertest.Returns(""))
+		mock := commandertest.New(t, commandertest.Returns("", "list-panes"))
 		client := tmux.NewClient(mock)
 
 		if _, err := client.ListAllPaneHookKeys(); err != nil {

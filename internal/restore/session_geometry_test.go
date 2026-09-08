@@ -66,8 +66,19 @@ func findResizePaneZoom(calls [][]string, target string) int {
 	return -1
 }
 
+// geometryFake scripts the argv ApplyWindowGeometry issues for an unzoomed
+// window, so any other command it reaches for fails the fixture. A fixture
+// whose window is zoomed adds the resize-pane entry itself.
+func geometryFake(t *testing.T, entries ...commandertest.Entry) *commandertest.Scripted {
+	t.Helper()
+	return commandertest.New(t, append([]commandertest.Entry{
+		commandertest.Returns("", "select-layout"),
+		commandertest.Returns("", "select-pane"),
+	}, entries...)...)
+}
+
 func TestApplyWindowGeometry_AppliesSavedLayoutForEveryWindow(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -88,7 +99,7 @@ func TestApplyWindowGeometry_AppliesSavedLayoutForEveryWindow(t *testing.T) {
 }
 
 func TestApplyWindowGeometry_SelectsLivePaneIndexForActivePane(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -109,7 +120,7 @@ func TestApplyWindowGeometry_SelectsLivePaneIndexForActivePane(t *testing.T) {
 }
 
 func TestApplyWindowGeometry_AppliesZoomAfterLayoutWhenZoomedTrue(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t, commandertest.Returns("", "resize-pane"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -133,7 +144,7 @@ func TestApplyWindowGeometry_AppliesZoomAfterLayoutWhenZoomedTrue(t *testing.T) 
 }
 
 func TestApplyWindowGeometry_SkipsZoomWhenZoomedFalse(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -215,7 +226,7 @@ func TestApplyWindowGeometry_LogsAndContinuesWhenTiledFallbackAlsoFails(t *testi
 }
 
 func TestApplyWindowGeometry_DefaultsToStructuralPositionZeroWhenNoPaneActive(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t, commandertest.Returns("", "resize-pane"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -238,7 +249,7 @@ func TestApplyWindowGeometry_DefaultsToStructuralPositionZeroWhenNoPaneActive(t 
 }
 
 func TestApplyWindowGeometry_OrdersLayoutThenPaneThenZoom(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t, commandertest.Returns("", "resize-pane"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -260,7 +271,7 @@ func TestApplyWindowGeometry_OrdersLayoutThenPaneThenZoom(t *testing.T) {
 }
 
 func TestApplyWindowGeometry_SinglePaneWindowSelectsThatPane(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -285,7 +296,7 @@ func TestApplyWindowGeometry_SinglePaneWindowSelectsThatPane(t *testing.T) {
 }
 
 func TestApplyWindowGeometry_UsesLiveIndicesFromBaseAndPaneBase(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t, commandertest.Returns("", "resize-pane"))
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -335,7 +346,7 @@ func TestApplyWindowGeometry_ContinuesRemainingWindowsWhenOneFails(t *testing.T)
 }
 
 func TestApplyWindowGeometry_FirstActivePaneWins(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 

@@ -12,7 +12,7 @@ import (
 
 func TestSetPaneOption(t *testing.T) {
 	t.Run("it runs set-option -p against the pane target", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 		client := tmux.NewClient(mock)
 
 		if err := client.SetPaneOption("%3", state.PortalPaneIDOption, "abc123"); err != nil {
@@ -29,7 +29,7 @@ func TestSetPaneOption(t *testing.T) {
 	})
 
 	t.Run("it scopes the write to one pane, never the server or a session", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t, commandertest.Returns("", "set-option"))
 		client := tmux.NewClient(mock)
 
 		_ = client.SetPaneOption("%3", state.PortalPaneIDOption, "abc123")
@@ -45,7 +45,7 @@ func TestSetPaneOption(t *testing.T) {
 	})
 
 	t.Run("it wraps a tmux failure with the pane and the option name", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.Quiet(commandertest.Fails(fmt.Errorf("no such pane: %%999"))))
+		client := tmux.NewClient(commandertest.New(t, commandertest.Fails(fmt.Errorf("no such pane: %%999"), "set-option")))
 
 		err := client.SetPaneOption("%999", state.PortalPaneIDOption, "abc123")
 		if err == nil {

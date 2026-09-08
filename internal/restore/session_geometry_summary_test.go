@@ -30,7 +30,7 @@ func geometrySummaryLine(t *testing.T, sink *logtest.Sink) string {
 }
 
 func TestApplyWindowGeometry_EmitsGeometryCompleteSummaryOnCleanReplay(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	logger, sink := logtest.NewCaptureLogger(t)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
@@ -58,7 +58,7 @@ func TestApplyWindowGeometry_EmitsGeometryCompleteSummaryOnCleanReplay(t *testin
 }
 
 func TestApplyWindowGeometry_SummaryPanesEqualsLivePaneCount(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	logger, sink := logtest.NewCaptureLogger(t)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
@@ -77,7 +77,7 @@ func TestApplyWindowGeometry_SummaryPanesEqualsLivePaneCount(t *testing.T) {
 }
 
 func TestApplyWindowGeometry_SummaryHasOnlyPanesTookAnomalousAttrs(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	logger, sink := logtest.NewCaptureLogger(t)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
@@ -98,7 +98,7 @@ func TestApplyWindowGeometry_SummaryHasOnlyPanesTookAnomalousAttrs(t *testing.T)
 }
 
 func TestApplyWindowGeometry_EmitsExactlyOneSummaryPerCall(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	logger, sink := logtest.NewCaptureLogger(t)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
@@ -226,7 +226,7 @@ func TestApplyWindowGeometry_ZoomFailureIncrementsAnomalous(t *testing.T) {
 }
 
 func TestApplyWindowGeometry_EmptySavedWindowGroupSkippedNotAnomalous(t *testing.T) {
-	mock := commandertest.Quiet()
+	mock := geometryFake(t)
 	client := tmux.NewClient(mock)
 	logger, sink := logtest.NewCaptureLogger(t)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}

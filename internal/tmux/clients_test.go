@@ -11,7 +11,7 @@ import (
 
 func TestListClients(t *testing.T) {
 	t.Run("it parses client_pid and client_activity lines into ClientInfo", func(t *testing.T) {
-		mock := commandertest.Quiet(commandertest.Returns("501 1720000000\n502 1720000005"))
+		mock := commandertest.New(t, commandertest.Returns("501 1720000000\n502 1720000005", "list-clients"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListClients("dev")
@@ -37,7 +37,7 @@ func TestListClients(t *testing.T) {
 	})
 
 	t.Run("it parses a single client line", func(t *testing.T) {
-		mock := commandertest.Quiet(commandertest.Returns("777 1699999999"))
+		mock := commandertest.New(t, commandertest.Returns("777 1699999999", "list-clients"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListClients("dev")
@@ -53,7 +53,7 @@ func TestListClients(t *testing.T) {
 	})
 
 	t.Run("it tolerates the no-clients case as an empty slice", func(t *testing.T) {
-		mock := commandertest.Quiet(commandertest.When(commandertest.Any, "", fmt.Errorf("exit status 1")))
+		mock := commandertest.New(t, commandertest.Fails(fmt.Errorf("exit status 1"), "list-clients"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListClients("dev")
@@ -69,7 +69,7 @@ func TestListClients(t *testing.T) {
 	})
 
 	t.Run("it tolerates empty output as an empty slice", func(t *testing.T) {
-		mock := commandertest.Quiet(commandertest.Returns(""))
+		mock := commandertest.New(t, commandertest.Returns("", "list-clients"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListClients("dev")
@@ -95,7 +95,7 @@ func TestListClients(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				mock := commandertest.Quiet(commandertest.Returns(tc.output))
+				mock := commandertest.New(t, commandertest.Returns(tc.output, "list-clients"))
 				client := tmux.NewClient(mock)
 
 				if _, err := client.ListClients("dev"); err == nil {
@@ -106,7 +106,7 @@ func TestListClients(t *testing.T) {
 	})
 
 	t.Run("it targets the session exactly and requests pid+activity", func(t *testing.T) {
-		mock := commandertest.Quiet(commandertest.Returns("501 1720000000"))
+		mock := commandertest.New(t, commandertest.Returns("501 1720000000", "list-clients"))
 		client := tmux.NewClient(mock)
 
 		if _, err := client.ListClients("dev"); err != nil {

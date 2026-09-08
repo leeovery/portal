@@ -14,7 +14,7 @@ const colonSession = "a:b"
 
 func TestRenameSessionRefusesColon(t *testing.T) {
 	t.Run("it refuses a rename to a name containing a colon", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.Quiet())
+		client := tmux.NewClient(commandertest.New(t))
 
 		err := client.RenameSession("old-name", colonSession)
 
@@ -27,7 +27,7 @@ func TestRenameSessionRefusesColon(t *testing.T) {
 	})
 
 	t.Run("it names the offending character in the refusal message", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.Quiet())
+		client := tmux.NewClient(commandertest.New(t))
 
 		err := client.RenameSession("old-name", colonSession)
 
@@ -40,7 +40,7 @@ func TestRenameSessionRefusesColon(t *testing.T) {
 	})
 
 	t.Run("it issues no tmux command for a refused rename", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t)
 		client := tmux.NewClient(mock)
 
 		_ = client.RenameSession("old-name", colonSession)
@@ -51,7 +51,7 @@ func TestRenameSessionRefusesColon(t *testing.T) {
 	})
 
 	t.Run("it renames a colon-free name unchanged", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t, commandertest.Returns("", "rename-session"))
 		client := tmux.NewClient(mock)
 
 		if err := client.RenameSession("old-name", "new-name"); err != nil {
@@ -254,7 +254,7 @@ func TestValidateSessionNameFlagPrefix(t *testing.T) {
 	})
 
 	t.Run("it refuses the rename before composing the tmux argv", func(t *testing.T) {
-		mock := commandertest.Quiet()
+		mock := commandertest.New(t)
 		client := tmux.NewClient(mock)
 
 		err := client.RenameSession("old-name", "-bar")

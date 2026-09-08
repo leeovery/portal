@@ -209,7 +209,7 @@ func TestCheckTmuxVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := commandertest.Quiet(commandertest.When(commandertest.Any, tt.output, tt.runErr))
+			mock := commandertest.New(t, commandertest.When(commandertest.ArgvPrefix("-V"), tt.output, tt.runErr))
 
 			err := tmux.CheckTmuxVersion(mock)
 
@@ -242,7 +242,7 @@ func TestCheckTmuxVersion(t *testing.T) {
 func TestCheckTmuxVersion_WrapsCommanderError(t *testing.T) {
 	t.Run("wraps original error so errors.Is works", func(t *testing.T) {
 		sentinel := errors.New("the original cause")
-		mock := commandertest.Quiet(commandertest.Fails(sentinel))
+		mock := commandertest.New(t, commandertest.Fails(sentinel, "-V"))
 
 		err := tmux.CheckTmuxVersion(mock)
 		if err == nil {
