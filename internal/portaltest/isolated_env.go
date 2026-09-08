@@ -34,13 +34,17 @@ func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 	t.Setenv("HOME", homeDir)
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	// Shells hosted by a test's tmux server flush per-session files into HOME as
-	// they exit — zsh's history among them — racing the framework's RemoveAll of
-	// that temp dir. These reach the returned env slice through the os.Environ()
-	// read below, so they must be set before it.
+	// Shells hosted by a test's tmux server flush per-session files as they exit,
+	// racing the framework's RemoveAll of the temp HOME. zsh's history is that
+	// writer: /etc/zshrc assigns HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history for every
+	// interactive shell whatever it inherited, so only ZDOTDIR moves it — and it
+	// must name a directory outside the tree the framework removes, which homeDir
+	// is not. zsh's session directory hangs off the same prefix and moves with it.
+	// HISTFILE still buys the shells with no such override: a bash pane writes
+	// .bash_history into HOME without it. Both reach the returned env slice
+	// through the os.Environ() read below, so they must be set before it.
 	t.Setenv("HISTFILE", os.DevNull)
-	t.Setenv("SHELL_SESSIONS_DISABLE", "1")
-	t.Setenv("ZDOTDIR", homeDir)
+	t.Setenv("ZDOTDIR", shellConfigDirOutsideTempTree(t))
 
 	// Registered after the test's first t.TempDir, whose lone cleanup removes the
 	// parent holding homeDir, so LIFO runs this wait before that RemoveAll; a
@@ -104,6 +108,22 @@ func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 	}
 
 	return env, stateDir
+}
+
+// shellConfigDirOutsideTempTree creates the directory ZDOTDIR names and
+// registers its removal. It is deliberately not a t.TempDir(): the point is to
+// sit outside the tree the framework removes, so a shell still flushing at
+// teardown cannot land a file mid-RemoveAll. Registered before the quiescence
+// wait, so LIFO removes it after that wait has run.
+func shellConfigDirOutsideTempTree(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "portaltest-shellconfig-*")
+	if err != nil {
+		t.Fatalf("portaltest: mkdir shell config dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
 }
 
 // Narrows *testing.T so a fake recorder can drive installBackstopCleanup.

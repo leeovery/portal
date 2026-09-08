@@ -11,20 +11,55 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// HOME and XDG_CONFIG_HOME are redirected for the whole binary so the backstop
-// under test targets a hermetic temp dir: on a machine with a live `portal state
-// daemon` it would otherwise race that daemon's tick writes and flag them.
 func TestMain(m *testing.M) {
+	os.Exit(runInSelfSandbox(m.Run))
+}
+
+// runInSelfSandbox redirects HOME and XDG_CONFIG_HOME at a temp sandbox for the
+// whole binary so the backstop under test targets a hermetic temp dir: on a
+// machine with a live `portal state daemon` it would otherwise race that
+// daemon's tick writes and flag them. It removes the sandbox and returns run's
+// own code, so no cleanup rides on a deferred function os.Exit would skip.
+func runInSelfSandbox(run func() int) int {
 	sandbox, err := os.MkdirTemp("", "portaltest-self-sandbox-*")
 	if err != nil {
 		panic("portaltest: mkdir sandbox: " + err.Error())
 	}
-	defer func() { _ = os.RemoveAll(sandbox) }()
 
 	_ = os.Setenv("HOME", sandbox)
 	_ = os.Setenv("XDG_CONFIG_HOME", filepath.Join(sandbox, "config"))
 
-	os.Exit(m.Run())
+	code := run()
+
+	_ = os.RemoveAll(sandbox)
+	return code
+}
+
+func TestRunInSelfSandbox(t *testing.T) {
+	t.Run("it removes the self-test sandbox directory and preserves the run's exit code", func(t *testing.T) {
+		// The helper sets these with os.Setenv; t.Setenv puts the binary-wide
+		// values TestMain established back when this test ends.
+		t.Setenv("HOME", os.Getenv("HOME"))
+		t.Setenv("XDG_CONFIG_HOME", os.Getenv("XDG_CONFIG_HOME"))
+
+		const wantCode = 7
+		var sandbox string
+
+		code := runInSelfSandbox(func() int {
+			sandbox = os.Getenv("HOME")
+			return wantCode
+		})
+
+		if code != wantCode {
+			t.Errorf("exit code = %d, want the run's own %d", code, wantCode)
+		}
+		if sandbox == "" {
+			t.Fatalf("the run saw no HOME; the sandbox was not installed")
+		}
+		if _, err := os.Stat(sandbox); !os.IsNotExist(err) {
+			t.Errorf("sandbox %q survived the run: stat err = %v, want not-exist", sandbox, err)
+		}
+	})
 }
 
 func envValue(env []string, key string) (string, bool) {
@@ -272,35 +307,41 @@ func TestStateDirEnv(t *testing.T) {
 	})
 }
 
-func TestNeutralisesShellSessionDirectory(t *testing.T) {
-	t.Setenv("SHELL_SESSIONS_DISABLE", "")
+func TestPointsZDOTDIROutsideTheFrameworkTempTree(t *testing.T) {
 	t.Setenv("ZDOTDIR", "/decoy/should/not/leak")
 
 	env, _ := portaltest.IsolateStateForTest(t)
+	frameworkTree := filepath.Dir(t.TempDir())
 
-	t.Run("it neutralises the shell session directory in the isolated env", func(t *testing.T) {
-		if got := os.Getenv("SHELL_SESSIONS_DISABLE"); got != "1" {
-			t.Errorf("process SHELL_SESSIONS_DISABLE = %q, want %q", got, "1")
+	t.Run("it points ZDOTDIR outside the framework temp tree", func(t *testing.T) {
+		zdotdir := os.Getenv("ZDOTDIR")
+		if zdotdir == "" {
+			t.Fatalf("ZDOTDIR unset on the test process env; the shell would resolve it to the temp HOME")
 		}
-		home := os.Getenv("HOME")
-		if got := os.Getenv("ZDOTDIR"); got != home {
-			t.Errorf("process ZDOTDIR = %q, want the isolated HOME %q", got, home)
+		if under(zdotdir, frameworkTree) {
+			t.Errorf("ZDOTDIR %q is inside the framework temp tree %q; the shell's writes land in the directory the framework removes", zdotdir, frameworkTree)
+		}
+		if info, err := os.Stat(zdotdir); err != nil {
+			t.Errorf("ZDOTDIR %q not on disk: %v", zdotdir, err)
+		} else if !info.IsDir() {
+			t.Errorf("ZDOTDIR %q is not a directory", zdotdir)
 		}
 	})
 
-	t.Run("it carries the shell-session env in the returned slice", func(t *testing.T) {
-		if got := envCount(env, "SHELL_SESSIONS_DISABLE"); got != 1 {
-			t.Fatalf("expected exactly 1 SHELL_SESSIONS_DISABLE entry in the returned env, got %d", got)
-		}
-		if got, _ := envValue(env, "SHELL_SESSIONS_DISABLE"); got != "1" {
-			t.Errorf("returned env SHELL_SESSIONS_DISABLE = %q, want %q", got, "1")
-		}
+	t.Run("it carries that ZDOTDIR in the returned env slice", func(t *testing.T) {
 		if got := envCount(env, "ZDOTDIR"); got != 1 {
 			t.Fatalf("expected exactly 1 ZDOTDIR entry in the returned env, got %d", got)
 		}
-		home := os.Getenv("HOME")
-		if got, _ := envValue(env, "ZDOTDIR"); got != home {
-			t.Errorf("returned env ZDOTDIR = %q, want the isolated HOME %q", got, home)
+		if got, _ := envValue(env, "ZDOTDIR"); got != os.Getenv("ZDOTDIR") {
+			t.Errorf("returned env ZDOTDIR = %q, want the process value %q", got, os.Getenv("ZDOTDIR"))
 		}
 	})
+}
+
+func under(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
