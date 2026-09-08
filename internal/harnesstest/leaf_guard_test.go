@@ -14,6 +14,8 @@ func TestHarnessTestPackage(t *testing.T) {
 	// the standard library: an empty allowlist, taken across other modules as
 	// well as this one.
 	t.Run("it confines internal/harnesstest to the standard library", func(t *testing.T) {
-		sourceguardtest.AssertDepsWithin(t, harnessTestPkg, nil, sourceguardtest.ForbiddingThirdParty())
+		for _, lane := range sourceguardtest.Lanes() {
+			sourceguardtest.AssertDepsWithin(t, harnessTestPkg, nil, sourceguardtest.ForbiddingThirdParty(), lane)
+		}
 	})
 }

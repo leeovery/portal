@@ -23,7 +23,9 @@ var themeMayImport = []string{"github.com/leeovery/portal/internal/log"}
 
 func TestThemePackage_ResolvesNoPaths(t *testing.T) {
 	t.Run("depends on no path-resolving package", func(t *testing.T) {
-		sourceguardtest.AssertDepsWithin(t, themePkg, themeMayImport)
+		for _, lane := range sourceguardtest.Lanes() {
+			sourceguardtest.AssertDepsWithin(t, themePkg, themeMayImport, lane)
+		}
 	})
 
 	t.Run("reads neither the themes env var nor the home directory", func(t *testing.T) {

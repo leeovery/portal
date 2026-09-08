@@ -1,8 +1,6 @@
 package sourceguardtest_test
 
 import (
-	"go/ast"
-	"go/build/constraint"
 	"testing"
 
 	"github.com/leeovery/portal/internal/sourceguardtest"
@@ -26,37 +24,22 @@ func TestSourceGuardTestPackage(t *testing.T) {
 		// is anchored at, and it is admissible for the same reason the rule
 		// exists: it is stdlib-only and untagged, so it drags neither a
 		// dependency nor a lane onto the guards built here.
-		sourceguardtest.AssertDepsWithin(t, sourceGuardTestPkg, []string{
-			"github.com/leeovery/portal/internal/harnesstest",
-			"github.com/leeovery/portal/internal/portalbintest",
-		}, sourceguardtest.ForbiddingThirdParty())
+		for _, lane := range sourceguardtest.Lanes() {
+			sourceguardtest.AssertDepsWithin(t, sourceGuardTestPkg, []string{
+				"github.com/leeovery/portal/internal/harnesstest",
+				"github.com/leeovery/portal/internal/portalbintest",
+			}, sourceguardtest.ForbiddingThirdParty(), lane)
+		}
 	})
 
-	// go list resolves a package under the default build tags, so a dependency
-	// behind a tag on one of these sources sits outside every dependency
-	// reading taken of this package — and a primitive behind one carries the
-	// tag onto whatever guard reaches for it.
+	// A primitive behind a tag carries that tag onto every guard reaching for
+	// it, so a tag on any of these sources takes the guards built on them out
+	// of the lane they are meant to run in.
 	t.Run("it carries no build tag, so the guards built on it stay in the unit lane", func(t *testing.T) {
 		for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
-			if line, tagged := buildConstraintLine(source.File); tagged {
-				t.Errorf("%s carries the build constraint %s — a tag here gates every guard built on these primitives out of the unit lane", source.Path, line)
+			if expr, stated := sourceguardtest.BuildConstraint(source.File); stated {
+				t.Errorf("%s carries the build constraint %s — a tag here gates every guard built on these primitives out of the unit lane", source.Path, expr)
 			}
 		}
 	})
-}
-
-// buildConstraintLine reports the first //go:build line preceding the package
-// clause, which is where a build constraint on the file is stated.
-func buildConstraintLine(file *ast.File) (string, bool) {
-	for _, group := range file.Comments {
-		if group.Pos() > file.Package {
-			break
-		}
-		for _, c := range group.List {
-			if _, err := constraint.Parse(c.Text); err == nil {
-				return c.Text, true
-			}
-		}
-	}
-	return "", false
 }

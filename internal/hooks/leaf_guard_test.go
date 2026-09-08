@@ -42,6 +42,8 @@ func TestHooksPackage_ImportsOnlyLeaves(t *testing.T) {
 	})
 
 	t.Run("it drags in no session, tmux or state tree transitively", func(t *testing.T) {
-		sourceguardtest.AssertDepsWithin(t, hooksPkg, hooksMayImport)
+		for _, lane := range sourceguardtest.Lanes() {
+			sourceguardtest.AssertDepsWithin(t, hooksPkg, hooksMayImport, lane)
+		}
 	})
 }

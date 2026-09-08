@@ -2,7 +2,6 @@ package restoretest_test
 
 import (
 	"go/ast"
-	"go/build/constraint"
 	"strings"
 	"testing"
 
@@ -14,7 +13,6 @@ const (
 	sessionRestorerType = "SessionRestorer"
 
 	sessionRestorerConstructor = "restoretest.NewSessionRestorer"
-	integrationTag             = "integration"
 )
 
 // TestNoIntegrationFixtureComposesASessionRestorer is the session-layer half of
@@ -162,23 +160,12 @@ func scanIntegrationSessionRestorerLiterals(t harnesstest.TestingT, opts ...sour
 	return scanned, findings
 }
 
-// isIntegrationTagged evaluates the file's //go:build line with `integration`
+// isIntegrationTagged evaluates the file's build constraint with `integration`
 // as the only satisfied tag, so a file gated on some other tag is not mistaken
 // for one the integration lane compiles.
 func isIntegrationTagged(file *ast.File) bool {
-	for _, group := range file.Comments {
-		if group.Pos() > file.Package {
-			break
-		}
-		for _, c := range group.List {
-			expr, err := constraint.Parse(c.Text)
-			if err != nil {
-				continue
-			}
-			return expr.Eval(func(tag string) bool { return tag == integrationTag })
-		}
-	}
-	return false
+	expr, stated := sourceguardtest.BuildConstraint(file)
+	return stated && sourceguardtest.SatisfiedWith(expr, sourceguardtest.IntegrationTag)
 }
 
 func sessionRestorerLiteralsIn(source sourceguardtest.ParsedSource) []string {

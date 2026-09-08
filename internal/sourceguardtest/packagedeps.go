@@ -26,9 +26,38 @@ func ForbiddingThirdParty() DepsOption {
 	return func(cfg *depsConfig) { cfg.thirdPartyForbidden = true }
 }
 
+// WithBuildTags resolves the package under the named build tags, so a guard can
+// judge a tagged configuration as well as the default one. go list resolves one
+// configuration at a time: a dependency reachable only from a file behind a tag
+// sits outside a reading taken without it, and so outside any rule stated over
+// that reading.
+func WithBuildTags(tags ...string) DepsOption {
+	return func(cfg *depsConfig) { cfg.tags = tags }
+}
+
+// Lanes are the build configurations this module compiles its tests in: the
+// default one, and the integration lane. A guard over a package's dependencies
+// runs over both, so a dependency reachable only from an integration-tagged
+// file is judged rather than resolved away.
+func Lanes() []DepsOption {
+	return []DepsOption{WithBuildTags(), WithBuildTags(IntegrationTag)}
+}
+
 type depsConfig struct {
 	dir                 string
+	tags                []string
 	thirdPartyForbidden bool
+}
+
+// lane names the build configuration a reading was taken under, as a clause to
+// be appended to the package it was taken of, and is empty for the default one:
+// a finding is otherwise unreproducible, since the command a reader would run
+// to confirm it resolves a different set from the one that produced it.
+func (c depsConfig) lane() string {
+	if len(c.tags) == 0 {
+		return ""
+	}
+	return " under -tags " + strings.Join(c.tags, ",")
 }
 
 func newDepsConfig(opts []DepsOption) depsConfig {
@@ -52,9 +81,13 @@ const depFormat = "{{.ImportPath}}\t{{with .Module}}{{.Path}}{{end}}"
 // listDeps is the enumeration seam: the shapes go list cannot be made to
 // produce on demand — an empty set among them — are reachable only by
 // swapping it.
-var listDeps = func(dir, pkg string) ([]dep, error) {
-	cmd := exec.Command("go", "list", "-deps", "-f", depFormat, pkg)
-	cmd.Dir = dir
+var listDeps = func(cfg depsConfig, pkg string) ([]dep, error) {
+	args := []string{"list", "-deps", "-f", depFormat}
+	if len(cfg.tags) > 0 {
+		args = append(args, "-tags", strings.Join(cfg.tags, ","))
+	}
+	cmd := exec.Command("go", append(args, pkg)...)
+	cmd.Dir = cfg.dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, &listError{output: string(out), err: err}
@@ -87,7 +120,8 @@ func (e *listError) Error() string {
 // `go list -deps` reports, pkg itself included, in that command's order. The
 // argument is ordinarily an import path, so a guard resolves the same set
 // regardless of the test binary's working directory; InDir moves that
-// resolution to a chosen directory for a caller that needs one. A package go
+// resolution to a chosen directory for a caller that needs one, and
+// WithBuildTags takes it under a chosen build configuration. A package go
 // list cannot resolve, and a set that comes back empty, are both fatal: a
 // guard must fail rather than pass over nothing.
 func PackageDeps(t harnesstest.TestingT, pkg string, opts ...DepsOption) []string {
@@ -103,13 +137,14 @@ func PackageDeps(t harnesstest.TestingT, pkg string, opts ...DepsOption) []strin
 func packageDeps(t harnesstest.TestingT, pkg string, opts []DepsOption) []dep {
 	t.Helper()
 
-	deps, err := listDeps(newDepsConfig(opts).dir, pkg)
+	cfg := newDepsConfig(opts)
+	deps, err := listDeps(cfg, pkg)
 	if err != nil {
-		t.Fatalf("go list -deps %s: %v", pkg, err)
+		t.Fatalf("go list -deps %s%s: %v", pkg, cfg.lane(), err)
 		return nil
 	}
 	if len(deps) == 0 {
-		t.Fatalf("go list -deps %s resolved no dependencies at all — a guard over this set would pass vacuously", pkg)
+		t.Fatalf("go list -deps %s%s resolved no dependencies at all — a guard over this set would pass vacuously", pkg, cfg.lane())
 		return nil
 	}
 	return deps

@@ -12,5 +12,7 @@ const shellquotePkg = "github.com/leeovery/portal/internal/shellquote"
 // can only ever depend on the standard library: an empty allowlist, taken
 // across other modules as well as this one.
 func TestShellQuotePackage_DependsOnTheStandardLibraryAlone(t *testing.T) {
-	sourceguardtest.AssertDepsWithin(t, shellquotePkg, nil, sourceguardtest.ForbiddingThirdParty())
+	for _, lane := range sourceguardtest.Lanes() {
+		sourceguardtest.AssertDepsWithin(t, shellquotePkg, nil, sourceguardtest.ForbiddingThirdParty(), lane)
+	}
 }

@@ -12,5 +12,7 @@ const nanoidPkg = "github.com/leeovery/portal/internal/nanoid"
 // it can only ever depend on the standard library: an empty allowlist, taken
 // across other modules as well as this one.
 func TestNanoIDPackage_DependsOnTheStandardLibraryAlone(t *testing.T) {
-	sourceguardtest.AssertDepsWithin(t, nanoidPkg, nil, sourceguardtest.ForbiddingThirdParty())
+	for _, lane := range sourceguardtest.Lanes() {
+		sourceguardtest.AssertDepsWithin(t, nanoidPkg, nil, sourceguardtest.ForbiddingThirdParty(), lane)
+	}
 }

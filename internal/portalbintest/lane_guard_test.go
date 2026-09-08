@@ -3,7 +3,6 @@ package portalbintest_test
 import (
 	"fmt"
 	"go/ast"
-	"go/build/constraint"
 	"go/parser"
 	"go/token"
 	"path/filepath"
@@ -14,9 +13,6 @@ import (
 
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
-
-// integrationTag is the tag the integration lane is selected by.
-const integrationTag = "integration"
 
 // buildHelperNames is the vocabulary the rule is expressed in: every helper that
 // compiles the portal binary, matched on the callee's own name so a qualified
@@ -87,26 +83,12 @@ func buildHelperRefsIn(source sourceguardtest.ParsedSource) []helperRef {
 }
 
 // compiledInUnitLane reports whether the unit lane compiles the file — that is,
-// whether its build constraint holds with the integration tag unset. A file with
-// no constraint is in the lane, and so is one whose constraint cannot be parsed:
-// where the tag is unreadable the guard judges rather than excuses.
+// whether its build constraint holds with the integration tag unset. A file
+// stating no constraint the guard can read is in the lane, so where the tag is
+// unreadable the guard judges rather than excuses.
 func compiledInUnitLane(file *ast.File) bool {
-	for _, group := range file.Comments {
-		if group.Pos() > file.Package {
-			break
-		}
-		for _, comment := range group.List {
-			if !constraint.IsGoBuild(comment.Text) {
-				continue
-			}
-			expr, err := constraint.Parse(comment.Text)
-			if err != nil {
-				return true
-			}
-			return expr.Eval(func(tag string) bool { return tag != integrationTag })
-		}
-	}
-	return true
+	expr, stated := sourceguardtest.BuildConstraint(file)
+	return !stated || sourceguardtest.SatisfiedWithout(expr, sourceguardtest.IntegrationTag)
 }
 
 // auditBuildHelperLane returns how many unit-lane test files it judged, how many
@@ -139,7 +121,7 @@ func laneGuardFailure(scanned, referenced int, defects []string) string {
 	}
 	return fmt.Sprintf("%d unit-lane test file(s) build the portal binary:\n  %s\n"+
 		"  a test that builds the binary carries //go:build %s, which keeps `go test ./...` free of portal builds",
-		len(defects), strings.Join(defects, "\n  "), integrationTag)
+		len(defects), strings.Join(defects, "\n  "), sourceguardtest.IntegrationTag)
 }
 
 // stageTestFile parses one miniature fixture file into the record the rule is

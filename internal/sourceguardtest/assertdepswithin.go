@@ -29,7 +29,7 @@ func AssertDepsWithin(t harnesstest.TestingT, pkg string, allowed []string, opts
 
 	ownModule, found := moduleOf(deps, pkg)
 	if !found {
-		t.Fatalf("go list -deps %s resolved a set that does not hold %s itself — this guard is judging some other package", pkg, pkg)
+		t.Fatalf("go list -deps %s%s resolved a set that does not hold %s itself — this guard is judging some other package", pkg, cfg.lane(), pkg)
 		return
 	}
 
@@ -41,12 +41,12 @@ func AssertDepsWithin(t harnesstest.TestingT, pkg string, allowed []string, opts
 		case slices.Contains(allowed, d.Path):
 			sawAllowed = true
 		default:
-			t.Errorf("%s transitively depends on %s — it may reach no further than %v", pkg, d.Path, allowed)
+			t.Errorf("%s%s transitively depends on %s — it may reach no further than %v", pkg, cfg.lane(), d.Path, allowed)
 		}
 	}
 
 	if len(allowed) > 0 && !sawAllowed {
-		t.Fatalf("%s depends on none of %v — the allowlist no longer describes the package, so this guard proves nothing", pkg, allowed)
+		t.Fatalf("%s%s depends on none of %v — the allowlist no longer describes the package, so this guard proves nothing", pkg, cfg.lane(), allowed)
 	}
 }
 

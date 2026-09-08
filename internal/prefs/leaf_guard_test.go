@@ -14,5 +14,7 @@ const prefsPkg = "github.com/leeovery/portal/internal/prefs"
 var prefsMayImport = []string{"github.com/leeovery/portal/internal/fileutil"}
 
 func TestPrefsIsALeaf(t *testing.T) {
-	sourceguardtest.AssertDepsWithin(t, prefsPkg, prefsMayImport)
+	for _, lane := range sourceguardtest.Lanes() {
+		sourceguardtest.AssertDepsWithin(t, prefsPkg, prefsMayImport, lane)
+	}
 }
