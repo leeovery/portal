@@ -359,3 +359,13 @@ Address findings from Analysis (Cycle 4).
 | resume-hooks-silently-lost-9-50 | The rename-refusal copy is a literal in four places with nothing tying them together | The refusal wordings are exported once and read by the capture fixture tables; A re-wording that does not move the README fails the guard; The guard enumerates the exported vocabulary, so a newly added refusal is covered with no guard edit; The README documents the refusal in the picker's `r`-key context, not only in the `hook` section, and the keymap table points at it; CLAUDE.md states the enforcement rather than the discipline |
 | resume-hooks-silently-lost-9-51 | The source-reading guards certified under `go test -overlay` are unverified | Every `sourceguardtest`-driven source-reading guard has been observed failing against a real violation introduced in a scratch copy; No guard's certification rests on a `go test -overlay` probe; The verification method and the reason an overlay cannot serve are recorded in `internal/sourceguardtest`'s package documentation; Any guard found not to bite is named and either fixed or raised; The working tree is left unmodified by the verification itself |
 | resume-hooks-silently-lost-9-52 | CLAUDE.md's architecture rows carry three claims the tree has moved past | The `tmux` row's enumeration includes `attach-session` and both of its sites; The `session` row describes sanitisation and the generation-to-recogniser pinning; Neither re-voiced `logtest` claim states a count; The `Sink`-everywhere claim accounts for the JSON-handler exception by name; Every statement in the edited rows is true against the tree at the time of the edit |
+
+### Phase 10: Guard Cache Correctness
+
+Ad hoc additions.
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| resume-hooks-silently-lost-10-1 | A dependency guard's verdict can be served stale from the test cache | Adding an `integration`-tagged file to a package guarded through `Lanes()` invalidates that package's test cache, observed without `-count=1`; The same experiment run against the pre-change primitive is observed *not* to invalidate, so the fix is shown to be what closes it; The directory read happens inside `PackageDeps` for every caller, rather than being added per guard; The reason for the read is stated where the read is, in terms of the subprocess boundary; No guard's verdict changes: every leaf guard passes on the unmodified tree and still reports the dependencies it reported before |
