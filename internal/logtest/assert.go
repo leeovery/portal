@@ -43,9 +43,10 @@ func AssertRecord(t harnesstest.TestingT, rec Record, want RecordWant) {
 
 // AssertWriteFailure checks the tail every failed-write breadcrumb carries: the
 // error_class token the write phase classified to, and that the error attr
-// carries a value wrapping sentinel. The sentinel is a parameter rather than
-// resolved here so that logtest — reachable from every test package in the tree
-// — takes no dependency on the package that declares it.
+// carries a value wrapping sentinel. The caller names the sentinel rather than
+// this helper resolving it, so the edge to the package declaring it stays with
+// that caller instead of arriving in every test package in the tree, all of
+// which may reach for this one.
 func AssertWriteFailure(t harnesstest.TestingT, rec Record, wantClass string, sentinel error) {
 	t.Helper()
 	if got := rec.AttrString(t, "error_class"); got != wantClass {
