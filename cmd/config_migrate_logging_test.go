@@ -4,8 +4,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/fileutil"
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/xdg"
 )
@@ -22,6 +25,26 @@ func seedOldFile(t *testing.T, tmpDir, filename, content string) (oldPath, newPa
 	}
 	newPath = filepath.Join(tmpDir, ".config", "portal", filename)
 	return oldPath, newPath
+}
+
+// denyRenameFixture stages a seeded old file whose destination directory is
+// read+execute-only, so MkdirAll succeeds on the existing dir but the rename
+// into it fails.
+func denyRenameFixture(t *testing.T) (oldPath, newPath, component string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	oldPath, _ = seedOldFile(t, tmpDir, "projects.json", "data")
+
+	newDir := filepath.Join(tmpDir, ".config", "portal")
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatalf("failed to create new dir: %v", err)
+	}
+	if err := os.Chmod(newDir, 0o555); err != nil {
+		t.Fatalf("failed to chmod new dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(newDir, 0o755) })
+
+	return oldPath, filepath.Join(newDir, "projects.json"), "projects"
 }
 
 func TestMigrateConfigFileLogging(t *testing.T) {
@@ -135,25 +158,12 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 		}
 	})
 
-	t.Run("emits one WARN with error_class=write-failed-rename when os.Rename fails", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		oldPath, _ := seedOldFile(t, tmpDir, "projects.json", "data")
-
-		// Read+execute-only, so MkdirAll succeeds on the existing dir but the
-		// rename into it fails.
-		newDir := filepath.Join(tmpDir, ".config", "portal")
-		if err := os.MkdirAll(newDir, 0o755); err != nil {
-			t.Fatalf("failed to create new dir: %v", err)
-		}
-		if err := os.Chmod(newDir, 0o555); err != nil {
-			t.Fatalf("failed to chmod new dir: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(newDir, 0o755) })
-		newPath := filepath.Join(newDir, "projects.json")
+	t.Run("it wraps the migrate rename failure in the rename write-phase sentinel", func(t *testing.T) {
+		oldPath, newPath, component := denyRenameFixture(t)
 
 		sink := logtest.Install(t)
 
-		migrateConfigFile(oldPath, newPath, "projects")
+		migrateConfigFile(oldPath, newPath, component)
 
 		rec := sink.Records().Only(t, "log record")
 		logtest.AssertRecord(t, rec, logtest.RecordWant{
@@ -166,19 +176,14 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 		if got := rec.AttrString(t, "path"); got != newPath {
 			t.Errorf("path = %q, want %q", got, newPath)
 		}
-		if got := rec.AttrString(t, "error_class"); got != "write-failed-rename" {
-			t.Errorf("error_class = %q, want %q", got, "write-failed-rename")
-		}
-		if !rec.HasAttr("error") {
-			t.Errorf("WARN record missing error attr: %+v", rec.Attrs)
-		}
+		logtest.AssertWriteFailure(t, rec, "write-failed-rename", fileutil.ErrWriteRename)
 
 		if _, err := os.Stat(oldPath); err != nil {
 			t.Errorf("old file should still exist after failed rename: %v", err)
 		}
 	})
 
-	t.Run("emits one WARN with error_class=write-failed-temp-create when MkdirAll fails", func(t *testing.T) {
+	t.Run("it wraps the migrate temp-create failure in the temp-create write-phase sentinel", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		oldPath, _ := seedOldFile(t, tmpDir, "projects.json", "data")
 
@@ -206,11 +211,34 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 		if got := rec.AttrString(t, "path"); got != filepath.Dir(newPath) {
 			t.Errorf("path = %q, want %q", got, filepath.Dir(newPath))
 		}
-		if got := rec.AttrString(t, "error_class"); got != "write-failed-temp-create" {
-			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
+		logtest.AssertWriteFailure(t, rec, "write-failed-temp-create", fileutil.ErrWriteTempCreate)
+	})
+
+	t.Run("it fails when the carried error does not wrap the classified phase sentinel", func(t *testing.T) {
+		sink := logtest.Install(t)
+
+		migrateConfigFile(denyRenameFixture(t))
+
+		rec := sink.Records().Only(t, "log record")
+		spy := &harnesstest.Recorder{}
+		logtest.AssertWriteFailure(spy, rec, "write-failed-rename", fileutil.ErrWriteWrite)
+
+		if len(spy.Errors) != 1 {
+			t.Errorf("AssertWriteFailure reported %d failures against a mismatched sentinel, want 1: %v", len(spy.Errors), spy.Errors)
 		}
-		if !rec.HasAttr("error") {
-			t.Errorf("WARN record missing error attr: %+v", rec.Attrs)
+	})
+
+	t.Run("it renders the same error_class token as before", func(t *testing.T) {
+		sink := logtest.Install(t)
+
+		migrateConfigFile(denyRenameFixture(t))
+
+		line := sink.Records().Only(t, "log record")
+		if got := line.AttrString(t, "error_class"); got != "write-failed-rename" {
+			t.Errorf("error_class = %q, want %q", got, "write-failed-rename")
+		}
+		if !strings.Contains(sink.Body(), " error_class=write-failed-rename") {
+			t.Errorf("rendered line does not carry the unchanged error_class token: %q", sink.Body())
 		}
 	})
 

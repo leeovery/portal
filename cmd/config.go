@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
@@ -25,14 +26,16 @@ func migrateConfigFile(oldPath, newPath, component string) {
 
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
 		if component != "" {
-			log.For(component).Warn("migrate", "op", "migrate", "via", "migrate", "path", filepath.Dir(newPath), "error", err, "error_class", "write-failed-temp-create")
+			wrapped := fmt.Errorf("%w: failed to create directory: %w", fileutil.ErrWriteTempCreate, err)
+			log.For(component).Warn("migrate", "op", "migrate", "via", "migrate", "path", filepath.Dir(newPath), "error", wrapped, "error_class", "write-failed-temp-create")
 		}
 		return
 	}
 
 	if err := os.Rename(oldPath, newPath); err != nil {
 		if component != "" {
-			log.For(component).Warn("migrate", "op", "migrate", "via", "migrate", "path", newPath, "error", err, "error_class", "write-failed-rename")
+			wrapped := fmt.Errorf("%w: failed to rename: %w", fileutil.ErrWriteRename, err)
+			log.For(component).Warn("migrate", "op", "migrate", "via", "migrate", "path", newPath, "error", wrapped, "error_class", "write-failed-rename")
 		}
 		return
 	}
