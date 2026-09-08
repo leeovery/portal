@@ -280,7 +280,9 @@
             "resume-hooks-silently-lost-9-49": "tick-7ae640",
             "resume-hooks-silently-lost-9-50": "tick-216be1",
             "resume-hooks-silently-lost-9-51": "tick-28c67a",
-            "resume-hooks-silently-lost-9-52": "tick-bbd73e"
+            "resume-hooks-silently-lost-9-52": "tick-bbd73e",
+            "resume-hooks-silently-lost-10": "tick-b1bd9a",
+            "resume-hooks-silently-lost-10-1": "tick-15722f"
           },
           "storage_paths": [
             ".tick/"
@@ -790,6 +792,12 @@
                 "50": "approved",
                 "51": "approved",
                 "52": "approved"
+              }
+            },
+            "ad-hoc-1": {
+              "gate_mode": "gated",
+              "tasks": {
+                "1": "approved"
               }
             }
           },
