@@ -49,6 +49,15 @@ type depsConfig struct {
 	thirdPartyForbidden bool
 }
 
+// sourceDir is the directory the judged package's own sources are read from,
+// which is the test binary's working directory unless a caller named another.
+func (c depsConfig) sourceDir() string {
+	if c.dir == "" {
+		return "."
+	}
+	return c.dir
+}
+
 // lane names the build configuration a reading was taken under, as a clause to
 // be appended to the package it was taken of, and is empty for the default one:
 // a finding is otherwise unreproducible, since the command a reader would run
@@ -95,6 +104,14 @@ var listDeps = func(cfg depsConfig, pkg string) ([]dep, error) {
 	return parseDeps(string(out)), nil
 }
 
+// readPackageSources opens the judged package's directory so that the
+// directory and the .go files it holds are recorded as inputs of the test
+// binary that judged it. What the read yields is discarded and an unreadable
+// directory is not an error: the read exists for its record, not its result.
+var readPackageSources = func(dir string) {
+	_, _ = PackageGoFiles(dir, true)
+}
+
 func parseDeps(out string) []dep {
 	var deps []dep
 	for line := range strings.SplitSeq(out, "\n") {
@@ -124,6 +141,14 @@ func (e *listError) Error() string {
 // WithBuildTags takes it under a chosen build configuration. A package go
 // list cannot resolve, and a set that comes back empty, are both fatal: a
 // guard must fail rather than pass over nothing.
+//
+// The directory the enumeration runs from — the package's own, unless InDir
+// named another — is read first, and the result of that read is thrown away.
+// go list runs as a subprocess, whose
+// reads the test cache cannot see, and a source behind a build tag is compiled
+// into no test binary of the default lane — so without a read taken by the
+// judging binary itself, adding such a source moves nothing about the cache
+// key, and the guard reports a cached pass over a tree it never re-read.
 func PackageDeps(t harnesstest.TestingT, pkg string, opts ...DepsOption) []string {
 	t.Helper()
 
@@ -138,6 +163,7 @@ func packageDeps(t harnesstest.TestingT, pkg string, opts []DepsOption) []dep {
 	t.Helper()
 
 	cfg := newDepsConfig(opts)
+	readPackageSources(cfg.sourceDir())
 	deps, err := listDeps(cfg, pkg)
 	if err != nil {
 		t.Fatalf("go list -deps %s%s: %v", pkg, cfg.lane(), err)
