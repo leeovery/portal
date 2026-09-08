@@ -357,21 +357,85 @@ func abortingEnumeration(entries *int) func(hooks.Snapshot) ([]string, error) {
 	}
 }
 
+// halfRelationCrossoverBound is the mutation bound the half-relation is tightest
+// at: the fraction is already exhausted there, so the pre-read stands at exactly
+// half the mutation bound and a comparison against a mutation bound halved in
+// integer arithmetic reads the two as equal.
+const halfRelationCrossoverBound = 10 * time.Millisecond
+
+// sampledMutationBounds are the production mutation bound and the lowered
+// figures a test drives it at.
+func sampledMutationBounds() []time.Duration {
+	return []time.Duration{2 * time.Second, 300 * time.Millisecond, 60 * time.Millisecond}
+}
+
+// pollIntervalFloor reports the floor the derived pre-read bound rests on. A
+// mutation bound of a single nanosecond exhausts the fraction — it divides away
+// to nothing — so what comes back is the floor and nothing else.
+func pollIntervalFloor(t *testing.T) time.Duration {
+	t.Helper()
+	hooks.SetLockTimeoutForTest(t, time.Nanosecond)
+	return hooks.SnapshotLockBoundForTest(t)
+}
+
+// assertHalfRelation pins the pre-read bound at no more than half the mutation
+// bound, so a contended clean costs the daemon's tick one bound rather than two.
+// Multiplying the pre-read rather than halving the mutation bound keeps the
+// comparison off Go's integer division, which discards the remainder of an odd
+// bound and would read a pre-read below half as equal to it.
+func assertHalfRelation(t *testing.T, mutation time.Duration) {
+	t.Helper()
+	hooks.SetLockTimeoutForTest(t, mutation)
+	preRead := hooks.SnapshotLockBoundForTest(t)
+	if 2*preRead > mutation {
+		t.Errorf("pre-read bound = %v at a %v mutation bound — a contended clean must cost one bound, not two", preRead, mutation)
+	}
+}
+
 // The clean's advisory pre-read is bounded as a fraction of the mutation bound
 // rather than at a figure of its own, so the relationship between the two is
 // visible at the declaration and a test that lowers one lowers both.
 func TestSnapshotLockBoundDerivation(t *testing.T) {
-	t.Run("it bounds the clean's pre-read below the mutation bound", func(t *testing.T) {
-		for _, mutation := range []time.Duration{2 * time.Second, 300 * time.Millisecond, 60 * time.Millisecond} {
+	t.Run("it pins the pre-read bound at the poll-interval floor", func(t *testing.T) {
+		floor := pollIntervalFloor(t)
+		if floor <= 0 {
+			t.Fatalf("the floor is %v — a bound at or below zero is waited out before it is ever tested", floor)
+		}
+		for _, mutation := range append(sampledMutationBounds(), halfRelationCrossoverBound) {
 			hooks.SetLockTimeoutForTest(t, mutation)
-			preRead := hooks.SnapshotLockBoundForTest(t)
-			if preRead <= 0 {
-				t.Errorf("pre-read bound = %v at a %v mutation bound — it must still grant an uncontended lock", preRead, mutation)
-			}
-			if preRead >= mutation/2 {
-				t.Errorf("pre-read bound = %v at a %v mutation bound — a contended clean must cost one bound, not two", preRead, mutation)
+			if preRead := hooks.SnapshotLockBoundForTest(t); preRead < floor {
+				t.Errorf("pre-read bound = %v at a %v mutation bound — it must not fall below the %v floor, under which the deadline is re-tested only after a poll sleep and the figure named stops being the figure waited", preRead, mutation, floor)
 			}
 		}
+	})
+
+	t.Run("it grants an uncontended acquire whatever the bound", func(t *testing.T) {
+		for _, bound := range []time.Duration{2 * time.Second, 0, -time.Second} {
+			hooks.SetLockTimeoutForTest(t, bound)
+			store, _ := hookstest.StageStore(t, hookstest.Staging{Entries: numberedEntries(1)})
+
+			sink := logtest.Install(t)
+			h, err := store.Load(hooks.ViaCLI)
+			if err != nil {
+				t.Fatalf("Load at a %v bound: %v", bound, err)
+			}
+			if len(h) != 1 {
+				t.Fatalf("got %d entries at a %v bound, want 1", len(h), bound)
+			}
+			if got := hookstest.UnlockedRecords(t, sink); len(got) != 0 {
+				t.Errorf("a %v bound degraded an uncontended read to an unlocked one: %+v — the lock is granted before any deadline is tested, so no figure of the bound is what grants it", bound, got)
+			}
+		}
+	})
+
+	t.Run("it holds the half-relation at the production bound and the lowered test bounds", func(t *testing.T) {
+		for _, mutation := range sampledMutationBounds() {
+			assertHalfRelation(t, mutation)
+		}
+	})
+
+	t.Run("it holds the half-relation at the integer-division crossover bound", func(t *testing.T) {
+		assertHalfRelation(t, halfRelationCrossoverBound)
 	})
 
 	t.Run("it lowers the pre-read bound with the mutation bound under test", func(t *testing.T) {
