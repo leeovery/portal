@@ -353,7 +353,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 9,
-          "current_task": "resume-hooks-silently-lost-9-19",
+          "current_task": "resume-hooks-silently-lost-9-20",
           "completed_tasks": [
             "resume-hooks-silently-lost-1-1",
             "resume-hooks-silently-lost-1-2",
@@ -531,7 +531,8 @@
             "resume-hooks-silently-lost-9-15",
             "resume-hooks-silently-lost-9-16",
             "resume-hooks-silently-lost-9-17",
-            "resume-hooks-silently-lost-9-18"
+            "resume-hooks-silently-lost-9-18",
+            "resume-hooks-silently-lost-9-19"
           ],
           "staging": {
             "p1": {
@@ -1333,6 +1334,56 @@
                 "internal/tui/theme_source_guard_test.go",
                 "cmd/open_theme_nomination_test.go",
                 "internal/sourceguardtest/parsesources.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-19",
+              "source": "executor",
+              "summary": "The guard family verdicts can be served stale from the go test cache when the change is behind a build tag",
+              "detail": "Adding an //go:build integration file to internal/shellquote / internal/harnesstest / internal/xdg left go test ./internal/... reporting (cached) and passing — the tagged file is not an input to the default-lane test binary, so the cache key does not move, and the newly tag-aware assertion never re-ran (-count=1 fails immediately). This affects every guard whose verdict comes from an external go list: all eight sites calling sourceguardtest.Lanes() plus cmd/capturetool/import_guard_test.go:33. A fix (marking these tests uncacheable, or folding the tagged file set into the test own read inputs) belongs to the guard family, not to one package.",
+              "files": [
+                "internal/sourceguardtest/packagedeps.go",
+                "internal/sourceguardtest/leaf_guard_test.go",
+                "internal/nanoid/leaf_guard_test.go",
+                "internal/shellquote/leaf_guard_test.go",
+                "internal/harnesstest/leaf_guard_test.go",
+                "internal/xdg/leaf_guard_test.go",
+                "internal/prefs/leaf_guard_test.go",
+                "internal/hooks/leaf_guard_test.go",
+                "internal/theme/leaf_guard_test.go",
+                "cmd/capturetool/import_guard_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-19",
+              "source": "reviewer",
+              "summary": "The parse-one-miniature-fixture-source preamble is re-authored at four guard sites, and this task added the fourth",
+              "detail": "parser.ParseFile(fset, <name>, src, sourceguardtest.ParseMode) followed by the identical t.Fatalf(\"parse fixture source: %v\", err) and, in three of the four, a hand-assembled sourceguardtest.ParsedSource{Path, Fset, File} — internal/sourceguardtest/buildconstraint_test.go:132-140 (new), internal/portalbintest/lane_guard_test.go:127-141, internal/logtest/install_guard_test.go:145-153, internal/portaltest/teardown_guard_coverage_rule_test.go:145-152. The natural home is a sourceguardtest.ParseFixture(t, path, src) ParsedSource primitive beside ParseSources, which already owns the parse step between enumeration and traversal and the single stated ParseMode. The fix touches four packages, so it is outside this task.",
+              "files": [
+                "internal/sourceguardtest/parsesources.go",
+                "internal/sourceguardtest/buildconstraint_test.go",
+                "internal/portalbintest/lane_guard_test.go",
+                "internal/logtest/install_guard_test.go",
+                "internal/portaltest/teardown_guard_coverage_rule_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-19",
+              "source": "reviewer",
+              "summary": "The tmux target-composition guard asks the build-tag question its own way, and asks it in one lane only",
+              "detail": "internal/tmux/target_composition_guard_test.go:63 hardcodes \"integration\" in its go list -tags argv while already importing sourceguardtest (:18), so it could take sourceguardtest.IntegrationTag — the last routable copy of the literal in the guard family. Separately, that listing is taken under -tags integration alone (:60-70), the mirror of the blindness this task closed: a package reaching internal/tmux only from a //go:build !integration file never appears in importersOfTmux, so the targets it composes are never scanned. The fix is the same Lanes()-style two-reading shape, in a guard this task does not name.",
+              "files": [
+                "internal/tmux/target_composition_guard_test.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-19",
+              "source": "reviewer",
+              "summary": "The integration literal in portalbintest/build.go cannot reach the constant without moving it",
+              "detail": "internal/portalbintest/build.go:67 composes go build -tags integration. It cannot import sourceguardtest (that package imports portalbintest for ProjectRoot), so sharing the spelling would mean re-homing IntegrationTag into a lower leaf both can reach — a move that touches the guard family beyond this task files.",
+              "files": [
+                "internal/portalbintest/build.go",
+                "internal/sourceguardtest/buildconstraint.go"
               ]
             }
           ]
