@@ -353,7 +353,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 9,
-          "current_task": "resume-hooks-silently-lost-9-21",
+          "current_task": "resume-hooks-silently-lost-9-22",
           "completed_tasks": [
             "resume-hooks-silently-lost-1-1",
             "resume-hooks-silently-lost-1-2",
@@ -533,7 +533,8 @@
             "resume-hooks-silently-lost-9-17",
             "resume-hooks-silently-lost-9-18",
             "resume-hooks-silently-lost-9-19",
-            "resume-hooks-silently-lost-9-20"
+            "resume-hooks-silently-lost-9-20",
+            "resume-hooks-silently-lost-9-21"
           ],
           "staging": {
             "p1": {
@@ -1385,6 +1386,27 @@
               "files": [
                 "internal/portalbintest/build.go",
                 "internal/sourceguardtest/buildconstraint.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-21",
+              "source": "executor",
+              "summary": "The same Exe/os.Executable trap is restated once more outside internal/restoretest, out of this task reach",
+              "detail": "internal/bootstrapadapter/adapters_test.go:102 carries its own copy of the rationale (\"Exe falls back to os.Executable, which under go test is the test binary...\"). Task 9-21 acceptance criteria scope the single-statement rule to internal/restoretest, so it was left. Consolidating it would mean pointing that comment at restoretest.StagedHydrateExe from a different package test file — a judgement about cross-package comment references rather than a mechanical edit.",
+              "files": [
+                "internal/bootstrapadapter/adapters_test.go",
+                "internal/restoretest/restoretest.go"
+              ]
+            },
+            {
+              "task": "resume-hooks-silently-lost-9-21",
+              "source": "reviewer",
+              "summary": "The same Exe/os.Executable trap is restated twice more in internal/bootstrapadapter (supersedes the executor entry — bank once)",
+              "detail": "internal/bootstrapadapter/adapters_test.go:102-105 carries a near-verbatim copy of the rationale, and internal/bootstrapadapter/adapters.go:69-73 carries a third variant on NewRestoreAdapter own doc. AC 1 scopes the single-statement rule to internal/restoretest, so both are out of reach here. The consolidation is a judgement, not a mechanical edit: the test file could point at restoretest.StagedHydrateExe across a package boundary, but the production doc on adapters.go arguably should not reference a test helper at all and may be right to state its own rationale in place.",
+              "files": [
+                "internal/bootstrapadapter/adapters_test.go",
+                "internal/bootstrapadapter/adapters.go",
+                "internal/restoretest/restoretest.go"
               ]
             }
           ]
