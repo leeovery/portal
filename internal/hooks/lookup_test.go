@@ -1,7 +1,6 @@
 package hooks_test
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -124,14 +123,10 @@ func TestLookupOnResume(t *testing.T) {
 	})
 
 	t.Run("surfaces a wrapped I/O error distinct from the no-hook case", func(t *testing.T) {
-		filePath := filepath.Join(t.TempDir(), "hooks.json")
-		// Reading a directory returns EISDIR, not ErrNotExist, so the error
-		// propagates rather than degrading to "no hook".
-		if err := os.Mkdir(filePath, 0o700); err != nil {
-			t.Fatalf("failed to create directory: %v", err)
-		}
+		// An unreadable hooks.json reads as EISDIR, not ErrNotExist, so the
+		// error propagates rather than degrading to "no hook".
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
 
-		store := hooks.NewStore(filePath)
 		cmd, ok, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
 		if err == nil {
 			t.Fatalf("expected error, got nil")
@@ -165,14 +160,11 @@ func TestLookupOnResume(t *testing.T) {
 	})
 
 	t.Run("it refuses an empty hook key before reading the file", func(t *testing.T) {
-		filePath := filepath.Join(t.TempDir(), "hooks.json")
-		// A directory would surface EISDIR out of the store's read, so a clean
-		// miss here proves the file was never consulted.
-		if err := os.Mkdir(filePath, 0o700); err != nil {
-			t.Fatalf("failed to create directory: %v", err)
-		}
+		// An unreadable hooks.json would surface EISDIR out of the store's read,
+		// so a clean miss here proves the file was never consulted.
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
 
-		cmd, ok, err := hooks.NewStore(filePath).LookupOnResume("", hooks.ViaHydrate)
+		cmd, ok, err := store.LookupOnResume("", hooks.ViaHydrate)
 		assertNoHook(t, cmd, ok, err)
 	})
 }

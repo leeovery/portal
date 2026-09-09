@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -18,13 +19,9 @@ type HookKeyResolver interface {
 	ResolveHookKey(paneID tmux.Target) (string, error)
 }
 
-// PaneHookLister returns one row per live pane: the pane's hook token, empty
-// for an unstamped pane, alongside its display-only location. The row count
-// answers whether the tmux read succeeded and the non-empty tokens answer which
-// panes are protected — two questions no consumer may conflate.
-type PaneHookLister interface {
-	ListAllPaneHookKeys() ([]tmux.PaneHookRow, error)
-}
+// PaneHookLister is the staleness cycle's live pane enumeration, declared once
+// in internal/hooksweep and aliased here for cmd's own seams.
+type PaneHookLister = hooksweep.PaneHookLister
 
 // PaneOptionSetter writes one tmux option onto one pane.
 type PaneOptionSetter interface {

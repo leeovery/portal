@@ -445,7 +445,7 @@ func TestHooksSetCommand(t *testing.T) {
 			t.Errorf("error = %q, want tmux's own words %q unaltered", err.Error(), stderr)
 		}
 		if _, ok := errors.AsType[*tmux.CommandError](err); !ok {
-			t.Errorf("error %v is not a recoverable *tmux.CommandError (errors.As failed)", err)
+			t.Errorf("errors.AsType[*tmux.CommandError](err) = false; want a recoverable *tmux.CommandError; err = %v", err)
 		}
 
 		if _, statErr := os.Stat(hooksFile); statErr == nil {

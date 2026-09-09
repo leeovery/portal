@@ -39,7 +39,6 @@ func requirePoisonedHome(t *testing.T) string {
 func TestPackageWideHomePoison(t *testing.T) {
 	t.Run("it resolves a default config path under the package-wide poisoned HOME when a subtest pins none", func(t *testing.T) {
 		home := requirePoisonedHome(t)
-		t.Setenv("XDG_CONFIG_HOME", "")
 
 		got, err := configFilePath(xdg.ConfigFileID{EnvVar: "TEST_HOME_POISON_UNSET", Filename: "projects.json"})
 		if err != nil {

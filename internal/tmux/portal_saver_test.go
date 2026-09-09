@@ -2763,7 +2763,10 @@ func TestWaitForSaverDaemonReady_KeepsWaitingWhileTheObservationChangesPastTheSt
 }
 
 func TestWaitForSaverDaemonReady_WaitsOutADaemonWhosePIDFileAppearsPastTheStall(t *testing.T) {
-	const stall = 40 * time.Millisecond
+	// Scaled so each leg clears the next by ~50ms: the pid file appears at
+	// 150ms, re-arming the stall deadline at ~350ms, and the daemon identifies
+	// at 300ms — a deschedule between the two observations cannot decide it.
+	const stall = 200 * time.Millisecond
 	installReadinessPollInterval(t, 1*time.Millisecond)
 	installReadinessBudget(t, stall, 5*time.Second)
 

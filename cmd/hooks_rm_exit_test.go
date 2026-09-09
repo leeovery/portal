@@ -172,7 +172,7 @@ func TestHooksRmExitsZeroOnlyWhenItRemoved(t *testing.T) {
 			t.Errorf("error = %q, want tmux's own words %q unaltered", err.Error(), stderr)
 		}
 		if _, ok := errors.AsType[*tmux.CommandError](err); !ok {
-			t.Errorf("error %v is not a recoverable *tmux.CommandError (errors.As failed)", err)
+			t.Errorf("errors.AsType[*tmux.CommandError](err) = false; want a recoverable *tmux.CommandError; err = %v", err)
 		}
 	})
 
@@ -228,8 +228,8 @@ func TestHooksRmExitsZeroOnlyWhenItRemoved(t *testing.T) {
 		hooksFileInTempDir(t, nil)
 		t.Setenv("TMUX_PANE", "%3")
 
-		// The poisoned pair doubles as the assertion here: a body that reached
-		// the pane would surface the seam's error in place of this message.
+		// The poisoned resolver doubles as an assertion on the message: a body
+		// that resolved the pane would surface the seam's error in place of it.
 		resolver, stamper := paneKeyPathSeams()
 		withHooksDeps(t, HooksDeps{KeyResolver: resolver, PaneStamper: stamper})
 
@@ -241,6 +241,7 @@ func TestHooksRmExitsZeroOnlyWhenItRemoved(t *testing.T) {
 		if err.Error() != want {
 			t.Errorf("error = %q, want %q", err.Error(), want)
 		}
+		assertNoPaneTmuxCalls(t, resolver, stamper)
 	})
 
 	t.Run("it exits 0 and removes on the resolved-token path", func(t *testing.T) {

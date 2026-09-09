@@ -48,7 +48,7 @@ func TestBuildProductionSpawnSeams(t *testing.T) {
 			t.Fatal("Exists seam is nil")
 		}
 		if got := seams.Exists("mysession"); !got {
-			t.Errorf("Exists returned false; quietCommander defaults to no error, want true")
+			t.Errorf("Exists returned false; commandertest.Quiet defaults to no error, want true")
 		}
 		want := []string{"has-session", "-t", "=mysession:"}
 		if len(cmder.Calls()) != 1 || !slices.Equal(cmder.Calls()[0], want) {

@@ -1,9 +1,10 @@
 package cmd
 
 // TestMain poisons the PORTAL_* config paths and TMUX package-wide so a test that
-// forgets to isolate fails loudly, and HOME to a per-run temp directory so one that
-// resolves a default config path lands there instead of reading or mutating the
-// developer's real config; subprocesses inherit the poison via os.Environ().
+// forgets to isolate fails loudly, and HOME to a per-run temp directory — with
+// XDG_CONFIG_HOME emptied so HOME is what decides — so one that resolves a default
+// config path lands there instead of reading or mutating the developer's real
+// config; subprocesses inherit the poison via os.Environ().
 
 import (
 	"fmt"
@@ -62,6 +63,11 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("HOME", homeDir)
+	// The home poison only decides a default resolve while XDG_CONFIG_HOME is
+	// empty, so it is emptied here too: on a machine where the developer sets
+	// it, a test resolving a non-overridden config path would read their real
+	// config base instead of the temp home.
+	os.Setenv("XDG_CONFIG_HOME", "")
 
 	os.Setenv("PORTAL_STATE_DIR", "/nonexistent/portal-test-must-isolate-state")
 	os.Setenv("PORTAL_HOOKS_FILE", "/nonexistent/portal-test-must-isolate-hooks.json")

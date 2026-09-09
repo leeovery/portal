@@ -86,24 +86,17 @@ var _ PaneHookLister = (*recordingPaneHookLister)(nil)
 // stubStaleSweepReader answers the sweep's two seams with fixed values: a fixed
 // row set (or failure) for the pane-token enumeration, and a fixed
 // @portal-restoring read. It counts the enumeration reads, so a test can assert
-// the sweep stood down before enumerating as well as what it read. The optional
-// during hook runs at the top of the enumeration, so a test can land a
-// concurrent writer's mutation inside it — in the window between the sweep's
-// snapshot and the token set that snapshot is weighed against.
+// the sweep stood down before enumerating as well as what it read.
 type stubStaleSweepReader struct {
 	rows         []tmux.PaneHookRow
 	err          error
 	restoring    bool
 	restoringErr error
-	during       func()
 	calls        int
 }
 
 func (s *stubStaleSweepReader) ListAllPaneHookKeys() ([]tmux.PaneHookRow, error) {
 	s.calls++
-	if s.during != nil {
-		s.during()
-	}
 	return s.rows, s.err
 }
 

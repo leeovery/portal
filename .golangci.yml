@@ -31,10 +31,13 @@ linters:
     - modernize
   exclusions:
     rules:
-      # TestMain poisons PORTAL_* env vars to force per-test isolation. It must
+      # TestMain poisons the environment to force per-test isolation. It must
       # use os.Setenv (no *testing.T exists in TestMain, so t.Setenv is
-      # unavailable) and the values are compile-time constants, so the error is
-      # a dead branch. See any testmain_isolation_test.go header for rationale.
+      # unavailable). Setenv fails only on an empty key, a '=' or NUL byte in
+      # the key, or a NUL byte in the value; every key it sets is a constant
+      # name and every value a literal or a filesystem path, so none of those
+      # is reachable here.
+      # See any testmain_isolation_test.go header for rationale.
       - path: testmain_isolation_test\.go
         linters:
           - errcheck

@@ -80,40 +80,6 @@ func noSuchSessionCommander(target string) *commandertest.Scripted {
 	})
 }
 
-func TestShowEnvironmentClassifiesUnaddressableName(t *testing.T) {
-	t.Run("it classifies an unaddressable session name as anomalous rather than natural churn", func(t *testing.T) {
-		client := tmux.NewClient(noSuchSessionCommander("=" + colonSession))
-
-		_, err := client.ShowEnvironment(colonSession)
-
-		if err == nil {
-			t.Fatal("expected an error, got nil")
-		}
-		if errors.Is(err, tmuxerr.ErrNoSuchSession) {
-			t.Errorf("error = %v; a colon-bearing name must NOT be classified as a vanished session", err)
-		}
-		if !errors.Is(err, tmuxerr.ErrUnaddressableSessionName) {
-			t.Errorf("error = %v; want it to wrap tmuxerr.ErrUnaddressableSessionName", err)
-		}
-	})
-
-	t.Run("it still treats a genuinely vanished session as natural churn", func(t *testing.T) {
-		client := tmux.NewClient(noSuchSessionCommander("=gone"))
-
-		_, err := client.ShowEnvironment("gone")
-
-		if err == nil {
-			t.Fatal("expected an error, got nil")
-		}
-		if !errors.Is(err, tmuxerr.ErrNoSuchSession) {
-			t.Errorf("error = %v; want it to wrap tmuxerr.ErrNoSuchSession", err)
-		}
-		if errors.Is(err, tmuxerr.ErrUnaddressableSessionName) {
-			t.Errorf("error = %v; a colon-free name is addressable", err)
-		}
-	})
-}
-
 // perSessionOp is one operation addressing a single session that can report a
 // failure back to its caller.
 type perSessionOp struct {

@@ -929,6 +929,10 @@ func TestSessionsRenameRefusedFixtures(t *testing.T) {
 			fixture: "sessions-rename-refused-id-prefix",
 			flash:   `"$" isn't allowed at the start of a session name — tmux reads it as a session ID`,
 		},
+		{
+			fixture: "sessions-rename-refused-flag-prefix",
+			flash:   `"-" isn't allowed at the start of a session name — tmux reads it as a command flag`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -951,7 +955,7 @@ func TestSessionsRenameRefusedFixtures(t *testing.T) {
 }
 
 func TestFixtureNamesIncludesRenameRefusals(t *testing.T) {
-	for _, want := range []string{"sessions-rename-refused-separator", "sessions-rename-refused-id-prefix"} {
+	for _, want := range []string{"sessions-rename-refused-separator", "sessions-rename-refused-id-prefix", "sessions-rename-refused-flag-prefix"} {
 		if !slices.Contains(capture.FixtureNames(), want) {
 			t.Errorf("FixtureNames() %v does not include %s", capture.FixtureNames(), want)
 		}

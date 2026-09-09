@@ -165,7 +165,7 @@ func TestHooksPath(t *testing.T) {
 
 		path := hookstest.HooksPath(t, dir)
 
-		if want := hookstest.HooksPath(t, dir); path != want {
+		if want := filepath.Join(dir, "hooks.json"); path != want {
 			t.Errorf("path = %q, want %q", path, want)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {

@@ -300,7 +300,7 @@ func commitNowSeamCases() []seamCase {
 				})
 			},
 			assert: func(t *testing.T) {
-				if err := resolveCommitNowDeps().Commit("", state.Index{}, false, nil); err != nil {
+				if err := resolveCommitNowDeps().Commit(t.TempDir(), state.Index{}, false, nil); err != nil {
 					t.Errorf("Commit() err = %v; want the injected seam's nil", err)
 				}
 			},

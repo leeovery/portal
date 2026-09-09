@@ -41,7 +41,7 @@ func TestRealCommandRunner_Run_EmbedsArgvAndStderrOnNonZeroExit(t *testing.T) {
 	}
 
 	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
-		t.Errorf("errors.As did not recover *exec.ExitError through the wrap: %v", err)
+		t.Errorf("errors.AsType[*exec.ExitError](err) = false; *exec.ExitError not recovered through the wrap: %v", err)
 	}
 }
 
@@ -54,6 +54,6 @@ func TestRealCommandRunner_Run_PathLookupErrorWrapsCleanly(t *testing.T) {
 	}
 
 	if _, ok := errors.AsType[*exec.Error](err); !ok {
-		t.Errorf("errors.As did not recover *exec.Error through the wrap: %v", err)
+		t.Errorf("errors.AsType[*exec.Error](err) = false; *exec.Error not recovered through the wrap: %v", err)
 	}
 }

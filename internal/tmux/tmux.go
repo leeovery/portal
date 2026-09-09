@@ -460,10 +460,12 @@ func SessionTargetExact(session string) Target {
 //
 // The trailing ":" is load-bearing: it is what makes tmux read the leading
 // component as a session name, so the "=" applies to it and a period in the
-// name is not split into window and pane. The empty coordinate half leaves
-// tmux's own default in place — the session's current window, and that window's
-// active pane — which is where a bare session name resolved to already. See
-// SessionTargetExact.
+// name is not split into window and pane. A bare "=name" there is read as a
+// window or pane name and misses: list-panes falls through to the same fuzzy
+// lookup, while display-message returns empty at exit 0 for a live session as
+// much as a gone one. The empty coordinate half leaves tmux's own default in
+// place — the session's current window, and that window's active pane — which
+// is where a bare session name resolved to already. See SessionTargetExact.
 func CoordTargetExact(session string) Target {
 	return Target("=" + session + ":")
 }

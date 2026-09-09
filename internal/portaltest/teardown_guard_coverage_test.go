@@ -154,9 +154,14 @@ func (c fixtureCalls) throughLocalArrange(pkg map[string]fixtureCalls) fixtureCa
 //
 // The pairing is judged per function, with one hop into a same-package arrange,
 // so routing a suite through a shared setup is judged rather than skipped. What
-// stays out of reach is an arrange in another package, and an inversion split
-// across two scopes: order is compared within a single scope, because sibling
-// closures run in whatever order their caller invokes them.
+// stays out of reach is an arrange in another package; an inversion split
+// across two scopes (order is compared within a single scope, because sibling
+// closures run in whatever order their caller invokes them); and an inversion
+// sealed inside one same-package arrange that neither isolates nor names the
+// state directory — such an arrange does not qualify on its own, and the fold
+// attributes both its server start and its guard registration to the single
+// line the caller reaches it on, so the two compare equal and the order goes
+// unjudged while both calls still read as present.
 func TestTeardownGuardCoversEveryServerHostingFixture(t *testing.T) {
 	_, sources := sourceguardtest.RepoSources(t, sourceguardtest.TestSources)
 

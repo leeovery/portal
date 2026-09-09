@@ -46,7 +46,7 @@ func TestPgrepPortalDaemons_OSLayerFailureWrapsWithStderr(t *testing.T) {
 	}
 
 	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
-		t.Errorf("errors.As did not recover *exec.ExitError through the wrap: %v", err)
+		t.Errorf("errors.AsType[*exec.ExitError](err) = false; *exec.ExitError not recovered through the wrap: %v", err)
 	}
 }
 

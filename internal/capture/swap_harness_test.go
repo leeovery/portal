@@ -43,6 +43,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-inline-flash", page: tui.PageSessions, present: []string{"fab-flowx-explore", "closed externally"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-rename-refused-separator", page: tui.PageSessions, present: []string{sessionRow, `":" isn't allowed in a session name — tmux reads it as a separator`}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-rename-refused-id-prefix", page: tui.PageSessions, present: []string{sessionRow, `"$" isn't allowed at the start of a session name — tmux reads it as a session ID`}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-rename-refused-flag-prefix", page: tui.PageSessions, present: []string{sessionRow, `"-" isn't allowed at the start of a session name — tmux reads it as a command flag`}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-multi-select-active", page: tui.PageSessions, present: []string{sessionRow, "3 selected"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-terminal", page: tui.PageSessions, present: []string{sessionRow, "unsupported terminal", "com.apple.Terminal"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-null", page: tui.PageSessions, present: []string{sessionRow}, absent: []string{"No sessions yet", "unsupported terminal"}},
@@ -223,15 +224,8 @@ func countCalls(block *ast.BlockStmt, name string) int {
 		if !ok {
 			return true
 		}
-		switch fn := call.Fun.(type) {
-		case *ast.SelectorExpr:
-			if fn.Sel.Name == name {
-				count++
-			}
-		case *ast.Ident:
-			if fn.Name == name {
-				count++
-			}
+		if sourceguardtest.CalleeName(call) == name {
+			count++
 		}
 		return true
 	})

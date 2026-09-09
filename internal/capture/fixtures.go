@@ -140,6 +140,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsInlineFlashFixture,
 		sessionsRenameRefusedSeparatorFixture,
 		sessionsRenameRefusedIDPrefixFixture,
+		sessionsRenameRefusedFlagPrefixFixture,
 		sessionsMultiSelectActiveFixture,
 		sessionsUnsupportedTerminalFixture,
 		sessionsUnsupportedNullFixture,
@@ -349,6 +350,15 @@ func sessionsRenameRefusedIDPrefixFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-rename-refused-id-prefix"
 	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyLineStart(), keyRune('$'), keyEnter()}
+	return fx
+}
+
+// The third refusal, and the longest of the three: only a leading "-" is
+// refused, so the line-start key is load-bearing here too.
+func sessionsRenameRefusedFlagPrefixFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "sessions-rename-refused-flag-prefix"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyLineStart(), keyRune('-'), keyEnter()}
 	return fx
 }
 

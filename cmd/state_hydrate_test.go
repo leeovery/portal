@@ -1495,12 +1495,8 @@ func TestHydrate_Timeout_LookupError_ExecsBareShellAndLogsWarning(t *testing.T) 
 	dir := t.TempDir()
 	fifo := makeFIFO(t, dir, "hydrate-tle__0.0.fifo")
 
-	// A directory forces EISDIR out of the store's os.ReadFile.
-	hooksDir := filepath.Join(dir, "hooks.json")
-	if err := os.Mkdir(hooksDir, 0o700); err != nil {
-		t.Fatalf("mkdir hooks.json: %v", err)
-	}
-	store := hooks.NewStore(hooksDir)
+	// An unreadable hooks.json forces EISDIR out of the store's read.
+	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Unreadable: true})
 
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 
@@ -1539,12 +1535,8 @@ func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
 
 	signalFIFOAsync(t, fifo)
 
-	// A directory forces EISDIR out of the store's os.ReadFile.
-	hooksDir := filepath.Join(dir, "hooks.json")
-	if err := os.Mkdir(hooksDir, 0o700); err != nil {
-		t.Fatalf("mkdir hooks.json: %v", err)
-	}
-	store := hooks.NewStore(hooksDir)
+	// An unreadable hooks.json forces EISDIR out of the store's read.
+	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Unreadable: true})
 
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 

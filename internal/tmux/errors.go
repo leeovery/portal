@@ -55,10 +55,12 @@ func reportsNoSuchSession(stderr string) bool {
 	})
 }
 
-// ErrUnaddressableSessionName reports a session name that Portal's exact-match
-// target form cannot express; discriminate with errors.Is. It is identity-equal
-// to tmuxerr.ErrUnaddressableSessionName, which lives in a leaf package so
-// internal/state can classify against it without an import cycle.
+// ErrUnaddressableSessionName reports a session name tmux cannot be handed back
+// — as an exact target or as the bare positional a rename carries; the rules
+// that refuse one are enumerated by ValidateSessionName. Discriminate with
+// errors.Is. It is identity-equal to tmuxerr.ErrUnaddressableSessionName, which
+// lives in a leaf package so internal/state can classify against it without an
+// import cycle.
 var ErrUnaddressableSessionName = tmuxerr.ErrUnaddressableSessionName
 
 // targetSeparator divides the session component of a tmux target from its window

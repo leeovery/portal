@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -71,12 +70,8 @@ func TestHydrateExecLog_NilHookStore_MissThenBareShellExec(t *testing.T) {
 
 func TestHydrateExecLog_LookupError_ErrorResultWithAttrWarnRetainedBareShell(t *testing.T) {
 	dir := t.TempDir()
-	// hooks.json is a directory, so the lookup read fails.
-	hooksDir := dir + "/hooks.json"
-	if err := os.Mkdir(hooksDir, 0o700); err != nil {
-		t.Fatalf("mkdir hooks.json: %v", err)
-	}
-	store := hooks.NewStore(hooksDir)
+	// An unreadable hooks.json makes the lookup read fail.
+	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Unreadable: true})
 
 	t.Setenv("SHELL", "/bin/zsh")
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")

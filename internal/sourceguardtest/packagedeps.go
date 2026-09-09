@@ -49,8 +49,10 @@ type depsConfig struct {
 	thirdPartyForbidden bool
 }
 
-// sourceDir is the directory the judged package's own sources are read from,
-// which is the test binary's working directory unless a caller named another.
+// sourceDir is the directory the enumeration runs from — the test binary's
+// working directory unless a caller named another with InDir. It holds the
+// judged package's own sources only when no InDir was named: a caller that
+// anchors elsewhere to judge another package reads that anchor instead.
 func (c depsConfig) sourceDir() string {
 	if c.dir == "" {
 		return "."
@@ -104,7 +106,8 @@ var listDeps = func(cfg depsConfig, pkg string) ([]dep, error) {
 	return parseDeps(string(out)), nil
 }
 
-// readPackageSources opens the judged package's directory so that the
+// readPackageSources opens the directory the enumeration runs from — the
+// judged package's own only when the caller named no InDir — so that the
 // directory and the .go files it holds are recorded as inputs of the test
 // binary that judged it. What the read yields is discarded and an unreadable
 // directory is not an error: the read exists for its record, not its result.

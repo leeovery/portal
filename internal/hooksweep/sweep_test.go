@@ -380,8 +380,8 @@ func TestHookSweepReportsStandDown(t *testing.T) {
 func TestHookSweepGuardCountsPaneRowsNotTokens(t *testing.T) {
 	t.Run("it does not fire the mass-deletion guard when no pane is stamped", func(t *testing.T) {
 		seed := fmt.Sprintf(`{
-  %q: {"on-resume": "cmd-old"},
-  %q: {"on-resume": "cmd-live"}
+  %q: {"on-resume": "cmd-unjudgeable-a"},
+  %q: {"on-resume": "cmd-unjudgeable-b"}
 }`, hookstest.UnjudgeableSeedA, hookstest.UnjudgeableSeedB)
 		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
 		before := hookstest.HooksFileBytes(t, path)
@@ -442,7 +442,7 @@ func TestHookSweepGuardCountsPaneRowsNotTokens(t *testing.T) {
 	})
 
 	t.Run("it counts the rows, not the tokens, on the counts line", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: fmt.Sprintf(`{%q: {"on-resume": "cmd-live"}}`, hookstest.UnjudgeableSeedB)})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: fmt.Sprintf(`{%q: {"on-resume": "cmd-unjudgeable"}}`, hookstest.UnjudgeableSeedB)})
 
 		loggerSink := logtest.Install(t)
 		lister := &stubReader{rows: unstampedRows(4)}

@@ -23,16 +23,26 @@ var lockTimeout = 2 * time.Second
 var lockPollInterval = 5 * time.Millisecond
 
 // snapshotLockFraction is the hundredth of lockTimeout the clean's advisory
-// pre-read waits, which is 20ms at the 2s bound above.
+// pre-read waits, which is 20ms at the 2s bound above: four lockPollInterval
+// sleeps above the sub-millisecond critical section, so a holder that is merely
+// mid-write is still waited out. A hundredth rather than a thousandth because a
+// thousandth is 2ms at that bound — below the lockPollInterval floor, so it
+// would resolve to the floor and the fraction would stop naming the wait at
+// all.
 const snapshotLockFraction = 100
 
 // snapshotLockBound bounds the clean's advisory pre-read alone, which may
 // degrade to an unlocked read at no cost to correctness, paying one DEBUG
 // breadcrumb, so a clean held up by a stuck writer costs the daemon's tick one
-// mutation bound rather than two. It is derived from lockTimeout rather than
-// declared beside it, so lowering the mutation bound lowers this one with it
-// until the floor below takes over.
-// The floor of one poll interval is load-bearing: acquireLock re-tests its
+// mutation bound rather than two.
+// A bound this far under lockTimeout is safe because it can only shorten a wait
+// that was already contended: acquireLock attempts its first Flock before it
+// tests any deadline, so an uncontended acquire is granted whatever the bound
+// and no bound, however short, can degrade one. What is left to trade is only
+// how long a contended pre-read persists before falling back.
+// It is derived from lockTimeout rather than declared beside it, so lowering the
+// mutation bound lowers this one with it until the floor below takes over.
+// The floor of one lockPollInterval is load-bearing: acquireLock re-tests its
 // deadline only after a poll sleep, so under it the figure named stops being
 // the figure waited.
 func snapshotLockBound() time.Duration {

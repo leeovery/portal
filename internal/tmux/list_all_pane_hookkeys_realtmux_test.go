@@ -48,7 +48,7 @@ func TestListAllPaneHookKeys_ListPanesFailurePropagates(t *testing.T) {
 	}
 
 	if _, ok := errors.AsType[*tmux.CommandError](err); !ok {
-		t.Errorf("error %v is not a recoverable *tmux.CommandError (errors.As failed)", err)
+		t.Errorf("errors.AsType[*tmux.CommandError](err) = false; want a recoverable *tmux.CommandError; err = %v", err)
 	}
 }
 

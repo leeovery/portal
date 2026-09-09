@@ -37,7 +37,7 @@ func TestResolveHookKey_AgainstARealServer(t *testing.T) {
 			t.Errorf("hook key for a gone pane = %q, want \"\"", got)
 		}
 		if _, ok := errors.AsType[*tmux.CommandError](err); !ok {
-			t.Fatalf("error %v is not a recoverable *tmux.CommandError (errors.As failed)", err)
+			t.Fatalf("errors.AsType[*tmux.CommandError](err) = false; want a recoverable *tmux.CommandError; err = %v", err)
 		}
 		if !strings.Contains(err.Error(), "no such pane") {
 			t.Errorf("error = %q, want tmux's own words preserved", err.Error())

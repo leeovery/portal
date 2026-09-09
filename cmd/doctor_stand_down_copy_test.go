@@ -392,8 +392,8 @@ func TestStandDownCopy(t *testing.T) {
 	})
 
 	// A phrase two surfaces share is written once and composed into each, so a
-	// re-wording moves both. The declaration-level guard cannot see a value
-	// re-authored inline with today's words; this reads the entry itself.
+	// re-wording moves both. This reads the rendered entries and pins that the
+	// two vocabularies agree on those shared words.
 	t.Run("it composes a shared phrase from the const both surfaces name", func(t *testing.T) {
 		for _, tc := range standDownCopyCases() {
 			if tc.sharedPhrase == "" {

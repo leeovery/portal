@@ -489,7 +489,7 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 	restoretest.DriveSignalHydrateBinary(t, binDir, ts.SocketPath(),
 		stateDir, hooksPath, []string{"alpha"}, env)
 
-	waitForSessionMarkerCleared(t, client, "alpha", 10*time.Second)
+	waitForSessionMarkerCleared(t, client, "alpha", restoretest.HydrateBudget)
 
 	markersMid, err := state.ListSkeletonMarkers(client)
 	if err != nil {
@@ -527,7 +527,7 @@ func waitForSessionMarkerCleared(t *testing.T, client *tmux.Client, session stri
 		if !stillSet {
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(restoretest.HydrateTick)
 	}
 	markers, _ := state.ListSkeletonMarkers(client)
 	t.Fatalf("session %q skeleton markers still set after %s; markers=%v",

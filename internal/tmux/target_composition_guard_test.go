@@ -346,6 +346,40 @@ func stamp(name string) { SetPaneOption(Target(name+":"), "@portal-pane-id", "to
 		}
 	})
 
+	// A method and a plain function sharing a name are one entry in the taker
+	// map, so their positions are unioned rather than overwritten: reading only
+	// the last declaration would drop the other's argument out of the rule.
+	t.Run("it flags every position two same-named target takers declare", func(t *testing.T) {
+		dir := writeFixturePackage(t, `package fixture
+
+type Target string
+
+type Client struct{}
+
+func CoordTargetExact(session string) Target { return Target("=" + session + ":") }
+
+func (c *Client) stampPaneToken(session string, target Target, token string) {}
+
+func stampPaneToken(paneID Target) {}
+
+func stampTwice(c *Client, name string) {
+	c.stampPaneToken(string(CoordTargetExact(name)), Target(name+":"), "tok")
+	stampPaneToken(Target(name + ":"))
+}
+`)
+
+		findings := scanBareTargets(t, []string{dir})
+		if len(findings) != 2 {
+			t.Fatalf("scan of two same-named target takers found %d findings, want 2 — one at each declaration's position: %v",
+				len(findings), findings)
+		}
+		for _, finding := range findings {
+			if finding.detail != "the target passed to stampPaneToken is composed by hand — "+routeItThrough {
+				t.Errorf("finding %v does not report an argument of the pooled taker", finding)
+			}
+		}
+	})
+
 	t.Run("it passes a target parameter handed the vocabulary's own output", func(t *testing.T) {
 		dir := writeFixturePackage(t, `package fixture
 
