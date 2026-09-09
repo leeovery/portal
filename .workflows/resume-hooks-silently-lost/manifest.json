@@ -828,7 +828,7 @@
     "review": {
       "items": {
         "resume-hooks-silently-lost": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "resume-hooks-silently-lost-1-1",
             "resume-hooks-silently-lost-1-10",
