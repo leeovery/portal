@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-09-09
+
+✨ Added
+- `hook list` now shows a fourth column with each hook's live pane location, blank when no pane currently carries that hook's key.
+- Three unaddressable session-name patterns are now refused by rename (a leading `$`, a leading `-`, or any `:`), with a clear on-screen explanation instead of a silent tmux failure.
+
+🔧 Changed
+- Resume hooks are now keyed by a stable per-pane token stamped directly on the pane, instead of the old session-based key — hooks survive session renames and pane rearrangement more reliably.
+- `hook rm` now exits non-zero whenever it removes nothing, so scripts can tell a real removal from a no-op.
+- `hooks.json` is now protected by a lock file, preventing concurrent writers from corrupting it.
+- Stale hook cleanup is more conservative: entries in the old key format are never guessed at and are kept forever unless removed by hand, and a cleanup pass that can't safely judge staleness (e.g. during a restore, or on a read failure) now stands down instead of risking mass deletion.
+- `portal doctor --fix` reports more specific reasons when it skips pruning stale hooks (e.g. restore in progress, lock timeout, unreadable store).
+- Restored panes now re-exec the same Portal binary that performed the restore, rather than whatever `portal` happens to be on `PATH`, avoiding mismatched-binary restore failures.
+- The Homebrew tap update now runs as a separate CI job from the main release, so a failure there no longer marks an otherwise-successful release as failed.
+- `golangci-lint run` now also covers integration-tagged test files in a single invocation.
+
+🐛 Fixed
+- Sessions with no project-name fragment (e.g. a leading `$` or `-`) no longer mint invalid tmux session names.
+- `portal uninstall` no longer misclassifies certain tmux errors when the saver session is already gone.
+- Fixed a filter-footer layout issue where the keymap hints could disappear entirely at certain terminal widths instead of truncating gracefully.
+- Fixed the theme side-panel's header alignment drifting out of sync with the page behind it when a notice band appeared or cleared while the panel was open.
+
 ## [0.11.0] - 2026-08-12
 
 ✨ Added
