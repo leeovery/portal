@@ -316,7 +316,7 @@
     "implementation": {
       "items": {
         "resume-hooks-silently-lost": {
-          "status": "in-progress",
+          "status": "completed",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
@@ -821,8 +821,7 @@
             8,
             9,
             10
-          ],
-          "bank": []
+          ]
         }
       }
     }
