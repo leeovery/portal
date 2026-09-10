@@ -193,9 +193,12 @@ func runDoctorFix(cmd *cobra.Command, deps *DoctorDeps) {
 // The sweep's own mass-deletion hazard guard is the down-server protection
 // here — do not add a second guard. A cycle that removed nothing for a reason
 // renders that reason — why it declined, or that it failed — so a prune that
-// could not run never looks like one that ran and found nothing.
+// could not run never looks like one that ran and found nothing. A store that
+// could not be opened is one such reason: to a user it is the file that could
+// not be read, which is the words the diagnosis already uses for it.
 func pruneDoctorStaleHooks(w io.Writer, deps *DoctorDeps) {
 	if deps.HookStore == nil {
+		reportSkippedPrune(w, hooksweep.ReasonStoreReadFailed)
 		return
 	}
 	outcome, err := hooksweep.Run(deps.HookLister, deps.HookStore)
@@ -378,6 +381,12 @@ func checkStaleHooks(reader hooksweep.Reader, store *hooks.Store) checkResult {
 
 	view := hooksweep.JudgeAgainstLivePanes(reader, len(persisted))
 	if view.Decline.Declined() {
+		// Nothing persisted is an answer the sweep gives without reading a
+		// pane, so a pane read that failed cannot make it unknowable here
+		// either: with no key to judge, the count is zero whatever tmux said.
+		if len(persisted) == 0 {
+			return checkResult{name: name, status: checkPass, detail: "no hooks"}
+		}
 		return staleHooksNotEvaluable(name, view.Decline.Reason())
 	}
 

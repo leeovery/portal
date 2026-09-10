@@ -22,6 +22,7 @@ func TestStaleHookVerdictParity(t *testing.T) {
 		{"enumeration error", &stubStaleSweepReader{err: errors.New("tmux transient")}, []string{hookstest.ReapableSeedA}, false},
 		{"restore marker set", restoringHookLister(), []string{hookstest.ReapableSeedA}, false},
 		{"live rows with unstamped panes", &stubStaleSweepReader{rows: unstampedRows(2)}, []string{hookstest.UnjudgeableSeedA}, true},
+		{"nothing persisted with the enumeration failing", &stubStaleSweepReader{err: errors.New("tmux transient")}, nil, true},
 	}
 
 	for _, tc := range cases {

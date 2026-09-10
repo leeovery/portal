@@ -40,6 +40,17 @@ func TestDoctorFixAlwaysReportsTheHookPrune(t *testing.T) {
 		assertSkippedPruneLine(t, outBuf.String(), renderSkippedPruneLine(hooksweep.ReasonRestoring))
 	})
 
+	// A store that could not be opened never reaches the sweep, so its line
+	// comes from this function alone: with none, a prune that could not run
+	// would read exactly like one that ran and found nothing.
+	t.Run("it prints a skipped line when the hook store could not be opened", func(t *testing.T) {
+		var out bytes.Buffer
+
+		pruneDoctorStaleHooks(&out, &DoctorDeps{})
+
+		assertSkippedPruneLine(t, out.String(), renderSkippedPruneLine(hooksweep.ReasonStoreReadFailed))
+	})
+
 	// A failed sweep is no stand-down, so its line is rendered by a renderer of
 	// its own rather than through the stand-down vocabulary.
 	t.Run("it renders the same failed-sweep line for --fix after sweep-failed leaves the reason type", func(t *testing.T) {
