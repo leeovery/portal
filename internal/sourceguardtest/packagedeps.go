@@ -49,17 +49,6 @@ type depsConfig struct {
 	thirdPartyForbidden bool
 }
 
-// sourceDir is the directory the enumeration runs from — the test binary's
-// working directory unless a caller named another with InDir. It holds the
-// judged package's own sources only when no InDir was named: a caller that
-// anchors elsewhere to judge another package reads that anchor instead.
-func (c depsConfig) sourceDir() string {
-	if c.dir == "" {
-		return "."
-	}
-	return c.dir
-}
-
 // lane names the build configuration a reading was taken under, as a clause to
 // be appended to the package it was taken of, and is empty for the default one:
 // a finding is otherwise unreproducible, since the command a reader would run
@@ -81,13 +70,15 @@ func newDepsConfig(opts []DepsOption) depsConfig {
 
 // dep is one row of a transitive dependency listing. Module is the path of the
 // module providing the package, and is empty for the standard library — which
-// is how a dependency's origin is told apart without any hardcoded prefix.
+// is how a dependency's origin is told apart without any hardcoded prefix. Dir
+// is the directory holding the package's sources.
 type dep struct {
 	Path   string
 	Module string
+	Dir    string
 }
 
-const depFormat = "{{.ImportPath}}\t{{with .Module}}{{.Path}}{{end}}"
+const depFormat = "{{.ImportPath}}\t{{with .Module}}{{.Path}}{{end}}\t{{.Dir}}"
 
 // listDeps is the enumeration seam: the shapes go list cannot be made to
 // produce on demand — an empty set among them — are reachable only by
@@ -106,13 +97,29 @@ var listDeps = func(cfg depsConfig, pkg string) ([]dep, error) {
 	return parseDeps(string(out)), nil
 }
 
-// readPackageSources opens the directory the enumeration runs from — the
-// judged package's own only when the caller named no InDir — so that the
-// directory and the .go files it holds are recorded as inputs of the test
-// binary that judged it. What the read yields is discarded and an unreadable
-// directory is not an error: the read exists for its record, not its result.
+// readPackageSources lists dir, so that its entries — every source file it
+// holds, by name, size and modification time — are recorded as inputs of the
+// test binary that judged the package living there. What the read yields is
+// discarded and an unreadable directory is not an error: the read exists for
+// its record, not its result.
 var readPackageSources = func(dir string) {
 	_, _ = PackageGoFiles(dir, true)
+}
+
+// readModuleSources lists the directory of every dependency provided by pkg's
+// own module, pkg included. A dependency from another module lives in the
+// module cache or the standard library, neither of which an edit to this tree
+// can move, so neither is read.
+func readModuleSources(deps []dep, pkg string) {
+	module, ok := moduleOf(deps, pkg)
+	if !ok {
+		return
+	}
+	for _, d := range deps {
+		if d.Module == module && d.Dir != "" {
+			readPackageSources(d.Dir)
+		}
+	}
 }
 
 func parseDeps(out string) []dep {
@@ -121,8 +128,9 @@ func parseDeps(out string) []dep {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		path, module, _ := strings.Cut(line, "\t")
-		deps = append(deps, dep{Path: path, Module: module})
+		path, rest, _ := strings.Cut(line, "\t")
+		module, dir, _ := strings.Cut(rest, "\t")
+		deps = append(deps, dep{Path: path, Module: module, Dir: dir})
 	}
 	return deps
 }
@@ -145,13 +153,16 @@ func (e *listError) Error() string {
 // list cannot resolve, and a set that comes back empty, are both fatal: a
 // guard must fail rather than pass over nothing.
 //
-// The directory the enumeration runs from — the package's own, unless InDir
-// named another — is read first, and the result of that read is thrown away.
-// go list runs as a subprocess, whose
-// reads the test cache cannot see, and a source behind a build tag is compiled
-// into no test binary of the default lane — so without a read taken by the
-// judging binary itself, adding such a source moves nothing about the cache
-// key, and the guard reports a cached pass over a tree it never re-read.
+// The directory of every dependency in the package's own module — the package
+// itself included — is listed once the set is resolved, and what those reads
+// yield is thrown away. go list runs as a subprocess, whose reads the test
+// cache cannot see; a source behind a build tag is compiled into no test
+// binary of the default lane; and a package the judging binary does not
+// itself import — the whole closure, when a guard judges another package — is
+// compiled into no test binary at all. Without a read taken by the judging
+// binary over each of those directories, an import added to any of them moves
+// nothing about the cache key, and the guard reports a cached pass over a
+// tree it never re-read.
 func PackageDeps(t harnesstest.TestingT, pkg string, opts ...DepsOption) []string {
 	t.Helper()
 
@@ -166,7 +177,6 @@ func packageDeps(t harnesstest.TestingT, pkg string, opts []DepsOption) []dep {
 	t.Helper()
 
 	cfg := newDepsConfig(opts)
-	readPackageSources(cfg.sourceDir())
 	deps, err := listDeps(cfg, pkg)
 	if err != nil {
 		t.Fatalf("go list -deps %s%s: %v", pkg, cfg.lane(), err)
@@ -176,5 +186,6 @@ func packageDeps(t harnesstest.TestingT, pkg string, opts []DepsOption) []dep {
 		t.Fatalf("go list -deps %s%s resolved no dependencies at all — a guard over this set would pass vacuously", pkg, cfg.lane())
 		return nil
 	}
+	readModuleSources(deps, pkg)
 	return deps
 }
