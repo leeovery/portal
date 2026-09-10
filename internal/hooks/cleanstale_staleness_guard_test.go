@@ -1,7 +1,11 @@
 package hooks_test
 
 import (
+	"fmt"
 	"go/ast"
+	"go/token"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/leeovery/portal/internal/sourceguardtest"
@@ -48,44 +52,163 @@ func assertCallsStaleKeys(t *testing.T, dir, funcName string) {
 
 // Every mutation takes the file under one exclusive hold, so each must reach
 // the file through the unexported load/save — which do no locking of their own.
-// Routing through any of the locking front doors instead nests a second
-// acquisition inside the hold the mutation already owns: a deadlock-shaped
-// regression that degrades into a silent multi-second stall rather than failing
-// a test. The read front doors are named alongside Load/Save because they
-// acquire the same sidecar, shared — which an exclusive holder still blocks.
-func TestMutationsDoNotCallExportedLoadOrSave(t *testing.T) {
-	mutations := map[string]bool{"Set": true, "Remove": true, "deleteStale": true}
-	forbidden := map[string]bool{
-		"Load":              true,
-		"Save":              true,
-		"loadSnapshot":      true,
-		"List":              true,
-		"Get":               true,
-		"loadShared":        true,
-		"loadSharedBounded": true,
+// Routing through a locking front door instead nests a second acquisition
+// inside the hold the mutation already owns: a deadlock-shaped regression that
+// degrades into a silent multi-second stall rather than failing a test. Neither
+// side is named here — a mutation is whatever Store method takes the mutation
+// lock, and a front door is whatever Store method reaches acquireLock — so a
+// rename or a new method on either side is judged rather than slipped past.
+func TestMutationsDoNotReenterALockingFrontDoor(t *testing.T) {
+	verdict := judgeLockReentrancy(sourceguardtest.ParsePackageSources(t, ".", false))
+	if verdict.mutations == 0 {
+		t.Fatalf("no Store method calls %s — the guard is judging nothing", mutationAcquire)
 	}
-
-	for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
-		sourceguardtest.ForEachFuncCall(source.File, func(funcName string, call *ast.CallExpr) bool {
-			callee := sourceguardtest.CalleeName(call)
-			if mutations[funcName] && forbidden[callee] && calleeReceiverName(call) == "s" {
-				t.Errorf("%s: %s calls s.%s — a mutation must reach the file through the unexported load/save, never re-enter a locking front door", source.Fset.Position(call.Pos()), funcName, callee)
-			}
-			return true
-		})
+	if verdict.frontDoors == 0 {
+		t.Fatalf("no Store method reaches %s — the guard has nothing to forbid", lockRoot)
+	}
+	for _, violation := range verdict.violations {
+		t.Error(violation)
 	}
 }
 
-// calleeReceiverName reports the identifier a method call is made on
-// ("s" for s.Load()), or "" when the call has no plain identifier receiver.
-func calleeReceiverName(call *ast.CallExpr) string {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
+const (
+	// lockRoot is the one function every acquisition passes through; a method
+	// reaching it, directly or through another method, is a locking front door.
+	lockRoot = "acquireLock"
+	// mutationAcquire is how a mutation takes its exclusive hold; the method
+	// calling it is a mutation, and that call is the one front door it may use.
+	mutationAcquire = "acquireMutationLock"
+	// storeType is the type whose methods are judged.
+	storeType = "Store"
+)
+
+type lockReentrancyVerdict struct {
+	violations []string
+	mutations  int
+	frontDoors int
+}
+
+type storeMethod struct {
+	source      sourceguardtest.ParsedSource
+	receiver    string
+	calls       []receiverCall
+	reachesRoot bool
+}
+
+type receiverCall struct {
+	name string
+	pos  token.Pos
+}
+
+// judgeLockReentrancy reads every Store method off the sources, derives the
+// front doors as the methods reaching lockRoot through any chain of receiver
+// calls, and reports each mutation that calls one other than its own acquire.
+func judgeLockReentrancy(sources []sourceguardtest.ParsedSource) lockReentrancyVerdict {
+	methods := map[string]*storeMethod{}
+	for _, source := range sources {
+		for _, decl := range source.File.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || receiverTypeName(fn) != storeType {
+				continue
+			}
+			method := &storeMethod{source: source, receiver: receiverName(fn)}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if sourceguardtest.CalleeName(call) == lockRoot {
+					method.reachesRoot = true
+				}
+				if name, ok := receiverCallName(call, method.receiver); ok {
+					method.calls = append(method.calls, receiverCall{name: name, pos: call.Pos()})
+				}
+				return true
+			})
+			methods[fn.Name.Name] = method
+		}
+	}
+
+	locking := map[string]bool{}
+	for name, method := range methods {
+		locking[name] = method.reachesRoot
+	}
+	for changed := true; changed; {
+		changed = false
+		for name, method := range methods {
+			if locking[name] {
+				continue
+			}
+			for _, call := range method.calls {
+				if locking[call.name] {
+					locking[name] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	var verdict lockReentrancyVerdict
+	for _, isLocking := range locking {
+		if isLocking {
+			verdict.frontDoors++
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(methods)) {
+		method := methods[name]
+		if !slices.ContainsFunc(method.calls, func(c receiverCall) bool { return c.name == mutationAcquire }) {
+			continue
+		}
+		verdict.mutations++
+		for _, call := range method.calls {
+			if call.name == mutationAcquire || !locking[call.name] {
+				continue
+			}
+			verdict.violations = append(verdict.violations, fmt.Sprintf(
+				"%s: %s calls %s.%s — a mutation must reach the file through the unexported load/save, never re-enter a locking front door",
+				method.source.Position(call.pos), name, method.receiver, call.name))
+		}
+	}
+	return verdict
+}
+
+// receiverTypeName reports the type a method is declared on, with a pointer
+// receiver unwrapped, or "" for a plain function.
+func receiverTypeName(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) != 1 {
 		return ""
 	}
-	ident, ok := sel.X.(*ast.Ident)
+	expr := fn.Recv.List[0].Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	ident, ok := expr.(*ast.Ident)
 	if !ok {
 		return ""
 	}
 	return ident.Name
+}
+
+// receiverName reports the identifier a method binds its receiver to, or ""
+// when the receiver is unnamed.
+func receiverName(fn *ast.FuncDecl) string {
+	if len(fn.Recv.List[0].Names) == 0 {
+		return ""
+	}
+	return fn.Recv.List[0].Names[0].Name
+}
+
+// receiverCallName reports the method a call names on receiver ("Load" for
+// s.Load()), and false for any call not made on that identifier.
+func receiverCallName(call *ast.CallExpr, receiver string) (string, bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return "", false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	if !ok || receiver == "" || ident.Name != receiver {
+		return "", false
+	}
+	return sel.Sel.Name, true
 }
