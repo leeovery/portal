@@ -226,6 +226,18 @@ func TestSet(t *testing.T) {
 		}
 	})
 
+	t.Run("it refuses to write over a malformed hooks.json", func(t *testing.T) {
+		store, filePath := hookstest.StageStore(t, hookstest.Staging{Seed: "not json"})
+		before := hookstest.HooksFileBytes(t, filePath)
+
+		err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", hooks.ViaCLI)
+		if !errors.Is(err, hooks.ErrMalformed) {
+			t.Errorf("err = %v, want errors.Is ErrMalformed — a map loaded from nothing and written back is every other entry gone", err)
+		}
+
+		hookstest.AssertHooksFileUnchanged(t, filePath, before, "rewritten while malformed")
+	})
+
 	t.Run("overwrites existing entry for same key and event", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := hookstest.HooksPath(t, dir)
@@ -446,13 +458,13 @@ func TestRemove(t *testing.T) {
 		}
 	})
 
-	t.Run("it leaves a malformed hooks.json byte-identical when it removes nothing", func(t *testing.T) {
+	t.Run("it refuses to judge a malformed hooks.json and leaves it byte-identical", func(t *testing.T) {
 		store, filePath := hookstest.StageStore(t, hookstest.Staging{Seed: "not json"})
 		before := hookstest.HooksFileBytes(t, filePath)
 
 		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
-		if err != nil {
-			t.Fatalf("unexpected error on remove: %v", err)
+		if !errors.Is(err, hooks.ErrMalformed) {
+			t.Errorf("err = %v, want errors.Is ErrMalformed — an answer about a file that did not parse is a fiction", err)
 		}
 		if removed {
 			t.Error("removed = true, want false for a malformed file")
