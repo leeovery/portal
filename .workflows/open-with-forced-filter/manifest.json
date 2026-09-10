@@ -1,0 +1,15 @@
+{
+  "name": "open-with-forced-filter",
+  "work_type": "feature",
+  "status": "in-progress",
+  "created": "2026-09-10",
+  "description": "Rethink what an argument to portal open means — the bare-positional resolution grammar plus a /text shortcut that forces the picker open pre-filtered",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-08-17-open-with-forced-filter.md",
+      "source": "inbox:idea",
+      "seeded_at": "2026-09-10T07:03:23Z"
+    }
+  ]
+}

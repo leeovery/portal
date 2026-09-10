@@ -182,6 +182,9 @@
     },
     "resume-hooks-silently-lost": {
       "work_type": "bugfix"
+    },
+    "open-with-forced-filter": {
+      "work_type": "feature"
     }
   },
   "defaults": {
