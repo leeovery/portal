@@ -71,16 +71,31 @@ func (s *Store) loadSharedBounded(via Via, bound time.Duration) (Snapshot, error
 	f, err := s.acquireSharedLock(bound)
 	if err != nil {
 		logger.Debug("load-unlocked", "op", "load-unlocked", "via", via.String(), "error", err)
-		return s.load()
+		return s.loadDegrading(via)
 	}
 	defer func() { _ = f.Close() }()
 
-	return s.load()
+	return s.loadDegrading(via)
+}
+
+// loadDegrading is the read doors' view of the file: a malformed hooks.json
+// reads as empty after one DEBUG record, so a lookup, a listing or a diagnosis
+// never fails over content a hand edit can still repair. Only the read doors
+// degrade — a mutation takes load directly and refuses what it cannot parse.
+func (s *Store) loadDegrading(via Via) (Snapshot, error) {
+	h, err := s.load()
+	if errors.Is(err, ErrMalformed) {
+		logger.Debug("load-malformed", "op", "load-malformed", "via", via.String(), "error", err)
+		return Snapshot{}, nil
+	}
+	return h, err
 }
 
 // load is the non-locking read the mutations use from inside their own hold: a
 // second acquisition from the same process is not re-entrant and would block
-// against that hold until the bound.
+// against that hold until the bound. A file that does not parse is reported as
+// ErrMalformed rather than as empty, so no mutation writes a one-entry map over
+// the registrations it could not read.
 func (s *Store) load() (Snapshot, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -92,7 +107,7 @@ func (s *Store) load() (Snapshot, error) {
 
 	var h Snapshot
 	if err := json.Unmarshal(data, &h); err != nil {
-		return Snapshot{}, nil
+		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 
 	return h, nil
@@ -278,6 +293,12 @@ func narrowToSnapshot(candidates []string, snapshot Snapshot) []string {
 // nothing judged, or the load the deletion takes under its own hold. A clean
 // that read, judged and then failed to write carries it from neither.
 var ErrStoreRead = errors.New("failed to read hooks store")
+
+// ErrMalformed reports a hooks.json that exists but does not parse. A read
+// degrades it to an empty map — a resume must not forfeit a hook over a file
+// that can still be repaired by hand — while a mutation refuses it: a map
+// loaded from nothing and written back is every other entry gone.
+var ErrMalformed = errors.New("hooks.json holds malformed JSON")
 
 // CleanStale removes and returns the hook entries whose key enumerateLive's
 // answer leaves stale: absent from that live set, judgeable by the staleness
