@@ -4,7 +4,33 @@
   "status": "in-progress",
   "created": "2026-09-10",
   "description": "Rethink what an argument to portal open means — the bare-positional resolution grammar plus a /text shortcut that forces the picker open pre-filtered",
-  "phases": {},
+  "phases": {
+    "discussion": {
+      "items": {
+        "open-with-forced-filter": {
+          "status": "in-progress",
+          "subtopics": {
+            "filter-shortcut-form": {
+              "status": "pending",
+              "parent": null
+            },
+            "bare-positional-grammar": {
+              "status": "pending",
+              "parent": null
+            },
+            "attach-vs-mint-intent": {
+              "status": "pending",
+              "parent": null
+            },
+            "session-name-recognisability": {
+              "status": "pending",
+              "parent": null
+            }
+          }
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-08-17-open-with-forced-filter.md",
