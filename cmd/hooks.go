@@ -174,8 +174,10 @@ func paneLocationsByToken(lister PaneHookLister) map[string]string {
 		if row.Token == "" {
 			continue
 		}
-		// A token two panes carry is a hand-stamped anomaly — a split inherits
-		// nothing — so first row wins and the entry resolves to one location.
+		// Two rows can carry one token without anyone hand-stamping it: a
+		// window shared by grouped sessions, or linked with link-window,
+		// enumerates once per session that shows it, so one pane is listed
+		// twice. First row wins and the entry resolves to one location.
 		if _, seen := locations[row.Token]; seen {
 			continue
 		}
