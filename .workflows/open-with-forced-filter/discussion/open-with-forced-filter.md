@@ -339,6 +339,15 @@ which the rename case makes possible — is already covered by `-p`, `-a` and `-
 Symmetry pressure, not a need, and a fourth mint route is exactly the surface
 accretion this work set out not to cause.
 
+**Option E — the seed's no-space form, `x/port`.** Rejected as impossible rather
+than undesirable. `x/port` is not a function call in any shell: it is a path — a
+command named `port` inside a directory named `x` — and no function definition can
+claim that shape. The only mechanisms that could intercept it are a global
+unknown-command hook, which would put Portal in the path of every mistyped
+command on the machine to save one keystroke, or defining a separate function per
+search term. Recorded explicitly because it is a stated seed ask, so that silence
+is not mistaken for oversight.
+
 **Option D — make `/` configurable, opt-in via global config.** Rejected. A
 keybinding and an argv token are different kinds of thing: a keystroke lives in
 one user's session, whereas a command string is a shared artifact that goes into
@@ -391,8 +400,13 @@ The escape is `-p /tmp`, the flag that exists for exactly this. The user judges
 minting a session directly in a root-level directory as something they would
 never do.
 
+The form is `x /term` with a space. The seed's no-space `x/port` is ruled out
+permanently (Option E) — it is not a shape a shell function can take.
+
 Confidence: high on the glyph. The degenerate `x /` (empty filter text) follows
 `-f`'s existing answer — a usage error — rather than meaning "mint at root".
+
+*(resolves review-001 F8)*
 
 Sibling check: `cli-verb-surface-redesign` specification — its resolution
 precedence puts the path domain second in the chain and defines a path argument
