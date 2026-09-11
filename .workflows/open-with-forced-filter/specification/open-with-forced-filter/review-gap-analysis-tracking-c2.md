@@ -269,8 +269,8 @@ Eager attach on a single session-search match is already shipped behaviour rathe
 **Proposed Text**:
 Eager attach on a single session-search match is already shipped behaviour rather than a new one (§1.1).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.2 verbatim.
 
 ---
 

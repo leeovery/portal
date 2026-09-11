@@ -83,7 +83,7 @@ Let K be the number of live sessions matching the term under §4.
 | 1 | The matching session is attached directly. No picker. |
 | >= 2 | The picker opens on the Sessions page with the term applied as a committed filter and the cursor on the first matching row. |
 
-Eager attach on a single session-search match is already shipped behaviour rather than a new one: `-s <glob>` matching exactly one session attaches it outright (§1.1).
+Eager attach on a single session-search match is already shipped behaviour rather than a new one (§1.1).
 
 #### 3.3 The committed-filter landing
 
