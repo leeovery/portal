@@ -357,4 +357,14 @@ Project records and tags stay out (§4.1). Nothing in the source material asked 
 
 ---
 
+### 11. Correction Owed to `cli-verb-surface-redesign`
+
+That specification's target-resolution section defines a path argument by the leading `/` / `.` / `~` test and places the path domain second in the bare-positional chain. §2.2 narrows that test for one shape: a single-segment leading-`/` argument is session-search text rather than a path, and never reaches the chain at all.
+
+That is a change to shipped behaviour the sibling specification describes, and this specification is the superseding source for it. The correction lands in the sibling's `## Corrigenda` section — its live body edited so the path test carries the exception, with one corrigendum entry naming this work unit as the source.
+
+Nothing else in that specification is contradicted. Axiom 2, the accepted consequence that bare project shorthand does not reattach, the rejection of project-prefix session matching, the pinned-domain contract, `-f` as a non-composing flag, and the tab-completion principle are all ratified rather than changed (§10.1, §3.1, §5.5, §8.1).
+
+---
+
 ## Working Notes
