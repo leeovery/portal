@@ -294,8 +294,14 @@ K=1/K=2 difference costs the user a picker they were already opening.
 Trade-off accepted: the user cannot predict before typing whether they land in a
 session or in the picker.
 
-Confidence: high on the shape. The zero-match case, what the term searches
-over, and how the form composes with the rest of the argv are open.
+Confidence: high on the shape.
+
+*Amended 2026-09-11 — this line previously read "The zero-match case, what the
+term searches over, and how the form composes with the rest of the argv are
+open." All three have since been decided: the zero-match case by this subtopic's
+own Decision above ("zero fails honestly"), the match domain by
+`search-match-domain`, and argv composition by `argv-composition`. The subtopic's
+only residual is the trade-off already stated above. (resolves review-002 F5)*
 
 Sibling check: `cli-verb-surface-redesign` specification — its rejection of
 project-prefix session matching is ratified, not contradicted: that rejection
