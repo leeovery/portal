@@ -309,7 +309,7 @@ Nothing about how the concurrent bootstrap behaves changes. This section adds th
 
 Offered words carry the sigil — `/po` completes to `/portal-a1b2`, never to `portal-a1b2`, which would replace the whole word and drop the slash the user typed. The words offered are the live session names the typed term prefixes: the shell discards any candidate that is not an extension of the word being completed, so completion is prefix-shaped even though the form itself matches by containment (§4.3). `/ort<TAB>` therefore offers nothing, while `/ort` still finds `portal-a1b2` on Enter.
 
-`/<TAB>` — the sigil with nothing after it — offers every live session name, since every name is prefixed by the empty term. The bare slash is a usage error only when it is run (§2.5), which is precisely what makes completing it worth doing.
+`/<TAB>` — the sigil with nothing after it — offers every live session name, since every name is prefixed by the empty term. Left as typed it opens the picker on an empty filter (§2.5); accepting a completion instead narrows the term to one session and attaches it, which is what makes completing the bare slash worth doing.
 
 Directories are deliberately excluded from what is *offered*, even though they count for *matching* (§4.1): a completed `/Users/leeovery/Code/portal` reads as a path and trips the no-second-slash rule (§2.2) straight back into path territory.
 
@@ -419,7 +419,7 @@ Out of scope and not deferred — there is no open thread here to pick up later.
 
 #### 10.5 The rest of the argument surface
 
-**Nothing is retired, renamed or deprecated.** `-f`, all four domain pins, and the bare positional chain keep their current prominence, and the domain pins and the bare positional chain keep their current behaviour exactly. Two changes are owed to the existing surface: `-f`'s widened match domain (§4.2), and how the `-f` / `/term` pair is described (§9.1).
+**Nothing is retired, renamed or deprecated.** `-f`, all four domain pins, and the bare positional chain keep their current prominence, and the domain pins and the bare positional chain keep their current behaviour exactly. Two changes are owed to the existing surface: the widened match domain, which reaches `-f` and the filter typed by hand in the picker alike (§4.2), and how the `-f` / `/term` pair is described (§9.1).
 
 #### 10.6 The picker reached any other way
 
@@ -439,7 +439,7 @@ That is a change to shipped behaviour the sibling specification describes, and t
 
 Nothing else in that specification is contradicted. Axiom 2, the accepted consequence that bare project shorthand does not reattach, the rejection of project-prefix session matching, `-f` as a non-composing flag, and the tab-completion principle are all ratified rather than changed (§10.1, §3.1, §5.5, §8.1).
 
-**The pinned-domain contract is adjacent rather than breached.** That contract holds that every domain pin hard-fails on an unresolvable target and never falls back to the TUI picker. The sigil is not a domain pin: reaching the picker is its purpose (§3.2) rather than a fallback from a failure, and on its own unresolvable case — K = 0 — it hard-fails exactly as a pin does.
+**The pinned-domain contract is adjacent rather than breached.** That contract holds that every domain pin hard-fails on an unresolvable target and never falls back to the TUI picker. The sigil is not a domain pin: reaching the picker is its purpose (§3.2) rather than a fallback from a failure, and it has no unresolvable case to fall back from — a term matching nothing is a filter result that opens the picker on an empty list (§3.2).
 
 ---
 

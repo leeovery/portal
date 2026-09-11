@@ -21,8 +21,8 @@ Correct the completion paragraph to the one outcome the record holds for a bare 
 **Proposed Text**:
 `/<TAB>` — the sigil with nothing after it — offers every live session name, since every name is prefixed by the empty term. Left as typed it opens the picker on an empty filter (§2.5); accepting a completion instead narrows the term to one session and attaches it, which is what makes completing the bare slash worth doing.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §8.1 verbatim.
 
 ---
 
@@ -45,8 +45,8 @@ Correct the clause to the outcome the record holds: the form has no unresolvable
 **Proposed Text**:
 **The pinned-domain contract is adjacent rather than breached.** That contract holds that every domain pin hard-fails on an unresolvable target and never falls back to the TUI picker. The sigil is not a domain pin: reaching the picker is its purpose (§3.2) rather than a fallback from a failure, and it has no unresolvable case to fall back from — a term matching nothing is a filter result that opens the picker on an empty list (§3.2).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §11 verbatim.
 
 ---
 
@@ -69,5 +69,5 @@ Name the widened match domain once, as reaching the flag and the hand-typed filt
 **Proposed Text**:
 **Nothing is retired, renamed or deprecated.** `-f`, all four domain pins, and the bare positional chain keep their current prominence, and the domain pins and the bare positional chain keep their current behaviour exactly. Two changes are owed to the existing surface: the widened match domain, which reaches `-f` and the filter typed by hand in the picker alike (§4.2), and how the `-f` / `/term` pair is described (§9.1).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §10.5 verbatim.
