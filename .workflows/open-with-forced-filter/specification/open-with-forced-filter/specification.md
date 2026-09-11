@@ -45,7 +45,7 @@ A leading `/` today makes an argument a path unconditionally (`sed -n '14p' inte
 | `/tmp/` | path — mints, unchanged; the trailing slash is the second one |
 | `./port`, `~/port`, `port` | unchanged — the rule tests a leading `/` only |
 
-Completion offers no help telling the two apart. Portal returns no candidates for a slash-leading word and switches the shell's filename fallback off (`portal __complete open /tm` → no candidates, `ShellCompDirectiveNoFileComp`; `portal completion bash | grep -n 'compopt +o default'`), so `x /tm<TAB>` completes to nothing rather than to `/tmp/`. The trailing slash that keeps an argument a path is therefore one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
+Completion cannot turn one shape into the other. The words it offers for a slash-leading argument are live session names carrying the sigil, never directories (§8.1), and Portal switches the shell's filename fallback off (`portal completion bash | grep -n 'compopt +o default'`) — so `x /tm<TAB>` never becomes `/tmp/`. The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
 
 #### 2.3 Recognition is positional-independent
 

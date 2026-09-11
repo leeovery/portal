@@ -92,8 +92,8 @@ Completion offers no help telling the two apart. Portal returns no candidates fo
 **Proposed Text**:
 Completion cannot turn one shape into the other. The words it offers for a slash-leading argument are live session names carrying the sigil, never directories (§8.1), and Portal switches the shell's filename fallback off (`portal completion bash | grep -n 'compopt +o default'`) — so `x /tm<TAB>` never becomes `/tmp/`. The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §2.2 verbatim. The removed `portal __complete open /tm` measurement was of today's pre-feature behaviour and does not survive the completion work; the durable `compopt +o default` measurement is kept.
 
 ---
 
