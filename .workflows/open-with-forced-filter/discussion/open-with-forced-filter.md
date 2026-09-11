@@ -186,13 +186,31 @@ session when the term is unambiguous.
 
 ### Decision
 
-*(provisional — the chain itself stands unchanged; what replaces the missing
-route is being worked under the sigil subtopics)*
-
 The bare-positional resolution chain is **not** altered by this feature. Its
 ordering, its domains, and Axiom 2 stand as the `cli-verb-surface-redesign`
 specification set them. Project-prefix session matching stays rejected for the
 reason that specification gave.
+
+The user put this landing themselves once the reframe held — "maybe we are ok as
+we are? I wonder if simply adding `x /xyz` would be a good addition and leave
+everything else as-is" — and the sigil subtopics have since filled the missing
+search route without touching a single branch of the chain.
+
+**This also settles the intent question discovery raised.** The user's belief that
+`x portal` means "mint in the Portal directory, never attach" is what the product
+already does, and it was decided deliberately rather than by accident. The one
+qualification is the rename case: a session renamed to exactly `portal` *is*
+attached by `x portal`, because the exact-session branch is tested first. That is
+the chain working as specified — an exact session name is a session-domain hit —
+and the user has a deliberate route to the other outcome in the three domain pins.
+No change is owed.
+
+Trade-off accepted: the residual unpredictability stands. Which directory a bare
+word mints at is zoxide's frecency call, and a live session whose name exactly
+matches a bare word changes that word's outcome for as long as it exists.
+
+Confidence: high. The chain's behaviour was measured rather than recalled, and the
+decision is to leave shipped, specified behaviour alone.
 
 Sibling check: `cli-verb-surface-redesign` specification — holds Axiom 2 (no
 find-or-create), the accepted consequence that bare project shorthand does not
@@ -700,6 +718,64 @@ Sibling check: `cli-verb-surface-redesign` specification — it records that "th
 under its no-back-compat posture, a statement about the functions surviving the
 verb redesign rather than a decision about how their completion is registered. No
 correction is owed.
+
+---
+
+## surface-reconciliation
+
+### Context
+
+The user raised this as the thread behind the whole feature: the argument surface
+has accumulated ways to do things, and adding another risks making it worse. After
+this feature there are four ways to reach a live session — a bare exact session
+name, `-s <name>`, `-s <glob>`, and `/term` — plus two ways to open the picker
+pre-filtered, `-f <text>` and `/term`.
+
+### Journey
+
+The worry turned out to be smaller than it looked once each pair was examined
+rather than counted.
+
+**`-f` and `/term` are not two spellings of one behaviour.** They differ exactly
+where it matters: with one match, `/term` attaches and `-f` shows a list of one.
+`-f` is the explicit form that always lands in the picker, which is what a script
+or a keybinding wants; `/term` is the interactive form that finishes the job when
+it can. The user's verdict on the pair was direct — "they arent the same. this is
+fine."
+
+**The four session routes are not four spellings either.** A bare exact name is a
+name you already know. `-s <name>` is the same thing pinned, for a script or for
+reaching a name a higher-precedence domain would shadow. `-s <glob>` opens *every*
+match, which is a burst, not a search. `/term` narrows and lets the user choose.
+Only the last is the everyday human route, and it is the one that did not exist.
+
+The accretion worry was also what produced the two rejections recorded under the
+sigil subtopic: a `+` mint sigil (a fourth mint route solving nothing) and a
+configurable sigil (one behaviour, two meanings). Both were declined on this
+ground rather than on their own merits.
+
+### Decision
+
+**The surface stands as it is, plus `/term`.** Nothing is retired, renamed or
+deprecated: `-f`, all four domain pins, and the bare positional chain keep their
+current behaviour and their current prominence.
+
+The user's landing, stated twice — "leave everything else as-is", and on the
+closest pair, "they arent the same. this is fine."
+
+What this does change is how the pair is *described*: `-f` documented as "open
+the picker pre-filtered" invites a reader to assume `/term` is shorthand for it.
+The two are better described by outcome — one always shows the list, one takes
+you there when there is only one place to go. That is help-text and README work
+for the specification to carry, not a behaviour change.
+
+Confidence: high.
+
+Sibling check: `cli-verb-surface-redesign` specification — it is the document that
+established this surface and its governing principle ("split the public surface by
+outcome, not by input shape"). Adding a form that is distinguished from `-f` by
+its *outcome* applies that principle rather than departing from it. No correction
+is owed.
 
 ---
 

@@ -15,11 +15,11 @@
               "parent": null
             },
             "bare-positional-grammar": {
-              "status": "converging",
+              "status": "decided",
               "parent": null
             },
             "attach-vs-mint-intent": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "session-name-recognisability": {
@@ -31,7 +31,7 @@
               "parent": null
             },
             "surface-reconciliation": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "search-match-domain": {
