@@ -652,11 +652,15 @@ invocation, and nothing else belongs on the line.
   single-segment leading-`/` argument is a sigil in any position, so
   `portal open ~/Code/api /tmp` is a usage error rather than a two-mint burst —
   `/tmp` is a sigil, and a sigil with another target on the line is refused. The
-  alternative, recognising the shape only as the sole positional (which would have
-  left that line bursting), was rejected: the token meaning one thing everywhere is
-  worth more than preserving one uncommon line, and the escape is the same `-p`
-  escape already documented for `x /tmp` on its own. `portal open -p ~/Code/api -p /tmp`
-  bursts two mints unchanged. *(resolves review-002 F4)*
+  alternative — recognising the shape only as the sole positional, which would
+  have left that line bursting — was rejected on the user's own ground: it makes
+  the outcome depend on **argument order**, so `portal open /tmp ~/Code/api`
+  errors while `portal open ~/Code/api /tmp` succeeds, with the same two arguments.
+  A user cannot hold that rule, and no error message could explain it. Position
+  independence is worth more than preserving one uncommon line, and the escape is
+  the same `-p` escape already documented for `x /tmp` alone:
+  `portal open -p ~/Code/api -p /tmp` bursts two mints unchanged.
+  *(resolves review-002 F4)*
 - `portal open /term -s|-p|-a|-z <value>` → usage error. **Settled by derivation**
   — not discussed. Determined by the two rulings above, which make the sigil a
   whole-invocation form, together with `-f`'s existing contract, which already
