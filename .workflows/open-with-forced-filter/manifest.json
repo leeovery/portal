@@ -53,6 +53,10 @@
             "search-result-display": {
               "status": "decided",
               "parent": null
+            },
+            "cold-path-classification": {
+              "status": "decided",
+              "parent": null
             }
           }
         }

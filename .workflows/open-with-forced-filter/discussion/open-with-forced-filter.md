@@ -952,6 +952,58 @@ that vocabulary changes. No correction is owed.
 
 ---
 
+## cold-path-classification
+
+### Context
+
+On a cold boot — no tmux server running — Portal must start the server, register
+hooks, restore every saved session and replay its scrollback before it can list a
+single session. That takes seconds, and Portal already has an honest loading page
+for it, with a live `Restoring sessions N/M` counter.
+
+Which invocations get that page is decided from the command line before anything
+is resolved, and anything positional is classified as not-heading-for-the-picker.
+`-f port` is a flag, so it qualifies; `/port` is a positional, so it would not.
+The same verdict also decides where soft bootstrap warnings go — on the non-picker
+classification they are written straight to the terminal the picker is about to
+take over with its alternate screen, which is the corruption the classification
+exists to prevent.
+
+So without a decision, `x /port` on a cold boot gives a blank terminal for the
+whole bootstrap and can spray a warning into the frame the picker is about to
+claim, while `x -f port` on the same boot shows the loading page throughout.
+
+The awkwardness is real rather than an oversight: `/term` does not know whether it
+is heading for the picker. That depends on the match count, and on a cold server
+there are no sessions to match until restore has finished.
+
+### Decision
+
+**The sigil is classified as a picker invocation.** It gets the concurrent
+bootstrap and the loading page, and bootstrap warnings take the in-TUI route
+rather than stderr.
+
+Deciding factor: a brief loading page on the way to a direct attach costs a
+flicker; a silent multi-second blank terminal on every cold boot reads as a hang,
+and it is the first impression the feature makes after every reboot. The warnings
+argument points the same way — they need somewhere safe to land, and the picker
+path already has one.
+
+Trade-off accepted: when the term resolves to exactly one session, the loading
+page appears and is replaced by the attach, so the user sees a brief screen they
+did not need.
+
+Confidence: high.
+
+Sibling check: no overlap found. The cold-path startup flip is described in the
+project's architecture notes rather than owned by a sibling work unit's
+specification; this decision adds the sigil to the set of invocations that take
+the concurrent path and changes nothing about how that path behaves.
+
+*(resolves review-002 F1)*
+
+---
+
 ## Summary
 
 ### Key Insights
