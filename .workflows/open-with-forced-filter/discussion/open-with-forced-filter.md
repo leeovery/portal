@@ -128,22 +128,53 @@ reach neither the path domain nor the glob branch:
 
 A path argument needs a `/`, or a leading `.` or `~`; a glob needs one of
 `*?[` (`internal/resolver/glob.go`, `globMeta`). So for `portal` the live set is
-exact session name → alias → zoxide, and the first of those never fires for a
-project word by naming convention. **Both survivors mint at a directory.**
+exact session name → alias → zoxide, and the last two both mint at a directory.
 
-That matters because it relocates the unpredictability. The *outcome* of a bare
-word is invariant — a new session at some directory. The only thing the user
-cannot predict is **which directory zoxide picked**, which is zoxide's frecency
-ranking rather than Portal's branch ordering. "I can't remember which of five
-branches answers" is largely a mirage.
+**But the session branch is not dead — rename makes it live.** The first draft of
+this reasoning claimed the exact-session branch "never fires for a project word
+by naming convention", and that is false. `Resolve` tests `isExactSession`
+before anything else (`internal/resolver/query.go`), and renaming a session is a
+shipped user action — the picker's `r` modal, through `tmux.RenameSession`. A
+user who renames a session to `portal` and then types `x portal` is **attached**
+to it; the same word typed before that rename, or after that session is killed,
+mints a new session at whatever directory zoxide ranks first. Same keystrokes,
+opposite outcome, decided by what happens to be running.
 
-**What is actually missing.** Stripping the mirage leaves a real gap, and it is
-not in the chain: the argument surface has three routes that mint and **no route
-that searches live sessions**. Reaching an existing session requires its exact
-`{project}-{nanoid}` name under `-s`, or the picker. Since the names are
-unmemorable by design, the picker is the only practical route — which is exactly
-the ceremony the seed set out to remove. The bare form is not broken; it is
-complete for minting and deliberately blind to attaching.
+So the unpredictability is a mirage **only for generated names**. For the
+custom-named sessions the seed says are part of the real session set, attach-vs-
+mint genuinely does vary with live state. What survives of the reframe is
+narrower and still useful: the outcome of a bare word is invariant *as long as
+no live session is named exactly that word*, and the residual variation is which
+directory zoxide picked — frecency ranking rather than branch ordering.
+
+**What is actually missing.** The first draft of this reasoning also claimed the
+argument surface has "no route that searches live sessions". That is false too.
+`x -s 'port*'` is a search route, measured against the code:
+
+- one match → the burst degenerates and attaches it outright, no picker
+  (`dispatchOpenBurst`, `len(surfaces) == 1` → `openResolved`, `cmd/open_burst.go:90`)
+- two or more matches → a window opens per match (`runOpenBurst`)
+- zero matches → hard fail carrying the `-f` hint
+
+So eager attach on a single session-search match is **already shipped
+behaviour**, not a new idea — which matters for `unambiguous-direct-attach`,
+where it is precedent rather than invention.
+
+What `-s <glob>` is not is *ergonomic*, and it answers multi-match the opposite
+way to what the seed wants:
+
+- it demands glob syntax, and the glob must be quoted — unquoted `x -s port*` is
+  eaten by zsh's `nomatch` before Portal sees it
+- it is a flag plus a quoted pattern, which is further from muscle memory than
+  the `-f` it is meant to beat
+- on two or more matches it **opens every match** rather than letting the user
+  choose — the seed wants precisely the opposite: narrow, then pick by preview
+
+So the gap is real but narrower than first stated. The argument surface has
+three routes that mint, one route that searches — awkward to type, and
+burst-on-ambiguity by design — and no route that searches *and narrows*. The bare
+form is not broken; it is complete for minting and, rename aside, blind to
+attaching.
 
 This reframes the feature. It is not "add a filter shortcut, and separately
 consider fixing the chain". It is: **the argument surface is missing its search
