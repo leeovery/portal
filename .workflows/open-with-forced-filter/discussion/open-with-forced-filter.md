@@ -63,8 +63,9 @@ Measured against the tree at the start of this discussion.
 - The shell function is a pass-through, so any new syntax is parsed by Portal,
   not by the shell. `portal init` emits `x() { portal open "$@"; }` for bash,
   zsh and fish (`cmd/init.go`) — `x /port` reaches `portal open` as the single
-  positional `/port`. A no-space `x/port` is not a shell function call at all,
-  so it cannot work without a different mechanism.
+  positional `/port`. A no-space `x/port` reaches the emitted `x` function only if
+  a function is defined under that exact name — so it cannot work for an arbitrary
+  search term without a different mechanism.
 - The bare chain is exact session → path → alias → zoxide → miss
   (`internal/resolver/query.go`), with globs handled separately (a glob is not
   expanded by `Resolve`; it falls through to a miss on the single-target path,
@@ -363,14 +364,18 @@ which the rename case makes possible — is already covered by `-p`, `-a` and `-
 Symmetry pressure, not a need, and a fourth mint route is exactly the surface
 accretion this work set out not to cause.
 
-**Option E — the seed's no-space form, `x/port`.** Rejected as impossible rather
-than undesirable. `x/port` is not a function call in any shell: it is a path — a
-command named `port` inside a directory named `x` — and no function definition can
-claim that shape. The only mechanisms that could intercept it are a global
-unknown-command hook, which would put Portal in the path of every mistyped
-command on the machine to save one keystroke, or defining a separate function per
-search term. Recorded explicitly because it is a stated seed ask, so that silence
-is not mistaken for oversight.
+**Option E — the seed's no-space form, `x/port`.** Rejected, and not on the ground
+that the shape is unclaimable: measured, both shells will define a function whose
+literal name is `x/port` and dispatch that word to it
+(`bash --noprofile --norc -c 'x/port() { echo RAN-FUNC; }; x/port'` → `RAN-FUNC`,
+GNU bash 5.3.15; `zsh -f -c 'x/port() { echo RAN-FUNC }; x/port'` → `RAN-FUNC`,
+zsh 5.9). What that buys is nothing, because the name must be the *search term*:
+a function per term anyone might ever type is not a mechanism, and without one
+the word falls through to a path — a command named `port` inside a directory
+named `x`. The only other interception is a global unknown-command hook, which
+would put Portal in the path of every mistyped command on the machine to save one
+keystroke. Recorded explicitly because it is a stated seed ask, so that silence is
+not mistaken for oversight.
 
 **Option D — make `/` configurable, opt-in via global config.** Rejected. A
 keybinding and an argv token are different kinds of thing: a keystroke lives in
@@ -430,7 +435,8 @@ minting a session directly in a root-level directory as something they would
 never do.
 
 The form is `x /term` with a space. The seed's no-space `x/port` is ruled out
-permanently (Option E) — it is not a shape a shell function can take.
+permanently (Option E) — the shape is claimable, but only one search term at a
+time.
 
 Confidence: high on the glyph. The degenerate `x /` (empty filter text) follows
 `-f`'s existing answer — a usage error — rather than meaning "mint at root".
