@@ -131,6 +131,8 @@ The recorded directory is the `@portal-dir` tmux session user-option, stamped at
 
 **Known limitation, unconditional and self-correcting:** a session created before the directory stamp shipped carries no recorded directory and matches on name alone, in every view. Such sessions age out as they are killed and replaced. Deriving the missing value everywhere was rejected for its cost — one pane read per unrecorded session on every `/term`.
 
+This holds *within* a single picker as well as across launches. The grouped views derive a missing directory while the sigil's own narrowed list is on screen, and retain what they derive; that value belongs to grouping and to nothing else. Neither the match (§4.4) nor the directory column (§6.1) ever reads it, so a regroup can never make a session findable by a path it was not findable by a moment earlier, and can never put a path beside a name that showed none.
+
 #### 4.2 The matched fields are shared across all three filter entry points
 
 `-f/--filter`, the sigil, and typing `/` by hand inside the picker all narrow the same list through the same filter value. Widening the matched fields to include the directory widens them for all three. That is deliberate: the same list narrowing on different *fields* depending on how the user arrived at it is harder to predict than one wider rule.
