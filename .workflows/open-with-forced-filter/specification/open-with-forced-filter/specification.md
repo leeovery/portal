@@ -87,9 +87,9 @@ The searched set is the set the picker lists. Portal's own internal sessions —
 
 | K | Outcome |
 |---|---|
-| 0 | The picker opens on the Sessions page with the term applied as a committed filter, showing an empty list. |
+| 0 | The picker opens on the Sessions page, landing as §3.3 sets it, with no session surviving the term. |
 | 1 | The matching session is attached directly. No picker. |
-| >= 2 | The picker opens on the Sessions page with the term applied as a committed filter and the cursor on the first matching row. |
+| >= 2 | The picker opens on the Sessions page, landing as §3.3 sets it, with the cursor on the first matching row. |
 
 **The sigil never fails.** The form is the pre-filtered picker, and the single-match attach is the one shortcut past it; a count of zero is a filter result rather than an error. Zero matches is indistinguishable from typing `/` inside the picker and filtering to nothing — `Esc` clears the filter and the session list is there. Nothing is written to stderr and the exit status is not a failure.
 
@@ -135,7 +135,7 @@ The usage errors of §5.1 are ordinary usage errors, carrying the same shape as 
 
 The recorded directory is the `@portal-dir` tmux session user-option, stamped at creation and returned with the session list at no extra cost — `ListSessions` appends `#{@portal-dir}` to its `list-sessions -F` format and parses it into `Session.Dir` (`grep -n '@portal-dir' internal/tmux/tmux.go`). Matching on it therefore costs no additional tmux round-trip.
 
-**Never a derived directory.** The picker can derive a missing directory by asking a session's pane where it is, but only in the grouped views, and it caches the answer — so a session would be findable or not depending on which view the user last left the picker in. The shell form has it worse: K (§3.2) is taken before any picker exists, against a session list carrying names only. Matching the recorded value alone makes the answer identical everywhere — the count and the list, the shell and the picker — and keeps the sigil path free of a per-session pane read on a path whose whole point is to feel instant.
+**Never a derived directory.** The picker can derive a missing directory by asking a session's pane where it is, but only in the grouped views, and it caches the answer — so a session would be findable or not depending on which view the user last left the picker in. The shell form has it worse: K (§3.2) is taken before any picker exists, so a derived value has nowhere to come from and nowhere to be kept — the recorded directory that rides back with the session list is the only one there is. Matching the recorded value alone makes the answer identical everywhere — the count and the list, the shell and the picker — and keeps the sigil path free of a per-session pane read on a path whose whole point is to feel instant.
 
 **The searched form is the displayed form.** A recorded directory under the user's home is searched home-abbreviated (`~/Code/portal`), not as tmux recorded it (`/Users/leeovery/Code/portal`) — the same abbreviation the row displays (§6.2). Otherwise a term hitting the home prefix (`/lee`, `/user`) would match every session the user has while every returned row displayed no such text, and on a lone survivor would attach outright with nothing on screen accounting for the choice. What was matched is what is shown.
 
@@ -262,6 +262,8 @@ The sibling `theming-system` specification fixes the token vocabulary at ninetee
 The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`); the directory takes whatever width remains after the name and the fixed slots, and applies the left-truncation above.
 
 **Below a floor the directory is dropped rather than truncated to noise.** When the remaining width cannot hold an ellipsis plus one whole path segment, the row shows the session name alone — a row ending in `…l` says nothing and reads as damage, where a bare name at least reads as a name.
+
+The rendering never narrows the search. A term is tested against the whole recorded directory in its home-abbreviated form (§4.1), which is fixed before any row is laid out, so a row can survive on a segment the width pushed out of view or the floor dropped altogether. What the column carries is the recognisable tail of the value that was matched, not a promise that the matched run itself is on screen.
 
 #### 6.3 Scope
 

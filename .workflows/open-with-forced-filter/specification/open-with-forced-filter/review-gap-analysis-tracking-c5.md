@@ -22,8 +22,8 @@ Correct the clause. The recorded directory rides back with the session list at n
 **Proposed Text**:
 **Never a derived directory.** The picker can derive a missing directory by asking a session's pane where it is, but only in the grouped views, and it caches the answer — so a session would be findable or not depending on which view the user last left the picker in. The shell form has it worse: K (§3.2) is taken before any picker exists, so a derived value has nowhere to come from and nowhere to be kept — the recorded directory that rides back with the session list is the only one there is.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.1 verbatim.
 
 ---
 
@@ -46,8 +46,8 @@ Add at the end of §6.2, after the paragraph beginning "**Below a floor the dire
 
 The rendering never narrows the search. A term is tested against the whole recorded directory in its home-abbreviated form (§4.1), which is fixed before any row is laid out, so a row can survive on a segment the width pushed out of view or the floor dropped altogether. What the column carries is the recognisable tail of the value that was matched, not a promise that the matched run itself is on screen.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §6.2 verbatim.
 
 ---
 
@@ -79,7 +79,7 @@ Let the table carry what varies with the count and point at the landing rather t
 | 1 | The matching session is attached directly. No picker. |
 | >= 2 | The picker opens on the Sessions page, landing as §3.3 sets it, with the cursor on the first matching row. |
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.2's outcome table verbatim.
 
 ---
