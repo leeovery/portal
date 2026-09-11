@@ -95,7 +95,7 @@ On K >= 2 the picker lands exactly as `-f` already lands it: filter text set and
 
 #### 3.4 When the count is taken
 
-K is evaluated against the live session set once the tmux server is ready to answer for it. On a warm server that is immediately. On a cold server the sigil takes the picker's concurrent-bootstrap path (§7), so the count is taken after restore has reconstructed the saved sessions — the loading page appears first and is replaced by the attach when K turns out to be 1.
+K is evaluated against the live session set once the tmux server is ready to answer for it. On a warm server that is immediately. On a cold server the sigil takes the picker's concurrent-bootstrap path (§7), so the count is taken once that bootstrap has run to completion — every step of it, not merely the restore that reconstructs the saved sessions. Nothing the sigil decides fires earlier: the loading page stands until the count can be taken, and is then replaced by the attach when K turns out to be 1, or by the failure when it turns out to be 0. Acting at the end of restore would replace the process mid-bootstrap and abandon the steps that follow it — among them the clearing of the `@portal-restoring` marker, which must not outlive bootstrap.
 
 #### 3.5 Accepted cost
 

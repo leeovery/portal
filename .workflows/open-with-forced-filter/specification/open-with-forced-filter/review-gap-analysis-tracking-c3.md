@@ -22,8 +22,8 @@ K is evaluated against the live session set once the tmux server is ready to ans
 **Proposed Text**:
 K is evaluated against the live session set once the tmux server is ready to answer for it. On a warm server that is immediately. On a cold server the sigil takes the picker's concurrent-bootstrap path (§7), so the count is taken once that bootstrap has run to completion — every step of it, not merely the restore that reconstructs the saved sessions. Nothing the sigil decides fires earlier: the loading page stands until the count can be taken, and is then replaced by the attach when K turns out to be 1, or by the failure when it turns out to be 0. Acting at the end of restore would replace the process mid-bootstrap and abandon the steps that follow it — among them the clearing of the `@portal-restoring` marker, which must not outlive bootstrap.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.4 verbatim.
 
 ---
 
