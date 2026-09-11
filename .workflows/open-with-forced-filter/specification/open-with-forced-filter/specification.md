@@ -188,4 +188,32 @@ These are settled by derivation rather than by discussion. The two rulings above
 
 ---
 
+### 6. Search Result Display
+
+#### 6.1 The requirement
+
+**A row in a sigil-opened list shows the directory it matched on, beside the session name.**
+
+Matching on the recorded directory (§4.1) means `/port` can return a row the user cannot account for: a session named `api-work` appears because it lives in the Portal checkout, while the row shows only a name, a window count and an attached marker. In Flat mode — the default, and where the sigil's narrowed list lands — the user is looking at a name with no visible relationship to what they typed.
+
+That is the seed's own complaint returning by the back door. Names are precisely what the user said they cannot recognise sessions by; the feature answers that by matching the directory instead; displaying the name alone sends them back to previewing each candidate, which is the ceremony being removed.
+
+#### 6.2 Placement and weight
+
+Alongside the name rather than on its own line, rendered in the muted rung of the text ramp — the role paths, counts and subtitles already take elsewhere in the picker. This introduces no new colour token and no new convention; the selected row's own treatment one step brighter is the established pattern the sigil row reuses.
+
+The sibling `theming-system` specification fixes the token vocabulary at nineteen closed semantic roles and forbids raw colour at call sites. This section references an existing role rather than proposing a new one, so nothing in that vocabulary changes.
+
+Exact column treatment is presentation detail for implementation. The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`), so a long path in a narrow terminal is handled by the mechanism that is already there.
+
+#### 6.3 Scope
+
+Scoped to the sigil's own list. How Sessions rows render when the picker is reached any other way is untouched, consistent with the matching rule's own divergence (§4.4).
+
+#### 6.4 Accepted cost
+
+The row carries more text.
+
+---
+
 ## Working Notes
