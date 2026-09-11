@@ -508,8 +508,15 @@ with the four letters never appearing together anywhere in it.
 
 Measured: the sessions list filters through `charm.land/bubbles/v2/list.DefaultFilter`,
 which is `fuzzy.Find` from `sahilm/fuzzy` — subsequence matching, case-folded and
-rank-sorted. (Portal's own `internal/fuzzy` has no production consumer, so it is
-not what the picker does.)
+rank-sorted — and `internal/tui` installs no filter of its own, so that default
+stands.
+
+`grep -rn 'SetFilterFunc\|DefaultFilter' internal/tui/*.go | grep -v _test` → no matches
+
+Portal's own `internal/fuzzy` is not what the picker uses, and has no production
+consumer at all:
+
+`grep -rln 'internal/fuzzy' . --include='*.go' | grep -v '^./internal/fuzzy/'` → `internal/fuzzy/match_test.go`
 
 Harmless inside the picker, where the user reads the results and skips the
 nonsense rows. Not harmless here, because two decisions taken in this discussion
@@ -935,11 +942,14 @@ one, which is the ceremony being removed.
 **A row in a sigil-opened list shows the directory it matched on, beside the
 session name.**
 
-Placement and weight are the user's call: alongside the name rather than on its
-own line, rendered in the muted weight of the text ramp — the role paths already
-take elsewhere in the picker, so this introduces no new colour token and no new
-convention. (The selected-row path already has its own established treatment one
-step brighter; the sigil row reuses that pattern rather than inventing one.)
+Placement and weight follow the user's suggestion, offered as a lean rather than
+a ruling ("could go next to the session name perhaps in 'gray' (using theme
+tokens obvs)"): alongside the name rather than on its own line, rendered in the
+muted weight of the text ramp — the role paths already take elsewhere in the
+picker, so this introduces no new colour token and no new convention. (The
+selected-row path already has its own established treatment one step brighter;
+the sigil row reuses that pattern rather than inventing one.) The exact column
+treatment is presentation detail the specification settles.
 
 Scoped to the sigil's own list. How Sessions rows render generally is untouched —
 this work changes nothing about the picker reached any other way, consistent with
@@ -1021,12 +1031,65 @@ the concurrent path and changes nothing about how that path behaves.
 
 ### Key Insights
 
-*(to be captured)*
+1. **The complaint and the defect were in different places.** Discovery arrived
+   with "the bare-positional chain is unpredictable". Measured, a plain word can
+   reach only three of the five branches and two of those always mint, so the
+   *outcome* is near-invariant — the unpredictability is which directory zoxide
+   chose. The genuine hole was elsewhere entirely: three routes that mint, one
+   that searches but bursts on ambiguity (`-s <glob>`), and none that searches
+   and narrows. Testing the complaint before designing against it is what
+   located it.
+
+2. **Declaring the domain is what makes eager resolution safe.** The sibling
+   specification rejected project-prefix session matching because it reintroduces
+   attach-versus-mint guessing with a cliff at the second match. The sigil has
+   the same K=1/K=2 cliff and is fine, because both sides of its cliff are
+   session-domain: the worst case is a picker the user was already opening, not a
+   stray session minted where they wanted an attach. What matters is not whether
+   behaviour changes with the match count, but what sits on each side.
+
+3. **Deciding the fields of a match is not deciding the match.** Widening the
+   search to include directories was settled as a question about *which fields*,
+   and the rule applied to them was left implicit — which would have inherited
+   subsequence matching over full filesystem paths and, under eager resolution,
+   attached the user to a session with no run of their typed characters anywhere
+   in it. The fields and the rule are separate decisions and only one of them was
+   visible at the time.
+
+4. **Divergence between entry points is not uniformly bad.** The same property —
+   one list narrowing differently depending on how you reached it — was rejected
+   for the matched fields and accepted for the matching rule. The distinguishing
+   question is whether the path can act without showing the user anything: the
+   picker shows its results and can afford a loose rule, the shell form cannot.
+
+5. **A match domain the row does not display is a match the user cannot audit.**
+   Matching directories and rendering only names would have put rows in front of
+   the user with no visible reason for being there — sending them back to
+   previewing each candidate, which is the ceremony the feature exists to remove.
 
 ### Open Threads
 
-*(to be captured)*
+- **A correction is owed to the `cli-verb-surface-redesign` specification.** Its
+  target-resolution section defines a path argument by the leading `/` / `.` /
+  `~` test, which this feature narrows: a single-segment leading-`/` argument
+  becomes session-search text rather than a path. The correction is owed once
+  this feature has a specification of its own to name as the superseding source;
+  it is recorded in the `filter-shortcut-form` sibling check as well as here.
 
 ### Current State
 
-*(to be captured)*
+**Resolved.** The form is `/term` with a space, recognised by shape in any
+position, composing with nothing. It is session-domain and never mints: one match
+attaches outright, several open the picker pre-filtered, none fails honestly. It
+matches session name and recorded session directory, by containment, and shows
+the matched directory beside the name. It takes the picker's cold-start
+classification, so it gets the loading page and in-TUI warnings. Completion
+strips the sigil and completes session names. The bare-positional chain, the four
+domain pins, `-f`, and the picker's own fuzzy filter are all untouched. The `x`
+function's completion registration is corrected as part of this work.
+
+**Uncertain.** Whether matching directories produces a tolerable rate of
+unwanted rows is a question only use will answer — the user took it as "happy to
+include folders too and see how it goes", and narrowing back to names alone is a
+cheap reversal. Pre-stamp sessions carrying no recorded directory match on name
+alone until they age out.
