@@ -228,7 +228,7 @@ Alongside the name rather than on its own line, rendered in the muted rung of th
 
 The sibling `theming-system` specification fixes the token vocabulary at nineteen closed semantic roles and forbids raw colour at call sites. This section references an existing role rather than proposing a new one, so nothing in that vocabulary changes.
 
-**When the row is too narrow for both, the directory gives way and the session name never does.** The directory is shortened **from the left**, so its tail survives — `…/Code/portal`, not `/Users/leeovery/Cod…` — because the tail is the segment a human recognises a checkout by, and the whole premise of showing it is that the directory is recognisable where the name is not. A path under the user's home is abbreviated to `~/` first, which reclaims the width before any truncation is needed.
+**When the row is too narrow for both, the directory gives way and the session name never does.** The directory is shortened **from the left**, so its tail survives — `…/Code/portal`, not `/Users/leeovery/Cod…` — because the tail is the segment a human recognises a checkout by, and the whole premise of showing it is that the directory is recognisable where the name is not. A path under the user's home is always displayed abbreviated to `~/`, at any width — the abbreviation is how the value is rendered rather than a rung of the truncation ladder, and it commonly reclaims enough width that no truncation is needed at all.
 
 The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`); the directory column takes its width from what remains and applies the left-truncation above.
 

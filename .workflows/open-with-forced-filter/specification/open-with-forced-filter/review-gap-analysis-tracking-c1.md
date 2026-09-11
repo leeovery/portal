@@ -253,8 +253,8 @@ Always abbreviate. The clause says the abbreviation reclaims width *before any t
 **Proposed Text**:
 > A path under the user's home is always displayed abbreviated to `~/`, at any width — the abbreviation is how the value is rendered rather than a rung of the truncation ladder, and it commonly reclaims enough width that no truncation is needed at all.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §6.2 verbatim.
 
 ---
 
