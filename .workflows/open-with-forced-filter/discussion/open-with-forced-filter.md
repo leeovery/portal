@@ -404,6 +404,94 @@ it rather than discovering it.
 
 ---
 
+## search-match-domain
+
+### Context
+
+`/port` forces its term into the picker as filter text. What that text is matched
+*against* decides whether the form actually does its job.
+
+The seed's driving scenario is a session set that is part generated names and
+part custom ones: "One or two might be custom-named, the rest are
+`portal-<nanoid>`. I genuinely don't know which is which by name." A user with
+`portal-a1b2`, `portal-c3d4`, and a third session they renamed `api-work` while
+working in the Portal directory types `/port` and gets two rows. The one they
+wanted is the third, and nothing in its name contains "port" any more.
+
+Today the sessions list matches on the session name and nothing else —
+`SessionItem.FilterValue()` returns `i.Session.Name`
+(`internal/tui/session_item.go:80`). Not the directory the session was opened in,
+not the project record behind it, not its tags.
+
+### Options Considered
+
+**Name only (today's behaviour).** Precise: every row that comes back contains
+the typed text in its name. Misses any session whose name has drifted from its
+origin — which is the seed's own scenario.
+
+**Name plus the session's directory.** Finds the renamed session, because the
+place it was opened in is the thing the user actually remembers. Less precise:
+sessions the user would never think of as "port" appear because their path
+happens to contain it.
+
+**Name, directory, project record and tags.** Not pursued — nothing in the
+conversation asked for it, and each added field widens the false-positive set
+further for a case nobody has hit.
+
+### Journey
+
+The trade was put to the user as a choice about how they would rather lose:
+`/port` occasionally missing a renamed session they wanted, or occasionally
+showing a couple they did not. They chose to include folders and observe.
+
+Two consequences were then measured rather than assumed.
+
+**The directory is already in hand at no cost.** The picker's own session
+enumeration asks tmux for it in the same call — `ListSessions` appends
+`#{@portal-dir}` to its `list-sessions -F` format and parses it into
+`Session.Dir` (`internal/tmux/tmux.go:128`). So matching on directory adds no
+tmux round-trip for any session created since the stamp shipped. This matters
+because per-session directory resolution is a known cost elsewhere: the grouped
+render's fallback performs one pane read per unstamped session, which is why
+Flat mode deliberately performs none.
+
+**There is one filter, not three.** `-f/--filter`, the new `/` form, and typing
+`/` by hand inside the picker all narrow the same list through the same
+`FilterValue`. Widening the match domain therefore widens it for all three —
+this is not a change scoped to the new form.
+
+### Decision
+
+**The session search matches the session name and the session's directory.**
+
+Scope accepted deliberately: because the three entry points share one filter,
+this changes what `-f` matches and what typing `/` inside the picker matches, not
+only the new form. Divergence was rejected as the worse outcome — the same list
+narrowing differently depending on how the user arrived at it is harder to
+predict than a single wider rule.
+
+Project records and tags stay out of the match domain.
+
+Known limitation, self-correcting: a session created before the directory stamp
+shipped carries no recorded directory and so matches on name alone. Such sessions
+age out as they are killed and replaced.
+
+Trade-off accepted: `/port` is less precise than it would be on names alone, and
+the user has taken that knowingly — "happy to include folders too and see how it
+goes".
+
+Confidence: medium. The direction is settled; whether the added false positives
+are tolerable is something only use will answer, and narrowing back to names is a
+cheap reversal if not.
+
+Sibling check: no overlap found. No sibling document decides the picker's filter
+match domain — `tui-session-picker` specifies the picker's pages and keymap, and
+`session-tagging-and-grouping` decides grouping and tags rather than filtering.
+
+*(resolves review-001 F1)*
+
+---
+
 ## Summary
 
 ### Key Insights

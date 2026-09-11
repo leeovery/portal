@@ -33,6 +33,10 @@
             "surface-reconciliation": {
               "status": "pending",
               "parent": null
+            },
+            "search-match-domain": {
+              "status": "decided",
+              "parent": null
             }
           }
         }
