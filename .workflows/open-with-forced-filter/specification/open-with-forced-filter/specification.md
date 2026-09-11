@@ -374,7 +374,7 @@ Each entry below was reached as a decision, not left out by omission.
 
 #### 10.1 The bare-positional resolution chain
 
-**Unchanged.** Its ordering, its domains, and the sibling `cli-verb-surface-redesign` specification's Axiom 2 (no find-or-create) stand exactly as that specification set them. Project-prefix session matching stays rejected, on that specification's own grounds — `api` resolving to the sole live `api-*` session reintroduces attach-versus-create guessing with an ambiguity cliff the moment a second `api-*` session exists.
+**Unchanged.** Its ordering, its domains, and the sibling `cli-verb-surface-redesign` specification's Axiom 2 (no find-or-create) stand exactly as that specification set them. Project-prefix session matching stays rejected, on that specification's own grounds (§3.1).
 
 The complaint that opened this work — that a bare argument walks branches whose order nobody remembers — was measured and does not hold as stated. A plain word can reach neither the path domain nor the glob branch (§2.2 for the path test; a glob needs one of `*?[`, `grep -n 'globMeta =' internal/resolver/glob.go`), so its live set is exact session name → alias → zoxide, and the last two both mint at a directory. The outcome of a bare word is invariant as long as no live session is named exactly that word.
 

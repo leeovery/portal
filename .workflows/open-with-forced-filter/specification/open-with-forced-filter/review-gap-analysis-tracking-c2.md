@@ -247,8 +247,8 @@ Keep the reasoning where it does work — the section that uses it to show why d
 **Proposed Text**:
 **Unchanged.** Its ordering, its domains, and the sibling `cli-verb-surface-redesign` specification's Axiom 2 (no find-or-create) stand exactly as that specification set them. Project-prefix session matching stays rejected, on that specification's own grounds (§3.1).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §10.1 verbatim.
 
 ---
 
