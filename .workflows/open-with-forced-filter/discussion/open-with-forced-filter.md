@@ -379,9 +379,10 @@ a README, a script, or a bug report. Under a configurable sigil `x /tmp` mints o
 one machine and filters on another, and neither user can read the other's
 command. It also doubles the documentation rather than removing it (both
 behaviours plus the switch), and it would be the first Portal setting to change
-*parsing* rather than appearance — `prefs.json` carries five fields today
-(`session_list_mode`, `theme`, `theme_light`, `theme_dark`, `theme_migrated`;
-`grep -n 'json:"' internal/prefs/store.go`), every one of them UI state.
+*parsing* rather than appearance — `prefs.json` carries six fields today
+(`session_list_mode`, `appearance`, `theme`, `theme_light`, `theme_dark`,
+`theme_migrated`; `grep -n 'json:"' internal/prefs/store.go`), every one of them
+UI state.
 
 ### Journey
 
