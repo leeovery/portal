@@ -165,5 +165,5 @@ By-Project view carries the project as a group heading, so the information is
 reachable there by another route; Flat has none.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Routed to `.workflows/open-with-forced-filter/discussion/open-with-forced-filter.md` (`## search-result-display`). The Context prose was repaired in place and the Decision block took a dated timeline revision (2026-09-11), the failed measurements as its trigger: the requirement re-lands unchanged in kind and broader in reach — the directory column applies in every grouping mode the sigil's list can be in, since none of them displays the matched directory under a committed filter. Specification §6.1 and §6.3 re-aligned to the revised decision.

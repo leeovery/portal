@@ -204,7 +204,9 @@ These are settled by derivation rather than by discussion. The two rulings above
 
 **A row in a sigil-opened list shows the directory it matched on, beside the session name.**
 
-Matching on the recorded directory (§4.1) means `/port` can return a row the user cannot account for: a session named `api-work` appears because it lives in the Portal checkout, while the row shows only a name, a window count and an attached marker. In Flat mode — the default, and where the sigil's narrowed list lands — the user is looking at a name with no visible relationship to what they typed.
+Matching on the recorded directory (§4.1) means `/port` can return a row the user cannot account for: a session named `api-work` appears because it lives in the Portal checkout, while the row shows only a name, a window count and an attached marker.
+
+**In every grouping mode**, not only Flat. The picker reopens in whichever session-list grouping mode the user last left it in — persisted and re-applied at construction, with Flat only the fallback for a user who has never pressed `s` (`sed -n '612,615p' cmd/open.go`) — so the sigil's narrowed list lands in Flat, By Project or By Tag depending on that history. By Project does not carry the information by another route: the grouping survives a committed filter but the headings do not, because a header row's filter value is empty (`sed -n '93p' internal/tui/session_item.go` → `func (HeaderItem) FilterValue() string { return "" }`). A filtered By-Project list therefore shows grouped-indented names with neither heading nor directory.
 
 That is the seed's own complaint returning by the back door. Names are precisely what the user said they cannot recognise sessions by; the feature answers that by matching the directory instead; displaying the name alone sends them back to previewing each candidate, which is the ceremony being removed.
 
@@ -218,7 +220,7 @@ Exact column treatment is presentation detail for implementation. The row alread
 
 #### 6.3 Scope
 
-Scoped to the sigil's own list. How Sessions rows render when the picker is reached any other way is untouched, consistent with the matching rule's own divergence (§4.4).
+Scoped to the sigil's own list, across every grouping mode that list can be in (§6.1). How Sessions rows render when the picker is reached any other way is untouched, consistent with the matching rule's own divergence (§4.4).
 
 #### 6.4 Accepted cost
 
