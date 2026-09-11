@@ -39,8 +39,8 @@ The narrowed list the search hands over does not sit still. The user presses `Sp
 - The containment set stays in force for as long as its filter text stands untouched — every re-render reproduces it, and only a hand edit hands the list back to the picker's own rule (recommended)
 - Containment narrows the first displayed set only; every later re-render filters through the picker's own rule, so the set can widen with no keystroke from the user
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Option 1 chosen — the containment set stays in force for as long as its filter text stands untouched; every re-render reproduces it, and only a hand edit returns the list to the picker's own rule. Applied to §4.4.
 
 ---
 

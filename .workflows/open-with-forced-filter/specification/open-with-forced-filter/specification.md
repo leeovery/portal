@@ -145,11 +145,13 @@ Portal's own `internal/fuzzy` package is not what the picker uses and has no pro
 
 | Entry point | Matched fields | Matching rule |
 |---|---|---|
-| Sigil — the count deciding §3.2, and the picker's first displayed set | name + recorded directory | containment |
+| Sigil — the count deciding §3.2, and its list for as long as its filter text stands untouched | name + recorded directory | containment |
 | `-f/--filter` | name + recorded directory | the picker's own fuzzy |
 | `/` typed by hand in the picker | name + recorded directory | the picker's own fuzzy |
 
-**The picker's own filter is untouched by this work.** Once the sigil has opened the picker, the moment the user edits the filter by hand the picker's rule applies and the row set can widen. The divergence is therefore visible only by rows appearing, never by rows the user expected going missing.
+**The containment set holds for as long as the sigil's filter text stands untouched.** The narrowed list does not sit still — a `Space` preview and back, an `s` regroup, a refresh after a session is killed elsewhere all re-render it — and every one of those reproduces the containment set. The list the user is choosing from is the list they were handed. Only a hand edit of the filter text returns the list to the picker's own rule.
+
+**The picker's own filter is untouched by this work.** Once the user edits that text the picker's rule applies and the row set can widen. The divergence is therefore visible only by rows appearing, never by rows the user expected going missing.
 
 The distinguishing question is whether a path can act without showing the user anything: the picker shows its results and can afford a loose rule; the shell form cannot.
 
