@@ -102,7 +102,7 @@ The specification's clause "and has done for as long as the function has existed
 
 Binary measured: `portal version` → `0.11.1` (`/opt/homebrew/bin/portal`); emitted scripts come from cobra v1.10.2's `GenBashCompletionV2` / `GenZshCompletion` per `cmd/init.go:64,118`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Routed to `.workflows/open-with-forced-filter/discussion/open-with-forced-filter.md`. The `completion` Journey's diagnosis was repaired in place with the new measurements, and `shell-completion-wiring` took a dated Decision revision (2026-09-11) plus a Context repair: the defect is that cobra's script asks the typed word, not that the completer is misregistered, and the fix must change what command the script asks for. The goal — `x` completing as `portal open` — is unchanged. Specification §8.2 and §8.3 re-aligned. The severity carried across: every Tab after `x` currently fires a real `open` invocation at the live tmux server.
 
 ---

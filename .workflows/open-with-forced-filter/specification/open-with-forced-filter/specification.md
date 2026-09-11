@@ -319,24 +319,35 @@ Today the sigil form completes to nothing — the slash is part of the word bein
 
 This is a pre-existing defect, not one this feature introduces, and it is **folded into this feature** rather than spun out.
 
-`portal init` emits a function that runs `portal open`, but registers Portal's completer against `portal` — so the shell completes everything typed after `x` as though the user had typed `portal`. All three emitted shells share the mistake (`grep -n 'complete -o default -F __start_portal\|compdef _portal\|complete -c .* -w portal' cmd/init.go`).
+**Cobra's emitted script asks the typed word for its completions**, not a registered command name (`portal init bash | grep -n 'requestComp='` → `requestComp="${words[0]} __complete ${args[*]}"`; zsh builds the same request from `${words[1]}`). The typed word is `x`, and `x` expands to `portal open` — so Tab after `x` runs `portal open __complete …`, a real `open` invocation carrying `__complete` as a positional target, and Portal's completer is never consulted.
 
-Measured against the built binary:
+Driving the emitted script with both functions stubbed to record what they are handed:
+
+```
+x    -> portal open __complete
+x    -> portal open __complete -s
+x    -> portal open __complete /tm
+xctl -> portal __complete
+```
+
+That is why the pair differ despite carrying identical registrations (`portal init bash | grep -n '^complete '` → both take `complete -o default -F __start_portal`): `xctl` expands to bare `portal`, so its request resolves correctly. All three emitted shells share the mistake for the session-opening function.
+
+Portal's completer answers correctly whenever it is actually asked:
 
 | Probe | Result |
 |---|---|
 | `portal __complete open ""` | live session names — correct |
 | `portal __complete open -s ""` | live session names — correct |
-| `portal __complete ""` | the subcommand list (`alias`, `doctor`, `hook`, `init`, `kill`, `list`, `open`, `theme`, …) — what `x <TAB>` actually offers |
-| `portal __complete -s ""` | `unknown shorthand flag: 's'`, ending in `ShellCompDirectiveDefault` — why `x -s <TAB>` falls through to filenames |
 
-So every `x` completion is off by one level, not just the flag: `x <TAB>` offers subcommand names where it should offer session names, and has done for as long as the function has existed.
+Nothing is wrong on that side. What is wrong is that the `x` path never reaches it — every Tab press there spends an `open` invocation against the live tmux server and returns no completion output, which is why the shell falls through to filenames. It has done so for as long as the function has existed.
 
 #### 8.3 The correction
 
-**`portal init` is corrected so the session-opening function completes as `portal open` rather than as `portal`, across bash, zsh and fish.** `xctl` keeps completing at the root level, which is already correct — it genuinely does map to `portal`.
+**`portal init` is corrected so that Tab after the session-opening function asks Portal for `open`'s completions**, reaching the completer that already answers `portal __complete open …` correctly — across bash, zsh and fish. `xctl` is untouched: its request already resolves to `portal __complete …`.
 
-The correction applies to the **configured** function name, not the literal `x`: `portal init --cmd <name>` renames both emitted functions, and the completion registration must follow whatever name was chosen.
+The correction changes **what command the emitted script asks for completions** when the typed word is the session-opening function. Registering the completer against a different name would not help, because the script does not consult a registered name (§8.2).
+
+It applies to the **configured** function name, not the literal `x`: `portal init --cmd <name>` renames both emitted functions, and the correction must follow whatever name was chosen.
 
 #### 8.4 Why it is folded in rather than spun out
 
