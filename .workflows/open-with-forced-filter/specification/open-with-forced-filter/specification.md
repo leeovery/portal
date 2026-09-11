@@ -373,7 +373,9 @@ That specification's target-resolution section defines a path argument by the le
 
 That is a change to shipped behaviour the sibling specification describes, and this specification is the superseding source for it. The correction lands in the sibling's `## Corrigenda` section — its live body edited so the path test carries the exception, with one corrigendum entry naming this work unit as the source.
 
-Nothing else in that specification is contradicted. Axiom 2, the accepted consequence that bare project shorthand does not reattach, the rejection of project-prefix session matching, the pinned-domain contract, `-f` as a non-composing flag, and the tab-completion principle are all ratified rather than changed (§10.1, §3.1, §5.5, §8.1).
+Nothing else in that specification is contradicted. Axiom 2, the accepted consequence that bare project shorthand does not reattach, the rejection of project-prefix session matching, `-f` as a non-composing flag, and the tab-completion principle are all ratified rather than changed (§10.1, §3.1, §5.5, §8.1).
+
+**The pinned-domain contract is adjacent rather than breached.** That contract holds that every domain pin hard-fails on an unresolvable target and never falls back to the TUI picker. The sigil is not a domain pin: reaching the picker is its purpose (§3.2) rather than a fallback from a failure, and on its own unresolvable case — K = 0 — it hard-fails exactly as a pin does.
 
 ---
 
