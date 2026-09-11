@@ -6,7 +6,7 @@
 
 #### 1.1 The gap this fills
 
-`portal open`'s argument surface reaches a live session by an exact session name (bare or pinned with `-s`), or by `-s <glob>`. The glob form answers ambiguity by opening a window per match rather than by narrowing — one match degenerates to a direct open, two or more run the multi-window burst (`sed -n '90p' cmd/open_burst.go` → `if len(surfaces) == 1 {`) — and it demands quoted glob syntax, because an unquoted `x -s port*` is consumed by zsh's `nomatch` before Portal sees it. Every other route on the surface mints: a bare path, alias or zoxide hit, and the `-p` / `-a` / `-z` pins.
+`portal open`'s argument surface reaches a live session by an exact session name (bare or pinned with `-s`), or by a session glob — bare or pinned, which resolve identically (`sed -n '31,41p' cmd/open_surfaces.go` → both `ResolveBareAll` and `ResolveSessionPinAll` dispatch a glob to `expandSessionGlobAll`). The glob form answers ambiguity by opening a window per match rather than by narrowing — one match degenerates to a direct open, two or more run the multi-window burst (`sed -n '90p' cmd/open_burst.go` → `if len(surfaces) == 1 {`) — and it demands quoted glob syntax, because an unquoted `x port*` is consumed by zsh's `nomatch` before Portal sees it. Every other route on the surface mints: a bare path, alias or zoxide hit, and the `-p` / `-a` / `-z` pins.
 
 Nothing on the surface searches live sessions and then lets the user choose among the matches. This feature adds that route.
 
@@ -303,7 +303,7 @@ The fix lands in the output of `portal init`, which users evaluate in their shel
 
 #### 9.1 Why documentation is a deliverable here
 
-After this feature there are four ways to reach a live session — a bare exact session name, `-s <name>`, `-s <glob>`, and `/term` — plus two ways to open the picker pre-filtered, `-f <text>` and `/term`. None of them is a duplicate, but the closest pair reads like one when described by input shape.
+After this feature the surface reaches a live session by a bare exact session name, a quoted bare glob, `-s <name>`, `-s <glob>`, and `/term`, and opens the picker pre-filtered by `-f <text>` and `/term`. None of them is a duplicate, but the closest pair reads like one when described by input shape.
 
 `-f` documented as "open the picker pre-filtered" invites a reader to assume `/term` is shorthand for it. They differ exactly where it matters: with one match, `/term` attaches and `-f` shows a list of one. **The pair must be described by outcome — one always shows the list, one takes you there when there is only one place to go.**
 

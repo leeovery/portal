@@ -94,8 +94,8 @@ name, `-s <name>`, `-s <glob>`, and `/term` — plus two ways to open the picker
 pre-filtered, `-f <text>` and `/term`.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Routed to `.workflows/open-with-forced-filter/discussion/open-with-forced-filter.md` (`## surface-reconciliation`, Context + Journey) and repaired there: the count is five, the quoted bare glob named alongside `-s <glob>`. A further measurement taken during the repair showed the two glob forms resolve identically — both dispatch through `expandSessionGlobAll` — so the Journey no longer claims a behavioural difference between them. Specification §1.1 and §9.1 re-aligned to the corrected source.
 
 ---
 
