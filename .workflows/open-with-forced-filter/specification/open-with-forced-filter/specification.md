@@ -381,6 +381,7 @@ This is wording work, not behaviour change.
 
 - The sigil form and its recognition rule, including the single-segment absolute-directory cost and the `-p` escape (§2.2, §2.4).
 - The three outcomes by match count (§3.2).
+- The term-less form — a slash on its own opens the picker with its filter open and empty, ready to type into, and never errors (§2.5).
 - What the search matches, and that it matches by containment while the picker's own filter stays fuzzy (§4).
 - That the form composes with nothing (§5.1).
 - `-f` and `/term` distinguished by outcome rather than by input shape, and which of the two to reach for (§9.1).

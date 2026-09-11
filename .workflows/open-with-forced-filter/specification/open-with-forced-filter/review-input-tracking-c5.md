@@ -31,5 +31,5 @@ Add the term-less form to what the help text and README must carry, beside the t
 - What the search matches, and that it matches by containment while the picker's own filter stays fuzzy (§4).
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §9.2 verbatim.
