@@ -46,5 +46,5 @@ State that the searched set is the set the picker lists, so Portal's own interna
 
 The searched set is the set the picker lists. Portal's own internal sessions — the `_portal-saver` daemon host and the `_portal-bootstrap` server anchor — are absent from that list and are never search candidates: no term counts one toward K, and none can be attached by a sigil.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.2 verbatim. Confirmed against the tree: `ListSessions` filters every underscore-prefixed session before returning (`sed -n '171,178p' internal/tmux/tmux.go`), so the searched set the specification now names is the one already in place.

@@ -79,6 +79,8 @@ This is what makes eager resolution safe. The sibling `cli-verb-surface-redesign
 
 Let K be the number of live sessions matching the term under §4.
 
+The searched set is the set the picker lists. Portal's own internal sessions — the `_portal-saver` daemon host and the `_portal-bootstrap` server anchor — are absent from that list and are never search candidates: no term counts one toward K, and none can be attached by a sigil.
+
 | K | Outcome |
 |---|---|
 | 0 | Hard failure. Nothing opens, nothing mints, and the picker does not appear. |
