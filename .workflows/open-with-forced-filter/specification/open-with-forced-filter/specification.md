@@ -284,6 +284,8 @@ Nothing about how the concurrent bootstrap behaves changes. This section adds th
 
 **`/po<TAB>` completes the term after — and excluding — the `/`, against live session names, leaving the sigil in place.** `/po` completing to `/portal-a1b2` leaves exactly one match, which under §3.2 attaches outright, so `/po<TAB><Enter>` becomes the whole interaction.
 
+Offered words carry the sigil — `/po` completes to `/portal-a1b2`, never to `portal-a1b2`, which would replace the whole word and drop the slash the user typed. The words offered are the live session names the typed term prefixes: the shell discards any candidate that is not an extension of the word being completed, so completion is prefix-shaped even though the form itself matches by containment (§4.3). `/ort<TAB>` therefore offers nothing, while `/ort` still finds `portal-a1b2` on Enter.
+
 Directories are deliberately excluded from what is *offered*, even though they count for *matching* (§4.1): a completed `/Users/leeovery/Code/portal` reads as a path and trips the no-second-slash rule (§2.2) straight back into path territory.
 
 Today the sigil form completes to nothing — the slash is part of the word being completed, no session name begins with one, and Portal suppresses the shell's filename fallback, so Tab is silently inert rather than misleading (`portal __complete open /po` → no candidates, `ShellCompDirectiveNoFileComp`).
