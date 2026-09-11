@@ -139,7 +139,7 @@ The picker's own filter does not. The sessions list filters through `charm.land/
 **Proposed Text**:
 The picker's own filter does not. The sessions list filters through `charm.land/bubbles/v2/list.DefaultFilter`, which is `fuzzy.Find` from `sahilm/fuzzy` — subsequence matching, anywhere, case-folded and rank-sorted — and `internal/tui` installs no filter of its own, so that default stands (`grep -rn 'SetFilterFunc\|DefaultFilter' internal/tui/*.go | grep -v _test` → no matches). Case-folding is the one property the sigil keeps from it: the two rules diverge on subsequence against containment and on nothing else.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.3 verbatim.
 
 ---
