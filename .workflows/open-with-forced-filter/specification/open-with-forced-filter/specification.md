@@ -357,6 +357,8 @@ This is wording work, not behaviour change.
 - What the search matches, and that it matches by containment while the picker's own filter stays fuzzy (§4).
 - That the form composes with nothing (§5.1).
 - `-f` and `/term` distinguished by outcome rather than by input shape, and which of the two to reach for (§9.1).
+- That the form completes against live session names after the slash (§8.1).
+- That the corrected completion reaches an existing install only once the output of `portal init` is re-evaluated — a new shell, or re-running `portal init` (§8.3, §8.5).
 
 Both `portal open --help` (`cmd/open.go`'s `Long` and the `-f` flag description) and the README's `x (open)` section carry it. The README's resolution table is where the sigil row belongs, alongside the domain pins and `-f` (`grep -n -- '-f, --filter' README.md` → the pin table row).
 

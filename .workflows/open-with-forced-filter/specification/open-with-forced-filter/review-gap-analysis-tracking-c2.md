@@ -222,8 +222,8 @@ Add both to the documentation list. What determines it is the feature's own stan
 - That the form completes against live session names after the slash (§8.1).
 - That the corrected completion reaches an existing install only once the output of `portal init` is re-evaluated — a new shell, or re-running `portal init` (§8.3, §8.5).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Both bullets applied to §9.2 verbatim.
 
 ---
 
