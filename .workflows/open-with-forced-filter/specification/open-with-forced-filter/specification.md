@@ -141,6 +141,8 @@ This holds *within* a single picker as well as across launches. The grouped view
 
 `-f/--filter`, the sigil, and typing `/` by hand inside the picker all narrow the same list through the same filter value. Widening the matched fields to include the directory widens them for all three. That is deliberate: the same list narrowing on different *fields* depending on how the user arrived at it is harder to predict than one wider rule.
 
+The *form* is shared with them too: all three match the recorded directory home-abbreviated, exactly as §4.1 fixes it, never the absolute path tmux recorded. The abbreviation belongs to the value rather than to the sigil's rule — what diverges between the three entry points is the rule (§4.4) and nothing else. Matching the raw path on the fuzzy routes would make every session on the machine answer to the user's own account name.
+
 #### 4.3 The matching rule
 
 **The sigil matches by containment** — the typed characters appearing as a run in the matched text — case-folded.

@@ -44,8 +44,8 @@ Say in the section that fixes the shared fields that the *form* of the directory
 **Proposed Text**:
 The form is shared with them too: all three match the recorded directory home-abbreviated, exactly as §4.1 fixes it, never the absolute path tmux recorded. The abbreviation belongs to the value, not to the sigil's rule — what diverges between the three entry points is the rule (§4.4) and nothing else.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.2 verbatim.
 
 ---
 
