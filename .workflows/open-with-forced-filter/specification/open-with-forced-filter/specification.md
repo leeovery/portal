@@ -226,7 +226,7 @@ That is the seed's own complaint returning by the back door. Names are precisely
 
 #### 6.2 Placement and weight
 
-Alongside the name rather than on its own line, rendered in the muted rung of the text ramp — the role paths, counts and subtitles already take elsewhere in the picker. This introduces no new colour token and no new convention; the selected row's own treatment one step brighter is the established pattern the sigil row reuses.
+Alongside the name rather than on its own line, taking the same colour token as the row's window count — the muted rung of the text ramp, the role paths, counts and subtitles already take elsewhere in the picker. This introduces no new colour token and no new convention; the selected row's own treatment one step brighter is the established pattern the sigil row reuses.
 
 The sibling `theming-system` specification fixes the token vocabulary at nineteen closed semantic roles and forbids raw colour at call sites. This section references an existing role rather than proposing a new one, so nothing in that vocabulary changes.
 

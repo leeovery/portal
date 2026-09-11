@@ -351,7 +351,7 @@ Name it by the neighbour rather than by the ramp: the directory takes the same c
 **Proposed Text**:
 > Alongside the name rather than on its own line, taking the same colour token as the row's window count — the muted rung of the text ramp, the role paths, counts and subtitles already take elsewhere in the picker.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §6.2 verbatim.
 
 ---
