@@ -12,7 +12,7 @@ Nothing on the surface searches live sessions and then lets the user choose amon
 
 #### 1.2 What it adds
 
-A positional beginning with `/` — `x /port` — declares session-search intent. The term after the slash is forced into the sessions list as filter text and never enters the resolution chain. Exactly one matching session attaches outright; two or more open the picker with the list already narrowed and the cursor on the first row; zero is a hard failure.
+A positional beginning with `/` — `x /port` — declares session-search intent. The term after the slash is forced into the sessions list as filter text and never enters the resolution chain, and the number of live sessions it matches decides what happens (§3.2).
 
 The flow it collapses is the user's dominant one today: `x`, wait for the picker, `/`, type three or four characters, `Enter`, `Space` through the two or three survivors to see which is which, `Enter` to attach. After this feature the leading five steps are one keystroke sequence: `x /port`.
 

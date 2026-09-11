@@ -278,8 +278,8 @@ The outcomes table is the home. The opening description keeps its job — naming
 **Proposed Text**:
 > A positional beginning with `/` — `x /port` — declares session-search intent. The term after the slash is forced into the sessions list as filter text and never enters the resolution chain, and the number of live sessions it matches decides what happens (§3.2).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §1.2 verbatim.
 
 ---
 
