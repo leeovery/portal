@@ -162,8 +162,8 @@ Offer every live session name, each carrying the sigil. What determines it is th
 **Proposed Text**:
 `/<TAB>` — the sigil with nothing after it — offers every live session name, since every name is prefixed by the empty term. The bare slash is a usage error only when it is run (§2.5), which is precisely what makes completing it worth doing.
 
-**Resolution**: Pending
-**Notes**: Lands in §8.1, after the paragraph on which words are offered.
+**Resolution**: Approved
+**Notes**: Applied to §8.1 verbatim, after the paragraph on which words are offered.
 
 ---
 
