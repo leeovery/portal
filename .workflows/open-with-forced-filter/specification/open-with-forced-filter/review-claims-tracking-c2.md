@@ -63,8 +63,8 @@ Source carrying the claim: `.workflows/open-with-forced-filter/discussion/open-w
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Routed to `.workflows/open-with-forced-filter/discussion/open-with-forced-filter.md` (`## filter-shortcut-form` → Decision) and repaired in place: completion returns no candidates for a slash-leading word and suppresses the filename fallback, so the trailing slash is one the user types. The Decision itself is untouched — the sigil is `/`, and the accepted cost already named the same directories with `-p` as the escape. Specification §2.2 re-aligned.
 
 ---
 
