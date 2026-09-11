@@ -112,8 +112,8 @@ Keep §5.5's reference and drop the restatement of the fields behind it; the fie
 **Proposed Text**:
 `-f/--filter` keeps its argument contract, its fuzzy matching rule and its Projects redirect under a pending command. Its matched fields widen with everything else's (§4.2). The two forms are deliberately not symmetrical — the sigil takes no command exception — which is one more line of help text (§9).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §5.5 verbatim.
 
 ---
 

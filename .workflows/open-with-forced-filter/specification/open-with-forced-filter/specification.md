@@ -227,7 +227,7 @@ These are settled by derivation rather than by discussion. The two rulings above
 
 #### 5.5 What `-f` keeps
 
-`-f/--filter` keeps its argument contract, its fuzzy matching rule and its Projects redirect under a pending command. Its matched fields widen with everything else's (§4.2): after this feature `-f` narrows on session name and recorded directory, exactly as the sigil and the hand-typed filter do. The two forms are deliberately not symmetrical — the sigil takes no command exception — which is one more line of help text (§9).
+`-f/--filter` keeps its argument contract, its fuzzy matching rule and its Projects redirect under a pending command. Its matched fields widen with everything else's (§4.2). The two forms are deliberately not symmetrical — the sigil takes no command exception — which is one more line of help text (§9).
 
 ---
 
