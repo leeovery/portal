@@ -23,8 +23,8 @@ Single-segment absolute directories typed *without* a trailing slash — `x /tmp
 
 The cost is affordable because of what it shadows: minting a session directly in a root-level directory is not something the user does, so the directories the rule takes out of the minting domain are ones nobody opens a session in. The recognition rule stays a test of the argument's shape and never consults the filesystem — a rule that minted when the single-segment path happened to exist would read the same command differently on two machines.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §2.4 verbatim (the additive paragraph only; the quoted Current is unchanged).
 
 ---
 

@@ -59,6 +59,8 @@ The alternative — recognising the shape only as the sole positional — was re
 
 Single-segment absolute directories typed *without* a trailing slash — `x /tmp`, `x /opt`, `x /srv` — stop minting and start filtering. The escape is `-p`, the pin that exists for exactly this: `portal open -p /tmp` mints there, and `portal open -p ~/Code/api -p /tmp` bursts two mints unchanged.
 
+The cost is affordable because of what it shadows: minting a session directly in a root-level directory is not something the user does, so the directories the rule takes out of the minting domain are ones nobody opens a session in. The recognition rule stays a test of the argument's shape and never consults the filesystem — a rule that minted when the single-segment path happened to exist would read the same command differently on two machines.
+
 #### 2.5 The degenerate form
 
 `x /` — a bare slash with no term — is a usage error, following `-f`'s existing answer to an empty value (`sed -n '161,163p' cmd/open.go` → the `-f/--filter value must not be empty` guard). It does not mean "mint at root".
