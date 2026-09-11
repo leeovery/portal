@@ -61,6 +61,22 @@
           }
         }
       }
+    },
+    "specification": {
+      "items": {
+        "open-with-forced-filter": {
+          "status": "in-progress",
+          "sources": {
+            "open-with-forced-filter": {
+              "status": "pending"
+            }
+          },
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "construction_gate_mode": "gated",
+          "date": "2026-09-11"
+        }
+      }
     }
   },
   "seeds": [
