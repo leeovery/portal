@@ -824,9 +824,9 @@ correction is owed.
 
 The user raised this as the thread behind the whole feature: the argument surface
 has accumulated ways to do things, and adding another risks making it worse. After
-this feature there are four ways to reach a live session — a bare exact session
-name, `-s <name>`, `-s <glob>`, and `/term` — plus two ways to open the picker
-pre-filtered, `-f <text>` and `/term`.
+this feature there are five ways to reach a live session — a bare exact session
+name, a quoted bare glob, `-s <name>`, `-s <glob>`, and `/term` — plus two ways to
+open the picker pre-filtered, `-f <text>` and `/term`.
 
 ### Journey
 
@@ -840,10 +840,12 @@ or a keybinding wants; `/term` is the interactive form that finishes the job whe
 it can. The user's verdict on the pair was direct — "they arent the same. this is
 fine."
 
-**The four session routes are not four spellings either.** A bare exact name is a
+**The five session routes are not five spellings either.** A bare exact name is a
 name you already know. `-s <name>` is the same thing pinned, for a script or for
-reaching a name a higher-precedence domain would shadow. `-s <glob>` opens *every*
-match, which is a burst, not a search. `/term` narrows and lets the user choose.
+reaching a name a higher-precedence domain would shadow. A quoted bare glob and
+`-s <glob>` open *every* match — a burst, not a search — and resolve identically
+(both dispatch through `expandSessionGlobAll`, `sed -n '31,41p' cmd/open_surfaces.go`);
+the pin only makes the intent explicit. `/term` narrows and lets the user choose.
 Only the last is the everyday human route, and it is the one that did not exist.
 
 The accretion worry was also what produced the two rejections recorded under the
