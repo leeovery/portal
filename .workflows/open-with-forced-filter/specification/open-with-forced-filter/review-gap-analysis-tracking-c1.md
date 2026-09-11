@@ -106,8 +106,8 @@ Key the rule on the text, not on the act: while the committed filter value is ch
 **Proposed Text**:
 > **The containment set holds for as long as the sigil's filter text stands untouched.** The narrowed list does not sit still — a `Space` preview and back, an `s` regroup, a refresh after a session is killed elsewhere all re-render it — and every one of those reproduces the containment set. The list the user is choosing from is the list they were handed. Only a hand edit of the filter text returns the list to the picker's own rule, and the test is the text rather than the act: while the committed filter value is character-identical to the term the sigil supplied, containment stands — opening the filter input and leaving it as it was, or editing back to the same characters, keeps it. Any other value, a cleared filter included, is the picker's own rule.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.4 verbatim.
 
 ---
 
