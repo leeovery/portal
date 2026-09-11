@@ -554,6 +554,11 @@ invocation, and nothing else belongs on the line.
   where a silent page switch is not.
 - `portal open /term <other-target>` → usage error, at every arity. The sigil
   never participates in the multi-target burst.
+- `portal open /term -s|-p|-a|-z <value>` → usage error. **Settled by derivation**
+  — not discussed. Determined by the two rulings above, which make the sigil a
+  whole-invocation form, together with `-f`'s existing contract, which already
+  rejects every domain pin; the sigil is stricter than `-f` in every other
+  respect, so it cannot be laxer here.
 
 `-f/--filter` keeps its existing behaviour untouched, including its Projects
 redirect under a pending command. `-f` never promised session-domain, so nothing
