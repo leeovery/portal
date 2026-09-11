@@ -39,7 +39,7 @@ Every session opened anywhere under the user's home is recorded at an absolute p
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Option 1 chosen — the directory is searched in the same home-abbreviated form the row displays. Applied to §4.1.
 
 ---

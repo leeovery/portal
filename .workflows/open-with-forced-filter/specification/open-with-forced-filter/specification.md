@@ -127,6 +127,8 @@ The recorded directory is the `@portal-dir` tmux session user-option, stamped at
 
 **Never a derived directory.** The picker can derive a missing directory by asking a session's pane where it is, but only in the grouped views, and it caches the answer — so a session would be findable or not depending on which view the user last left the picker in. The shell form has it worse: K (§3.2) is taken before any picker exists, against a session list carrying names only. Matching the recorded value alone makes the answer identical everywhere — the count and the list, the shell and the picker — and keeps the sigil path free of a per-session pane read on a path whose whole point is to feel instant.
 
+**The searched form is the displayed form.** A recorded directory under the user's home is searched home-abbreviated (`~/Code/portal`), not as tmux recorded it (`/Users/leeovery/Code/portal`) — the same abbreviation the row displays (§6.2). Otherwise a term hitting the home prefix (`/lee`, `/user`) would match every session the user has while every returned row displayed no such text, and on a lone survivor would attach outright with nothing on screen accounting for the choice. What was matched is what is shown.
+
 **Known limitation, unconditional and self-correcting:** a session created before the directory stamp shipped carries no recorded directory and matches on name alone, in every view. Such sessions age out as they are killed and replaced. Deriving the missing value everywhere was rejected for its cost — one pane read per unrecorded session on every `/term`.
 
 #### 4.2 The matched fields are shared across all three filter entry points
