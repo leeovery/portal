@@ -101,6 +101,16 @@ The sigil emits no `resolve` component line. That component records one INFO lin
 
 *Derived, not decided in discussion: the source material settles the sigil's domain but never names its logging. The derivation is the `resolve` component's own stated rule.*
 
+#### 3.7 The zero-match failure, and how an attach is performed
+
+**The K = 0 message names the search that found nothing.** It must say that no live session matched the term, and it must not point the user at `-f` — the existing bare-positional miss message does (`grep -n 'try -f' cmd/open_burst.go`), which is right for a miss in the guessing chain and wrong here: `-f` opens a picker filtered by the same term, which would list nothing either. Exact wording follows the house convention for `open`'s user-facing errors.
+
+The usage errors of §5.1 are ordinary usage errors, carrying the same shape as `-f`'s own mutual-exclusion refusal.
+
+**An attach under K = 1 uses the connector the invocation already selects** — `syscall.Exec` into `tmux attach-session` outside tmux, `switch-client` inside it. The sigil introduces no third connection mode.
+
+*Derived, not decided in discussion: the sources settle that zero fails honestly and that one match attaches, but name neither the message nor the connection mode. The derivations are the existing miss-message's purpose and `open`'s existing connector selection.*
+
 ---
 
 ### 4. Match Domain and Matching Rule
