@@ -114,8 +114,8 @@ The term is literal text: containment tests the characters as typed, so `*`, `?`
 **Proposed Text**:
 **The term is literal text.** `*`, `?` and `[` are characters to find rather than wildcards: `/port*` matches a session whose name or recorded directory contains `port*`, and nothing else does. The glob forms answer ambiguity by opening a window per match; the sigil answers it by narrowing, and the two rules are not mixed.
 
-**Resolution**: Pending
-**Notes**: Lands as a paragraph in §4.3, after the containment rule.
+**Resolution**: Approved
+**Notes**: Applied to §4.3 verbatim, after the separate-fields paragraph.
 
 ---
 
