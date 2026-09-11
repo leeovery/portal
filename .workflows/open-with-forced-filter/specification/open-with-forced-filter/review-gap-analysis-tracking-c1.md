@@ -155,8 +155,8 @@ Every row shows its recorded directory, whether it was found by name or by direc
 **Proposed Text**:
 > **Every row in a sigil-opened list shows its recorded directory beside the session name** — the rows found by their directory and the rows found by their name alike, so the column is uniform rather than a signal in itself.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §6.1 verbatim.
 
 ---
 

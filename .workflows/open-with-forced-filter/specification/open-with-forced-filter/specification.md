@@ -212,7 +212,7 @@ These are settled by derivation rather than by discussion. The two rulings above
 
 #### 6.1 The requirement
 
-**A row in a sigil-opened list shows the directory it matched on, beside the session name.**
+**Every row in a sigil-opened list shows its recorded directory beside the session name** — the rows found by their directory and the rows found by their name alike, so the column is uniform rather than a signal in itself.
 
 Matching on the recorded directory (§4.1) means `/port` can return a row the user cannot account for: a session named `api-work` appears because it lives in the Portal checkout, while the row shows only a name, a window count and an attached marker.
 
