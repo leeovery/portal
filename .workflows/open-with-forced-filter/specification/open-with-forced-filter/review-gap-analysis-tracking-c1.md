@@ -326,8 +326,8 @@ Add to §4.3, after the paragraph beginning "**The sigil matches by containment*
 
 > The two fields are tested separately: a session matches when the term appears as a run in its name, or as a run in its recorded directory. They are never joined into a single string to be searched — a term matching across the join would return a session that neither field contains, and no row could account for it.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.3 verbatim.
 
 ---
 

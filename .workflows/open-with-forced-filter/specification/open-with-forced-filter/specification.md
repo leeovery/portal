@@ -137,6 +137,8 @@ The recorded directory is the `@portal-dir` tmux session user-option, stamped at
 
 **The sigil matches by containment** — the typed characters appearing as a run in the matched text — case-folded.
 
+The two fields are tested separately: a session matches when the term appears as a run in its name, or as a run in its recorded directory. They are never joined into a single string to be searched — a term matching across the join would return a session that neither field contains, and no row could account for it.
+
 The picker's own filter does not. The sessions list filters through `charm.land/bubbles/v2/list.DefaultFilter`, which is `fuzzy.Find` from `sahilm/fuzzy` — subsequence matching, anywhere, case-folded and rank-sorted — and `internal/tui` installs no filter of its own, so that default stands (`grep -rn 'SetFilterFunc\|DefaultFilter' internal/tui/*.go | grep -v _test` → no matches). Case-folding is the one property the sigil keeps from it: the two rules diverge on subsequence against containment and on nothing else. Under that rule a session at `~/Projects/rust-tools` satisfies `port`: **p** in `projects`, **o** in `projects`, **r** in `rust`, **t** in `tools`, with the four letters never appearing together.
 
 That is harmless inside the picker, where the user reads the results and skips the nonsense rows. It is not harmless for the sigil, because two decisions compound: matching directories gives the matcher a long absolute path to find scattered letters in, and eager resolution (§3.2) means a lone match is acted on without ever being shown. Together they can attach the user to a session they never saw and would not have chosen. `/port` finding nothing is a better failure than `/port` attaching `rust-tools`.
