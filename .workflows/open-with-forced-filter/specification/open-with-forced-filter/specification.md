@@ -216,4 +216,34 @@ The row carries more text.
 
 ---
 
+### 7. Cold-Path Classification
+
+#### 7.1 The requirement
+
+**A sigil invocation is classified as a picker invocation.** It takes the concurrent bootstrap and the honest loading page, and its soft bootstrap warnings take the in-TUI route rather than stderr.
+
+#### 7.2 What the classification decides
+
+On a cold boot — no tmux server running — Portal must start the server, register hooks, restore every saved session and replay its scrollback before it can list a single session. Which invocations get the loading page for that is decided from the command line before anything is resolved, and anything positional is classified as not-heading-for-the-picker (`sed -n '168,170p' cmd/root.go` → `return cmd.Name() == "open" && len(args) == 0 && !anyOpenDomainPin(cmd)`).
+
+The same verdict decides where soft bootstrap warnings go: on the non-picker classification they are written straight to the terminal the picker is about to take over with its alternate screen, which is the corruption the classification exists to prevent.
+
+Without this section, `x /port` on a cold boot would give a blank terminal for the whole bootstrap and could spray a warning into the frame the picker is about to claim, while `x -f port` on the same boot showed the loading page throughout.
+
+#### 7.3 Why the awkwardness is real
+
+`/term` does not know whether it is heading for the picker — that depends on K (§3.2), and on a cold server there are no sessions to match until restore has finished. The classification is therefore taken on the form rather than on the outcome.
+
+A brief loading page on the way to a direct attach costs a flicker. A silent multi-second blank terminal on every cold boot reads as a hang, and it is the first impression the feature makes after every reboot. The warnings argument points the same way — they need somewhere safe to land, and the picker path already has one.
+
+#### 7.4 Accepted cost
+
+When K turns out to be 1, the loading page appears and is replaced by the attach, so the user sees a brief screen they did not need.
+
+#### 7.5 The concurrent path itself is unchanged
+
+Nothing about how the concurrent bootstrap behaves changes. This section adds the sigil to the set of invocations that take it.
+
+---
+
 ## Working Notes
