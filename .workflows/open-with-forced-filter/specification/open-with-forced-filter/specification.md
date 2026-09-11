@@ -137,7 +137,9 @@ The recorded directory is the `@portal-dir` tmux session user-option, stamped at
 
 **The sigil matches by containment** — the typed characters appearing as a run in the matched text — case-folded.
 
-The two fields are tested separately: a session matches when the term appears as a run in its name, or as a run in its recorded directory. They are never joined into a single string to be searched — a term matching across the join would return a session that neither field contains, and no row could account for it.
+The two fields are tested separately **for the sigil**: a session matches when the term appears as a run in its name, or as a run in its recorded directory. They are never joined into a single string on this path — a term matching across the join would return a session that neither field contains, and the sigil can act on a lone match without showing it.
+
+**On the two fuzzy routes the fields are joined**, as the picker's stock matcher expects, so a cross-field match is possible there — the first letters of the term found in the name and the rest in the path. That is accepted: those routes always show their rows, their rule was already the loose one (§4.4), and separating the fields would cost the list its ranking through the stock matcher.
 
 The picker's own filter does not. The sessions list filters through `charm.land/bubbles/v2/list.DefaultFilter`, which is `fuzzy.Find` from `sahilm/fuzzy` — subsequence matching, anywhere, case-folded and rank-sorted — and `internal/tui` installs no filter of its own, so that default stands (`grep -rn 'SetFilterFunc\|DefaultFilter' internal/tui/*.go | grep -v _test` → no matches). Case-folding is the one property the sigil keeps from it: the two rules diverge on subsequence against containment and on nothing else. Under that rule a session at `~/Projects/rust-tools` satisfies `port`: **p** in `projects`, **o** in `projects`, **r** in `rust`, **t** in `tools`, with the four letters never appearing together.
 

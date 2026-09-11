@@ -18,8 +18,8 @@ After this feature `-f port` and a `/` typed by hand inside the picker both sear
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Option 1 chosen — the fuzzy routes join the two fields as the stock matcher expects and accept a cross-field match; the sigil keeps its separate tests. Applied to §4.3.
 
 ---
 
