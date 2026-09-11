@@ -45,6 +45,10 @@
             "completion": {
               "status": "decided",
               "parent": null
+            },
+            "shell-completion-wiring": {
+              "status": "decided",
+              "parent": null
             }
           }
         }

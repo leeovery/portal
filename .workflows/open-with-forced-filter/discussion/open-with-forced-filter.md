@@ -622,6 +622,68 @@ departing from it. No correction is owed.
 
 ---
 
+## shell-completion-wiring
+
+### Context
+
+The `x` shell function has never completed correctly. It runs `portal open`, but
+`portal init` registers Portal's completer against `portal`, so the shell
+completes everything typed after `x` one command level too high. The user noticed
+it as "`x -s <TAB>` does nothing"; measured, the breakage is general — `x <TAB>`
+offers Portal's own subcommand list where it should offer live session names, and
+has done for as long as the function has existed.
+
+All three emitted shells share the mistake. `xctl` is unaffected: it genuinely
+does map to `portal`, so completing it at the root level is correct.
+
+This is a pre-existing defect rather than anything this feature introduced. It
+reaches this discussion because the completion decision — complete the term after
+the sigil against live session names — is inert through `x` until the wiring is
+right, and `x /term` is the form the whole feature is designed around.
+
+### Options Considered
+
+**Spin it out as its own bugfix work unit.** Keeps this feature's edits within the
+argument surface, and gives a pre-existing bug with a three-shell blast radius its
+own scope. Costs: this feature ships knowingly half-working — the sigil's
+completion reachable only by typing `portal open /term` in full, which nobody
+will.
+
+**Fold it into this feature.** The completion decision becomes real on the form
+the user actually types. Costs: drags the feature into shell-integration code it
+otherwise never touches.
+
+### Decision
+
+**Folded into this feature.** `portal init` is corrected so the session-opening
+function completes as `portal open` rather than as `portal`, across bash, zsh and
+fish. `xctl` keeps completing at the root level, which is already correct.
+
+The correction applies to the *configured* function name, not the literal `x` —
+`portal init --cmd <name>` renames both emitted functions, and the completion
+registration must follow whatever name was chosen.
+
+Deciding factor: this feature's deliverable is not a parsing rule, it is `x /term`
+becoming muscle memory. A completion decision that does not reach that form has
+not been delivered.
+
+**Rollout consequence:** the fix lands in the output of `portal init`, which users
+evaluate in their shell startup file. An existing install therefore does not pick
+it up until the shell is restarted (or `portal init` is re-evaluated), even though
+the binary is new. This affects the completion behaviour only — the `/term` form
+itself is parsed by Portal and works the moment the new binary is in place.
+
+Confidence: high on the scope call; it was the user's, taken against a stated case
+for spinning it out.
+
+Sibling check: `cli-verb-surface-redesign` specification — it records that "the `x`
+/ `xctl` shell functions re-emit from `portal init` and keep working untouched"
+under its no-back-compat posture, a statement about the functions surviving the
+verb redesign rather than a decision about how their completion is registered. No
+correction is owed.
+
+---
+
 ## Summary
 
 ### Key Insights
