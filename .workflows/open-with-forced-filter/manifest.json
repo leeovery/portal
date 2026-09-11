@@ -41,6 +41,10 @@
             "argv-composition": {
               "status": "decided",
               "parent": null
+            },
+            "completion": {
+              "status": "decided",
+              "parent": null
             }
           }
         }

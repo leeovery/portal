@@ -561,6 +561,67 @@ contract intact. No correction is owed.
 
 ---
 
+## completion
+
+### Context
+
+The form exists to be muscle memory, and a search term the shell cannot finish
+for the user is not muscle memory. `x po<TAB>` offers live session names today;
+what `x /po<TAB>` should offer was undecided.
+
+### Journey
+
+Today the sigil form completes to nothing. The slash is part of the word being
+completed, no session name begins with one, and Portal suppresses the shell's
+filename fallback — so Tab is silently inert rather than misleading. (The review
+predicted a fallback to filenames from the root directory; measured, that does
+not happen.)
+
+The fix has no real choice in it: look past the sigil, complete the term against
+live session names, and leave the sigil in place. Completing `/po` to
+`/portal-a1b2` also pays off twice — a completed full session name leaves exactly
+one match, which under eager resolution attaches outright, so `/po<TAB><Enter>`
+becomes the whole interaction.
+
+Directories are deliberately excluded from what is *offered*, even though they
+count for *matching*: a completed `/Users/leeovery/Code/portal` reads as a path
+and trips the no-second-slash rule straight back into path territory.
+
+**A dependency surfaced while settling this.** The user reported that `x -s <TAB>`
+completes nothing while `portal open -s <TAB>` works, and the cause is broader
+than the flag. The `x` function maps to `portal open`, but `portal init` registers
+Portal's completer against `portal` — so the shell completes `x …` as though the
+user had typed `portal …`, one command level too high. Measured:
+
+- `portal __complete open ""` → live session names (correct)
+- `portal __complete open -s ""` → live session names (correct)
+- `portal __complete ""` → the subcommand list — `alias`, `doctor`, `hook`, `init`, `kill`, `list`, `open`, `theme`, … — which is what `x <TAB>` actually offers
+- `portal __complete -s ""` → `unknown shorthand flag: 's'`, ending in the default directive, which is why `x -s <TAB>` falls through to filenames
+
+So every `x` completion is off by one level, not just the flag the user noticed:
+`x <TAB>` offers subcommand names where it should offer session names. The
+decision below is therefore reachable through `portal open /po<TAB>` immediately,
+and through `x /po<TAB>` only once that wiring is corrected.
+
+### Decision
+
+**Completion looks past the sigil.** `/po<TAB>` completes the term after — and
+excluding — the `/`, against live session names, leaving the sigil in place.
+Directories are matched but never offered as completions.
+
+Confidence: high — the user confirmed the shape ("`/` is the command, followed by
+the string; we complete on the string after and excluding the `/`").
+
+Sibling check: `cli-verb-surface-redesign` specification — its Tab Completion
+section states the principle "complete every Portal-owned enumerable namespace;
+leave the rest to the shell" and assigns the `open` bare positional to session
+names. This decision applies that same principle to the sigil form rather than
+departing from it. No correction is owed.
+
+*(resolves review-001 F7)*
+
+---
+
 ## Summary
 
 ### Key Insights
