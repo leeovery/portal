@@ -20,8 +20,8 @@ Append to §3.7, after the paragraph on the K = 0 message:
 
 **On a cold boot the miss arrives after the loading page and reads identically.** A sigil invocation takes the loading page before K can be taken (§7), so a K = 0 on a cold server is discovered with the TUI already on screen. The TUI closes, the same message is written to the terminal, and the exit status is the same non-zero one the warm path returns. This is not a bootstrap fatal and does not take the in-TUI error frame; the picker never appears, exactly as §3.2 requires.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.7 verbatim.
 
 ---
 
