@@ -37,6 +37,10 @@
             "search-match-domain": {
               "status": "decided",
               "parent": null
+            },
+            "argv-composition": {
+              "status": "decided",
+              "parent": null
             }
           }
         }

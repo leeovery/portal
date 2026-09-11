@@ -492,6 +492,75 @@ match domain — `tui-session-picker` specifies the picker's pages and keymap, a
 
 ---
 
+## argv-composition
+
+### Context
+
+`/term` was designed as "one route within a grammar", which raises what it means
+when anything else shares the command line with it.
+
+Two cases, and the first already has a shipped behaviour that would be inherited
+by default.
+
+**A trailing command.** `portal open -f port -- claude` does not filter the
+sessions list at all — it opens the picker on the **Projects** page with `port` in
+the projects filter. That is deliberate and correct for `-f`: a trailing command
+can only run in a session about to be minted, so a pending command forces the
+picker to the mint side (`applyInitialFilter` routes the term to the projects
+list whenever a command is pending, `internal/tui/model.go:1261`). Inherited by
+`/term`, it would mean typing a glyph whose entire job is to declare "search my
+live sessions, never mint" and landing on the mint page — the sigil contradicting
+itself.
+
+**A second target.** Two positionals are what triggers the multi-window burst, so
+`x /port api` is a session search and a mint target side by side, one of which
+wants a picker.
+
+### Journey
+
+The first case was put as a contradiction rather than a trade: the sigil declares
+session-domain and a command declares mint, so honouring both is impossible and
+quietly switching pages hides that from the user.
+
+The second was genuinely open. A case was floated for allowing it — wanting an
+existing Portal session *and* a fresh session in another project, in two windows,
+from one line — and rejected by the user rather than argued down.
+
+Both answers point the same way, and together they change what kind of thing the
+sigil is. It is not a target that sits in the grammar alongside other targets: it
+is a **whole-invocation mode**, the way `-f` is. `portal open /term` is a complete
+invocation, and nothing else belongs on the line.
+
+### Decision
+
+**`/term` composes with nothing. Any other argument on the line is a usage error.**
+
+- `portal open /term -e <cmd>` and `portal open /term -- <cmd>` → usage error. A
+  command declares mint; the sigil declares session-domain. Refusing is honest
+  where a silent page switch is not.
+- `portal open /term <other-target>` → usage error, at every arity. The sigil
+  never participates in the multi-target burst.
+
+`-f/--filter` keeps its existing behaviour untouched, including its Projects
+redirect under a pending command. `-f` never promised session-domain, so nothing
+about that redirect is contradictory; the two forms are deliberately not
+symmetrical, which is one more line of help text and no behaviour change to a
+shipped flag.
+
+Confidence: high. Both halves were the user's own call, and the second was taken
+against a stated case for permitting it.
+
+Sibling check: `cli-verb-surface-redesign` specification — it establishes `-f` as
+"the sole non-composing flag", mutually exclusive with positional targets and
+every pin, and separately specifies the `-f <text> -e <cmd>` filtered-Projects
+variant as a stated exception. This decision adds a second non-composing form
+that is stricter than `-f` (it takes no command exception) and leaves `-f`'s own
+contract intact. No correction is owed.
+
+*(resolves review-001 F5)*
+
+---
+
 ## Summary
 
 ### Key Insights
