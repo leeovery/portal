@@ -66,8 +66,8 @@ The shape is already fixed — the refusal a filter flag gives when it is combin
 **Proposed Text**:
 **A refusal names what collided.** Each line above is refused with a single message naming the search form and the element beside it that may not be there — the shape `-f`'s own mutual-exclusion refusal already takes — rather than a generic complaint about the arguments that leaves the user to find the offending word themselves.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §5.1 verbatim.
 
 ---
 
@@ -91,8 +91,8 @@ Scoped to the picker session a sigil opened — across every grouping mode that 
 **Proposed Text**:
 Scoped to the picker session a sigil opened — the term-less form of §2.5 included — across every grouping mode that list can be in (§6.1), and for as long as that picker is open.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §6.3 verbatim.
 
 ---
 
@@ -113,8 +113,8 @@ Completion cannot turn one shape into the other. The words it offers for a slash
 **Proposed Text**:
 Completion cannot turn one shape into the other (§8.1), and Portal switches the shell's filename fallback off (`portal completion bash | grep -n 'compopt +o default'`) — so `x /tm<TAB>` never becomes `/tmp/`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §2.2 verbatim.
 
 ---
 
@@ -135,7 +135,7 @@ The payoff the completion work is justified by — press Tab, press Enter, you a
 **Proposed Text**:
 `/po` completing to `/portal-a1b2` normally leaves that session as the only match, which under §3.2 attaches outright, so `/po<TAB><Enter>` becomes the whole interaction; where a second session's name or recorded directory also contains the completed name, the same keystrokes land in the picker on those two.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §8.1 verbatim.
 
 ---

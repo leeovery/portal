@@ -45,7 +45,7 @@ A leading `/` today makes an argument a path unconditionally (`sed -n '14p' inte
 | `/tmp/` | path — mints, unchanged; the trailing slash is the second one |
 | `./port`, `~/port`, `port` | unchanged — the rule tests a leading `/` only |
 
-Completion cannot turn one shape into the other. The words it offers for a slash-leading argument are live session names carrying the sigil, never directories (§8.1), and Portal switches the shell's filename fallback off (`portal completion bash | grep -n 'compopt +o default'`) — so `x /tm<TAB>` never becomes `/tmp/`. The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
+Completion cannot turn one shape into the other (§8.1), and Portal switches the shell's filename fallback off (`portal completion bash | grep -n 'compopt +o default'`) — so `x /tm<TAB>` never becomes `/tmp/`. The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
 
 #### 2.3 Recognition is positional-independent
 
@@ -195,6 +195,8 @@ The distinguishing question is whether a path can act without showing the user a
 
 Flags that answer before the command body runs are outside the rule: `portal open /term --help` prints help, and root-level persistent flags apply as they do to any other invocation.
 
+**A refusal names what collided.** Each line above is refused with a single message naming the search form and the element beside it that may not be there — the shape `-f`'s own mutual-exclusion refusal already takes — rather than a generic complaint about the arguments that leaves the user to find the offending word themselves.
+
 The sigil is not a target that sits in the grammar alongside other targets — it is a whole-invocation mode, the way `-f` is. `portal open /term` is a complete invocation, and nothing else belongs on the line.
 
 | Line | Outcome |
@@ -263,7 +265,7 @@ The row already flexes the name against a fixed count slot, a fixed attached slo
 
 #### 6.3 Scope
 
-Scoped to the picker session a sigil opened — across every grouping mode that list can be in (§6.1), and for as long as that picker is open. A hand edit of the filter text returns the matching rule to the picker's own (§4.4) but does not take the column with it: the rows can still be present on the strength of their directory, so the accounting is still owed. How Sessions rows render when the picker is reached any other way is untouched.
+Scoped to the picker session a sigil opened — the term-less form of §2.5 included — across every grouping mode that list can be in (§6.1), and for as long as that picker is open. A hand edit of the filter text returns the matching rule to the picker's own (§4.4) but does not take the column with it: the rows can still be present on the strength of their directory, so the accounting is still owed. How Sessions rows render when the picker is reached any other way is untouched.
 
 #### 6.4 Accepted cost
 
@@ -309,7 +311,7 @@ Nothing about how the concurrent bootstrap behaves changes. This section adds th
 
 #### 8.1 Completion looks past the sigil
 
-**`/po<TAB>` completes the term after — and excluding — the `/`, against live session names, leaving the sigil in place.** `/po` completing to `/portal-a1b2` leaves exactly one match, which under §3.2 attaches outright, so `/po<TAB><Enter>` becomes the whole interaction.
+**`/po<TAB>` completes the term after — and excluding — the `/`, against live session names, leaving the sigil in place.** `/po` completing to `/portal-a1b2` normally leaves that session as the only match, which under §3.2 attaches outright, so `/po<TAB><Enter>` becomes the whole interaction; where a second session's name or recorded directory also contains the completed name, the same keystrokes land in the picker on those two.
 
 Offered words carry the sigil — `/po` completes to `/portal-a1b2`, never to `portal-a1b2`, which would replace the whole word and drop the slash the user typed. The words offered are the live session names the typed term prefixes: the shell discards any candidate that is not an extension of the word being completed, so completion is prefix-shaped even though the form itself matches by containment (§4.3). `/ort<TAB>` therefore offers nothing, while `/ort` still finds `portal-a1b2` on Enter.
 
