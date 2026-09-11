@@ -49,6 +49,10 @@
             "shell-completion-wiring": {
               "status": "decided",
               "parent": null
+            },
+            "search-result-display": {
+              "status": "decided",
+              "parent": null
             }
           }
         }

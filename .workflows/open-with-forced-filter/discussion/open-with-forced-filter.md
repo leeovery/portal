@@ -895,6 +895,63 @@ precedence reasoning relies on, which this decision leaves standing.
 
 ---
 
+## search-result-display
+
+### Context
+
+Matching on the session's directory means `/port` can return a row the user
+cannot account for. A session named `api-work` appears because it lives in the
+Portal checkout, and the row shows a session name, a window count and an attached
+marker — nothing about the directory that put it there.
+
+In Flat mode, which is the default and where the sigil's narrowed list lands, the
+user is looking at a name with no visible relationship to what they typed. The
+By-Project view carries the project as a group heading, so the information is
+reachable there by another route; Flat has none.
+
+This is the seed's own complaint returning by the back door: names are precisely
+what the user said they cannot recognise sessions by, the feature answers that by
+matching the directory instead, and then displays the name anyway. It bites
+hardest in the case the whole feature exists for — two rows back, one obviously
+named and one not, and choosing between them is the moment that is meant to be
+fast. Without the directory on the row the user falls back to previewing each
+one, which is the ceremony being removed.
+
+### Decision
+
+**A row in a sigil-opened list shows the directory it matched on, beside the
+session name.**
+
+Placement and weight are the user's call: alongside the name rather than on its
+own line, rendered in the muted weight of the text ramp — the role paths already
+take elsewhere in the picker, so this introduces no new colour token and no new
+convention. (The selected-row path already has its own established treatment one
+step brighter; the sigil row reuses that pattern rather than inventing one.)
+
+Scoped to the sigil's own list. How Sessions rows render generally is untouched —
+this work changes nothing about the picker reached any other way, consistent with
+the matching rule decided under `search-match-domain`.
+
+Deciding factor: it is the only thing that makes a directory match legible. Having
+widened the match domain to something invisible, leaving it invisible means the
+user cannot audit why a row is in front of them.
+
+Trade-off accepted: the row carries more text, and a long path in a narrow
+terminal needs truncating — the delegate already truncates, so this is
+presentation detail for the specification rather than an open question.
+
+Confidence: high.
+
+Sibling check: `theming-system` specification — it fixes the token vocabulary at
+19 closed semantic roles and forbids raw colour at call sites, with the muted rung
+of the text ramp already carrying paths, counts and subtitles. This decision
+references that existing role rather than proposing a new token, so nothing in
+that vocabulary changes. No correction is owed.
+
+*(resolves review-002 F6)*
+
+---
+
 ## Summary
 
 ### Key Insights
