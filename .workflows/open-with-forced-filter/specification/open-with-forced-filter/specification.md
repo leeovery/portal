@@ -81,6 +81,8 @@ This is what makes eager resolution safe. The sibling `cli-verb-surface-redesign
 
 Let K be the number of live sessions matching the term under §4.
 
+**A term-less sigil takes no count.** `x /` carries nothing to match, so no count is evaluated and none of the rows below apply: it opens the picker on the whole live session list, filter focused and empty (§2.5), on a machine holding one live session as on a machine holding twenty.
+
 The searched set is the set the picker lists. Portal's own internal sessions — the `_portal-saver` daemon host and the `_portal-bootstrap` server anchor — are absent from that list and are never search candidates: no term counts one toward K, and none can be attached by a sigil.
 
 | K | Outcome |

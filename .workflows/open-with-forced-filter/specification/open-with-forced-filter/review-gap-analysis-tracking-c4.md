@@ -24,8 +24,8 @@ Let K be the number of live sessions matching the term under §4.
 
 **A term-less sigil takes no count.** `x /` carries nothing to match, so no count is evaluated and none of the rows below apply: it opens the picker on the whole live session list, filter focused and empty (§2.5), on a machine holding one live session as on a machine holding twenty.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.2 verbatim.
 
 ---
 
