@@ -212,6 +212,8 @@ Matching on the recorded directory (§4.1) means `/port` can return a row the us
 
 **In every grouping mode**, not only Flat. The picker reopens in whichever session-list grouping mode the user last left it in — persisted and re-applied at construction, with Flat only the fallback for a user who has never pressed `s` (`sed -n '612,615p' cmd/open.go`) — so the sigil's narrowed list lands in Flat, By Project or By Tag depending on that history. By Project does not carry the information by another route: the grouping survives a committed filter but the headings do not, because a header row's filter value is empty (`sed -n '93p' internal/tui/session_item.go` → `func (HeaderItem) FilterValue() string { return "" }`). A filtered By-Project list therefore shows grouped-indented names with neither heading nor directory.
 
+**Only the recorded directory is displayed.** A session carrying no recorded directory (§4.1) shows none beside its name — the slot is simply empty. The displayed value is never derived from a pane read, for the same reason the match is not: the row must show what the search actually matched against, and the sigil path pays for no per-session pane read.
+
 That is the seed's own complaint returning by the back door. Names are precisely what the user said they cannot recognise sessions by; the feature answers that by matching the directory instead; displaying the name alone sends them back to previewing each candidate, which is the ceremony being removed.
 
 #### 6.2 Placement and weight

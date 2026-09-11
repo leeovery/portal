@@ -62,8 +62,8 @@ Append to §6.1, after the "In every grouping mode" paragraph:
 
 **Only the recorded directory is displayed.** A session carrying no recorded directory (§4.1) shows none beside its name — the slot is simply empty. The displayed value is never derived from a pane read, for the same reason the match is not: the row must show what the search actually matched against, and the sigil path pays for no per-session pane read.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §6.1 verbatim.
 
 ---
 
