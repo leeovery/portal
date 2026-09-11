@@ -289,4 +289,30 @@ The fix lands in the output of `portal init`, which users evaluate in their shel
 
 ---
 
+### 9. Documentation
+
+#### 9.1 Why documentation is a deliverable here
+
+After this feature there are four ways to reach a live session — a bare exact session name, `-s <name>`, `-s <glob>`, and `/term` — plus two ways to open the picker pre-filtered, `-f <text>` and `/term`. None of them is a duplicate, but the closest pair reads like one when described by input shape.
+
+`-f` documented as "open the picker pre-filtered" invites a reader to assume `/term` is shorthand for it. They differ exactly where it matters: with one match, `/term` attaches and `-f` shows a list of one. **The pair must be described by outcome — one always shows the list, one takes you there when there is only one place to go.**
+
+This is wording work, not behaviour change.
+
+#### 9.2 What the documentation must carry
+
+- The sigil form and its recognition rule, including the single-segment absolute-directory cost and the `-p` escape (§2.2, §2.4).
+- The three outcomes by match count (§3.2).
+- What the search matches, and that it matches by containment while the picker's own filter stays fuzzy (§4).
+- That the form composes with nothing (§5.1).
+- `-f` and `/term` distinguished by outcome rather than by input shape (§9.1).
+
+Both `portal open --help` (`cmd/open.go`'s `Long` and the `-f` flag description) and the README's `x (open)` section carry it. The README's resolution table is where the sigil row belongs, alongside the domain pins and `-f` (`grep -n -- '-f, --filter' README.md` → the pin table row).
+
+#### 9.3 CHANGELOG
+
+No CHANGELOG entry is written as part of this work — the release process owns that file.
+
+---
+
 ## Working Notes
