@@ -498,15 +498,62 @@ Flat mode deliberately performs none.
 `FilterValue`. Widening the match domain therefore widens it for all three —
 this is not a change scoped to the new form.
 
+### The matching rule (settled after the fields, on review)
+
+Deciding the *fields* left the *rule* undecided, and the rule turned out to
+matter more. The picker does not look for the typed text inside a row: it matches
+letters in order, anywhere. A session at `~/Projects/rust-tools` satisfies `port`
+— **p** in `projects`, **o** in `projects`, **r** in `rust`, **t** in `tools` —
+with the four letters never appearing together anywhere in it.
+
+Measured: the sessions list filters through `charm.land/bubbles/v2/list.DefaultFilter`,
+which is `fuzzy.Find` from `sahilm/fuzzy` — subsequence matching, case-folded and
+rank-sorted. (Portal's own `internal/fuzzy` has no production consumer, so it is
+not what the picker does.)
+
+Harmless inside the picker, where the user reads the results and skips the
+nonsense rows. Not harmless here, because two decisions taken in this discussion
+compound it: matching directories gave the matcher a long absolute path to find
+scattered letters in, and eager resolution means a lone match is acted on without
+being shown. Together they can attach the user to a session they never saw and
+would not have chosen.
+
+**The sigil's match is containment — the typed characters in a row — not
+subsequence.** Eager attach is only defensible when a single match is one a human
+would agree with, and scattered-subsequence over a full filesystem path routinely
+is not. `/port` finding nothing is a better failure than `/port` attaching
+`rust-tools`.
+
+**The picker's own filter is untouched by this work.** Typing `/` by hand inside
+the picker keeps today's fuzzy, rank-sorted behaviour.
+
+This is a deliberate reversal of the "one filter, not three" position taken when
+the fields were decided — see the amendment note below. The fields stay shared;
+the *rule* diverges, and only on the path that can act without showing the user
+anything.
+
+Consequence accepted: the set `/port` acts on — both the count that decides
+attach-versus-picker, and what the picker first displays — is the containment set.
+If the user then edits the filter by hand inside that picker, the picker's own
+rule applies and the row set can widen. The divergence is therefore visible only
+by rows appearing, never by rows the user expected going missing.
+
 ### Decision
 
-**The session search matches the session name and the session's directory.**
+**The session search matches the session name and the session's directory**, by
+containment.
 
-Scope accepted deliberately: because the three entry points share one filter,
-this changes what `-f` matches and what typing `/` inside the picker matches, not
-only the new form. Divergence was rejected as the worse outcome — the same list
-narrowing differently depending on how the user arrived at it is harder to
-predict than a single wider rule.
+*Amended 2026-09-11 — this Decision previously continued: "Scope accepted
+deliberately: because the three entry points share one filter, this changes what
+`-f` matches and what typing `/` inside the picker matches, not only the new form.
+Divergence was rejected as the worse outcome — the same list narrowing differently
+depending on how the user arrived at it is harder to predict than a single wider
+rule." That position stood for one sitting and was reversed once the picker's
+matching rule was measured: the sigil matches by containment while the picker
+keeps its fuzzy filter, so the rule now diverges by entry point on purpose. The
+divergence is confined to the matching rule; the matched fields remain shared.
+The user's call — "only the new `/` part. the main picker should be unchanged
+from this work". (resolves review-002 F2)*
 
 Project records and tags stay out of the match domain.
 
