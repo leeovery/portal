@@ -130,8 +130,8 @@ Add to §4.4, after the paragraph beginning "**The containment set holds…**":
 
 > **Containment narrows the list; it does not reorder it.** Rows keep the order the sessions list gives them in whatever grouping mode is current, with non-matching rows removed and nothing re-ranked — the picker's rank-sorting is a property of its fuzzy rule, which the sigil does not use. The first matching row (§3.2) is the first surviving row of that existing order.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.4 verbatim.
 
 ---
 

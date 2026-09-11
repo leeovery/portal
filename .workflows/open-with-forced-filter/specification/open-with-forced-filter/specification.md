@@ -153,6 +153,8 @@ Portal's own `internal/fuzzy` package is not what the picker uses and has no pro
 
 **The containment set holds for as long as the sigil's filter text stands untouched.** The narrowed list does not sit still — a `Space` preview and back, an `s` regroup, a refresh after a session is killed elsewhere all re-render it — and every one of those reproduces the containment set. The list the user is choosing from is the list they were handed. Only a hand edit of the filter text returns the list to the picker's own rule, and the test is the text rather than the act: while the committed filter value is character-identical to the term the sigil supplied, containment stands — opening the filter input and leaving it as it was, or editing back to the same characters, keeps it. Any other value, a cleared filter included, is the picker's own rule.
 
+**Containment narrows the list; it does not reorder it.** Rows keep the order the sessions list gives them in whatever grouping mode is current, with non-matching rows removed and nothing re-ranked — the picker's rank-sorting is a property of its fuzzy rule, which the sigil does not use. The first matching row (§3.2) is the first surviving row of that existing order.
+
 **The picker's own filter is untouched by this work.** Once the user edits that text the picker's rule applies and the row set can widen. The divergence is therefore visible only by rows appearing, never by rows the user expected going missing.
 
 The distinguishing question is whether a path can act without showing the user anything: the picker shows its results and can afford a loose rule; the shell form cannot.
