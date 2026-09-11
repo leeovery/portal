@@ -58,5 +58,5 @@ $ sed -n '114,116p' .workflows/cli-verb-surface-redesign/specification/cli-verb-
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Routed to `.workflows/open-with-forced-filter/discussion/open-with-forced-filter.md` (the `filter-shortcut-form` sibling check and the Summary's Open Threads entry) and repaired in place: the sibling names its path domain semantically and the character test lives in `internal/resolver/path.go`; what this feature changes in the sibling's own terms is the precedence chain. The correction itself is still owed and the landed corrigendum already stated it against the chain sentence. Specification §11 re-aligned, and the corrigendum's own gloss in `cli-verb-surface-redesign` tightened (commit e6f388d88) because it repeated the same misattribution.
