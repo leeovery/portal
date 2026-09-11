@@ -115,6 +115,8 @@ The usage errors of §5.1 are ordinary usage errors, carrying the same shape as 
 
 **On a cold boot the miss arrives after the loading page and reads identically.** A sigil invocation takes the loading page before K can be taken (§7), so a K = 0 on a cold server is discovered with the TUI already on screen. The TUI closes, the same message is written to the terminal, and the exit status is the same non-zero one the warm path returns. Any soft bootstrap warnings accumulated on the way out take the same route as they do on a resolved attach (§7.5) — written to the terminal after teardown, ahead of the message. This is not a bootstrap fatal and does not take the in-TUI error frame; the picker never appears, exactly as §3.2 requires.
 
+**A session list that could not be read is not a zero match.** K = 0 says the search ran and found nothing; a failed read has searched nothing, and reporting it as a miss tells the user their sessions are gone when they are running. Such a failure is reported in tmux's own terms rather than the zero-match wording, and exits non-zero. On a cold boot it reaches the user by the same route as the zero-match failure — the TUI closes and the message follows teardown — and, like it, is not a bootstrap fatal and takes no in-TUI error frame.
+
 **An attach under K = 1 uses the connector the invocation already selects** — `syscall.Exec` into `tmux attach-session` outside tmux, `switch-client` inside it. The sigil introduces no third connection mode.
 
 *Derived, not decided in discussion: the sources settle that zero fails honestly and that one match attaches, but name neither the message nor the connection mode. The derivations are the existing miss-message's purpose and `open`'s existing connector selection.*

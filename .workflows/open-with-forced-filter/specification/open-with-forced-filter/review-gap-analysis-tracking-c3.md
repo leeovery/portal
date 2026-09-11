@@ -66,8 +66,8 @@ Say that a failed read of the session list is reported as the failure it is and 
 **Proposed Text**:
 **A session list that could not be read is not a zero match.** K = 0 says the search ran and found nothing; a failed read has searched nothing, and reporting it as a miss tells the user their sessions are gone when they are running. Such a failure is reported in tmux's own terms rather than the zero-match wording, and exits non-zero. On a cold boot it reaches the user by the same route as the zero-match failure — the TUI closes and the message follows teardown — and, like it, is not a bootstrap fatal and takes no in-TUI error frame.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.7 verbatim.
 
 ---
 
