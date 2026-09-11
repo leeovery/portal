@@ -86,8 +86,8 @@ In a narrow terminal a row cannot carry both a session name and a long absolute 
 **Current**:
 Exact column treatment is presentation detail for implementation. The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`), so a long path in a narrow terminal is handled by the mechanism that is already there.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Option 1 chosen — directory truncated from the left so the tail survives, home-abbreviated to `~/`, session name never truncated. Applied to §6.2.
 
 ---
 

@@ -222,7 +222,9 @@ Alongside the name rather than on its own line, rendered in the muted rung of th
 
 The sibling `theming-system` specification fixes the token vocabulary at nineteen closed semantic roles and forbids raw colour at call sites. This section references an existing role rather than proposing a new one, so nothing in that vocabulary changes.
 
-Exact column treatment is presentation detail for implementation. The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`), so a long path in a narrow terminal is handled by the mechanism that is already there.
+**When the row is too narrow for both, the directory gives way and the session name never does.** The directory is shortened **from the left**, so its tail survives — `…/Code/portal`, not `/Users/leeovery/Cod…` — because the tail is the segment a human recognises a checkout by, and the whole premise of showing it is that the directory is recognisable where the name is not. A path under the user's home is abbreviated to `~/` first, which reclaims the width before any truncation is needed.
+
+The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`); the directory column takes its width from what remains and applies the left-truncation above.
 
 #### 6.3 Scope
 
