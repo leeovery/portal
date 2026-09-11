@@ -232,6 +232,8 @@ The sibling `theming-system` specification fixes the token vocabulary at ninetee
 
 The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`); the directory column takes its width from what remains and applies the left-truncation above.
 
+**Below a floor the directory is dropped rather than truncated to noise.** When the remaining width cannot hold an ellipsis plus one whole path segment, the row shows the session name alone — a row ending in `…l` says nothing and reads as damage, where a bare name at least reads as a name.
+
 #### 6.3 Scope
 
 Scoped to the picker session a sigil opened — across every grouping mode that list can be in (§6.1), and for as long as that picker is open. A hand edit of the filter text returns the matching rule to the picker's own (§4.4) but does not take the column with it: the rows can still be present on the strength of their directory, so the accounting is still owed. How Sessions rows render when the picker is reached any other way is untouched.

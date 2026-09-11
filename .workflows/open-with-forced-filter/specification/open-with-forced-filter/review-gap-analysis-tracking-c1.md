@@ -200,8 +200,8 @@ The directory is said to give way when the row is too narrow for both it and the
 - Drop the directory whenever the remaining width cannot hold an ellipsis plus one whole path segment, showing the name alone below that point (recommended)
 - Always render the directory into whatever width remains, left-truncated, however little that is
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Option 1 chosen — the directory is dropped below a floor of an ellipsis plus one whole path segment, rather than truncated to noise. Applied to §6.2.
 
 ---
 
