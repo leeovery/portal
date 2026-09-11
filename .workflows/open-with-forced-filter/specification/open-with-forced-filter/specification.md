@@ -313,7 +313,7 @@ Offered words carry the sigil — `/po` completes to `/portal-a1b2`, never to `p
 
 Directories are deliberately excluded from what is *offered*, even though they count for *matching* (§4.1): a completed `/Users/leeovery/Code/portal` reads as a path and trips the no-second-slash rule (§2.2) straight back into path territory.
 
-Today the sigil form completes to nothing — the slash is part of the word being completed, no session name begins with one, and Portal suppresses the shell's filename fallback, so Tab is silently inert rather than misleading (`portal __complete open /po` → no candidates, `ShellCompDirectiveNoFileComp`).
+Today the sigil form completes to nothing — the slash is part of the word being completed, no session name begins with one, and the shell's filename fallback is off (§2.2), so Tab is silently inert rather than misleading (`portal __complete open /po` → no candidates, `ShellCompDirectiveNoFileComp`).
 
 #### 8.2 The `x` function's completion is registered one level too high
 

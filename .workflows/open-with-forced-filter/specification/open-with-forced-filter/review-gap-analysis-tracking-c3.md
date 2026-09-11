@@ -166,7 +166,7 @@ Today the sigil form completes to nothing — the slash is part of the word bein
 **Proposed Text**:
 Today the sigil form completes to nothing — the slash is part of the word being completed, no session name begins with one, and the shell's filename fallback is off (§2.2), so Tab is silently inert rather than misleading (`portal __complete open /po` → no candidates, `ShellCompDirectiveNoFileComp`).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §8.1 verbatim.
 
 ---
