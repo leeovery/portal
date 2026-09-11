@@ -282,6 +282,30 @@ opening a window per session instead of narrowing.
 
 ### Decision
 
+#### 2026-09-11 — revised
+*Trigger: user reversal — the zero-match case does not fail. "Nothing errors from
+using `/`. Worst case it populates a filter with zero results. The same as me
+opening the TUI now and filtering to zero results. No difference."*
+
+**Read B, with no failure path.** The forced-filter form is session-domain by
+declaration, never mints, and resolves eagerly: exactly one matching session
+attaches directly with no picker; **every other count opens the picker
+pre-filtered**, zero included. A term matching nothing lands in the picker showing
+an empty list under its filter — indistinguishable from typing `/` inside the
+picker and filtering to nothing — where `Esc` clears the filter and the session
+list is there. Nothing is written to stderr and the exit status is not a failure.
+
+What changed from the entry below: it made zero a hard failure at the shell. That
+was the wrong shape. The form *is* the pre-filtered picker, and the single-match
+attach is the one shortcut past it; a count of zero is a filter result, not an
+error, and answering it with a message strands the user at a prompt having done
+nothing where an empty list is one keystroke from recovery.
+
+Read A — a search branch on the bare positional — stays rejected, on the
+sibling's own grounds.
+
+#### Initial
+
 **Read B.** The forced-filter form is session-domain by declaration, never
 mints, and resolves eagerly: exactly one matching session attaches directly with
 no picker; two or more open the picker pre-filtered; zero fails honestly. Read A
@@ -408,6 +432,22 @@ That trade is theirs to make — the cost is a documented rule, and the benefit 
 the habit forming on its own.
 
 ### Decision
+
+#### 2026-09-11 — revised
+*Trigger: user reversal — the bare `x /` is not an error. "Using `/` with no string
+is not an error. That's an empty filter, ready to be typed into in the TUI."*
+
+**`x /` — the sigil with no term — opens the picker with the filter open and
+empty, the cursor in it, ready to type.** It is `x` followed by `/`, not plain `x`
+and not a usage error. The entry below borrowed `-f`'s refusal of an empty value,
+which does not transfer: `-f ""` is a flag given no argument, while `/` on its own
+is the gesture that opens a filter. Nothing about using `/` errors.
+
+Everything else in the entry below stands: the glyph, the no-second-slash rule,
+the shadowed single-segment directories and their `-p` escape, and the permanent
+rejection of the no-space form.
+
+#### Initial
 
 **The sigil is `/`.**
 
@@ -1124,7 +1164,9 @@ the concurrent path and changes nothing about how that path behaves.
 
 **Resolved.** The form is `/term` with a space, recognised by shape in any
 position, composing with nothing. It is session-domain and never mints: one match
-attaches outright, several open the picker pre-filtered, none fails honestly. It
+attaches outright, every other count opens the picker pre-filtered — zero
+included, landing on an empty list rather than an error — and `/` alone opens the
+picker with an empty filter ready to type into. It
 matches session name and recorded session directory, by containment, and shows
 the matched directory beside the name. It takes the picker's cold-start
 classification, so it gets the loading page and in-TUI warnings. Completion
