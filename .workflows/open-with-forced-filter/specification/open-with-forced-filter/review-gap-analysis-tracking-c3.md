@@ -67,7 +67,7 @@ Say that a failed read of the session list is reported as the failure it is and 
 **A session list that could not be read is not a zero match.** K = 0 says the search ran and found nothing; a failed read has searched nothing, and reporting it as a miss tells the user their sessions are gone when they are running. Such a failure is reported in tmux's own terms rather than the zero-match wording, and exits non-zero. On a cold boot it reaches the user by the same route as the zero-match failure — the TUI closes and the message follows teardown — and, like it, is not a bootstrap fatal and takes no in-TUI error frame.
 
 **Resolution**: Approved
-**Notes**: Applied to §3.7 verbatim.
+**Notes**: Applied to §3.7, then re-worded when the user reversed the zero-match decision later in the same sitting: K = 0 now opens the picker, so the finding's distinction stands but no longer contrasts against a zero-match *message*. A failed tmux read remains the one failure path on this form.
 
 ---
 
@@ -87,8 +87,8 @@ Say that a failed read of the session list is reported as the failure it is and 
 - The zero-match message always names `-p <dir>` beside the no-match statement — one extra line on every search miss, correct advice whether or not the term was meant as a directory.
 - The zero-match message names `-p` only when the term, read as a single-segment absolute path, exists on disk — the recognition rule stays filesystem-free as §2.4 requires, while the message written after the failure is free to look (recommended).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Declined
+**Notes**: Moot. The user reversed the zero-match decision in this sitting — `/term` never errors; a term matching nothing opens the picker on an empty list, exactly as filtering to nothing inside the picker does, and `x /` opens the picker with an empty focused filter. There is no zero-match message, so there is nothing to point at `-p` from. The shadowed-directory cost is carried by §2.4 and the documentation (§9.2) as before. The reversal is recorded in the discussion's `unambiguous-direct-attach` and `filter-shortcut-form` Decisions (commit 33c8707a9).
 
 ---
 

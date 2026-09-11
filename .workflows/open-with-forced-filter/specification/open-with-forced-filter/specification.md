@@ -61,9 +61,11 @@ Single-segment absolute directories typed *without* a trailing slash — `x /tmp
 
 The cost is affordable because of what it shadows: minting a session directly in a root-level directory is not something the user does, so the directories the rule takes out of the minting domain are ones nobody opens a session in. The recognition rule stays a test of the argument's shape and never consults the filesystem — a rule that minted when the single-segment path happened to exist would read the same command differently on two machines.
 
-#### 2.5 The degenerate form
+#### 2.5 The bare slash
 
-`x /` — a bare slash with no term — is a usage error, following `-f`'s existing answer to an empty value (`sed -n '161,163p' cmd/open.go` → the `-f/--filter value must not be empty` guard). It does not mean "mint at root".
+`x /` — the sigil with no term — opens the picker with the filter **open and empty, the cursor in it, ready to type**. It is `x` followed by `/`, not plain `x`, and not an error. It does not mean "mint at root".
+
+`-f`'s refusal of an empty value does not transfer: `-f ""` is a flag given no argument, while `/` on its own is the gesture that opens a filter.
 
 ---
 
@@ -83,19 +85,23 @@ The searched set is the set the picker lists. Portal's own internal sessions —
 
 | K | Outcome |
 |---|---|
-| 0 | Hard failure. Nothing opens, nothing mints, and the picker does not appear. |
+| 0 | The picker opens on the Sessions page with the term applied as a committed filter, showing an empty list. |
 | 1 | The matching session is attached directly. No picker. |
 | >= 2 | The picker opens on the Sessions page with the term applied as a committed filter and the cursor on the first matching row. |
+
+**The sigil never fails.** The form is the pre-filtered picker, and the single-match attach is the one shortcut past it; a count of zero is a filter result rather than an error. Zero matches is indistinguishable from typing `/` inside the picker and filtering to nothing — `Esc` clears the filter and the session list is there. Nothing is written to stderr and the exit status is not a failure.
 
 Eager attach on a single session-search match is already shipped behaviour rather than a new one (§1.1).
 
 #### 3.3 The committed-filter landing
 
-On K >= 2 the picker lands exactly as `-f` already lands it: filter text set and filter state committed rather than focused, cursor re-anchored onto the post-filter visible set, so arrows, `Space` and `Enter` work immediately on the narrowed list (`sed -n '1261,1273p' internal/tui/model.go`). The user is not left inside a live filter input.
+Whenever a term opens the picker — K = 0 and K >= 2 alike — it lands exactly as `-f` already lands it: filter text set and filter state committed rather than focused, cursor re-anchored onto the post-filter visible set, so arrows, `Space` and `Enter` work immediately on the narrowed list (`sed -n '1261,1273p' internal/tui/model.go`). The user is not left inside a live filter input.
+
+The bare slash is the exception, and deliberately so: `x /` carries no term to commit, so its filter is **focused and empty** (§2.5).
 
 #### 3.4 When the count is taken
 
-K is evaluated against the live session set once the tmux server is ready to answer for it. On a warm server that is immediately. On a cold server the sigil takes the picker's concurrent-bootstrap path (§7), so the count is taken once that bootstrap has run to completion — every step of it, not merely the restore that reconstructs the saved sessions. Nothing the sigil decides fires earlier: the loading page stands until the count can be taken, and is then replaced by the attach when K turns out to be 1, or by the failure when it turns out to be 0. Acting at the end of restore would replace the process mid-bootstrap and abandon the steps that follow it — among them the clearing of the `@portal-restoring` marker, which must not outlive bootstrap.
+K is evaluated against the live session set once the tmux server is ready to answer for it. On a warm server that is immediately. On a cold server the sigil takes the picker's concurrent-bootstrap path (§7), so the count is taken once that bootstrap has run to completion — every step of it, not merely the restore that reconstructs the saved sessions. Nothing the sigil decides fires earlier: the loading page stands until the count can be taken, and is then replaced by the attach when K turns out to be 1, or by the picker at any other count. Acting at the end of restore would replace the process mid-bootstrap and abandon the steps that follow it — among them the clearing of the `@portal-restoring` marker, which must not outlive bootstrap.
 
 #### 3.5 Accepted cost
 
@@ -107,19 +113,15 @@ The sigil emits no `resolve` component line. That component records one INFO lin
 
 *Derived, not decided in discussion: the source material settles the sigil's domain but never names its logging. The derivation is the `resolve` component's own stated rule.*
 
-#### 3.7 The zero-match failure, and how an attach is performed
-
-**The K = 0 message names the search that found nothing.** It must say that no live session matched the term, and it must not point the user at `-f` — the existing bare-positional miss message does (`grep -n 'try -f' cmd/open_burst.go`), which is right for a miss in the guessing chain and wrong here: `-f` opens a picker filtered by the same term, which would list nothing either. Exact wording follows the house convention for `open`'s user-facing errors.
-
-The usage errors of §5.1 are ordinary usage errors, carrying the same shape as `-f`'s own mutual-exclusion refusal.
-
-**On a cold boot the miss arrives after the loading page and reads identically.** A sigil invocation takes the loading page before K can be taken (§7), so a K = 0 on a cold server is discovered with the TUI already on screen. The TUI closes, the same message is written to the terminal, and the exit status is the same non-zero one the warm path returns. Any soft bootstrap warnings accumulated on the way out take the same route as they do on a resolved attach (§7.5) — written to the terminal after teardown, ahead of the message. This is not a bootstrap fatal and does not take the in-TUI error frame; the picker never appears, exactly as §3.2 requires.
-
-**A session list that could not be read is not a zero match.** K = 0 says the search ran and found nothing; a failed read has searched nothing, and reporting it as a miss tells the user their sessions are gone when they are running. Such a failure is reported in tmux's own terms rather than the zero-match wording, and exits non-zero. On a cold boot it reaches the user by the same route as the zero-match failure — the TUI closes and the message follows teardown — and, like it, is not a bootstrap fatal and takes no in-TUI error frame.
+#### 3.7 How an attach is performed, and the one failure that is not a search result
 
 **An attach under K = 1 uses the connector the invocation already selects** — `syscall.Exec` into `tmux attach-session` outside tmux, `switch-client` inside it. The sigil introduces no third connection mode.
 
-*Derived, not decided in discussion: the sources settle that zero fails honestly and that one match attaches, but name neither the message nor the connection mode. The derivations are the existing miss-message's purpose and `open`'s existing connector selection.*
+**A session list that could not be read is not a zero match.** K = 0 says the search ran and found nothing, which is a filter result and opens the picker (§3.2); a failed read has searched nothing, and opening an empty picker on it would tell the user their sessions are gone when they are running. A tmux read failure is therefore reported in tmux's own terms and exits non-zero — the one failure path on this form, and it belongs to tmux rather than to the search. On a cold boot it reaches the user after teardown; it is not a bootstrap fatal and takes no in-TUI error frame.
+
+The usage errors of §5.1 are ordinary usage errors, carrying the same shape as `-f`'s own mutual-exclusion refusal. They are refusals of a malformed command line, not outcomes of a search.
+
+*Derived, not decided in discussion: the sources settle that one match attaches but never name the connection mode, and never treat a failed session-list read separately from an empty one. The derivations are `open`'s existing connector selection, and the sigil's own rule that a zero count is a filter result — which a read that never ran cannot be.*
 
 ---
 
@@ -205,7 +207,7 @@ The sigil is not a target that sits in the grammar alongside other targets — i
 | `portal open /term -f <text>` | usage error |
 | `portal open /term --ack <batch>:<token>` | usage error |
 
-**A refused line starts nothing.** The refusal is decided from the arguments alone, so it needs no tmux server and takes no loading page: on a cold machine as on a warm one, a refused line prints its usage error and exits without starting the server, restoring a session or painting a frame. The picker classification of §7.1 applies to a complete sigil invocation only. That is the one respect in which a usage error differs from the zero-match failure (§3.7), which can only be discovered once a live session list exists.
+**A refused line starts nothing.** The refusal is decided from the arguments alone, so it needs no tmux server and takes no loading page: on a cold machine as on a warm one, a refused line prints its usage error and exits without starting the server, restoring a session or painting a frame. The picker classification of §7.1 applies to a complete sigil invocation only. That is what separates a usage error from everything else on this path: a malformed line is knowable from the argv, while the match count — and any failure of the read that produces it (§3.7) — needs a live session list.
 
 #### 5.2 Why a command is refused rather than redirected
 
