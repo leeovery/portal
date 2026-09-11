@@ -81,8 +81,8 @@ The rule governs targets, the trailing command, and `open`'s own flags. Flags th
 >
 > Flags that answer before the command body runs are outside the rule: `portal open /term --help` prints help, and root-level persistent flags apply as they do to any other invocation.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §5.1 verbatim.
 
 ---
 

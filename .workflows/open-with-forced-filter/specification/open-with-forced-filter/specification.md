@@ -167,7 +167,9 @@ The distinguishing question is whether a path can act without showing the user a
 
 #### 5.1 The rule
 
-**`/term` composes with nothing. Any other argument on the line is a usage error.**
+**`/term` composes with nothing. Any other target, any trailing command, and any of `open`'s own flags on the same line is a usage error.**
+
+Flags that answer before the command body runs are outside the rule: `portal open /term --help` prints help, and root-level persistent flags apply as they do to any other invocation.
 
 The sigil is not a target that sits in the grammar alongside other targets — it is a whole-invocation mode, the way `-f` is. `portal open /term` is a complete invocation, and nothing else belongs on the line.
 
