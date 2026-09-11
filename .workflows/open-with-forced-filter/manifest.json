@@ -15,7 +15,7 @@
               "parent": null
             },
             "bare-positional-grammar": {
-              "status": "pending",
+              "status": "converging",
               "parent": null
             },
             "attach-vs-mint-intent": {
@@ -23,6 +23,10 @@
               "parent": null
             },
             "session-name-recognisability": {
+              "status": "pending",
+              "parent": null
+            },
+            "unambiguous-direct-attach": {
               "status": "pending",
               "parent": null
             }

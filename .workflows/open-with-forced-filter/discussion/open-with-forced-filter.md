@@ -93,6 +93,84 @@ Measured against the tree at the start of this discussion.
 
 ---
 
+## bare-positional-grammar
+
+### Context
+
+Discovery arrived with two complaints about `portal open <word>`: that the
+outcome is unpredictable because a bare argument walks five branches whose order
+nobody remembers, and that the user's own intent when typing `x portal` is "mint
+a session in the Portal directory, never attach" — a belief they flagged as
+possibly wrong.
+
+Both were tested against the code and against the decision of record before
+anything else was discussed, because a conversation reasoned over a false
+premise stays poisoned however well the document is corrected later.
+
+### Journey
+
+**The intent belief is already the behaviour, and was decided deliberately.**
+`x portal` mints in the Portal directory today. `portal` is not an exact session
+name — sessions are `{project}-{nanoid}` — so the session branch cannot answer
+and the chain falls through to a directory domain, which always mints. The
+`cli-verb-surface-redesign` specification locked this as **Axiom 2 (no
+find-or-create)**, recorded the consequence under its own heading ("Bare project
+shorthand does not reattach"), and **explicitly rejected** project-prefix session
+matching — `api` resolving to the sole live `api-*` session — on the grounds that
+it "reintroduces attach-vs-create guessing with an ambiguity cliff the moment a
+second `api-*` session exists". The user was right about their own intent, and
+the product already serves it.
+
+**The chain is three live branches for a plain word, not five.** A bare word can
+reach neither the path domain nor the glob branch:
+
+`sed -n '13,15p' internal/resolver/path.go` → `return strings.Contains(arg, "/") || arg[0] == '.' || arg[0] == '~'`
+
+A path argument needs a `/`, or a leading `.` or `~`; a glob needs one of
+`*?[` (`internal/resolver/glob.go`, `globMeta`). So for `portal` the live set is
+exact session name → alias → zoxide, and the first of those never fires for a
+project word by naming convention. **Both survivors mint at a directory.**
+
+That matters because it relocates the unpredictability. The *outcome* of a bare
+word is invariant — a new session at some directory. The only thing the user
+cannot predict is **which directory zoxide picked**, which is zoxide's frecency
+ranking rather than Portal's branch ordering. "I can't remember which of five
+branches answers" is largely a mirage.
+
+**What is actually missing.** Stripping the mirage leaves a real gap, and it is
+not in the chain: the argument surface has three routes that mint and **no route
+that searches live sessions**. Reaching an existing session requires its exact
+`{project}-{nanoid}` name under `-s`, or the picker. Since the names are
+unmemorable by design, the picker is the only practical route — which is exactly
+the ceremony the seed set out to remove. The bare form is not broken; it is
+complete for minting and deliberately blind to attaching.
+
+This reframes the feature. It is not "add a filter shortcut, and separately
+consider fixing the chain". It is: **the argument surface is missing its search
+route, and this feature adds it.**
+
+The user confirmed the reframe, and named two things they want from the result:
+a shortened syntax for opening the picker pre-filtered, and going straight to a
+session when the term is unambiguous.
+
+### Decision
+
+*(provisional — the chain itself stands unchanged; what replaces the missing
+route is being worked under the sigil subtopics)*
+
+The bare-positional resolution chain is **not** altered by this feature. Its
+ordering, its domains, and Axiom 2 stand as the `cli-verb-surface-redesign`
+specification set them. Project-prefix session matching stays rejected for the
+reason that specification gave.
+
+Sibling check: `cli-verb-surface-redesign` specification — holds Axiom 2 (no
+find-or-create), the accepted consequence that bare project shorthand does not
+reattach, and the explicit rejection of project-prefix session matching. This
+discussion ratifies all three rather than contradicting them; no correction is
+owed.
+
+---
+
 ## Summary
 
 ### Key Insights
