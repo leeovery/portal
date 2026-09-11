@@ -141,8 +141,8 @@ Keep the scope boundary the entry exists to draw and let it point at the two rul
 
 **Unchanged** — its own filter as §4.4 sets it, its rows as §6.3 scopes them.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §10.6 verbatim.
 
 ---
 

@@ -412,7 +412,7 @@ Out of scope and not deferred — there is no open thread here to pick up later.
 
 #### 10.6 The picker reached any other way
 
-**Unchanged.** The picker's own filter keeps its fuzzy, rank-sorted behaviour (§4.4), and Sessions rows reached by any route other than the sigil render as they do today (§6.3).
+**Unchanged** — its own filter as §4.4 sets it, its rows as §6.3 scopes them.
 
 #### 10.7 Match-domain widening beyond name and directory
 
