@@ -180,8 +180,8 @@ The column belongs to the invocation, not to the filter text: it stands for the 
 **Proposed Text**:
 > Scoped to the picker session a sigil opened — across every grouping mode that list can be in (§6.1), and for as long as that picker is open. A hand edit of the filter text returns the matching rule to the picker's own (§4.4) but does not take the column with it: the rows can still be present on the strength of their directory, so the accounting is still owed. How Sessions rows render when the picker is reached any other way is untouched.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §6.3 verbatim.
 
 ---
 

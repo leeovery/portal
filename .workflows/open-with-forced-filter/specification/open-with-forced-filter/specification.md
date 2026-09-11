@@ -234,7 +234,7 @@ The row already flexes the name against a fixed count slot, a fixed attached slo
 
 #### 6.3 Scope
 
-Scoped to the sigil's own list, across every grouping mode that list can be in (§6.1). How Sessions rows render when the picker is reached any other way is untouched, consistent with the matching rule's own divergence (§4.4).
+Scoped to the picker session a sigil opened — across every grouping mode that list can be in (§6.1), and for as long as that picker is open. A hand edit of the filter text returns the matching rule to the picker's own (§4.4) but does not take the column with it: the rows can still be present on the strength of their directory, so the accounting is still owed. How Sessions rows render when the picker is reached any other way is untouched.
 
 #### 6.4 Accepted cost
 
