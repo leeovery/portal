@@ -202,6 +202,93 @@ owed.
 
 ---
 
+## unambiguous-direct-attach
+
+### Context
+
+The user wants two things from the result: a shorter spelling for opening the
+picker pre-filtered, and going straight to a session when the term is
+unambiguous. The second is the load-bearing one, because "unambiguous" splits
+two ways with very different products, and one of the two is a design the
+`cli-verb-surface-redesign` specification already rejected by name.
+
+### Options Considered
+
+**Read A — the bare word gains a search branch.** `x port` looks at live
+sessions; exactly one match attaches it, otherwise the chain falls through to
+minting as today.
+
+- Pros: nothing new to learn, no sigil, the shortest possible spelling.
+- Cons: the outcome flips on invisible state. `x portal` attaches while one
+  Portal session lives and silently mints a second the moment two exist — same
+  keystrokes, opposite destination, with nothing on screen saying which world
+  the user is in. This is exactly the `api` → `api-*` matching the sibling
+  specification rejected, and for exactly the reason it gave.
+
+**Read B — the search sigil resolves eagerly.** The forced-filter form is
+session-domain by declaration and can never mint. One match attaches straight
+away with no picker; two or more open the picker pre-filtered with the cursor on
+the first; zero is an honest failure.
+
+- Pros: no attach-vs-mint guess survives, because the sigil has already declared
+  the domain. Collapses the seed's flow to its floor on the common day and
+  degrades to exactly the screen the user was heading for on the ambiguous one.
+- Cons: the *timing* is unpredictable — sometimes the user lands in a session,
+  sometimes in a picker, and they cannot tell which before typing.
+
+### Journey
+
+The document's own Decision on `bare-positional-grammar` had just ratified the
+sibling's rejection of project-prefix session matching, which made Read B look
+like the same cliff wearing a sigil: K=1 behaving differently from K=2 is
+identical in both reads.
+
+What separates them is **what is at risk on the wrong side of the cliff**. Under
+Read A the two sides are *attach an existing session* and *mint a brand-new one*
+— different in kind, and the wrong one leaves a stray session behind. Under Read
+B both sides are session-domain and neither mints: the only variable is whether
+Portal finishes the job or hands the user the narrowed list. Degrading to a
+picker is not a wrong guess; it is the destination the user was walking to
+anyway. The sibling's rationale objects to reintroducing *attach-vs-create*
+guessing, and Read B reintroduces none.
+
+The argument was then strengthened by a measurement that falsified an earlier
+claim in this discussion: **eager attach on a single session-search match is
+already shipped**. `x -s 'port*'` attaches outright when the glob matches one
+session — the burst degenerates to a direct open
+(`cmd/open_burst.go:90`, `len(surfaces) == 1` → `openResolved`). So Read B is
+consistent with a route the user already lives with, rather than a new
+behaviour; what the shipped route does differently is answer *multi*-match by
+opening a window per session instead of narrowing.
+
+### Decision
+
+**Read B.** The forced-filter form is session-domain by declaration, never
+mints, and resolves eagerly: exactly one matching session attaches directly with
+no picker; two or more open the picker pre-filtered; zero fails honestly. Read A
+— a search branch on the bare positional — stays rejected, on the sibling's own
+grounds.
+
+Deciding factor: the sigil removes the attach-vs-mint guess entirely, which is
+what the sibling's rejection was actually protecting against; the residual
+K=1/K=2 difference costs the user a picker they were already opening.
+
+Trade-off accepted: the user cannot predict before typing whether they land in a
+session or in the picker.
+
+Confidence: high on the shape. The zero-match case, what the term searches
+over, and how the form composes with the rest of the argv are open.
+
+Sibling check: `cli-verb-surface-redesign` specification — its rejection of
+project-prefix session matching is ratified, not contradicted: that rejection
+governs the bare positional, which this decision leaves untouched. Its
+domain-pin contract ("every domain pin hard-fails on unresolvable and never
+falls back to the TUI picker") is adjacent and **not** binding here — the sigil
+is not a domain pin, and its whole purpose is to reach the picker. No correction
+is owed.
+
+---
+
 ## Summary
 
 ### Key Insights

@@ -27,6 +27,10 @@
               "parent": null
             },
             "unambiguous-direct-attach": {
+              "status": "decided",
+              "parent": null
+            },
+            "surface-reconciliation": {
               "status": "pending",
               "parent": null
             }
