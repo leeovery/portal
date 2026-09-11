@@ -68,7 +68,7 @@
           "status": "in-progress",
           "sources": {
             "open-with-forced-filter": {
-              "status": "pending"
+              "status": "incorporated"
             }
           },
           "review_cycle": 0,
