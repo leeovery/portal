@@ -779,6 +779,46 @@ is owed.
 
 ---
 
+## session-name-recognisability
+
+### Context
+
+This subtopic was seeded at initialisation, from the discovery log rather than
+from anything the user asked for. The log recorded the *reason* behind the user's
+intent belief — that `{project}-{nanoid}` names "make existing sessions
+unrecognisable by name" — and it was put on the map as the root cause worth
+testing.
+
+### Journey
+
+It was never a question the user had. Asked directly whether the naming itch
+survived folder matching, the answer was that naming is fine, and that the
+subtopic's presence needed explaining rather than answering.
+
+The seeding was a reasonable reading of the discovery log and a wrong call about
+scope: the log named naming as an explanation, not as a complaint. The feature's
+own answer also removes whatever pressure existed — searching directories as well
+as names means a session is found by the place it was opened in, with no need to
+recognise `portal-c3d4` at all.
+
+Recorded rather than deleted so the same inference is not drawn again from the
+same discovery log.
+
+### Decision
+
+**Session naming stays exactly as it is.** `{project}-{nanoid}` is unchanged, and
+no part of this feature touches session creation, the naming scheme, or renaming.
+
+Out of scope and not deferred: there is no open thread here to pick up later.
+
+Confidence: high — the user's answer was direct.
+
+Sibling check: no overlap found. No sibling document proposes changing the naming
+scheme; `cli-verb-surface-redesign` cites `{project}-{nanoid}` as a fact its
+precedence reasoning relies on, which this decision leaves standing.
+
+---
+
 ## Summary
 
 ### Key Insights
