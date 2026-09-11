@@ -103,4 +103,48 @@ The sigil emits no `resolve` component line. That component records one INFO lin
 
 ---
 
+### 4. Match Domain and Matching Rule
+
+#### 4.1 The matched fields
+
+**A session matches on its name and on its recorded directory.** Project records and tags stay out of the match domain.
+
+The recorded directory is the `@portal-dir` tmux session user-option, stamped at creation and returned with the session list at no extra cost — `ListSessions` appends `#{@portal-dir}` to its `list-sessions -F` format and parses it into `Session.Dir` (`grep -n '@portal-dir' internal/tmux/tmux.go`). Matching on it therefore costs no additional tmux round-trip.
+
+**Never a derived directory.** The picker can derive a missing directory by asking a session's pane where it is, but only in the grouped views, and it caches the answer — so a session would be findable or not depending on which view the user last left the picker in. The shell form has it worse: K (§3.2) is taken before any picker exists, against a session list carrying names only. Matching the recorded value alone makes the answer identical everywhere — the count and the list, the shell and the picker — and keeps the sigil path free of a per-session pane read on a path whose whole point is to feel instant.
+
+**Known limitation, unconditional and self-correcting:** a session created before the directory stamp shipped carries no recorded directory and matches on name alone, in every view. Such sessions age out as they are killed and replaced. Deriving the missing value everywhere was rejected for its cost — one pane read per unrecorded session on every `/term`.
+
+#### 4.2 The matched fields are shared across all three filter entry points
+
+`-f/--filter`, the sigil, and typing `/` by hand inside the picker all narrow the same list through the same filter value. Widening the matched fields to include the directory widens them for all three. That is deliberate: the same list narrowing on different *fields* depending on how the user arrived at it is harder to predict than one wider rule.
+
+#### 4.3 The matching rule
+
+**The sigil matches by containment** — the typed characters appearing as a run in the matched text — case-folded.
+
+The picker's own filter does not. The sessions list filters through `charm.land/bubbles/v2/list.DefaultFilter`, which is `fuzzy.Find` from `sahilm/fuzzy` — subsequence matching, anywhere, rank-sorted — and `internal/tui` installs no filter of its own, so that default stands (`grep -rn 'SetFilterFunc\|DefaultFilter' internal/tui/*.go | grep -v _test` → no matches). Under that rule a session at `~/Projects/rust-tools` satisfies `port`: **p** in `projects`, **o** in `projects`, **r** in `rust`, **t** in `tools`, with the four letters never appearing together.
+
+That is harmless inside the picker, where the user reads the results and skips the nonsense rows. It is not harmless for the sigil, because two decisions compound: matching directories gives the matcher a long absolute path to find scattered letters in, and eager resolution (§3.2) means a lone match is acted on without ever being shown. Together they can attach the user to a session they never saw and would not have chosen. `/port` finding nothing is a better failure than `/port` attaching `rust-tools`.
+
+Portal's own `internal/fuzzy` package is not what the picker uses and has no production consumer (`grep -rln 'internal/fuzzy' . --include='*.go' | grep -v '^./internal/fuzzy/'` → `internal/fuzzy/match_test.go`).
+
+#### 4.4 The rule diverges by entry point; the fields do not
+
+| Entry point | Matched fields | Matching rule |
+|---|---|---|
+| Sigil — the count deciding §3.2, and the picker's first displayed set | name + recorded directory | containment |
+| `-f/--filter` | name + recorded directory | the picker's own fuzzy |
+| `/` typed by hand in the picker | name + recorded directory | the picker's own fuzzy |
+
+**The picker's own filter is untouched by this work.** Once the sigil has opened the picker, the moment the user edits the filter by hand the picker's rule applies and the row set can widen. The divergence is therefore visible only by rows appearing, never by rows the user expected going missing.
+
+The distinguishing question is whether a path can act without showing the user anything: the picker shows its results and can afford a loose rule; the shell form cannot.
+
+#### 4.5 Accepted cost and confidence
+
+`/port` is less precise than it would be on names alone — sessions the user would never think of as "port" appear because their path happens to contain it. Taken knowingly, as something use rather than argument will settle. Narrowing the match domain back to names alone is a cheap reversal if the false-positive rate proves intolerable.
+
+---
+
 ## Working Notes
