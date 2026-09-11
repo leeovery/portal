@@ -228,8 +228,8 @@ Add as a new subsection after §7.4:
 
 (The existing §7.5 becomes §7.6.)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied as §7.5 verbatim; the former §7.5 renumbered to §7.6 (no §-references pointed at it).
 
 ---
 

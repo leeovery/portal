@@ -268,7 +268,11 @@ A brief loading page on the way to a direct attach costs a flicker. A silent mul
 
 When K turns out to be 1, the loading page appears and is replaced by the attach, so the user sees a brief screen they did not need.
 
-#### 7.5 The concurrent path itself is unchanged
+#### 7.5 A sigil that resolves to a direct attach still delivers its warnings
+
+On K = 1 the TUI tears down before the connector runs, so the notice band never surfaces. The accumulated soft warnings are written to the terminal at that point instead — after teardown, before the attach — which is where a warm-server sigil attach already puts them. The alternate screen is gone by then, so the corruption this classification prevents cannot occur.
+
+#### 7.6 The concurrent path itself is unchanged
 
 Nothing about how the concurrent bootstrap behaves changes. This section adds the sigil to the set of invocations that take it.
 
