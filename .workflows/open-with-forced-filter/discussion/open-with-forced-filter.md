@@ -444,10 +444,14 @@ Confidence: high on the glyph. The degenerate `x /` (empty filter text) follows
 *(resolves review-001 F8)*
 
 Sibling check: `cli-verb-surface-redesign` specification — its resolution
-precedence puts the path domain second in the chain and defines a path argument
-by the leading `/` / `.` / `~` test. This decision narrows that test for one
-shape (a single-segment leading-`/` argument), which is a change to shipped
-behaviour that specification describes. It is owed a correction once this
+precedence runs every bare positional through `exact session name → path → alias
+→ zoxide query`, the path domain named semantically as an existing directory
+(`sed -n '55,58p' .workflows/cli-verb-surface-redesign/specification/cli-verb-surface-redesign/specification.md`);
+the leading `/` / `.` / `~` test that decides which arguments reach that domain
+lives in the code, not in that document
+(`sed -n '14p' internal/resolver/path.go`). This decision takes one shape — a
+single-segment leading-`/` argument — out of the chain entirely, which is a change
+to the precedence that specification states. It is owed a correction once this
 feature's own specification exists; noted here so the specification phase carries
 it rather than discovering it.
 
@@ -1109,11 +1113,12 @@ the concurrent path and changes nothing about how that path behaves.
 ### Open Threads
 
 - **A correction is owed to the `cli-verb-surface-redesign` specification.** Its
-  target-resolution section defines a path argument by the leading `/` / `.` /
-  `~` test, which this feature narrows: a single-segment leading-`/` argument
-  becomes session-search text rather than a path. The correction is owed once
-  this feature has a specification of its own to name as the superseding source;
-  it is recorded in the `filter-shortcut-form` sibling check as well as here.
+  target-resolution section runs every bare positional through the precedence
+  chain, which this feature narrows: a single-segment leading-`/` argument becomes
+  session-search text and never enters the chain at all. The correction is owed
+  once this feature has a specification of its own to name as the superseding
+  source; it is recorded in the `filter-shortcut-form` sibling check as well as
+  here.
 
 ### Current State
 
