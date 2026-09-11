@@ -46,10 +46,11 @@ In scope: the public verb surface and tiering (public / hidden), command names, 
 
 ### Target resolution precedence
 
-A bare positional target is resolved in two steps:
+A bare positional target is resolved in three steps:
 
-1. **Glob pre-check.** If the target contains glob metacharacters (`*`, `?`, `[…]`), it is **session-domain by construction**: expand it against live session names and skip the chain below entirely (see Glob Targets). Zero matches ⇒ unresolvable ⇒ hard fail.
-2. **Otherwise, the precedence chain**, first match wins: **exact session name → path → alias → zoxide query**.
+1. **Search-sigil pre-check.** If the target begins with `/` and contains no further `/`, it is a **session-search sigil**: the text after the `/` is forced into a session search and the target never enters the chain below. The path test in step 3 is narrowed by exactly this shape — `/tmp` is a sigil, while `/tmp/` and `/Users/leeovery/Code/portal` remain path targets. See the `open-with-forced-filter` specification, which owns the form, its outcomes, and the `-p` escape for minting at a single-segment absolute directory.
+2. **Glob pre-check.** If the target contains glob metacharacters (`*`, `?`, `[…]`), it is **session-domain by construction**: expand it against live session names and skip the chain below entirely (see Glob Targets). Zero matches ⇒ unresolvable ⇒ hard fail.
+3. **Otherwise, the precedence chain**, first match wins: **exact session name → path → alias → zoxide query**.
 
 Each domain maps to an outcome per Axiom 2:
 - **exact session name** → attach existing session
@@ -473,3 +474,5 @@ These are deferred future scope, not unresolved decisions — recorded so planni
 > **Corrigendum 2026-08-07** (from `theming-system`): the Command Surface Summary's public table omitted **`portal theme export <slug>`** — corrected: it is a public, bootstrap-exempt verb (the `theme` group's only member) that writes one theme's file to stdout.
 >
 > **Corrigendum 2026-08-07** (from `theming-system`): `uninstall`'s "config (`projects.json`, `aliases`, `hooks.json`, `prefs.json`, `terminals.json`)" — corrected: the user-authored `themes/` drop-in directory sits alongside those files under `~/.config/portal/` and is likewise untouched.
+>
+> **Corrigendum 2026-09-11** (from `open-with-forced-filter`): "**Otherwise, the precedence chain**, first match wins: **exact session name → path → alias → zoxide query**", with the path domain reached by any target carrying a leading `/` — corrected: a positional beginning with `/` and containing no further `/` is a session-search sigil that never enters the chain, so the path test is narrowed for that one shape. Multi-segment and trailing-slash paths are unaffected.
