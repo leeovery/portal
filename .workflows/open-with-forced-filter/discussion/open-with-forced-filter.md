@@ -557,9 +557,32 @@ from this work". (resolves review-002 F2)*
 
 Project records and tags stay out of the match domain.
 
-Known limitation, self-correcting: a session created before the directory stamp
-shipped carries no recorded directory and so matches on name alone. Such sessions
-age out as they are killed and replaced.
+**Which directory value is matched.** Only the directory tmux records against the
+session (`@portal-dir`, stamped at creation and returned with the session list at
+no extra cost). Never a derived one.
+
+This was written first as "sessions created before the stamp match on name alone",
+which was true in Flat mode only. The picker derives a missing directory by asking
+each unrecorded session's pane where it is — but only in the grouped views, and it
+caches the answer into the session set, so the same session is findable or not
+depending on which view the user last left the picker in, and findable again in
+Flat once a grouped view has run in the same picker session. The shell form has it
+worse: the count deciding attach-versus-picker is taken before any picker exists,
+against a session list carrying names only, so `x /port` could hard-fail on a
+session the picker would have listed a moment later.
+
+Matching the recorded value alone makes the answer identical everywhere — the
+count and the list, the shell and the picker — and keeps the sigil path free of a
+per-session pane read on a path whose whole point is to feel instant.
+
+Known limitation, now unconditional rather than mode-dependent, and
+self-correcting: a session created before the directory stamp shipped carries no
+recorded directory and so matches on name alone, in every view. Such sessions age
+out as they are killed and replaced. The alternative — deriving the missing value
+everywhere, including before the picker exists — was rejected for its cost: one
+pane read per unrecorded session on every `/term`.
+
+*(resolves review-002 F3)*
 
 Trade-off accepted: `/port` is less precise than it would be on names alone, and
 the user has taken that knowingly — "happy to include folders too and see how it
