@@ -122,15 +122,30 @@ function fixGateSection(gateMode, thresholdReached) {
 }
 
 /**
- * The cycle-limit callout emitted before the convergence diagnostic.
- * @param {number} session @param {number} limit
+ * The cycle-limit callout emitted before the convergence diagnostic — over
+ * the topic's lifetime count, whatever session ran the cycles.
+ * @param {number} total @param {number} limit
  * @returns {string}
  */
-function cycleLimitDisplay(session, limit) {
+function cycleLimitDisplay(total, limit) {
   return section(
     'DISPLAY: cycle limit',
     CONTINUE_INSTRUCTION,
-    `⚑ Analysis cycle ${session} this session — over the session limit of ${limit}.`,
+    `⚑ Analysis cycle ${total} on this topic — over the cycle limit of ${limit}.`,
+  );
+}
+
+/**
+ * The one-line confirmation that a pass corrected the specification — the
+ * count is the session's (it landed the corrigenda), so it rides the call.
+ * @param {number} count
+ * @returns {string}
+ */
+function specCorrectionsDisplay(count) {
+  return section(
+    'DISPLAY: spec corrections',
+    CONTINUE_INSTRUCTION,
+    `${count} spec correction${count === 1 ? '' : 's'} recorded.`,
   );
 }
 
@@ -146,4 +161,4 @@ function cycleGateMenu() {
   );
 }
 
-module.exports = { blockedTasksMenu, taskGateSection, fixGateSection, cycleLimitDisplay, cycleGateMenu };
+module.exports = { blockedTasksMenu, taskGateSection, fixGateSection, cycleLimitDisplay, specCorrectionsDisplay, cycleGateMenu };

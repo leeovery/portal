@@ -19,7 +19,7 @@ const { titlecase, WORKLIST_GLYPH, DISCOVERY_GLYPH, discoveryLifecycleLabel } = 
 const { section, CONTINUE_INSTRUCTION, CONTINUE_MARKDOWN_INSTRUCTION, AUTO_GATE_INSTRUCTION, menu, menuFrame, MENU_GLYPH, cmdOption, bareOption, promptOption, callout, indentedBody, bulletRow, subDetail, treeList } = require('./projections/surfaces.cjs');
 const { buildOrderLive } = require('./build-order.cjs');
 const { worklist, escapeMarkdown } = require('./projections/worklist.cjs');
-const { blockedTasksMenu, taskGateSection, fixGateSection, cycleLimitDisplay, cycleGateMenu } = require('./projections/tasks.cjs');
+const { blockedTasksMenu, taskGateSection, fixGateSection, cycleLimitDisplay, specCorrectionsDisplay, cycleGateMenu } = require('./projections/tasks.cjs');
 const { workunitReceipt, topicReceipt, absorbSummary, absorbReceipt, promoteReceipt, pivotContinuationMenu, absorbContinuationMenu, sessionReceipt } = require('./projections/transactions.cjs');
 const { absorbTargetMenu, absorbNameGate, absorbConfirmGate, planTopicsMenu } = require('./projections/start.cjs');
 const {
@@ -46,7 +46,7 @@ const { compareExperimentIds, isParentExperimentId, DERIVED_PHASES, EXPERIMENT_T
 const { WORK_UNIT_TYPES, typeConfig: workUnitTypeConfig, completedPhases } = require('./workunit-detail.cjs');
 const { phaseItems, computeNextPhase, computeTopicLifecycle, lifecyclePhrase, experimentWaits, awaitedExperiments, waits, itemOf, OUTSTANDING_RESEARCH_STATUSES } = require('./derivations.cjs');
 const { manageDetail } = require('./workunit-manage.cjs');
-const { gateOf, counterOf, FIX_THRESHOLD, SESSION_CYCLE_LIMIT } = require('./tasks.cjs');
+const { gateOf, counterOf, FIX_THRESHOLD, CYCLE_LIMIT } = require('./tasks.cjs');
 const { sourceRows } = require('./transitions.cjs');
 
 // The payload-facing status vocabulary — the staging values the two
@@ -1769,11 +1769,13 @@ function findingsSummary(cwd, { dotpath, file }) {
 
 // review-presentation — the review's outcome, after the do-now work has
 // been applied. What is listed is only what the user acts on: the findings
-// that failed the review and must be planned. Corrections are a count —
-// they are already made, gated by the suite and verified, so a list would
-// put pages nobody reads in front of the one decision that matters. The
-// judgment (which items, worded how) rides as the payload; the shape is
-// this surface's rule, so it cannot drift per verdict or per author.
+// that failed the review and must be planned, and — as a count, named in
+// the report — the criteria the review could not measure. Corrections are
+// a count — they are already made, gated by the suite and verified, so a
+// list would put pages nobody reads in front of the one decision that
+// matters. The judgment (which items, worded how) rides as the payload;
+// the shape is this surface's rule, so it cannot drift per verdict or per
+// author.
 
 /**
  * @param {string} cwd
@@ -1852,6 +1854,13 @@ function reviewPresentation(cwd, { dotpath, file }) {
   }
   if (Number(p.discarded) > 0) {
     tail.push(`Discarded: ${p.discarded} — reasons in the report.`);
+  }
+  if (p.not_measured !== undefined) {
+    const n = p.not_measured;
+    if (!Number.isInteger(n) || n < 0) {
+      throw new Error('render review-presentation: "not_measured" must be a non-negative integer');
+    }
+    if (n > 0) tail.push(`Not measured: ${n} criteri${n === 1 ? 'on' : 'a'} — named in the report.`);
   }
   if (tail.length) body.push(tail.join('\n'));
   if (body.length) {
@@ -4174,11 +4183,24 @@ function cycleLimit(cwd, args) {
   }
   const item = itemOf(manifest, 'implementation', topic);
   if (!item) throw new Error(`render cycle-limit: no implementation item "${topic}"`);
-  const session = typeof item.analysis_cycle_session === 'number' ? item.analysis_cycle_session : 0;
-  if (session <= SESSION_CYCLE_LIMIT) {
-    throw new Error(`render cycle-limit: analysis_cycle_session is ${session}, within the session limit of ${SESSION_CYCLE_LIMIT}`);
+  const total = counterOf(item, 'analysis_cycle_total');
+  if (total <= CYCLE_LIMIT) {
+    throw new Error(`render cycle-limit: analysis_cycle_total is ${total}, within the cycle limit of ${CYCLE_LIMIT}`);
   }
-  return cycleLimitDisplay(session, SESSION_CYCLE_LIMIT);
+  return cycleLimitDisplay(total, CYCLE_LIMIT);
+}
+
+/**
+ * The spec-correction confirmation. Address-free: the count is the session's
+ * own (the corrigenda it just landed), never manifest state.
+ * @param {string} _cwd @param {Record<string, string|undefined>} args @returns {string}
+ */
+function specCorrections(_cwd, args) {
+  const count = Number(args.count);
+  if (args.count === undefined || !Number.isInteger(count) || count < 1) {
+    throw new Error(`render spec-corrections: --count must be a whole number of at least 1, got ${JSON.stringify(args.count)}`);
+  }
+  return specCorrectionsDisplay(count);
 }
 
 /** @returns {string} */
@@ -4769,6 +4791,7 @@ const SURFACES = {
   'fix-gate': fixGate,
   'blocked-tasks': blockedTasks,
   'cycle-limit': cycleLimit,
+  'spec-corrections': specCorrections,
   'cycle-gate': cycleGate,
   'workunit-receipt': workunitReceiptSurface,
   'topic-receipt': topicReceiptSurface,

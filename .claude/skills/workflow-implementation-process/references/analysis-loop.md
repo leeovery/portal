@@ -7,7 +7,7 @@
 Each cycle follows stages A through H sequentially. Always start at **A. Cycle Gate**.
 
 ```
-A. Cycle gate (record the cycle, warn if over the session limit)
+A. Cycle gate (record the cycle, warn if over the lifetime cycle limit)
 B. Git checkpoint
 C. Dispatch analysis agents → invoke-analysis.md
 D. Dispatch synthesis agent → invoke-synthesizer.md
@@ -48,18 +48,18 @@ A crash between the synthesizer's write and the init — initialise the cycle fr
 
 #### Otherwise
 
-Record the cycle via the engine (increments both the lifetime and session counters):
+Record the cycle via the engine (increments the topic's lifetime counter):
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs task analysis-cycle {work_unit} {topic}
 ```
 
 `{N}` throughout this loop refers to the response's `cycle_total`; **F. Process Task**'s `{analysis_gate_mode}` is the response's `analysis_gate_mode`.
 
-#### If the response's `over_session_limit` is `false`
+#### If the response's `over_cycle_limit` is `false`
 
 → Proceed to **B. Git Checkpoint**.
 
-#### If the response's `over_session_limit` is `true`
+#### If the response's `over_cycle_limit` is `true`
 
 **Do NOT skip analysis autonomously.** This gate is an escape hatch for the user — not a signal to stop. The expected default is to continue running analysis until no issues are found. Present the choice and let the user decide.
 
@@ -160,25 +160,13 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit --paths {implement
 
 > **CHECKPOINT**: Do not proceed until all agents have returned.
 
-Commit the analysis findings — the scoped commit covers the findings files and the manifest's cycle counters:
+Commit the analysis findings — the scoped commit covers the findings files and the manifest's cycle counter:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): analysis cycle {N} — findings" --topic implementation/{topic}
 ```
 
-Read the bank (an absent field prints empty):
-
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.implementation.{topic} bank
-```
-
-#### If all three agents returned `STATUS: clean` and the bank holds entries
-
-The phase boundaries left residue — the synthesizer runs over the bank alone for its verdicts.
-
-→ Proceed to **D. Dispatch Synthesis Agent**.
-
-#### If all three agents returned `STATUS: clean` and the bank is empty
+#### If all three agents returned `STATUS: clean`
 
 → Return to **[the skill](../SKILL.md)** for **Step 8**.
 
@@ -212,21 +200,32 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "im
 
 ## E. Approval Overview
 
-Settle the spec defects first — each `## Spec Defects` entry in `analysis-report-c{N}.md` is classified before the overview renders, so the tasks are authored against a correct specification. Once per entry:
+1. **Settle the spec defects** — each `## Spec Defects` entry in `analysis-report-c{N}.md` is classified before the overview renders, so the tasks are authored against a correct specification.
 
-→ Load **[correcting-historical-artifacts.md](../../workflow-shared/references/correcting-historical-artifacts.md)** for **B. This Work Unit's Specification** and follow its instructions, with specification path = `.workflows/{work_unit}/specification/{topic}/specification.md`, correcting_phase = `implementation/{topic}`.
+   **If the report carries a `## Spec Defects` section** — once per entry:
 
-A record-settled entry lands there silently — a derivable gap included, its derivation in the corrigendum. A code-wrong verdict becomes a staged proposal — the tree owes the change; an open verdict (a product-intent gap, or a call the reference could not stand behind — the only classes it returns open) becomes one whose Solution says what is settled and whose **Decision** carries the question, a **Stakes** line arguing the stop (each side's product consequence, why no investigation settles the tie, and the grounds for the recommendation where a side is marked), and two to four sides, each written as the product end state chosen — what the product *is* if that side wins, never the work to do — the recommended side first and marked `(recommended)`; only an honest no-lean fork carries no marker. An entry the reference returns unsettled (the item back in its own phase, or held by a live session) is left exactly as reported — never re-classified here. Add each staged verdict under the next `## Task {n}` heading in `.workflows/{work_unit}/implementation/{topic}/analysis-tasks-c{N}.md` — a synthesis that staged none wrote no file: create it with its `# Analysis Tasks: {Topic} (Cycle {N})` header — shaped like the proposals beside it: a `severity:` line carrying the defect's grade (`high`, `medium`, `low` — never a refactor class), a `sources:` line naming the report entry, then **Problem**, **Solution**, and where there is one the **Decision** with its **Stakes** and sides — and initialise its row:
+   → Load **[correcting-historical-artifacts.md](../../workflow-shared/references/correcting-historical-artifacts.md)** for **B. This Work Unit's Specification** and follow its instructions, with specification path = `.workflows/{work_unit}/specification/{topic}/specification.md`, correcting_phase = `implementation/{topic}`.
 
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} staging.c{N}.tasks.{n} pending
-```
+   A record-settled entry lands there silently — a derivable gap included, its derivation in the corrigendum. A code-wrong verdict becomes a staged proposal — the tree owes the change; an open verdict (a product-intent gap, or a call the reference could not stand behind — the only classes it returns open) becomes one whose Solution says what is settled and whose **Decision** carries the question, a **Stakes** line arguing the stop (each side's product consequence, why no investigation settles the tie, and the grounds for the recommendation where a side is marked), and two to four sides, each written as the product end state chosen — what the product *is* if that side wins, never the work to do — the recommended side first and marked `(recommended)`; only an honest no-lean fork carries no marker. An entry the reference returns unsettled (the item back in its own phase, or held by a live session) is left exactly as reported — never re-classified here. Add each staged verdict under the next `## Task {n}` heading in `.workflows/{work_unit}/implementation/{topic}/analysis-tasks-c{N}.md` — a synthesis that staged none wrote no file: create it with its `# Analysis Tasks: {Topic} (Cycle {N})` header — shaped like the proposals beside it: a `severity:` line carrying the defect's grade (`high`, `medium`, `low` — never a refactor class), a `sources:` line naming the report entry, then **Problem**, **Solution**, and where there is one the **Decision** with its **Stakes** and sides — and initialise its row:
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.implementation.{topic} staging.c{N}.tasks.{n} pending
+   ```
 
-An entry an earlier run already settled — its corrigendum present in the specification, or its proposal already in the staging file — is skipped; a proposal already in the staging file whose `staging.c{N}` row is missing is a crashed landing — initialise the row and move on, never re-append. When at least one correction landed, confirm in one line total — `{count} spec correction(s) recorded.` — never a per-correction recap; nothing when none did.
+   An entry an earlier run already settled — its corrigendum present in the specification, or its proposal already in the staging file — is skipped; a proposal already in the staging file whose `staging.c{N}` row is missing is a crashed landing — initialise the row and move on, never re-append. When at least one correction landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim as a code block:
+
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs render spec-corrections --count {count}
+   ```
+
+   **Otherwise:** nothing to settle — continue.
+2. **Apply the comment corrections** — each `## Comment Corrections` entry with the Edit tool: its OLD text replaced by its NEW text at the named file, verbatim; an empty NEW deletes the comment. A correction whose NEW text is already in place was applied by an earlier run — skip it silently; one whose OLD text is otherwise absent is dropped — name the dropped ones in one line. Commit the files a correction changed as a code commit; nothing when none changed:
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit --paths {corrected files} -m "impl({work_unit}): analysis cycle {N} — comment corrections" --for {work_unit} implementation/{topic}
+   ```
 
 #### If the cycle stages no proposal
 
-The synthesis staged none and the record settled every defect.
+The synthesis staged none — the record settled every defect and the corrections are applied.
 
 → Proceed to **G. Route on Results**.
 
@@ -353,6 +352,12 @@ Mark each remaining `approved` row `skipped` (`node .claude/skills/workflow-engi
 → Load **[invoke-task-writer.md](invoke-task-writer.md)** and follow its instructions as written.
 
 > **CHECKPOINT**: Do not proceed until the task writer has returned.
+
+**Record the phase as machinery-created** — the writer's `PHASES` names the phase the tasks landed in; a task of that phase never banks. Skip the push when `machine_phases` already contains the number:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest push {work_unit}.implementation.{topic} machine_phases {phase}
+```
 
 **If the planning item carries no `storage_paths`** (a plan initialised before the field existed): record it now — read the format's authoring.md → Storage Pathspecs and copy the fenced array:
 

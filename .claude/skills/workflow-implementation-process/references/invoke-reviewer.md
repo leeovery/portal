@@ -19,7 +19,8 @@ Invoke `workflow-implementation-task-reviewer` with:
 3. **Project skill paths**: from `project_skills` in the manifest (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.implementation.{topic} project_skills`)
 4. **Work type**: from the manifest (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit} work_type`) — `quick-fix` switches the reviewer to completeness-based criteria and verification-workflow checks
 5. **code-quality.md path**: `.claude/skills/workflow-implementation-process/references/code-quality.md` — the standards the executor worked to, including the comment discipline
-6. **Executor's report**: the structured result the executor returned for this attempt — the claims under review, to be verified against the code, never trusted
+6. **finding-floor.md path**: `.claude/skills/workflow-implementation-process/references/finding-floor.md` — the floor every BANK entry clears
+7. **Executor's report**: the structured result the executor returned for this attempt — the claims under review, to be verified against the code, never trusted
 
 ---
 
@@ -46,6 +47,7 @@ COMMENT_CORRECTIONS:
   NEW: {replacement — empty to delete}
 BANK:
 - {cross-scope consolidation opportunity}
+  FAILURE: {what goes wrong, for whom, how it is noticed}
   DETAIL: {what and where}
   FILES: {paths}
 NOTES:
@@ -55,7 +57,7 @@ NOTES:
 - `approved`: task passes all five review dimensions
 - `needs-changes`: ISSUES contains specific, actionable items with fix recommendations and confidence levels
 - COMMENT_CORRECTIONS may accompany either verdict — prose-only fixes that never count toward the verdict. On `approved`, the orchestrator applies them directly; on `needs-changes`, they travel to the executor with the findings
-- BANK may accompany either verdict and never counts toward it — opportunities whose fix reaches beyond the task's scope, deposited to the manifest the moment the report arrives ([task-loop.md](task-loop.md) **D. Review Task**)
+- BANK may accompany either verdict and never counts toward it — opportunities whose fix reaches beyond the task's scope, deposited on arrival while the task's `do_banking` is `true` ([bank-deposit.md](bank-deposit.md))
 
 → Return to caller.
 
@@ -63,10 +65,10 @@ NOTES:
 
 ## C. Confirmation Review
 
-Dispatched from the fix gate when the user challenges a finding rather than directing a fix. Invoke a **fresh** `workflow-implementation-task-reviewer` agent — never the reviewer whose finding is under challenge, which would defend its own work, and never a continuation. Pass items 1–6 of **A. Invoke the Agent**, plus:
+Dispatched from the fix gate when the user challenges a finding rather than directing a fix. Invoke a **fresh** `workflow-implementation-task-reviewer` agent — never the reviewer whose finding is under challenge, which would defend its own work, and never a continuation. Pass items 1–7 of **A. Invoke the Agent**, plus:
 
-7. **Challenged findings** — the disputed ISSUES, verbatim from the review under challenge
-8. **The user's challenge** — their argument, verbatim
+8. **Challenged findings** — the disputed ISSUES, verbatim from the review under challenge
+9. **The user's challenge** — their argument, verbatim
 
 The agent adjudicates (see the charter's Confirmation Dispatch) and returns:
 

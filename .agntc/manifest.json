@@ -1,7 +1,7 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.7.32",
-    "commit": "1a06374c54716684a63ac7fd010543f38c1ef78e",
+    "ref": "v0.7.34",
+    "commit": "2bb12e998eb274898e48de569efa49070ac5f014",
     "agents": [
       "claude"
     ],
@@ -221,12 +221,14 @@
       ".claude/skills/workflow-implementation-process/references/",
       ".claude/skills/workflow-implementation-process/references/ad-hoc-plan-changes.md",
       ".claude/skills/workflow-implementation-process/references/analysis-loop.md",
+      ".claude/skills/workflow-implementation-process/references/bank-deposit.md",
       ".claude/skills/workflow-implementation-process/references/code-quality.md",
       ".claude/skills/workflow-implementation-process/references/conclude-implementation.md",
       ".claude/skills/workflow-implementation-process/references/consolidation-pass.md",
       ".claude/skills/workflow-implementation-process/references/display-task-brief.md",
       ".claude/skills/workflow-implementation-process/references/display-task-result.md",
       ".claude/skills/workflow-implementation-process/references/environment-setup.md",
+      ".claude/skills/workflow-implementation-process/references/finding-floor.md",
       ".claude/skills/workflow-implementation-process/references/invoke-analysis.md",
       ".claude/skills/workflow-implementation-process/references/invoke-consolidation-finder.md",
       ".claude/skills/workflow-implementation-process/references/invoke-executor.md",
@@ -448,6 +450,7 @@
       ".claude/skills/workflow-review-process/SKILL.md",
       ".claude/skills/workflow-review-process/references/",
       ".claude/skills/workflow-review-process/references/apply-do-now.md",
+      ".claude/skills/workflow-review-process/references/invoke-change-set-verifiers.md",
       ".claude/skills/workflow-review-process/references/invoke-review-synthesizer.md",
       ".claude/skills/workflow-review-process/references/invoke-review-task-writer.md",
       ".claude/skills/workflow-review-process/references/invoke-task-verifiers.md",
@@ -520,6 +523,7 @@
       ".claude/skills/workflow-shared/references/seed-context.md",
       ".claude/skills/workflow-shared/references/sequence-build-order.md",
       ".claude/skills/workflow-shared/references/sequence-discovery-map.md",
+      ".claude/skills/workflow-shared/references/specification-body.md",
       ".claude/skills/workflow-shared/references/technical-lens.md",
       ".claude/skills/workflow-shared/references/topic-discovery-dispatch.md",
       ".claude/skills/workflow-shared/references/topic-discovery.md",
@@ -613,6 +617,7 @@
       ".claude/agents/workflow-planning-task-designer.md",
       ".claude/agents/workflow-research-deep-dive.md",
       ".claude/agents/workflow-research-review.md",
+      ".claude/agents/workflow-review-change-set-verifier.md",
       ".claude/agents/workflow-review-finding-assessor.md",
       ".claude/agents/workflow-review-finding-guards.md",
       ".claude/agents/workflow-review-finding-relationships.md",
@@ -627,7 +632,7 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "installedAt": "2026-09-07T13:03:28.732Z",
+    "installedAt": "2026-09-11T16:20:36.172Z",
     "constraint": "^0.7.0"
   },
   "samber/cc-skills-golang": {

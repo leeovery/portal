@@ -75,12 +75,6 @@ The pass ran; only the phase record is outstanding.
 
 > **CHECKPOINT**: Do not proceed until the finder has returned.
 
-When the finder wrote its file, commit the findings (the scoped commit covers the file and the manifest):
-
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): phase {N} consolidation — findings" --topic implementation/{topic}
-```
-
 #### If `STATUS` is `clean`
 
 > *Output the next fenced block as a code block:*
@@ -93,6 +87,12 @@ Consolidation sweep: nothing owed.
 
 #### If `STATUS` is `findings`
 
+Commit the findings (the scoped commit covers the file and the manifest):
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): phase {N} consolidation — findings" --topic implementation/{topic}
+```
+
 → Proceed to **B. Judge the Findings**.
 
 ---
@@ -101,19 +101,35 @@ Consolidation sweep: nothing owed.
 
 Read the findings file. The finder proposes; this stage disposes, with the session context the finder lacks:
 
-1. **Re-apply the bar** — drop findings the session already settled: an ad hoc change that made one moot, a deferral the user chose, ground a finding would trample. Then list the plan's open tasks with the format's **reading.md** and drop any finding whose ground a pending task already owns — that work is owed either way, so every proposal reaching the walk is one nothing upcoming covers.
-2. **Settle the spec defects** — each `## Spec Defects` entry is classified before a proposal is written, so the tasks are authored against a correct specification. Once per entry:
+1. **Re-apply the bar, the floor, and the settled directions** — once per pass:
+
+   → Load **[finding-floor.md](finding-floor.md)**.
+
+   The prelude's `staging` read names every earlier walk (`p{M}`, `c{M}`); each row marked `approved` is a proposal in that pass's staging file (`consolidation-tasks-p{M}.md`, `analysis-tasks-c{M}.md`) whose title and Solution an earlier pass settled. Judge each finding's proposed shape against them: A proposal that reverses a settled direction is dropped unless the finding shows that direction wrong by measurement, the specification, or a project rule — and then the proposal names the ground. Reverses, not touches: extending, completing, or building on a direction is no reversal; a measured defect is always grounds; a reversal without grounds is dropped here, never raised to the user as a fork. Then drop every finding that names no failure it prevents. Then drop findings the session already settled: an ad hoc change that made one moot, a deferral the user chose, ground a finding would trample. Then list the plan's open tasks with the format's **reading.md** and drop any finding whose ground a pending task already owns — that work is owed either way, so every proposal reaching the walk is one nothing upcoming covers.
+2. **Settle the spec defects** — each `## Spec Defects` entry is classified before a proposal is written, so the tasks are authored against a correct specification.
+
+   **If the findings file carries a `## Spec Defects` section** — once per entry:
 
    → Load **[correcting-historical-artifacts.md](../../workflow-shared/references/correcting-historical-artifacts.md)** for **B. This Work Unit's Specification** and follow its instructions, with specification path = `.workflows/{work_unit}/specification/{topic}/specification.md`, correcting_phase = `implementation/{topic}`.
 
-   A record-settled entry lands there silently — a derivable gap included, its derivation in the corrigendum. A code-wrong verdict returns for the fold below as a `behaviour` finding; an open verdict (a product-intent gap, or a call the reference could not stand behind — the only classes it returns open) returns as a finding whose proposal carries the decision. An entry the reference returns unsettled (the item back in its own phase, or held by a live session) is left exactly as reported — never re-classified here. An entry the specification already reads as corrected — its corrigendum present — was settled by an earlier run: skip it. When at least one correction landed, confirm in one line total — `{count} spec correction(s) recorded.` — never a per-correction recap; nothing when none did.
-3. **Fold the survivors into proposals** — related findings about one pattern become one proposal; anything giant splits. Normal planning granularity, the count dictated by the work. Give each a one-word class tag: its dominant finding class (`duplication`, `near-miss`, `drift`, `dead-code`, `complexity`, `comments`), or `behaviour` where it changes what the code does. A proposal carries the problem and the direction — the bodies are authored after the walk. Settle the direction: derivable from the record → derive; underivable but technical → an honest judgment call — either way the Solution carries the settled direction with its derivation in a clause. A **Decision** is staged only when all four hold: the fork lives at product level (choosing changes what the product's user gets or how it behaves, not how the tree achieves it — test structure, helper extraction, naming, lint, internal bounds never qualify); the costs conflict irreducibly (both sides defensible, mirrored consequences, and no measurement, convention, spec entry, or further trace breaks the tie — where investigation could break it, the investigation is owed instead); a side visibly costs the user (a fork every side of which leaves the user well served — a clean refusal against support for an input nothing produces — is a preference, not a decision: settle it on whatever convention or precedent leans, an honest call where none does); and the tie-break is the user's (appetite, product intent, a fact only they hold) — and a fork whose sides cannot be written as two distinct product end states is below the bar. Such a proposal keeps a Solution saying what is settled and adds the **Decision** — the question, a **Stakes** line arguing the bar (each side's product consequence as the tree bears it out — never a hypothetical cost — why no investigation settles the tie, and the grounds for the recommendation where a side is marked), and two to four sides, each written as the product end state chosen — what the product *is* if that side wins, never the work to do — the recommended side first and marked `(recommended)`; only an honest no-lean fork carries no marker. Most passes stage zero Decisions.
-4. **Settle each bank verdict** — the findings file carries the finder's verdict per banked entry, with the entry's JSON quoted verbatim. Record each disposition in the staging file's `## Bank Disposition` section: `folded into task {n}`, `mooted — {reason}`, or `residue — {reason}` (pre-existing debt and out-of-phase entries ride to the end-of-implementation analysis).
-5. **Bank the finder's pre-existing debt** — push each `## Pre-existing Debt` entry the bank does not already hold (read it back first — a re-entry must not double-deposit); it rides to the end-of-implementation analysis:
+   A record-settled entry lands there silently — a derivable gap included, its derivation in the corrigendum. A code-wrong verdict returns for the fold below as a `behaviour` finding; an open verdict (a product-intent gap, or a call the reference could not stand behind — the only classes it returns open) returns as a finding whose proposal carries the decision. An entry the reference returns unsettled (the item back in its own phase, or held by a live session) is left exactly as reported — never re-classified here. An entry the specification already reads as corrected — its corrigendum present — was settled by an earlier run: skip it. When at least one correction landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim as a code block:
 
    ```bash
-   node .claude/skills/workflow-engine/scripts/engine.cjs manifest push {work_unit}.implementation.{topic} bank '{"source":"finder","pre_existing":true,"summary":"{one line}","detail":"{what and where, file:line}","files":["{path}"]}'
+   node .claude/skills/workflow-engine/scripts/engine.cjs render spec-corrections --count {count}
    ```
+
+   **Otherwise:** nothing to settle — continue.
+3. **Apply the comment corrections** — each `## Comment Corrections` entry with the Edit tool: its OLD text replaced by its NEW text at the named file, verbatim; an empty NEW deletes the comment. A correction whose NEW text is already in place was applied by an earlier run — skip it silently; one whose OLD text is otherwise absent is dropped — name the dropped ones in one line. Commit the files a correction changed as a code commit; nothing when none changed:
+   ```bash
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit --paths {corrected files} -m "impl({work_unit}): phase {N} comment corrections" --for {work_unit} implementation/{topic}
+   ```
+4. **Fold the survivors into proposals** — related findings about one pattern become one proposal; anything giant splits. Normal planning granularity, the count dictated by the work. Give each a one-word class tag: its dominant finding class (`duplication`, `near-miss`, `drift`, `dead-code`, `complexity`, or `corrections` for the pass's one-edit bundle), or `behaviour` where it changes what the code does. A finding whose fix is one edit — never a `behaviour` finding, which keeps its own proposal and its tests — is not a proposal of its own: fold every such one-liner in the pass into a single `## Task {n}: Corrections` proposal with `severity: corrections`, its Solution listing each edit with its file:line. A proposal carries the problem and the direction — the bodies are authored after the walk; one that reverses a settled direction names its ground in the Solution. Settle the direction: derivable from the record → derive; underivable but technical → an honest judgment call — either way the Solution carries the settled direction with its derivation in a clause. A **Decision** is staged only when all four hold: the fork lives at product level (choosing changes what the product's user gets or how it behaves, not how the tree achieves it — test structure, helper extraction, naming, lint, internal bounds never qualify); the costs conflict irreducibly (both sides defensible, mirrored consequences, and no measurement, convention, spec entry, or further trace breaks the tie — where investigation could break it, the investigation is owed instead); a side visibly costs the user (a fork every side of which leaves the user well served — a clean refusal against support for an input nothing produces — is a preference, not a decision: settle it on whatever convention or precedent leans, an honest call where none does); and the tie-break is the user's (appetite, product intent, a fact only they hold) — and a fork whose sides cannot be written as two distinct product end states is below the bar. Such a proposal keeps a Solution saying what is settled and adds the **Decision** — the question, a **Stakes** line arguing the bar (each side's product consequence as the tree bears it out — never a hypothetical cost — why no investigation settles the tie, and the grounds for the recommendation where a side is marked), and two to four sides, each written as the product end state chosen — what the product *is* if that side wins, never the work to do — the recommended side first and marked `(recommended)`; only an honest no-lean fork carries no marker. Most passes stage zero Decisions.
+
+#### If no proposal survives
+
+→ Proceed to **F. Record the Phase**.
+
+#### Otherwise
 
 Write the staging file to `.workflows/{work_unit}/implementation/{topic}/consolidation-tasks-p{N}.md`:
 
@@ -140,18 +156,7 @@ severity: {class tag}
 2. {the product end state if this side is chosen}
 
 ## Task 3: ...
-
-## Bank Disposition
-
-- {entry summary} — {folded into task {n} | mooted — {reason} | residue — {reason}}
-  {the entry's JSON, verbatim as banked}
 ```
-
-#### If no proposal survives
-
-→ Proceed to **F. Record the Phase**.
-
-#### Otherwise
 
 Initialise the walk's gate state — one batched write, one `pending` per staged proposal:
 
@@ -319,10 +324,10 @@ PHASES: {phase numbers}
 SUMMARY: {1 sentence}
 ```
 
-**Consume the settled bank entries** — pull each entry whose disposition is `folded` or `mooted`: its work is now a plan task (approved or declined — offered and declined is decided), or its premise is gone. `residue` entries stay for the end-of-implementation analysis. Use the JSON quoted in the staging file's `## Bank Disposition`, verbatim — `"removed": false` means the entry is not in the bank: read it back (`manifest get`) and pull the matching entry, or move on if it is already gone:
+**Empty the bank** — its entries are decided: folded into a task (approved or declined — offered and declined is decided) or dropped by the finder. **If the manifest holds a `bank`** (`manifest exists {work_unit}.implementation.{topic} bank`): delete it:
 
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest pull {work_unit}.implementation.{topic} bank '{entry json exactly as banked}'
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.implementation.{topic} bank
 ```
 
 **If the planning item carries no `storage_paths`** (a plan initialised before the field existed): record it now — read the format's authoring.md → Storage Pathspecs and copy the fenced array (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} storage_paths '{format storage pathspecs}'`).
@@ -344,22 +349,21 @@ The loop's next task fetch sees the consolidation tasks; the phase records compl
 
 Close the phase:
 
-1. **Consume the settled bank entries** — skip when no staging or findings file exists for this phase (no sweep ran). Pull each entry marked `mooted` (by the staging file's `## Bank Disposition`, else by the findings file's bank verdicts), and each `folded` entry — its task was offered and declined or abandoned, which is decided. `residue` entries stay. Use the quoted JSON, verbatim — `"removed": false` means the entry is not in the bank: read it back (`manifest get`) and pull the matching entry, or move on if it is already gone:
+1. **Empty the bank** — the phase's deposits end here, folded or dropped. **If the manifest holds a `bank`** (`manifest exists {work_unit}.implementation.{topic} bank`): delete it:
    ```bash
-   node .claude/skills/workflow-engine/scripts/engine.cjs manifest pull {work_unit}.implementation.{topic} bank '{entry json exactly as banked}'
+   node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.implementation.{topic} bank
    ```
-2. **Bank the finder's pre-existing debt** — push each `## Pre-existing Debt` entry the bank does not already hold, as at **B** step 5. A no-op when the findings file is absent or the entries are already deposited.
-3. **Mark the boundary** — skip the push when `consolidated_phases` already contains `{N}`:
+2. **Mark the boundary** — skip the push when `consolidated_phases` already contains `{N}`:
    ```bash
    node .claude/skills/workflow-engine/scripts/engine.cjs manifest push {work_unit}.implementation.{topic} consolidated_phases {N}
    ```
-4. **Complete the phase in the plan** — follow the format's **updating.md** instructions for phase completion.
-5. **Record it via the engine** — re-run the completion for the phase's last completed task (session context; after a crash, any `-{N}-` id from the manifest's `completed_tasks`). The re-record is idempotent — the id and the phase each land once:
+3. **Complete the phase in the plan** — follow the format's **updating.md** instructions for phase completion.
+4. **Record it via the engine** — re-run the completion for the phase's last completed task (session context; after a crash, any `-{N}-` id from the manifest's `completed_tasks`). The re-record is idempotent — the id and the phase each land once:
    ```bash
    node .claude/skills/workflow-engine/scripts/engine.cjs task complete {work_unit} {topic} {internal_id} --phase {N} --phase-complete
    ```
-6. **If the planning item carries no `storage_paths`** (a plan initialised before the field existed): record it now — read the format's authoring.md → Storage Pathspecs and copy the fenced array (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} storage_paths '{format storage pathspecs}'`).
-7. **Commit** — `--plan` stages the planning topic, the manifests, and the plan's declared storage:
+5. **If the planning item carries no `storage_paths`** (a plan initialised before the field existed): record it now — read the format's authoring.md → Storage Pathspecs and copy the fenced array (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} storage_paths '{format storage pathspecs}'`).
+6. **Commit** — `--plan` stages the planning topic, the manifests, and the plan's declared storage:
    ```bash
    node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): phase {N} consolidated" --plan {topic}
    ```
