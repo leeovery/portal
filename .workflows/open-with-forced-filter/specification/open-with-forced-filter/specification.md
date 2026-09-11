@@ -246,4 +246,47 @@ Nothing about how the concurrent bootstrap behaves changes. This section adds th
 
 ---
 
+### 8. Tab Completion
+
+#### 8.1 Completion looks past the sigil
+
+**`/po<TAB>` completes the term after — and excluding — the `/`, against live session names, leaving the sigil in place.** `/po` completing to `/portal-a1b2` leaves exactly one match, which under §3.2 attaches outright, so `/po<TAB><Enter>` becomes the whole interaction.
+
+Directories are deliberately excluded from what is *offered*, even though they count for *matching* (§4.1): a completed `/Users/leeovery/Code/portal` reads as a path and trips the no-second-slash rule (§2.2) straight back into path territory.
+
+Today the sigil form completes to nothing — the slash is part of the word being completed, no session name begins with one, and Portal suppresses the shell's filename fallback, so Tab is silently inert rather than misleading (`portal __complete open /po` → no candidates, `ShellCompDirectiveNoFileComp`).
+
+#### 8.2 The `x` function's completion is registered one level too high
+
+This is a pre-existing defect, not one this feature introduces, and it is **folded into this feature** rather than spun out.
+
+`portal init` emits a function that runs `portal open`, but registers Portal's completer against `portal` — so the shell completes everything typed after `x` as though the user had typed `portal`. All three emitted shells share the mistake (`grep -n 'complete -o default -F __start_portal\|compdef _portal\|complete -c .* -w portal' cmd/init.go`).
+
+Measured against the built binary:
+
+| Probe | Result |
+|---|---|
+| `portal __complete open ""` | live session names — correct |
+| `portal __complete open -s ""` | live session names — correct |
+| `portal __complete ""` | the subcommand list (`alias`, `doctor`, `hook`, `init`, `kill`, `list`, `open`, `theme`, …) — what `x <TAB>` actually offers |
+| `portal __complete -s ""` | `unknown shorthand flag: 's'`, ending in `ShellCompDirectiveDefault` — why `x -s <TAB>` falls through to filenames |
+
+So every `x` completion is off by one level, not just the flag: `x <TAB>` offers subcommand names where it should offer session names, and has done for as long as the function has existed.
+
+#### 8.3 The correction
+
+**`portal init` is corrected so the session-opening function completes as `portal open` rather than as `portal`, across bash, zsh and fish.** `xctl` keeps completing at the root level, which is already correct — it genuinely does map to `portal`.
+
+The correction applies to the **configured** function name, not the literal `x`: `portal init --cmd <name>` renames both emitted functions, and the completion registration must follow whatever name was chosen.
+
+#### 8.4 Why it is folded in rather than spun out
+
+This feature's deliverable is not a parsing rule, it is `x /term` becoming muscle memory. A completion decision that does not reach that form has not been delivered — without the fix, §8.1 is reachable only by typing `portal open /term` in full.
+
+#### 8.5 Rollout consequence
+
+The fix lands in the output of `portal init`, which users evaluate in their shell startup file. An existing install does not pick it up until the shell is restarted (or `portal init` is re-evaluated), even though the binary is new. This affects completion behaviour only — the `/term` form itself is parsed by Portal and works the moment the new binary is in place.
+
+---
+
 ## Working Notes
