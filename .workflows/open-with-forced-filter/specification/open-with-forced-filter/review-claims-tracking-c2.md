@@ -115,5 +115,5 @@ Source carrying the claim: `.workflows/open-with-forced-filter/discussion/open-w
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Routed to `.workflows/open-with-forced-filter/discussion/open-with-forced-filter.md` (`## filter-shortcut-form` → Options Considered, Option E) and repaired in place, along with the two restatements in the Current-state bullets and the Decision. The rejection stands on its surviving objection — the function name must be the search term, so it would take one per term — rather than on unclaimability. Specification §2.1 re-aligned.

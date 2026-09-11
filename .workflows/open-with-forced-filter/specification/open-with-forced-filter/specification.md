@@ -30,7 +30,7 @@ What this feature deliberately leaves untouched is stated in §10; the correctio
 
 The form is a positional argument beginning with `/`, with a space between the command and the argument: `x /port`, `portal open /port`. The character after the `/` begins the search term.
 
-The seed's no-space form `x/port` is ruled out permanently. It is not a function call in any shell — it is a path, a command named `port` inside a directory named `x` — and no function definition can claim that shape. The only mechanisms that could intercept it are a global unknown-command hook, which would put Portal in the path of every mistyped command on the machine, or one function per search term. Neither is built.
+The seed's no-space form `x/port` is ruled out permanently — not because the shape is unclaimable, but because claiming it buys nothing. Both shells will define a function whose literal name is `x/port` and dispatch that word to it (`bash --noprofile --norc -c 'x/port() { echo RAN-FUNC; }; x/port'` → `RAN-FUNC`, GNU bash 5.3.15; `zsh -f -c 'x/port() { echo RAN-FUNC }; x/port'` → `RAN-FUNC`, zsh 5.9) — but the name must be the search term, so it would take a function per term anyone might ever type. Without one the word falls through to a path, a command named `port` inside a directory named `x`. The only other interception is a global unknown-command hook, which would put Portal in the path of every mistyped command on the machine. Neither is built.
 
 #### 2.2 The recognition rule
 
