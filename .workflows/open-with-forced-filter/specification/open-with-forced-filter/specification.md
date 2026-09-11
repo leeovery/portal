@@ -315,4 +315,46 @@ No CHANGELOG entry is written as part of this work — the release process owns 
 
 ---
 
+### 10. Out of Scope and Unchanged
+
+Each entry below was reached as a decision, not left out by omission.
+
+#### 10.1 The bare-positional resolution chain
+
+**Unchanged.** Its ordering, its domains, and the sibling `cli-verb-surface-redesign` specification's Axiom 2 (no find-or-create) stand exactly as that specification set them. Project-prefix session matching stays rejected, on that specification's own grounds — `api` resolving to the sole live `api-*` session reintroduces attach-versus-create guessing with an ambiguity cliff the moment a second `api-*` session exists.
+
+The complaint that opened this work — that a bare argument walks branches whose order nobody remembers — was measured and does not hold as stated. A plain word can reach neither the path domain nor the glob branch (§2.2 for the path test; a glob needs one of `*?[`, `grep -n 'globMeta =' internal/resolver/glob.go`), so its live set is exact session name → alias → zoxide, and the last two both mint at a directory. The outcome of a bare word is invariant as long as no live session is named exactly that word.
+
+The residual variation is accepted: which directory a bare word mints at is zoxide's frecency call, and a session renamed to exactly that word changes the word's outcome for as long as it lives. That is the exact-session branch working as specified, and the domain pins are the deliberate route to the other outcome.
+
+A search branch on the bare positional — `x port` attaching when exactly one session matches — was considered and rejected. Under it the two sides of the cliff are *attach an existing session* and *mint a brand-new one*, which is the guess the sibling specification refused. The sigil avoids it by declaring its domain first (§3.1).
+
+#### 10.2 A `+` mint sigil
+
+**Not built.** "Add new" is already the bare form's behaviour. The only gap such a sigil could fill — forcing a mint when a live session is named exactly the term — is already covered by `-p`, `-a` and `-z`. A fourth mint route is the surface accretion this work set out not to cause.
+
+#### 10.3 A configurable sigil
+
+**Not built.** A keybinding and an argv token are different kinds of thing: a keystroke lives in one user's session, a command string is a shared artifact that goes into a README, a script, or a bug report. Under a configurable sigil `x /tmp` mints on one machine and filters on another, and neither user can read the other's command. It would also be the first Portal setting to change *parsing* rather than appearance — every field `prefs.json` carries today is UI state (`grep -n 'json:"' internal/prefs/store.go`).
+
+#### 10.4 Session naming
+
+**Unchanged.** `{project}-{nanoid}` stays exactly as it is, and no part of this feature touches session creation, the naming scheme, or renaming. The feature's own answer removes whatever pressure existed: searching directories as well as names means a session is found by the place it was opened in, with no need to recognise `portal-c3d4` at all.
+
+Out of scope and not deferred — there is no open thread here to pick up later.
+
+#### 10.5 The rest of the argument surface
+
+**Nothing is retired, renamed or deprecated.** `-f`, all four domain pins, and the bare positional chain keep their current behaviour and their current prominence. The only change owed to the existing surface is how the `-f` / `/term` pair is described (§9.1).
+
+#### 10.6 The picker reached any other way
+
+**Unchanged.** The picker's own filter keeps its fuzzy, rank-sorted behaviour (§4.4), and Sessions rows reached by any route other than the sigil render as they do today (§6.3).
+
+#### 10.7 Match-domain widening beyond name and directory
+
+Project records and tags stay out (§4.1). Nothing in the source material asked for them, and each added field widens the false-positive set further for a case nobody has hit.
+
+---
+
 ## Working Notes
