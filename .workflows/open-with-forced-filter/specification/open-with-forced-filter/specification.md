@@ -196,9 +196,9 @@ These are settled by derivation rather than by discussion. The two rulings above
 
 *Derivation recorded: `-f`'s mutual-exclusion contract plus §5.1's whole-invocation ruling.*
 
-#### 5.5 `-f` is unchanged
+#### 5.5 What `-f` keeps
 
-`-f/--filter` keeps its existing behaviour in full, including its Projects redirect under a pending command. The two forms are deliberately not symmetrical — the sigil takes no command exception — which is one more line of help text (§9) and no behaviour change to a shipped flag.
+`-f/--filter` keeps its argument contract, its fuzzy matching rule and its Projects redirect under a pending command. Its matched fields widen with everything else's (§4.2): after this feature `-f` narrows on session name and recorded directory, exactly as the sigil and the hand-typed filter do. The two forms are deliberately not symmetrical — the sigil takes no command exception — which is one more line of help text (§9).
 
 ---
 
@@ -367,7 +367,7 @@ Out of scope and not deferred — there is no open thread here to pick up later.
 
 #### 10.5 The rest of the argument surface
 
-**Nothing is retired, renamed or deprecated.** `-f`, all four domain pins, and the bare positional chain keep their current behaviour and their current prominence. The only change owed to the existing surface is how the `-f` / `/term` pair is described (§9.1).
+**Nothing is retired, renamed or deprecated.** `-f`, all four domain pins, and the bare positional chain keep their current prominence, and the domain pins and the bare positional chain keep their current behaviour exactly. Two changes are owed to the existing surface: `-f`'s widened match domain (§4.2), and how the `-f` / `/term` pair is described (§9.1).
 
 #### 10.6 The picker reached any other way
 

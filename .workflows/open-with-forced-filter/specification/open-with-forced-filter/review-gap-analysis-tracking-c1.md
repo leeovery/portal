@@ -30,8 +30,8 @@ The widening governs and the two blanket "unchanged" statements are what is wron
 §10.5:
 > **Nothing is retired, renamed or deprecated.** `-f`, all four domain pins, and the bare positional chain keep their current prominence, and the domain pins and the bare positional chain keep their current behaviour exactly. Two changes are owed to the existing surface: `-f`'s widened match domain (§4.2), and how the `-f` / `/term` pair is described (§9.1).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §5.5 and §10.5 verbatim; §5.5's heading retitled from "`-f` is unchanged" to "What `-f` keeps", which the old title contradicted.
 
 ---
 
