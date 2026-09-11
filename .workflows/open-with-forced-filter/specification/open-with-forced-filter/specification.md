@@ -109,7 +109,7 @@ The sigil emits no `resolve` component line. That component records one INFO lin
 
 The usage errors of §5.1 are ordinary usage errors, carrying the same shape as `-f`'s own mutual-exclusion refusal.
 
-**On a cold boot the miss arrives after the loading page and reads identically.** A sigil invocation takes the loading page before K can be taken (§7), so a K = 0 on a cold server is discovered with the TUI already on screen. The TUI closes, the same message is written to the terminal, and the exit status is the same non-zero one the warm path returns. This is not a bootstrap fatal and does not take the in-TUI error frame; the picker never appears, exactly as §3.2 requires.
+**On a cold boot the miss arrives after the loading page and reads identically.** A sigil invocation takes the loading page before K can be taken (§7), so a K = 0 on a cold server is discovered with the TUI already on screen. The TUI closes, the same message is written to the terminal, and the exit status is the same non-zero one the warm path returns. Any soft bootstrap warnings accumulated on the way out take the same route as they do on a resolved attach (§7.5) — written to the terminal after teardown, ahead of the message. This is not a bootstrap fatal and does not take the in-TUI error frame; the picker never appears, exactly as §3.2 requires.
 
 **An attach under K = 1 uses the connector the invocation already selects** — `syscall.Exec` into `tmux attach-session` outside tmux, `switch-client` inside it. The sigil introduces no third connection mode.
 
