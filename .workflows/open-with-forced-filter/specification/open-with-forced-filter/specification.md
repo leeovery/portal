@@ -147,4 +147,45 @@ The distinguishing question is whether a path can act without showing the user a
 
 ---
 
+### 5. Argv Composition
+
+#### 5.1 The rule
+
+**`/term` composes with nothing. Any other argument on the line is a usage error.**
+
+The sigil is not a target that sits in the grammar alongside other targets — it is a whole-invocation mode, the way `-f` is. `portal open /term` is a complete invocation, and nothing else belongs on the line.
+
+| Line | Outcome |
+|---|---|
+| `portal open /term` | the sigil, per §3 |
+| `portal open /term -e <cmd>` | usage error |
+| `portal open /term -- <cmd>` | usage error |
+| `portal open /term <other-target>` | usage error, at every arity |
+| `portal open <other-target> /term` | usage error — recognition is positional-independent (§2.3) |
+| `portal open /term -s|-p|-a|-z <value>` | usage error |
+| `portal open /term -f <text>` | usage error |
+| `portal open /term --ack <batch>:<token>` | usage error |
+
+#### 5.2 Why a command is refused rather than redirected
+
+A trailing command declares mint: it can only run in a session about to be created. `-f` answers that by routing its term to the **Projects** page instead of the sessions list, which is correct for `-f` — it never promised session-domain (`sed -n '1265,1271p' internal/tui/model.go` → the `commandPending` branch sends the filter to the project list).
+
+Inheriting that would mean typing a glyph whose entire job is to declare "search my live sessions, never mint" and landing on the mint page — the sigil contradicting itself. Refusing is honest where a silent page switch is not.
+
+#### 5.3 Why a second target is refused
+
+The sigil never participates in the multi-window burst. A case was floated for allowing it — wanting an existing Portal session *and* a fresh session in another project, in two windows, from one line — and declined.
+
+#### 5.4 The domain pins and the hidden `--ack`
+
+These are settled by derivation rather than by discussion. The two rulings above make the sigil a whole-invocation form, and `-f`'s existing contract already rejects every domain pin (`sed -n '156,160p' cmd/open.go`); the sigil is stricter than `-f` in every other respect, so it cannot be laxer here. `--ack` is the burst's internal handshake flag and the sigil never bursts, so it falls under the same rule.
+
+*Derivation recorded: `-f`'s mutual-exclusion contract plus §5.1's whole-invocation ruling.*
+
+#### 5.5 `-f` is unchanged
+
+`-f/--filter` keeps its existing behaviour in full, including its Projects redirect under a pending command. The two forms are deliberately not symmetrical — the sigil takes no command exception — which is one more line of help text (§9) and no behaviour change to a shipped flag.
+
+---
+
 ## Working Notes
