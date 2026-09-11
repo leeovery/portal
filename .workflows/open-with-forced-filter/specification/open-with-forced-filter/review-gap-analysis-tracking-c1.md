@@ -54,8 +54,8 @@ Add to §2.3, after the existing paragraphs:
 
 > **The command payload is not searched for the shape.** Recognition applies to the arguments `open` parses as targets, and stops at a `--` separator: the words after it are the trailing command's own, passed to that command untouched, so a `/word` among them is that command's argument and never a sigil. `portal open ~/Code/api -- ls /tmp` is unaffected by this feature. The rule loses nothing by stopping there, because a sigil line carries no command at all (§5.1) — a line holding both is a usage error on the target it names. A command carried as a flag value is a value rather than a positional and was never in reach of the rule.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §2.3 verbatim.
 
 ---
 
