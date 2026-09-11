@@ -249,13 +249,15 @@ That is the seed's own complaint returning by the back door. Names are precisely
 
 #### 6.2 Placement and weight
 
-Alongside the name rather than on its own line, taking the same colour token as the row's window count — the muted rung of the text ramp, the role paths, counts and subtitles already take elsewhere in the picker. This introduces no new colour token and no new convention; the selected row's own treatment one step brighter is the established pattern the sigil row reuses.
+**The directory begins one space after the session name** — packed against it rather than anchored to a column of its own, so its start moves with the name's length and both its edges are ragged down the list.
+
+Balance comes from colour rather than alignment. The directory takes the same colour token as the row's window count — the muted rung of the text ramp, the role paths, counts and subtitles already take elsewhere in the picker — so it reads as a second-weight annotation on the name it follows, and the ragged edges do not register as misalignment. A right-anchored column would buy a scannable edge at the cost of a wide, arbitrary gap on every short-named row, and would make the two pieces read as separate columns rather than as one row about one session. This introduces no new colour token and no new convention; the selected row's own treatment one step brighter is the established pattern the sigil row reuses.
 
 The sibling `theming-system` specification fixes the token vocabulary at nineteen closed semantic roles and forbids raw colour at call sites. This section references an existing role rather than proposing a new one, so nothing in that vocabulary changes.
 
 **When the row is too narrow for both, the directory gives way and the session name never does.** The directory is shortened **from the left**, so its tail survives — `…/Code/portal`, not `/Users/leeovery/Cod…` — because the tail is the segment a human recognises a checkout by, and the whole premise of showing it is that the directory is recognisable where the name is not. A path under the user's home is always displayed abbreviated to `~/`, at any width — the abbreviation is how the value is rendered rather than a rung of the truncation ladder, and it commonly reclaims enough width that no truncation is needed at all.
 
-The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`); the directory column takes its width from what remains and applies the left-truncation above.
+The row already flexes the name against a fixed count slot, a fixed attached slot and a right margin, and already truncates (`grep -n 'ansi.Truncate' internal/tui/session_item.go`); the directory takes whatever width remains after the name and the fixed slots, and applies the left-truncation above.
 
 **Below a floor the directory is dropped rather than truncated to noise.** When the remaining width cannot hold an ellipsis plus one whole path segment, the row shows the session name alone — a row ending in `…l` says nothing and reads as damage, where a bare name at least reads as a name.
 

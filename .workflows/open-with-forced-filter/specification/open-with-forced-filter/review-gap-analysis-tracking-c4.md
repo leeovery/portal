@@ -44,8 +44,8 @@ Two builders will lay out the same row differently and both will be following th
 - Left-packed — the directory begins one space after the session name, so its start column varies row to row and both of its edges are ragged.
 - Right-anchored — the directory ends flush against the fixed window-count slot with a minimum gap kept after the name, so the surviving path tails align down the list and the variable gap absorbs the difference in name lengths. (recommended)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Option 2 chosen — left-packed, the directory one space after the name. The user's reasoning: colour (theme tokens) creates the balance, and right-aligning would be a mistake. §6.2 rewritten to state the placement and to carry that reason — the muted token makes the directory read as a second-weight annotation on the name, so the ragged edges do not register as misalignment.
 
 ---
 
