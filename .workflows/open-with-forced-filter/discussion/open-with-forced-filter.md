@@ -289,6 +289,121 @@ is owed.
 
 ---
 
+## filter-shortcut-form
+
+### Context
+
+The seed asked for a shell-level form short enough to be muscle memory — `x /port`
+— that forces its term into the picker as filter text rather than into the
+resolution chain. With `unambiguous-direct-attach` settled on eager session-domain
+resolution, the remaining question is what glyph declares that intent.
+
+The glyph is not free real estate. A leading `/` already means something in
+Portal: it makes an argument a path, unconditionally.
+
+`sed -n '13,15p' internal/resolver/path.go` → `return strings.Contains(arg, "/") || arg[0] == '.' || arg[0] == '~'`
+
+So `x /tmp` mints a session at `/tmp` today, and `x /port` hard-errors with
+`Directory not found: /port`. Claiming `/` overrides a working rule rather than
+filling empty space.
+
+### Options Considered
+
+The candidate field is narrower than it looks, because most obvious glyphs are
+consumed by the shell before Portal ever sees the argument. Measured under zsh
+with `extendedglob` and `nomatch` set — `zsh -c "setopt extendedglob nomatch; echo <candidate>"`:
+
+| Candidate | Result |
+|---|---|
+| `?port` | `zsh: no matches found` — glob metacharacter |
+| `^port` | expands to every non-matching file — `extendedglob` negation |
+| `=port` | `zsh: port not found` — equals-expansion |
+| `!port` | history expansion (interactive shells) |
+| `@port` `:port` `,port` `+port` `%port` | pass through untouched (zsh and bash both) |
+
+**Option A — `/`.** Zero learning cost: `/` is the picker's own filter key, so the
+gesture inside the picker and the gesture outside it are the same one.
+Overrides the path rule; needs a disambiguation rule and a documented footnote.
+
+**Option B — `:`.** Structurally impossible in a session name — `ValidateSessionName`
+rejects a name containing `:` because tmux reserves it as a target separator
+(`internal/tmux/errors.go:102`), so `:port` can never be confused with a session
+name by construction. Needs no disambiguation rule and no footnote. Costs an
+arbitrary mapping the user must install in their fingers.
+
+**Option C — a `+` mint sigil alongside the search sigil.** Rejected. "Add new" is
+already the bare form's behaviour: `x port` walks alias then zoxide and mints.
+`+port` would be a second spelling for a default that already exists. The only
+gap it could fill — forcing a mint when a live session is named exactly `port`,
+which the rename case makes possible — is already covered by `-p`, `-a` and `-z`.
+Symmetry pressure, not a need, and a fourth mint route is exactly the surface
+accretion this work set out not to cause.
+
+**Option D — make `/` configurable, opt-in via global config.** Rejected. A
+keybinding and an argv token are different kinds of thing: a keystroke lives in
+one user's session, whereas a command string is a shared artifact that goes into
+a README, a script, or a bug report. Under a configurable sigil `x /tmp` mints on
+one machine and filters on another, and neither user can read the other's
+command. It also doubles the documentation rather than removing it (both
+behaviours plus the switch), and it would be the first Portal setting to change
+*parsing* rather than appearance — `prefs.json` carries five fields today
+(`session_list_mode`, `theme`, `theme_light`, `theme_dark`, `theme_migrated`;
+`grep -n 'json:"' internal/prefs/store.go`), every one of them UI state.
+
+### Journey
+
+The discussion ran to `:` first. The case for it was reversibility rather than
+aesthetics: shipping `:` does not foreclose `/`, because adding a second accepted
+sigil later is additive and breaks nothing — whereas shipping `/`, installing it
+in muscle memory, and then discovering the override bites means withdrawing the
+very habit the feature exists to build. Start with the glyph that needs no
+footnote, keep the door open.
+
+The user weighed that against the ergonomic argument and chose `/`. The deciding
+consideration on their side: `/` is the only candidate with no learning cost at
+all, because it is already the key they press inside the picker to do the same
+thing, and the population of directories the override actually shadows is one
+they would never open a session in.
+
+That trade is theirs to make — the cost is a documented rule, and the benefit is
+the habit forming on its own.
+
+### Decision
+
+**The sigil is `/`.**
+
+A leading `/` declares session-search intent, and the term is forced as filter
+text — never entering the resolution chain. Disambiguation follows the
+no-second-slash rule: a leading-`/` argument is filter text **only when it
+contains no further `/`**.
+
+- `x /port` → session search, filter text `port`
+- `x /Users/leeovery/Code/portal` → unchanged, a path that mints
+- `x /tmp/` → unchanged, a path that mints — the trailing slash is the second one
+
+The rule survives ordinary use because the two forms are produced differently:
+shell completion appends a trailing slash to a directory, so `x /tm<TAB>` yields
+`/tmp/` and stays a path, while `/port` typed by hand is a filter.
+
+Trade-off accepted: single-segment absolute directories typed *without* a
+trailing slash — `x /tmp`, `x /opt`, `x /srv` — stop minting and start filtering.
+The escape is `-p /tmp`, the flag that exists for exactly this. The user judges
+minting a session directly in a root-level directory as something they would
+never do.
+
+Confidence: high on the glyph. The degenerate `x /` (empty filter text) follows
+`-f`'s existing answer — a usage error — rather than meaning "mint at root".
+
+Sibling check: `cli-verb-surface-redesign` specification — its resolution
+precedence puts the path domain second in the chain and defines a path argument
+by the leading `/` / `.` / `~` test. This decision narrows that test for one
+shape (a single-segment leading-`/` argument), which is a change to shipped
+behaviour that specification describes. It is owed a correction once this
+feature's own specification exists; noted here so the specification phase carries
+it rather than discovering it.
+
+---
+
 ## Summary
 
 ### Key Insights

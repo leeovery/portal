@@ -11,7 +11,7 @@
           "status": "in-progress",
           "subtopics": {
             "filter-shortcut-form": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "bare-positional-grammar": {
