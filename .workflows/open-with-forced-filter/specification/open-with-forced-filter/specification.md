@@ -192,6 +192,7 @@ The sigil is not a target that sits in the grammar alongside other targets — i
 | `portal open /term -- <cmd>` | usage error |
 | `portal open /term <other-target>` | usage error, at every arity |
 | `portal open <other-target> /term` | usage error — recognition is positional-independent (§2.3) |
+| `portal open /term /other` | usage error — a second sigil is another target |
 | `portal open /term -s|-p|-a|-z <value>` | usage error |
 | `portal open /term -f <text>` | usage error |
 | `portal open /term --ack <batch>:<token>` | usage error |

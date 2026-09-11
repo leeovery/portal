@@ -140,8 +140,8 @@ A second sigil is another target and the line is the same usage error. What dete
 | `portal open <other-target> /term` | usage error — recognition is positional-independent (§2.3) |
 | `portal open /term /other` | usage error — a second sigil is another target |
 
-**Resolution**: Pending
-**Notes**: Same row as the table in finding 1; apply once.
+**Resolution**: Approved
+**Notes**: The `/term /other` row applied to §5.1's table verbatim — this finding owns it; finding 1 contributed only its paragraph.
 
 ---
 
