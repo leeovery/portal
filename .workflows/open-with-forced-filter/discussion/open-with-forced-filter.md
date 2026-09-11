@@ -927,10 +927,16 @@ cannot account for. A session named `api-work` appears because it lives in the
 Portal checkout, and the row shows a session name, a window count and an attached
 marker — nothing about the directory that put it there.
 
-In Flat mode, which is the default and where the sigil's narrowed list lands, the
-user is looking at a name with no visible relationship to what they typed. The
-By-Project view carries the project as a group heading, so the information is
-reachable there by another route; Flat has none.
+The picker reopens in whichever grouping mode the user last left it in — the mode
+is persisted and re-applied at construction, with Flat only the fallback for a user
+who has never pressed `s` (`sed -n '612,615p' cmd/open.go`). So the sigil's narrowed
+list lands in Flat, By Project or By Tag depending on that history, and in every one
+of them the user is looking at a name with no visible relationship to what they
+typed. By Project does not rescue it: the grouping survives a committed filter but
+the headings do not — a header row's filter value is empty
+(`sed -n '93p' internal/tui/session_item.go` → `func (HeaderItem) FilterValue() string { return "" }`),
+so a filtered By-Project list shows grouped-indented names with neither heading nor
+directory.
 
 This is the seed's own complaint returning by the back door: names are precisely
 what the user said they cannot recognise sessions by, the feature answers that by
@@ -941,6 +947,26 @@ fast. Without the directory on the row the user falls back to previewing each
 one, which is the ceremony being removed.
 
 ### Decision
+
+#### 2026-09-11 — revised
+*Trigger: measurement — `sed -n '612,615p' cmd/open.go` shows the picker's grouping
+mode is loaded from persisted prefs rather than fixed at Flat, and
+`sed -n '93p' internal/tui/session_item.go` shows group headings carry an empty
+filter value and drop out under a committed filter. The entry below reasoned from
+Flat being where the sigil lands and from By Project carrying the directory as a
+heading; neither holds.*
+
+**A row in a sigil-opened list shows the directory it matched on, beside the
+session name — in every grouping mode the list can be in.** The requirement is
+unchanged in kind and broader in reach than the entry below assumed: no mode
+displays the matched directory under a committed filter, so scoping the column to
+Flat would leave the grouped modes carrying exactly the unaccountable row the
+decision exists to remove.
+
+Placement, weight, scope, deciding factor and trade-off are as the entry below
+states them.
+
+#### Initial
 
 **A row in a sigil-opened list shows the directory it matched on, beside the
 session name.**
