@@ -317,6 +317,8 @@ After this feature the surface reaches a live session by a bare exact session na
 
 `-f` documented as "open the picker pre-filtered" invites a reader to assume `/term` is shorthand for it. They differ exactly where it matters: with one match, `/term` attaches and `-f` shows a list of one. **The pair must be described by outcome — one always shows the list, one takes you there when there is only one place to go.**
 
+The outcome carries a use with it, and the documentation says which to reach for: `-f` is the form for a script or a keybinding, which needs to land in the same place every time; `/term` is the interactive form.
+
 This is wording work, not behaviour change.
 
 #### 9.2 What the documentation must carry
@@ -325,7 +327,7 @@ This is wording work, not behaviour change.
 - The three outcomes by match count (§3.2).
 - What the search matches, and that it matches by containment while the picker's own filter stays fuzzy (§4).
 - That the form composes with nothing (§5.1).
-- `-f` and `/term` distinguished by outcome rather than by input shape (§9.1).
+- `-f` and `/term` distinguished by outcome rather than by input shape, and which of the two to reach for (§9.1).
 
 Both `portal open --help` (`cmd/open.go`'s `Long` and the `-f` flag description) and the README's `x (open)` section carry it. The README's resolution table is where the sigil row belongs, alongside the domain pins and `-f` (`grep -n -- '-f, --filter' README.md` → the pin table row).
 

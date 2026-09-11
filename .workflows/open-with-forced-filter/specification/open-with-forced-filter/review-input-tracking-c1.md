@@ -115,8 +115,8 @@ The help text and README will tell a reader how the two filtered forms differ an
 
 - `-f` and `/term` distinguished by outcome rather than by input shape, and which of the two to reach for (§9.1).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §9.1 and §9.2 verbatim.
 
 ---
 
