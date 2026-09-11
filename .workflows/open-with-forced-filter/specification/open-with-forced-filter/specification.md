@@ -63,4 +63,44 @@ Single-segment absolute directories typed *without* a trailing slash — `x /tmp
 
 ---
 
+### 3. Resolution
+
+#### 3.1 The sigil is session-domain by declaration
+
+A sigil argument never enters the bare-positional resolution chain. It reaches neither the path, alias nor zoxide domain, and it can never mint a session. Its term is a search over live sessions and nothing else.
+
+This is what makes eager resolution safe. The sibling `cli-verb-surface-redesign` specification rejected project-prefix session matching (`api` resolving to the sole live `api-*` session) because it reintroduces attach-versus-create guessing with a cliff at the second match. The sigil has the same cliff at the same place and is nevertheless sound, because both sides of its cliff are session-domain: the worst case is a picker the user was already heading for, not a stray session minted where an attach was wanted.
+
+#### 3.2 Outcomes by match count
+
+Let K be the number of live sessions matching the term under §4.
+
+| K | Outcome |
+|---|---|
+| 0 | Hard failure. Nothing opens, nothing mints, and the picker does not appear. |
+| 1 | The matching session is attached directly. No picker. |
+| >= 2 | The picker opens on the Sessions page with the term applied as a committed filter and the cursor on the first matching row. |
+
+Eager attach on a single session-search match is already shipped behaviour rather than a new one: `-s <glob>` matching exactly one session attaches it outright (§1.1).
+
+#### 3.3 The committed-filter landing
+
+On K >= 2 the picker lands exactly as `-f` already lands it: filter text set and filter state committed rather than focused, cursor re-anchored onto the post-filter visible set, so arrows, `Space` and `Enter` work immediately on the narrowed list (`sed -n '1261,1273p' internal/tui/model.go`). The user is not left inside a live filter input.
+
+#### 3.4 When the count is taken
+
+K is evaluated against the live session set once the tmux server is ready to answer for it. On a warm server that is immediately. On a cold server the sigil takes the picker's concurrent-bootstrap path (§7), so the count is taken after restore has reconstructed the saved sessions — the loading page appears first and is replaced by the attach when K turns out to be 1.
+
+#### 3.5 Accepted cost
+
+The user cannot predict before typing whether they land in a session or in the picker. That was taken knowingly: the cost of the wrong side of the cliff is a screen they were already opening.
+
+#### 3.6 No `resolve` log line
+
+The sigil emits no `resolve` component line. That component records one INFO line per bare positional resolved through the guessing chain; deterministic targets — globs and domain pins — emit none, and a sigil declares its domain in the same way a pin does.
+
+*Derived, not decided in discussion: the source material settles the sigil's domain but never names its logging. The derivation is the `resolve` component's own stated rule.*
+
+---
+
 ## Working Notes
