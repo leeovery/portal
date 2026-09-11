@@ -192,6 +192,8 @@ The sigil is not a target that sits in the grammar alongside other targets — i
 | `portal open /term -f <text>` | usage error |
 | `portal open /term --ack <batch>:<token>` | usage error |
 
+**A refused line starts nothing.** The refusal is decided from the arguments alone, so it needs no tmux server and takes no loading page: on a cold machine as on a warm one, a refused line prints its usage error and exits without starting the server, restoring a session or painting a frame. The picker classification of §7.1 applies to a complete sigil invocation only. That is the one respect in which a usage error differs from the zero-match failure (§3.7), which can only be discovered once a live session list exists.
+
 #### 5.2 Why a command is refused rather than redirected
 
 A trailing command declares mint: it can only run in a session about to be created. `-f` answers that by routing its term to the **Projects** page instead of the sessions list, which is correct for `-f` — it never promised session-domain (`sed -n '1265,1271p' internal/tui/model.go` → the `commandPending` branch sends the filter to the project list).

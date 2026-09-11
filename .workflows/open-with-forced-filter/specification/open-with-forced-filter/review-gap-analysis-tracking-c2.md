@@ -43,8 +43,8 @@ A refused line needs nothing from tmux in order to be refused, so it is refused 
 
 **A refused line starts nothing.** The refusal is decided from the arguments alone, so it needs no tmux server and takes no loading page: on a cold machine as on a warm one, a refused line prints its usage error and exits without starting the server, restoring a session or painting a frame. The picker classification of §7.1 applies to a complete sigil invocation only. That is the one respect in which a usage error differs from the zero-match failure (§3.7), which can only be discovered once a live session list exists.
 
-**Resolution**: Pending
-**Notes**: The `/term /other` row is also finding 6; if that finding is declined, drop that row and keep the paragraph.
+**Resolution**: Approved
+**Notes**: The paragraph applied to §5.1 verbatim; the `/term /other` table row is left to finding 5, which owns it. Original note: The `/term /other` row is also finding 6; if that finding is declined, drop that row and keep the paragraph.
 
 ---
 
