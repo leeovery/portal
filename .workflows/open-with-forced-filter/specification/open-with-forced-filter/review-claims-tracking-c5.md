@@ -80,5 +80,5 @@ $ sed -n '1205,1211p' .workflows/open-with-forced-filter/discussion/open-with-fo
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Reclassified from `route` to `settled` before applying. The discussion is not defective: it recorded the correction as *owed*, which was true when written, and whether that debt has since been discharged is pipeline state rather than substance the discussion carries. What was wrong is the specification's tense — the correction was applied earlier in this session (commits 35c47ed19 and e6f388d88) while §11 still read as future work, which would have had a reader apply it twice. §11 retitled "Relationship to `cli-verb-surface-redesign`" and rewritten to record the correction as applied, with the grep that shows both halves in place; §1.3's pointer follows. No source document edited.

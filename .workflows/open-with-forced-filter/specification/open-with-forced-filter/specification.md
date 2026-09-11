@@ -20,7 +20,7 @@ The flow it collapses is the user's dominant one today: `x`, wait for the picker
 
 This specification covers the sigil's shape and recognition rule (§2), its resolution semantics (§3), what the search matches and by what rule (§4), what else may share its command line (§5), how a matched row is displayed (§6), its cold-start classification (§7), tab completion for the form together with the pre-existing defect that stops the `x` function completing at all (§8), and the help-text and README changes the form obliges (§9).
 
-What this feature deliberately leaves untouched is stated in §10; the correction it owes a sibling specification is §11.
+What this feature deliberately leaves untouched is stated in §10; how it stands against a sibling specification, and the correction already applied there, is §11.
 
 ---
 
@@ -437,11 +437,13 @@ Project records and tags stay out (§4.1). Nothing in the source material asked 
 
 ---
 
-### 11. Correction Owed to `cli-verb-surface-redesign`
+### 11. Relationship to `cli-verb-surface-redesign`
 
-That specification's target-resolution section runs every bare positional through the precedence chain `exact session name → path → alias → zoxide query`, naming the path domain semantically as an existing directory (`sed -n '55,58p' .workflows/cli-verb-surface-redesign/specification/cli-verb-surface-redesign/specification.md`). The leading `/` / `.` / `~` test that decides which arguments reach that domain lives in the code rather than in that document (§2.2). What §2.2 changes in the sibling's own terms is the chain: a single-segment leading-`/` argument is session-search text and never enters it at all.
+That specification's target-resolution section ran every bare positional through the precedence chain `exact session name → path → alias → zoxide query`, naming the path domain semantically as an existing directory. The leading `/` / `.` / `~` test that decides which arguments reach that domain lives in the code rather than in that document (§2.2). What §2.2 changes in the sibling's own terms is the chain: a single-segment leading-`/` argument is session-search text and never enters it at all.
 
-That is a change to shipped behaviour the sibling specification describes, and this specification is the superseding source for it. The correction lands in the sibling's `## Corrigenda` section — its live body edited so the precedence chain carries the exception as a pre-check, with one corrigendum entry naming this work unit as the source.
+That is a change to shipped behaviour the sibling specification described, and this specification is the superseding source for it. **The correction has been applied** — no further edit to that document is owed, and applying one again would duplicate it. Its precedence section now opens with a numbered search-sigil pre-check pointing here as the owner of the form, and its `## Corrigenda` section carries one dated entry naming this work unit:
+
+`grep -n 'open-with-forced-filter' .workflows/cli-verb-surface-redesign/specification/cli-verb-surface-redesign/specification.md` → the pre-check step and the corrigendum entry.
 
 Nothing else in that specification is contradicted. Axiom 2, the accepted consequence that bare project shorthand does not reattach, the rejection of project-prefix session matching, `-f` as a non-composing flag, and the tab-completion principle are all ratified rather than changed (§10.1, §3.1, §5.5, §8.1).
 
