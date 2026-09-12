@@ -213,6 +213,7 @@ total: 5
 - Leave `anyOpenDomainPin` (`:176`), `shouldRunConcurrentBootstrap` (`:180`), the orchestrator's step set, `cmd/bootstrap/progress_emitter.go` and `internal/tui/loading_progress.go` untouched — this decides which invocations take the existing route, never how that route behaves.
 - Extend `TestIsTUIPath` (`cmd/concurrent_bootstrap_gate_test.go:28`) with the search-form rows, reusing its `openProbeCmd` / `openProbeCmdWithFlags` helpers, including a parity row asserting the same verdict for `-f port` and `/port`.
 - Build the `--` separator row's command by parsing the whole line rather than handing a helper a hand-written args slice — `c := openProbeCmd()`, `_ = c.ParseFlags([]string{"~/Code/api", "--", "ls", "/tmp"})`, then `isTUIPath(c, c.Flags().Args())`. Both existing helpers return a command whose flag set has never been parsed, where `ArgsLenAtDash()` is pflag's `-1` default and the scan therefore reads every word it is given, the command's own `/tmp` included; parsing is what records the separator, and `Args()` is the same post-parse slice cobra hands `PersistentPreRunE` (the `--` itself is not in it). The rows carrying no separator are unaffected and keep the plain helper call.
+- Re-point `TestShouldRunConcurrentBootstrap_IssuesNoProbe`'s `"direct-path open"` row (`cmd/concurrent_bootstrap_gate_test.go:175`), whose `/dir` argument is a single-segment absolute path: give it a multi-segment path (e.g. `/dir/sub`) so the row keeps covering the CLI-classified line it is named for. It asserts only that the decider issues no tmux round-trip, so it stays green either way — but under the widened predicate `/dir` is a search form, which would leave that case uncovered and make the row a duplicate of the bare-picker row beside it.
 - Add a cold-route test beside `TestPersistentPreRunE_ColdTUI_DefersBootstrap` (`cmd/concurrent_bootstrap_route_test.go:17`) driving `open /port` through `rootCmd.Execute()`: the orchestrator must record zero synchronous `Run` calls and `openTUIFunc` must observe a deferred bootstrap on the context.
 - Leave `TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg` (`cmd/bootstrap_warnings_test.go:255`) green on its multi-segment path fixture — a path positional is still a CLI line — and add its search-form counterpart asserting an empty stderr with the warning still in the sink.
 
@@ -224,6 +225,7 @@ total: 5
 - [ ] On a cold server `open /port` stashes a deferred bootstrap and the orchestrator runs zero times synchronously — the same verdict `open -f port` gets on the same boot
 - [ ] On a latched server `open /port` takes the abridged path with `serverStarted=false` and no deferred bootstrap, exactly as a `-f` invocation does
 - [ ] `PersistentPreRunE` writes no warnings to stderr for a search-form line, and leaves them in the sink; a path positional still writes them
+- [ ] The probe-free decider guard still covers a CLI-classified direct-path line after the flip, rather than duplicating its bare-picker row
 - [ ] A line refused by `validateOpenArgs` never reaches the classification: no server is started, no loading page is painted, the exit is 2
 - [ ] The warm path, every CLI path and the concurrent route's step sequence and labels are unchanged (existing suites green unmodified)
 - [ ] `go test ./...` passes and `go test -tags integration -p 1 ./...` passes
@@ -245,6 +247,7 @@ total: 5
 - The scan stops at `cmd.ArgsLenAtDash()`, so a command's own `/word` argument cannot flip an ordinary mint line onto the picker route
 - `anyOpenDomainPin` keeps its veto ahead of the new arm: a pin dispatches one resolved target directly, and that is unchanged for every line the validator admits
 - The probe commands in the gate suite register no `ack` flag and no positional parsing beyond cobra's defaults; both helpers the predicate calls tolerate a flag set that does not declare the flag. What they do not tolerate is an unparsed flag set on a line carrying `--`: `ArgsLenAtDash()` stays at pflag's `-1` until `Parse` runs, so that one row must parse rather than hand over a hand-written slice
+- Two existing fixtures use a single-segment absolute path to mean "an ordinary path argument" and are reclassified by this feature: `cmd/bootstrap_warnings_test.go`'s (re-pointed by task 1-4) and the probe-free decider guard's (re-pointed here). Both keep their subject by lengthening the path rather than by weakening a rule
 - The term-less form classifies identically to a term-carrying one — the scan matches the shape, never the term
 - Nothing about the concurrent route itself moves: the same ten steps, the same five friendly labels, the same progress channel
 

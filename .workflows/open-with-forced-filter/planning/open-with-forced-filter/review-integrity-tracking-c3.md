@@ -39,5 +39,5 @@ Add a Do step to task 4-4 re-pointing that row's argument to a multi-segment pat
 - Leave `TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg` (`cmd/bootstrap_warnings_test.go:255`) green on its multi-segment path fixture — a path positional is still a CLI line — and add its search-form counterpart asserting an empty stderr with the warning still in the sink.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied to task open-with-forced-filter-4-4 (detail file and tick record) under auto mode, with an acceptance criterion and an edge-case bullet naming both reclassified fixtures.
