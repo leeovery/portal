@@ -20,6 +20,18 @@ status: draft
 - [ ] No `resolve` component log line is emitted for a search-form invocation.
 - [ ] `go test ./...` and `go test -tags integration -p 1 ./...` both pass.
 
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| open-with-forced-filter-1-1 | Keep the grouping-derived directory out of the session's recorded directory | Flat mode still issues zero pane reads, a sessions refresh discards derived values, an unresolvable session keeps both values empty, By Tag reads the derived value too |
+| open-with-forced-filter-1-2 | Match sessions on their home-abbreviated recorded directory as well as their name | no recorded directory (name alone, no trailing separator), directory exactly the home directory, home-prefix lookalike path not abbreviated, home lookup failure, header rows keep an empty filter value, hand-built session item still matches on its directory, grouping-derived directory never enters the matched text |
+| open-with-forced-filter-1-3 | Land a search-form term as a committed sessions filter in the picker | Sessions page pinned with zero live sessions, Sessions page pinned when nothing survives the term, Flat / By Project / By Tag, existing -f landing unchanged, command-pending Projects redirect unchanged |
+| open-with-forced-filter-1-4 | Take the search-form shape out of the resolution chain | bare /, multi-segment absolute path, single segment with a trailing slash, ./port, ~/port, bare word, a live session named literally /port, -p/-s/-a/-z unchanged |
+| open-with-forced-filter-1-5 | Route `portal open /term` to the search-form landing | *, ? and [ in the term stay literal (no glob expansion, no burst), term equal to a live session name still opens the picker, no resolve component log line |
+| open-with-forced-filter-1-6 | Open an empty focused filter for the term-less search form | -f ""'s empty-value refusal does not transfer, whole live list stays visible under an empty focused filter, cursor must not start on a group header, zero live sessions |
+| open-with-forced-filter-1-7 | Refuse a search form that shares its command line | words after -- never inspected, search form second on the line, second search form, -e, --, -f, four domain pins, --ack, -- with no command, --help still answers, root persistent flags still apply, exit code 2, no server started and no frame painted |
+
 ### Phase 2: The Single-Match Shortcut Under Containment Matching
 status: draft
 
