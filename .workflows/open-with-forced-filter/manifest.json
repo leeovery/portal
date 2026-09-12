@@ -97,6 +97,25 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "open-with-forced-filter": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "d70e5bef1a404c309a2ca9fc1f2d6109daa92239",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": null,
+          "task_map": {},
+          "storage_paths": [
+            ".tick/"
+          ]
+        }
+      }
     }
   },
   "seeds": [
