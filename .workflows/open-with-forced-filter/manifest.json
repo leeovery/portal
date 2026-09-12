@@ -108,8 +108,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 4,
-          "task": "open-with-forced-filter-4-5",
+          "phase": 5,
+          "task": null,
           "task_map": {
             "open-with-forced-filter-1-1": "tick-a5663a",
             "open-with-forced-filter-1": "tick-c846ae",
@@ -148,17 +148,7 @@
               "p4": "2026-09-12"
             }
           },
-          "staging": {
-            "author-p4": {
-              "tasks": {
-                "open-with-forced-filter-4-1": "approved",
-                "open-with-forced-filter-4-2": "approved",
-                "open-with-forced-filter-4-3": "approved",
-                "open-with-forced-filter-4-4": "approved",
-                "open-with-forced-filter-4-5": "approved"
-              }
-            }
-          },
+          "staging": {},
           "external_id": "tick-964b62"
         }
       }
