@@ -109,7 +109,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 5,
-          "task": null,
+          "task": "open-with-forced-filter-5-1",
           "task_map": {
             "open-with-forced-filter-1-1": "tick-a5663a",
             "open-with-forced-filter-1": "tick-c846ae",
@@ -145,7 +145,8 @@
               "p1": "2026-09-12",
               "p2": "2026-09-12",
               "p3": "2026-09-12",
-              "p4": "2026-09-12"
+              "p4": "2026-09-12",
+              "p5": "2026-09-12"
             }
           },
           "staging": {},
