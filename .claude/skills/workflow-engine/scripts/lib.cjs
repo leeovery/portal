@@ -90,6 +90,7 @@ module.exports = {
   agents: {
     completedReviewCycles: agentState.completedReviewCycles,
     reviewArming: agentState.reviewArming,
+    latestReview: agentState.latestReview,
   },
   session: {
     nextSessionNumber: discoverySession.nextSessionNumber,
@@ -101,6 +102,7 @@ module.exports = {
     scanPresence: presence.scanPresence,
     scanProject: presence.scanProject,
     heldCodeSessions: presence.heldCodeSessions,
+    heldDocument: presence.heldDocument,
     ownsRow: presence.ownsRow,
     fmtAge: presence.fmtAge,
   },

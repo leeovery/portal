@@ -12,10 +12,10 @@
 
 const { signpost, box, renderTree, wrap, wrapWithPrefix } = require('../../kernel/render.cjs');
 const { WORK_TYPE_PIPELINES, DERIVED_PHASES } = require('../../kernel/manifest-schema.cjs');
-const { OUTSTANDING_RESEARCH_STATUSES, CONVERSATION_ACTIONS } = require('../derivations.cjs');
+const { OUTSTANDING_RESEARCH_STATUSES, CONVERSATION_ACTIONS, CLOSED_LIFECYCLES } = require('../derivations.cjs');
 const { TREE_WIDTH, treeHeader, titlecase, title, derivedFrom, stateNote, materialBlock, discoveryGlyph, discoveryLifecycleLabel } = require('../conventions.cjs');
 const { section, menuFrame, cmdOption, callout } = require('./surfaces.cjs');
-const { fmtAge, CODE_PHASES } = require('../presence.cjs');
+const { fmtAge, CODE_PHASES, SOURCE_PHASES } = require('../presence.cjs');
 const { buildOrderLive } = require('../build-order.cjs');
 
 /** @typedef {import('../epic-detail.cjs').EpicDetail} EpicDetail */
@@ -150,13 +150,17 @@ function displayOrder(phase, items) {
   return [...items.filter((i) => i.status === 'proposed'), ...items.filter((i) => i.status !== 'proposed')];
 }
 
-/** Build the tree nodes for one build/flat phase — a completed item with a live reconcile flag carries the `· input moved` cue. @param {string} phase @param {PhaseEntry[]} items */
+/** The tree tag one build/flat-phase item carries — a completed item with a live reconcile flag reads `input moved` ahead of a hold, a held or dep-blocked one `blocked`. @param {PhaseEntry} item */
+function statusTag(item) {
+  if (item.status === 'completed' && item.reconcile_needed !== undefined) return 'completed · input moved';
+  const depBlocked = Array.isArray(item.deps_blocking) && item.deps_blocking.length > 0;
+  return item.blocked_by !== undefined || depBlocked ? `${item.status} · blocked` : item.status;
+}
+
+/** Build the tree nodes for one build/flat phase. @param {string} phase @param {PhaseEntry[]} items */
 function phaseNodes(phase, items) {
   return displayOrder(phase, items).map((item) => {
-    const depBlocked = Array.isArray(item.deps_blocking) && item.deps_blocking.length > 0;
-    const tagText = item.status === 'completed' && item.reconcile_needed !== undefined
-      ? 'completed · input moved'
-      : (item.blocked_by !== undefined || depBlocked ? `${item.status} · blocked` : item.status);
+    const tagText = statusTag(item);
     const head = title({ label: titlecase(item.name) });
     // The plan format rides inside the tag rather than after it: anything
     // appended past the tag column would break the alignment for every row.
@@ -231,13 +235,16 @@ function arrivalCallouts(newArrivals) {
 // Discovery-map topic rows as kernel tree nodes. No tag column — the
 // lifecycle rides a `↳ state` line beneath the summary, so long titles never
 // stretch a shared column across the whole map.
-/** @param {EpicDetail} detail @param {Set<string>} heldTopics */
-function mapNodes(detail, heldTopics) {
+/** @param {EpicDetail} detail @param {Map<string, number>} heldAges topic → last-active age of the session holding it */
+function mapNodes(detail, heldAges) {
   return detail.discovery_map.map((row) => {
     const body = [];
     if (row.summary) body.push(row.summary);
     if (row.source_provenance) body.push(derivedFrom(row.source_provenance));
-    body.push(stateNote(heldTopics.has(row.name) ? `${lifecycleLabel(row)} · in session` : lifecycleLabel(row)));
+    const age = heldAges.get(row.name);
+    body.push(stateNote(age === undefined
+      ? lifecycleLabel(row)
+      : `${lifecycleLabel(row)} · in session (last active ${fmtAge(age)} ago)`));
     return {
       title: title({ glyph: discoveryGlyph(row.lifecycle), label: titlecase(row.name) }),
       body,
@@ -248,6 +255,24 @@ function mapNodes(detail, heldTopics) {
 /** Held rows from a presence scan — sessions whose owning process still runs. @param {PresenceRow[]|undefined} presence @returns {PresenceRow[]} */
 function heldSessions(presence) {
   return (presence || []).filter((r) => r.held);
+}
+
+/**
+ * Held map topics with the freshest last-active age among the sessions
+ * holding each. The map is the research-and-discussion tree, so only those
+ * phases' holds cue a row — a planning or code session on the same topic
+ * shows on its own menu row, never as this row's age. A row spans both
+ * phases, so one topic can be held twice.
+ * @param {PresenceRow[]|undefined} presence @returns {Map<string, number>}
+ */
+function heldTopicAges(presence) {
+  /** @type {Map<string, number>} */
+  const ages = new Map();
+  for (const r of heldSessions(presence)) {
+    if (!SOURCE_PHASES.includes(r.phase)) continue;
+    ages.set(r.topic, Math.min(r.age_seconds, ages.get(r.topic) ?? Infinity));
+  }
+  return ages;
 }
 
 /** First-matching recommendation for the no-map dashboard, or null. @param {EpicDetail} detail */
@@ -313,7 +338,7 @@ function plansNotReadyBlock(detail) {
  */
 function epicDashboard(workUnit, detail, opts = {}) {
   const newArrivals = opts.newArrivals || {};
-  const heldTopics = new Set(heldSessions(opts.presence).map((r) => r.topic));
+  const heldAges = heldTopicAges(opts.presence);
   const hasMap = detail.discovery_map.length > 0;
   const phaseNames = Object.keys(detail.phases);
 
@@ -343,7 +368,7 @@ function epicDashboard(workUnit, detail, opts = {}) {
     if (callouts.length > 0) block += callouts.join('\n') + '\n\n';
     const total = detail.map_summary ? detail.map_summary.total : detail.discovery_map.length;
     block += treeHeader(`RESEARCH & DISCUSSION (${total} topic${total === 1 ? '' : 's'}${mapStatusSuffix(detail)})`) + '\n';
-    block += renderTree(mapNodes(detail, heldTopics), { width: TREE_WIDTH, gap: true });
+    block += renderTree(mapNodes(detail, heldAges), { width: TREE_WIDTH, gap: true });
     stages.push(block);
   }
 
@@ -393,6 +418,11 @@ const CUE_RECONCILE =
   + '                              this item last moved; the item\'s entry\n'
   + '                              flow reconciles it';
 
+const CUE_DISCUSSION_BLOCKED =
+  '    blocked (discussion)    — its research is still outstanding;\n'
+  + '                              land it and the item returns to\n'
+  + '                              the menu';
+
 const CUE_BLOCKED =
   '    blocked (specification) — a source discussion is back\n'
   + '                              in-progress; re-conclude it and the\n'
@@ -426,12 +456,16 @@ function epicKey(detail) {
   const anyFlagged = cuePhases.some((p) => (detail.phases[p] || [])
     .some((i) => i.status === 'completed' && i.reconcile_needed !== undefined))
     || detail.discovery_map.some((r) => r.reconcile_pending === true);
-  const specBlockedAny = (detail.phases.specification || []).some((i) => i.blocked_by !== undefined);
+  // The cue follows the rendered tag, not the field: a held item whose tag
+  // reads `input moved` earns the reconcile cue, not this one.
+  const blockedAny = (/** @type {string} */ phase) => cuePhases.includes(phase)
+    && (detail.phases[phase] || []).some((i) => i.blocked_by !== undefined && statusTag(i).endsWith('· blocked'));
   const blocks = [];
   if (!hasMap || BUILD_PHASES.some((p) => (detail.phases[p] || []).length > 0)) blocks.push(KEY_STATUS);
   const cueLines = [];
   if (anyFlagged) cueLines.push(CUE_RECONCILE);
-  if (specBlockedAny) cueLines.push(CUE_BLOCKED);
+  if (blockedAny('discussion')) cueLines.push(CUE_DISCUSSION_BLOCKED);
+  if (blockedAny('specification')) cueLines.push(CUE_BLOCKED);
   if (anyBlocked) cueLines.push(CUE_PLAN_BLOCKED);
   if (cueLines.length > 0) blocks.push('  Cue:\n' + cueLines.join('\n'));
   if (anyBlocked) blocks.push(KEY_BLOCKING);
@@ -496,10 +530,11 @@ function startVerbLabel(n, srcFlagged) {
   return `Start ${phase} for "${t}" — *${n.label}*${cue}`;
 }
 
-// A row's triage tail speaks for its own phase's queue — a parked research
-// stub beside a discussion row is the research row's cue, never both rows'.
-// The queue is read per phase: a `triaged` stub, or files landed beneath a
-// started or reopened item (the row's triage_queued, counted from disk).
+// A row's triage tail speaks for its own phase's queue — a research row
+// never carries the discussion queue's cue, nor a discussion row the
+// research's. The queue is read per phase: a `triaged` stub, or files landed
+// beneath a started or reopened item (the row's triage_queued, counted from
+// disk).
 /** @param {string} workUnit @param {MapRow} row @param {string} action @returns {MenuKey} */
 function discoveryEntry(workUnit, row, action) {
   const phase = ACTION_PHASE[/** @type {keyof typeof ACTION_PHASE} */ (action)];
@@ -515,12 +550,12 @@ function discoveryEntry(workUnit, row, action) {
   };
 }
 
-// Research still outstanding beneath a topic whose own entry is not a
-// research action — a discussing or decided topic — gets its own row
-// directly above the topic's: research feeds discussion, so it is the way in
-// first. (A fresh topic's own next action already leads with the research.)
-// A closed lifecycle carries nothing.
-const CLOSED_LIFECYCLES = ['cancelled', 'handled'];
+// Research parked beneath a decided topic — a `triaged` stub under a
+// concluded discussion — gets its own row: the topic's own action is null,
+// and the research is the reconcile's first step. Every other live
+// lifecycle already leads with the research as the row's own action
+// (research reopened under a decided discussion reads `researching`), and a
+// closed one carries nothing.
 
 /** @param {string} workUnit @param {MapRow} row @returns {MenuKey|null} */
 function researchEntry(workUnit, row) {
@@ -557,9 +592,9 @@ function experimentEntries(workUnit, detail) {
 function continueEntries(workUnit, detail, phase) {
   return (detail.phases[phase] || [])
     .filter((item) => item.status === 'in-progress')
-    // A blocked spec is not actionable — no menu row; the display tree
+    // A blocked item is not actionable — no menu row; the display tree
     // carries its blocked state.
-    .filter((item) => !(phase === 'specification' && item.blocked_by !== undefined))
+    .filter((item) => item.blocked_by === undefined)
     .map((item) => ({
       key: '',
       action: `continue_${phase}`,
@@ -646,7 +681,7 @@ function commandOptions(workUnit, detail, hasMap) {
     label: hasMap ? 'Start research on a new topic' : 'Start new research',
   });
   if (hasMap && !detail.active_session) opts.push(discoveryOpt);
-  if (detail.completed.length > 0) {
+  if (detail.completed.some((i) => i.blocked_by === undefined)) {
     opts.push({ key: 'c', word: 'completed', action: 'resume_completed', topic: null, route: null, label: 'Resume a completed topic' });
   }
   const cancellable = Object.values(detail.phases)
@@ -701,9 +736,9 @@ function pickRecommendation(detail, numbered, options, hasMap) {
 
   if (hasMap) {
     // Top of the actionable map — the first discovery entry mirrors the
-    // first map row with a non-null next_action, led by its research row
-    // when one stands above it. Decided rows lead the map but carry no
-    // action, so the actionable order is → then ◐ then ○. A topic another
+    // first map row with a non-null next_action, or a decided row's research
+    // entry ahead of it. Decided rows lead the map but carry no action of
+    // their own, so the actionable order is → then ◐ then ○. A topic another
     // session holds open is never the recommendation.
     const discoveryActions = ['start_research', 'start_discussion', 'continue_research', 'continue_discussion', 'start_discussion_after_research'];
     const discovery = numbered.find((e) => discoveryActions.includes(e.action) && !e.in_session) || null;
@@ -724,7 +759,8 @@ function pickRecommendation(detail, numbered, options, hasMap) {
     if (build) return build;
     // With a flagged completed item and nothing else to start, the reconcile
     // route IS the recommendation — resuming the flagged item clears the flag.
-    if (detail.completed.some((i) => i.reconcile_needed !== undefined)) {
+    // A held item is no route: its flag clears at the entry its hold releases.
+    if (detail.completed.some((i) => i.reconcile_needed !== undefined && i.blocked_by === undefined)) {
       const cOption = options.find((o) => o.action === 'resume_completed');
       if (cOption) { cOption.recommended = true; return null; }
     }
@@ -813,8 +849,8 @@ function epicMenu(workUnit, detail, opts = {}) {
 
   if (hasMap) {
     // Discovery topics — one entry per map row with a non-null next_action
-    // (✓/⊙/⊘ rows have none), in map order, each led by the row's research
-    // entry when research is outstanding beneath it.
+    // (✓/⊙/⊘ rows have none), in map order; a decided row carries its
+    // research entry instead when research is outstanding beneath it.
     for (const row of detail.discovery_map) {
       const research = researchEntry(workUnit, row);
       if (research) numbered.push(research);
@@ -1009,7 +1045,9 @@ function pipelineOrdered(items) {
  * @returns {{keys: SubViewKey[], title: string, display: string, rendered: string}}
  */
 function epicCompletedMenu(workUnit, detail) {
-  const rows = pipelineOrdered(detail.completed).map((item) => {
+  // A held item is not actionable — no resume row; it returns once the hold
+  // releases, the way the main menu's continue rows do.
+  const rows = pipelineOrdered(detail.completed.filter((item) => item.blocked_by === undefined)).map((item) => {
     const flagged = item.reconcile_needed !== undefined;
     return {
       phase: item.phase,

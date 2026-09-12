@@ -64,7 +64,15 @@ Emit its `DISPLAY: triage announce` section verbatim as a code block, then open 
 
 #### If at a natural break
 
-A concern landed mid-session, the user chose `later` earlier, or the sitting opened fresh with the queue announced. Consult the natural-breaks checklist — a recent `later` defers the re-offer until the conversation has genuinely moved on.
+A concern landed mid-session, the user chose `later` earlier, or the sitting opened fresh with the queue announced. Judge the break by the checklist, with two readings of its own: a recent `later` defers the re-offer until the conversation has genuinely moved on — except when the user is concluding, which is the break a deferred concern was waiting for and holds over the `later` — and the just-opened signal does not count here, the announce having spent it; a break in the session's own thread is what qualifies.
+
+→ Load **[natural-breaks.md](natural-breaks.md)** and follow its instructions as written.
+
+**If the checklist defers:**
+
+→ Return to caller.
+
+**Otherwise:**
 
 → Proceed to **B. Offer**.
 
@@ -155,7 +163,7 @@ Present the concern in your own voice — name its origin in a sentence, then br
 
 **STOP.** Wait for user response.
 
-Then discuss it as real session material: engage, challenge, connect it to what this topic has already decided. Control belongs to the conversation — this may take one exchange or many, and the loop's other machinery (documenting, commits, dispatch checks) runs as normal around it — the dispatch check's triage-queue box holds while entries remain, so no review launches mid-walk. The concern on the table is the session's only subject and the only thing the user's agreement can cover: a tangent it surfaces is parked — on the Discussion Map as `pending`, or bookmarked in the research file — and picked up after the queue empties, and no question or proposal spans another queued concern, however the user phrases their steer.
+Then discuss it as real session material: engage, challenge, connect it to what this topic has already decided. Control belongs to the conversation — this may take one exchange or many, and the loop's other machinery (documenting, commits — and in discussion the dispatch check, whose triage-queue box holds while entries remain, so no review launches mid-walk) runs as normal around it. The concern on the table is the session's only subject and the only thing the user's agreement can cover: a tangent it surfaces is parked — on the Discussion Map as `pending`, or on the research thread register — and picked up after the queue empties, and no question or proposal spans another queued concern, however the user phrases their steer.
 
 **If the discussion reaches an outcome** — a decision, a direction, or the user explicitly parking it as a deferred thread; for a walked entry, when its last ask resolves (earlier asks' outcomes are documented and committed by the loop's machinery as they land):
 
@@ -195,7 +203,18 @@ node .claude/skills/workflow-engine/scripts/engine.cjs discussion-map set {work_
 
 #### If `phase` is `research`
 
-Fold the concern into the freeform body as a `### {title}` thread opening with the provenance line, followed by the body and what the discussion made of it.
+Fold the concern into the freeform body as a `### {title}` section opening with the provenance line, followed by the body and what the discussion made of it. Then the thread register, the rerouting topic as the origin:
+
+- **The fold holds the answer** — enter it and mark it learned:
+  ```bash
+  node .claude/skills/workflow-engine/scripts/engine.cjs research-threads add {work_unit} {topic} {title:(kebabcase)} --question "{the concern's question}" --origin "{origin}"
+  node .claude/skills/workflow-engine/scripts/engine.cjs research-threads set {work_unit} {topic} {title:(kebabcase)} learned
+  ```
+- **Research is still owed** — enter it and leave it open:
+  ```bash
+  node .claude/skills/workflow-engine/scripts/engine.cjs research-threads add {work_unit} {topic} {title:(kebabcase)} --question "{the concern's question}" --origin "{origin}"
+  ```
+- **The slug is already on the register** — nothing enters twice; `research-threads set {work_unit} {topic} {title:(kebabcase)} learned` when the fold holds the answer, otherwise leave it as it stands.
 
 → Proceed to **E. Absorb**.
 
@@ -249,7 +268,7 @@ Surface the engine's error verbatim — it names the recovery path. The concern 
 
 #### If `remaining` is non-zero
 
-Announce the move in one line — the concern now waits in this topic's `{other_phase}` queue, raised when that phase runs; when the response carries `reconcile_flagged` or `sources_staled`, say which downstream work the move flagged, and when the move parked the concern research-side, that this discussion now waits on that research — it cannot conclude until the research lands, and the menu carries the way in. Then re-enter the check now, in this same turn — the move is the next raise's natural break, and the standing opt-in routes it straight to the next raise.
+Announce the move in one line — the concern now waits in this topic's `{other_phase}` queue, raised when that phase runs; when the response carries `reconcile_flagged` or `sources_staled`, say which downstream work the move flagged, and when the move parked the concern research-side, that this discussion now waits on that research — it cannot conclude, nor be re-entered once this session closes, until the research lands — the menu carries the way in. Then re-enter the check now, in this same turn — the move is the next raise's natural break, and the standing opt-in routes it straight to the next raise.
 
 → Return to **A. Check**.
 

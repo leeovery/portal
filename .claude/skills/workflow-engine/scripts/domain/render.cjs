@@ -29,8 +29,9 @@ const {
 } = require('./projections/baseline.cjs');
 const { baselineState } = require('./baseline.cjs');
 const { migrationGate, labelGate } = require('./projections/boot.cjs');
-const { heldCodeSessions, beatQuietly, fmtAge, CODE_PHASES } = require('./presence.cjs');
+const { heldCodeSessions, heldDocument, beatQuietly, fmtAge, CODE_PHASES } = require('./presence.cjs');
 const { roadmapState } = require('./roadmap.cjs');
+const { latestReview } = require('./agent-state.cjs');
 const {
   roadmapMapView,
   roadmapAddGate,
@@ -41,10 +42,12 @@ const {
 } = require('./projections/roadmap.cjs');
 const { revisitablePhases, revisitPhasesSection } = require('./projections/workunit.cjs');
 const { experimentRegister, experimentApprovalGate, experimentPick, experimentNextGate, experimentSpawnGate } = require('./projections/experiment.cjs');
-const { waitGate } = require('./projections/wait.cjs');
+const { researchThreads } = require('./projections/research-threads.cjs');
+const { registerState } = require('./research-threads.cjs');
+const { waitGate, researchWaitState } = require('./projections/wait.cjs');
 const { compareExperimentIds, isParentExperimentId, DERIVED_PHASES, EXPERIMENT_TERMINAL_STATUSES, EXPERIMENT_SPAWN_PHASES } = require('../kernel/manifest-schema.cjs');
 const { WORK_UNIT_TYPES, typeConfig: workUnitTypeConfig, completedPhases } = require('./workunit-detail.cjs');
-const { phaseItems, computeNextPhase, computeTopicLifecycle, lifecyclePhrase, experimentWaits, awaitedExperiments, waits, itemOf, OUTSTANDING_RESEARCH_STATUSES } = require('./derivations.cjs');
+const { phaseItems, computeNextPhase, computeTopicLifecycle, lifecyclePhrase, experimentWaits, awaitedExperiments, waits, itemOf, outstandingResearch, outstandingResearchPhrase, CLOSED_LIFECYCLES } = require('./derivations.cjs');
 const { manageDetail } = require('./workunit-manage.cjs');
 const { gateOf, counterOf, FIX_THRESHOLD, CYCLE_LIMIT } = require('./tasks.cjs');
 const { sourceRows } = require('./transitions.cjs');
@@ -1293,7 +1296,7 @@ function linters(cwd, { dotpath, file, variant }) {
 //   gap-route — the gap raise plus its acknowledgement gate: the menu states
 //               the routing intent and confirms it (no "no" — an objection
 //               arrives as Comment and drops into the settleable exchange)
-//   held-doc  — the fallback when a live session holds the owning document
+//   held-doc  — the fallback when another session holds the owning document
 // The raise body takes the finding idiom: bold head, one meta bullet per
 // cited quote, a labelled context paragraph, stakes beneath.
 // ---------------------------------------------------------------------------
@@ -1323,7 +1326,7 @@ function incoherenceGate(cwd, args) {
     throw new Error('render incoherence-gate: --variant must be "conflict", "gap-route", or "held-doc"');
   }
   if (!file) throw new Error('render incoherence-gate: --file <payload.json> is required');
-  const { phase, topic, manifest } = resolveAddress(cwd, dotpath, 'incoherence-gate');
+  const { workUnit, phase, topic, manifest } = resolveAddress(cwd, dotpath, 'incoherence-gate');
   const p = readJsonPayload(cwd, file, 'incoherence-gate');
   if (!isFilled(p.doc)) throw new Error('render incoherence-gate: "doc" must be a non-empty string');
   if (!Object.hasOwn(LANE_GATE_FIELDS, p.lane)) {
@@ -1387,8 +1390,10 @@ function incoherenceGate(cwd, args) {
       )),
     ].join('\n');
   }
+  const holder = heldDocument(cwd, workUnit, p.doc);
+  const lastActive = holder ? ` — last active ${fmtAge(holder.age_seconds)} ago —` : ',';
   return section('MENU: incoherence held doc', INCOHERENCE_STOP, menu(
-    `${overAuto ? `${AUTO_OVERRIDE_LINE}\n\n` : ''}"${p.doc}" is open in another session right now, so the fix belongs there — this topic waits for it.`,
+    `${overAuto ? `${AUTO_OVERRIDE_LINE}\n\n` : ''}"${p.doc}" is open in another session${lastActive} so the fix belongs there; this topic waits for it.`,
     [
       cmdOption('n', 'next', 'Queue the resolution and carry on here'),
       cmdOption('s', 'stop', 'Stop here; re-enter after that session lands it'),
@@ -1970,8 +1975,32 @@ function rerouteOffer(cwd, { dotpath, file }) {
   );
 }
 
-// research-conclude-gate — the topic-completion consent gate. The dead-end
-// row renders only when the session's own conclusion is that the topic gives
+// research-threads — the thread register: what the topic set out to learn,
+// rendered at the session's transitions and as the conclusion's hand-off.
+// The register is a lens — nothing gates on a thread's state, so the
+// display is the whole response and carries the continue instruction; an
+// empty register answers empty, so no caller renders a header over nothing.
+
+/** The register block wrapped as its DISPLAY section. @param {string} topic @param {object} manifest @param {string} instruction */
+function researchThreadsSection(topic, manifest, instruction) {
+  return section('DISPLAY: research threads', instruction, researchThreads(topic, manifest));
+}
+
+/**
+ * @param {string} cwd
+ * @param {{dotpath: string}} args
+ * @returns {string}
+ */
+function researchThreadsSurface(cwd, { dotpath }) {
+  const { topic, manifest } = resolveResearch(cwd, dotpath, 'research-threads');
+  if (registerState(manifest, topic).total === 0) return '';
+  return researchThreadsSection(topic, manifest, CONTINUE_INSTRUCTION);
+}
+
+// research-conclude-gate — the topic-completion consent gate, the register
+// above it whenever the topic holds a thread (open is a fine way to
+// conclude — the register is the hand-off, never a block). The dead-end row
+// renders only when the session's own conclusion is that the topic gives
 // the product nothing to carry forward under its own name — the judgment
 // travels as the --dead-end flag, never derived here.
 
@@ -1981,7 +2010,7 @@ function rerouteOffer(cwd, { dotpath, file }) {
  * @returns {string}
  */
 function researchConcludeGate(cwd, args) {
-  resolveResearch(cwd, args.dotpath, 'research-conclude-gate');
+  const { topic, manifest } = resolveResearch(cwd, args.dotpath, 'research-conclude-gate');
   const options = [
     cmdOption('c', 'conclude', 'Mark this topic as complete, ready for discussion'),
   ];
@@ -1989,11 +2018,15 @@ function researchConcludeGate(cwd, args) {
     options.push(cmdOption('d', 'dead-end', 'Close it as a dead end — completed and kept as record, no discussion owed; reversible from the map'));
   }
   options.push(cmdOption('k', 'keep', "Keep digging, there's more to understand"));
-  return section(
+  const gate = section(
     'MENU: research conclude gate',
     "emit verbatim as markdown, then STOP for the user's response",
     menu('', options, { question: 'This topic looks ready to conclude.' }),
   );
+  const register = registerState(manifest, topic).total > 0
+    ? researchThreadsSection(topic, manifest, 'emit verbatim as a code block')
+    : '';
+  return register + gate;
 }
 
 /**
@@ -2010,7 +2043,7 @@ function resolveResearch(cwd, dotpath, surface) {
 }
 
 // deep-dive-offer — the orchestrator's dispatch offer over a thread it judged
-// worth investigating independently. The thread description is the judgment
+// worth investigating independently. The thread's question is the judgment
 // content; the two-line opening and the y/n pair are fixed. The two lines
 // split by role: the statement names what was noticed and stays context, the
 // question beneath it is the ask and takes the decision glyph.
@@ -2025,15 +2058,45 @@ function deepDiveOffer(cwd, { dotpath, file }) {
   resolveResearch(cwd, dotpath, 'deep-dive-offer');
   const p = readJsonPayload(cwd, file, 'deep-dive-offer');
   if (!isFilled(p.thread)) {
-    throw new Error('render deep-dive-offer: "thread" must be a non-empty string — the thread description as it opens the offer');
+    throw new Error('render deep-dive-offer: "thread" must be a non-empty string — the thread\'s question as it opens the offer');
   }
   return section('MENU: deep dive offer', STOP_FOR_RESPONSE, menu(
-    `${p.thread} looks like it could use a deep dive.`,
+    `A thread worth digging: ${p.thread}`,
     [
       cmdOption('y', 'yes', 'Dispatch a deep-dive agent'),
       cmdOption('n', 'no', "Skip, we'll cover it in conversation"),
     ],
-    { question: 'Want me to spin up a background investigation while we keep going?' },
+    { question: 'Send a deep dive after it while we keep going?' },
+  ));
+}
+
+// perspective-offer — the discussion orchestrator's offer to argue a decision
+// from two opposing lenses. The tension description is the judgment content;
+// the statement names the tension and stays context, the question beneath it
+// is the ask and takes the decision glyph.
+
+/**
+ * @param {string} cwd
+ * @param {{dotpath: string, file?: string}} args
+ * @returns {string}
+ */
+function perspectiveOffer(cwd, { dotpath, file }) {
+  if (!file) throw new Error('render perspective-offer: --file <payload.json> is required');
+  const { phase } = resolveAddress(cwd, dotpath, 'perspective-offer');
+  if (phase !== 'discussion') {
+    throw new Error(`render perspective-offer: address must be <work_unit>.discussion.<topic>, got phase "${phase}"`);
+  }
+  const p = readJsonPayload(cwd, file, 'perspective-offer');
+  if (!isFilled(p.tension)) {
+    throw new Error('render perspective-offer: "tension" must be a non-empty string — the tension description as it opens the offer');
+  }
+  return section('MENU: perspective offer', STOP_FOR_RESPONSE, menu(
+    `This decision sits on a ${p.tension} tension.`,
+    [
+      cmdOption('y', 'yes', 'Spin up perspective agents arguing each lens'),
+      cmdOption('n', 'no', 'Continue without perspectives'),
+    ],
+    { question: 'Want to explore both lenses?' },
   ));
 }
 
@@ -2067,6 +2130,40 @@ function inFlightAgentsGate(cwd, { dotpath, count }) {
     cmdOption('w', 'wait', 'Wait for results before concluding'),
     cmdOption('p', 'proceed', 'Conclude now (results will persist in cache for reference)'),
   ], { glyphLabel: false }));
+}
+
+// review-findings-gate — the discussion conclusion's drain offer over a
+// review report whose findings are still to be walked. The count is the
+// row's own (`remaining` on the acknowledged review row), so the surface
+// reads the agent store and refuses any state the calling prose never
+// renders it from. The report may be a background pass or the closing pass
+// — the wording claims neither.
+
+/**
+ * @param {string} cwd
+ * @param {{dotpath: string}} args
+ * @returns {string}
+ */
+function reviewFindingsGate(cwd, { dotpath }) {
+  const { workUnit, phase, topic } = resolveAddress(cwd, dotpath, 'review-findings-gate');
+  if (phase !== 'discussion') {
+    throw new Error(`render review-findings-gate: address must be <wu>.discussion.<topic> — the discussion close is the flow that runs this gate; got phase "${phase}"`);
+  }
+  const row = latestReview(cwd, workUnit, topic);
+  if (!row) {
+    throw new Error('render review-findings-gate: no review has been dispatched on this topic — the gate follows an acknowledged report');
+  }
+  if (row.status !== 'acknowledged') {
+    throw new Error(`render review-findings-gate: the latest review row "${row.id}" is ${row.status} — the gate follows an acknowledged report with findings still to walk`);
+  }
+  const n = row.remaining.length;
+  return section('MENU: review findings gate', STOP_FOR_RESPONSE, menu(
+    `The review left ${n} finding${n === 1 ? '' : 's'} still to walk.`,
+    [
+      cmdOption('r', 'review', 'Work through them now'),
+      cmdOption('s', 'skip', 'Acknowledge and conclude the topic'),
+    ],
+  ));
 }
 
 // off-topic-offer — the single-topic counterpart of reroute-offer: with no
@@ -2506,11 +2603,11 @@ function concludeGate(cwd, { dotpath }) {
 const CLOSING_GATES = {
   're-review': () => ({
     name: 'MENU: re-review gate',
-    label: "The discussion has moved since the last final review. Another pass can catch what that movement opened — or conclude on the review you've already had.",
-    question: 'Run another final review?',
+    label: 'The discussion has moved since the last review read it. One more pass can catch what that movement opened — or conclude without one.',
+    question: 'Run one more review?',
     options: [
-      cmdOption('y', 'yes', 'Run another final review'),
-      cmdOption('s', 'skip', 'Conclude on the last review — the movement stays unreviewed'),
+      cmdOption('y', 'yes', 'Run one more review before concluding'),
+      cmdOption('n', 'no', 'Conclude without it — the movement stays unreviewed'),
       promptOption('Keep going', 'Tell me what else to explore'),
     ],
   }),
@@ -3722,9 +3819,10 @@ function blocker(fact, guidance) {
 // ---------------------------------------------------------------------------
 // direct-entry-gate — the epic menu's d/r doors take a free-typed topic name.
 // A name already on the map is not a new topic: the menu row is the way in,
-// so the door refuses, naming where the topic stands — a parked research
-// stub included, whose row the menu carries above the topic's own. Empty
-// when the name is new, or the work unit carries no map.
+// so the door refuses, naming where the topic stands — outstanding research
+// first, at either door, since its row is the topic's own; a closed topic
+// names its closure, which is what explains its empty menu. Empty when the
+// name is new, or the work unit carries no map.
 // ---------------------------------------------------------------------------
 
 /**
@@ -3741,16 +3839,11 @@ function directEntryGate(cwd, { dotpath }) {
   const item = phaseItems(manifest, 'discovery').find((i) => i.name === topic);
   if (!item) return '';
   const { lifecycle, research_state } = computeTopicLifecycle(manifest, topic);
-  // The r door over outstanding research names the research, not the
-  // discussion beside it — that is the phase the user asked for, and its
-  // row is the one the menu leads with.
-  const outstanding = OUTSTANDING_RESEARCH_STATUSES.includes(research_state ?? '');
-  const stands = phase === 'research' && outstanding
-    ? `research is ${research_state === 'triaged' ? 'parked on it (triage waiting)' : 'in flight on it'}`
-    : lifecyclePhrase(lifecycle, research_state, item.routing);
+  const research = CLOSED_LIFECYCLES.includes(lifecycle) ? null : outstandingResearch(manifest, topic);
+  const stands = research ? outstandingResearchPhrase(research) : lifecyclePhrase(lifecycle, research_state, item.routing);
   return blocker(
     `"${titlecase(topic)}" is already on the map — ${stands}`,
-    `Return to the epic menu — ${outstanding ? 'its research row is the way in' : 'its row for the topic names the next step'}.`,
+    `Return to the epic menu — ${research ? 'its research row is the way in' : 'its row for the topic names the next step'}.`,
   );
 }
 
@@ -3783,6 +3876,19 @@ function entryGate(cwd, { dotpath, own }) {
       );
     }
     return '';
+  }
+
+  if (phase === 'discussion') {
+    // Research feeds discussion: outstanding research holds the discussion
+    // shut at entry, every work type — the birth guard's read, rendered.
+    const research = outstandingResearch(manifest, topic);
+    if (!research) return '';
+    return blocker(
+      `Entry blocked — this discussion awaits research on "${t}" (${researchWaitState(research)})`,
+      manifest.work_type === 'epic'
+        ? 'Return to the epic menu — its research row is the way in.'
+        : 'Continue the work unit — the research is its next step.',
+    );
   }
 
   if (phase === 'planning') {
@@ -3927,7 +4033,7 @@ function entryGate(cwd, { dotpath, own }) {
     return '';
   }
 
-  throw new Error(`render entry-gate: no prerequisite rules for phase "${phase}" (planning|implementation|review|specification)`);
+  throw new Error(`render entry-gate: no prerequisite rules for phase "${phase}" (discussion|planning|implementation|review|specification)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -4740,9 +4846,12 @@ const SURFACES = {
   'triage-block': triageBlock,
   'requeue-offer': requeueOffer,
   'reroute-offer': rerouteOffer,
+  'research-threads': researchThreadsSurface,
   'research-conclude-gate': researchConcludeGate,
   'deep-dive-offer': deepDiveOffer,
+  'perspective-offer': perspectiveOffer,
   'in-flight-agents-gate': inFlightAgentsGate,
+  'review-findings-gate': reviewFindingsGate,
   'reroute-candidates': rerouteCandidates,
   'off-topic-offer': offTopicOffer,
   'map-op-gate': mapOpGate,

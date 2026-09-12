@@ -24,8 +24,8 @@
 - [The section's coverage entries — the property, where it lives, how it was checked]
 
 ### Plan Completion
-- [ ] Phase N acceptance criteria met
-- [ ] All tasks completed or deliberately discarded (list any skipped/cancelled tasks here — discards are disclosed, never silent)
+- [ ] Phase N acceptance criteria met, except any named below as not measured
+- [ ] All tasks completed or deliberately discarded [any skipped or cancelled tasks named here — discards are disclosed, never silent]
 - [ ] No scope creep
 
 **Criteria not measured**

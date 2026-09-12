@@ -85,7 +85,7 @@ A `(code session: …)` marker needs no gate here — implementation and review 
 
 **If the selected entry carries an `(in session: …)` marker:**
 
-Another live session holds this topic open. Fetch and emit the `MENU: in-session gate — {key}` section for the selected entry:
+Another session holds this topic open. Fetch and emit the `MENU: in-session gate — {key}` section for the selected entry:
 
 ```bash
 node .claude/skills/workflow-continue-epic/scripts/gateway.cjs in-session-gate {work_unit} {key}
@@ -101,7 +101,7 @@ node .claude/skills/workflow-continue-epic/scripts/gateway.cjs in-session-gate {
 
 Continue with the **Hard gate check** below.
 
-**Hard gate check** — specification reads the settled record; this refusal comes before the soft gate. Read `phase_counts` from DATA. (Blocked items never reach here — a blocked spec or a dep-blocked plan carries no menu row; the display tree shows the `blocked` cue and the ⚑ list carries the detail.)
+**Hard gate check** — specification reads the settled record; this refusal comes before the soft gate. Read `phase_counts` from DATA. (Blocked items never reach here — a blocked spec, a discussion held for its outstanding research, or a dep-blocked plan carries no menu row; the display tree shows the `blocked` cue or the research awaited, and the ⚑ list carries the plan detail.)
 
 **If `action` is `analyze_discussions` and `phase_counts` shows discussion items in-progress and no specification items exist:**
 

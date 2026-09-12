@@ -25,10 +25,10 @@ The discussion is an organic conversation. The Discussion Map is your tracking b
    Check the triage queue first: follow **A. Check** in **[rerouted-concerns.md](../../workflow-shared/references/rerouted-concerns.md)**. Its offer and raise gates end the turn — the agent checks below wait for a later iteration; an absorb never ends the turn, the protocol itself continues to the next raise.
 
    Then run the check-for-results logic from the background-agent files loaded above. Each file knows its own rules; follow the named section in each:
-   - **Review agent**: follow **B. Check and Surface** in **[review-agent.md](review-agent.md)** — delegates to the shared surfacing protocol for review findings.
-   - **Perspective agents**: follow **D. Check and Surface** in **[perspective-agents.md](perspective-agents.md)** — promotes completed perspective sets to synthesis, then delegates to the shared surfacing protocol for synthesis findings.
+   - **Review agent**: follow **B. Check and Surface** in **[review-agent.md](review-agent.md)** — delegates to the surfacing protocol for review findings.
+   - **Perspective agents**: follow **D. Check and Surface** in **[perspective-agents.md](perspective-agents.md)** — promotes completed perspective sets to synthesis, then delegates to the surfacing protocol for synthesis findings.
    
-   Both enforce the never-dump rules: two-phase surfacing, one finding at a time, mid-thread protection. **Do not surface findings directly — always go through the agent files, which route to the shared protocol.** Skip only when no agents have been dispatched yet — the store decides, not the iteration count: a resumed session may hold agents from an earlier sitting.
+   Both enforce the never-dump rules: two-phase surfacing, one finding at a time, mid-thread protection. **Do not surface findings directly — always go through the agent files, which route to the surfacing protocol.** Skip only when no agents have been dispatched yet — the store decides, not the iteration count: a resumed session may hold agents from an earlier sitting.
 
    Last, at a natural break with no screen or raise left open, a non-empty calls queue flushes — follow **J. Flush the Calls Queue**, whose own branches cover the empty case. A resumed session's queue flushes here too.
 2. **Discuss** — Engage with the user on the current subtopic or wherever the conversation leads. Challenge thinking, push back, explore edge cases. Participate as an expert architect. A point the record settles is not a question — per **[ask-or-decide.md](../../workflow-shared/references/ask-or-decide.md)**, make the call, queue it (**I. Settled Calls**), and carry on. Follow interesting threads — tangents that surface new concerns are valuable. New subtopics may emerge; record each on the map as it's identified (kebab-case name; new subtopics start `pending`; `--parent` nests under an existing top-level subtopic):
@@ -182,7 +182,7 @@ Then say where the ball sits:
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Paused with the waits queued — the closing ceremony runs once everything this discussion waits on has landed. Run `/clear`, then `/workflow-start`: the menu carries the way in, and this discussion concludes once every wait releases.
+> Paused with the waits queued — the closing ceremony runs once everything this discussion waits on has landed. Run `/clear`, then `/workflow-start`: the menu carries the way in — research this discussion waits on is entered first, and the discussion's own door stays shut until it lands — and this discussion concludes once every wait releases.
 ```
 
 **STOP.** Do not proceed — terminal condition.
