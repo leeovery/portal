@@ -109,7 +109,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "open-with-forced-filter-2-1",
+          "task": "open-with-forced-filter-2-2",
           "task_map": {
             "open-with-forced-filter-1-1": "tick-a5663a",
             "open-with-forced-filter-1": "tick-c846ae",
@@ -118,7 +118,9 @@
             "open-with-forced-filter-1-4": "tick-69c098",
             "open-with-forced-filter-1-5": "tick-f275ce",
             "open-with-forced-filter-1-6": "tick-6d0e49",
-            "open-with-forced-filter-1-7": "tick-507aea"
+            "open-with-forced-filter-1-7": "tick-507aea",
+            "open-with-forced-filter-2-1": "tick-46dad8",
+            "open-with-forced-filter-2": "tick-c525a5"
           },
           "storage_paths": [
             ".tick/"
@@ -130,7 +132,16 @@
               "p2": "2026-09-12"
             }
           },
-          "staging": {},
+          "staging": {
+            "author-p2": {
+              "tasks": {
+                "open-with-forced-filter-2-1": "approved",
+                "open-with-forced-filter-2-2": "approved",
+                "open-with-forced-filter-2-3": "approved",
+                "open-with-forced-filter-2-4": "approved"
+              }
+            }
+          },
           "external_id": "tick-964b62"
         }
       }
