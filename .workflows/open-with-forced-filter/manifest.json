@@ -65,7 +65,7 @@
     "specification": {
       "items": {
         "open-with-forced-filter": {
-          "status": "in-progress",
+          "status": "completed",
           "sources": {
             "open-with-forced-filter": {
               "status": "incorporated"
