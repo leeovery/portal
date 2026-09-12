@@ -109,11 +109,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "open-with-forced-filter-1-3",
+          "task": "open-with-forced-filter-1-4",
           "task_map": {
             "open-with-forced-filter-1-1": "tick-a5663a",
             "open-with-forced-filter-1": "tick-c846ae",
-            "open-with-forced-filter-1-2": "tick-d5998c"
+            "open-with-forced-filter-1-2": "tick-d5998c",
+            "open-with-forced-filter-1-3": "tick-d3537a"
           },
           "storage_paths": [
             ".tick/"
