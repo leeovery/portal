@@ -104,6 +104,16 @@ status: draft
 - [ ] The warm path, the CLI paths and every non-search invocation keep their current classification, and the concurrent bootstrap's own behaviour is unchanged.
 - [ ] `go test ./...` and `go test -tags integration -p 1 ./...` both pass.
 
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| open-with-forced-filter-4-1 | Hold the loading page until the search decision resolves | a bootstrap fatal never issues the decision and keeps the error frame, a decision resolving before the minimum display span leaves the page standing for the remainder, a decision resolving after it holds the page until it arrives, no decision seam leaves every other picker's transition byte-identical, no decision is issued on a progress event including the restore step's, a single match quits without painting the picker and leaves the buffered warnings unsurfaced, a read failure sets no fatal state and takes no in-TUI error frame, Ctrl-C during loading before the decision resolves selects nothing |
+| open-with-forced-filter-4-2 | Defer the search count to the loading page when a bootstrap is in flight | a warm or latched invocation still counts up front with no seam supplied, the term-less form supplies no decision on either route, the deferred closure takes the same discriminating read and candidate set as the warm count including the inside-tmux current-session exclusion, a failed read exits non-zero without being a usage error or a bootstrap fatal, the single-match attach uses the connector built before the TUI ran, `-f` and the no-argument picker pass no decision |
+| open-with-forced-filter-4-3 | Deliver the accumulated soft bootstrap warnings on a single-match attach | an already-drained sink writes nothing so no path double-writes, no warnings is a silent no-op, the write precedes the exec'd attach that never returns, the lines are byte-identical to the CLI path's, the concurrent write follows the terminal-background restore and precedes the connect, a zero-or-two-plus picker still routes them to the notice band with nothing written after teardown, a cancelled picker writes nothing new |
+| open-with-forced-filter-4-4 | Classify a search form as a picker invocation | a line refused by the args validator never reaches the classification and still starts no server, words after a `--` separator are never inspected, a domain pin still reads as non-picker, parity with a `-f` invocation on the same boot, the warm and CLI paths keep their current classification, the term-less form classifies identically to a term-carrying one, the concurrent bootstrap's own step sequence and labels are unchanged |
+| open-with-forced-filter-4-5 | Pin the search decision behind the whole bootstrap against a real cold server | the decision must not fire at the end of restore, `@portal-restoring` is clear before anything the decision drives fires, the loading page stands for every step, the fixture uses an isolated socket and state dir and never touches the developer's server or daemon, the suite carries the integration build tag |
+
 ### Phase 5: Completion and Documentation
 status: draft
 
