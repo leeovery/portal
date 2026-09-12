@@ -71,10 +71,10 @@
               "status": "incorporated"
             }
           },
-          "review_cycle": 5,
+          "review_cycle": 6,
           "finding_gate_mode": "auto",
           "construction_gate_mode": "auto",
-          "date": "2026-09-11",
+          "date": "2026-09-12",
           "review_baseline_words": 5070,
           "tracking": {
             "review-claims-tracking-c1": "complete",
