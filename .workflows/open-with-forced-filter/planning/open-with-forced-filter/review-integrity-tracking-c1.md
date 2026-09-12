@@ -26,8 +26,8 @@ Emit `complete -c <cmdName> -f` unconditionally beside the wrap. The line is ine
 - In `emitFishInit` (`cmd/init.go:81`), replace the `cmdName` registration `complete -c %s -w portal` (`:101`) with two lines for `cmdName` — `complete -c %s -f` followed by `complete -c %s -w 'portal open'` — leaving the `ctlName` wrap at bare `portal` with no `-f` line of its own. The `-f` is unconditional rather than contingent on a live fish check: it is what holds the no-filename contract on that word whether or not the wrap carries the property across, and it is inert where the wrap already does.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied to task open-with-forced-filter-5-2 (detail file and tick record) under auto mode; the fish edge-case bullet now states the `-f` line is unconditional so nothing rests on the unrunnable check.
 
 ---
 
