@@ -49,8 +49,8 @@ and the tenth and eleventh **Acceptance Criteria** become:
 - [ ] The section notes that a path argument after the function no longer completes filenames — the deliberate loss beside that gain
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied to task open-with-forced-filter-5-4 (detail file and tick record) under auto mode.
 
 ---
 
