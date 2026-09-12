@@ -163,8 +163,8 @@ Nine points are listed as owed to the documentation, and both `portal open --hel
 - Both surfaces carry all nine points, with `--help` gaining the completion and rollout notes as well.
 - `portal open --help` carries the points about `open`'s own surface — the form and its recognition rule, the three outcomes, the term-less form, that it composes with nothing, and the `-f` versus `/term` distinction — and the README additionally carries the completion correction and its rollout consequence (recommended).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Option 1 chosen — `--help` carries `open`'s own surface; the README adds the completion correction and its rollout. Applied to §9.2.
 
 ---
 
@@ -188,7 +188,7 @@ Reduce the item to what it is for — naming the topic the documentation owes �
 **Proposed Text**:
 - The term-less form as §2.5 sets it, and that it is not an error.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §9.2 verbatim.
 
 ---

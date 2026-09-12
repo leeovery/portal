@@ -393,7 +393,7 @@ This is wording work, not behaviour change.
 
 - The sigil form and its recognition rule, including the single-segment absolute-directory cost and the `-p` escape (§2.2, §2.4).
 - The three outcomes by match count (§3.2).
-- The term-less form — a slash on its own opens the picker with its filter open and empty, ready to type into, and never errors (§2.5).
+- The term-less form as §2.5 sets it, and that it is not an error.
 - What the search matches, and that it matches by containment while the picker's own filter stays fuzzy (§4).
 - That the form composes with nothing (§5.1).
 - `-f` and `/term` distinguished by outcome rather than by input shape, and which of the two to reach for (§9.1).
@@ -401,7 +401,9 @@ This is wording work, not behaviour change.
 - That the corrected completion offers live session names after the session-opening function, and no longer falls through to filenames for a path argument (§8.3).
 - That the corrected completion reaches an existing install only once the output of `portal init` is re-evaluated — a new shell, or re-running `portal init` (§8.3, §8.5).
 
-Both `portal open --help` (`cmd/open.go`'s `Long` and the `-f` flag description) and the README's `x (open)` section carry it. The README's resolution table is where the sigil row belongs, alongside the domain pins and `-f` (`grep -n -- '-f, --filter' README.md` → the pin table row).
+**`portal open --help`** (`cmd/open.go`'s `Long`) carries the points about `open`'s own surface: the form and its recognition rule, the outcomes by match count, the term-less form, that it composes with nothing, and the `-f` / `/term` distinction. The `-f` flag description stays a one-liner — none of these fits there.
+
+**The README's `x (open)` section** carries those same points and, additionally, the completion correction and its rollout consequence, which belong to `portal init` rather than to `open` and have nowhere to live in a command's help. The README's resolution table is where the sigil row belongs, alongside the domain pins and `-f` (`grep -n -- '-f, --filter' README.md` → the pin table row).
 
 #### 9.3 CHANGELOG
 
