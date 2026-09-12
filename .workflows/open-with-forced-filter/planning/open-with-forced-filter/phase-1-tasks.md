@@ -297,6 +297,7 @@ total: 7
 - Extend `applySearchLanding()` (`internal/tui/model.go`): when the search form carries an empty term, call `m.sessionList.SetFilterText("")`, then `m.sessionList.SetFilterState(list.Filtering)`, then `m.ensureSessionRowSelected()`. Add one comment on the ordering — the text call is what populates the filtered set, so the state flip must not come first.
 - Add nothing to the render layer: the focused-filter footer, the untouched section-header row and the `SettingFilter` key guard already cover the `Filtering` state.
 - Leave the `-f` empty-value refusal (`cmd/open.go:161`) exactly as it is.
+- Re-point task 1-3's `"it applies no filter for an empty search term"` subtest to the superseding expectation: the term-less landing now leaves the session list in `list.Filtering` with an empty filter value and every live session visible.
 
 **Acceptance Criteria**:
 - [ ] A model built with `Deps.Search = &SearchForm{Term: ""}` lands on `PageSessions` with `FilterState() == list.Filtering` and `FilterValue() == ""`

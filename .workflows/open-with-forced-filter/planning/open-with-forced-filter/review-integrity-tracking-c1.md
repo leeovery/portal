@@ -62,8 +62,8 @@ Add a Do step to task 1-6 re-pointing that subtest by name, matching what task 2
 - Re-point task 1-3's `"it applies no filter for an empty search term"` subtest to the superseding expectation: the term-less landing now leaves the session list in `list.Filtering` with an empty filter value and every live session visible.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied to task open-with-forced-filter-1-6 (detail file and tick record) under auto mode.
 
 ---
 
