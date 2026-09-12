@@ -135,28 +135,31 @@ total: 5
 
 ## open-with-forced-filter-4-3
 
-### Task 4-3: Deliver the accumulated soft bootstrap warnings on a single-match attach
+### Task 4-3: Deliver the accumulated soft bootstrap warnings when a search ends without a picker
 
 **Problem**: Soft bootstrap warnings reach the user by exactly three routes — `bootstrapWarnings.EmitTo(cmd.ErrOrStderr())` in `PersistentPreRunE` for a non-picker line (`cmd/root.go:112`, `:145`), `stageBootstrapWarningsOnModel` for the warm TUI path (`cmd/bootstrap_warnings.go:44`), and the progress channel into the model's `bufferedWarnings` for the concurrent one (`internal/tui/model.go:1559`). Once task 4-4 classifies a search form as a picker invocation, none of the three fires for a single-match attach: `PersistentPreRunE` stops writing because the line is now a picker line; the warm route never builds a model, because the count attaches before the TUI runs; and on the cold route the model quits at the loading gate, so the notice band never appears. A saver-down warning would be dropped silently on exactly the invocation that is about to hand the terminal over to tmux.
 
-**Solution**: Write the accumulated warnings to stderr at the two points where a search form attaches without a picker — the up-front count's attach in `cmd`, and the TUI teardown that follows a decision attach — both through the shared `warning.WriteLines` so the lines are byte-identical to the CLI path's.
+**Solution**: Write the accumulated warnings to stderr wherever a search form ends without a picker — the up-front count's attach and its failed read in `cmd`, and the TUI teardown that follows either outcome — all through the shared `warning.WriteLines` so the lines are byte-identical to the CLI path's.
 
-**Outcome**: A `/term` invocation resolving to one session prints its soft bootstrap warnings and then attaches, on a warm or latched server and on a cold boot alike; a zero- or two-plus-match picker still routes them to the notice band and writes nothing after teardown; a cancelled loading page and an early-quit picker write nothing.
+**Outcome**: A `/term` invocation resolving to one session prints its soft bootstrap warnings and then attaches, on a warm or latched server and on a cold boot alike, and one whose session-list read fails prints them ahead of tmux's own error; a zero- or two-plus-match picker still routes them to the notice band and writes nothing after teardown; a cancelled loading page and an early-quit picker write nothing.
 
 **Do**:
 - In `runSearchForm` (`cmd/open_search.go`), on the up-front single-match branch, call `bootstrapWarnings.EmitTo(cmd.ErrOrStderr())` immediately before `openSessionFunc(cmd, matches[0].Name)`.
-- Add `func emitSearchAttachWarnings(w io.Writer, model tui.Model)` to `cmd/open_search.go`: a no-op unless `model.SearchAttached()`, otherwise `tui.WriteBootstrapWarnings(w, model.BufferedWarnings())`.
+- Make the same call on the up-front branch that returns an enumeration error, immediately before returning it, so a failed session-list read surrenders its warnings ahead of tmux's own message.
+- Add `func emitSearchTeardownWarnings(w io.Writer, model tui.Model)` to `cmd/open_search.go`: a no-op unless `model.SearchAttached()` or `model.SearchError() != nil`, otherwise `tui.WriteBootstrapWarnings(w, model.BufferedWarnings())`.
 - Call it from `openTUI` (`cmd/open.go:569`) between `tui.RestoreTerminalBackground(os.Stdout, model)` (`:697`) and `processTUIResult(model, connector)`, passing `cmd.ErrOrStderr()`.
-- Gate that call on `model.SearchAttached()` alone — never on `len(model.BufferedWarnings()) > 0`, which also holds after a `Ctrl-C` from the loading page, where today's behaviour is to drop them.
+- Gate that call on those two search outcomes alone — never on `len(model.BufferedWarnings()) > 0`, which also holds after a `Ctrl-C` from the loading page, where today's behaviour is to drop them. A torn-down picker surrenders its warnings whichever way it tore down; a cancelled one does not.
 - Add nothing to the picker branches: `surfaceBufferedWarnings` already owns the notice band and empties the buffer on every transition.
-- Add `cmd/open_search_warnings_test.go`: drive the warm route through `rootCmd.Execute()` with `rootCmd.SetErr(&buf)`, `resetBootstrapWarnings(t)`, a stubbed `openSessionFunc` recording call order; drive the teardown route by building a model with `tui.Build` carrying a decision closure, stepping it through `LoadingMinElapsedMsg` and `BootstrapCompleteMsg{Warnings: …}`, and calling `emitSearchAttachWarnings` over a buffer.
+- Add `cmd/open_search_warnings_test.go`: drive the warm route through `rootCmd.Execute()` with `rootCmd.SetErr(&buf)`, `resetBootstrapWarnings(t)`, a stubbed `openSessionFunc` recording call order; drive the teardown route by building a model with `tui.Build` carrying a decision closure, stepping it through `LoadingMinElapsedMsg` and `BootstrapCompleteMsg{Warnings: …}`, and calling `emitSearchTeardownWarnings` over a buffer.
 
 **Acceptance Criteria**:
 - [ ] A warm single-match attach writes every accumulated warning line to stderr, in order, before `openSessionFunc` is called
 - [ ] Those lines are byte-identical to what `warning.WriteLines` produces for the same warnings — the CLI path's output for the same bootstrap
 - [ ] The sink is empty afterwards, so no later drain writes the same warning twice
+- [ ] A warm search whose session-list read fails writes every accumulated warning line to stderr before tmux's own error reaches the user
+- [ ] On the concurrent route a recorded search error writes the model's buffered warnings after teardown, exactly as an attach does
 - [ ] With no warnings accumulated, neither route writes a byte
-- [ ] `emitSearchAttachWarnings` writes exactly `model.BufferedWarnings()` when `SearchAttached()` is true, and nothing when it is false
+- [ ] `emitSearchTeardownWarnings` writes exactly `model.BufferedWarnings()` when the model records an attach or a search error, and nothing otherwise
 - [ ] On the concurrent route the write follows the terminal-background restore and precedes the connect, so the exec'd attach (which never returns) cannot pre-empt it
 - [ ] A zero- or two-plus-match search picker surfaces its warnings in the notice band and writes nothing after teardown
 - [ ] A loading page cancelled with `Ctrl-C` while warnings are buffered writes nothing
@@ -169,6 +172,8 @@ total: 5
 - `"it writes nothing when no warnings accumulated"` — both routes
 - `"it writes the buffered warnings on a decision attach"` — model driven to `SearchAttached()`
 - `"it writes nothing after teardown when the picker opened"` — decision returning `("", nil)`, warnings surfaced as a band
+- `"it writes the accumulated warnings before a warm failed read"` — erroring source; stderr carries the lines, then the tmux error surfaces
+- `"it writes the buffered warnings on a decision read failure"` — model driven to a non-nil `SearchError()`
 - `"it writes nothing when the loading page was cancelled"` — `Ctrl-C` before the gates close, buffer non-empty, nothing written
 - `"it writes the same lines as the CLI path"` — compared against `warning.WriteLines` over the same warnings
 - `"it writes before connecting"` — the stub connector records that the buffer was already non-empty when it ran
@@ -177,8 +182,9 @@ total: 5
 **Edge Cases**:
 - The sink drains itself on `EmitTo`, so the up-front write is idempotent against any later drain and an empty sink writes nothing at all
 - On the concurrent route the model's buffer, not the sink, is the carrier: the sink was already drained into `pendingBootstrapWarnings` before the program started, and that field is folded into a `BootstrapCompleteMsg` only on the warm route, where the orchestrator had already run
-- The write is gated on the attach rather than on a non-empty buffer, because `surfaceBufferedWarnings` clears the buffer on every transition — leaving a non-empty buffer at teardown reachable only by the attach and by an early quit, and the early quit must keep dropping them
-- A failed session-list read writes no warnings: the tmux error is the report on that path. The specification settles only the K = 1 case here, so this narrow reading is the one to review
+- The write is gated on the recorded search outcome rather than on a non-empty buffer, because `surfaceBufferedWarnings` clears the buffer on every transition — leaving a non-empty buffer at teardown reachable only by an attach, a search error and an early quit, and the early quit must keep dropping them
+- A failed session-list read delivers its warnings too: the picker is never painted on that path either, so the reasoning that puts them on the terminal for an attach — the band never surfaces, the alternate screen is gone — applies unchanged. The warning and the tmux error are the pairing where the first explains the second (a saver that is down is why the list could not be read), so they are written together, warnings first
+- A cancelled loading page is the one torn-down picker that still drops them, because the user asked for nothing and is owed no report
 - The outside-tmux connector execs and never returns, which is why the write cannot be deferred past `processTUIResult` on either route
 - On a warm search attach the model never exists, so the two routes are genuinely disjoint — no invocation can take both
 

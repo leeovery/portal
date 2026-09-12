@@ -72,7 +72,7 @@ The record does not settle it. The warning-delivery rule is written for the atta
 - Deliver them: write the accumulated warnings before the tmux error on both routes — drain the sink ahead of returning the enumeration error on the up-front count, and widen the teardown gate from `SearchAttached()` to also cover a recorded search error — so a torn-down picker always surrenders its warnings, whichever way it tore down (recommended)
 - Leave them undelivered as the task now has it: the tmux error is the whole report on this path, the gate stays `SearchAttached()` alone, and the warnings die in the sink beside a `Ctrl-C`'d loading page's
 
-**Resolution**: Pending
-**Notes**: Whichever way this goes, the answer belongs in the task's Acceptance Criteria rather than only in its Edge Cases — the current "writes no warnings" reading is stated as a note and asserted by no criterion, so neither behaviour is pinned by a test as the task stands.
+**Resolution**: Fixed
+**Notes**: Option 1 chosen — deliver them. Task 4-3 widened accordingly: the up-front failed-read branch drains the sink before returning tmux's error, the teardown helper (renamed `emitSearchTeardownWarnings`) gates on an attach or a recorded search error, and the task is retitled "when a search ends without a picker". Two acceptance criteria and two tests now pin the failed-read delivery; the cancelled loading page remains the one torn-down picker that drops them. Original note: whichever way this goes, the answer belongs in the task's Acceptance Criteria rather than only in its Edge Cases — the current "writes no warnings" reading is stated as a note and asserted by no criterion, so neither behaviour is pinned by a test as the task stands.
 
 ---
