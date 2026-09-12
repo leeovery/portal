@@ -51,6 +51,15 @@ status: draft
 - [ ] A session-list read that fails is reported in tmux's own terms and exits non-zero, distinct in both message and status from a zero-match result.
 - [ ] `go test ./...` and `go test -tags integration -p 1 ./...` both pass.
 
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| open-with-forced-filter-2-1 | Decide a session match by case-folded containment over name and directory | empty recorded directory matches on name alone, case-folded on both sides, glob metacharacters literal, a run crossing the name–directory join is not a match, home lookup failure degrades to the raw recorded path, a term hitting the home prefix matches nothing, a directory outside home stays unabbreviated, an empty term is never handed to the rule |
+| open-with-forced-filter-2-2 | Attach directly when exactly one live session matches the term | term-less form takes no count, `_portal-saver` and `_portal-bootstrap` never candidates, the session the user is currently in (count uses the set the picker lists), a term equal to a live session name now attaches (supersedes a Phase 1 expectation), glob metacharacters literal and no burst, inside-tmux switch versus outside-tmux exec, zero live sessions, K=0 exits non-failure with nothing on stderr, no resolve component line, a session vanishing between the count read and the picker's own read |
+| open-with-forced-filter-2-3 | Narrow a search-opened list by containment while the term stands untouched | filter edited to any other value including cleared reverts to fuzzy, edited back to the identical term restores containment, term-less form on the picker's own rule from its first keystroke, group headers still drop under a non-empty term, surviving rows keep their existing order with nothing re-ranked, regroup / preview and back / external-kill refresh each reproduce the set, -f and every other picker keep fuzzy, per-item field lookup must track the rebuilt items rather than a stale capture, a session name containing a space (fields never recovered by splitting the joined filter value) |
+| open-with-forced-filter-2-4 | Report a failed session-list read rather than counting it as no matches | a genuinely empty server is still zero matches and opens the picker, tmux's own stderr is the message, no picker paints and nothing is attached, `ListSessions`' no-server swallow stays intact for the picker and `portal list`, a malformed-output parse error is the same failure class, an empty session list from a live server is never a failure |
+
 ### Phase 3: The Directory Column in a Search-Opened Picker
 status: draft
 
