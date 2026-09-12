@@ -27,5 +27,5 @@ State the setup the row needs: build its command by parsing the whole line and p
 - Build the `--` separator row's command by parsing the whole line rather than handing a helper a hand-written args slice — `c := openProbeCmd()`, `_ = c.ParseFlags([]string{"~/Code/api", "--", "ls", "/tmp"})`, then `isTUIPath(c, c.Flags().Args())`. Both existing helpers return a command whose flag set has never been parsed, where `ArgsLenAtDash()` is pflag's `-1` default and the scan therefore reads every word it is given, the command's own `/tmp` included; parsing is what records the separator, and `Args()` is the same post-parse slice cobra hands `PersistentPreRunE` (the `--` itself is not in it). The rows carrying no separator are unaffected and keep the plain helper call.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied to task open-with-forced-filter-4-4 (detail file and tick record) under auto mode; the probe-command edge-case bullet now records why the separator row must parse.
