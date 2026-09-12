@@ -109,7 +109,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 4,
-          "task": "open-with-forced-filter-4-4",
+          "task": "open-with-forced-filter-4-5",
           "task_map": {
             "open-with-forced-filter-1-1": "tick-a5663a",
             "open-with-forced-filter-1": "tick-c846ae",
@@ -132,7 +132,8 @@
             "open-with-forced-filter-4-1": "tick-00f27b",
             "open-with-forced-filter-4": "tick-50e666",
             "open-with-forced-filter-4-2": "tick-700a3d",
-            "open-with-forced-filter-4-3": "tick-3afec2"
+            "open-with-forced-filter-4-3": "tick-3afec2",
+            "open-with-forced-filter-4-4": "tick-9b4d04"
           },
           "storage_paths": [
             ".tick/"
