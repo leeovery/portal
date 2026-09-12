@@ -150,7 +150,7 @@ total: 5
 - Call it from `openTUI` (`cmd/open.go:569`) between `tui.RestoreTerminalBackground(os.Stdout, model)` (`:697`) and `processTUIResult(model, connector)`, passing `cmd.ErrOrStderr()`.
 - Gate that call on those two search outcomes alone — never on `len(model.BufferedWarnings()) > 0`, which also holds after a `Ctrl-C` from the loading page, where today's behaviour is to drop them. A torn-down picker surrenders its warnings whichever way it tore down; a cancelled one does not.
 - Add nothing to the picker branches: `surfaceBufferedWarnings` already owns the notice band and empties the buffer on every transition.
-- Add `cmd/open_search_warnings_test.go`: drive the warm route through `rootCmd.Execute()` with `rootCmd.SetErr(&buf)`, `resetBootstrapWarnings(t)`, a stubbed `openSessionFunc` recording call order; drive the teardown route by building a model with `tui.Build` carrying a decision closure, stepping it through `LoadingMinElapsedMsg` and `BootstrapCompleteMsg{Warnings: …}`, and calling `emitSearchTeardownWarnings` over a buffer.
+- Add `cmd/open_search_warnings_test.go`: drive the warm route by calling `runSearchForm` directly — `resetBootstrapWarnings(t)`, one warning added to the sink after that reset, a `*cobra.Command` whose `SetErr` is a buffer, the session source injected through `withOpenDeps` and a stubbed `openSessionFunc` recording call order — so the only thing that can put a line in that buffer is the write under test, whichever way the invocation classifies at this point in the phase; drive the teardown route by building a model with `tui.Build` carrying a decision closure, stepping it through `LoadingMinElapsedMsg` and `BootstrapCompleteMsg{Warnings: …}`, and calling `emitSearchTeardownWarnings` over a buffer.
 
 **Acceptance Criteria**:
 - [ ] A warm single-match attach writes every accumulated warning line to stderr, in order, before `openSessionFunc` is called
@@ -187,6 +187,7 @@ total: 5
 - A cancelled loading page is the one torn-down picker that still drops them, because the user asked for nothing and is owed no report
 - The outside-tmux connector execs and never returns, which is why the write cannot be deferred past `processTUIResult` on either route
 - On a warm search attach the model never exists, so the two routes are genuinely disjoint — no invocation can take both
+- This task lands before the classification flip (task 4-4), so a `/term` line still reads as a CLI line and `PersistentPreRunE` writes the warnings and drains the sink before `RunE`. An end-to-end `rootCmd.Execute()` assertion would therefore pass over output this task did not produce — which is why the warm route is driven through `runSearchForm` directly. The end-to-end stderr behaviour is pinned by task 4-4's own `"it holds warnings out of stderr for a search-form line"`
 
 **Context**:
 > On K = 1 the TUI tears down before the connector runs, so the notice band never surfaces. The accumulated soft warnings are written to the terminal at that point instead — after teardown, before the attach — which is where a warm-server sigil attach already puts them. The alternate screen is gone by then, so the corruption this classification prevents cannot occur.

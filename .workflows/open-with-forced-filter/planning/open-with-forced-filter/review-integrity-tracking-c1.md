@@ -91,5 +91,5 @@ Drive the warm route by calling `runSearchForm` directly, with the sink seeded a
 - Add `cmd/open_search_warnings_test.go`: drive the warm route by calling `runSearchForm` directly — `resetBootstrapWarnings(t)`, one warning added to the sink after that reset, a `*cobra.Command` whose `SetErr` is a buffer, the session source injected through `withOpenDeps` and a stubbed `openSessionFunc` recording call order — so the only thing that can put a line in that buffer is the write under test, whichever way the invocation classifies at this point in the phase; drive the teardown route by building a model with `tui.Build` carrying a decision closure, stepping it through `LoadingMinElapsedMsg` and `BootstrapCompleteMsg{Warnings: …}`, and calling `emitSearchTeardownWarnings` over a buffer.
 ```
 
-**Resolution**: Pending
-**Notes**: The end-to-end `rootCmd.Execute()` shape is not lost — task 4-4 already pins the stderr side of the flipped classification with `"it holds warnings out of stderr for a search-form line"`.
+**Resolution**: Fixed
+**Notes**: Applied to task open-with-forced-filter-4-3 (detail file and tick record) under auto mode; an edge-case bullet now records why the end-to-end shape cannot drive this task. The end-to-end `rootCmd.Execute()` shape is not lost — task 4-4 already pins the stderr side of the flipped classification with `"it holds warnings out of stderr for a search-form line"`.
