@@ -22,8 +22,8 @@ Fix the joined form as the name, one space, then the recorded directory in its h
 **Proposed Text**:
 **On the two fuzzy routes the fields are joined**, as the picker's stock matcher expects, so a cross-field match is possible there — the first letters of the term found in the name and the rest in the path. **The joined text is the session name, one space, then the recorded directory in its home-abbreviated form** — character-for-character the row the user is shown (§6.2), so what the matcher scores and what the eye reads are one string; a session carrying no recorded directory joins to its name alone, with no trailing separator. That is accepted: those routes always show their rows, their rule was already the loose one (§4.4), and separating the fields would cost the list its ranking through the stock matcher.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.3 verbatim.
 
 ---
 
@@ -47,8 +47,8 @@ This holds *within* a single picker as well as across launches. The grouped view
 **Proposed Text**:
 This holds *within* a single picker as well as across launches. The grouped views derive a missing directory while the sigil's own narrowed list is on screen, and retain what they derive; that value belongs to grouping and to nothing else. **A session therefore carries the two as separate values — the recorded directory, which may be absent, and the derived one, which grouping alone reads and writes. A derived value never lands in the recorded one.** Neither the match (§4.4) nor the directory column (§6.1) ever reads it, so a regroup can never make a session findable by a path it was not findable by a moment earlier, and can never put a path beside a name that showed none.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.1 verbatim.
 
 ---
 
@@ -75,8 +75,8 @@ New bullet, in §9.2's list:
 
 - That the corrected completion offers live session names after the session-opening function, and no longer falls through to filenames for a path argument (§8.3).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §8.3 and §9.2 verbatim.
 
 ---
 
@@ -100,8 +100,8 @@ The shell form has it worse: K (§3.2) is taken before any picker exists, so a d
 **Proposed Text**:
 The shell form has it worse: K (§3.2) is taken before a single session row has been rendered — on a cold machine while the loading page still stands (§3.4) — so a derived value has nowhere to come from and nowhere to be kept; the recorded directory that rides back with the session list is the only one there is.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.1 verbatim.
 
 ---
 
@@ -124,8 +124,8 @@ New paragraph, in §6.2, after the paragraph beginning "Balance comes from colou
 
 Where colour is off entirely the row is unchanged — the same single space, no bracket, glyph or separator introduced to stand in for the weight. The established carve-out asks that *state* never be carried by colour alone; a directory annotates the name rather than reporting state, and a path is legible as a path by its own separators.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §6.2 verbatim.
 
 ---
 
@@ -149,7 +149,7 @@ Keep the fact this passage owns — that no count is evaluated for a term-less s
 **Proposed Text**:
 **A term-less sigil takes no count.** `x /` carries nothing to match, so no count is evaluated and none of the rows below apply: it opens the picker on the whole live session list as §2.5 sets it, on a machine holding one live session as on a machine holding twenty.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.2 verbatim.
 
 ---

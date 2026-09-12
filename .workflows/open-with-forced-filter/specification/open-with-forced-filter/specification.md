@@ -81,7 +81,7 @@ This is what makes eager resolution safe. The sibling `cli-verb-surface-redesign
 
 Let K be the number of live sessions matching the term under §4.
 
-**A term-less sigil takes no count.** `x /` carries nothing to match, so no count is evaluated and none of the rows below apply: it opens the picker on the whole live session list, filter focused and empty (§2.5), on a machine holding one live session as on a machine holding twenty.
+**A term-less sigil takes no count.** `x /` carries nothing to match, so no count is evaluated and none of the rows below apply: it opens the picker on the whole live session list as §2.5 sets it, on a machine holding one live session as on a machine holding twenty.
 
 The searched set is the set the picker lists. Portal's own internal sessions — the `_portal-saver` daemon host and the `_portal-bootstrap` server anchor — are absent from that list and are never search candidates: no term counts one toward K, and none can be attached by a sigil.
 
@@ -135,13 +135,13 @@ The usage errors of §5.1 are ordinary usage errors, carrying the same shape as 
 
 The recorded directory is the `@portal-dir` tmux session user-option, stamped at creation and returned with the session list at no extra cost — `ListSessions` appends `#{@portal-dir}` to its `list-sessions -F` format and parses it into `Session.Dir` (`grep -n '@portal-dir' internal/tmux/tmux.go`). Matching on it therefore costs no additional tmux round-trip.
 
-**Never a derived directory.** The picker can derive a missing directory by asking a session's pane where it is, but only in the grouped views, and it caches the answer — so a session would be findable or not depending on which view the user last left the picker in. The shell form has it worse: K (§3.2) is taken before any picker exists, so a derived value has nowhere to come from and nowhere to be kept — the recorded directory that rides back with the session list is the only one there is. Matching the recorded value alone makes the answer identical everywhere — the count and the list, the shell and the picker — and keeps the sigil path free of a per-session pane read on a path whose whole point is to feel instant.
+**Never a derived directory.** The picker can derive a missing directory by asking a session's pane where it is, but only in the grouped views, and it caches the answer — so a session would be findable or not depending on which view the user last left the picker in. The shell form has it worse: K (§3.2) is taken before a single session row has been rendered — on a cold machine while the loading page still stands (§3.4) — so a derived value has nowhere to come from and nowhere to be kept; the recorded directory that rides back with the session list is the only one there is. Matching the recorded value alone makes the answer identical everywhere — the count and the list, the shell and the picker — and keeps the sigil path free of a per-session pane read on a path whose whole point is to feel instant.
 
 **The searched form is the displayed form.** A recorded directory under the user's home is searched home-abbreviated (`~/Code/portal`), not as tmux recorded it (`/Users/leeovery/Code/portal`) — the same abbreviation the row displays (§6.2). Otherwise a term hitting the home prefix (`/lee`, `/user`) would match every session the user has while every returned row displayed no such text, and on a lone survivor would attach outright with nothing on screen accounting for the choice. What was matched is what is shown.
 
 **Known limitation, unconditional and self-correcting:** a session created before the directory stamp shipped carries no recorded directory and matches on name alone, in every view. Such sessions age out as they are killed and replaced. Deriving the missing value everywhere was rejected for its cost — one pane read per unrecorded session on every `/term`.
 
-This holds *within* a single picker as well as across launches. The grouped views derive a missing directory while the sigil's own narrowed list is on screen, and retain what they derive; that value belongs to grouping and to nothing else. Neither the match (§4.4) nor the directory column (§6.1) ever reads it, so a regroup can never make a session findable by a path it was not findable by a moment earlier, and can never put a path beside a name that showed none.
+This holds *within* a single picker as well as across launches. The grouped views derive a missing directory while the sigil's own narrowed list is on screen, and retain what they derive; that value belongs to grouping and to nothing else. **A session therefore carries the two as separate values — the recorded directory, which may be absent, and the derived one, which grouping alone reads and writes. A derived value never lands in the recorded one.** Neither the match (§4.4) nor the directory column (§6.1) ever reads it, so a regroup can never make a session findable by a path it was not findable by a moment earlier, and can never put a path beside a name that showed none.
 
 #### 4.2 The matched fields are shared across all three filter entry points
 
@@ -157,7 +157,7 @@ The two fields are tested separately **for the sigil**: a session matches when t
 
 **The term is literal text.** `*`, `?` and `[` are characters to find rather than wildcards: `/port*` matches a session whose name or recorded directory contains `port*`, and nothing else does. The glob forms answer ambiguity by opening a window per match; the sigil answers it by narrowing, and the two rules are not mixed.
 
-**On the two fuzzy routes the fields are joined**, as the picker's stock matcher expects, so a cross-field match is possible there — the first letters of the term found in the name and the rest in the path. That is accepted: those routes always show their rows, their rule was already the loose one (§4.4), and separating the fields would cost the list its ranking through the stock matcher.
+**On the two fuzzy routes the fields are joined**, as the picker's stock matcher expects, so a cross-field match is possible there — the first letters of the term found in the name and the rest in the path. **The joined text is the session name, one space, then the recorded directory in its home-abbreviated form** — character-for-character the row the user is shown (§6.2), so what the matcher scores and what the eye reads are one string; a session carrying no recorded directory joins to its name alone, with no trailing separator. That is accepted: those routes always show their rows, their rule was already the loose one (§4.4), and separating the fields would cost the list its ranking through the stock matcher.
 
 The picker's own filter does not. The sessions list filters through `charm.land/bubbles/v2/list.DefaultFilter`, which is `fuzzy.Find` from `sahilm/fuzzy` — subsequence matching, anywhere, case-folded and rank-sorted — and `internal/tui` installs no filter of its own, so that default stands (`grep -rn 'SetFilterFunc\|DefaultFilter' internal/tui/*.go | grep -v _test` → no matches). Case-folding is the one property the sigil keeps from it: the two rules diverge on subsequence against containment and on nothing else. Under that rule a session at `~/Projects/rust-tools` satisfies `port`: **p** in `projects`, **o** in `projects`, **r** in `rust`, **t** in `tools`, with the four letters never appearing together.
 
@@ -254,6 +254,8 @@ That is the seed's own complaint returning by the back door. Names are precisely
 **The directory begins one space after the session name** — packed against it rather than anchored to a column of its own, so its start moves with the name's length and both its edges are ragged down the list.
 
 Balance comes from colour rather than alignment. The directory takes the same colour token as the row's window count — the muted rung of the text ramp, the role paths, counts and subtitles already take elsewhere in the picker — so it reads as a second-weight annotation on the name it follows, and the ragged edges do not register as misalignment. A right-anchored column would buy a scannable edge at the cost of a wide, arbitrary gap on every short-named row, and would make the two pieces read as separate columns rather than as one row about one session. This introduces no new colour token and no new convention; the selected row's own treatment one step brighter is the established pattern the sigil row reuses.
+
+Where colour is off entirely the row is unchanged — the same single space, no bracket, glyph or separator introduced to stand in for the weight. The established carve-out asks that *state* never be carried by colour alone; a directory annotates the name rather than reporting state, and a path is legible as a path by its own separators.
 
 The sibling `theming-system` specification fixes the token vocabulary at nineteen closed semantic roles and forbids raw colour at call sites. This section references an existing role rather than proposing a new one, so nothing in that vocabulary changes.
 
@@ -357,6 +359,8 @@ The correction changes **what command the emitted script asks for completions** 
 
 It applies to the **configured** function name, not the literal `x`: `portal init --cmd <name>` renames both emitted functions, and the correction must follow whatever name was chosen.
 
+The correction brings the session-opening function onto `open`'s existing completion contract: live session names, and no filename fallback. Path arguments — `x ~/Code/pro<TAB>` — complete to filenames today only because Portal is never asked and the shell has nothing else to offer; once Portal answers, it switches that fallback off (§2.2), and it must, since a filename fallback on the same word is what would turn `x /tm<TAB>` into `/tmp/` and a search into a mint. The loss is taken deliberately, and it is the contract `portal open` has always had.
+
 #### 8.4 Why it is folded in rather than spun out
 
 This feature's deliverable is not a parsing rule, it is `x /term` becoming muscle memory. A completion decision that does not reach that form has not been delivered — without the fix, §8.1 is reachable only by typing `portal open /term` in full.
@@ -388,6 +392,7 @@ This is wording work, not behaviour change.
 - That the form composes with nothing (§5.1).
 - `-f` and `/term` distinguished by outcome rather than by input shape, and which of the two to reach for (§9.1).
 - That the form completes against live session names after the slash (§8.1).
+- That the corrected completion offers live session names after the session-opening function, and no longer falls through to filenames for a path argument (§8.3).
 - That the corrected completion reaches an existing install only once the output of `portal init` is re-evaluated — a new shell, or re-running `portal init` (§8.3, §8.5).
 
 Both `portal open --help` (`cmd/open.go`'s `Long` and the `-f` flag description) and the README's `x (open)` section carry it. The README's resolution table is where the sigil row belongs, alongside the domain pins and `-f` (`grep -n -- '-f, --filter' README.md` → the pin table row).
