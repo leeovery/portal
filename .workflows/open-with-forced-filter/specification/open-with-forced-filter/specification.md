@@ -45,7 +45,7 @@ A leading `/` today makes an argument a path unconditionally (`sed -n '14p' inte
 | `/tmp/` | path — mints, unchanged; the trailing slash is the second one |
 | `./port`, `~/port`, `port` | unchanged — the rule tests a leading `/` only |
 
-Completion cannot turn one shape into the other (§8.1), and Portal switches the shell's filename fallback off (`portal completion bash | grep -n 'compopt +o default'`) — so `x /tm<TAB>` never becomes `/tmp/`. The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
+Completion cannot turn one shape into the other (§8.1). Portal switches the shell's filename fallback off wherever it is asked for completions (`portal completion bash | grep -n 'compopt +o default'`), so `portal open /tm<TAB>` never becomes `/tmp/`, and neither does `x /tm<TAB>` once the corrected `portal init` output is live in the user's shell — until then Tab after that function is answered by the shell rather than by Portal and still falls through to filenames (§8.2, §8.5). The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
 
 #### 2.3 Recognition is positional-independent
 
@@ -103,7 +103,7 @@ The bare slash is the exception, and deliberately so: `x /` carries no term to c
 
 #### 3.4 When the count is taken
 
-K is evaluated against the live session set once the tmux server is ready to answer for it. On a warm server that is immediately. On a cold server the sigil takes the picker's concurrent-bootstrap path (§7), so the count is taken once that bootstrap has run to completion — every step of it, not merely the restore that reconstructs the saved sessions. Nothing the sigil decides fires earlier: the loading page stands until the count can be taken, and is then replaced by the attach when K turns out to be 1, or by the picker at any other count. Acting at the end of restore would replace the process mid-bootstrap and abandon the steps that follow it — among them the clearing of the `@portal-restoring` marker, which must not outlive bootstrap.
+K is evaluated against the live session set once the tmux server is ready to answer for it. On a warm server that is immediately. On a cold server the sigil takes the picker's concurrent-bootstrap path (§7), so the count is taken once that bootstrap has run to completion — every step of it, not merely the restore that reconstructs the saved sessions. Nothing the sigil decides fires earlier: the loading page stands until the count can be taken, and is then replaced by the attach when K turns out to be 1, or by the picker at any other count. Acting at the end of restore would replace the process mid-bootstrap and abandon the steps that follow it — among them the clearing of the `@portal-restoring` marker, which must not outlive bootstrap. The loading page's own minimum display span is untouched by this (§7.6): where the count can be taken before that span has elapsed, the page stands for the remainder of it, and the attach or the picker follows when it lifts.
 
 #### 3.5 Accepted cost
 
@@ -157,7 +157,7 @@ The two fields are tested separately **for the sigil**: a session matches when t
 
 **The term is literal text.** `*`, `?` and `[` are characters to find rather than wildcards: `/port*` matches a session whose name or recorded directory contains `port*`, and nothing else does. The glob forms answer ambiguity by opening a window per match; the sigil answers it by narrowing, and the two rules are not mixed.
 
-**On the two fuzzy routes the fields are joined**, as the picker's stock matcher expects, so a cross-field match is possible there — the first letters of the term found in the name and the rest in the path. **The joined text is the session name, one space, then the recorded directory in its home-abbreviated form** — character-for-character the row the user is shown (§6.2), so what the matcher scores and what the eye reads are one string; a session carrying no recorded directory joins to its name alone, with no trailing separator. That is accepted: those routes always show their rows, their rule was already the loose one (§4.4), and separating the fields would cost the list its ranking through the stock matcher.
+**On the two fuzzy routes the fields are joined**, as the picker's stock matcher expects, so a cross-field match is possible there — the first letters of the term found in the name and the rest in the path. **The joined text is the session name, one space, then the recorded directory in its home-abbreviated form** — the two values the row is built from (§6.2), so what the matcher scores and what the eye reads are the same text; a session carrying no recorded directory joins to its name alone, with no trailing separator. The join is over those two values and nothing else, and it is taken before the row is laid out: the width-driven left-truncation and the floor that drops the directory altogether (§6.2) narrow what is displayed and never what is matched, and the row's count and attached slots are no part of the matched text. That is accepted: those routes always show their rows, their rule was already the loose one (§4.4), and separating the fields would cost the list its ranking through the stock matcher.
 
 The picker's own filter does not. The sessions list filters through `charm.land/bubbles/v2/list.DefaultFilter`, which is `fuzzy.Find` from `sahilm/fuzzy` — subsequence matching, anywhere, case-folded and rank-sorted — and `internal/tui` installs no filter of its own, so that default stands (`grep -rn 'SetFilterFunc\|DefaultFilter' internal/tui/*.go | grep -v _test` → no matches). Case-folding is the one property the sigil keeps from it: the two rules diverge on subsequence against containment and on nothing else. Under that rule a session at `~/Projects/rust-tools` satisfies `port`: **p** in `projects`, **o** in `projects`, **r** in `rust`, **t** in `tools`, with the four letters never appearing together.
 
@@ -177,6 +177,8 @@ Portal's own `internal/fuzzy` package is not what the picker uses and has no pro
 
 **Containment narrows the list; it does not reorder it.** Rows keep the order the sessions list gives them in whatever grouping mode is current, with non-matching rows removed and nothing re-ranked — the picker's rank-sorting is a property of its fuzzy rule, which the sigil does not use. The first matching row (§3.2) is the first surviving row of that existing order.
 
+**The term-less form supplies nothing for that test to hold.** `x /` lands with an empty, focused filter (§2.5) — the picker's own filter gesture, reached from the shell — so the first character typed there is already a value the sigil did not supply, and the picker's own rule applies from that keystroke on.
+
 **The picker's own filter is untouched by this work.** Once the user edits that text the picker's rule applies and the row set can widen. The divergence is therefore visible only by rows appearing, never by rows the user expected going missing.
 
 The distinguishing question is whether a path can act without showing the user anything: the picker shows its results and can afford a loose rule; the shell form cannot.
@@ -184,6 +186,8 @@ The distinguishing question is whether a path can act without showing the user a
 #### 4.5 Accepted cost and confidence
 
 `/port` is less precise than it would be on names alone — sessions the user would never think of as "port" appear because their path happens to contain it. Taken knowingly, as something use rather than argument will settle. Narrowing the match domain back to names alone is a cheap reversal if the false-positive rate proves intolerable.
+
+**Accepted with it:** the widening reaches the pickers this feature does not open. There, a session can surface on the strength of a recorded directory no row displays, because the directory column is scoped to a search-opened picker (§6.3). The visible effect is rows appearing, never rows the user expected going missing, and narrowing the fields by entry point is the alternative §4.2 rejects.
 
 ---
 
@@ -322,6 +326,8 @@ Offered words carry the sigil — `/po` completes to `/portal-a1b2`, never to `p
 `/<TAB>` — the sigil with nothing after it — offers every live session name, since every name is prefixed by the empty term. Left as typed it opens the picker on an empty filter (§2.5); accepting a completion instead narrows the term to one session and attaches it, which is what makes completing the bare slash worth doing.
 
 Directories are deliberately excluded from what is *offered*, even though they count for *matching* (§4.1): a completed `/Users/leeovery/Code/portal` reads as a path and trips the no-second-slash rule (§2.2) straight back into path territory.
+
+A live session name carrying a `/` is held back for the same reason — tmux permits one, and `ValidateSessionName` refuses only `:`, a leading `$` and a leading `-`. Completing `/foo` to `/foo/bar` would produce a word with a second slash, which §2.2 reads as a path, taking the user out of the search form they typed. Such a session stays reachable: a term stopping short of the slash matches it by containment like any other. It is only never offered.
 
 Today the sigil form completes to nothing — the slash is part of the word being completed, no session name begins with one, and the shell's filename fallback is off (§2.2), so Tab is silently inert rather than misleading (`portal __complete open /po` → no candidates, `ShellCompDirectiveNoFileComp`).
 

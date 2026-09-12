@@ -22,8 +22,8 @@ Keep the precise definition — name plus one space plus the home-abbreviated re
 **Proposed Text**:
 **On the two fuzzy routes the fields are joined**, as the picker's stock matcher expects, so a cross-field match is possible there — the first letters of the term found in the name and the rest in the path. **The joined text is the session name, one space, then the recorded directory in its home-abbreviated form** — the two values the row is built from (§6.2), so what the matcher scores and what the eye reads are the same text; a session carrying no recorded directory joins to its name alone, with no trailing separator. The join is over those two values and nothing else, and it is taken before the row is laid out: the width-driven left-truncation and the floor that drops the directory altogether (§6.2) narrow what is displayed and never what is matched, and the row's count and attached slots are no part of the matched text. That is accepted: those routes always show their rows, their rule was already the loose one (§4.4), and separating the fields would cost the list its ranking through the stock matcher.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.3 verbatim.
 
 ---
 
@@ -46,8 +46,8 @@ Add to §8.1, immediately after the paragraph beginning "Directories are deliber
 
 A live session name carrying a `/` is held back for the same reason. Completing one would produce a word with a second slash in it, which §2.2 reads as a path — so the completion would take the user out of the search form they typed. Such a session is still reachable: a term stopping short of the slash matches it by containment like any other. It is only never offered.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §8.1 verbatim.
 
 ---
 
@@ -70,8 +70,8 @@ Add to §3.4, at the end of the paragraph beginning "K is evaluated against the 
 
 The loading page's own minimum display span is untouched by this (§7.6): where the count can be taken before that span has elapsed, the page stands for the remainder of it, and the attach or the picker follows when it lifts.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §3.4 verbatim.
 
 ---
 
@@ -95,8 +95,8 @@ Completion cannot turn one shape into the other (§8.1), and Portal switches the
 **Proposed Text**:
 Completion cannot turn one shape into the other (§8.1). Portal switches the shell's filename fallback off wherever it is asked for completions (`portal completion bash | grep -n 'compopt +o default'`), so `portal open /tm<TAB>` never becomes `/tmp/`, and neither does `x /tm<TAB>` once the corrected `portal init` output is live in the user's shell — until then Tab after that function is answered by the shell rather than by Portal and still falls through to filenames (§8.2, §8.5). The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §2.2 verbatim.
 
 ---
 
@@ -119,8 +119,8 @@ Add to §4.4, after the paragraph beginning "**The containment set holds for as 
 
 **The term-less form supplies nothing for that test to hold.** `x /` lands with an empty, focused filter (§2.5) — the picker's own filter gesture, reached from the shell — so the first character typed there is already a value the sigil did not supply, and the picker's own rule applies from that keystroke on.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.4 verbatim.
 
 ---
 
@@ -143,8 +143,8 @@ Add to §4.5, after the existing paragraph:
 
 **Accepted with it:** the widening reaches the pickers this feature does not open. There, a session can surface on the strength of a recorded directory no row displays, because the directory column is scoped to a search-opened picker (§6.3). The visible effect is rows appearing, never rows the user expected going missing, and narrowing the fields by entry point is the alternative §4.2 rejects.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §4.5 verbatim.
 
 ---
 
