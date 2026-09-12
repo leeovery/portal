@@ -104,13 +104,16 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "d70e5bef1a404c309a2ca9fc1f2d6109daa92239",
-          "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "open-with-forced-filter-1-1",
-          "task_map": {},
+          "task": "open-with-forced-filter-1-2",
+          "task_map": {
+            "open-with-forced-filter-1-1": "tick-a5663a",
+            "open-with-forced-filter-1": "tick-c846ae"
+          },
           "storage_paths": [
             ".tick/"
           ],
@@ -123,16 +126,17 @@
           "staging": {
             "author-p1": {
               "tasks": {
-                "open-with-forced-filter-1-1": "pending",
-                "open-with-forced-filter-1-2": "pending",
-                "open-with-forced-filter-1-3": "pending",
-                "open-with-forced-filter-1-4": "pending",
-                "open-with-forced-filter-1-5": "pending",
-                "open-with-forced-filter-1-6": "pending",
-                "open-with-forced-filter-1-7": "pending"
+                "open-with-forced-filter-1-1": "approved",
+                "open-with-forced-filter-1-2": "approved",
+                "open-with-forced-filter-1-3": "approved",
+                "open-with-forced-filter-1-4": "approved",
+                "open-with-forced-filter-1-5": "approved",
+                "open-with-forced-filter-1-6": "approved",
+                "open-with-forced-filter-1-7": "approved"
               }
             }
-          }
+          },
+          "external_id": "tick-964b62"
         }
       }
     }
