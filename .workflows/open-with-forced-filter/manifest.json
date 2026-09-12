@@ -104,12 +104,12 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "d70e5bef1a404c309a2ca9fc1f2d6109daa92239",
-          "task_list_gate_mode": "gated",
+          "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": null,
+          "task": "open-with-forced-filter-2-1",
           "task_map": {
             "open-with-forced-filter-1-1": "tick-a5663a",
             "open-with-forced-filter-1": "tick-c846ae",
@@ -126,7 +126,8 @@
           "approvals": {
             "structure": "2026-09-12",
             "tasks": {
-              "p1": "2026-09-12"
+              "p1": "2026-09-12",
+              "p2": "2026-09-12"
             }
           },
           "staging": {},
