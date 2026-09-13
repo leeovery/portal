@@ -184,7 +184,11 @@ type Model struct {
 	initialFilter  string
 	// initialCursor is the capture-only cursor anchor, applied and cleared in
 	// evaluateDefaultPage after items ingest. Empty is a no-op.
-	initialCursor      string
+	initialCursor string
+	// searchForm and searchTerm describe the invocation rather than a pending
+	// action, so the landing never clears them.
+	searchForm         bool
+	searchTerm         string
 	insideTmux         bool
 	currentSession     string
 	modal              modalState
@@ -519,6 +523,15 @@ func WithKiller(k SessionKiller) Option {
 func WithRenamer(r SessionRenamer) Option {
 	return func(m *Model) {
 		m.sessionRenamer = r
+	}
+}
+
+// WithSearchForm declares that a session search opened the picker with term,
+// which lands as the committed sessions filter on the Sessions page.
+func WithSearchForm(term string) Option {
+	return func(m *Model) {
+		m.searchForm = true
+		m.searchTerm = term
 	}
 }
 
@@ -1252,6 +1265,10 @@ func (m *Model) evaluateDefaultPage() {
 	m.defaultPageEvaluated = true
 	if m.commandPending {
 		m.activePage = PageProjects
+	} else if m.searchForm {
+		// A search is session-domain by declaration: a term matching nothing,
+		// and a machine with no live sessions, still land on Sessions.
+		m.activePage = PageSessions
 	} else if len(m.sessionList.Items()) > 0 {
 		m.activePage = PageSessions
 	} else {
@@ -1259,7 +1276,18 @@ func (m *Model) evaluateDefaultPage() {
 	}
 
 	m.applyInitialFilter()
+	m.applySearchLanding()
 	m.applyInitialCursor()
+}
+
+// A search form carries no initial filter, so exactly one of the two applies.
+func (m *Model) applySearchLanding() {
+	if !m.searchForm || m.searchTerm == "" {
+		return
+	}
+	m.sessionList.SetFilterText(m.searchTerm)
+	m.sessionList.SetFilterState(list.FilterApplied)
+	m.ensureSessionRowSelected()
 }
 
 func (m *Model) applyInitialFilter() {

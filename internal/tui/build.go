@@ -49,6 +49,9 @@ type Deps struct {
 	// snapshot: re-reading prefs.json would import another instance's commit.
 	ThemeKeys theme.RawKeys
 
+	// Search nil means the picker was not reached by a search form.
+	Search *SearchForm
+
 	InitialFilter  string
 	Command        []string
 	ServerStarted  bool
@@ -60,6 +63,13 @@ type Deps struct {
 	NoColor bool
 
 	Capture CaptureSeeds
+}
+
+// SearchForm is the term a session search opened the picker with. It declares
+// the session domain, so its landing is the Sessions page whatever the term
+// matches.
+type SearchForm struct {
+	Term string
 }
 
 // CaptureSeeds declares first-frame state a one-shot fixture render cannot
@@ -113,6 +123,9 @@ func Build(deps Deps) Model {
 	}
 	if deps.DirReader != nil && deps.DirRunner != nil {
 		opts = append(opts, WithDirResolver(deps.DirReader, deps.DirRunner))
+	}
+	if deps.Search != nil {
+		opts = append(opts, WithSearchForm(deps.Search.Term))
 	}
 	opts = append(opts, WithInitialMode(deps.InitialMode))
 	opts = append(opts, WithThemeNomination(deps.Theme))
