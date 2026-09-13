@@ -84,8 +84,9 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		AliasEditor:   f.aliasEditor,
 		Enumerator:    fakeEnumerator{groups: f.enumeratorGroups},
 		Reader:        fakeScrollbackReader{content: f.scrollback},
-		// DirReader/DirRunner stay nil (sessions are pre-stamped, so the lazy
-		// pane-read fallback never fires); ModePersister stays nil so an
+		// DirReader/DirRunner stay nil, so the lazy pane-read fallback returns
+		// before reading anything and a fixture session carrying no recorded
+		// directory groups into the catch-all; ModePersister stays nil so an
 		// `s`-toggle writes nowhere.
 		InitialMode:   f.initialMode,
 		Search:        f.search,
