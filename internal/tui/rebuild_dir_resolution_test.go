@@ -3,6 +3,8 @@ package tui
 import (
 	"testing"
 
+	"charm.land/bubbles/v2/list"
+
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/session"
@@ -225,6 +227,37 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		}
 		if !rows[0].CatchAll {
 			t.Fatalf("with a nil seam an empty-Dir session must route to the Unknown catch-all")
+		}
+	})
+
+	t.Run("it does not match a session on a grouping-derived directory", func(t *testing.T) {
+		dir := t.TempDir()
+		key := project.CanonicalDirKey(dir)
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+
+		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
+		m.dirReader = &fakeStamper{path: dir}
+		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+
+		m.rebuildSessionList()
+
+		if m.derivedDirs["portal-abc"] != key {
+			t.Fatalf("precondition: derivedDirs[%q] = %q, want %q", "portal-abc", m.derivedDirs["portal-abc"], key)
+		}
+		rows := sessionRows(m.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(session rows) = %d, want 1", len(rows))
+		}
+		if got := rows[0].FilterValue(); got != "portal-abc" {
+			t.Errorf("FilterValue() = %q, want %q (the derived directory is no part of the matched text)", got, "portal-abc")
+		}
+
+		m.sessionList.SetFilterText(key)
+		m.sessionList.SetFilterState(list.FilterApplied)
+
+		if visible := m.sessionList.VisibleItems(); len(visible) != 0 {
+			t.Errorf("filtering on the derived directory left %d visible items, want 0", len(visible))
 		}
 	})
 }

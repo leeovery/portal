@@ -12,13 +12,25 @@ import (
 )
 
 func TestSessionItem(t *testing.T) {
-	t.Run("FilterValue returns session name", func(t *testing.T) {
+	t.Run("it returns the session name alone when the session carries no recorded directory", func(t *testing.T) {
 		item := tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 3, Attached: true}}
 
 		got := item.FilterValue()
 
 		if got != "dev" {
-			t.Errorf("FilterValue() = %q, want %q", got, "dev")
+			t.Errorf("FilterValue() = %q, want %q (name alone, no trailing separator)", got, "dev")
+		}
+	})
+
+	t.Run("it returns the name, one space and the abbreviated directory", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		item := tui.SessionItem{Session: tmux.Session{Name: "api-work", Windows: 3, Dir: home + "/Code/portal"}}
+
+		got := item.FilterValue()
+
+		if got != "api-work ~/Code/portal" {
+			t.Errorf("FilterValue() = %q, want %q", got, "api-work ~/Code/portal")
 		}
 	})
 
@@ -52,6 +64,21 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 
 		if got := item.FilterValue(); got != "dev" {
 			t.Errorf("FilterValue() = %q, want %q", got, "dev")
+		}
+	})
+
+	t.Run("returns the name and abbreviated directory from FilterValue regardless of group fields", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		item := tui.SessionItem{
+			Session:      tmux.Session{Name: "dev", Windows: 3, Attached: true, Dir: home + "/Code/portal"},
+			GroupKey:     "work",
+			GroupHeading: "work",
+			CatchAll:     false,
+		}
+
+		if got := item.FilterValue(); got != "dev ~/Code/portal" {
+			t.Errorf("FilterValue() = %q, want %q", got, "dev ~/Code/portal")
 		}
 	})
 

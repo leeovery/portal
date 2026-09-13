@@ -2821,6 +2821,71 @@ func TestBuiltInFiltering(t *testing.T) {
 			t.Errorf("expected 3 visible items after clearing filter, got %d", len(visible))
 		}
 	})
+
+	t.Run("it narrows -f to a session found by its directory", func(t *testing.T) {
+		t.Setenv("HOME", "/Users/leeovery")
+		sessions := []tmux.Session{
+			{Name: "api-work", Windows: 1, Dir: "/Users/leeovery/Code/portal"},
+			{Name: "other", Windows: 2},
+		}
+		m := tui.New(&mockSessionLister{sessions: sessions}).WithInitialFilter("portal")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{})
+
+		visible := model.(tui.Model).SessionListVisibleItems()
+		if len(visible) != 1 {
+			t.Fatalf("expected 1 visible item for a directory term, got %d", len(visible))
+		}
+		if got := visible[0].(tui.SessionItem).Session.Name; got != "api-work" {
+			t.Errorf("visible session = %q, want %q", got, "api-work")
+		}
+	})
+
+	t.Run("it narrows a hand-typed filter to a session found by its directory", func(t *testing.T) {
+		t.Setenv("HOME", "/Users/leeovery")
+		sessions := []tmux.Session{
+			{Name: "api-work", Windows: 1, Dir: "/Users/leeovery/Code/portal"},
+			{Name: "other", Windows: 2},
+		}
+		var model tea.Model = tui.NewModelWithSessions(sessions)
+
+		model, _ = model.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+		var cmd tea.Cmd
+		for _, r := range "portal" {
+			model, cmd = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		}
+		model = drainFilterMatches(model, cmd)
+
+		if got := model.(tui.Model).SessionListFilterValue(); got != "portal" {
+			t.Fatalf("filter value = %q, want %q", got, "portal")
+		}
+		visible := model.(tui.Model).SessionListVisibleItems()
+		if len(visible) != 1 {
+			t.Fatalf("expected 1 visible item for a hand-typed directory term, got %d", len(visible))
+		}
+		if got := visible[0].(tui.SessionItem).Session.Name; got != "api-work" {
+			t.Errorf("visible session = %q, want %q", got, "api-work")
+		}
+	})
+
+	t.Run("it does not match a session on the user's account name", func(t *testing.T) {
+		t.Setenv("HOME", "/Users/leeovery")
+		sessions := []tmux.Session{
+			{Name: "api-work", Windows: 1, Dir: "/Users/leeovery/Code/portal"},
+		}
+		m := tui.New(&mockSessionLister{sessions: sessions}).WithInitialFilter("leeovery")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{})
+
+		visible := model.(tui.Model).SessionListVisibleItems()
+		if len(visible) != 0 {
+			t.Errorf("expected 0 visible items for the account name, got %d (the matched text is the displayed, home-abbreviated path)", len(visible))
+		}
+	})
 }
 
 func TestPageSwitching(t *testing.T) {
@@ -7113,4 +7178,22 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// The list computes its matches in a tea.Cmd, batched with whatever else the
+// keypress produced; its FilterMatchesMsg has to be fed back before the visible
+// set reflects the typed query.
+func drainFilterMatches(model tea.Model, cmd tea.Cmd) tea.Model {
+	if cmd == nil {
+		return model
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			model = drainFilterMatches(model, c)
+		}
+	case list.FilterMatchesMsg:
+		model, _ = model.Update(msg)
+	}
+	return model
 }

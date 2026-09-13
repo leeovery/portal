@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -77,8 +78,16 @@ type SessionItem struct {
 	CatchAll bool
 }
 
+// FilterValue is the text every filter entry point narrows on: the session name
+// joined to its recorded directory, home-abbreviated so a term hitting the home
+// prefix cannot match a session on characters no row shows. The grouping-derived
+// directory is no part of it — a regroup must never make a session findable by a
+// path it was not findable by a moment earlier.
 func (i SessionItem) FilterValue() string {
-	return i.Session.Name
+	if i.Session.Dir == "" {
+		return i.Session.Name
+	}
+	return i.Session.Name + " " + resolver.AbbreviateHome(i.Session.Dir)
 }
 
 // A genuine height-1 list.Item is load-bearing: pagination counts every rendered

@@ -256,3 +256,67 @@ func TestNormalisePath(t *testing.T) {
 		}
 	})
 }
+
+func TestAbbreviateHome(t *testing.T) {
+	// The abbreviation is a pure string test, so every case below holds without
+	// touching the disk.
+	const home = "/Users/leeovery"
+
+	t.Run("it abbreviates a path under the home directory", func(t *testing.T) {
+		t.Setenv("HOME", home)
+
+		got := resolver.AbbreviateHome(home + "/Code/portal")
+
+		if got != "~/Code/portal" {
+			t.Errorf("AbbreviateHome(%q) = %q, want %q", home+"/Code/portal", got, "~/Code/portal")
+		}
+	})
+
+	t.Run("it abbreviates the home directory itself to a bare tilde", func(t *testing.T) {
+		t.Setenv("HOME", home)
+
+		got := resolver.AbbreviateHome(home)
+
+		if got != "~" {
+			t.Errorf("AbbreviateHome(%q) = %q, want %q", home, got, "~")
+		}
+	})
+
+	t.Run("it leaves a home-prefix lookalike path unchanged", func(t *testing.T) {
+		t.Setenv("HOME", home)
+
+		got := resolver.AbbreviateHome("/Users/leeoveryX/Code")
+
+		if got != "/Users/leeoveryX/Code" {
+			t.Errorf("AbbreviateHome(%q) = %q, want it unchanged", "/Users/leeoveryX/Code", got)
+		}
+	})
+
+	t.Run("it leaves an unrelated absolute path unchanged", func(t *testing.T) {
+		t.Setenv("HOME", home)
+
+		got := resolver.AbbreviateHome("/opt/tools")
+
+		if got != "/opt/tools" {
+			t.Errorf("AbbreviateHome(%q) = %q, want it unchanged", "/opt/tools", got)
+		}
+	})
+
+	t.Run("it returns the path unchanged when the home directory cannot be resolved", func(t *testing.T) {
+		t.Setenv("HOME", "")
+
+		got := resolver.AbbreviateHome("/Users/leeovery/Code/portal")
+
+		if got != "/Users/leeovery/Code/portal" {
+			t.Errorf("AbbreviateHome(%q) = %q, want it unchanged", "/Users/leeovery/Code/portal", got)
+		}
+	})
+
+	t.Run("it is the inverse of ExpandTilde for a path under the home directory", func(t *testing.T) {
+		t.Setenv("HOME", home)
+
+		if got := resolver.ExpandTilde(resolver.AbbreviateHome(home + "/Code/portal")); got != home+"/Code/portal" {
+			t.Errorf("round trip = %q, want %q", got, home+"/Code/portal")
+		}
+	})
+}
