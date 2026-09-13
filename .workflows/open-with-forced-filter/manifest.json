@@ -206,7 +206,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 1,
-          "current_task": "open-with-forced-filter-1-4",
+          "current_task": "open-with-forced-filter-1-5",
           "bank": [
             {
               "task": "open-with-forced-filter-1-1",
@@ -219,12 +219,23 @@
                 "internal/tui/model.go",
                 "internal/tui/grouping.go"
               ]
+            },
+            {
+              "task": "open-with-forced-filter-1-4",
+              "source": "reviewer",
+              "summary": "A classification fixture still uses a single-segment absolute positional, which stops meaning what its name says once the sigil becomes a picker invocation",
+              "failure": "At task 1-7 the sigil becomes a picker invocation, so TestShouldRunConcurrentBootstrap_IssuesNoProbe's row labelled \"direct-path open\" would exercise the sigil branch of the decider while claiming to cover the direct-path one. The table would then have no case covering a genuine direct-path positional, so a later change that made the decider issue a tmux round-trip on that branch would pass the suite and be noticed only as a stalled cold-path portal open ~/dir in the field.",
+              "detail": "cmd/concurrent_bootstrap_gate_test.go:175 — {\"direct-path open\", openProbeCmd(), []string{\"/dir\"}}. Inert today (isTUIPath, cmd/root.go:168-170, keys on argument count and never consults the resolver). Its siblings in the same file already use ~/dir (:36, :127), so the fix is one word. The other two open <abs path> fixtures (cmd/open_test.go:83, cmd/version_guard_test.go:42) are already multi-segment.",
+              "files": [
+                "cmd/concurrent_bootstrap_gate_test.go"
+              ]
             }
           ],
           "completed_tasks": [
             "open-with-forced-filter-1-1",
             "open-with-forced-filter-1-2",
-            "open-with-forced-filter-1-3"
+            "open-with-forced-filter-1-3",
+            "open-with-forced-filter-1-4"
           ]
         }
       }
