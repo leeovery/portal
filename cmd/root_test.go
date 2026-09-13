@@ -27,6 +27,12 @@ func resetRootCmd() {
 	for _, c := range rootCmd.Commands() {
 		c.SetContext(context.Background())
 	}
+	// A --help run leaves the flag Changed, which makes every later Execute of
+	// that command print help instead of running it.
+	resetHelpFlag(rootCmd)
+	for _, c := range rootCmd.Commands() {
+		resetHelpFlag(c)
+	}
 	_ = initCmd.Flags().Set("cmd", "x")
 	_ = listCmd.Flags().Set("short", "false")
 	_ = listCmd.Flags().Set("long", "false")
@@ -84,6 +90,13 @@ func resetRootCmd() {
 			_ = f.Value.Set("")
 			f.Changed = false
 		}
+	}
+}
+
+func resetHelpFlag(cmd *cobra.Command) {
+	if f := cmd.Flags().Lookup("help"); f != nil {
+		_ = f.Value.Set("false")
+		f.Changed = false
 	}
 }
 

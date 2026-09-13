@@ -136,7 +136,7 @@ A command to run in a freshly minted session is scoped with -e/--exec or after a
 Passing two or more targets (or one glob that expands to several sessions) opens a
 portal to each: this terminal becomes the first surface and the remaining N−1 open
 in host-terminal windows.`,
-	Args: cobra.ArbitraryArgs,
+	Args: validateOpenArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command, destination, err := parseCommandArgs(cmd, args)
 		if err != nil {

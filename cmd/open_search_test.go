@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/logtest"
@@ -283,5 +285,144 @@ func TestOpenCommand_SearchForm_BareSigilIsNotAUsageError(t *testing.T) {
 	}
 	if sc.sessionCalled || sc.pathCalled || sc.burstCalled {
 		t.Error("a bare search sigil must reach no other branch of open")
+	}
+}
+
+// executeOpenExpectingUsage runs `portal open <argv>` and asserts it was refused
+// with a *UsageError carrying wantMsg.
+func executeOpenExpectingUsage(t *testing.T, wantMsg string, argv ...string) {
+	t.Helper()
+
+	resetRootCmd()
+	rootCmd.SetArgs(append([]string{"open"}, argv...))
+
+	err := rootCmd.Execute()
+
+	usage, ok := errors.AsType[*UsageError](err)
+	if !ok {
+		t.Fatalf("portal open %v: error = %v (%T), want *UsageError", argv, err, err)
+	}
+	if usage.Error() != wantMsg {
+		t.Errorf("portal open %v: message = %q, want %q", argv, usage.Error(), wantMsg)
+	}
+}
+
+func TestValidateOpenArgs_RefusesSearchFormBesideAnotherTarget(t *testing.T) {
+	installSearchFormSeams(t, nil)
+
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{name: "search form first", argv: []string{"/port", "api"}},
+		{name: "search form second", argv: []string{"api", "/port"}},
+		{name: "two other targets", argv: []string{"/port", "api", "blog"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executeOpenExpectingUsage(t, "cannot use a /term search with another target", tt.argv...)
+		})
+	}
+}
+
+func TestValidateOpenArgs_RefusesSecondSearchForm(t *testing.T) {
+	installSearchFormSeams(t, nil)
+
+	executeOpenExpectingUsage(t, "cannot use a /term search with another /term search", "/port", "/blog")
+}
+
+func TestValidateOpenArgs_RefusesSearchFormWithACommand(t *testing.T) {
+	installSearchFormSeams(t, nil)
+
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{name: "exec flag", argv: []string{"/port", "-e", "ls"}},
+		{name: "dash separator", argv: []string{"/port", "--", "ls"}},
+		{name: "empty dash separator", argv: []string{"/port", "--"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executeOpenExpectingUsage(t, "cannot use a /term search with a command (-e/--)", tt.argv...)
+		})
+	}
+}
+
+func TestValidateOpenArgs_RefusesSearchFormWithFilter(t *testing.T) {
+	installSearchFormSeams(t, nil)
+
+	executeOpenExpectingUsage(t, "cannot use a /term search with -f/--filter", "/port", "-f", "blog")
+}
+
+func TestValidateOpenArgs_RefusesSearchFormWithEachDomainPin(t *testing.T) {
+	installSearchFormSeams(t, nil)
+
+	for _, pin := range []string{"-s", "-p", "-a", "-z"} {
+		t.Run(pin, func(t *testing.T) {
+			executeOpenExpectingUsage(t, "cannot use a /term search with a domain pin (-s/-p/-z/-a)", "/port", pin, "api")
+		})
+	}
+}
+
+func TestValidateOpenArgs_RefusesSearchFormWithAck(t *testing.T) {
+	installSearchFormSeams(t, nil)
+
+	executeOpenExpectingUsage(t, "cannot use a /term search with --ack", "/port", "--ack", "batch:token")
+}
+
+func TestValidateOpenArgs_RefusedLineStartsNoBootstrap(t *testing.T) {
+	runner := &recordingRunner{}
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+		t.Error("a refused line must never reach the picker")
+		return nil
+	})
+
+	executeOpenExpectingUsage(t, "cannot use a /term search with another target", "/port", "api")
+
+	if runner.calls != 0 {
+		t.Errorf("bootstrap ran %d times for a refused line, want 0", runner.calls)
+	}
+}
+
+func TestValidateOpenArgs_StillAnswersHelpOnASearchFormLine(t *testing.T) {
+	installSearchFormSeams(t, nil)
+
+	out, _, err := runRootCmd(t, "open", "/port", "--help")
+	if err != nil {
+		t.Fatalf("portal open /port --help: unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Usage:") {
+		t.Errorf("help output missing usage section: %q", out.String())
+	}
+}
+
+func TestValidateOpenArgs_AdmitsEveryNonSearchLine(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{name: "lone search form", argv: []string{"/port"}},
+		{name: "lone bare sigil", argv: []string{"/"}},
+		{name: "slash word after the separator", argv: []string{"~/Code/api", "--", "ls", "/tmp"}},
+		{name: "two positional targets", argv: []string{"api", "blog"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			installSearchFormSeams(t, nil)
+
+			resetRootCmd()
+			rootCmd.SetArgs(append([]string{"open"}, tt.argv...))
+
+			if err := rootCmd.Execute(); err != nil {
+				if usage, ok := errors.AsType[*UsageError](err); ok {
+					t.Fatalf("portal open %v was refused: %v", tt.argv, usage)
+				}
+			}
+		})
 	}
 }
