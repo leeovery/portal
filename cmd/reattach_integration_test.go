@@ -381,7 +381,7 @@ func TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton(t *testing.T) 
 	// Synchronously is fine here — only completion before the stub returns
 	// matters.
 	var tuiCalled bool
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ string, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
 		tuiCalled = true
 		if d := deferredBootstrapFromContext(cmd); d != nil {
 			if _, _, err := d.runner.Run(cmd.Context()); err != nil {
@@ -456,8 +456,8 @@ func TestReattachIntegration_OpenPathResolvesSavedOnlySession(t *testing.T) {
 
 	// Reaching the TUI would mean alias resolution produced no PathResult,
 	// masking a regression in the path-arg branch under test.
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, query string, _ []string, _ bool) error {
-		t.Errorf("openTUIFunc unexpectedly called (query=%q); resolver should have produced PathResult", query)
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, _ []string, _ bool) error {
+		t.Errorf("openTUIFunc unexpectedly called (landing=%+v); resolver should have produced PathResult", landing)
 		return nil
 	})
 
@@ -484,5 +484,5 @@ var _ SessionValidator = (*mockSessionValidator)(nil)
 var _ SwitchClienter = (*mockSwitchClient)(nil)
 var _ bootstrap.Runner = (*bootstrap.Orchestrator)(nil)
 
-var _ func(*cobra.Command, string, []string, bool) error = openTUIFunc
+var _ func(*cobra.Command, pickerLanding, []string, bool) error = openTUIFunc
 var _ func(*cobra.Command, string, []string) error = openPathFunc

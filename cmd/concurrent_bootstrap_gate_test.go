@@ -219,7 +219,7 @@ func TestPersistentPreRunE_LatchedTUI_ReadsLatchExactlyOnce(t *testing.T) {
 
 	var capturedServerStarted bool
 	var openTUIReached bool
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ string, _ []string, serverStarted bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, serverStarted bool) error {
 		capturedServerStarted = serverStarted
 		openTUIReached = true
 		return nil

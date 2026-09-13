@@ -44,7 +44,7 @@ func installOpenMultiTargetSeams(t *testing.T, deps *OpenDeps, rawArgs []string)
 		return nil
 	})
 
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
 		bc.tuiCalled = true
 		return nil
 	})

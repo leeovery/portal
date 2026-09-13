@@ -14,7 +14,7 @@ func TestBuildTUIModel_ThreadsDetectionSeams(t *testing.T) {
 	cfg.detector = fakeTerminalDetector{id: spawn.NewIdentity("com.mitchellh.ghostty", "Ghostty")}
 	cfg.resolve = spawn.NewResolver(spawn.TerminalsConfig{}).Resolve
 
-	m := buildTUIModel(cfg, "", nil)
+	m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

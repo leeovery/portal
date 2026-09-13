@@ -48,7 +48,7 @@ func themeNominationForTest(t *testing.T) theme.Nomination {
 func modelForNomination(n theme.Nomination) tui.Model {
 	cfg := defaultTestTUIConfig()
 	cfg.theme = n
-	return buildTUIModel(cfg, "", nil)
+	return buildTUIModel(cfg, pickerLanding{}, nil)
 }
 
 func assertPaintedCanvas(t *testing.T, m tui.Model, want color.Color) {
@@ -303,7 +303,7 @@ func TestConstruction_NoColorLoadsBothSelectsDark(t *testing.T) {
 	cfg := defaultTestTUIConfig()
 	cfg.theme = nomination
 	cfg.noColor = true
-	m := buildTUIModel(cfg, "", nil)
+	m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 	assertPaintedCanvas(t, m, nil)
 	if content := m.View().Content; !strings.Contains(content, "Sessions") {
@@ -365,7 +365,7 @@ func TestOpenTUI_FatalBeforeModelConstruction(t *testing.T) {
 	}
 
 	commander := commandertest.Quiet()
-	err := openTUI(cmdWithClient(tmux.NewClient(commander)), "", nil, false)
+	err := openTUI(cmdWithClient(tmux.NewClient(commander)), pickerLanding{}, nil, false)
 
 	if err == nil {
 		t.Fatal("openTUI returned nil; want the broken-built-in fatal")

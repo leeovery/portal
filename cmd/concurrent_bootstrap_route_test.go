@@ -23,7 +23,7 @@ func TestPersistentPreRunE_ColdTUI_DefersBootstrap(t *testing.T) {
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
 
 	var deferredSeen bool
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ string, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
 		if runner.calls != 0 {
 			t.Errorf("orchestrator ran synchronously (%d calls) on the cold/TUI path; want deferred", runner.calls)
 		}
@@ -52,7 +52,7 @@ func TestPersistentPreRunE_LatchedTUI_TakesAbridgedPath(t *testing.T) {
 
 	var deferredSeen bool
 	var serverStarted bool
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ string, _ []string, started bool) error {
+	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, started bool) error {
 		deferredSeen = deferredBootstrapFromContext(cmd) != nil
 		serverStarted = started
 		return nil

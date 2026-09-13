@@ -202,7 +202,7 @@ func TestAbridged_OutcomeMatrix_OpenSatisfied_AbridgedInstantPicker(t *testing.T
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
 
 	var deferredSeen, serverStarted bool
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ string, _ []string, started bool) error {
+	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, started bool) error {
 		deferredSeen = deferredBootstrapFromContext(cmd) != nil
 		serverStarted = started
 		return nil
@@ -232,7 +232,7 @@ func TestAbridged_OutcomeMatrix_OpenNotSatisfied_ConcurrentDeferred(t *testing.T
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
 
 	var deferredSeen bool
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ string, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
 		if runner.calls != 0 {
 			t.Errorf("orchestrator ran synchronously (%d calls) on the concurrent route; want deferred", runner.calls)
 		}

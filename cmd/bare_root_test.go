@@ -16,7 +16,7 @@ func TestBarePortalPrintsHelpAndDoesNotLaunchPicker(t *testing.T) {
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
 	tuiLaunched := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
 		tuiLaunched = true
 		return nil
 	})

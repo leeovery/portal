@@ -181,7 +181,7 @@ func TestThemePanelOpen_WiredThroughBuildTUIModel(t *testing.T) {
 	cfg.themeSource = newThemeSource(loader)
 	cfg.themeKeys = theme.RawKeys{Theme: "sunset"}
 
-	view := pressThemeKeyOnModel(t, buildTUIModel(cfg, "", nil))
+	view := pressThemeKeyOnModel(t, buildTUIModel(cfg, pickerLanding{}, nil))
 
 	for _, want := range []string{themePanelHeaderCopy, "sunset", "●"} {
 		if !strings.Contains(view, want) {

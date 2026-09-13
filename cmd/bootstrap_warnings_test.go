@@ -226,7 +226,7 @@ func TestPersistentPreRunE_EmitsWarningsToStderrOnCLIPath(t *testing.T) {
 func TestPersistentPreRunE_DoesNotEmitWarningsForOpenWithNoArgs(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ string, _ []string, _ bool) error { return nil })
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error { return nil })
 
 	runner := &recordingRunner{
 		warnings: []bootstrap.Warning{bootstrap.SaverDownWarning()},

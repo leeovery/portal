@@ -161,7 +161,7 @@ func TestPersistentPreRunE_Abridged_LeavesWarningsForOpenTUIOnTUIPath(t *testing
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
 
 	var pendingAtOpenTUI []bootstrap.Warning
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
 		pendingAtOpenTUI = bootstrapWarnings.Drain()
 		return nil
 	})

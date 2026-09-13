@@ -45,7 +45,7 @@ func TestBuildTUIModel_NoColorSuppressesCanvas(t *testing.T) {
 		cfg := defaultTestTUIConfig()
 		cfg.noColor = true
 
-		m := buildTUIModel(cfg, "", nil)
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		if v := m.View(); v.BackgroundColor != nil {
 			t.Errorf("noColor View.BackgroundColor = %v, want nil (canvas suppressed)", v.BackgroundColor)
@@ -60,7 +60,7 @@ func TestBuildTUIModel_NoColorSuppressesCanvas(t *testing.T) {
 		// a non-program test.
 		cfg.theme = theme.ConstantNomination(themetest.Builtin(t, theme.DefaultDarkSlug))
 
-		m := buildTUIModel(cfg, "", nil)
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		if v := m.View(); v.BackgroundColor == nil {
 			t.Errorf("coloured View.BackgroundColor = nil, want the canvas colour set")

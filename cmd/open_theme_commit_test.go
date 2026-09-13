@@ -99,7 +99,7 @@ func themeRoundTripConfig(t *testing.T) tuiConfig {
 func startRoundTripPicker(t *testing.T, cfg tuiConfig) tui.Model {
 	t.Helper()
 
-	m := buildTUIModel(cfg, "", nil)
+	m := buildTUIModel(cfg, pickerLanding{}, nil)
 	m = update(t, m, tea.WindowSizeMsg{Width: roundTripTermWidth, Height: roundTripTermHeight})
 	return update(t, m, darkBackgroundReply)
 }

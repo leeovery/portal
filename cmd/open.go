@@ -151,6 +151,13 @@ in host-terminal windows.`,
 			}
 		}
 
+		// Ahead of the multi-target gate as much as of resolution: a term carrying
+		// glob metacharacters is literal text to search for, and the gate would read
+		// it as a target expandable to several sessions and burst it.
+		if forms := searchFormPositionals(cmd, args); len(forms) > 0 {
+			return openTUIFunc(cmd, pickerLanding{filter: resolver.SearchTerm(forms[0]), search: true}, nil, serverWasStarted(cmd))
+		}
+
 		// Ahead of resolution and the pin dispatch, so a filter combined with a pin
 		// is rejected rather than resolving the pin.
 		if cmd.Flags().Changed("filter") {
@@ -161,7 +168,7 @@ in host-terminal windows.`,
 			if filterVal == "" {
 				return NewUsageError("-f/--filter value must not be empty")
 			}
-			return openTUIFunc(cmd, filterVal, command, serverWasStarted(cmd))
+			return openTUIFunc(cmd, pickerLanding{filter: filterVal}, command, serverWasStarted(cmd))
 		}
 
 		// Raw argv because cobra collapses repeated same-flag values and splits
@@ -182,7 +189,7 @@ in host-terminal windows.`,
 		}
 
 		if destination == "" {
-			return openTUIFunc(cmd, "", command, serverWasStarted(cmd))
+			return openTUIFunc(cmd, pickerLanding{}, command, serverWasStarted(cmd))
 		}
 
 		query := destination
@@ -517,8 +524,8 @@ func themeResolution(keys prefs.ThemeKeys, loader theme.Loader) (theme.Resolutio
 	return resolution, raw, nil
 }
 
-func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Model {
-	return tui.Build(tui.Deps{
+func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.Model {
+	deps := tui.Deps{
 		Lister:           cfg.lister,
 		Killer:           cfg.killer,
 		Renamer:          cfg.renamer,
@@ -538,7 +545,6 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		Theme:            cfg.theme,
 		ThemeKeys:        cfg.themeKeys,
 		ThemeSource:      cfg.themeSource,
-		InitialFilter:    initialFilter,
 		Command:          command,
 		ServerStarted:    cfg.serverStarted,
 		InsideTmux:       cfg.insideTmux,
@@ -552,7 +558,13 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		SpawnExe:         cfg.spawnExe,
 		SpawnGetenv:      cfg.spawnGetenv,
 		SpawnLogger:      cfg.spawnLogger,
-	})
+	}
+	if landing.search {
+		deps.Search = &tui.SearchForm{Term: landing.filter}
+	} else {
+		deps.InitialFilter = landing.filter
+	}
+	return tui.Build(deps)
 }
 
 func processTUIResult(model tui.Model, connector SessionConnector) error {
@@ -566,7 +578,7 @@ func processTUIResult(model tui.Model, connector SessionConnector) error {
 	return connector.Connect(selected)
 }
 
-func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverStarted bool) error {
+func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, serverStarted bool) error {
 	client := tmuxClient(cmd)
 	gitResolver := &resolverAdapter{}
 	gen := nanoid.NewGenerator()
@@ -676,7 +688,7 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		}
 	}
 
-	m := buildTUIModel(cfg, initialFilter, command)
+	m := buildTUIModel(cfg, landing, command)
 	// Staged rather than written: the model emits them only after the loading page
 	// is dismissed, because a direct write during loading corrupts the rendered UI.
 	stageBootstrapWarningsOnModel(&m)

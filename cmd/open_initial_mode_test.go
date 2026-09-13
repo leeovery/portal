@@ -28,7 +28,7 @@ func TestBuildTUIModel_InjectsInitialMode(t *testing.T) {
 		cfg := defaultTestTUIConfig()
 		cfg.initialMode = prefs.ModeFlat
 
-		m := buildTUIModel(cfg, "", nil)
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		if got := m.SessionListTitle(); got != "Sessions" {
 			t.Errorf("SessionListTitle() = %q, want %q", got, "Sessions")
@@ -39,7 +39,7 @@ func TestBuildTUIModel_InjectsInitialMode(t *testing.T) {
 		cfg := defaultTestTUIConfig()
 		cfg.initialMode = prefs.ModeByTag
 
-		m := buildTUIModel(cfg, "", nil)
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		if got := m.SessionListTitle(); got != "Sessions — by tag" {
 			t.Errorf("SessionListTitle() = %q, want %q", got, "Sessions — by tag")
@@ -50,7 +50,7 @@ func TestBuildTUIModel_InjectsInitialMode(t *testing.T) {
 		cfg := defaultTestTUIConfig()
 		cfg.initialMode = prefs.ModeByProject
 
-		m := buildTUIModel(cfg, "", nil)
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		if got := m.SessionListTitle(); got != "Sessions — by project" {
 			t.Errorf("SessionListTitle() = %q, want %q", got, "Sessions — by project")
@@ -65,7 +65,7 @@ func TestBuildTUIModel_InjectsPersister(t *testing.T) {
 		cfg.initialMode = prefs.ModeFlat
 		cfg.modePersister = persister
 
-		m := buildTUIModel(cfg, "", nil)
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		updated, _ := m.Update(keyS)
 		_ = updated
@@ -82,7 +82,7 @@ func TestBuildTUIModel_InjectsPersister(t *testing.T) {
 		cfg.initialMode = prefs.ModeFlat
 		cfg.modePersister = nil
 
-		m := buildTUIModel(cfg, "", nil)
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		// Must not panic; the toggle still advances in-memory.
 		updated, _ := m.Update(keyS)
@@ -154,7 +154,7 @@ func TestOpenTUI_InitialModeFromPrefs(t *testing.T) {
 		cfg.initialMode = loadInitialModeForTest(t)
 		cfg.modePersister = load.Store
 
-		m := buildTUIModel(cfg, "", nil)
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
 		m.Update(keyS)
 
 		if got := loadInitialModeForTest(t); got != prefs.ModeByProject {
