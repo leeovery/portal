@@ -961,3 +961,157 @@ func TestFixtureNamesIncludesRenameRefusals(t *testing.T) {
 		}
 	}
 }
+
+// The fixture data lives under /home/user, which AbbreviateHome only folds for
+// a process whose home is that directory — so the abbreviated forms the frame
+// is judged on are unreachable without pinning it.
+const searchResultsHome = "/home/user"
+
+func searchResultsFrame(t *testing.T, keys ...tea.KeyPressMsg) string {
+	t.Helper()
+	t.Setenv("HOME", searchResultsHome)
+
+	fx, err := capture.FixtureByName("sessions-search-results")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-search-results): %v", err)
+	}
+
+	var model tea.Model = fx.ModelAt(darkBuiltinTheme(t), harnessWidth, harnessHeight)
+	for _, key := range keys {
+		var cmd tea.Cmd
+		model, cmd = model.Update(key)
+		model = settleCommands(model, cmd, 0)
+	}
+	return ansi.Strip(model.(tui.Model).View().Content)
+}
+
+// settleCommands drives a command and whatever it returns back through Update,
+// so a regroup whose filter pass is an async command is settled before the rows
+// are read — as the running tea program settles it for the live capture.
+func settleCommands(model tea.Model, cmd tea.Cmd, depth int) tea.Model {
+	if cmd == nil || depth >= 8 {
+		return model
+	}
+	msg := cmd()
+	if msg == nil {
+		return model
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			model = settleCommands(model, c, depth+1)
+		}
+		return model
+	}
+	model, next := model.Update(msg)
+	return settleCommands(model, next, depth+1)
+}
+
+// searchResultsRow is the one frame line carrying name, so an assertion about
+// one row is not satisfied by another row's text.
+func searchResultsRow(t *testing.T, frame, name string) string {
+	t.Helper()
+	for line := range strings.SplitSeq(frame, "\n") {
+		if strings.Contains(line, name) {
+			return line
+		}
+	}
+	t.Fatalf("the frame carries no row for %s:\n%s", name, frame)
+	return ""
+}
+
+func TestFixtureNamesIncludesSessionsSearchResults(t *testing.T) {
+	if !slices.Contains(capture.FixtureNames(), "sessions-search-results") {
+		t.Errorf("FixtureNames() %v does not include sessions-search-results", capture.FixtureNames())
+	}
+	fx, err := capture.FixtureByName("sessions-search-results")
+	if err != nil {
+		t.Fatalf("FixtureByName(sessions-search-results): %v", err)
+	}
+	if got := fx.Name(); got != "sessions-search-results" {
+		t.Errorf("FixtureByName(sessions-search-results) returned the fixture named %s", got)
+	}
+}
+
+func TestSessionsSearchResultsFixture(t *testing.T) {
+	t.Run("it builds a search-opened model landing on the Sessions page with the term committed", func(t *testing.T) {
+		fx, err := capture.FixtureByName("sessions-search-results")
+		if err != nil {
+			t.Fatalf("FixtureByName(sessions-search-results): %v", err)
+		}
+
+		deps := fx.Deps(darkBuiltinTheme(t))
+		if deps.Search == nil {
+			t.Fatal("Deps().Search is nil; the fixture does not open the picker through a search form")
+		}
+		if got, want := deps.Search.Term, "port"; got != want {
+			t.Errorf("Deps().Search.Term = %q, want %q", got, want)
+		}
+
+		m := fx.ModelAt(darkBuiltinTheme(t), harnessWidth, harnessHeight)
+		if m.ActivePage() != tui.PageSessions {
+			t.Errorf("ActivePage() = %d, want PageSessions", m.ActivePage())
+		}
+		if got, want := m.SessionListTitle(), "Sessions"; got != want {
+			t.Errorf("SessionListTitle() = %q, want %q (the fixture opens in Flat mode)", got, want)
+		}
+	})
+
+	t.Run("it narrows the list to the containment set", func(t *testing.T) {
+		frame := searchResultsFrame(t)
+		for _, name := range []string{"portal-a1b2", "api-work", "legacy-port-shim", "portal-notes"} {
+			if !strings.Contains(frame, name) {
+				t.Errorf("the frame is missing the matching session %q:\n%s", name, frame)
+			}
+		}
+		if strings.Contains(frame, "evvi-sync-engine") {
+			t.Errorf("the frame carries evvi-sync-engine, which matches neither field — the list is not narrowed:\n%s", frame)
+		}
+	})
+
+	t.Run("it renders a home-abbreviated directory beside the session name", func(t *testing.T) {
+		frame := searchResultsFrame(t)
+		if !strings.Contains(frame, "portal-a1b2 ~/code/portal") {
+			t.Errorf("the frame does not carry the abbreviated directory one space after its session name:\n%s", frame)
+		}
+	})
+
+	t.Run("it renders a row matched only by its recorded directory", func(t *testing.T) {
+		frame := searchResultsFrame(t)
+		if !strings.Contains(frame, "api-work ~/code/portal-gateway") {
+			t.Errorf("the frame does not carry the directory-only match and its path:\n%s", frame)
+		}
+	})
+
+	t.Run("it renders an empty directory slot for a session carrying none", func(t *testing.T) {
+		row := searchResultsRow(t, searchResultsFrame(t), "legacy-port-shim")
+		if strings.Contains(row, "/") {
+			t.Errorf("the directory-less session's row carries a path:\n%s", row)
+		}
+	})
+
+	t.Run("it leaves a directory outside the home directory unabbreviated", func(t *testing.T) {
+		frame := searchResultsFrame(t)
+		if !strings.Contains(frame, "portal-notes /opt/portal-tools") {
+			t.Errorf("the frame does not carry the unabbreviated out-of-home path:\n%s", frame)
+		}
+	})
+
+	t.Run("it left-truncates the longest path in the frame", func(t *testing.T) {
+		row := searchResultsRow(t, searchResultsFrame(t), "portal-design-exports-review")
+		if !strings.Contains(row, "…/") {
+			t.Errorf("the deepest path is not left-truncated at the harness width; its truncation rung is uncaptured:\n%s", row)
+		}
+	})
+
+	t.Run("it renders the column in By Project and By Tag", func(t *testing.T) {
+		byProject := searchResultsFrame(t, tea.KeyPressMsg{Code: 's', Text: "s"})
+		if !strings.Contains(byProject, "~/code/portal") {
+			t.Errorf("the By Project frame carries no directory column:\n%s", byProject)
+		}
+
+		byTag := searchResultsFrame(t, tea.KeyPressMsg{Code: 's', Text: "s"}, tea.KeyPressMsg{Code: 's', Text: "s"})
+		if !strings.Contains(byTag, "~/code/portal") {
+			t.Errorf("the By Tag frame carries no directory column:\n%s", byTag)
+		}
+	})
+}

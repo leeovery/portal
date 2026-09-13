@@ -27,10 +27,13 @@ type Fixture struct {
 
 	Lister *fakeLister
 
-	projectStore       *fakeProjectStore
-	projectEditor      tui.ProjectEditor
-	aliasEditor        tui.AliasEditor
-	initialMode        prefs.SessionListMode
+	projectStore  *fakeProjectStore
+	projectEditor tui.ProjectEditor
+	aliasEditor   tui.AliasEditor
+	initialMode   prefs.SessionListMode
+	// search non-nil opens the picker as a session search did, with the term
+	// committed as the list's filter.
+	search             *tui.SearchForm
 	initialMultiSelect []string
 	initialCursor      string
 	// Independent of the `--theme` palette: the union is what the panel lists —
@@ -85,6 +88,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		// pane-read fallback never fires); ModePersister stays nil so an
 		// `s`-toggle writes nowhere.
 		InitialMode:   f.initialMode,
+		Search:        f.search,
 		Command:       f.command,
 		CWD:           "/home/user",
 		ServerStarted: f.serverStarted,
@@ -147,6 +151,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsMultiSelectPreflightAbortFixture,
 		sessionsBurstOpeningFixture,
 		sessionsNoTagsSignpostFixture,
+		sessionsSearchResultsFixture,
 		projectsFixture,
 		projectsCommandPendingFixture,
 		themePanelAdaptivePairFixture,
@@ -439,6 +444,43 @@ func sessionsNoTagsSignpostFixture() *Fixture {
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: projects},
 		initialMode:  prefs.ModeByTag,
+	}
+}
+
+// One frame carrying every branch of the search-opened directory column: a home
+// path shown abbreviated, a row matched on its directory alone, a row whose
+// recorded directory is empty, a path deep enough to be left-truncated at the
+// widths these captures are taken at, a path outside home that stays absolute,
+// and a session matching neither field so the narrowing is visible by its
+// absence.
+//
+// legacy-port-shim carries no Dir, against this file's stamped-Dir convention:
+// the dir-resolution seams are nil, so a grouped rebuild resolves nothing and
+// routes it to the catch-all rather than issuing a pane read the harness has no
+// server for.
+func sessionsSearchResultsFixture() *Fixture {
+	sessions := []tmux.Session{
+		{Name: "portal-a1b2", Windows: 3, Attached: true, Dir: "/home/user/code/portal"},
+		{Name: "api-work", Windows: 2, Attached: false, Dir: "/home/user/code/portal-gateway"},
+		{Name: "legacy-port-shim", Windows: 1, Attached: false},
+		{Name: "portal-design-exports-review", Windows: 2, Attached: false, Dir: "/home/user/code/portal/internal/capture/testdata/reference/design-exports/frames"},
+		{Name: "portal-notes", Windows: 1, Attached: false, Dir: "/opt/portal-tools"},
+		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
+	}
+
+	projects := []project.Project{
+		{Path: "/home/user/code/portal", Name: "portal", Tags: []string{"work"}},
+		{Path: "/home/user/code/portal-gateway", Name: "portal-gateway", Tags: []string{"work", "client"}},
+		{Path: "/opt/portal-tools", Name: "portal-tools", Tags: []string{"tools"}},
+		{Path: "/home/user/code/evvi", Name: "evvi"},
+	}
+
+	return &Fixture{
+		name:         "sessions-search-results",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: projects},
+		initialMode:  prefs.ModeFlat,
+		search:       &tui.SearchForm{Term: "port"},
 	}
 }
 
