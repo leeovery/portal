@@ -119,18 +119,36 @@ func (c *Client) NewSession(name, dir, shellCommand string) error {
 	return nil
 }
 
+// listSessionsArgs is the read every session-list reader issues, so they parse
+// identically shaped output. @portal-dir must stay the LAST field: a directory
+// path may contain a literal '|', so it needs the unbounded trailing SplitN slot.
+var listSessionsArgs = []string{"list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}|#{@portal-dir}"}
+
 // ListSessions returns the running tmux sessions, excluding Portal's own
 // underscore-prefixed internal ones. No running server yields an empty slice and
 // a nil error.
 func (c *Client) ListSessions() ([]Session, error) {
-	// @portal-dir must stay the LAST field: a directory path may contain a
-	// literal '|', so it needs the unbounded trailing SplitN slot.
-	output, err := c.cmd.Run("list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}|#{@portal-dir}")
+	output, err := c.cmd.Run(listSessionsArgs...)
 	if err != nil {
 		// Swallowed deliberately: the error is the no-server signal.
 		return []Session{}, nil
 	}
+	return parseSessionList(output)
+}
 
+// ListSessionsProbe is the discriminating variant of ListSessions: a failed
+// list-sessions returns a nil slice and an error wrapping the *CommandError the
+// commander built, so a caller that cannot treat an unread list as an empty one
+// reports tmux's own words instead.
+func (c *Client) ListSessionsProbe() ([]Session, error) {
+	output, err := c.cmd.Run(listSessionsArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
+	}
+	return parseSessionList(output)
+}
+
+func parseSessionList(output string) ([]Session, error) {
 	if output == "" {
 		return []Session{}, nil
 	}

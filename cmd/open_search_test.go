@@ -461,7 +461,7 @@ type fakeSearchSource struct {
 	currentCalls int
 }
 
-func (f *fakeSearchSource) ListSessions() ([]tmux.Session, error) {
+func (f *fakeSearchSource) ListSessionsProbe() ([]tmux.Session, error) {
 	f.listCalls++
 	return slices.Clone(f.sessions), f.listErr
 }
@@ -558,7 +558,7 @@ func TestOpenCommand_SearchForm_TermLessFormTakesNoCount(t *testing.T) {
 	executeOpen(t, "/")
 
 	if sc.source.listCalls != 0 || sc.source.currentCalls != 0 {
-		t.Errorf("term-less form read the session set: ListSessions=%d CurrentSessionName=%d, want 0 and 0",
+		t.Errorf("term-less form read the session set: ListSessionsProbe=%d CurrentSessionName=%d, want 0 and 0",
 			sc.source.listCalls, sc.source.currentCalls)
 	}
 	if want := (pickerLanding{search: true}); sc.landing != want {
@@ -644,7 +644,7 @@ func TestOpenCommand_SearchForm_CountsOverExactlyTheEnumeratedSessions(t *testin
 		t.Fatal("both enumerated sessions match, so the picker must open")
 	}
 	if sc.source.listCalls != 1 {
-		t.Errorf("ListSessions was called %d times, want 1", sc.source.listCalls)
+		t.Errorf("ListSessionsProbe was called %d times, want 1", sc.source.listCalls)
 	}
 }
 
@@ -658,6 +658,9 @@ func TestOpenCommand_SearchForm_ReturnsAnEnumerationError(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "no server running") {
 		t.Fatalf("error = %v, want the enumeration failure", err)
+	}
+	if usage, ok := errors.AsType[*UsageError](err); ok {
+		t.Errorf("error = %v, want an ordinary failure rather than a refusal of the command line", usage)
 	}
 	if sc.tuiCalled || sc.sessionCalled {
 		t.Error("a failed read is not a zero match: neither the picker nor an attach may follow it")

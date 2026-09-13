@@ -71,9 +71,11 @@ func validateOpenArgs(cmd *cobra.Command, args []string) error {
 
 // SearchSessionSource enumerates the live sessions a search term is counted
 // against, and names the session the caller is attached to so the count is taken
-// over the set the picker would list.
+// over the set the picker would list. The enumeration discriminates a failed
+// read from an empty server: a list that could not be read has searched nothing,
+// so it must not be counted as no matches.
 type SearchSessionSource interface {
-	ListSessions() ([]tmux.Session, error)
+	ListSessionsProbe() ([]tmux.Session, error)
 	CurrentSessionName() (string, error)
 }
 
@@ -89,7 +91,7 @@ func buildSearchSessionSource(cmd *cobra.Command) SearchSessionSource {
 // current-session read that fails or answers empty drops nothing, so a session
 // is never counted out on a failed read.
 func searchCandidates(src SearchSessionSource) ([]tmux.Session, error) {
-	sessions, err := src.ListSessions()
+	sessions, err := src.ListSessionsProbe()
 	if err != nil {
 		return nil, err
 	}
