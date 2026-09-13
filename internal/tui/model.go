@@ -187,8 +187,11 @@ type Model struct {
 	initialCursor string
 	// searchForm and searchTerm describe the invocation rather than a pending
 	// action, so the landing never clears them.
-	searchForm         bool
-	searchTerm         string
+	searchForm bool
+	searchTerm string
+	// searchItems is the item slice the containment filter resolves its ranks
+	// against; nil for every picker a search term did not open.
+	searchItems        *searchItemSource
 	insideTmux         bool
 	currentSession     string
 	modal              modalState
@@ -858,6 +861,7 @@ func New(lister SessionLister, opts ...Option) Model {
 		m.themeState.gate = newNominationGate(m.themeState.nomination)
 	}
 	m.syncResolvedMode()
+	m.installSearchFilter()
 	return m
 }
 
@@ -1216,6 +1220,11 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 		items = ToListItems(filtered)
 	}
 
+	// Re-pointed before the items are handed over: the filter pass SetItems
+	// defers into a tea.Cmd resolves its ranks against that slice.
+	if m.searchItems != nil {
+		m.searchItems.set(items)
+	}
 	cmd := m.sessionList.SetItems(items)
 
 	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
