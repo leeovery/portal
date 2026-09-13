@@ -904,6 +904,7 @@ func (m *Model) sessionDelegate() SessionDelegate {
 		Theme:       m.themeState.active,
 		Colourless:  m.colourless,
 		MultiSelect: m.multiSelectMode,
+		ShowDir:     m.searchForm,
 		Selected:    m.selectedSessions,
 		GoneFlagged: m.goneFlagged,
 	}
