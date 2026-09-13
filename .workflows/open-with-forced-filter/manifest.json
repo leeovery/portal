@@ -101,9 +101,9 @@
     "planning": {
       "items": {
         "open-with-forced-filter": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
-          "spec_commit": "d70e5bef1a404c309a2ca9fc1f2d6109daa92239",
+          "spec_commit": "7421009c05ee012c7ac4b5f2d3787388b1a99a1f",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "auto",
