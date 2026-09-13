@@ -1282,11 +1282,19 @@ func (m *Model) evaluateDefaultPage() {
 
 // A search form carries no initial filter, so exactly one of the two applies.
 func (m *Model) applySearchLanding() {
-	if !m.searchForm || m.searchTerm == "" {
+	if !m.searchForm {
 		return
 	}
+	// A term-less form opens the input focused and empty, ready to type.
+	state := list.FilterApplied
+	if m.searchTerm == "" {
+		state = list.Filtering
+	}
+	// Setting the text is what runs the filter pass, so it must precede the state
+	// flip: the list serves its filtered set in every state but Unfiltered, and an
+	// unpopulated one would hide every session.
 	m.sessionList.SetFilterText(m.searchTerm)
-	m.sessionList.SetFilterState(list.FilterApplied)
+	m.sessionList.SetFilterState(state)
 	m.ensureSessionRowSelected()
 }
 

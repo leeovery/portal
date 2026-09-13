@@ -156,20 +156,6 @@ func TestSearchFormLanding(t *testing.T) {
 		}
 	})
 
-	t.Run("it applies no filter for an empty search term", func(t *testing.T) {
-		m := searchLanding(t, prefs.ModeFlat, "", sessions, nil)
-
-		if m.activePage != PageSessions {
-			t.Errorf("activePage = %v, want PageSessions", m.activePage)
-		}
-		if got := m.sessionList.FilterState(); got != list.Unfiltered {
-			t.Errorf("session filter state = %v, want Unfiltered", got)
-		}
-		if got := len(m.sessionList.VisibleItems()); got != len(sessions) {
-			t.Errorf("visible sessions = %d, want all %d", got, len(sessions))
-		}
-	})
-
 	t.Run("it leaves the -f landing unchanged", func(t *testing.T) {
 		m := Build(Deps{
 			Lister:        fakeLister{},

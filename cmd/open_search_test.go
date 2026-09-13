@@ -269,3 +269,19 @@ func TestOpenCommand_MultiSegmentPathPositional_StillMints(t *testing.T) {
 		t.Errorf("minted path = %q, want %q", gotPath, dir)
 	}
 }
+
+func TestOpenCommand_SearchForm_BareSigilIsNotAUsageError(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+
+	executeOpen(t, "/")
+
+	if !sc.tuiCalled {
+		t.Fatal("openTUIFunc must be called for a bare search sigil")
+	}
+	if want := (pickerLanding{search: true}); sc.landing != want {
+		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	}
+	if sc.sessionCalled || sc.pathCalled || sc.burstCalled {
+		t.Error("a bare search sigil must reach no other branch of open")
+	}
+}
