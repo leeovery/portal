@@ -221,10 +221,12 @@
             "open-with-forced-filter-2-4"
           ],
           "consolidated_phases": [
-            1
+            1,
+            2
           ],
           "completed_phases": [
-            1
+            1,
+            2
           ]
         }
       }
