@@ -169,16 +169,61 @@
       "items": {
         "open-with-forced-filter": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "consolidation_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 0,
-          "linters": [],
-          "project_skills": [],
+          "linters": [
+            {
+              "name": "go vet",
+              "command": "go vet ./..."
+            },
+            {
+              "name": "gofmt",
+              "command": "gofmt -l ."
+            },
+            {
+              "name": "golangci-lint",
+              "command": "golangci-lint run ./..."
+            }
+          ],
+          "project_skills": [
+            ".claude/skills/golang-how-to",
+            ".claude/skills/golang-testing",
+            ".claude/skills/golang-code-style",
+            ".claude/skills/golang-naming",
+            ".claude/skills/golang-error-handling",
+            ".claude/skills/golang-design-patterns",
+            ".claude/skills/golang-structs-interfaces",
+            ".claude/skills/golang-dependency-injection",
+            ".claude/skills/golang-safety",
+            ".claude/skills/golang-concurrency",
+            ".claude/skills/golang-context",
+            ".claude/skills/golang-cli",
+            ".claude/skills/golang-spf13-cobra",
+            ".claude/skills/golang-dependency-management"
+          ],
           "current_phase": 1,
-          "current_task": null
+          "current_task": "open-with-forced-filter-1-2",
+          "bank": [
+            {
+              "task": "open-with-forced-filter-1-1",
+              "source": "reviewer",
+              "summary": "CLAUDE.md's session-grouping paragraph still describes the in-memory cache this task deleted",
+              "failure": "A contributor or agent reads CLAUDE.md:210 (\"caching the guess in-memory (into m.sessions ...)\") and writes code reading a derived directory off tmux.Session.Dir, reintroducing the conflation the spec forbids. Noticed only as the user-visible symptom: a session becoming findable (or showing a path) after an s regroup that it did not a moment earlier, with no test failing.",
+              "detail": "Claim falsified by internal/tui/model.go:1104-1111 (applySessions nils m.derivedDirs) and internal/tui/model.go:1164-1186 (resolveDerivedDirs stores into the map, never into m.sessions). The same paragraph's internal/tui row at CLAUDE.md:67 stays true. Wants one edit at the phase/feature boundary once 1-2 and the directory column land.",
+              "files": [
+                "CLAUDE.md",
+                "internal/tui/model.go",
+                "internal/tui/grouping.go"
+              ]
+            }
+          ],
+          "completed_tasks": [
+            "open-with-forced-filter-1-1"
+          ]
         }
       }
     }
