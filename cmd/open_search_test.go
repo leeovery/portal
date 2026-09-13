@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +11,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/spawn"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -122,8 +125,10 @@ type searchFormCapture struct {
 	command       []string
 	burstCalled   bool
 	sessionCalled bool
+	attached      string
 	pathCalled    bool
 	seams         *recordingResolverSeams
+	source        *fakeSearchSource
 }
 
 func installSearchFormSeams(t *testing.T, lister resolver.SessionLister) *searchFormCapture {
@@ -131,13 +136,14 @@ func installSearchFormSeams(t *testing.T, lister resolver.SessionLister) *search
 
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
-	sc := &searchFormCapture{seams: &recordingResolverSeams{}}
+	sc := &searchFormCapture{seams: &recordingResolverSeams{}, source: &fakeSearchSource{}}
 
 	deps := OpenDeps{
-		SessionLister: sc.seams,
-		AliasLookup:   sc.seams,
-		Zoxide:        sc.seams,
-		DirValidator:  sc.seams,
+		SessionLister:  sc.seams,
+		AliasLookup:    sc.seams,
+		Zoxide:         sc.seams,
+		DirValidator:   sc.seams,
+		SearchSessions: sc.source,
 	}
 	if lister != nil {
 		deps.SessionLister = lister
@@ -154,8 +160,9 @@ func installSearchFormSeams(t *testing.T, lister resolver.SessionLister) *search
 		sc.burstCalled = true
 		return nil
 	})
-	withFuncSeam(t, &openSessionFunc, func(*cobra.Command, string) error {
+	withFuncSeam(t, &openSessionFunc, func(_ *cobra.Command, name string) error {
 		sc.sessionCalled = true
+		sc.attached = name
 		return nil
 	})
 	withFuncSeam(t, &openPathFunc, func(*cobra.Command, string, []string) error {
@@ -206,40 +213,56 @@ func TestOpenCommand_SearchForm_ResolvesNothing(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_GlobMetacharactersAreLiteralText(t *testing.T) {
-	sc := installSearchFormSeams(t, &testSessionLister{names: []string{"portal-a", "portal-b"}})
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "po*rt-x"}, {Name: "portal-a1b2"}}
 
-	executeOpen(t, "/po*rt")
+	executeOpen(t, "/po*")
 
-	if want := (pickerLanding{filter: "po*rt", search: true}); sc.landing != want {
-		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	if sc.attached != "po*rt-x" {
+		t.Errorf("attached session = %q, want %q; the term is literal text, not a glob", sc.attached, "po*rt-x")
 	}
 	if sc.burstCalled {
 		t.Error("a search term carrying glob metacharacters must not dispatch the burst")
 	}
 }
 
-func TestOpenCommand_SearchForm_TermEqualToLiveSessionNameStillOpensPicker(t *testing.T) {
-	sc := installSearchFormSeams(t, &testSessionLister{names: []string{"port"}})
+func TestOpenCommand_SearchForm_AttachesASessionWhoseNameEqualsTheTerm(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "port"}}
 
 	executeOpen(t, "/port")
 
-	if sc.sessionCalled {
-		t.Error("a search form must not attach, even when its term equals a live session name")
+	if sc.attached != "port" {
+		t.Errorf("attached session = %q, want %q", sc.attached, "port")
 	}
-	if !sc.tuiCalled {
-		t.Fatal("openTUIFunc must be called for a search form")
+	if sc.tuiCalled {
+		t.Error("a term matching exactly one live session must not open the picker")
 	}
 }
 
 func TestOpenCommand_SearchForm_EmitsNoResolveLine(t *testing.T) {
-	sink := logtest.Install(t)
+	tests := []struct {
+		name     string
+		sessions []tmux.Session
+	}{
+		{name: "no match"},
+		{name: "one match", sessions: []tmux.Session{{Name: "port"}}},
+		{name: "two matches", sessions: []tmux.Session{{Name: "port"}, {Name: "portal-a1b2"}}},
+	}
 
-	installSearchFormSeams(t, &testSessionLister{names: []string{"port"}})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sink := logtest.Install(t)
 
-	executeOpen(t, "/port")
+			sc := installSearchFormSeams(t, nil)
+			sc.source.sessions = tt.sessions
 
-	if records := sink.Records().Matching("resolve", "resolved"); len(records) != 0 {
-		t.Errorf("search form emitted %d resolve records, want none: %v", len(records), records)
+			executeOpen(t, "/port")
+
+			if records := sink.Records().Matching("resolve", "resolved"); len(records) != 0 {
+				t.Errorf("search form emitted %d resolve records, want none: %v", len(records), records)
+			}
+		})
 	}
 }
 
@@ -424,5 +447,219 @@ func TestValidateOpenArgs_AdmitsEveryNonSearchLine(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// fakeSearchSource stands in for the live session enumeration the search form
+// counts over, recording every read so a test can assert none was taken.
+type fakeSearchSource struct {
+	sessions     []tmux.Session
+	listErr      error
+	current      string
+	currentErr   error
+	listCalls    int
+	currentCalls int
+}
+
+func (f *fakeSearchSource) ListSessions() ([]tmux.Session, error) {
+	f.listCalls++
+	return slices.Clone(f.sessions), f.listErr
+}
+
+func (f *fakeSearchSource) CurrentSessionName() (string, error) {
+	f.currentCalls++
+	return f.current, f.currentErr
+}
+
+func TestOpenCommand_SearchForm_AttachesTheSingleMatch(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
+
+	executeOpen(t, "/port")
+
+	if sc.attached != "portal-a1b2" {
+		t.Errorf("attached session = %q, want %q", sc.attached, "portal-a1b2")
+	}
+	if sc.tuiCalled {
+		t.Error("the picker must not open when exactly one live session matches")
+	}
+}
+
+func TestOpenCommand_SearchForm_AttachesASessionMatchedOnlyByItsRecordedDirectory(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{
+		{Name: "api-work", Dir: filepath.Join(os.Getenv("HOME"), "Code", "portal")},
+		{Name: "blog-c3d4"},
+	}
+
+	executeOpen(t, "/portal")
+
+	if sc.attached != "api-work" {
+		t.Errorf("attached session = %q, want %q", sc.attached, "api-work")
+	}
+	if sc.tuiCalled {
+		t.Error("a directory-only match is still a match: the picker must not open")
+	}
+}
+
+func TestOpenCommand_SearchForm_OpensPickerWhenNothingMatches(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "blog-c3d4"}, {Name: "api-e5f6"}}
+
+	_, errBuf, err := runRootCmd(t, "open", "/port")
+	if err != nil {
+		t.Fatalf("portal open /port: error = %v, want nil; zero matches is a filter result", err)
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", errBuf.String())
+	}
+	if want := (pickerLanding{filter: "port", search: true}); sc.landing != want {
+		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	}
+	if sc.sessionCalled {
+		t.Error("nothing matched, so nothing may be attached")
+	}
+}
+
+func TestOpenCommand_SearchForm_OpensPickerWhenTwoOrMoreMatch(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}, {Name: "blog-c3d4"}}
+
+	executeOpen(t, "/port")
+
+	if !sc.tuiCalled {
+		t.Fatal("two matches must open the picker")
+	}
+	if want := (pickerLanding{filter: "port", search: true}); sc.landing != want {
+		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	}
+	if sc.sessionCalled {
+		t.Error("two matches leave a choice: nothing may be attached")
+	}
+}
+
+func TestOpenCommand_SearchForm_OpensPickerWhenNoSessionsAreLive(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+
+	executeOpen(t, "/port")
+
+	if !sc.tuiCalled {
+		t.Fatal("an empty session list must open the picker")
+	}
+	if sc.sessionCalled {
+		t.Error("no live session: nothing may be attached")
+	}
+}
+
+func TestOpenCommand_SearchForm_TermLessFormTakesNoCount(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+
+	executeOpen(t, "/")
+
+	if sc.source.listCalls != 0 || sc.source.currentCalls != 0 {
+		t.Errorf("term-less form read the session set: ListSessions=%d CurrentSessionName=%d, want 0 and 0",
+			sc.source.listCalls, sc.source.currentCalls)
+	}
+	if want := (pickerLanding{search: true}); sc.landing != want {
+		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	}
+	if sc.sessionCalled {
+		t.Error("a term-less form counts nothing, so it can attach nothing")
+	}
+}
+
+func TestOpenCommand_SearchForm_ExcludesTheCurrentSessionFromTheCount(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
+	sc.source.current = "portal-a1b2"
+
+	executeOpen(t, "/port")
+
+	if sc.sessionCalled {
+		t.Errorf("attached %q: the session the user is in is not a candidate", sc.attached)
+	}
+	if !sc.tuiCalled {
+		t.Fatal("with the only match excluded the picker must open")
+	}
+}
+
+func TestOpenCommand_SearchForm_AttachesTheOtherMatchWhenTheCurrentSessionAlsoMatches(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
+	sc.source.current = "portal-a1b2"
+
+	executeOpen(t, "/port")
+
+	if sc.attached != "port-agent" {
+		t.Errorf("attached session = %q, want %q", sc.attached, "port-agent")
+	}
+	if sc.tuiCalled {
+		t.Error("one candidate match remains, so the picker must not open")
+	}
+}
+
+func TestOpenCommand_SearchForm_CountsNothingOutWhenTheCurrentSessionReadFails(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
+	sc.source.currentErr = errors.New("no current client")
+
+	executeOpen(t, "/port")
+
+	if sc.sessionCalled {
+		t.Errorf("attached %q: a failed current-session read must drop no candidate", sc.attached)
+	}
+	if !sc.tuiCalled {
+		t.Fatal("both sessions remain candidates, so two matches open the picker")
+	}
+}
+
+func TestOpenCommand_SearchForm_ExcludesNothingOutsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
+	sc.source.current = "portal-a1b2"
+
+	executeOpen(t, "/port")
+
+	if sc.source.currentCalls != 0 {
+		t.Errorf("CurrentSessionName was read %d times outside tmux, want 0", sc.source.currentCalls)
+	}
+	if !sc.tuiCalled {
+		t.Fatal("outside tmux both sessions are candidates, so two matches open the picker")
+	}
+}
+
+func TestOpenCommand_SearchForm_CountsOverExactlyTheEnumeratedSessions(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.sessions = []tmux.Session{{Name: "_portal-saver"}, {Name: "portal-a1b2"}}
+
+	executeOpen(t, "/portal")
+
+	if sc.sessionCalled {
+		t.Errorf("attached %q: the count is the enumeration's, with no filter of its own on top", sc.attached)
+	}
+	if !sc.tuiCalled {
+		t.Fatal("both enumerated sessions match, so the picker must open")
+	}
+	if sc.source.listCalls != 1 {
+		t.Errorf("ListSessions was called %d times, want 1", sc.source.listCalls)
+	}
+}
+
+func TestOpenCommand_SearchForm_ReturnsAnEnumerationError(t *testing.T) {
+	sc := installSearchFormSeams(t, nil)
+	sc.source.listErr = errors.New("no server running")
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "/port"})
+
+	err := rootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "no server running") {
+		t.Fatalf("error = %v, want the enumeration failure", err)
+	}
+	if sc.tuiCalled || sc.sessionCalled {
+		t.Error("a failed read is not a zero match: neither the picker nor an attach may follow it")
 	}
 }

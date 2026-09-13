@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"slices"
+
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -64,4 +67,69 @@ func validateOpenArgs(cmd *cobra.Command, args []string) error {
 		return NewUsageError("cannot use a /term search with --ack")
 	}
 	return nil
+}
+
+// SearchSessionSource enumerates the live sessions a search term is counted
+// against, and names the session the caller is attached to so the count is taken
+// over the set the picker would list.
+type SearchSessionSource interface {
+	ListSessions() ([]tmux.Session, error)
+	CurrentSessionName() (string, error)
+}
+
+func buildSearchSessionSource(cmd *cobra.Command) SearchSessionSource {
+	if openDeps != nil && openDeps.SearchSessions != nil {
+		return openDeps.SearchSessions
+	}
+	return tmuxClient(cmd)
+}
+
+// searchCandidates returns the sessions a term is counted over: the enumeration
+// less the session the caller is already in, which the picker omits too. A
+// current-session read that fails or answers empty drops nothing, so a session
+// is never counted out on a failed read.
+func searchCandidates(src SearchSessionSource) ([]tmux.Session, error) {
+	sessions, err := src.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	if !tmux.InsideTmux() {
+		return sessions, nil
+	}
+	current, err := src.CurrentSessionName()
+	if err != nil || current == "" {
+		return sessions, nil
+	}
+	return slices.DeleteFunc(sessions, func(s tmux.Session) bool { return s.Name == current }), nil
+}
+
+// searchMatches returns, in enumeration order, the sessions the term matches.
+func searchMatches(term string, sessions []tmux.Session) []tmux.Session {
+	var matches []tmux.Session
+	for _, s := range sessions {
+		if resolver.MatchesSearchTerm(term, s.Name, s.Dir) {
+			matches = append(matches, s)
+		}
+	}
+	return matches
+}
+
+// runSearchForm dispatches a search form by the number of live sessions its term
+// matches: exactly one attaches directly, any other count opens the picker
+// pre-filtered by the term. A term-less form has nothing to count, so it opens
+// the picker on the whole live list without reading the session set at all.
+func runSearchForm(cmd *cobra.Command, term string) error {
+	if term == "" {
+		return openTUIFunc(cmd, pickerLanding{search: true}, nil, serverWasStarted(cmd))
+	}
+
+	sessions, err := searchCandidates(buildSearchSessionSource(cmd))
+	if err != nil {
+		return err
+	}
+
+	if matches := searchMatches(term, sessions); len(matches) == 1 {
+		return openSessionFunc(cmd, matches[0].Name)
+	}
+	return openTUIFunc(cmd, pickerLanding{filter: term, search: true}, nil, serverWasStarted(cmd))
 }

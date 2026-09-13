@@ -44,6 +44,8 @@ type OpenDeps struct {
 	DirValidator  resolver.DirValidator
 	AckWriter     spawn.AckWriter
 	ThemeLoader   *theme.Loader
+	// SearchSessions enumerates the live sessions a /term search is counted over.
+	SearchSessions SearchSessionSource
 }
 
 type SessionConnector interface {
@@ -155,7 +157,7 @@ in host-terminal windows.`,
 		// glob metacharacters is literal text to search for, and the gate would read
 		// it as a target expandable to several sessions and burst it.
 		if forms := searchFormPositionals(cmd, args); len(forms) > 0 {
-			return openTUIFunc(cmd, pickerLanding{filter: resolver.SearchTerm(forms[0]), search: true}, nil, serverWasStarted(cmd))
+			return runSearchForm(cmd, resolver.SearchTerm(forms[0]))
 		}
 
 		// Ahead of resolution and the pin dispatch, so a filter combined with a pin
