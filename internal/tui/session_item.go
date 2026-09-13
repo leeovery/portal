@@ -78,11 +78,14 @@ type SessionItem struct {
 	CatchAll bool
 }
 
-// FilterValue is the text every filter entry point narrows on: the session name
-// joined to its recorded directory, home-abbreviated so a term hitting the home
-// prefix cannot match a session on characters no row shows. The grouping-derived
-// directory is no part of it — a regroup must never make a session findable by a
-// path it was not findable by a moment earlier.
+// FilterValue is the text the picker's own fuzzy rule narrows on: the session
+// name joined to its recorded directory, home-abbreviated so a term hitting the
+// home prefix cannot match a session on characters no row shows. The
+// grouping-derived directory is no part of it — a regroup must never make a
+// session findable by a path it was not findable by a moment earlier. A filter
+// rule reading those two fields off the item rather than this string matches the
+// same values by another route, so widening or narrowing what a filter matches
+// means changing both.
 func (i SessionItem) FilterValue() string {
 	if i.Session.Dir == "" {
 		return i.Session.Name
