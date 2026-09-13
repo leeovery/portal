@@ -1,0 +1,11 @@
+## Attempt 1
+
+ISSUES:
+- `internal/tui/session_dir_column_test.go:20-31,74-79` — no case pins the acceptance criterion "the abbreviation is applied before the width is consulted … never reached only as a rung of that ladder". Every home-bearing assertion runs at a width the *raw* path cannot fit: `t.TempDir()` under a 49-char `$TMPDIR` yields a home of ~75 cells, so `home + "/Code/portal"` is ~87 cells against a maximum asserted width of 40 (the sweep tops out at 26). A refactor to the natural-looking "only abbreviate when the raw value doesn't fit" ladder passes this suite unchanged, and then a session under a short home renders `/Users/lee/w` where the search matched — and the row is expected to display — `~/w`. It surfaces as a row whose displayed directory does not contain the term the user searched, which is the exact divergence §4.1 forbids.
+  FIX: Add one table case with a width that admits the raw path, so only an abbreviate-first implementation can pass — e.g. after the "when it fits" case: `{name: "it abbreviates even at a width the raw path would fit", dir: home + "/Code/portal", width: lipgloss.Width(home+"/Code/portal") + 1, want: "~/Code/portal"}`. Deriving the width from the dir keeps it independent of the temp home's length.
+  CONFIDENCE: high
+
+NOTES:
+- The doubled-separator shape named in the task's Edge Cases is unexercised. The behaviour is correct (`~/Code//portal` at a narrow width yields `…//portal` — a faithful separator-anchored tail, not a mid-segment cut, and no panic), so this is an observation rather than a required case.
+- `dirTruncationPrefix` is the third package-level `"…"` declaration in `internal/tui` beside `footerEllipsis` (`footer.go:18`) and `themeRowEllipsis` (`theme_row.go:18`), plus ~8 inline literals. Divergence would be visible on screen and harmless, so per the finding floor this is neither an issue nor a bank entry — recorded only so it isn't re-discovered as one.
+- The executor's reported test correction (widths authored with `len(…)` rather than `lipgloss.Width`) is visible in the final file and was the right call: `len("…")` is 3 bytes against 1 cell, which would have mis-stated the budget the helper is specified against.
