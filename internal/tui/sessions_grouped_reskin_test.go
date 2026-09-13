@@ -168,7 +168,7 @@ func TestCatchAllRow_IndentsLikeResolvableGroupRow(t *testing.T) {
 		{Name: "known-1", Dir: dir},
 		{Name: "orphan-1", Dir: "/nope/elsewhere"},
 	}
-	items := buildByProject(sessions, project.NewIndex(projects))
+	items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 	var idx = -1
 	for i, it := range items {
@@ -247,7 +247,7 @@ func TestGroupingMachineryPreserved(t *testing.T) {
 			{Name: "bravo-1", Dir: dirB},
 			{Name: "orphan-1", Dir: "/nowhere"},
 		}
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		var shape []string
 		for _, it := range items {
@@ -279,7 +279,7 @@ func TestGroupingMachineryPreserved(t *testing.T) {
 			{Name: "portal-1", Dir: dir},
 			{Name: "other-1", Dir: other},
 		}
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		var shape []string
 		for _, it := range items {

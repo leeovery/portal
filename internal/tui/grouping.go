@@ -9,23 +9,35 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
+// effectiveDir is the directory grouping matches on: the recorded @portal-dir
+// stamp when present, else the grouping-only derived guess. The item a builder
+// emits keeps the recorded value untouched — the two are not interchangeable
+// (the derived one is canonicalised, the recorded one is the raw stamp).
+func effectiveDir(s tmux.Session, derived map[string]string) string {
+	if s.Dir != "" {
+		return s.Dir
+	}
+	return derived[s.Name]
+}
+
 const unknownHeading = "Unknown"
 
 const untaggedHeading = "Untagged"
 
 // The group key is the canonical path, not the heading name, so two distinct
 // directories sharing a project name form two distinct groups.
-func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
+func buildByProject(sessions []tmux.Session, idx project.Index, derived map[string]string) []list.Item {
 	var known []SessionItem
 	var unknown []SessionItem
 
 	for _, s := range sessions {
-		if s.Dir == "" {
+		dir := effectiveDir(s, derived)
+		if dir == "" {
 			unknown = append(unknown, unknownItem(s))
 			continue
 		}
 
-		matched, key, ok := idx.Match(s.Dir)
+		matched, key, ok := idx.Match(dir)
 		if !ok {
 			unknown = append(unknown, unknownItem(s))
 			continue
@@ -41,12 +53,12 @@ func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
 	return assembleGroups(known, unknown, unknownHeading)
 }
 
-func buildByTag(sessions []tmux.Session, idx project.Index) []list.Item {
+func buildByTag(sessions []tmux.Session, idx project.Index, derived map[string]string) []list.Item {
 	var tagged []SessionItem
 	var untagged []SessionItem
 
 	for _, s := range sessions {
-		tags := resolveSessionTags(s, idx)
+		tags := resolveSessionTags(s, idx, derived)
 		if len(tags) == 0 {
 			untagged = append(untagged, untaggedItem(s))
 			continue
@@ -63,12 +75,13 @@ func buildByTag(sessions []tmux.Session, idx project.Index) []list.Item {
 	return assembleGroups(tagged, untagged, untaggedHeading)
 }
 
-func resolveSessionTags(s tmux.Session, idx project.Index) []string {
-	if s.Dir == "" {
+func resolveSessionTags(s tmux.Session, idx project.Index, derived map[string]string) []string {
+	dir := effectiveDir(s, derived)
+	if dir == "" {
 		return nil
 	}
 
-	matched, _, ok := idx.Match(s.Dir)
+	matched, _, ok := idx.Match(dir)
 	if !ok {
 		return nil
 	}

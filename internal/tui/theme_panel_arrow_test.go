@@ -414,8 +414,8 @@ func TestPanelArrow_NoFileReadPerKeystroke(t *testing.T) {
 	}
 }
 
-// Every session's Dir is re-emptied after the pre-render: applySessions caches
-// derived dirs back, and a warm cache would make "zero reads" vacuous.
+// The derived-dir cache is emptied after the pre-render: a warm cache would make
+// "zero reads" vacuous.
 func newArrowRebuildProbeModel(t *testing.T, rows []theme.Row, reader *fakeStamper) Model {
 	t.Helper()
 
@@ -439,9 +439,7 @@ func newArrowRebuildProbeModel(t *testing.T, rows []theme.Row, reader *fakeStamp
 	m.applySessions(sessions)
 	_ = m.viewSessionList()
 
-	for i := range m.sessions {
-		m.sessions[i].Dir = ""
-	}
+	m.derivedDirs = nil
 	return pressThemeKey(t, m)
 }
 

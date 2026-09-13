@@ -53,7 +53,7 @@ func TestBuildByProject(t *testing.T) {
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
 
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -93,7 +93,7 @@ func TestBuildByProject(t *testing.T) {
 			t.Fatalf("idx.Match(%q) ok = false, want true", dir)
 		}
 
-		items := buildByProject(sessions, idx)
+		items := buildByProject(sessions, idx, nil)
 		rows := sessionRows(items)
 		if len(rows) != 1 {
 			t.Fatalf("len(rows) = %d, want 1", len(rows))
@@ -123,7 +123,7 @@ func TestBuildByProject(t *testing.T) {
 			{Name: "alpha-a", Dir: dirA},
 		}
 
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 3 {
@@ -180,7 +180,7 @@ func TestBuildByProject(t *testing.T) {
 			{Name: "s2", Dir: dir2},
 		}
 
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -214,7 +214,7 @@ func TestBuildByProject(t *testing.T) {
 	t.Run("routes a session with empty Dir to the Unknown bucket", func(t *testing.T) {
 		sessions := []tmux.Session{{Name: "no-dir"}}
 
-		items := buildByProject(sessions, project.NewIndex(nil))
+		items := buildByProject(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -236,7 +236,7 @@ func TestBuildByProject(t *testing.T) {
 		dir := t.TempDir()
 		sessions := []tmux.Session{{Name: "orphan", Dir: dir}}
 
-		items := buildByProject(sessions, project.NewIndex(nil))
+		items := buildByProject(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -259,7 +259,7 @@ func TestBuildByProject(t *testing.T) {
 			{Name: "known-1", Dir: dir},
 		}
 
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -276,7 +276,7 @@ func TestBuildByProject(t *testing.T) {
 	})
 
 	t.Run("returns an empty slice for zero live sessions", func(t *testing.T) {
-		items := buildByProject(nil, project.NewIndex(nil))
+		items := buildByProject(nil, project.NewIndex(nil), nil)
 
 		if len(items) != 0 {
 			t.Fatalf("len(items) = %d, want 0", len(items))
@@ -291,7 +291,7 @@ func TestBuildByProject(t *testing.T) {
 			{Name: "s2", Dir: dir},
 		}
 
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		for _, si := range sessionRows(items) {
 			if si.CatchAll {
@@ -315,7 +315,7 @@ func TestBuildByProject(t *testing.T) {
 			{Name: "bravo"},
 		}
 
-		items := buildByProject(sessions, project.NewIndex(nil))
+		items := buildByProject(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 3 {
@@ -333,7 +333,7 @@ func TestBuildByProject(t *testing.T) {
 	t.Run("stamps each Unknown catch-all item GroupKey with the heading constant", func(t *testing.T) {
 		sessions := []tmux.Session{{Name: "no-dir"}}
 
-		items := buildByProject(sessions, project.NewIndex(nil))
+		items := buildByProject(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -353,7 +353,7 @@ func TestBuildByProject(t *testing.T) {
 			{Name: "zulu-1", Dir: dir},
 		}
 
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -389,7 +389,7 @@ func TestBuildByProject(t *testing.T) {
 			{Name: "deleted-project", Dir: t.TempDir()},
 		}
 
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		counts := map[string]int{}
 		for _, si := range sessionRows(items) {
@@ -410,7 +410,7 @@ func TestBuildByProject(t *testing.T) {
 			{Name: "deleted-project", Dir: t.TempDir()},
 		}
 
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -437,7 +437,7 @@ func TestBuildByTag(t *testing.T) {
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal"}}}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -500,7 +500,7 @@ func TestBuildByTag(t *testing.T) {
 			{Name: "s3", Dir: dir3},
 		}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 3 {
@@ -528,7 +528,7 @@ func TestBuildByTag(t *testing.T) {
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []tmux.Session{{Name: "no-tags", Dir: dir}}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -550,7 +550,7 @@ func TestBuildByTag(t *testing.T) {
 		dir := t.TempDir()
 		sessions := []tmux.Session{{Name: "orphan", Dir: dir}}
 
-		items := buildByTag(sessions, project.NewIndex(nil))
+		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -568,7 +568,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("emits one Untagged item for a session with empty Dir", func(t *testing.T) {
 		sessions := []tmux.Session{{Name: "no-dir"}}
 
-		items := buildByTag(sessions, project.NewIndex(nil))
+		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -588,7 +588,7 @@ func TestBuildByTag(t *testing.T) {
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"   ", "work"}}}
 		sessions := []tmux.Session{{Name: "s1", Dir: dir}}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -608,7 +608,7 @@ func TestBuildByTag(t *testing.T) {
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"   "}}}
 		sessions := []tmux.Session{{Name: "s1", Dir: dir}}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -638,7 +638,7 @@ func TestBuildByTag(t *testing.T) {
 			{Name: "a-sess", Dir: dir2},
 		}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 3 {
@@ -687,7 +687,7 @@ func TestBuildByTag(t *testing.T) {
 			{Name: "tagged-1", Dir: tagged},
 		}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -708,7 +708,7 @@ func TestBuildByTag(t *testing.T) {
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal"}}}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir, Windows: 3, Attached: true}}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -729,7 +729,7 @@ func TestBuildByTag(t *testing.T) {
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal", "urgent"}}}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) <= len(sessions) {
@@ -738,7 +738,7 @@ func TestBuildByTag(t *testing.T) {
 	})
 
 	t.Run("returns an empty slice for zero live sessions", func(t *testing.T) {
-		items := buildByTag(nil, project.NewIndex(nil))
+		items := buildByTag(nil, project.NewIndex(nil), nil)
 
 		if len(items) != 0 {
 			t.Fatalf("len(items) = %d, want 0", len(items))
@@ -753,7 +753,7 @@ func TestBuildByTag(t *testing.T) {
 			{Name: "s2", Dir: dir},
 		}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		for _, si := range sessionRows(items) {
 			if si.CatchAll {
@@ -777,7 +777,7 @@ func TestBuildByTag(t *testing.T) {
 			{Name: "bravo"},
 		}
 
-		items := buildByTag(sessions, project.NewIndex(nil))
+		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 3 {
@@ -795,7 +795,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("stamps each Untagged catch-all item GroupKey with the heading constant", func(t *testing.T) {
 		sessions := []tmux.Session{{Name: "no-dir"}}
 
-		items := buildByTag(sessions, project.NewIndex(nil))
+		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -815,7 +815,7 @@ func TestBuildByTag(t *testing.T) {
 			{Name: "zeta-1", Dir: dir},
 		}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -845,7 +845,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("routes a deleted-project session to Untagged", func(t *testing.T) {
 		sessions := []tmux.Session{{Name: "deleted-project", Dir: t.TempDir()}}
 
-		items := buildByTag(sessions, project.NewIndex(nil))
+		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
 		rows := sessionRows(items)
 		if len(rows) != 1 {
@@ -866,7 +866,7 @@ func TestBuildByTag(t *testing.T) {
 			{Name: "deleted-project", Dir: t.TempDir()},
 		}
 
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
 		seen := map[string]bool{}
 		for _, si := range sessionRows(items) {

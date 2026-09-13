@@ -79,7 +79,7 @@ func TestRebuildSessionList(t *testing.T) {
 		m.rebuildSessionList()
 
 		items := m.sessionList.Items()
-		want := buildByProject(sessions, project.NewIndex(projects))
+		want := buildByProject(sessions, project.NewIndex(projects), nil)
 		if len(items) != len(want) {
 			t.Fatalf("len(items) = %d, want %d", len(items), len(want))
 		}
@@ -105,7 +105,7 @@ func TestRebuildSessionList(t *testing.T) {
 		m.rebuildSessionList()
 
 		items := m.sessionList.Items()
-		want := buildByTag(sessions, project.NewIndex(projects))
+		want := buildByTag(sessions, project.NewIndex(projects), nil)
 		if len(items) != len(want) {
 			t.Fatalf("len(items) = %d, want %d", len(items), len(want))
 		}

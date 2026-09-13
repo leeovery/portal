@@ -136,7 +136,7 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 		if strings.Contains(m.View().Content, "No tags yet") {
 			t.Errorf("signpost rendered when a tag exists:\n%s", m.View().Content)
 		}
-		want := buildByTag(sessions, project.NewIndex(projects))
+		want := buildByTag(sessions, project.NewIndex(projects), nil)
 		if len(m.sessionList.Items()) != len(want) {
 			t.Errorf("len(items) = %d, want %d (normal By Tag build)", len(m.sessionList.Items()), len(want))
 		}

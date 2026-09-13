@@ -239,6 +239,13 @@ type Model struct {
 	dirReader session.PaneCurrentPathReader
 	dirRunner resolver.CommandRunner
 
+	// derivedDirs is the grouping-only companion to the recorded Session.Dir,
+	// keyed on session name: a guess derived from the pane's cwd, canonicalised,
+	// and read by the grouped arms alone. It must never land in Session.Dir —
+	// a regroup would then make a session findable by a path it was not findable
+	// by a moment earlier. Cleared on every session-list refresh.
+	derivedDirs map[string]string
+
 	// flashText empty means no flash. flashGen is bumped on every setFlash so a
 	// stale tick from a replaced flash cannot early-clear the current message.
 	flashText string
@@ -1096,6 +1103,8 @@ func (m Model) filteredSessions() []tmux.Session {
 
 func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 	m.sessions = sessions
+	// A guess derived for the previous list must not outlive it.
+	m.derivedDirs = nil
 	// Prune before the rebuild so the refreshed set feeds the delegate's ●.
 	m.pruneSelectionToLiveSessions()
 	return m.rebuildSessionList()
@@ -1149,36 +1158,31 @@ func (m *Model) setProjects(projects []project.Project) {
 	m.projectIndex = project.NewIndex(projects)
 }
 
-// Best-effort: an unresolvable session keeps an empty Dir and is re-attempted
-// next rebuild; the result is never stamped back to tmux. Call it only from the
-// grouped arms — Flat must pay zero pane reads.
-func (m *Model) resolveSessionDirs(sessions []tmux.Session) []tmux.Session {
+// Best-effort: an unresolvable session is not negative-cached — nothing is
+// stored and the next grouped rebuild tries again. Call it only from the grouped
+// arms — Flat must pay zero pane reads.
+func (m *Model) resolveDerivedDirs(sessions []tmux.Session) map[string]string {
 	if m.dirReader == nil || m.dirRunner == nil {
-		return sessions
+		return m.derivedDirs
 	}
 
-	resolved := make([]tmux.Session, len(sessions))
-	for i, s := range sessions {
-		if s.Dir == "" {
-			if dir, ok, err := session.ResolveSessionDir(s.Name, m.dirReader, m.dirRunner); ok && err == nil {
-				s.Dir = dir
-				m.cacheSessionDir(s.Name, dir)
-			}
+	for _, s := range sessions {
+		if s.Dir != "" {
+			continue
 		}
-		resolved[i] = s
-	}
-	return resolved
-}
-
-// In-memory only: a SessionsMsg refresh replaces m.sessions, so the guess is
-// re-derived rather than frozen.
-func (m *Model) cacheSessionDir(name, dir string) {
-	for i := range m.sessions {
-		if m.sessions[i].Name == name {
-			m.sessions[i].Dir = dir
-			return
+		if _, cached := m.derivedDirs[s.Name]; cached {
+			continue
 		}
+		dir, ok, err := session.ResolveSessionDir(s.Name, m.dirReader, m.dirRunner)
+		if !ok || err != nil || dir == "" {
+			continue
+		}
+		if m.derivedDirs == nil {
+			m.derivedDirs = make(map[string]string, len(sessions))
+		}
+		m.derivedDirs[s.Name] = dir
 	}
+	return m.derivedDirs
 }
 
 func (m *Model) rebuildSessionList() tea.Cmd {
@@ -1192,9 +1196,9 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	case m.byTagSignpost:
 		items = ToListItems(filtered)
 	case m.sessionListMode == prefs.ModeByProject:
-		items = buildByProject(m.resolveSessionDirs(filtered), m.projectIndex)
+		items = buildByProject(filtered, m.projectIndex, m.resolveDerivedDirs(filtered))
 	case m.sessionListMode == prefs.ModeByTag:
-		items = buildByTag(m.resolveSessionDirs(filtered), m.projectIndex)
+		items = buildByTag(filtered, m.projectIndex, m.resolveDerivedDirs(filtered))
 	default:
 		items = ToListItems(filtered)
 	}

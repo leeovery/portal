@@ -71,6 +71,12 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		if si.GroupHeading != "Portal" {
 			t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "Portal")
 		}
+		if m.sessions[0].Dir != "" {
+			t.Errorf("m.sessions[0].Dir = %q, want \"\" (the derived value must not land in the recorded one)", m.sessions[0].Dir)
+		}
+		if si.Session.Dir != "" {
+			t.Errorf("SessionItem.Session.Dir = %q, want \"\" (the item carries the recorded directory verbatim)", si.Session.Dir)
+		}
 	})
 
 	t.Run("By Tag: an empty-Dir session resolving to a tagged project appears under its tags, not Untagged", func(t *testing.T) {
@@ -95,10 +101,16 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 			if si.GroupKey == "" {
 				t.Errorf("By Tag item has empty GroupKey (canonical tag): %+v", si)
 			}
+			if si.Session.Dir != "" {
+				t.Errorf("SessionItem.Session.Dir = %q, want \"\" (the item carries the recorded directory verbatim)", si.Session.Dir)
+			}
+		}
+		if m.sessions[0].Dir != "" {
+			t.Errorf("m.sessions[0].Dir = %q, want \"\" (the derived value must not land in the recorded one)", m.sessions[0].Dir)
 		}
 	})
 
-	t.Run("caches the derived directory into m.sessions and never stamps tmux", func(t *testing.T) {
+	t.Run("caches the derived directory outside the recorded one and never stamps tmux", func(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
@@ -114,8 +126,11 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		if len(reader.setCalls) != 0 {
 			t.Fatalf("expected 0 stamp writes (no freezing), got %d: %v", len(reader.setCalls), reader.setCalls)
 		}
-		if m.sessions[0].Dir != key {
-			t.Errorf("m.sessions[0].Dir = %q, want %q (cached)", m.sessions[0].Dir, key)
+		if m.sessions[0].Dir != "" {
+			t.Errorf("m.sessions[0].Dir = %q, want \"\" (the recorded directory stays untouched)", m.sessions[0].Dir)
+		}
+		if got := m.derivedDirs["portal-abc"]; got != key {
+			t.Errorf("m.derivedDirs[%q] = %q, want %q (cached)", "portal-abc", got, key)
 		}
 	})
 
@@ -167,6 +182,31 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		}
 		if m.sessions[0].Dir != "" {
 			t.Errorf("m.sessions[0].Dir = %q, want \"\" (unresolvable, nothing to cache)", m.sessions[0].Dir)
+		}
+		if got, ok := m.derivedDirs["portal-abc"]; ok {
+			t.Errorf("m.derivedDirs[%q] = %q, want absent (unresolvable sessions are not negative-cached)", "portal-abc", got)
+		}
+	})
+
+	t.Run("it discards derived values when the session list is refreshed", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+
+		reader := &fakeStamper{path: dir}
+		m := newRebuildTestModel(t, prefs.ModeByProject, nil, projects)
+		m.dirReader = reader
+		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+
+		m.applySessions(sessions)
+		if len(reader.reads) != 1 {
+			t.Fatalf("first refresh reads = %d, want 1", len(reader.reads))
+		}
+
+		reader.reads = nil
+		m.applySessions(sessions)
+		if len(reader.reads) != 1 {
+			t.Errorf("second refresh performed %d pane reads, want 1 (the refresh discards the derived value)", len(reader.reads))
 		}
 	})
 

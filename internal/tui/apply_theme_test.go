@@ -44,11 +44,9 @@ func newSwapProbeModel(t *testing.T, before theme.Theme, mode prefs.SessionListM
 	_ = m.viewProjectList()
 	m.activePage = PageSessions
 
-	// Re-arm the lazy pass: applySessions cached each derived dir, and a warm
+	// Re-arm the lazy pass: the pre-render derived each session's dir, and a warm
 	// cache would make "zero reads" true for the wrong reason.
-	for i := range m.sessions {
-		m.sessions[i].Dir = ""
-	}
+	m.derivedDirs = nil
 	return m
 }
 

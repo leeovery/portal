@@ -44,7 +44,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Name: "alpha-1", Dir: dirA},
 			{Name: "bravo-1", Dir: dirB},
 		}
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		m := newCursorTestModel(t, items)
 
@@ -72,7 +72,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Name: "alpha-1", Dir: dirA},
 			{Name: "bravo-1", Dir: dirB},
 		}
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 		m := newCursorTestModel(t, items)
 
 		updated, _ := m.Update(keyDown)
@@ -98,7 +98,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Name: "alpha-1", Dir: dirA},
 			{Name: "bravo-1", Dir: dirB},
 		}
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 		m := newCursorTestModel(t, items)
 
 		updated, _ := m.Update(keyDown)
@@ -127,7 +127,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Name: "alpha-2", Dir: dirA},
 			{Name: "bravo-1", Dir: dirB},
 		}
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 		rows := sessionRows(items)
 
 		m := newCursorTestModel(t, items)
@@ -169,7 +169,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}},
 		}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
-		items := buildByTag(sessions, project.NewIndex(projects))
+		items := buildByTag(sessions, project.NewIndex(projects), nil)
 		rows := sessionRows(items)
 		if len(rows) != 2 {
 			t.Fatalf("expected 2 instances (one per tag), got %d", len(rows))
@@ -203,7 +203,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
-		items := buildByProject(sessions, project.NewIndex(projects))
+		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		m := newCursorTestModel(t, items)
 		m.sessionList.Select(0)
