@@ -120,6 +120,12 @@ type SessionDelegate struct {
 	// Suppressing the background is the real work — hue is stripped downstream.
 	Colourless  bool
 	MultiSelect bool
+	// ShowDir renders each session's recorded directory beside its name, out of
+	// the name's own flex budget. Off by default: it belongs to a picker opened
+	// by a session search, whose rows can be present on the strength of a
+	// directory, and it stays on for that picker's life however the filter text
+	// is edited afterwards.
+	ShowDir bool
 	// Selected is keyed on Session.Name, so a multi-tag By-Tag session marked
 	// once shows the ● on every one of its rows. Nil marks nothing.
 	Selected map[string]struct{}
@@ -259,15 +265,32 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	total := m.Width()
 	used := leftBarColumnWidth + lipgloss.Width(indent) + nameGap + countSlotWidth + attachedSlotWidth + rowRightMargin
 
-	var name, namePad string
+	var name, namePad, dirText string
 	if total <= 0 {
 		name = d.rowToken(nameBase, nameTok, selected).Render(it.Session.Name)
 		namePad = ""
+		if d.ShowDir && it.Session.Dir != "" {
+			dirText = resolver.AbbreviateHome(it.Session.Dir)
+		}
 	} else {
 		nameWidth := max(total-used, 1)
 		visibleName := ansi.Truncate(it.Session.Name, nameWidth, "…")
 		name = d.rowToken(nameBase, nameTok, selected).Render(visibleName)
-		namePad = bg.Render(padTo("", nameWidth-lipgloss.Width(visibleName)))
+		remaining := nameWidth - lipgloss.Width(visibleName)
+		if d.ShowDir {
+			// The separating space is the one cell withheld from the fit.
+			dirText = fitSessionDir(it.Session.Dir, remaining-1)
+		}
+		if dirText != "" {
+			remaining -= 1 + lipgloss.Width(dirText)
+		}
+		namePad = bg.Render(padTo("", remaining))
+	}
+
+	// Painted by the row background, so the selected row's tint covers the gap.
+	dirCell := ""
+	if dirText != "" {
+		dirCell = bg.Render(" ") + d.rowToken(lipgloss.Style{}, countTok, selected).Render(dirText)
 	}
 
 	gap := bg.Render(padTo("", nameGap))
@@ -290,7 +313,7 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 		rightMargin := bg.Render(padTo("", rowRightMargin))
 		trailing = attached + rightMargin
 	}
-	row := indentCell + bar + name + namePad + gap + count + trailing
+	row := indentCell + bar + name + dirCell + namePad + gap + count + trailing
 
 	// The flex name floors at 1, so at pathological narrow widths the assembled
 	// row would overflow; a final guard, and a no-op on the happy path.
