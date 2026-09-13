@@ -11,7 +11,25 @@ func IsPathArgument(arg string) bool {
 	if arg == "" {
 		return false
 	}
+	if IsSearchSigil(arg) {
+		return false
+	}
 	return strings.Contains(arg, "/") || arg[0] == '.' || arg[0] == '~'
+}
+
+// IsSearchSigil reports whether arg carries the search form: a leading slash and
+// no further slash, so `/port` and a bare `/` are search forms while every other
+// path shape — `/Users/leeovery/Code/portal`, `/tmp/`, `./port`, `~/port` — is
+// not. It is a pure test of the argument's shape and never touches the
+// filesystem, so the same command line reads the same way on every machine.
+func IsSearchSigil(arg string) bool {
+	return strings.HasPrefix(arg, "/") && strings.Count(arg, "/") == 1
+}
+
+// SearchTerm returns the text a search-form argument carries after its leading
+// slash, empty for a bare slash.
+func SearchTerm(arg string) string {
+	return strings.TrimPrefix(arg, "/")
 }
 
 // ResolvePath expands a tilde and returns the absolute path, erroring unless it

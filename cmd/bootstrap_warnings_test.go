@@ -266,7 +266,7 @@ func TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg(t *testing.T) {
 	resetRootCmd()
 	var stderr bytes.Buffer
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"open", "/nonexistent-path-for-test"})
+	rootCmd.SetArgs([]string{"open", "/nonexistent/path-for-test"})
 	_ = rootCmd.Execute()
 
 	if !strings.Contains(stderr.String(), "Portal save daemon failed") {

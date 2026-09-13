@@ -59,6 +59,41 @@ func TestIsPathArgument(t *testing.T) {
 			arg:  "",
 			want: false,
 		},
+		{
+			name: "false for the search-form shape",
+			arg:  "/port",
+			want: false,
+		},
+		{
+			name: "true for a multi-segment absolute path",
+			arg:  "/Users/leeovery/Code/portal",
+			want: true,
+		},
+		{
+			name: "true for a single segment carrying a trailing slash",
+			arg:  "/tmp/",
+			want: true,
+		},
+		{
+			name: "false for a bare slash",
+			arg:  "/",
+			want: false,
+		},
+		{
+			name: "true for ./port",
+			arg:  "./port",
+			want: true,
+		},
+		{
+			name: "true for ~/port",
+			arg:  "~/port",
+			want: true,
+		},
+		{
+			name: "false for a bare word",
+			arg:  "port",
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -69,6 +104,79 @@ func TestIsPathArgument(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsSearchSigil(t *testing.T) {
+	// The recognition is a pure test of the argument's shape, so every case below
+	// holds whether or not the named directory exists on this machine.
+	tests := []struct {
+		name string
+		arg  string
+		want bool
+	}{
+		{
+			name: "it recognises a single-segment leading-slash argument as a search form",
+			arg:  "/port",
+			want: true,
+		},
+		{
+			name: "it recognises a bare slash as a search form",
+			arg:  "/",
+			want: true,
+		},
+		{
+			name: "it rejects a multi-segment absolute path",
+			arg:  "/Users/leeovery/Code/portal",
+			want: false,
+		},
+		{
+			name: "it rejects a single segment carrying a trailing slash",
+			arg:  "/tmp/",
+			want: false,
+		},
+		{
+			name: "it rejects a dot-relative path",
+			arg:  "./port",
+			want: false,
+		},
+		{
+			name: "it rejects a tilde path",
+			arg:  "~/port",
+			want: false,
+		},
+		{
+			name: "it rejects a bare word",
+			arg:  "port",
+			want: false,
+		},
+		{
+			name: "it rejects the empty string",
+			arg:  "",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolver.IsSearchSigil(tt.arg); got != tt.want {
+				t.Errorf("IsSearchSigil(%q) = %v, want %v", tt.arg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchTerm(t *testing.T) {
+	t.Run("it returns the term after the slash", func(t *testing.T) {
+		if got := resolver.SearchTerm("/port"); got != "port" {
+			t.Errorf("SearchTerm(%q) = %q, want %q", "/port", got, "port")
+		}
+	})
+
+	t.Run("it returns an empty term for a bare slash", func(t *testing.T) {
+		if got := resolver.SearchTerm("/"); got != "" {
+			t.Errorf("SearchTerm(%q) = %q, want an empty term", "/", got)
+		}
+	})
 }
 
 func TestResolvePath(t *testing.T) {

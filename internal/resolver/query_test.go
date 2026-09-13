@@ -288,6 +288,87 @@ func TestQueryResolver_Resolve_PathLikeArguments(t *testing.T) {
 	})
 }
 
+func TestQueryResolver_Resolve_SearchSigil(t *testing.T) {
+	newResolver := func() *resolver.QueryResolver {
+		return resolver.NewQueryResolver(
+			&mockSessionLister{},
+			&mockAliasLookup{aliases: map[string]string{}},
+			&mockZoxideQuerier{err: resolver.ErrNoMatch},
+			&mockDirValidator{existing: map[string]bool{}},
+		)
+	}
+
+	t.Run("it does not route the search-form shape to the path domain", func(t *testing.T) {
+		result, err := newResolver().Resolve("/port")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		mr, ok := result.(*resolver.MissResult)
+		if !ok {
+			t.Fatalf("expected MissResult, got %T", result)
+		}
+		if mr.Target != "/port" {
+			t.Errorf("MissResult.Target = %q, want %q", mr.Target, "/port")
+		}
+	})
+
+	t.Run("it returns the same verdict for an existing and a non-existing single-segment directory", func(t *testing.T) {
+		for _, query := range []string{"/tmp", "/definitely-not-here"} {
+			result, err := newResolver().Resolve(query)
+			if err != nil {
+				t.Fatalf("Resolve(%q): unexpected error: %v", query, err)
+			}
+			if _, ok := result.(*resolver.MissResult); !ok {
+				t.Errorf("Resolve(%q) = %T, want *resolver.MissResult", query, result)
+			}
+		}
+	})
+
+	t.Run("it still resolves a multi-segment absolute path to the path domain", func(t *testing.T) {
+		dir := t.TempDir()
+		dir, _ = filepath.EvalSymlinks(dir)
+
+		result, err := newResolver().Resolve(dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected PathResult, got %T", result)
+		}
+		if pr.Path != dir {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, dir)
+		}
+		if pr.Domain != resolver.DomainPath {
+			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, resolver.DomainPath)
+		}
+	})
+
+	t.Run("it still mints for -p on a single-segment directory", func(t *testing.T) {
+		result, err := newResolver().ResolvePathPin("/tmp")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pr, ok := result.(*resolver.PathResult)
+		if !ok {
+			t.Fatalf("expected PathResult, got %T", result)
+		}
+		want, err := filepath.Abs("/tmp")
+		if err != nil {
+			t.Fatalf("failed to resolve /tmp: %v", err)
+		}
+		if pr.Path != want {
+			t.Errorf("PathResult.Path = %q, want %q", pr.Path, want)
+		}
+		if pr.Domain != resolver.DomainPath {
+			t.Errorf("PathResult.Domain = %q, want %q", pr.Domain, resolver.DomainPath)
+		}
+	})
+}
+
 func TestQueryResolver_Resolve_PathLikeNotSentToAliasOrZoxide(t *testing.T) {
 	t.Run("path containing / not sent through alias/zoxide chain", func(t *testing.T) {
 		dir := t.TempDir()
