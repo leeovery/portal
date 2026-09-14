@@ -22,7 +22,7 @@ Two ids appear below: `{id}` is the row id the dispatch answers (`deep-dive-{NNN
 
 Offer a dive where the conversation reaches a question neither party can answer from the room and the answer is worth more than a lookup — a substantial thread, independent of what is being discussed right now, that dedicated tools (web search, source code, documentation) would serve. Quick lookups, single searches, and questions that inform the next conversational turn stay in the main thread.
 
-The register is the anchor: the offer names a thread. A question new to the register is added first — origin `user` when the user raised it, `conversation` otherwise:
+The register is the anchor: the offer names a thread. A question new to the register is added first — origin `user` when the user raised it, `conversation` otherwise; a question that reshapes a thread already on the register is that thread, reframed, never a second row beside it:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs research-threads add {work_unit} {topic} {slug} --question "{the question, as asked}" --origin {user|conversation} [--parent {slug}]
@@ -182,7 +182,7 @@ Take the lowest-numbered `pending` row and fold it — one transaction of judgme
    node .claude/skills/workflow-engine/scripts/engine.cjs research-threads add {work_unit} {topic} {slug} --question "{the question}" --origin deep-dive-{NNN} --parent {parent slug}
    ```
 
-   A line the file already covers is folded as a note in the section instead. One another topic owns is folded as a note and raised through the session wrapper's off-topic route at the next break — **C. Topic Awareness** on an epic, **E. Off-Topic Concerns** on a single-topic work type. A measurement line becomes a thread the same way — what the measurement would settle, as the question — and is the laboratory's cue the session loop picks up at its next step; a fold at the close carries it into Open Threads, where the discussion's own laboratory offer meets it.
+   A line the file already covers is folded as a note in the section instead. One another topic owns is folded as a note and raised through the session wrapper's off-topic route at the next break — **C. Topic Awareness** on an epic, **E. Off-Topic Concerns** on a single-topic work type. A measurement line becomes a thread the same way — what the measurement would settle, as the question — and is the laboratory's cue the session loop picks up at its next step, in this same turn when step 5 asks nothing; a fold entered from the conclusion's in-flight gate carries it into Open Threads instead, where the discussion's own laboratory offer meets it.
 
    Then commit the fold — the section, the thread's move, and the opened threads in one write, nothing unrelated, the dive's id in the subject:
 
@@ -190,7 +190,7 @@ Take the lowest-numbered `pending` row and fold it — one transaction of judgme
    node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} --topic research/{topic} -m "research({work_unit}/{topic}): fold {the thread, in a few words} (deep-dive-{NNN})"
    ```
 
-5. **Speak to the user** — markdown prose, one authored line per paragraph, never a fence and never a menu. When the brief asked questions, the Answers in full — every answer's substance whole, told at product altitude: what the product does or the user sees before any symbol, path, or snippet the report used to say it. Otherwise a digest: what was asked, what came back, what it opened — as long as the return needs, never the report pasted. A question only the user holds — their environment, their intent for the product — is asked here, once, with your lean beside it; anything wanting a decision or more digging is a thread on the register, never a question in the room.
+5. **Speak to the user** — markdown prose, one authored line per paragraph, never a fence and never a menu. When the brief asked questions, the Answers in full — every answer's substance whole, each condition, threshold, and alternative the report gave included, told at product altitude: what the product does or the user sees before any symbol, path, or snippet the report used to say it. Otherwise a digest: what was asked, what came back, what it opened — as long as the return needs, never the report pasted. A question only the user holds — their environment, their intent for the product — is asked here, once, with your lean beside it; anything wanting a decision or more digging is a thread on the register, never a question in the room.
 
 6. **Render the register:**
 

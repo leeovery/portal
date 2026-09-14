@@ -15,7 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 const { loadManifest, loadProjectManifest } = require('./reads.cjs');
-const { titlecase, WORKLIST_GLYPH, DISCOVERY_GLYPH, discoveryLifecycleLabel } = require('./conventions.cjs');
+const { signpost } = require('../kernel/render.cjs');
+const { TREE_WIDTH, titlecase, WORKLIST_GLYPH, DISCOVERY_GLYPH, discoveryLifecycleLabel } = require('./conventions.cjs');
 const { section, CONTINUE_INSTRUCTION, CONTINUE_MARKDOWN_INSTRUCTION, AUTO_GATE_INSTRUCTION, menu, menuFrame, MENU_GLYPH, cmdOption, bareOption, promptOption, callout, indentedBody, bulletRow, subDetail, treeList } = require('./projections/surfaces.cjs');
 const { buildOrderLive } = require('./build-order.cjs');
 const { worklist, escapeMarkdown } = require('./projections/worklist.cjs');
@@ -587,23 +588,26 @@ function convergenceDiagnostic(cwd, { dotpath, file }) {
 
   const growth = hasGrowth ? p.live_words - p.review_baseline_words : 0;
   const head = [
-    `${CONVERGENCE_LOOPS[p.loop_type]} — cycle ${p.latest_cycle} diagnostic`,
-    '',
-    `  Trend: ${p.trend}`,
-    `  Latest cycle: ${fresh.length + recurring.length} findings (${fresh.length} new, ${recurring.length} recurring)`,
+    `Trend: ${p.trend}`,
+    `Latest cycle: ${fresh.length + recurring.length} findings (${fresh.length} new, ${recurring.length} recurring)`,
   ];
-  if (multi) head.push(`  Per stream: ${p.stream_counts.map((st) => `${st.label} ${st.count}`).join(' · ')}`);
-  if (hasGrowth) head.push(`  Document growth: ${p.review_baseline_words} → ${p.live_words} words (${growth >= 0 ? `+${growth}` : growth} net across review)`);
+  if (multi) head.push(`Per stream: ${p.stream_counts.map((st) => `${st.label} ${st.count}`).join(' · ')}`);
+  if (hasGrowth) head.push(`Document growth: ${p.review_baseline_words} → ${p.live_words} words (${growth >= 0 ? `+${growth}` : growth} net across review)`);
 
-  const parts = [head.join('\n')];
+  const row = (/** @type {string} */ text) => bulletRow(text, { indent: '    ' });
+  const note = (/** @type {string} */ text) => subDetail(text, { indent: '      ' });
+  const block = (/** @type {string} */ label, /** @type {string[]} */ rows) => [...indentedBody([label]), ...rows].join('\n');
+
+  const heading = signpost(`${CONVERGENCE_LOOPS[p.loop_type]} — cycle ${p.latest_cycle} diagnostic`, { width: TREE_WIDTH });
+  const parts = [[heading, '', ...indentedBody(head)].join('\n')];
   if (resolved.length > 0) {
-    parts.push(['  Resolved:', ...resolved.map((f) => `    • ${f.title} (fixed in cycle ${f.last_seen_cycle})`)].join('\n'));
+    parts.push(block('Resolved:', resolved.flatMap((f) => row(`${f.title} (fixed in cycle ${f.last_seen_cycle})`))));
   }
   if (recurring.length > 0) {
-    parts.push(['  Recurring:', ...recurring.map((f) => `    • ${f.title} (cycles ${f.cycles})\n      ${f.hypothesis}`)].join('\n'));
+    parts.push(block('Recurring:', recurring.flatMap((f) => [...row(`${f.title} (cycles ${f.cycles})`), note(`${f.hypothesis}`)])));
   }
   if (fresh.length > 0) {
-    parts.push(['  New this cycle:', ...fresh.map((f) => `    • ${f.title}`)].join('\n'));
+    parts.push(block('New this cycle:', fresh.flatMap((f) => row(`${f.title}`))));
   }
 
   const flags = [callout(CONVERGENCE_TRENDS[p.trend])];
@@ -2596,10 +2600,12 @@ function concludeGate(cwd, { dotpath }) {
 
 // closing-gate — the discussion close's own consents, on the road between
 // "we're done talking" and the conclude gate: the optional re-review offer,
-// the two faces of the mandatory review gate, and the wrap-up consent that
-// opens the reconciliation. One surface, variant-keyed; distinct from
-// conclude-gate, which is the final completion consent the same close
-// reaches later — the two stops coexist in one conclusion.
+// the three faces of the mandatory review gate (findings already back,
+// a review still running, no review ever run — each names what yes
+// does, so "another review" is never the reading), and the wrap-up
+// consent that opens the reconciliation. One surface, variant-keyed;
+// distinct from conclude-gate, which is the final completion consent the
+// same close reaches later — the two stops coexist in one conclusion.
 const CLOSING_GATES = {
   're-review': () => ({
     name: 'MENU: re-review gate',
@@ -2620,10 +2626,18 @@ const CLOSING_GATES = {
       promptOption('Keep going', 'Tell me what else to explore'),
     ],
   }),
-  /** @param {string} reason */
-  'final-review': (reason) => ({
+  'review-running': () => ({
+    name: 'MENU: review-running gate',
+    label: 'A review is still running over this discussion — what it finds must be heard before concluding. Nothing new is dispatched.',
+    question: 'Wait for it?',
+    options: [
+      cmdOption('y', 'yes', 'Wait for it and walk what it finds'),
+      promptOption('Keep going', 'Tell me what else to explore'),
+    ],
+  }),
+  'final-review': () => ({
     name: 'MENU: final-review gate',
-    label: `Next: a final gap review before concluding — ${reason}.`,
+    label: 'Next: a final gap review before concluding — no review has run yet.',
     question: 'Proceed?',
     options: [
       cmdOption('y', 'yes', 'Run the final review'),
@@ -2655,12 +2669,10 @@ function closingGate(cwd, { dotpath, variant, reason }) {
   if (!gate) {
     throw new Error(`render closing-gate: --variant must be one of ${Object.keys(CLOSING_GATES).join(', ')}, got "${variant ?? ''}"`);
   }
-  if (variant === 'final-review') {
-    if (!isFilled(reason)) throw new Error('render closing-gate: --reason is required with --variant final-review — the matched classification\'s quoted description');
-  } else if (reason !== undefined) {
-    throw new Error(`render closing-gate: --reason belongs to --variant final-review alone, not "${variant}"`);
+  if (reason !== undefined) {
+    throw new Error('render closing-gate: takes no --reason — every variant carries its own wording');
   }
-  const g = gate(/** @type {string} */ (reason));
+  const g = gate();
   return section(g.name, STOP_FOR_RESPONSE, menu(g.label, g.options, { question: g.question }));
 }
 

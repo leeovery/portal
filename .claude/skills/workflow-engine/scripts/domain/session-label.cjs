@@ -4,36 +4,41 @@
 // Domain ring: tmux session labels — an opt-in rename of the user's tmux
 // session to show where the workflow session is working
 // (`{original} · {work-unit} · {phase} · {topic}`). Applied by each process
-// skill at Step 0, restored by the `session cleanup` SessionEnd hook. The
+// skill at Step 0, restored by `session cleanup` at session end. The
 // feature is a display courtesy, never state: for the user who has not
 // opted in, or outside tmux, or on any tmux error, every path degrades to
 // a no-op JSON response and the label never gates a flow. (A bad argument
 // from an opted-in call site still fails loudly — that is an authoring
 // bug, not an environment condition.)
 //
-// Opt-in lives in the system config (`~/.config/workflows/config.json`)
-// under `session.tmux_labels` — absent means unconfigured, which is what
-// workflow-start's one-time prompt keys on (boot reports it via
-// `labelConfigStatus`). A `defaults.tmux_labels` boolean in the project
-// manifest overrides the system value for that project — the per-project
-// off-switch, and what keeps a prose-test world from ever labelling the
-// terminal the suite runs in. `WORKFLOWS_CONFIG_DIR` overrides the config
-// directory for tests.
+// Opt-in is the project manifest's `defaults.tmux_labels` boolean — absent
+// means never asked, which is what workflow-start's one-time prompt keys on
+// (boot reports it via `labelConfigStatus`); a prose-test world stamps
+// `false` so a walk never labels the terminal the suite runs in.
 //
-// The original name is stashed machine-globally (under the config dir's
-// `state/session-labels/`, keyed by tmux socket + session id) because the
-// resource it protects — the tmux session name — is machine-global: a
-// label from any project finds the same stash, so re-labels across phases
-// and projects recompose from the true original instead of compounding
-// suffixes. A user rename mid-flight is adopted as the new original at the
-// next label; restore only ever renames a session whose current name is
-// exactly a name we applied.
+// The restore runs from a SessionEnd hook in the project's committed
+// `.claude/settings.json` — a SessionEnd hook declared in skill frontmatter
+// never fires, so cleanup must be a settings-level hook. That hook carries
+// two commands: `session cleanup`, present while labels are on, and
+// `presence cleanup`, present in every workflow project regardless — the
+// heartbeat sweep is infrastructure, not a label preference. Recording the
+// choice syncs the hook (`recordLabelChoice`) and every boot re-syncs it
+// (`syncSessionEndHooks`).
+//
+// The original name is stashed in the checkout's cache
+// (`.workflows/.cache/.session-labels/`, keyed by tmux socket + session
+// id), so no other checkout's engine ever reads a record. Re-labels across
+// phases recompose from the true original instead of compounding suffixes.
+// A user rename mid-flight is adopted as the new original at the next
+// label; restore only ever renames a session whose current name is exactly
+// a name we applied.
 //
 // The stash key is not stable: tmux session ids renumber when the server
 // restarts, and name-restoring setups (tmux-resurrect, Portal) carry a
 // still-labelled name across the restart under a new id. Every original
-// lookup therefore resolves by exact applied-name match across the socket's
-// records — chained, because a record written against a stranded label
+// lookup therefore resolves by exact applied-name match across the
+// checkout's records for the socket — chained, because a record written
+// against a stranded label
 // carries that label inside its own `original` — and only a name matching
 // no record is adopted as the user's own. Records carry their owning
 // Claude process's identity (pid + start time, the presence discipline):
@@ -44,97 +49,155 @@
 
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { processStartTime, processAlive } = require('../kernel/process.cjs');
 const { VALID_PHASES } = require('../kernel/manifest-schema.cjs');
+const { readProjectManifest, withProjectLock, writeProjectManifestAtomic } = require('../kernel/manifest.cjs');
+const { writeJsonAtomic } = require('../kernel/manifest-io.cjs');
+const { commitTailPathspec, PROJECT_MANIFEST_SPEC } = require('./commit.cjs');
 
-/** The system config directory — `WORKFLOWS_CONFIG_DIR` overrides for tests. */
-function configDir() {
-  return process.env.WORKFLOWS_CONFIG_DIR || path.join(os.homedir(), '.config', 'workflows');
-}
+/** The project's committed Claude Code settings — where the session-end hooks live. */
+const SETTINGS_SPEC = '.claude/settings.json';
+const HOOK_ENGINE = 'node "$CLAUDE_PROJECT_DIR/.claude/skills/workflow-engine/scripts/engine.cjs"';
+const SESSION_HOOK_COMMAND = `${HOOK_ENGINE} session cleanup`;
+const PRESENCE_HOOK_COMMAND = `${HOOK_ENGINE} presence cleanup`;
+// What makes a hook ours: the exact `engine.cjs" <verb>` form. The path
+// before it and any arguments after are free, so a hook under another
+// install prefix or carrying a timeout is recognised and never twinned; the
+// closing quote is part of the mark, so a re-quoted command is not.
+const hookMark = (/** @type {string} */ command) => command.slice(command.indexOf('engine.cjs"'));
+const HOOK_MARKS = [SESSION_HOOK_COMMAND, PRESENCE_HOOK_COMMAND].map(hookMark);
 
-function configPath() {
-  return path.join(configDir(), 'config.json');
-}
-
-/**
- * The stored opt-in: true/false when configured, null when unconfigured
- * (absent file, absent key, or unreadable — all mean "never asked").
- * @returns {boolean|null}
- */
-function readLabelConfig() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(configPath(), 'utf8'));
-    const s = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed.session : null;
-    if (s && typeof s === 'object' && !Array.isArray(s) && typeof s.tmux_labels === 'boolean') return s.tmux_labels;
-  } catch { /* absent or unreadable — unconfigured */ }
-  return null;
+/** @param {unknown} v @returns {v is Record<string, any>} */
+function isObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
 /**
- * The project manifest's `defaults.tmux_labels`, when it is a boolean —
- * the per-project override. Null when absent or unreadable.
- * @param {string} cwd @returns {boolean|null}
- */
-function readProjectOverride(cwd) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(cwd, '.workflows', 'manifest.json'), 'utf8'));
-    const d = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed.defaults : null;
-    if (d && typeof d === 'object' && !Array.isArray(d) && typeof d.tmux_labels === 'boolean') return d.tmux_labels;
-  } catch { /* no project manifest — no override */ }
-  return null;
-}
-
-/**
- * The effective opt-in for this project: the project override wins, then
- * the system value. Null means unconfigured everywhere.
+ * The opt-in for this project — `defaults.tmux_labels` when it is a
+ * boolean; null when never asked, or when the project manifest is absent,
+ * unreadable, or carries no defaults.
  * @param {string} cwd @returns {boolean|null}
  */
 function resolveEnabled(cwd) {
-  const project = readProjectOverride(cwd);
-  if (project !== null) return project;
-  return readLabelConfig();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(cwd, '.workflows', 'manifest.json'), 'utf8'));
+    const v = isObject(parsed) && isObject(parsed.defaults) ? parsed.defaults.tmux_labels : undefined;
+    if (typeof v === 'boolean') return v;
+  } catch { /* no project manifest */ }
+  return null;
 }
 
 /**
- * Record the opt-in under `session.tmux_labels`, preserving every other
- * top-level key (the knowledge subsystem shares this file). An existing
- * file that does not parse is refused loudly — silently replacing it
- * would destroy the sibling subsystem's settings. Atomic pid-tagged
- * tmp-then-rename, matching the store/manifest convention.
- * @param {boolean} value
+ * Record the opt-in as the project manifest's `defaults.tmux_labels`,
+ * every other key preserved — under the project lock, the manifest's own
+ * atomic write. A manifest that does not parse refuses loudly through the
+ * kernel read: silently replacing it would drop every registered work unit.
+ * @param {string} cwd @param {boolean} value
+ * @returns {{tmux_labels: boolean}}
  */
-function setLabelConfig(value) {
-  const p = configPath();
-  /** @type {Record<string, unknown>} */
-  let existing = {};
-  if (fs.existsSync(p)) {
-    /** @type {unknown} */
-    let parsed;
-    try {
-      parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    } catch {
-      throw new Error(`config file at ${p} is not valid JSON — fix or remove it before recording the session-label choice`);
-    }
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing = /** @type {Record<string, unknown>} */ (parsed);
-  }
-  const session = existing.session && typeof existing.session === 'object' && !Array.isArray(existing.session)
-    ? /** @type {Record<string, unknown>} */ (existing.session)
-    : {};
-  const payload = { ...existing, session: { ...session, tmux_labels: value } };
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  const tmp = `${p}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2) + '\n');
-  fs.renameSync(tmp, p);
+function setLabelConfig(cwd, value) {
+  withProjectLock(cwd, () => {
+    const manifest = readProjectManifest(cwd);
+    const defaults = isObject(manifest.defaults) ? manifest.defaults : {};
+    manifest.defaults = { ...defaults, tmux_labels: value };
+    writeProjectManifestAtomic(cwd, manifest);
+  });
   return { tmux_labels: value };
+}
+
+/** The mark a hook of ours carries, or null for a foreign one. @param {unknown} hook */
+function ourMark(hook) {
+  if (!isObject(hook) || hook.type !== 'command' || typeof hook.command !== 'string') return null;
+  return HOOK_MARKS.find((m) => hook.command.includes(m)) || null;
+}
+
+/**
+ * Ensure the SessionEnd hook in the project's `.claude/settings.json`
+ * carries `session cleanup` iff `session` and `presence cleanup` iff
+ * `presence`, every other key — permissions, other events, foreign
+ * SessionEnd groups and their matchers — preserved. A file whose hooks of
+ * ours are already exactly the wanted set is left alone, wherever and
+ * however they sit (a recognised hook is never rewritten, never twinned,
+ * never reordered); otherwise ours are stripped from every group — a group
+ * emptied by that goes, one still holding foreign hooks stays — and the
+ * wanted set lands as one group. A settings file that does not parse is
+ * left untouched and reported rather than thrown: neither caller may fail
+ * over hook plumbing it cannot read.
+ * @param {string} cwd @param {{session: boolean, presence: boolean}} want
+ * @returns {{changed: boolean, error?: string}}
+ */
+function syncSessionEndHooks(cwd, { session, presence }) {
+  // WORKFLOWS_SKIP_SESSION_END_HOOKS is the test harness's hermeticity
+  // switch — a walk's boot must never write the world's settings file. Real
+  // projects never set it: the hooks are infrastructure, not a setting.
+  if (process.env.WORKFLOWS_SKIP_SESSION_END_HOOKS) return { changed: false };
+  const file = path.join(cwd, SETTINGS_SPEC);
+  /** @type {Record<string, any>} */
+  let settings = {};
+  if (fs.existsSync(file)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (!isObject(parsed)) throw new Error('root is not an object');
+      settings = parsed;
+    } catch (err) {
+      return { changed: false, error: `${SETTINGS_SPEC} is not valid JSON — ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+  const hooks = isObject(settings.hooks) ? settings.hooks : {};
+  /** @type {any[]} */
+  const groups = Array.isArray(hooks.SessionEnd) ? hooks.SessionEnd : [];
+  const marksOf = (/** @type {unknown} */ g) => (isObject(g) && Array.isArray(g.hooks) ? g.hooks.map(ourMark).filter(Boolean) : []);
+  const desired = [session && SESSION_HOOK_COMMAND, presence && PRESENCE_HOOK_COMMAND].filter(Boolean);
+  if (groups.flatMap(marksOf).sort().join('\n') === desired.map(hookMark).sort().join('\n')) return { changed: false };
+
+  const kept = groups.flatMap((g) => {
+    if (marksOf(g).length === 0) return [g];
+    const foreign = g.hooks.filter((/** @type {unknown} */ h) => !ourMark(h));
+    return foreign.length > 0 ? [{ ...g, hooks: foreign }] : [];
+  });
+  const nextGroups = desired.length > 0
+    ? [...kept, { hooks: desired.map((command) => ({ type: 'command', command })) }]
+    : kept;
+  const nextHooks = { ...hooks };
+  if (nextGroups.length > 0) nextHooks.SessionEnd = nextGroups;
+  else delete nextHooks.SessionEnd;
+  const next = { ...settings };
+  if (Object.keys(nextHooks).length > 0) next.hooks = nextHooks;
+  else delete next.hooks;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  writeJsonAtomic(file, next);
+  return { changed: true };
+}
+
+/**
+ * workflow-start's one-time answer: record the opt-in, sync the session-end
+ * hooks to match (`presence cleanup` stays whatever the answer), and commit
+ * the two together, confined. The choice is recorded either way: a settings
+ * file the sync could not read, or a commit git refused, comes back as a
+ * warning — boot re-syncs, and the state is saved.
+ * @param {string} cwd @param {boolean} value
+ * @returns {{tmux_labels: boolean, warnings?: string[]}}
+ */
+function recordLabelChoice(cwd, value) {
+  setLabelConfig(cwd, value);
+  /** @type {string[]} */
+  const warnings = [];
+  const specs = [PROJECT_MANIFEST_SPEC];
+  // Sequential with setLabelConfig's own hold, never nested: the lock is a
+  // file lock, not reentrant.
+  const sync = withProjectLock(cwd, () => syncSessionEndHooks(cwd, { session: value, presence: true }));
+  if (sync.error) warnings.push(`session-end hooks not synced: ${sync.error}`);
+  if (sync.changed) specs.push(SETTINGS_SPEC);
+  commitTailPathspec(cwd, specs, 'chore: record session-label choice', warnings);
+  return warnings.length > 0 ? { tmux_labels: value, warnings } : { tmux_labels: value };
 }
 
 /**
  * Boot's report for workflow-start's one-time prompt: `no-tmux` (never
- * prompt, never label), `on`/`off` (settled — by the project override or
- * the system value), `prompt` (in tmux and never asked anywhere).
+ * prompt, never label), `on`/`off` (recorded on the project manifest),
+ * `prompt` (in tmux and never asked).
  * @param {string} cwd
  * @returns {'no-tmux'|'on'|'off'|'prompt'}
  */
@@ -174,16 +237,15 @@ function tmuxContext() {
   return { socket, id: out.slice(0, sep), name: out.slice(sep + 1) };
 }
 
-// Machine-global stash home: the tmux session name is machine-global, so
-// its restore record must be findable from any project.
-function stashDir() {
-  return path.join(configDir(), 'state', 'session-labels');
+/** The checkout's stash store, under its gitignored cache. @param {string} cwd */
+function stashDir(cwd) {
+  return path.join(cwd, '.workflows', '.cache', '.session-labels');
 }
 
-/** @param {string|null} socket @param {string} tmuxId */
-function stashPath(socket, tmuxId) {
+/** @param {string} cwd @param {string|null} socket @param {string} tmuxId */
+function stashPath(cwd, socket, tmuxId) {
   const server = crypto.createHash('sha256').update(socket || '').digest('hex').slice(0, 8);
-  return path.join(stashDir(), `${server}-${tmuxId.replace(/[^A-Za-z0-9_-]/g, '')}.json`);
+  return path.join(stashDir(cwd), `${server}-${tmuxId.replace(/[^A-Za-z0-9_-]/g, '')}.json`);
 }
 
 /**
@@ -209,16 +271,17 @@ function readStash(file) {
 /**
  * Every complete stash record, with its file path. Incomplete or
  * unreadable files are left for the sweeps to drop.
+ * @param {string} cwd
  * @returns {(LabelStash & {file: string})[]}
  */
-function allStashRecords() {
+function allStashRecords(cwd) {
   /** @type {(LabelStash & {file: string})[]} */
   const records = [];
   /** @type {string[]} */
   let files = [];
-  try { files = fs.readdirSync(stashDir()).filter((f) => f.endsWith('.json')).sort(); } catch { return records; }
+  try { files = fs.readdirSync(stashDir(cwd)).filter((f) => f.endsWith('.json')).sort(); } catch { return records; }
   for (const f of files) {
-    const file = path.join(stashDir(), f);
+    const file = path.join(stashDir(cwd), f);
     const stash = readStash(file);
     if (stash && stash.tmux_id && stash.applied && stash.original) records.push({ ...stash, file });
   }
@@ -226,12 +289,12 @@ function allStashRecords() {
 }
 
 /**
- * The complete stash records on one socket — the chain-resolution set.
- * @param {string|null} socket
+ * This checkout's stash records on one socket — the chain-resolution set.
+ * @param {string} cwd @param {string|null} socket
  * @returns {(LabelStash & {file: string})[]}
  */
-function listStashes(socket) {
-  return allStashRecords().filter((r) => (r.socket || null) === (socket || null));
+function listStashes(cwd, socket) {
+  return allStashRecords(cwd).filter((r) => (r.socket || null) === (socket || null));
 }
 
 /**
@@ -264,8 +327,9 @@ function chainOriginal(records, name) {
 /**
  * Is the record's owning Claude process gone? Identity is pid + start time
  * (the presence discipline — a recycled pid carries a different start
- * time). A record without a pid predates owner identity and counts as
- * dead: exactly the strandings the sweeps exist to clear.
+ * time). A record without a pid carries no identity to verify and counts
+ * as dead: a label written with no CLAUDE_PID is sweepable by whoever
+ * finds it.
  * @param {LabelStash} stash
  */
 function ownerDead(stash) {
@@ -292,7 +356,7 @@ function liveSessions(socket) {
 
 /**
  * Rename the tmux session to carry the working position. No-op JSON when
- * the feature is off (system or project), the session runs outside tmux,
+ * the feature is off for the project, the session runs outside tmux,
  * tmux errors, or the stash cannot be written — the label never blocks a
  * flow. Bad arguments from an enabled call site throw: an authoring bug
  * fails loudly.
@@ -311,11 +375,11 @@ function applySessionLabel(cwd, workUnit, phase, topic) {
   try { ctx = tmuxContext(); } catch { /* tmux errored */ }
   if (!ctx) return { labelled: false, reason: process.env.TMUX ? 'tmux-error' : 'no-tmux' };
 
-  const file = stashPath(ctx.socket, ctx.id);
+  const file = stashPath(cwd, ctx.socket, ctx.id);
   // Resolve the original by applied-name chain, not by the id-keyed stash
   // alone: a server restart renumbers the id, so a stranded label's record
   // sits under a key this session will never look up directly.
-  const { original, visited } = chainOriginal(listStashes(ctx.socket), ctx.name);
+  const { original, visited } = chainOriginal(listStashes(cwd, ctx.socket), ctx.name);
   const position = topic === workUnit ? `${workUnit} · ${phase}` : `${workUnit} · ${phase} · ${topic}`;
   const name = `${original} · ${position}`;
   const pid = Number(process.env.CLAUDE_PID) || null;
@@ -333,7 +397,7 @@ function applySessionLabel(cwd, workUnit, phase, topic) {
     pid_start: pid ? processStartTime(pid) : null,
   };
   try {
-    fs.mkdirSync(stashDir(), { recursive: true });
+    fs.mkdirSync(stashDir(cwd), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(record) + '\n');
     fs.renameSync(tmp, file);
@@ -355,8 +419,8 @@ function applySessionLabel(cwd, workUnit, phase, topic) {
 
 /**
  * Put the original tmux session name back — `session cleanup`, the
- * SessionEnd sweep over the machine-global stash store. Without a session
- * id nothing is touched (an id-less sweep could take a live peer's label —
+ * SessionEnd sweep over the checkout's stash store. Without a session id
+ * nothing is touched (an id-less sweep could take a live peer's label —
  * the presence sweep refuses the same way). Sweeps stashes the named
  * session owns (an ownerless stash counts) plus any whose owning process
  * is dead — a stranding no other sweep would ever reach. A session is
@@ -368,12 +432,12 @@ function applySessionLabel(cwd, workUnit, phase, topic) {
  * one whose rename failed is kept for the next sweep, as is a link a live
  * session's name still chains through — dropping it would strand that
  * session's own recomposition. Never throws: a hook must exit clean.
- * @param {string|null} sessionId
+ * @param {string} cwd @param {string|null} sessionId
  * @returns {{restored: boolean}}
  */
-function restoreSessionLabel(sessionId) {
+function restoreSessionLabel(cwd, sessionId) {
   if (!sessionId) return { restored: false };
-  const dir = stashDir();
+  const dir = stashDir(cwd);
   /** @type {string[]} */
   let files = [];
   try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { return { restored: false }; }
@@ -404,7 +468,7 @@ function restoreSessionLabel(sessionId) {
         if (wearer) targetId = wearer.id;
       }
       if (targetId) {
-        const { original, visited } = chainOriginal(listStashes(socket), stash.applied);
+        const { original, visited } = chainOriginal(listStashes(cwd, socket), stash.applied);
         try {
           tmux(['rename-session', '-t', targetId, original], socket);
           restored = true;
@@ -417,7 +481,7 @@ function restoreSessionLabel(sessionId) {
         }
       } else {
         const live = liveOn(socket);
-        if (live && live.some((s) => chainOriginal(listStashes(socket), s.name).visited.includes(p))) {
+        if (live && live.some((s) => chainOriginal(listStashes(cwd, socket), s.name).visited.includes(p))) {
           drop = false; // a live name still chains through this record
         }
       }
@@ -449,7 +513,7 @@ function repairSessionLabels(cwd) {
   try { ctx = tmuxContext(); } catch { /* tmux errored */ }
   if (!ctx) return { repaired: false };
   let repaired = false;
-  const records = listStashes(ctx.socket);
+  const records = listStashes(cwd, ctx.socket);
   const head = records.find((r) => r.applied === ctx.name);
   if (head && ownerDead(head)) {
     const { original, visited } = chainOriginal(records, ctx.name);
@@ -461,17 +525,21 @@ function repairSessionLabels(cwd) {
   }
   /** @type {Map<string, {id: string, name: string}[]|null>} */
   const liveCache = new Map();
-  for (const r of allStashRecords()) {
+  for (const r of allStashRecords(cwd)) {
     if (!ownerDead(r)) continue;
     const key = r.socket || '';
     if (!liveCache.has(key)) liveCache.set(key, liveSessions(r.socket || null));
     const live = liveCache.get(key);
     if (!live) continue; // server unreachable — keep, nothing is verifiable
-    const sameSocket = listStashes(r.socket || null);
+    const sameSocket = listStashes(cwd, r.socket || null);
     const needed = live.some((s) => chainOriginal(sameSocket, s.name).visited.includes(r.file));
     if (!needed) { try { fs.unlinkSync(r.file); } catch { /* raced away */ } }
   }
   return { repaired };
 }
 
-module.exports = { applySessionLabel, restoreSessionLabel, repairSessionLabels, setLabelConfig, labelConfigStatus, configDir };
+module.exports = {
+  applySessionLabel, restoreSessionLabel, repairSessionLabels,
+  resolveEnabled, labelConfigStatus, syncSessionEndHooks, recordLabelChoice,
+  SETTINGS_SPEC,
+};
