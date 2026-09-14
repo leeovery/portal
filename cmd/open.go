@@ -133,6 +133,24 @@ Domain pins skip the precedence chain and force a single domain:
   -f, --filter    skip resolution and open the picker pre-filtered by <text>
                   (mutually exclusive with a target and every domain pin)
 
+A positional beginning with / and containing no further / searches your live
+sessions instead of resolving:
+  open /term      search live sessions for "term"
+  open /          open the picker with the filter empty and ready to type
+
+The term is matched case-folded, as a contiguous run, against each live session's
+name and its recorded directory. Exactly one match attaches that session outright;
+no match or several open the picker pre-filtered by the term — never an error.
+A single-segment absolute directory is read as a search, not a path: mint there
+with -p /tmp.
+
+A search composes with nothing — another target, a command, -f, a domain pin or a
+second search on the same line is a usage error.
+
+-f always opens the picker, which makes it the form for a script or a keybinding;
+/term takes you straight to the session when only one matches, which makes it the
+interactive form.
+
 A command to run in a freshly minted session is scoped with -e/--exec or after a
 -- separator; command scoping applies to mint outcomes only, never to an attach.
 

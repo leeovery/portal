@@ -140,6 +140,8 @@ func TestOpenHelpMetadata_DescribesRedesignedVerb(t *testing.T) {
 		"-e",
 		"--",
 		"precedence",
+		"/term",
+		"search",
 	} {
 		if !strings.Contains(long, want) {
 			t.Errorf("openCmd.Long omits %q; full surface not described:\n%s", want, openCmd.Long)
