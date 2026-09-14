@@ -206,8 +206,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 3,
-          "current_task": "open-with-forced-filter-4-1",
+          "current_phase": 4,
+          "current_task": "open-with-forced-filter-4-2",
           "completed_tasks": [
             "open-with-forced-filter-1-1",
             "open-with-forced-filter-1-2",
@@ -224,7 +224,8 @@
             "open-with-forced-filter-3-2",
             "open-with-forced-filter-3-3",
             "open-with-forced-filter-3-4",
-            "open-with-forced-filter-3-5"
+            "open-with-forced-filter-3-5",
+            "open-with-forced-filter-4-1"
           ],
           "consolidated_phases": [
             1,
@@ -242,7 +243,20 @@
                 "1": "approved"
               }
             }
-          }
+          },
+          "bank": [
+            {
+              "task": "open-with-forced-filter-4-1",
+              "source": "reviewer",
+              "summary": "Fold the two loading-gate dismissal blocks into one helper so the decision-before-warnings ordering is stated once",
+              "failure": "The dismissal sequence now exists as two verbatim copies (decision -> transitionFromLoading -> tea.Batch(surfaceBufferedWarnings, refetchSessionsAfterRestore, maybeDispatchDetectionCmd)), and the load-bearing ordering comment sits on only one of them. A later edit to one arm leaves cold boots behaving differently depending on which gate closed last: the caller gets its buffered warnings when bootstrap completed last and an empty buffer when the minimum span elapsed last, or vice versa. Nothing fails: both arms compile, and the current suites drive predominantly one ordering per behaviour. A user notices it as soft bootstrap warnings that appear after some reboots and not others.",
+              "detail": "The duplicated pair predates this task (internal/tui/model.go:1600-1601 and :1627-1628); 4-1 added a third duplicated line to each and, per its own instruction, commented only the BootstrapCompleteMsg copy (:1621-1623). A consolidation would restructure both arms, which this task was told to leave otherwise untouched, and phase 4 remaining tasks land on the same branches.",
+              "files": [
+                "internal/tui/model.go",
+                "internal/tui/search_decision.go"
+              ]
+            }
+          ]
         }
       }
     }
