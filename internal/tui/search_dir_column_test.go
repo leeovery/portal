@@ -131,8 +131,11 @@ func TestSearchDirColumn(t *testing.T) {
 		dir, sessions, projects := dirColumnFixture(t)
 		m := searchColumnModel(t, prefs.ModeFlat, "portal", sessions, projects)
 
-		for range 3 {
+		for i, want := range []prefs.SessionListMode{prefs.ModeByProject, prefs.ModeByTag, prefs.ModeFlat} {
 			m = pressSettled(t, m, tea.KeyPressMsg{Code: 's', Text: "s"})
+			if m.sessionListMode != want {
+				t.Fatalf("press %d left the list in mode %v, want %v — s no longer regroups from a committed filter", i+1, m.sessionListMode, want)
+			}
 			assertDirRendered(t, m, dir)
 		}
 	})

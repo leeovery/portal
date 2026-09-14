@@ -969,6 +969,15 @@ const searchResultsHome = "/home/user"
 
 func searchResultsFrame(t *testing.T, keys ...tea.KeyPressMsg) string {
 	t.Helper()
+	frame, _ := searchResultsFrameModel(t, keys...)
+	return frame
+}
+
+// searchResultsFrameModel returns the settled model beside its frame, so an
+// assertion about the state a keystroke reached is not left to the frame text,
+// which under a committed filter carries no mode indicator.
+func searchResultsFrameModel(t *testing.T, keys ...tea.KeyPressMsg) (string, tui.Model) {
+	t.Helper()
 	t.Setenv("HOME", searchResultsHome)
 
 	fx, err := capture.FixtureByName("sessions-search-results")
@@ -982,7 +991,8 @@ func searchResultsFrame(t *testing.T, keys ...tea.KeyPressMsg) string {
 		model, cmd = model.Update(key)
 		model = settleCommands(model, cmd, 0)
 	}
-	return ansi.Strip(model.(tui.Model).View().Content)
+	settled := model.(tui.Model)
+	return ansi.Strip(settled.View().Content), settled
 }
 
 // settleCommands drives a command and whatever it returns back through Update,
@@ -1104,12 +1114,18 @@ func TestSessionsSearchResultsFixture(t *testing.T) {
 	})
 
 	t.Run("it renders the column in By Project and By Tag", func(t *testing.T) {
-		byProject := searchResultsFrame(t, tea.KeyPressMsg{Code: 's', Text: "s"})
+		byProject, byProjectModel := searchResultsFrameModel(t, tea.KeyPressMsg{Code: 's', Text: "s"})
+		if got, want := byProjectModel.SessionListTitle(), "Sessions — by project"; got != want {
+			t.Fatalf("SessionListTitle() = %q after one s, want %q — the press did not regroup", got, want)
+		}
 		if !strings.Contains(byProject, "~/code/portal") {
 			t.Errorf("the By Project frame carries no directory column:\n%s", byProject)
 		}
 
-		byTag := searchResultsFrame(t, tea.KeyPressMsg{Code: 's', Text: "s"}, tea.KeyPressMsg{Code: 's', Text: "s"})
+		byTag, byTagModel := searchResultsFrameModel(t, tea.KeyPressMsg{Code: 's', Text: "s"}, tea.KeyPressMsg{Code: 's', Text: "s"})
+		if got, want := byTagModel.SessionListTitle(), "Sessions — by tag"; got != want {
+			t.Fatalf("SessionListTitle() = %q after two s presses, want %q — the presses did not regroup", got, want)
+		}
 		if !strings.Contains(byTag, "~/code/portal") {
 			t.Errorf("the By Tag frame carries no directory column:\n%s", byTag)
 		}
