@@ -145,7 +145,12 @@
             "open-with-forced-filter-4-7": "tick-cfc44d",
             "open-with-forced-filter-4-8": "tick-fc6181",
             "open-with-forced-filter-5-5": "tick-aceea8",
-            "open-with-forced-filter-5-6": "tick-a33475"
+            "open-with-forced-filter-5-6": "tick-a33475",
+            "open-with-forced-filter-6": "tick-10c1a3",
+            "open-with-forced-filter-6-1": "tick-6a5d97",
+            "open-with-forced-filter-6-2": "tick-403463",
+            "open-with-forced-filter-6-3": "tick-7c6b83",
+            "open-with-forced-filter-6-4": "tick-fa4ede"
           },
           "storage_paths": [
             ".tick/"
@@ -177,10 +182,10 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle_total": 0,
+          "analysis_cycle_total": 1,
           "linters": [
             {
               "name": "go vet",
@@ -277,8 +282,19 @@
                 "1": "approved",
                 "2": "approved"
               }
+            },
+            "c1": {
+              "tasks": {
+                "1": "approved",
+                "2": "approved",
+                "3": "approved",
+                "4": "approved"
+              }
             }
-          }
+          },
+          "machine_phases": [
+            6
+          ]
         }
       }
     }
