@@ -183,12 +183,12 @@
       "items": {
         "open-with-forced-filter": {
           "status": "in-progress",
-          "task_gate_mode": "auto",
-          "fix_gate_mode": "auto",
-          "analysis_gate_mode": "auto",
-          "consolidation_gate_mode": "auto",
+          "task_gate_mode": "gated",
+          "fix_gate_mode": "gated",
+          "analysis_gate_mode": "gated",
+          "consolidation_gate_mode": "gated",
           "fix_attempts": 0,
-          "analysis_cycle_total": 1,
+          "analysis_cycle_total": 2,
           "linters": [
             {
               "name": "go vet",
