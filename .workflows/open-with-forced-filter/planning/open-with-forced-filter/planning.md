@@ -169,3 +169,13 @@ status: draft
 |-------------|------|------------|
 | open-with-forced-filter-7-1 | Deliver the concurrent bootstrap's terminal event to the command-pending picker | a warm command-pending model with a nil receiver issues nothing extra and its batch is otherwise unchanged, the `BootstrapCompleteMsg` arm's `PageLoading` buffering gate stays exactly as it is so the warnings stay pending and reach `finishTUI` once rather than twice, a fatal must set `fatalActive` whatever page the model is on, a fatal must not mint the session so `processTUIResult` is stopped if it can still run the command, the loading page's behaviour stays byte-identical including the notice band and the destructive error frame, `isTUIPath` and `shouldRunConcurrentBootstrap` are untouched |
 | open-with-forced-filter-7-2 | Hold the command-pending picker's mint until the bootstrap's terminal event arrives | a warm command-pending model (nil `progressReceiver`) mints on the keypress exactly as today with no staging and no band change, first stage wins so a second Enter or `n` changes neither the staged directory nor the band, a staged empty directory stays distinguishable from nothing staged, both call sites assign the returned command to a local before returning, no staged mint is ever issued from the `BootstrapFatalMsg` arm nor by a `BootstrapCompleteMsg` arriving after a fatal, a live flash still claims the Projects slot ahead of the wait band, `projectBandHeight` matches the rendered slot and the list budget is re-measured at both the staging and the issuing, Esc and Ctrl-C still quit while a mint is staged, the loading-gated routes stay untouched with no new call reaching a real tmux server |
+
+### Phase 8: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| open-with-forced-filter-8-1 | Route every search surface's session set through one attached-session read | outside tmux the helper takes no read at all so the zero-call assertion in `TestOpenCommand_SearchForm_ExcludesNothingOutsideTmux` holds, a failed or empty current-session read drops nothing on any of the three surfaces, the bare `/` completion holds back the attached name too, a held-back name never reaches the `"/"+name` append, only the search branch consults the helper so `completeSessionNames` offers the same set as today including the attached session, the new completion seam is staged in tests only through `withFuncSeam` so the derived function-var guard stays green, the `SearchSessionSource` seam and `tui.PickerSessions` and the `openDeps.SearchSessions` wiring are untouched, the two connector-selection `tmux.InsideTmux()` uses stay as they are |
