@@ -139,7 +139,8 @@
             "open-with-forced-filter-5": "tick-fd355d",
             "open-with-forced-filter-5-2": "tick-a6b112",
             "open-with-forced-filter-5-3": "tick-6827c1",
-            "open-with-forced-filter-5-4": "tick-cd4c35"
+            "open-with-forced-filter-5-4": "tick-cd4c35",
+            "open-with-forced-filter-3-5": "tick-28aca8"
           },
           "storage_paths": [
             ".tick/"
@@ -172,7 +173,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
-          "consolidation_gate_mode": "gated",
+          "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 0,
           "linters": [
@@ -226,12 +227,20 @@
           ],
           "consolidated_phases": [
             1,
-            2
+            2,
+            3
           ],
           "completed_phases": [
             1,
             2
-          ]
+          ],
+          "staging": {
+            "p3": {
+              "tasks": {
+                "1": "approved"
+              }
+            }
+          }
         }
       }
     }
