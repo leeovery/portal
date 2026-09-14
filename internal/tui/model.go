@@ -222,6 +222,13 @@ type Model struct {
 	fatalMessage string
 	fatalErr     error
 
+	// A pick taken while the bootstrap was still in flight, minted from the
+	// terminal complete event instead. stagedMint carries the claim so a staged
+	// empty directory — a model whose cwd never resolved — stays distinguishable
+	// from nothing staged.
+	stagedMint    bool
+	stagedMintDir string
+
 	// One blocking receive re-issued per event, which preserves exact event order
 	// even under command batching. When set, the channel owns the terminal
 	// BootstrapCompleteMsg; when nil, Init synthesizes it.
@@ -1643,6 +1650,18 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			// much.
 			m.pendingBootstrapWarnings = append(m.pendingBootstrapWarnings, msg.Warnings...)
 		}
+		// Sequenced after the warnings append so what this event carried is staged
+		// for the teardown to write before the mint's connect takes the process.
+		// The fatalActive early return above is what denies a complete arriving
+		// after a fatal.
+		if m.stagedMint {
+			dir := m.stagedMintDir
+			m.stagedMint = false
+			m.stagedMintDir = ""
+			// The wait is over, so the band drops back to the pending-command banner.
+			(&m).resyncPageLayouts()
+			return m, m.mintSession(dir)
+		}
 		if m.minElapsed && m.activePage == PageLoading {
 			cmd := (&m).dismissLoadingGate()
 			return m, cmd
@@ -1785,13 +1804,43 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	}
 }
 
-func (m Model) createSession(dir string) tea.Cmd {
+// A picker whose bootstrap runs concurrently with it and has not yet completed.
+// A fatal leaves bootstrapComplete false, so a fatal'd picker reads as in flight
+// too: a caller that must exclude one checks fatalActive itself. The warm route
+// has no receiver: its bootstrap ran before Init.
+func (m Model) bootstrapInFlight() bool {
+	return m.progressReceiver != nil && !m.bootstrapComplete
+}
+
+// Callers must assign the returned command to a local before returning the
+// model: `return m, m.createSession(dir)` leaves the order of the model read and
+// this mutating call unspecified, so the staging would be lost on the copy.
+func (m *Model) createSession(dir string) tea.Cmd {
 	// The quit a fatal issues is asynchronous, so a keypress already queued can
 	// still reach this: a session minted against a half-bootstrapped server is
 	// exactly what the fatal exists to prevent.
 	if m.fatalActive {
 		return nil
 	}
+	if m.bootstrapInFlight() {
+		// First stage wins: the band has already announced the pick, so a silent
+		// re-target is worse than a keypress that visibly changes nothing.
+		if m.stagedMint {
+			return nil
+		}
+		m.stagedMint = true
+		m.stagedMintDir = dir
+		// The band is about to swap, and the Projects list budget is measured off
+		// the rendered slot.
+		m.resyncPageLayouts()
+		return nil
+	}
+	return m.mintSession(dir)
+}
+
+// The mint itself, with no gate: reached from the keypress on every model that
+// is not mid-bootstrap, and from the terminal complete event for a staged pick.
+func (m Model) mintSession(dir string) tea.Cmd {
 	return func() tea.Msg {
 		name, err := m.sessionCreator.CreateFromDir(dir, m.command)
 		if err != nil {
@@ -1885,7 +1934,8 @@ func (m Model) handleProjectEnter() (tea.Model, tea.Cmd) {
 	if m.sessionCreator == nil {
 		return m, nil
 	}
-	return m, m.createSession(pi.Project.Path)
+	cmd := (&m).createSession(pi.Project.Path)
+	return m, cmd
 }
 
 func (m Model) handleDeleteProjectKey() (tea.Model, tea.Cmd) {
@@ -2797,10 +2847,11 @@ func (m Model) handleNewInCWD() (tea.Model, tea.Cmd) {
 	if m.sessionCreator == nil {
 		return m, nil
 	}
-	return m, m.createSessionInCWD()
+	cmd := (&m).createSessionInCWD()
+	return m, cmd
 }
 
-func (m Model) createSessionInCWD() tea.Cmd {
+func (m *Model) createSessionInCWD() tea.Cmd {
 	return m.createSession(m.cwd)
 }
 

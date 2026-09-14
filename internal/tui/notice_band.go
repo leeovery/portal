@@ -32,6 +32,10 @@ const commandBandCaret = "▸"
 
 const commandBandText = "Pick a project to run"
 
+// The wait a pick taken while the concurrent bootstrap is still running
+// announces: the keypress was taken, and the mint follows the bootstrap.
+const stagedMintBandText = "Finishing startup — your pick will run when it's done"
+
 func (r noticeBandRole) barToken(th theme.Theme) theme.Token {
 	switch r {
 	case bandWarning:
@@ -197,6 +201,11 @@ func (m Model) activeNoticeBand() (role noticeBandRole, message string, ok bool)
 func (m Model) activeProjectNoticeBand() (role noticeBandRole, message string, ok bool) {
 	if role, message, live := m.flashSlotClaim(); live {
 		return role, message, true
+	}
+	// Above the commandPending arm: the banner asking for a pick is displaced
+	// once the pick is made.
+	if m.stagedMint {
+		return bandInfo, stagedMintBandText, true
 	}
 	if m.commandPending {
 		return bandCommand, commandBandText, true
