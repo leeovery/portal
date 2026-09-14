@@ -185,7 +185,7 @@
       "items": {
         "open-with-forced-filter": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "consolidation_gate_mode": "gated",
@@ -221,7 +221,7 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 7,
+          "current_phase": 8,
           "current_task": null,
           "completed_tasks": [
             "open-with-forced-filter-1-1",
@@ -259,7 +259,8 @@
             "open-with-forced-filter-6-3",
             "open-with-forced-filter-6-4",
             "open-with-forced-filter-7-1",
-            "open-with-forced-filter-7-2"
+            "open-with-forced-filter-7-2",
+            "open-with-forced-filter-8-1"
           ],
           "consolidated_phases": [
             1,
@@ -324,6 +325,19 @@
           },
           "machine_phases": [
             6
+          ],
+          "bank": [
+            {
+              "task": "open-with-forced-filter-8-1",
+              "source": "reviewer",
+              "summary": "README tab-completion sentence now overstates the offered set for the search form",
+              "failure": "A user inside tmux presses x /<TAB> and finds the session they are attached to absent from the candidates. Nothing in the docs accounts for the omission, so it reads as broken completion rather than a deliberate exclusion.",
+              "detail": "README.md:175 says x <TAB> offers your live session names and x /po<TAB> completes the term after the slash against those same names. After this task the search branch completes against those names less the attached session, while x <TAB> routes through the untouched completeSessionNames and still offers all of them. Specification section 8.1 carries the same overstatement.",
+              "files": [
+                "README.md",
+                ".workflows/open-with-forced-filter/specification/open-with-forced-filter/specification.md"
+              ]
+            }
           ]
         }
       }
