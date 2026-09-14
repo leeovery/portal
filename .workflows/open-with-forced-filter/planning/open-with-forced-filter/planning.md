@@ -158,3 +158,13 @@ status: draft
 | open-with-forced-filter-6-2 | Derive the searchable field list from one declaration | an empty recorded directory yields the name alone and a `FilterValue` with no trailing separator, the fields stay tested separately so a run spanning the name-directory join is not a match, an empty term matches nothing, the two display-side `AbbreviateHome` calls stay as they are, eager abbreviation is accepted with no cache |
 | open-with-forced-filter-6-3 | Make the containment filter's item source self-contained | a same-length replacement (a rename, a same-count refresh) must fall back as well as a length change, a never-`set` source behaves as today, header rows are still skipped and `MatchedIndexes` stays nil, a fresh companion slice is built on every `set`, items and recorded values come from one hold, `-race` with `set` driven against a concurrent filter pass |
 | open-with-forced-filter-6-4 | Deliver the soft bootstrap warnings the warm picker route drops | the clear sits inside the `PageLoading` block so a cancelled loading page is owed nothing, nothing is written twice on the warm loading-page route or the cold concurrent route, the K=1 attach and failed-read teardowns keep writing `BufferedWarnings()` exactly once, no warnings means no write, both writes precede the connector that execs and never returns, a warm `-f` and a warm bare `open` are covered too |
+
+### Phase 7: Ad Hoc
+
+**Goal**: Ad hoc additions.
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| open-with-forced-filter-7-1 | Deliver the concurrent bootstrap's terminal event to the command-pending picker | a warm command-pending model with a nil receiver issues nothing extra and its batch is otherwise unchanged, the `BootstrapCompleteMsg` arm's `PageLoading` buffering gate stays exactly as it is so the warnings stay pending and reach `finishTUI` once rather than twice, a fatal must set `fatalActive` whatever page the model is on, a fatal must not mint the session so `processTUIResult` is stopped if it can still run the command, the loading page's behaviour stays byte-identical including the notice band and the destructive error frame, `isTUIPath` and `shouldRunConcurrentBootstrap` are untouched |
