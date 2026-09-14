@@ -19,3 +19,32 @@ sources: architecture, duplication
 - This extends cycle 1's approved Task 1 rather than reversing it: that task's "`searchCandidates` keeps its own read … the seam stays where it is" scoped what *it* changed — `tui.PickerSessions` stays the one set rule and `SearchSessionSource` is untouched here; only the read producing its argument is collapsed, and the completer, which the rule never reached at all, is brought onto it.
 
 **Outcome**: Inside tmux, `x /<TAB>` never offers the session the user is attached to, so every candidate the completer hands back is one the sigil can actually reach. The count, the picker's list and the completer's offered set all answer from a single reading of which session that is.
+
+**Do**:
+
+- Add to `cmd/open_search.go`, beside `searchCandidates`: a one-method reader interface (`CurrentSessionName() (string, error)`, which `SearchSessionSource` and `*tmux.Client` both already satisfy) and `currentPickerSession(src)` returning the attached session's name — the empty string when `!tmux.InsideTmux()`, taking no read at all on that branch, and the empty string when the read errors or answers empty.
+- Rewrite `searchCandidates`' tail as `return tui.PickerSessions(sessions, currentPickerSession(src)), nil`, so the `tmux.InsideTmux()` gate and the failed/empty branch at `cmd/open_search.go:103-110` leave the function and only the `ListSessionsProbe` error return stays ahead of it.
+- Replace the inline block at `cmd/open.go:725-731` with `if name := currentPickerSession(client); name != "" { cfg.insideTmux = true; cfg.currentSession = name }`. The complete production set is two call sites — `rg -n 'CurrentSessionName\(\)' --glob '*.go' --glob '!*_test.go'` returns `cmd/open.go:726`, `cmd/open_search.go:106`, the `SearchSessionSource` method declaration at `cmd/open_search.go:84` and the `internal/tmux` definition — and both call sites convert.
+- In `cmd/completion.go`, add a package-level function-var seam `completionCurrentSession` beside `completionSessionNames`, defaulting to `func() string { return currentPickerSession(tmux.DefaultClient()) }` (same reason as its neighbour: the bootstrap-exempt `__complete` path carries no context client). Read it once ahead of `completeSearchTerm`'s loop and `continue` on a name equal to it, beside the existing embedded-slash skip; a name held back this way must not reach the `"/"+name` append.
+- Leave `completeSessionNames` on the raw name list — only the search branch consults the helper — and leave the `SearchSessionSource` seam, `tui.PickerSessions` and `openDeps.SearchSessions` wiring as they are.
+
+**Acceptance Criteria**:
+
+- [ ] `rg -n 'CurrentSessionName\(\)' --glob '*.go' --glob '!*_test.go' cmd/` shows exactly one call, inside `currentPickerSession`, alongside the interface method declarations (down from two calls today).
+- [ ] Neither `openTUI` nor `searchCandidates` carries a `tmux.InsideTmux()` gate of its own; the package's other two uses (`cmd/open.go:106` and `cmd/open.go:449`, connector selection) are untouched.
+- [ ] Inside tmux, `completeSearchTerm` never returns the attached session's name — for a typed term and for the bare `/` alike.
+- [ ] Outside tmux, and whenever the current-session read fails or answers empty, `completeSearchTerm` and `searchCandidates` each drop nothing: the offered set and the counted set are exactly what they are today.
+- [ ] `completeSessionNames` offers the same set as today, the attached session included, so `-s` and the bare positional are unchanged.
+- [ ] The existing search-count suites pass unchanged, including `TestOpenCommand_SearchForm_ExcludesNothingOutsideTmux`'s assertion that `CurrentSessionName` is read zero times outside tmux (`cmd/open_search_test.go:630`).
+- [ ] The new seam is staged in tests only through `withFuncSeam` (a `withCompletionCurrentSession` wrapper beside `withCompletionSessionNames`), so `cmd/seam_guard_test.go`'s derived function-var arm stays green.
+- [ ] `go build ./... && go test ./...` green; `golangci-lint run` clean.
+
+**Tests**:
+
+- `"it returns the attached session's name inside tmux"`
+- `"it takes no current-session read outside tmux"` — the reader records zero calls
+- `"it returns the empty string when the current-session read fails or answers empty"`
+- `"it does not offer the session the caller is attached to"` — `completeSearchTerm("/po")` with the attached session among the live names
+- `"it holds back the attached session for a bare slash too"`
+- `"it offers every live name when the current-session read answers nothing"`
+- `"it still offers the attached session on the plain session-name completer"`
