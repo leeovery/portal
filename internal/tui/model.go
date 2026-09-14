@@ -215,7 +215,8 @@ type Model struct {
 	bootstrapComplete bool
 
 	// Once fatalActive is set the model stays on the loading page and stops gating
-	// on BootstrapCompleteMsg, which will never arrive.
+	// on BootstrapCompleteMsg, which will never arrive. A command-pending model
+	// has no loading page: it quits instead, and mints nothing on the way out.
 	fatalActive  bool
 	fatalStep    int
 	fatalMessage string
@@ -1510,7 +1511,16 @@ func (m Model) Init() tea.Cmd {
 	detectTimeout := m.themeState.gate.timeoutCmd()
 
 	if m.commandPending {
-		return tea.Batch(requestBg, detectTimeout, m.loadProjects())
+		cmds := []tea.Cmd{requestBg, detectTimeout, m.loadProjects()}
+		// A command-pending picker paints from frame one and has no loading page,
+		// but on the cold route the orchestrator still runs behind it: without the
+		// receiver its warnings and its fatal reach no arm at all. Nothing is
+		// synthesized when it is nil — a warm route's warnings are already staged
+		// for the teardown to write.
+		if m.progressReceiver != nil {
+			cmds = append(cmds, m.progressReceiver)
+		}
+		return tea.Batch(cmds...)
 	}
 	fetchSessions := m.fetchSessionsCmd()
 	loadProjects := m.loadProjects()
@@ -1624,6 +1634,11 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			// The gate owns them from here, so what stays pending is exactly what
 			// no gate ever consumed.
 			m.pendingBootstrapWarnings = nil
+		} else if m.commandPending {
+			// No loading page and no notice band to reach, so the teardown write is
+			// the only route left. Appended rather than assigned: what was staged
+			// before the run is a disjoint set the terminal is owed just as much.
+			m.pendingBootstrapWarnings = append(m.pendingBootstrapWarnings, msg.Warnings...)
 		}
 		if m.minElapsed && m.activePage == PageLoading {
 			cmd := (&m).dismissLoadingGate()
@@ -1631,12 +1646,18 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		}
 		return m, nil
 	case BootstrapFatalMsg:
-		// The model must stay on PageLoading — never a half-restored picker —
-		// and this is a terminal event, so the receiver is not re-issued.
+		// The loading page must stay on PageLoading — never a half-restored picker
+		// — and this is a terminal event, so the receiver is not re-issued.
 		m.fatalActive = true
 		m.fatalStep = msg.FailedStep
 		m.fatalMessage = msg.Message
 		m.fatalErr = msg.Err
+		// A command-pending picker has no loading page to render the error frame
+		// on, and nothing it can do against a half-bootstrapped server, so it ends
+		// the run instead: the teardown reports the fatal and exits non-zero.
+		if m.commandPending {
+			return m, tea.Quit
+		}
 		return m, nil
 	case ProjectsLoadedMsg:
 		var setItemsCmd tea.Cmd
@@ -1762,6 +1783,12 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 }
 
 func (m Model) createSession(dir string) tea.Cmd {
+	// The quit a fatal issues is asynchronous, so a keypress already queued can
+	// still reach this: a session minted against a half-bootstrapped server is
+	// exactly what the fatal exists to prevent.
+	if m.fatalActive {
+		return nil
+	}
 	return func() tea.Msg {
 		name, err := m.sessionCreator.CreateFromDir(dir, m.command)
 		if err != nil {
