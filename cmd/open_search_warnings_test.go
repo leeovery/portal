@@ -329,3 +329,190 @@ func (c *observingConnector) Connect(string) error {
 	c.onConnect()
 	return nil
 }
+
+// warmPickerModel is the model a warm picker route builds: no progress
+// receiver and an unstarted server, which lands on the Sessions page from the
+// first frame with no loading gate to consume its staged warnings.
+func warmPickerModel(t *testing.T, deps tui.Deps, warnings []warning.Warning) tui.Model {
+	t.Helper()
+
+	deps.Lister = &mockSessionLister{sessions: []tmux.Session{{Name: "portal-a1b2"}}}
+	m := tui.Build(deps)
+	m.SetPendingBootstrapWarnings(warnings)
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{{Name: "portal-a1b2"}}})
+
+	updated, ok := model.(tui.Model)
+	if !ok {
+		t.Fatalf("model type = %T, want tui.Model", model)
+	}
+	if updated.ActivePage() != tui.PageSessions {
+		t.Fatalf("ActivePage() = %d, want PageSessions — a warm picker has no loading gate", updated.ActivePage())
+	}
+	return updated
+}
+
+func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
+	t.Run("it writes the staged bootstrap warnings at teardown when no loading gate consumed them", func(t *testing.T) {
+		warnings := soakedWarnings()
+		model := warmPickerModel(t, tui.Deps{}, warnings)
+
+		var canvas, stderr bytes.Buffer
+		if err := finishTUI(model, &observingConnector{onConnect: func() {}}, &canvas, &stderr); err != nil {
+			t.Fatalf("finishTUI: %v", err)
+		}
+
+		if want := wantWarningOutput(warnings); stderr.String() != want {
+			t.Errorf("stderr = %q, want %q", stderr.String(), want)
+		}
+	})
+
+	t.Run("it writes the same lines as the CLI path", func(t *testing.T) {
+		warnings := soakedWarnings()
+		accumulateWarnings(t, warnings)
+		var cli bytes.Buffer
+		bootstrapWarnings.EmitTo(&cli)
+
+		model := warmPickerModel(t, tui.Deps{}, warnings)
+
+		var canvas, stderr bytes.Buffer
+		if err := finishTUI(model, &observingConnector{onConnect: func() {}}, &canvas, &stderr); err != nil {
+			t.Fatalf("finishTUI: %v", err)
+		}
+
+		if stderr.String() != cli.String() {
+			t.Errorf("teardown stderr = %q, want the CLI path's %q", stderr.String(), cli.String())
+		}
+	})
+
+	t.Run("it writes nothing at teardown when the loading gate already surfaced them", func(t *testing.T) {
+		warnings := soakedWarnings()
+		m := tui.Build(tui.Deps{Lister: &mockSessionLister{}, ServerStarted: true})
+		m.SetPendingBootstrapWarnings(warnings)
+
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		// What Init synthesizes on the warm loading-page route.
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() == tui.PageLoading {
+			t.Fatal("both gates are satisfied; the loading page must have dismissed")
+		}
+
+		var canvas, stderr bytes.Buffer
+		if err := finishTUI(updated, &observingConnector{onConnect: func() {}}, &canvas, &stderr); err != nil {
+			t.Fatalf("finishTUI: %v", err)
+		}
+
+		if stderr.Len() != 0 {
+			t.Errorf("stderr = %q, want nothing — the gate surfaced them already", stderr.String())
+		}
+	})
+
+	t.Run("it writes nothing at teardown when the loading page was cancelled", func(t *testing.T) {
+		warnings := soakedWarnings()
+		m := tui.Build(tui.Deps{Lister: &mockSessionLister{}, ServerStarted: true})
+		m.SetPendingBootstrapWarnings(warnings)
+
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageLoading {
+			t.Fatalf("ActivePage() = %d, want PageLoading — the pad has not elapsed", updated.ActivePage())
+		}
+
+		var canvas, stderr bytes.Buffer
+		if err := finishTUI(updated, &observingConnector{onConnect: func() {}}, &canvas, &stderr); err != nil {
+			t.Fatalf("finishTUI: %v", err)
+		}
+
+		if stderr.Len() != 0 {
+			t.Errorf("stderr = %q, want nothing — the user asked for nothing and is owed no report", stderr.String())
+		}
+	})
+
+	t.Run("it writes nothing at teardown when no warnings accumulated", func(t *testing.T) {
+		model := warmPickerModel(t, tui.Deps{}, nil)
+
+		var canvas, stderr bytes.Buffer
+		if err := finishTUI(model, &observingConnector{onConnect: func() {}}, &canvas, &stderr); err != nil {
+			t.Fatalf("finishTUI: %v", err)
+		}
+
+		if stderr.Len() != 0 {
+			t.Errorf("stderr = %q, want nothing", stderr.String())
+		}
+	})
+
+	t.Run("it writes the staged warnings before the connector runs", func(t *testing.T) {
+		warnings := soakedWarnings()
+		model := warmPickerModel(t, tui.Deps{}, warnings)
+		model = withCapturedBackground(t, model)
+		model = selectFirstSession(t, model)
+
+		var canvas, stderr bytes.Buffer
+		var warningsAtConnect, canvasAtConnect string
+		connector := &observingConnector{onConnect: func() {
+			warningsAtConnect = stderr.String()
+			canvasAtConnect = canvas.String()
+		}}
+
+		if err := finishTUI(model, connector, &canvas, &stderr); err != nil {
+			t.Fatalf("finishTUI: %v", err)
+		}
+
+		if want := wantWarningOutput(warnings); warningsAtConnect != want {
+			t.Errorf("warnings at connect = %q, want %q — the exec'd attach never returns", warningsAtConnect, want)
+		}
+		if canvasAtConnect == "" {
+			t.Error("nothing written to the canvas writer at connect, want the set-back")
+		}
+	})
+
+	t.Run("it writes the staged warnings for a warm picker opened by -f and by a bare open", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			deps tui.Deps
+		}{
+			{name: "-f term", deps: tui.Deps{InitialFilter: "term"}},
+			{name: "bare open", deps: tui.Deps{}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				warnings := soakedWarnings()
+				model := warmPickerModel(t, tc.deps, warnings)
+
+				var canvas, stderr bytes.Buffer
+				if err := finishTUI(model, &observingConnector{onConnect: func() {}}, &canvas, &stderr); err != nil {
+					t.Fatalf("finishTUI: %v", err)
+				}
+
+				if want := wantWarningOutput(warnings); stderr.String() != want {
+					t.Errorf("stderr = %q, want %q", stderr.String(), want)
+				}
+			})
+		}
+	})
+}
+
+// selectFirstSession drives the picker to the selection a teardown connects on.
+func selectFirstSession(t *testing.T, m tui.Model) tui.Model {
+	t.Helper()
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, ok := model.(tui.Model)
+	if !ok {
+		t.Fatalf("model type = %T, want tui.Model", model)
+	}
+	if updated.Selected() == "" {
+		t.Fatal("Enter on the sessions list must record a selection")
+	}
+	return updated
+}

@@ -40,9 +40,9 @@ func (s *BootstrapWarningsSink) EmitTo(w io.Writer) {
 
 var bootstrapWarnings = &BootstrapWarningsSink{}
 
-// Called between building the model and starting Bubble Tea, so the warnings
-// ride the first BootstrapCompleteMsg and reach stderr only once the loading
-// page has dismissed.
+// Called between building the model and starting Bubble Tea. A loading page
+// folds them into its first BootstrapCompleteMsg and surfaces them when it
+// dismisses; a picker that paints from frame one leaves them for the teardown.
 func stageBootstrapWarningsOnModel(m *tui.Model) {
 	pending := bootstrapWarnings.Drain()
 	if len(pending) == 0 {

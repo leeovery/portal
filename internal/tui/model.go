@@ -229,8 +229,8 @@ type Model struct {
 	// Zero value renders the all-pending loading screen.
 	loadingProgress LoadingProgress
 
-	// pending is staged before Init and folded into BootstrapCompleteMsg;
-	// bufferedWarnings holds it until the loading page dismisses.
+	// pending is staged before Init; a loading page moves it into
+	// bufferedWarnings, and with no loading page it stays for the teardown.
 	pendingBootstrapWarnings []BootstrapWarning
 	bufferedWarnings         []BootstrapWarning
 
@@ -460,12 +460,14 @@ func (m Model) BufferedWarnings() []BootstrapWarning {
 	return m.bufferedWarnings
 }
 
+// PendingBootstrapWarnings returns the staged warnings no loading gate
+// consumed, which the teardown still owes the terminal.
 func (m Model) PendingBootstrapWarnings() []BootstrapWarning {
 	return m.pendingBootstrapWarnings
 }
 
-// Warnings are folded into the BootstrapCompleteMsg from Init's first tick, so
-// they ride the same gate that dismisses the loading page.
+// A loading page folds them into the BootstrapCompleteMsg from Init's first
+// tick; with no loading page they stay staged for the teardown to write.
 func (m *Model) SetPendingBootstrapWarnings(warnings []BootstrapWarning) {
 	m.pendingBootstrapWarnings = warnings
 }
@@ -1619,6 +1621,9 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		// accumulate dead state on the model.
 		if m.activePage == PageLoading {
 			m.bufferedWarnings = msg.Warnings
+			// The gate owns them from here, so what stays pending is exactly what
+			// no gate ever consumed.
+			m.pendingBootstrapWarnings = nil
 		}
 		if m.minElapsed && m.activePage == PageLoading {
 			cmd := (&m).dismissLoadingGate()

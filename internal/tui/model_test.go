@@ -6897,6 +6897,25 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 		}
 	})
 
+	t.Run("it clears the pending warnings when the complete message buffers them", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		warnings := []tui.BootstrapWarning{{Lines: []string{"saver down"}}}
+		m.SetPendingBootstrapWarnings(warnings)
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+
+		updated := model.(tui.Model)
+		if len(updated.BufferedWarnings()) != 1 {
+			t.Fatalf("BufferedWarnings len = %d, want 1", len(updated.BufferedWarnings()))
+		}
+		if got := updated.PendingBootstrapWarnings(); len(got) != 0 {
+			t.Errorf("PendingBootstrapWarnings = %#v, want none — the loading gate now owns them", got)
+		}
+	})
+
 	t.Run("transition flushes warnings via flushBufferedWarningsCmd (min first, bootstrap with warnings)", func(t *testing.T) {
 		var captured [][]string
 		restore := tui.SetFlushWarningsToStderrForTest(func(warnings []tui.BootstrapWarning) {
