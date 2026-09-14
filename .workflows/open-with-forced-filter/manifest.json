@@ -143,7 +143,9 @@
             "open-with-forced-filter-3-5": "tick-28aca8",
             "open-with-forced-filter-4-6": "tick-3024a0",
             "open-with-forced-filter-4-7": "tick-cfc44d",
-            "open-with-forced-filter-4-8": "tick-fc6181"
+            "open-with-forced-filter-4-8": "tick-fc6181",
+            "open-with-forced-filter-5-5": "tick-aceea8",
+            "open-with-forced-filter-5-6": "tick-a33475"
           },
           "storage_paths": [
             ".tick/"
@@ -245,7 +247,8 @@
             1,
             2,
             3,
-            4
+            4,
+            5
           ],
           "completed_phases": [
             1,
@@ -264,6 +267,12 @@
                 "1": "approved",
                 "2": "approved",
                 "3": "approved"
+              }
+            },
+            "p5": {
+              "tasks": {
+                "1": "approved",
+                "2": "approved"
               }
             }
           }
