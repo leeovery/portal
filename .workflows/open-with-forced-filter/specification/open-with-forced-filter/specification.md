@@ -45,7 +45,7 @@ A leading `/` today makes an argument a path unconditionally (`sed -n '14p' inte
 | `/tmp/` | path — mints, unchanged; the trailing slash is the second one |
 | `./port`, `~/port`, `port` | unchanged — the rule tests a leading `/` only |
 
-Completion cannot turn one shape into the other (§8.1). Portal switches the shell's filename fallback off wherever it is asked for completions (`portal completion bash | grep -n 'compopt +o default'`), so `portal open /tm<TAB>` never becomes `/tmp/`, and neither does `x /tm<TAB>` once the corrected `portal init` output is live in the user's shell — until then Tab after that function is answered by the shell rather than by Portal and still falls through to filenames (§8.2, §8.5). The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
+Completion cannot turn one shape into the other (§8.1). Portal answers every completion request with `ShellCompDirectiveNoFileComp`, and the shell switches its filename fallback off on that directive wherever it is able to: zsh and fish always (fish is registered `complete -c <name> -f`), bash only where `compopt` is a builtin — 4.0 and later — and the `bash-completion` package is installed, because cobra's generated script gates the switch-off on `type -t compopt` and its completion function reaches `_get_comp_words_by_ref` from that package before it runs at all. So `portal open /tm<TAB>` never becomes `/tmp/` on a shell that can honour the directive, and neither does `x /tm<TAB>` once the corrected `portal init` output is live in the user's shell — until then Tab after that function is answered by the shell rather than by Portal and still falls through to filenames (§8.2, §8.5). Where the shell cannot honour it — macOS's stock `/bin/bash` 3.2 is the case in the wild — the standing `complete -o default` registration supplies filenames, and it does so for `portal open` exactly as much as for `x`. The trailing slash that keeps an argument a path is therefore always one the user types, and a single-segment absolute directory typed without it is a sigil however it was reached.
 
 #### 2.3 Recognition is positional-independent
 
@@ -365,7 +365,7 @@ The correction changes **what command the emitted script asks for completions** 
 
 It applies to the **configured** function name, not the literal `x`: `portal init --cmd <name>` renames both emitted functions, and the correction must follow whatever name was chosen.
 
-The correction brings the session-opening function onto `open`'s existing completion contract: live session names, and no filename fallback. Path arguments — `x ~/Code/pro<TAB>` — complete to filenames today only because Portal is never asked and the shell has nothing else to offer; once Portal answers, it switches that fallback off (§2.2), and it must, since a filename fallback on the same word is what would turn `x /tm<TAB>` into `/tmp/` and a search into a mint. The loss is taken deliberately, and it is the contract `portal open` has always had.
+The correction brings the session-opening function onto `open`'s existing completion contract: live session names, and no filename fallback. Path arguments — `x ~/Code/pro<TAB>` — complete to filenames today only because Portal is never asked and the shell has nothing else to offer; once Portal answers, the shell switches that fallback off wherever it can honour the directive (§2.2), and it must, since a filename fallback on the same word is what would turn `x /tm<TAB>` into `/tmp/` and a search into a mint. The loss is taken deliberately, and it is the contract `portal open` has always had.
 
 #### 8.4 Why it is folded in rather than spun out
 
@@ -468,3 +468,9 @@ Nothing else in that specification is contradicted. Axiom 2, the accepted conseq
 ---
 
 ## Working Notes
+
+---
+
+## Corrigenda
+
+> **Corrigendum 2026-09-14** (from `implementation/open-with-forced-filter`): §2.2's "Portal switches the shell's filename fallback off wherever it is asked for completions", restated as a requirement at §8.3 — corrected: the switch-off is the shell's, not Portal's, and bash can only perform it where `compopt` is a builtin (4.0 and later) and the `bash-completion` package is present. Measured against cobra v1.10.2's generator: `bash_completionsV2.go:132-138` gates `compopt +o default` on `type -t compopt`, and `:432-438` reaches `_get_comp_words_by_ref` from the bash-completion package before any completion runs. On macOS's stock `/bin/bash` 3.2 the standing `complete -o default` therefore supplies filenames — for `portal open /tm<TAB>`, which the original claim named as the safe case, as much as for `x /tm<TAB>`.
