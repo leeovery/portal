@@ -153,7 +153,9 @@
             "open-with-forced-filter-6-4": "tick-fa4ede",
             "open-with-forced-filter-7": "tick-8d0c63",
             "open-with-forced-filter-7-1": "tick-417c10",
-            "open-with-forced-filter-7-2": "tick-424d49"
+            "open-with-forced-filter-7-2": "tick-424d49",
+            "open-with-forced-filter-8": "tick-d837ea",
+            "open-with-forced-filter-8-1": "tick-e7336e"
           },
           "storage_paths": [
             ".tick/"
@@ -185,7 +187,7 @@
           "status": "in-progress",
           "task_gate_mode": "gated",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "auto",
+          "analysis_gate_mode": "gated",
           "consolidation_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 2,
