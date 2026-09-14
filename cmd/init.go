@@ -51,11 +51,17 @@ func init() {
 // The generated script asks the typed word for its completions, and the session-opening
 // function expands to `portal open` — so its registration must name a shim that rewrites
 // the word rather than __start_portal itself, which would ask `portal open` instead.
+// The line must match the rewritten words or the cursor walk reads the wrong current
+// word from it, so it is substituted into rather than rebuilt: re-joining the array
+// would normalise the user's own spacing, and pinning the offset to the end would
+// move a cursor they left mid-line. The replacement is unanchored so it also lands on
+// a line that begins with whitespace.
 const bashOpenCompletionShim = `__start_portal_open() {
+    local typed=${COMP_WORDS[0]} expansion="portal open"
     COMP_WORDS=(portal open "${COMP_WORDS[@]:1}")
     (( COMP_CWORD += 1 ))
-    COMP_LINE="${COMP_WORDS[*]}"
-    COMP_POINT=${#COMP_LINE}
+    COMP_LINE=${COMP_LINE/"$typed"/$expansion}
+    (( COMP_POINT += ${#expansion} - ${#typed} ))
     __start_portal "$@"
 }
 `

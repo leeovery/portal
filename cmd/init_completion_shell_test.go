@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -29,8 +30,17 @@ printf ':4\n'
 // Fills cur/prev/words/cword the way the bash-completion package's own
 // _init_completion does: the generated script prefers it when it is declared, and
 // its fallback needs _get_comp_words_by_ref, which is absent for the same reason.
+// cur comes from COMP_LINE and COMP_POINT rather than from COMP_WORDS[COMP_CWORD],
+// as the package's own cursor walk does — a cursor left mid-line takes the current
+// word no further than itself.
 const bashCompletionDriver = `_init_completion() {
-    cur=${COMP_WORDS[COMP_CWORD]}
+    local index start=0
+    for (( index = 0; index <= COMP_CWORD; index++ )); do
+        while [[ ${COMP_LINE:start:1} == " " ]]; do (( start++ )); done
+        (( index == COMP_CWORD )) && break
+        (( start += ${#COMP_WORDS[index]} ))
+    done
+    cur=${COMP_LINE:start:COMP_POINT-start}
     prev=${COMP_WORDS[COMP_CWORD-1]}
     words=("${COMP_WORDS[@]}")
     cword=$COMP_CWORD
@@ -40,13 +50,15 @@ const bashCompletionDriver = `_init_completion() {
 source "$PORTAL_INIT_SCRIPT"
 
 COMP_WORDS=("$@")
-COMP_CWORD=$(( $# - 1 ))
-COMP_LINE="${COMP_WORDS[*]}"
-COMP_POINT=${#COMP_LINE}
+COMP_CWORD=$PORTAL_COMPLETION_CWORD
+COMP_LINE=$PORTAL_COMPLETION_LINE
+COMP_POINT=$PORTAL_COMPLETION_POINT
 
 fn=$(complete -p "${COMP_WORDS[0]}" | sed -n 's/.* -F \([^ ]*\) .*/\1/p')
 "$fn" "${COMP_WORDS[0]}" "${COMP_WORDS[COMP_CWORD]}" "${COMP_WORDS[COMP_CWORD-1]}"
 printf 'REPLY %s\n' "${COMPREPLY[@]}"
+printf 'LINE %s\n' "$COMP_LINE"
+printf 'POINT %s\n' "$COMP_POINT"
 `
 
 // compdef and the compsys functions the generated script calls are stand-ins, so
@@ -89,12 +101,69 @@ end
 
 // completionRun is what one Tab press produced: the request the shell made of
 // Portal, the candidates it offered back, every file-completion call the compsys
-// stand-ins caught, and cobra's own debug trace of the run.
+// stand-ins caught, cobra's own debug trace of the run, and the command line the
+// completion was left holding with the cursor offset into it (bash alone rewrites
+// either, so the other shells report both empty).
 type completionRun struct {
 	request  string
 	reply    []string
 	fileComp []string
 	debug    string
+	line     string
+	point    string
+}
+
+// completionLine is the command line one Tab press is taken on: the words the shell
+// splits it into, the line as the user typed it, and the index of the word their
+// cursor sits at the end of.
+type completionLine struct {
+	words      []string
+	typed      string
+	cursorWord int
+}
+
+// completionOption states a departure from a line whose words are separated by a
+// single space with the cursor at its end.
+type completionOption func(*completionLine)
+
+// cursorAfterWord puts the cursor at the end of the word at the given index rather
+// than at the end of the line.
+func cursorAfterWord(index int) completionOption {
+	return func(line *completionLine) { line.cursorWord = index }
+}
+
+// typedLine states the line exactly as the user typed it, for spacing that joining
+// the words with a single space cannot spell.
+func typedLine(typed string) completionOption {
+	return func(line *completionLine) { line.typed = typed }
+}
+
+func newCompletionLine(words []string, opts ...completionOption) completionLine {
+	line := completionLine{
+		words:      words,
+		typed:      strings.Join(words, " "),
+		cursorWord: len(words) - 1,
+	}
+	for _, opt := range opts {
+		opt(&line)
+	}
+	return line
+}
+
+// point reports the cursor's byte offset into the typed line, found by walking the
+// words in order across the spacing between them.
+func (l completionLine) point() int {
+	offset := 0
+	for index := 0; index < l.cursorWord; index++ {
+		for offset < len(l.typed) && l.typed[offset] == ' ' {
+			offset++
+		}
+		offset += len(l.words[index])
+	}
+	for offset < len(l.typed) && l.typed[offset] == ' ' {
+		offset++
+	}
+	return offset + len(l.words[l.cursorWord])
 }
 
 // requireShell resolves a shell binary, skipping the test when the machine has none.
@@ -119,9 +188,11 @@ func writeExecutable(t *testing.T, path, content string) {
 // driveCompletion sources what `portal init <shell>` emits, completes the given
 // command line in that shell, and reports what Portal was asked and what the shell
 // offered. The words are the whole line, the last one being the word under the
-// cursor — empty for a line ending in a space.
-func driveCompletion(t *testing.T, shell string, initArgs []string, words []string, candidates []string) completionRun {
+// cursor — empty for a line ending in a space — unless an option says otherwise.
+func driveCompletion(t *testing.T, shell string, initArgs []string, words []string, candidates []string, opts ...completionOption) completionRun {
 	t.Helper()
+
+	line := newCompletionLine(words, opts...)
 
 	shellPath := requireShell(t, shell)
 
@@ -145,7 +216,9 @@ func driveCompletion(t *testing.T, shell string, initArgs []string, words []stri
 		"PORTAL_STUB_RECORD="+recordPath,
 		"PORTAL_STUB_CANDIDATES="+strings.Join(candidates, "\n"),
 		"PORTAL_INIT_SCRIPT="+initPath,
-		"PORTAL_COMPLETION_LINE="+strings.Join(words, " "),
+		"PORTAL_COMPLETION_LINE="+line.typed,
+		"PORTAL_COMPLETION_POINT="+strconv.Itoa(line.point()),
+		"PORTAL_COMPLETION_CWORD="+strconv.Itoa(line.cursorWord),
 	)
 
 	driverPath := filepath.Join(dir, "driver."+shell)
@@ -177,6 +250,8 @@ func driveCompletion(t *testing.T, shell string, initArgs []string, words []stri
 		reply:    linesWithPrefix(string(out), "REPLY "),
 		fileComp: linesWithPrefix(string(out), "FILECOMP "),
 		debug:    readDebugTrace(t, debugPath),
+		line:     readingWithPrefix(string(out), "LINE "),
+		point:    readingWithPrefix(string(out), "POINT "),
 	}
 }
 
@@ -221,6 +296,16 @@ func linesWithPrefix(out, prefix string) []string {
 		}
 	}
 	return found
+}
+
+// readingWithPrefix reports the one reading a driver printed under the prefix, and
+// the empty string for a driver that prints none.
+func readingWithPrefix(out, prefix string) string {
+	found := linesWithPrefix(out, prefix)
+	if len(found) == 0 {
+		return ""
+	}
+	return found[0]
 }
 
 func request(fields ...string) string {
@@ -338,4 +423,49 @@ func TestInitCompletion_SkipsAnAbsentShell(t *testing.T) {
 		requireShell(t, absent)
 		t.Error("requireShell returned for an absent shell instead of skipping")
 	})
+}
+
+// The cursor cases are bash's alone: zsh derives its own PREFIX/SUFFIX from the real
+// cursor and fish's wrap never touches the line, so neither shim moves it.
+func TestInitCompletion_CompletesTheWordUnderAMidLineCursor(t *testing.T) {
+	run := driveCompletion(t, "bash", nil, []string{"x", "/po", "extra"}, []string{shellStubCandidate}, cursorAfterWord(1))
+
+	want := request("__complete", "open", "/po")
+	if run.request != want {
+		t.Errorf("request = %q, want %q", run.request, want)
+	}
+	if !slices.Contains(run.reply, shellStubCandidate) {
+		t.Errorf("reply = %q, want it to offer %q", run.reply, shellStubCandidate)
+	}
+}
+
+func TestInitCompletion_ShiftsTheCursorRatherThanPinningItToTheEndOfTheLine(t *testing.T) {
+	run := driveCompletion(t, "bash", nil, []string{"x", "/po", "extra"}, []string{shellStubCandidate}, cursorAfterWord(1))
+
+	// `x /po` is 5 characters and `portal open /po` is 15.
+	const want = "15"
+	if run.point != want {
+		t.Errorf("COMP_POINT = %q, want %q (the line is %q)", run.point, want, run.line)
+	}
+}
+
+func TestInitCompletion_PreservesTypedSpacingInTheRewrittenLine(t *testing.T) {
+	run := driveCompletion(t, "bash", nil, []string{"x", "api"}, []string{shellStubCandidate}, typedLine("x   api"))
+
+	const want = "portal open   api"
+	if run.line != want {
+		t.Errorf("COMP_LINE = %q, want %q", run.line, want)
+	}
+}
+
+func TestInitCompletion_CompletesOnALineWithLeadingWhitespace(t *testing.T) {
+	run := driveCompletion(t, "bash", nil, []string{"x", "/po"}, []string{shellStubCandidate}, typedLine("   x /po"))
+
+	want := request("__complete", "open", "/po")
+	if run.request != want {
+		t.Errorf("request = %q, want %q", run.request, want)
+	}
+	if !slices.Contains(run.reply, shellStubCandidate) {
+		t.Errorf("reply = %q, want it to offer %q", run.reply, shellStubCandidate)
+	}
 }

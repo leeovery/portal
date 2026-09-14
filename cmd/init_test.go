@@ -145,7 +145,7 @@ func TestInitBash(t *testing.T) {
 		},
 		{
 			name:      "defines the bash open completion shim",
-			wantInOut: "__start_portal_open() {\n    COMP_WORDS=(portal open \"${COMP_WORDS[@]:1}\")\n    (( COMP_CWORD += 1 ))\n    COMP_LINE=\"${COMP_WORDS[*]}\"\n    COMP_POINT=${#COMP_LINE}\n    __start_portal \"$@\"\n}",
+			wantInOut: "__start_portal_open() {\n    local typed=${COMP_WORDS[0]} expansion=\"portal open\"\n    COMP_WORDS=(portal open \"${COMP_WORDS[@]:1}\")\n    (( COMP_CWORD += 1 ))\n    COMP_LINE=${COMP_LINE/\"$typed\"/$expansion}\n    (( COMP_POINT += ${#expansion} - ${#typed} ))\n    __start_portal \"$@\"\n}",
 		},
 		{
 			name:      "wires completions to xctl name",
@@ -464,5 +464,20 @@ func TestInitCmdFlag_RegistrationsCarryNoDefaultName(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInitBash_EmitsNoPinnedCompletionCursor(t *testing.T) {
+	buf := new(bytes.Buffer)
+	resetRootCmd()
+	rootCmd.SetOut(buf)
+	rootCmd.SetArgs([]string{"init", "bash"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if pinned := "COMP_POINT=${#COMP_LINE}"; strings.Contains(buf.String(), pinned) {
+		t.Errorf("output pins the completion cursor with %q\ngot:\n%s", pinned, buf.String())
 	}
 }
