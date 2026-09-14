@@ -125,6 +125,8 @@ The single session verb — the picker, opening a target, and multi-window burst
 x                                    # interactive TUI picker
 x api                                # attach the existing session named "api"
 x 'api-*'                            # attach every session matching the glob
+x /port                              # search live sessions for "port"
+x /                                  # open the picker with the filter ready to type
 x ~/Code/myproject                   # mint a new session at a path
 x myalias                            # resolve alias → mint a new session there
 x ~/Code/app -e "make dev"           # mint a session and run a command
@@ -138,18 +140,39 @@ x work api ~/Code/new                # open three surfaces at once (see below)
 
 An exact session name **attaches** that existing session; a path, alias, or zoxide match **mints a brand-new session** there (directory targets always create — there is no find-or-create, so `x api` mints even while an `api-*` session runs; reach the existing one with the name, a glob, or `-s`). A target that resolves to nothing is a hard failure — there is no TUI-fallback-on-miss; the error points you at `-f`.
 
-**Domain pins** skip the chain and force one domain (each hard-fails on a miss, never pops the picker):
+**Session search.** A positional beginning with `/` and containing no further `/` is a search across your live sessions rather than a target to resolve — `x /port`. The rule tests the shape of the argument alone and never asks the filesystem anything, so the same command line means the same thing on every machine. Everything else is untouched: `x ./port`, `x ~/port`, `x /Users/me/Code/portal` and `x /tmp/` are the paths they always were (the trailing slash is the second one).
 
-| Flag | Pins to | Behaviour |
+The term is matched **case-folded, as a contiguous run**, against each live session's name and its recorded directory — home-abbreviated (`~/Code/portal`), exactly as the picker's row displays it. Three outcomes, by how many sessions match:
+
+- **exactly one** — that session is attached outright, no picker;
+- **several** — the picker opens pre-filtered by the term, cursor on the first match;
+- **none** — the picker opens on the term with nothing surviving it. That is a filter result, not an error: press `Esc` and your sessions are there.
+
+`x /` — the slash with no term — opens the picker with the filter empty, focused and ready to type. It is not an error, and it does not mean "mint at root".
+
+The picker's own hand-typed `/` filter stays **fuzzy** (scattered letters anywhere). The search form is deliberately stricter, because it can attach a lone match without ever showing it to you: a fuzzy `/port` could land you in `~/Projects/rust-tools` sight unseen.
+
+**The cost**: a single-segment absolute directory typed without a trailing slash — `x /tmp`, `x /opt` — now searches instead of minting. Mint there with the pin that exists for it: `x -p /tmp`.
+
+A search composes with nothing — a second target, a trailing command, `-f`, or any domain pin on the same line is a usage error. Recognition stops at a `--` separator, so the words after it stay the trailing command's own (`x ~/Code/api -- ls /tmp` is unaffected).
+
+**`-f` or `/term`?** They differ by outcome: `-f` always opens the picker, which makes it the form for a script or a keybinding that must land in the same place every time; `/term` takes you straight to the session when only one matches, which makes it the interactive form.
+
+**Domain pins** skip the chain and force one domain — a pin that misses hard-fails without popping the picker. The last three rows are not pins:
+
+| Flag / form | Pins to | Behaviour |
 |---|---|---|
 | `-s, --session <name/glob>` | session | attach; never mints |
 | `-p, --path <dir>` | path | mint at the directory (must exist) |
 | `-a, --alias <key/glob>` | alias | mint at the aliased directory |
 | `-z, --zoxide <query>` | zoxide | mint at zoxide's best match (errors if zoxide isn't installed) |
 | `-f, --filter <text>` | — | skip resolution, open the picker pre-filtered (mutually exclusive with any target or pin) |
+| `/<term>` *(positional, not a flag)* | — | open the picker pre-filtered by the term — or attach outright when exactly one live session matches |
 | `-e, --exec <cmd>` / `-- <cmd>` | — | command to run in a **freshly minted** session (never an attach target) |
 
 **Multi-window bursts.** Two or more targets (or one glob expanding to several sessions) open a portal to each: this terminal becomes the first surface and the remaining **N−1** open in host-terminal windows — **N windows for N targets**. Pins and bare targets mix freely (`x -s api -p ~/Code/new blog`), the command rides only the minted surfaces, and a supported terminal is required for the extra windows (Ghostty natively, others via [`terminals.json`](#configuration)). This is the command-line form of the picker's [multi-select mode](#multi-select-mode).
+
+**Tab completion.** This release corrects `portal init` so that Tab after the session-opening function reaches Portal's completer at all — until now the request it emitted was answered by the shell instead. `x <TAB>` now offers your live session names, and `x /po<TAB>` completes the term after the slash against those same names, leaving the slash in place. **An existing install picks the correction up only once the output of `portal init` is re-evaluated** — start a new shell, or re-run the `eval` in your profile; the `/term` form itself works the moment the new binary is in place. The deliberate loss beside that gain: a path argument after the function no longer falls through to filename completion, which is the contract `portal open` has always had. (Switching that fallback off needs a shell that supports it — bash 4+ with `bash-completion`, zsh, or fish. macOS's stock `/bin/bash` 3.2 cannot, so filenames still complete there.)
 
 New sessions auto-resolve to the git repository root when applicable.
 
