@@ -722,12 +722,9 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		cfg.themePersister = newThemePersister(prefsStore)
 	}
 
-	if tmux.InsideTmux() {
-		sessionName, err := client.CurrentSessionName()
-		if err == nil && sessionName != "" {
-			cfg.insideTmux = true
-			cfg.currentSession = sessionName
-		}
+	if sessionName := currentPickerSession(client); sessionName != "" {
+		cfg.insideTmux = true
+		cfg.currentSession = sessionName
 	}
 
 	m := buildTUIModel(cfg, landing, command)

@@ -17,6 +17,11 @@ func withCompletionSessionNames(t *testing.T, fn func() []string) {
 	withFuncSeam(t, &completionSessionNames, fn)
 }
 
+func withCompletionCurrentSession(t *testing.T, fn func() string) {
+	t.Helper()
+	withFuncSeam(t, &completionCurrentSession, fn)
+}
+
 func TestCompleteSessionNames(t *testing.T) {
 	t.Run("returns all names plus NoFileComp for empty prefix", func(t *testing.T) {
 		withCompletionSessionNames(t, func() []string { return []string{"api-1", "web-2"} })
@@ -41,6 +46,17 @@ func TestCompleteSessionNames(t *testing.T) {
 		}
 		if want := []string{"api-1", "api-2"}; !slices.Equal(names, want) {
 			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("it still offers the attached session on the plain session-name completer", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionCurrentSession(t, func() string { return "portal-a1b2" })
+
+		names, _ := completeSessionNames("")
+
+		if want := []string{"portal-a1b2", "web-9"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v (-s and the bare positional are unchanged)", names, want)
 		}
 	})
 
@@ -372,6 +388,42 @@ func TestCompleteSearchTerm(t *testing.T) {
 
 		if want := []string{"/foo-1"}; !slices.Equal(names, want) {
 			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("it does not offer the session the caller is attached to", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "port-agent"} })
+		withCompletionCurrentSession(t, func() string { return "portal-a1b2" })
+
+		names, directive := completeSearchTerm("/po")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"/port-agent"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v (the attached session is unreachable through the sigil)", names, want)
+		}
+	})
+
+	t.Run("it holds back the attached session for a bare slash too", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionCurrentSession(t, func() string { return "portal-a1b2" })
+
+		names, _ := completeSearchTerm("/")
+
+		if want := []string{"/web-9"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("it offers every live name when the current-session read answers nothing", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionCurrentSession(t, func() string { return "" })
+
+		names, _ := completeSearchTerm("/")
+
+		if want := []string{"/portal-a1b2", "/web-9"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v (a failed or empty read drops nothing)", names, want)
 		}
 	})
 

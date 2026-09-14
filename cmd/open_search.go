@@ -91,23 +91,33 @@ func buildSearchSessionSource(cmd *cobra.Command) SearchSessionSource {
 	return tmuxClient(cmd)
 }
 
+// currentSessionReader names the session the caller is attached to.
+type currentSessionReader interface {
+	CurrentSessionName() (string, error)
+}
+
+// currentPickerSession returns the session the caller is attached to, and the
+// empty string outside tmux or when the read fails or answers empty — so a
+// surface keying off it holds nothing back on a failed read.
+func currentPickerSession(src currentSessionReader) string {
+	if !tmux.InsideTmux() {
+		return ""
+	}
+	current, err := src.CurrentSessionName()
+	if err != nil {
+		return ""
+	}
+	return current
+}
+
 // searchCandidates returns the sessions a term is counted over: the enumeration
-// less the session the caller is already in, which the picker omits too. A
-// current-session read that fails or answers empty drops nothing, so a session
-// is never counted out on a failed read.
+// less the session the caller is already in, which the picker omits too.
 func searchCandidates(src SearchSessionSource) ([]tmux.Session, error) {
 	sessions, err := src.ListSessionsProbe()
 	if err != nil {
 		return nil, err
 	}
-	if !tmux.InsideTmux() {
-		return sessions, nil
-	}
-	current, err := src.CurrentSessionName()
-	if err != nil || current == "" {
-		return sessions, nil
-	}
-	return tui.PickerSessions(sessions, current), nil
+	return tui.PickerSessions(sessions, currentPickerSession(src)), nil
 }
 
 // searchMatches returns, in enumeration order, the sessions the term matches.

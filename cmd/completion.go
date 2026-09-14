@@ -19,6 +19,12 @@ var completionSessionNames = func() []string {
 	return names
 }
 
+// completionCurrentSession builds its own client for the same reason as its
+// neighbour: the bootstrap-exempt __complete path carries no context client.
+var completionCurrentSession = func() string {
+	return currentPickerSession(tmux.DefaultClient())
+}
+
 // completeSessionNames filters by prefix itself, because cobra does not
 // prefix-filter a dynamic completion func's returns, and suppresses file
 // completion so the shell never merges paths into the session-name list.
@@ -58,13 +64,19 @@ func completeAliasKeys(toComplete string) ([]string, cobra.ShellCompDirective) {
 // slash still on the front: the shell discards any candidate that is not an
 // extension of the word being completed. A name carrying a slash is held back —
 // completing to it would compose a second slash, which reads as a path rather
-// than a search.
+// than a search. The attached session is held back too: the sigil searches the
+// set the picker lists, which omits it, so offering it would complete to a name
+// the search cannot reach.
 func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) {
 	term := resolver.SearchTerm(toComplete)
+	current := completionCurrentSession()
 
 	var matches []string
 	for _, name := range completionSessionNames() {
 		if strings.Contains(name, "/") {
+			continue
+		}
+		if current != "" && name == current {
 			continue
 		}
 		if strings.HasPrefix(name, term) {

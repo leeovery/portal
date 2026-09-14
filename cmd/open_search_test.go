@@ -707,3 +707,47 @@ func TestOpenCommand_SearchForm_ReturnsAnEnumerationError(t *testing.T) {
 		t.Error("a failed read is not a zero match: neither the picker nor an attach may follow it")
 	}
 }
+
+func TestCurrentPickerSession(t *testing.T) {
+	t.Run("it returns the attached session's name inside tmux", func(t *testing.T) {
+		t.Setenv("TMUX", "/tmp/portal-current-picker-session-test,0,0")
+		src := &fakeSearchSource{current: "portal-a1b2"}
+
+		if got := currentPickerSession(src); got != "portal-a1b2" {
+			t.Errorf("currentPickerSession = %q, want %q", got, "portal-a1b2")
+		}
+		if src.currentCalls != 1 {
+			t.Errorf("CurrentSessionName was read %d times, want 1", src.currentCalls)
+		}
+	})
+
+	t.Run("it takes no current-session read outside tmux", func(t *testing.T) {
+		t.Setenv("TMUX", "")
+		src := &fakeSearchSource{current: "portal-a1b2"}
+
+		if got := currentPickerSession(src); got != "" {
+			t.Errorf("currentPickerSession = %q, want the empty string outside tmux", got)
+		}
+		if src.currentCalls != 0 {
+			t.Errorf("CurrentSessionName was read %d times outside tmux, want 0", src.currentCalls)
+		}
+	})
+
+	t.Run("it returns the empty string when the current-session read fails", func(t *testing.T) {
+		t.Setenv("TMUX", "/tmp/portal-current-picker-session-test,0,0")
+		src := &fakeSearchSource{current: "portal-a1b2", currentErr: errors.New("no current client")}
+
+		if got := currentPickerSession(src); got != "" {
+			t.Errorf("currentPickerSession = %q, want the empty string on a failed read", got)
+		}
+	})
+
+	t.Run("it returns the empty string when the current-session read answers empty", func(t *testing.T) {
+		t.Setenv("TMUX", "/tmp/portal-current-picker-session-test,0,0")
+		src := &fakeSearchSource{}
+
+		if got := currentPickerSession(src); got != "" {
+			t.Errorf("currentPickerSession = %q, want the empty string on an empty read", got)
+		}
+	})
+}
