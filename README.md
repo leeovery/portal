@@ -158,7 +158,7 @@ A search composes with nothing — a second target, a trailing command, `-f`, or
 
 **`-f` or `/term`?** They differ by outcome: `-f` always opens the picker, which makes it the form for a script or a keybinding that must land in the same place every time; `/term` takes you straight to the session when only one matches, which makes it the interactive form.
 
-**Domain pins** skip the chain and force one domain — a pin that misses hard-fails without popping the picker. The last three rows are not pins:
+**Domain pins** skip the chain and force one domain — a pin that misses hard-fails without popping the picker. `-f`, `/<term>` and `-e`/`--` are not pins:
 
 | Flag / form | Pins to | Behaviour |
 |---|---|---|
@@ -172,7 +172,7 @@ A search composes with nothing — a second target, a trailing command, `-f`, or
 
 **Multi-window bursts.** Two or more targets (or one glob expanding to several sessions) open a portal to each: this terminal becomes the first surface and the remaining **N−1** open in host-terminal windows — **N windows for N targets**. Pins and bare targets mix freely (`x -s api -p ~/Code/new blog`), the command rides only the minted surfaces, and a supported terminal is required for the extra windows (Ghostty natively, others via [`terminals.json`](#configuration)). This is the command-line form of the picker's [multi-select mode](#multi-select-mode).
 
-**Tab completion.** This release corrects `portal init` so that Tab after the session-opening function reaches Portal's completer at all — until now the request it emitted was answered by the shell instead. `x <TAB>` now offers your live session names, and `x /po<TAB>` completes the term after the slash against those same names, leaving the slash in place. **An existing install picks the correction up only once the output of `portal init` is re-evaluated** — start a new shell, or re-run the `eval` in your profile; the `/term` form itself works the moment the new binary is in place. The deliberate loss beside that gain: a path argument after the function no longer falls through to filename completion, which is the contract `portal open` has always had. (Switching that fallback off needs a shell that supports it — bash 4+ with `bash-completion`, zsh, or fish. macOS's stock `/bin/bash` 3.2 cannot, so filenames still complete there.)
+**Tab completion.** Tab after the session-opening function asks Portal for `open`'s completions: `x <TAB>` offers your live session names, and `x /po<TAB>` completes the term after the slash against those same names, leaving the slash in place. **A shell has that behaviour only once it has evaluated the current output of `portal init`** — start a new shell, or re-run the `eval` in your profile; the `/term` form itself is `portal open`'s own parsing, independent of the shell integration. The deliberate trade beside it: a path argument after the function does not fall through to filename completion, which is the contract `portal open` has always had. (Switching that fallback off needs a shell that supports it — bash 4+ with `bash-completion`, zsh, or fish. macOS's stock `/bin/bash` 3.2 cannot, so filenames still complete there.)
 
 New sessions auto-resolve to the git repository root when applicable.
 
