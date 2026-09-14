@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image/color"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -274,23 +275,48 @@ func TestEmitSearchTeardownWarnings(t *testing.T) {
 			t.Errorf("wrote %q, want nothing — the user asked for nothing and is owed no report", buf.String())
 		}
 	})
+}
 
-	t.Run("it writes before connecting", func(t *testing.T) {
+func TestFinishTUI(t *testing.T) {
+	t.Run("it restores the canvas and writes the warnings before connecting", func(t *testing.T) {
+		warnings := soakedWarnings()
 		model := searchTeardownModel(t, func() (string, error) { return "portal-a1b2", nil }, warnings)
+		model = withCapturedBackground(t, model)
 
-		var buf bytes.Buffer
-		emitSearchTeardownWarnings(&buf, model)
+		var canvas, stderr bytes.Buffer
+		var canvasAtConnect, warningsAtConnect string
+		connector := &observingConnector{onConnect: func() {
+			canvasAtConnect = canvas.String()
+			warningsAtConnect = stderr.String()
+		}}
 
-		var writtenAtConnect string
-		connector := &observingConnector{onConnect: func() { writtenAtConnect = buf.String() }}
-		if err := processTUIResult(model, connector); err != nil {
-			t.Fatalf("processTUIResult: %v", err)
+		if err := finishTUI(model, connector, &canvas, &stderr); err != nil {
+			t.Fatalf("finishTUI: %v", err)
 		}
 
-		if want := wantWarningOutput(warnings); writtenAtConnect != want {
-			t.Errorf("output at connect = %q, want %q — the exec'd attach never returns", writtenAtConnect, want)
+		if want := wantWarningOutput(warnings); warningsAtConnect != want {
+			t.Errorf("warnings at connect = %q, want %q — the exec'd attach never returns", warningsAtConnect, want)
+		}
+		if canvasAtConnect == "" {
+			t.Error("nothing written to the canvas writer at connect, want the set-back — the attach leaves Portal's colour stuck otherwise")
 		}
 	})
+}
+
+// withCapturedBackground gives the model an original background differing from
+// its canvas, which is what the restore's echo guard needs before it writes.
+func withCapturedBackground(t *testing.T, m tui.Model) tui.Model {
+	t.Helper()
+
+	updated, _ := m.Update(tea.BackgroundColorMsg{Color: color.RGBA{R: 0x12, G: 0x34, B: 0x56, A: 0xff}})
+	next, ok := updated.(tui.Model)
+	if !ok {
+		t.Fatalf("model type = %T, want tui.Model", updated)
+	}
+	if next.OriginalBackground() == "" {
+		t.Fatal("model must have captured an original background")
+	}
+	return next
 }
 
 // observingConnector reports what had already been written when the connect

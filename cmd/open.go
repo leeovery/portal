@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -586,6 +587,18 @@ func processTUIResult(model tui.Model, connector SessionConnector) error {
 	return connector.Connect(selected)
 }
 
+// finishTUI runs the teardown tail in its load-bearing order and returns the
+// connect's own result.
+func finishTUI(model tui.Model, connector SessionConnector, canvas, warnings io.Writer) error {
+	// Before the attach handoff, while the screen is still ours: terminals that
+	// ignore Bubble Tea's OSC 111 reset keep the canvas colour after Portal quits.
+	tui.RestoreTerminalBackground(canvas, model)
+	// Before the connect: the outside-tmux attach execs and never returns.
+	emitSearchTeardownWarnings(warnings, model)
+
+	return processTUIResult(model, connector)
+}
+
 func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, serverStarted bool) error {
 	client := tmuxClient(cmd)
 	gitResolver := &resolverAdapter{}
@@ -712,13 +725,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		return fmt.Errorf("unexpected model type: %T", finalModel)
 	}
 
-	// Before the attach handoff, while the screen is still ours: terminals that
-	// ignore Bubble Tea's OSC 111 reset keep the canvas colour after Portal quits.
-	tui.RestoreTerminalBackground(os.Stdout, model)
-	// Before the connect: the outside-tmux attach execs and never returns.
-	emitSearchTeardownWarnings(cmd.ErrOrStderr(), model)
-
-	return processTUIResult(model, connector)
+	return finishTUI(model, connector, os.Stdout, cmd.ErrOrStderr())
 }
 
 func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
