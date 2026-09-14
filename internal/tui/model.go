@@ -230,8 +230,9 @@ type Model struct {
 	// Zero value renders the all-pending loading screen.
 	loadingProgress LoadingProgress
 
-	// pending is staged before Init; a loading page moves it into
-	// bufferedWarnings, and with no loading page it stays for the teardown.
+	// pending is staged before Init and, with no loading page, added to by the
+	// terminal bootstrap event; a loading page moves it into bufferedWarnings
+	// instead. What is still pending at the end is written at teardown.
 	pendingBootstrapWarnings []BootstrapWarning
 	bufferedWarnings         []BootstrapWarning
 
@@ -1635,9 +1636,11 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			// no gate ever consumed.
 			m.pendingBootstrapWarnings = nil
 		} else if m.commandPending {
-			// No loading page and no notice band to reach, so the teardown write is
-			// the only route left. Appended rather than assigned: what was staged
-			// before the run is a disjoint set the terminal is owed just as much.
+			// No loading gate to hand these to, and this page's band is the
+			// pending-command banner's, so the teardown write is the route — the
+			// same one a warm picker takes. Appended rather than assigned: what was
+			// staged before the run is a disjoint set the terminal is owed just as
+			// much.
 			m.pendingBootstrapWarnings = append(m.pendingBootstrapWarnings, msg.Warnings...)
 		}
 		if m.minElapsed && m.activePage == PageLoading {
