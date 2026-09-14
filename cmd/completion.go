@@ -3,6 +3,7 @@ package cmd
 import (
 	"strings"
 
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
@@ -50,4 +51,34 @@ func completeAliasKeys(toComplete string) ([]string, cobra.ShellCompDirective) {
 		}
 	}
 	return matches, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeSearchTerm completes a search-form word against live session names,
+// matching on the term after the slash and offering each candidate with the
+// slash still on the front: the shell discards any candidate that is not an
+// extension of the word being completed. A name carrying a slash is held back —
+// completing to it would compose a second slash, which reads as a path rather
+// than a search.
+func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) {
+	term := resolver.SearchTerm(toComplete)
+
+	var matches []string
+	for _, name := range completionSessionNames() {
+		if strings.Contains(name, "/") {
+			continue
+		}
+		if strings.HasPrefix(name, term) {
+			matches = append(matches, "/"+name)
+		}
+	}
+	return matches, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeOpenPositional completes open's positional target: the search form
+// against the term after its slash, every other word against session names.
+func completeOpenPositional(toComplete string) ([]string, cobra.ShellCompDirective) {
+	if resolver.IsSearchSigil(toComplete) {
+		return completeSearchTerm(toComplete)
+	}
+	return completeSessionNames(toComplete)
 }

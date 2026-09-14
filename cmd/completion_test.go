@@ -254,6 +254,15 @@ func TestCompletionExcludesInternalSessions(t *testing.T) {
 	if want := []string{"my-work"}; !slices.Equal(names, want) {
 		t.Errorf("names = %v, want %v (internal _-prefixed sessions must be filtered)", names, want)
 	}
+
+	searchNames, directive := completeSearchTerm("/")
+
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+	}
+	if want := []string{"/my-work"}; !slices.Equal(searchNames, want) {
+		t.Errorf("search names = %v, want %v (internal _-prefixed sessions must be filtered)", searchNames, want)
+	}
 }
 
 // Goes through the real root command, so cobra's own filtering applies to the
@@ -299,6 +308,202 @@ func TestCompletionHidesInternalSurface(t *testing.T) {
 		}
 		if !slices.Contains(cands, "open") {
 			t.Errorf("top-level completion did not offer the visible open command; candidates=%v", cands)
+		}
+	})
+}
+
+func TestCompleteSearchTerm(t *testing.T) {
+	t.Run("it completes the term after the slash and keeps the slash on the candidate", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+
+		names, directive := completeSearchTerm("/po")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"/portal-a1b2"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("it offers every live session name for a bare slash", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+
+		names, directive := completeSearchTerm("/")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"/portal-a1b2", "/web-9"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("it offers nothing for a term that prefixes no name", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+
+		names, directive := completeSearchTerm("/ort")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if len(names) != 0 {
+			t.Errorf("names = %v, want none (the offer is prefix-shaped)", names)
+		}
+	})
+
+	t.Run("it never offers a session name containing a slash", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"foo/bar", "foo-1"} })
+
+		names, directive := completeSearchTerm("/foo")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"/foo-1"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v (a slash-bearing name would compose a second slash)", names, want)
+		}
+	})
+
+	t.Run("it holds back a slash-bearing name for the empty term too", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"foo/bar", "foo-1"} })
+
+		names, _ := completeSearchTerm("/")
+
+		if want := []string{"/foo-1"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("it offers no candidates when the session read fails", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return nil })
+
+		names, directive := completeSearchTerm("/po")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if len(names) != 0 {
+			t.Errorf("names = %v, want none", names)
+		}
+	})
+}
+
+func TestCompleteOpenPositional(t *testing.T) {
+	t.Run("it routes a search word through the search branch", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+
+		names, directive := completeOpenPositional("/po")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"/portal-a1b2"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("it leaves a non-search word on today's completer", func(t *testing.T) {
+		// A word carrying a second slash is a path shape, not the search form: it
+		// must never be answered with session names stitched behind a slash.
+		tests := []struct {
+			name       string
+			toComplete string
+			want       []string
+		}{
+			{name: "absolute path with a second segment", toComplete: "/Users/lee"},
+			{name: "single segment with a trailing slash", toComplete: "/tmp/"},
+			{name: "tilde path", toComplete: "~/Code/pro"},
+			{name: "dot-relative path", toComplete: "."},
+			{name: "bare word", toComplete: "we", want: []string{"web-9"}},
+			{name: "empty word", toComplete: "", want: []string{"portal-a1b2", "web-9"}},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+
+				names, directive := completeOpenPositional(tt.toComplete)
+
+				if directive != cobra.ShellCompDirectiveNoFileComp {
+					t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+				}
+				plain, _ := completeSessionNames(tt.toComplete)
+				if !slices.Equal(names, plain) {
+					t.Errorf("names = %v, want %v (identical to completeSessionNames)", names, plain)
+				}
+				if !slices.Equal(names, tt.want) {
+					t.Errorf("names = %v, want %v", names, tt.want)
+				}
+			})
+		}
+	})
+}
+
+func TestSearchCompletionWiring(t *testing.T) {
+	t.Run("it routes open's positional completer through the search branch", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+
+		names, directive := openCmd.ValidArgsFunction(openCmd, nil, "/po")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"/portal-a1b2"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+
+	t.Run("it answers a search word end to end through __complete", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+
+		cands := completionCandidates(t, "__complete", "open", "/po")
+
+		if want := []string{"/portal-a1b2"}; !slices.Equal(cands, want) {
+			t.Errorf("candidates = %v, want %v", cands, want)
+		}
+	})
+
+	t.Run("it leaves the --session flag completer on plain session names", func(t *testing.T) {
+		fn, ok := openCmd.GetFlagCompletionFunc("session")
+		if !ok {
+			t.Fatal("--session flag completion not registered")
+		}
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2"} })
+
+		names, directive := fn(openCmd, nil, "/po")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if len(names) != 0 {
+			t.Errorf("names = %v, want none (a flag value keeps the plain name completer)", names)
+		}
+	})
+
+	t.Run("it leaves kill's positional completer unchanged", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2"} })
+
+		names, directive := killCmd.ValidArgsFunction(killCmd, nil, "/po")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if len(names) != 0 {
+			t.Errorf("names = %v, want none", names)
+		}
+	})
+
+	t.Run("it leaves a second positional on today's behaviour", func(t *testing.T) {
+		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+
+		names, directive := openCmd.ValidArgsFunction(openCmd, []string{"/term"}, "")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if want := []string{"portal-a1b2", "web-9"}; !slices.Equal(names, want) {
+			t.Errorf("names = %v, want %v", names, want)
 		}
 	})
 }
