@@ -162,8 +162,8 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 
 	name, err := decide()
 	if err != nil {
-		// The warning explains the error that follows it — a saver that is down is
-		// why the list could not be read — so it is surrendered ahead of it.
+		// This route paints no picker either, so the buffered warnings go to the
+		// terminal.
 		bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 		return err
 	}
@@ -180,8 +180,8 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 // emitSearchTeardownWarnings writes the warnings a search form's picker
 // buffered but never surfaced, for the two teardowns that leave no picker
 // frame behind: the attach its decision named, and the session-list read that
-// failed. A picker that opened has already surfaced them in its notice band,
-// and a cancelled loading page is owed no report.
+// failed. The picker owns its own warning surfacing, and a cancelled loading
+// page is owed no report.
 func emitSearchTeardownWarnings(w io.Writer, model tui.Model) {
 	if !model.SearchAttached() && model.SearchError() == nil {
 		return
