@@ -70,6 +70,11 @@ type Deps struct {
 // matches.
 type SearchForm struct {
 	Term string
+	// Decide classifies the search against the live session list at the point
+	// that list can answer for it. A non-empty name is the session to attach,
+	// ("", nil) opens the picker, and a non-nil error is a failed session-list
+	// read. Nil leaves the classification unwired.
+	Decide func() (string, error)
 }
 
 // CaptureSeeds declares first-frame state a one-shot fixture render cannot
@@ -125,7 +130,7 @@ func Build(deps Deps) Model {
 		opts = append(opts, WithDirResolver(deps.DirReader, deps.DirRunner))
 	}
 	if deps.Search != nil {
-		opts = append(opts, WithSearchForm(deps.Search.Term))
+		opts = append(opts, WithSearchForm(deps.Search.Term), WithSearchDecision(deps.Search.Decide))
 	}
 	opts = append(opts, WithInitialMode(deps.InitialMode))
 	opts = append(opts, WithThemeNomination(deps.Theme))

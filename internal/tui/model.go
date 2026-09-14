@@ -189,6 +189,12 @@ type Model struct {
 	// action, so the landing never clears them.
 	searchForm bool
 	searchTerm string
+	// searchDecide is the cold-boot classification the loading gate runs once,
+	// cleared on the copy that runs it; nil for every picker no search form
+	// supplied one for.
+	searchDecide   func() (string, error)
+	searchAttached bool
+	searchErr      error
 	// searchItems is the item slice the containment filter resolves its ranks
 	// against; nil for every picker a search term did not open.
 	searchItems        *searchItemSource
@@ -1588,6 +1594,9 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			return m, nil
 		}
 		if m.bootstrapComplete && m.activePage == PageLoading {
+			if quit := (&m).resolveSearchDecision(); quit != nil {
+				return m, quit
+			}
 			m.transitionFromLoading()
 			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
 		}
@@ -1609,6 +1618,12 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			m.bufferedWarnings = msg.Warnings
 		}
 		if m.minElapsed && m.activePage == PageLoading {
+			// The decision must precede surfaceBufferedWarnings: that helper
+			// empties the buffer, and an attach leaves the TUI with the
+			// warnings still owed to the caller.
+			if quit := (&m).resolveSearchDecision(); quit != nil {
+				return m, quit
+			}
 			m.transitionFromLoading()
 			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
 		}
