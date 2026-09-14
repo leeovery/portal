@@ -715,6 +715,8 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 	// Before the attach handoff, while the screen is still ours: terminals that
 	// ignore Bubble Tea's OSC 111 reset keep the canvas colour after Portal quits.
 	tui.RestoreTerminalBackground(os.Stdout, model)
+	// Before the connect: the outside-tmux attach execs and never returns.
+	emitSearchTeardownWarnings(cmd.ErrOrStderr(), model)
 
 	return processTUIResult(model, connector)
 }

@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"io"
 	"slices"
 
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -160,10 +162,29 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 
 	name, err := decide()
 	if err != nil {
+		// The warning explains the error that follows it — a saver that is down is
+		// why the list could not be read — so it is surrendered ahead of it.
+		bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 		return err
 	}
 	if name != "" {
+		// No picker is painted on this route, so the notice band never surfaces
+		// what the bootstrap accumulated: it goes to the terminal instead, before
+		// the attach hands that terminal to tmux.
+		bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 		return openSessionFunc(cmd, name)
 	}
 	return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
+}
+
+// emitSearchTeardownWarnings writes the warnings a search form's picker
+// buffered but never surfaced, for the two teardowns that leave no picker
+// frame behind: the attach its decision named, and the session-list read that
+// failed. A picker that opened has already surfaced them in its notice band,
+// and a cancelled loading page is owed no report.
+func emitSearchTeardownWarnings(w io.Writer, model tui.Model) {
+	if !model.SearchAttached() && model.SearchError() == nil {
+		return
+	}
+	tui.WriteBootstrapWarnings(w, model.BufferedWarnings())
 }
