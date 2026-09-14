@@ -731,8 +731,8 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 	}
 
 	m := buildTUIModel(cfg, landing, command)
-	// Staged rather than written: the model emits them only after the loading page
-	// is dismissed, because a direct write during loading corrupts the rendered UI.
+	// Staged rather than written: a direct write while the TUI holds the screen
+	// corrupts the rendered frame.
 	stageBootstrapWarningsOnModel(&m)
 	p := tea.NewProgram(m)
 

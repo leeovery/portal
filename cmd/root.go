@@ -138,7 +138,8 @@ var rootCmd = &cobra.Command{
 		}
 
 		// The CLI path drains here so warnings precede the command's own output;
-		// the TUI path leaves them in the sink until the loading page dismisses.
+		// the TUI path leaves them in the sink for the model to carry, so nothing is
+		// written into a frame the picker is about to claim.
 		for _, w := range warnings {
 			bootstrapWarnings.Add(w)
 		}
