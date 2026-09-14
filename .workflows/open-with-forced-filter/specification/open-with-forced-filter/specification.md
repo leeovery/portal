@@ -289,7 +289,7 @@ The row carries more text.
 
 #### 7.2 What the classification decides
 
-On a cold boot — no tmux server running — Portal must start the server, register hooks, restore every saved session and replay its scrollback before it can list a single session. Which invocations get the loading page for that is decided from the command line before anything is resolved, and anything positional is classified as not-heading-for-the-picker (`sed -n '168,170p' cmd/root.go` → `return cmd.Name() == "open" && len(args) == 0 && !anyOpenDomainPin(cmd)`).
+On a cold boot — no tmux server running — Portal must start the server, register hooks, restore every saved session and replay its scrollback before it can list a single session. Which invocations get the loading page for that is decided from the command line before anything is resolved, and a pre-dash positional is classified as not-heading-for-the-picker, while post-dash words are not (`cmd/root.go`'s `isTUIPath` → `return len(preDashPositionals(cmd, args)) == 0 || len(searchFormPositionals(cmd, args)) > 0`, after a domain-pin veto).
 
 The same verdict decides where soft bootstrap warnings go: on the non-picker classification they are written straight to the terminal the picker is about to take over with its alternate screen, which is the corruption the classification exists to prevent.
 
@@ -311,7 +311,7 @@ On K = 1 the TUI tears down before the connector runs, so the notice band never 
 
 #### 7.6 The concurrent path itself is unchanged
 
-Nothing about how the concurrent bootstrap behaves changes. This section adds the sigil to the set of invocations that take it.
+This section adds the sigil to the set of invocations that take the concurrent bootstrap, and the implementation added a second member alongside it: `portal open -- <command>`, which the pre-dash reading of `isTUIPath` no longer disqualifies. The concurrent bootstrap's own machinery is unchanged for the sigil, which the loading page gates as it gates every other member. It is **not** unchanged for the command-pending picker: `WithCommand` forces `PageProjects`, so that member paints an actionable picker from frame one with no loading gate between the user and a half-bootstrapped server — for the `-- <command>` spelling admitted here as much as for the pre-existing `-e <command>` one.
 
 ---
 
@@ -474,3 +474,5 @@ Nothing else in that specification is contradicted. Axiom 2, the accepted conseq
 ## Corrigenda
 
 > **Corrigendum 2026-09-14** (from `implementation/open-with-forced-filter`): §2.2's "Portal switches the shell's filename fallback off wherever it is asked for completions", restated as a requirement at §8.3 — corrected: the switch-off is the shell's, not Portal's, and bash can only perform it where `compopt` is a builtin (4.0 and later) and the `bash-completion` package is present. Measured against cobra v1.10.2's generator: `bash_completionsV2.go:132-138` gates `compopt +o default` on `type -t compopt`, and `:432-438` reaches `_get_comp_words_by_ref` from the bash-completion package before any completion runs. On macOS's stock `/bin/bash` 3.2 the standing `complete -o default` therefore supplies filenames — for `portal open /tm<TAB>`, which the original claim named as the safe case, as much as for `x /tm<TAB>`.
+
+> **Corrigendum 2026-09-14** (from `implementation/open-with-forced-filter`): §7.6's "Nothing about how the concurrent bootstrap behaves changes. This section adds the sigil to the set of invocations that take it", and §7.2's quoted `isTUIPath` body — corrected: the implementation added two members to that set, not one. Phase 4's approved consolidation task (`eae96c47c`) re-read the classifier through `preDashPositionals`, which admits `portal open -- <command>` alongside the sigil; the quoted line no longer exists in the tree. The claim that the concurrent bootstrap's behaviour is unchanged holds for the sigil but not for the command-pending picker, which `WithCommand` (`internal/tui/model.go:508-514`) forces onto `PageProjects` — the one member of the set with no loading gate. That behaviour is a live defect rather than a documentation gap and is tracked as this phase's own consolidation finding.
