@@ -562,7 +562,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		SpawnLogger:      cfg.spawnLogger,
 	}
 	if landing.search {
-		deps.Search = &tui.SearchForm{Term: landing.filter}
+		deps.Search = &tui.SearchForm{Term: landing.filter, Decide: landing.decide}
 	} else {
 		deps.InitialFilter = landing.filter
 	}
@@ -572,6 +572,12 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 func processTUIResult(model tui.Model, connector SessionConnector) error {
 	if fatal := model.FatalError(); fatal != nil {
 		return fatal
+	}
+	// A session list that could not be read has searched nothing, so it is an
+	// ordinary error rather than a bootstrap fatal: tmux's own words on stderr
+	// and a non-zero exit, with no error frame and nothing attached.
+	if searchErr := model.SearchError(); searchErr != nil {
+		return searchErr
 	}
 	selected := model.Selected()
 	if selected == "" {

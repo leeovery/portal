@@ -231,3 +231,16 @@ func assertHooksFileUnchanged(t *testing.T, path string, before []byte, context 
 	t.Helper()
 	hookstest.AssertHooksFileUnchanged(t, path, before, context...)
 }
+
+// landingShape is a pickerLanding reduced to values a test can compare: its two
+// fields plus whether a decision closure was supplied. A pickerLanding itself
+// carries a func, so it is not comparable.
+type landingShape struct {
+	filter  string
+	search  bool
+	decided bool
+}
+
+func shapeOfLanding(l pickerLanding) landingShape {
+	return landingShape{filter: l.filter, search: l.search, decided: l.decide != nil}
+}

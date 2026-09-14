@@ -37,6 +37,10 @@ func preDashPositionals(cmd *cobra.Command, args []string) []string {
 type pickerLanding struct {
 	filter string
 	search bool
+	// decide classifies a search term against the live session list from inside
+	// the picker, for an invocation whose bootstrap has not run yet. Nil means
+	// the classification was already taken, or there was none to take.
+	decide func() (string, error)
 }
 
 // validateOpenArgs refuses a line carrying a search form beside anything else.
@@ -116,22 +120,50 @@ func searchMatches(term string, sessions []tmux.Session) []tmux.Session {
 	return matches
 }
 
+// searchDecision classifies term against the live session list: a single match
+// is the session to attach, any other count is ("", nil) and leaves the picker
+// to it, and a failed enumeration is returned unchanged. It is a closure because
+// the moment it runs differs by route — here, or from inside the picker.
+func searchDecision(src SearchSessionSource, term string) func() (string, error) {
+	return func() (string, error) {
+		sessions, err := searchCandidates(src)
+		if err != nil {
+			return "", err
+		}
+		if matches := searchMatches(term, sessions); len(matches) == 1 {
+			return matches[0].Name, nil
+		}
+		return "", nil
+	}
+}
+
 // runSearchForm dispatches a search form by the number of live sessions its term
 // matches: exactly one attaches directly, any other count opens the picker
 // pre-filtered by the term. A term-less form has nothing to count, so it opens
 // the picker on the whole live list without reading the session set at all.
+//
+// An invocation whose bootstrap runs in a goroutine behind the picker's loading
+// page has no server to count against yet — every term would answer zero — so it
+// hands the count to the picker instead of taking it here.
 func runSearchForm(cmd *cobra.Command, term string) error {
 	if term == "" {
 		return openTUIFunc(cmd, pickerLanding{search: true}, nil, serverWasStarted(cmd))
 	}
 
-	sessions, err := searchCandidates(buildSearchSessionSource(cmd))
+	decide := searchDecision(buildSearchSessionSource(cmd), term)
+	landing := pickerLanding{filter: term, search: true}
+
+	if deferredBootstrapFromContext(cmd) != nil {
+		landing.decide = decide
+		return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
+	}
+
+	name, err := decide()
 	if err != nil {
 		return err
 	}
-
-	if matches := searchMatches(term, sessions); len(matches) == 1 {
-		return openSessionFunc(cmd, matches[0].Name)
+	if name != "" {
+		return openSessionFunc(cmd, name)
 	}
-	return openTUIFunc(cmd, pickerLanding{filter: term, search: true}, nil, serverWasStarted(cmd))
+	return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
 }

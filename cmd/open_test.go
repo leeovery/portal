@@ -2182,8 +2182,8 @@ func TestOpenCommand_Filter_OpensPickerPrefilteredAndSkipsResolution(t *testing.
 	if !tuiCalled {
 		t.Fatal("openTUIFunc must be called for -f")
 	}
-	if want := (pickerLanding{filter: "blog"}); gotLanding != want {
-		t.Errorf("landing = %+v, want %+v", gotLanding, want)
+	if got, want := shapeOfLanding(gotLanding), (landingShape{filter: "blog"}); got != want {
+		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if gotCommand != nil {
 		t.Errorf("command = %v, want nil", gotCommand)
@@ -2387,8 +2387,8 @@ func TestOpenCommand_NoArgs_NoFilter_LaunchesPicker(t *testing.T) {
 	if !tuiCalled {
 		t.Fatal("openTUIFunc must be called for no-arg open")
 	}
-	if gotLanding != (pickerLanding{}) {
-		t.Errorf("landing = %+v, want the zero landing", gotLanding)
+	if got := shapeOfLanding(gotLanding); got != (landingShape{}) {
+		t.Errorf("landing = %+v, want the zero landing", got)
 	}
 }
 
@@ -2434,8 +2434,8 @@ func TestOpenCommand_CommandNoTarget_ExecFlag_OpensProjectsPicker(t *testing.T) 
 	if !tuiCalled {
 		t.Fatal("openTUIFunc must be called for a command with no target (Projects-mode picker)")
 	}
-	if gotLanding != (pickerLanding{}) {
-		t.Errorf("landing = %+v, want the zero landing", gotLanding)
+	if got := shapeOfLanding(gotLanding); got != (landingShape{}) {
+		t.Errorf("landing = %+v, want the zero landing", got)
 	}
 	wantCmd := []string{"claude"}
 	if !slices.Equal(gotCommand, wantCmd) {
@@ -2491,8 +2491,8 @@ func TestOpenCommand_CommandNoTarget_DashDash_OpensProjectsPicker(t *testing.T) 
 	if !tuiCalled {
 		t.Fatal("openTUIFunc must be called for a -- command with no target (Projects-mode picker)")
 	}
-	if gotLanding != (pickerLanding{}) {
-		t.Errorf("landing = %+v, want the zero landing", gotLanding)
+	if got := shapeOfLanding(gotLanding); got != (landingShape{}) {
+		t.Errorf("landing = %+v, want the zero landing", got)
 	}
 	wantCmd := []string{"claude"}
 	if !slices.Equal(gotCommand, wantCmd) {
@@ -2523,8 +2523,8 @@ func TestOpenCommand_Filter_ThreadsCommandToPicker(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if want := (pickerLanding{filter: "web"}); gotLanding != want {
-		t.Errorf("landing = %+v, want %+v", gotLanding, want)
+	if got, want := shapeOfLanding(gotLanding), (landingShape{filter: "web"}); got != want {
+		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	wantCmd := []string{"claude"}
 	if !slices.Equal(gotCommand, wantCmd) {
@@ -2549,8 +2549,8 @@ func TestOpenCommand_Filter_ThreadsDashDashCommandToPicker(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if want := (pickerLanding{filter: "web"}); gotLanding != want {
-		t.Errorf("landing = %+v, want %+v", gotLanding, want)
+	if got, want := shapeOfLanding(gotLanding), (landingShape{filter: "web"}); got != want {
+		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	wantCmd := []string{"claude"}
 	if !slices.Equal(gotCommand, wantCmd) {

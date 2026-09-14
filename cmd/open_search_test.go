@@ -129,6 +129,9 @@ type searchFormCapture struct {
 	pathCalled    bool
 	seams         *recordingResolverSeams
 	source        *fakeSearchSource
+	// readsAtTUI is the number of session reads taken by the time the picker
+	// seam ran, which is what separates an up-front count from a deferred one.
+	readsAtTUI int
 }
 
 func installSearchFormSeams(t *testing.T, lister resolver.SessionLister) *searchFormCapture {
@@ -154,6 +157,7 @@ func installSearchFormSeams(t *testing.T, lister resolver.SessionLister) *search
 		sc.tuiCalled = true
 		sc.landing = landing
 		sc.command = command
+		sc.readsAtTUI = sc.source.listCalls + sc.source.currentCalls
 		return nil
 	})
 	withFuncSeam(t, &runOpenBurstFunc, func(*cobra.Command, []spawn.Surface, []string) error {
@@ -191,8 +195,8 @@ func TestOpenCommand_SearchForm_OpensPickerOnTheTerm(t *testing.T) {
 	if !sc.tuiCalled {
 		t.Fatal("openTUIFunc must be called for a search form")
 	}
-	if want := (pickerLanding{filter: "port", search: true}); sc.landing != want {
-		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	if got, want := shapeOfLanding(sc.landing), (landingShape{filter: "port", search: true}); got != want {
+		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if sc.command != nil {
 		t.Errorf("command = %v, want nil", sc.command)
@@ -303,8 +307,8 @@ func TestOpenCommand_SearchForm_BareSigilIsNotAUsageError(t *testing.T) {
 	if !sc.tuiCalled {
 		t.Fatal("openTUIFunc must be called for a bare search sigil")
 	}
-	if want := (pickerLanding{search: true}); sc.landing != want {
-		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	if got, want := shapeOfLanding(sc.landing), (landingShape{search: true}); got != want {
+		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if sc.sessionCalled || sc.pathCalled || sc.burstCalled {
 		t.Error("a bare search sigil must reach no other branch of open")
@@ -513,8 +517,8 @@ func TestOpenCommand_SearchForm_OpensPickerWhenNothingMatches(t *testing.T) {
 	if errBuf.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", errBuf.String())
 	}
-	if want := (pickerLanding{filter: "port", search: true}); sc.landing != want {
-		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	if got, want := shapeOfLanding(sc.landing), (landingShape{filter: "port", search: true}); got != want {
+		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if sc.sessionCalled {
 		t.Error("nothing matched, so nothing may be attached")
@@ -530,8 +534,8 @@ func TestOpenCommand_SearchForm_OpensPickerWhenTwoOrMoreMatch(t *testing.T) {
 	if !sc.tuiCalled {
 		t.Fatal("two matches must open the picker")
 	}
-	if want := (pickerLanding{filter: "port", search: true}); sc.landing != want {
-		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	if got, want := shapeOfLanding(sc.landing), (landingShape{filter: "port", search: true}); got != want {
+		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if sc.sessionCalled {
 		t.Error("two matches leave a choice: nothing may be attached")
@@ -561,8 +565,8 @@ func TestOpenCommand_SearchForm_TermLessFormTakesNoCount(t *testing.T) {
 		t.Errorf("term-less form read the session set: ListSessionsProbe=%d CurrentSessionName=%d, want 0 and 0",
 			sc.source.listCalls, sc.source.currentCalls)
 	}
-	if want := (pickerLanding{search: true}); sc.landing != want {
-		t.Errorf("landing = %+v, want %+v", sc.landing, want)
+	if got, want := shapeOfLanding(sc.landing), (landingShape{search: true}); got != want {
+		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if sc.sessionCalled {
 		t.Error("a term-less form counts nothing, so it can attach nothing")
