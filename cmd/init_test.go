@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+// emitInitScript runs `init <shell>` in-process and returns what it emitted.
+func emitInitScript(t *testing.T, shell string, args ...string) string {
+	t.Helper()
+
+	buf := new(bytes.Buffer)
+	resetRootCmd()
+	rootCmd.SetOut(buf)
+	rootCmd.SetArgs(append([]string{"init", shell}, args...))
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("init %s: unexpected error: %v", shell, err)
+	}
+	return buf.String()
+}
+
 func TestInitZsh(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -25,8 +40,12 @@ func TestInitZsh(t *testing.T) {
 			wantInOut: "compdef _portal portal",
 		},
 		{
-			name:      "wires completions to x name",
-			wantInOut: "compdef _portal x",
+			name:      "wires completions to x name through the open shim",
+			wantInOut: "compdef _portal_open x",
+		},
+		{
+			name:      "defines the zsh open completion shim",
+			wantInOut: "_portal_open() {\n    words=(portal open \"${(@)words[2,-1]}\")\n    (( CURRENT += 1 ))\n    _portal \"$@\"\n}",
 		},
 		{
 			name:      "wires completions to xctl name",
@@ -121,8 +140,12 @@ func TestInitBash(t *testing.T) {
 			wantInOut: "complete -o default -F __start_portal portal",
 		},
 		{
-			name:      "wires completions to x name",
-			wantInOut: "complete -o default -F __start_portal x",
+			name:      "wires completions to x name through the open shim",
+			wantInOut: "complete -o default -F __start_portal_open x",
+		},
+		{
+			name:      "defines the bash open completion shim",
+			wantInOut: "__start_portal_open() {\n    COMP_WORDS=(portal open \"${COMP_WORDS[@]:1}\")\n    (( COMP_CWORD += 1 ))\n    COMP_LINE=\"${COMP_WORDS[*]}\"\n    COMP_POINT=${#COMP_LINE}\n    __start_portal \"$@\"\n}",
 		},
 		{
 			name:      "wires completions to xctl name",
@@ -174,8 +197,8 @@ func TestInitBash_CmdFlag(t *testing.T) {
 			name: "cmd flag wires completions to custom names",
 			args: []string{"init", "bash", "--cmd", "p"},
 			wantInOut: []string{
-				"complete -o default -F __start_portal p",
-				"complete -o default -F __start_portal pctl",
+				"complete -o default -F __start_portal_open p\n",
+				"complete -o default -F __start_portal pctl\n",
 			},
 		},
 	}
@@ -220,8 +243,8 @@ func TestInitFish(t *testing.T) {
 			wantInOut: "complete -c portal",
 		},
 		{
-			name:      "wires completions to x name",
-			wantInOut: "complete -c x -w portal",
+			name:      "wires completions to x name through the open wrap",
+			wantInOut: "complete -c x -f\ncomplete -c x -w 'portal open'\n",
 		},
 		{
 			name:      "wires completions to xctl name",
@@ -273,8 +296,8 @@ func TestInitFish_CmdFlag(t *testing.T) {
 			name: "cmd flag wires completions to custom names",
 			args: []string{"init", "fish", "--cmd", "p"},
 			wantInOut: []string{
-				"complete -c p -w portal",
-				"complete -c pctl -w portal",
+				"complete -c p -f\ncomplete -c p -w 'portal open'\n",
+				"complete -c pctl -w portal\n",
 			},
 		},
 	}
@@ -360,8 +383,8 @@ func TestInitZsh_CmdFlag(t *testing.T) {
 			name: "cmd flag wires completions to custom names",
 			args: []string{"init", "zsh", "--cmd", "p"},
 			wantInOut: []string{
-				"compdef _portal p",
-				"compdef _portal pctl",
+				"compdef _portal_open p\n",
+				"compdef _portal pctl\n",
 			},
 		},
 		{
@@ -370,18 +393,18 @@ func TestInitZsh_CmdFlag(t *testing.T) {
 			wantInOut: []string{
 				`function x() { portal open "$@" }`,
 				`function xctl() { portal "$@" }`,
-				"compdef _portal x",
-				"compdef _portal xctl",
+				"compdef _portal_open x\n",
+				"compdef _portal xctl\n",
 			},
 		},
 		{
-			name: "cmd flag with different name",
+			name: "cmd flag with a name shadowing a real command",
 			args: []string{"init", "zsh", "--cmd", "portal"},
 			wantInOut: []string{
 				`function portal() { portal open "$@" }`,
 				`function portalctl() { portal "$@" }`,
-				"compdef _portal portal",
-				"compdef _portal portalctl",
+				"compdef _portal_open portal\n",
+				"compdef _portal portalctl\n",
 			},
 		},
 	}
@@ -402,6 +425,42 @@ func TestInitZsh_CmdFlag(t *testing.T) {
 			for _, want := range tt.wantInOut {
 				if !strings.Contains(output, want) {
 					t.Errorf("output does not contain %q\ngot:\n%s", want, output)
+				}
+			}
+		})
+	}
+}
+
+func TestInitCmdFlag_RegistrationsCarryNoDefaultName(t *testing.T) {
+	tests := []struct {
+		name     string
+		shell    string
+		notInOut []string
+	}{
+		{
+			name:     "bash registrations name only the configured function",
+			shell:    "bash",
+			notInOut: []string{"__start_portal_open x", "__start_portal xctl"},
+		},
+		{
+			name:     "zsh registrations name only the configured function",
+			shell:    "zsh",
+			notInOut: []string{"compdef _portal_open x", "compdef _portal xctl"},
+		},
+		{
+			name:     "fish registrations name only the configured function",
+			shell:    "fish",
+			notInOut: []string{"complete -c x ", "complete -c xctl "},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := emitInitScript(t, tt.shell, "--cmd", "p")
+
+			for _, unwanted := range tt.notInOut {
+				if strings.Contains(output, unwanted) {
+					t.Errorf("output contains %q\ngot:\n%s", unwanted, output)
 				}
 			}
 		})

@@ -48,6 +48,25 @@ func init() {
 	initCmd.Flags().String("cmd", "x", "Custom name for shell functions (e.g., --cmd p creates p() and pctl())")
 }
 
+// The generated script asks the typed word for its completions, and the session-opening
+// function expands to `portal open` — so its registration must name a shim that rewrites
+// the word rather than __start_portal itself, which would ask `portal open` instead.
+const bashOpenCompletionShim = `__start_portal_open() {
+    COMP_WORDS=(portal open "${COMP_WORDS[@]:1}")
+    (( COMP_CWORD += 1 ))
+    COMP_LINE="${COMP_WORDS[*]}"
+    COMP_POINT=${#COMP_LINE}
+    __start_portal "$@"
+}
+`
+
+const zshOpenCompletionShim = `_portal_open() {
+    words=(portal open "${(@)words[2,-1]}")
+    (( CURRENT += 1 ))
+    _portal "$@"
+}
+`
+
 func emitBashInit(w io.Writer, cmdName string) error {
 	ctlName := cmdName + "ctl"
 
@@ -68,7 +87,10 @@ func emitBashInit(w io.Writer, cmdName string) error {
 		return err
 	}
 
-	if _, err := fmt.Fprintf(w, "complete -o default -F __start_portal %s\n", cmdName); err != nil {
+	if _, err := fmt.Fprint(w, bashOpenCompletionShim); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "complete -o default -F __start_portal_open %s\n", cmdName); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "complete -o default -F __start_portal %s\n", ctlName); err != nil {
@@ -98,7 +120,10 @@ func emitFishInit(w io.Writer, cmdName string) error {
 		return err
 	}
 
-	if _, err := fmt.Fprintf(w, "complete -c %s -w portal\n", cmdName); err != nil {
+	if _, err := fmt.Fprintf(w, "complete -c %s -f\n", cmdName); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "complete -c %s -w 'portal open'\n", cmdName); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "complete -c %s -w portal\n", ctlName); err != nil {
@@ -128,7 +153,10 @@ func emitZshInit(w io.Writer, cmdName string) error {
 		return err
 	}
 
-	if _, err := fmt.Fprintf(w, "compdef _portal %s\n", cmdName); err != nil {
+	if _, err := fmt.Fprint(w, zshOpenCompletionShim); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "compdef _portal_open %s\n", cmdName); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "compdef _portal %s\n", ctlName); err != nil {
