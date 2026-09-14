@@ -76,6 +76,16 @@ func TestIsTUIPath(t *testing.T) {
 		}
 	})
 
+	t.Run("open -- cmd (command after the separator, no target) IS the TUI path", func(t *testing.T) {
+		c := openProbeCmd()
+		if err := c.ParseFlags([]string{"--", "claude"}); err != nil {
+			t.Fatalf("ParseFlags: %v", err)
+		}
+		if !isTUIPath(c, c.Flags().Args()) {
+			t.Error("open -- claude: isTUIPath = false, want true (opens the Projects picker)")
+		}
+	})
+
 	t.Run("repeated session pins (no positional) are NOT the TUI path", func(t *testing.T) {
 		c := openProbeCmdWithFlags()
 		_ = c.Flags().Set("session", "a")
@@ -220,6 +230,16 @@ func TestShouldRunConcurrentBootstrap(t *testing.T) {
 		}
 		if !shouldRunConcurrentBootstrap(c, []string{}, probeClient(), false) {
 			t.Error("open -e cmd + not satisfied: shouldRunConcurrentBootstrap = false, want true (command-only open is a TUI path)")
+		}
+	})
+
+	t.Run("it routes concurrent for open -- cmd (command after the separator, not satisfied)", func(t *testing.T) {
+		c := openProbeCmd()
+		if err := c.ParseFlags([]string{"--", "claude"}); err != nil {
+			t.Fatalf("ParseFlags: %v", err)
+		}
+		if !shouldRunConcurrentBootstrap(c, c.Flags().Args(), probeClient(), false) {
+			t.Error("open -- claude + not satisfied: shouldRunConcurrentBootstrap = false, want true (command-only open is a TUI path)")
 		}
 	})
 }

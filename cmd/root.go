@@ -173,7 +173,7 @@ func isTUIPath(cmd *cobra.Command, args []string) bool {
 	if cmd.Name() != "open" || anyOpenDomainPin(cmd) {
 		return false
 	}
-	return len(args) == 0 || len(searchFormPositionals(cmd, args)) > 0
+	return len(preDashPositionals(cmd, args)) == 0 || len(searchFormPositionals(cmd, args)) > 0
 }
 
 // A domain pin dispatches one resolved target directly, so it is not a picker
