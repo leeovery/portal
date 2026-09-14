@@ -218,7 +218,7 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 6,
+          "current_phase": 7,
           "current_task": null,
           "completed_tasks": [
             "open-with-forced-filter-1-1",
@@ -254,7 +254,8 @@
             "open-with-forced-filter-6-1",
             "open-with-forced-filter-6-2",
             "open-with-forced-filter-6-3",
-            "open-with-forced-filter-6-4"
+            "open-with-forced-filter-6-4",
+            "open-with-forced-filter-7-1"
           ],
           "consolidated_phases": [
             1,
@@ -307,6 +308,21 @@
           },
           "machine_phases": [
             6
+          ],
+          "bank": [
+            {
+              "task": "open-with-forced-filter-7-1",
+              "source": "reviewer",
+              "summary": "The command-pending picker stays fully interactive for the whole concurrent bootstrap, so the terminal event can still be outrun",
+              "failure": "On a cold boot a user runs `portal open -- <command>`, the projects picker paints from frame one, and Enter within the first second mints, quits and exits while the orchestrator is still mid-restore: the remaining saved sessions never come back, `@portal-restoring` stays set so the daemon suppresses captureAndCommit until the next full bootstrap, and the run warning or fatal is never delivered (exit 0). Noticed as: after a reboot only some sessions came back, and portal said nothing. The same window leaves k/r/d live against a half-restored server.",
+              "detail": "internal/tui/build.go:167-169 -> WithCommand (internal/tui/model.go:507-513) forces PageProjects, so the loading gate that serialises every other cold TUI route is absent. internal/tui/model.go:1682-1684 (SessionCreatedMsg -> tea.Quit) and :2809-2811 (sessions-page Enter -> tea.Quit) are both reachable before the pipe Done event. cmd/open.go:736-748 returns into finishTUI with no join on the goroutine, and pipe.ServerStarted()/Warnings()/Err() (cmd/bootstrap_progress.go:129-133) have no production consumer - reading them post-Run today would be an unsynchronised read, so closing this needs a real join rather than a one-line read. Pre-existing, not introduced by 7-1.",
+              "files": [
+                "internal/tui/model.go",
+                "internal/tui/build.go",
+                "cmd/open.go",
+                "cmd/bootstrap_progress.go"
+              ]
+            }
           ]
         }
       }
