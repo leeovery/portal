@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -78,19 +79,13 @@ type SessionItem struct {
 	CatchAll bool
 }
 
-// FilterValue is the text the picker's own fuzzy rule narrows on: the session
-// name joined to its recorded directory, home-abbreviated so a term hitting the
-// home prefix cannot match a session on characters no row shows. The
-// grouping-derived directory is no part of it — a regroup must never make a
-// session findable by a path it was not findable by a moment earlier. A filter
-// rule reading those two fields off the item rather than this string matches the
-// same values by another route, so widening or narrowing what a filter matches
-// means changing both.
+// FilterValue is the session's search fields flattened for the picker's own
+// fuzzy rule, which narrows on one string. The name leads, so a query typed
+// against a row reads left to right as the row does. The grouping-derived
+// directory is no part of it — a regroup must never make a session findable by a
+// path it was not findable by a moment earlier.
 func (i SessionItem) FilterValue() string {
-	if i.Session.Dir == "" {
-		return i.Session.Name
-	}
-	return i.Session.Name + " " + resolver.AbbreviateHome(i.Session.Dir)
+	return strings.Join(resolver.SearchFields(i.Session.Name, i.Session.Dir), " ")
 }
 
 // A genuine height-1 list.Item is load-bearing: pagination counts every rendered

@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -31,6 +32,36 @@ func TestSessionItem(t *testing.T) {
 
 		if got != "api-work ~/Code/portal" {
 			t.Errorf("FilterValue() = %q, want %q", got, "api-work ~/Code/portal")
+		}
+	})
+
+	t.Run("FilterValue is the SearchFields slice joined by a single space", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		session := tmux.Session{Name: "api-work", Windows: 3, Dir: home + "/Code/portal"}
+		item := tui.SessionItem{Session: session}
+
+		got := item.FilterValue()
+
+		want := strings.Join(resolver.SearchFields(session.Name, session.Dir), " ")
+		if got != want {
+			t.Errorf("FilterValue() = %q, want %q (the search fields joined)", got, want)
+		}
+	})
+
+	t.Run("FilterValue for a session with no recorded directory has no trailing separator", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		session := tmux.Session{Name: "dev", Windows: 3}
+		item := tui.SessionItem{Session: session}
+
+		got := item.FilterValue()
+
+		want := strings.Join(resolver.SearchFields(session.Name, session.Dir), " ")
+		if got != want {
+			t.Errorf("FilterValue() = %q, want %q (the one-element slice joins to the bare name)", got, want)
+		}
+		if strings.HasSuffix(got, " ") {
+			t.Errorf("FilterValue() = %q, want no trailing separator", got)
 		}
 	})
 
