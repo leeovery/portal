@@ -1113,16 +1113,10 @@ func (m Model) projectBandHeight() int {
 }
 
 func (m Model) filteredSessions() []tmux.Session {
-	if !m.insideTmux || m.currentSession == "" {
+	if !m.insideTmux {
 		return m.sessions
 	}
-	filtered := make([]tmux.Session, 0, len(m.sessions))
-	for _, s := range m.sessions {
-		if s.Name != m.currentSession {
-			filtered = append(filtered, s)
-		}
-	}
-	return filtered
+	return PickerSessions(m.sessions, m.currentSession)
 }
 
 func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {

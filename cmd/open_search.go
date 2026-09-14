@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"io"
-	"slices"
 
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/tmux"
@@ -108,7 +107,7 @@ func searchCandidates(src SearchSessionSource) ([]tmux.Session, error) {
 	if err != nil || current == "" {
 		return sessions, nil
 	}
-	return slices.DeleteFunc(sessions, func(s tmux.Session) bool { return s.Name == current }), nil
+	return tui.PickerSessions(sessions, current), nil
 }
 
 // searchMatches returns, in enumeration order, the sessions the term matches.

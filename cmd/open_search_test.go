@@ -635,6 +635,43 @@ func TestOpenCommand_SearchForm_ExcludesNothingOutsideTmux(t *testing.T) {
 	}
 }
 
+// verbatimSearchSource hands back the very slice it holds, so a test can see
+// whether searchCandidates wrote through the enumeration it was given.
+type verbatimSearchSource struct {
+	sessions []tmux.Session
+	current  string
+}
+
+func (v *verbatimSearchSource) ListSessionsProbe() ([]tmux.Session, error) {
+	return v.sessions, nil
+}
+
+func (v *verbatimSearchSource) CurrentSessionName() (string, error) {
+	return v.current, nil
+}
+
+func TestSearchCandidates_LeavesTheEnumerationItWasHandedUnmodified(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/portal-search-candidates-test,0,0")
+
+	src := &verbatimSearchSource{
+		sessions: []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}, {Name: "blog-c3d4"}},
+		current:  "portal-a1b2",
+	}
+
+	if _, err := searchCandidates(src); err != nil {
+		t.Fatalf("searchCandidates() error = %v", err)
+	}
+
+	got := make([]string, 0, len(src.sessions))
+	for _, s := range src.sessions {
+		got = append(got, s.Name)
+	}
+	want := []string{"portal-a1b2", "port-agent", "blog-c3d4"}
+	if !slices.Equal(got, want) {
+		t.Errorf("enumeration after searchCandidates = %v, want %v unchanged", got, want)
+	}
+}
+
 func TestOpenCommand_SearchForm_CountsOverExactlyTheEnumeratedSessions(t *testing.T) {
 	sc := installSearchFormSeams(t, nil)
 	sc.source.sessions = []tmux.Session{{Name: "_portal-saver"}, {Name: "portal-a1b2"}}
