@@ -90,6 +90,65 @@ func TestIsTUIPath(t *testing.T) {
 			t.Error("list: isTUIPath = true, want false")
 		}
 	})
+
+	t.Run("a search form IS the TUI path", func(t *testing.T) {
+		for _, form := range []string{"/port", "/"} {
+			if !isTUIPath(openProbeCmd(), []string{form}) {
+				t.Errorf("open %s: isTUIPath = false, want true (a search form heads for the picker)", form)
+			}
+		}
+	})
+
+	t.Run("a search form at any positional index IS the TUI path", func(t *testing.T) {
+		if !isTUIPath(openProbeCmd(), []string{"api", "/port"}) {
+			t.Error("open api /port: isTUIPath = false, want true")
+		}
+	})
+
+	t.Run("a path positional is NOT the TUI path", func(t *testing.T) {
+		for _, arg := range []string{"/Users/x/y", "/tmp/", "./port", "~/dir", "api"} {
+			if isTUIPath(openProbeCmd(), []string{arg}) {
+				t.Errorf("open %s: isTUIPath = true, want false", arg)
+			}
+		}
+	})
+
+	t.Run("two positional targets are NOT the TUI path", func(t *testing.T) {
+		if isTUIPath(openProbeCmd(), []string{"api", "blog"}) {
+			t.Error("open api blog: isTUIPath = true, want false (multi-target burst dispatches directly)")
+		}
+	})
+
+	t.Run("words after a -- separator are never inspected", func(t *testing.T) {
+		c := openProbeCmd()
+		if err := c.ParseFlags([]string{"~/Code/api", "--", "ls", "/tmp"}); err != nil {
+			t.Fatalf("ParseFlags: %v", err)
+		}
+		if isTUIPath(c, c.Flags().Args()) {
+			t.Error("open ~/Code/api -- ls /tmp: isTUIPath = true, want false (/tmp is the command's own argument)")
+		}
+	})
+
+	t.Run("a search form beside a domain pin is NOT the TUI path", func(t *testing.T) {
+		c := openProbeCmdWithFlags()
+		if err := c.Flags().Set("session", "api"); err != nil {
+			t.Fatalf("set --session: %v", err)
+		}
+		if isTUIPath(c, []string{"/port"}) {
+			t.Error("open /port -s api: isTUIPath = true, want false (a domain pin dispatches directly)")
+		}
+	})
+
+	t.Run("a search form classifies exactly as -f", func(t *testing.T) {
+		filtered := openProbeCmdWithFlags()
+		if err := filtered.Flags().Set("filter", "port"); err != nil {
+			t.Fatalf("set --filter: %v", err)
+		}
+		want := isTUIPath(filtered, []string{})
+		if got := isTUIPath(openProbeCmdWithFlags(), []string{"/port"}); got != want {
+			t.Errorf("isTUIPath(open /port) = %v, isTUIPath(open -f port) = %v; want the same verdict", got, want)
+		}
+	})
 }
 
 // The decider issues zero tmux round-trips, so the backing commander is
@@ -172,7 +231,7 @@ func TestShouldRunConcurrentBootstrap_IssuesNoProbe(t *testing.T) {
 		args []string
 	}{
 		{"non-TUI command", &cobra.Command{Use: "list"}, []string{}},
-		{"direct-path open", openProbeCmd(), []string{"/dir"}},
+		{"direct-path open", openProbeCmd(), []string{"/dir/sub"}},
 		{"TUI path", openProbeCmd(), []string{}},
 	}
 	for _, tc := range cases {

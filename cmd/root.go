@@ -165,8 +165,15 @@ var rootCmd = &cobra.Command{
 
 // isTUIPath reports whether this invocation will launch the picker, and so must
 // not have warnings written to stderr — they would corrupt the alt-screen.
+//
+// A search form is classified on its shape rather than on its outcome: whether
+// it ends at the picker depends on how many live sessions its term matches, and
+// on a cold server there are none to match until restore has finished.
 func isTUIPath(cmd *cobra.Command, args []string) bool {
-	return cmd.Name() == "open" && len(args) == 0 && !anyOpenDomainPin(cmd)
+	if cmd.Name() != "open" || anyOpenDomainPin(cmd) {
+		return false
+	}
+	return len(args) == 0 || len(searchFormPositionals(cmd, args)) > 0
 }
 
 // A domain pin dispatches one resolved target directly, so it is not a picker

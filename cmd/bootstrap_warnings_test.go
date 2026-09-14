@@ -273,3 +273,32 @@ func TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg(t *testing.T) {
 		t.Errorf("stderr should contain SaverDownWarning on `open <path>` (CLI shape); got %q", stderr.String())
 	}
 }
+
+func TestPersistentPreRunE_DoesNotEmitWarningsForOpenWithSearchForm(t *testing.T) {
+	resetBootstrapOnce(t)
+
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error { return nil })
+
+	runner := &recordingRunner{
+		warnings: []bootstrap.Warning{bootstrap.SaverDownWarning()},
+	}
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
+	withOpenDeps(t, OpenDeps{SearchSessions: &fakeSearchSource{}})
+
+	resetRootCmd()
+	var stderr bytes.Buffer
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"open", "/port"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if stderr.Len() != 0 {
+		t.Errorf("stderr must be empty for a search-form line (warnings buffered for the picker); got %q", stderr.String())
+	}
+
+	remaining := bootstrapWarnings.Drain()
+	if len(remaining) != 1 {
+		t.Errorf("sink remaining warnings = %d, want 1 (still buffered for the TUI)", len(remaining))
+	}
+}
