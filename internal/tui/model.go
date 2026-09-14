@@ -1480,6 +1480,18 @@ func (m *Model) transitionFromLoading() {
 	m.evaluateDefaultPage()
 }
 
+// Both loading gates dismiss through here, so the sequence holds whichever of
+// them lands second. The decision must precede surfaceBufferedWarnings: that
+// helper empties the buffer, and an attach leaves the TUI with the warnings
+// still owed to the caller.
+func (m *Model) dismissLoadingGate() tea.Cmd {
+	if quit := m.resolveSearchDecision(); quit != nil {
+		return quit
+	}
+	m.transitionFromLoading()
+	return tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
+}
+
 func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
 	return func() tea.Msg {
 		if err := m.projectStore.Remove(path, "cli"); err != nil {
@@ -1594,11 +1606,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			return m, nil
 		}
 		if m.bootstrapComplete && m.activePage == PageLoading {
-			if quit := (&m).resolveSearchDecision(); quit != nil {
-				return m, quit
-			}
-			m.transitionFromLoading()
-			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
+			cmd := (&m).dismissLoadingGate()
+			return m, cmd
 		}
 		return m, nil
 	case BootstrapProgressMsg:
@@ -1618,14 +1627,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			m.bufferedWarnings = msg.Warnings
 		}
 		if m.minElapsed && m.activePage == PageLoading {
-			// The decision must precede surfaceBufferedWarnings: that helper
-			// empties the buffer, and an attach leaves the TUI with the
-			// warnings still owed to the caller.
-			if quit := (&m).resolveSearchDecision(); quit != nil {
-				return m, quit
-			}
-			m.transitionFromLoading()
-			return m, tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
+			cmd := (&m).dismissLoadingGate()
+			return m, cmd
 		}
 		return m, nil
 	case BootstrapFatalMsg:
