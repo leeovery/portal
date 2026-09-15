@@ -616,8 +616,7 @@ func processTUIResult(model tui.Model, connector SessionConnector) error {
 	return connector.Connect(selected)
 }
 
-// finishTUI runs the teardown tail in its load-bearing order and returns the
-// connect's own result.
+// finishTUI runs the teardown tail in its load-bearing order.
 func finishTUI(model tui.Model, connector SessionConnector, canvas, warnings io.Writer) error {
 	// Before the attach handoff, while the screen is still ours: terminals that
 	// ignore Bubble Tea's OSC 111 reset keep the canvas colour after Portal quits.

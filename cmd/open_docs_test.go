@@ -65,6 +65,18 @@ func hasCommentedExample(lines []string, argument string) bool {
 	return false
 }
 
+// hasRowStarting reports whether some line of the section begins with prefix
+// once trimmed — what anchors a table-row assertion to the row itself, since the
+// prose above the table carries the same tokens.
+func hasRowStarting(section, prefix string) bool {
+	for line := range strings.SplitSeq(section, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestReadmeDocumentsSearchForm(t *testing.T) {
 	section := readmeOpenSection(t)
 
@@ -78,8 +90,12 @@ func TestReadmeDocumentsSearchForm(t *testing.T) {
 		}
 	}
 
+	const resolutionRow = "| `/<term>`"
+	if !hasRowStarting(section, resolutionRow) {
+		t.Errorf("README's open section documents the resolution-table row: want a line beginning %q in it", resolutionRow)
+	}
+
 	tokens := map[string]string{
-		"the resolution-table row":            "`/<term>`",
 		"the single-segment directory escape": "-p /tmp",
 		"the completion correction's owner":   "portal init",
 		"the filter flag's own table row":     "-f, --filter",

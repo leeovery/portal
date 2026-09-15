@@ -75,7 +75,7 @@ func searchTeardownModel(t *testing.T, decide func() (string, error), warnings [
 func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	t.Run("it writes the accumulated warnings before a warm single-match attach", func(t *testing.T) {
 		warnings := soakedWarnings()
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
@@ -101,7 +101,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 
 	t.Run("it writes the same lines as the CLI path", func(t *testing.T) {
 		warnings := soakedWarnings()
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
@@ -116,7 +116,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	})
 
 	t.Run("it drains the sink so a later emit writes nothing", func(t *testing.T) {
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
 		accumulateWarnings(t, soakedWarnings())
 		cmd, _ := warmSearchCommand(t)
@@ -133,7 +133,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	})
 
 	t.Run("it writes nothing when no warnings accumulated", func(t *testing.T) {
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
 		accumulateWarnings(t, nil)
 		cmd, stderr := warmSearchCommand(t)
@@ -150,7 +150,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	t.Run("it writes the accumulated warnings before a warm failed read", func(t *testing.T) {
 		readErr := errors.New("no server running")
 		warnings := soakedWarnings()
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.listErr = readErr
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
@@ -167,7 +167,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 
 	t.Run("it leaves the picker branch's warnings for the model", func(t *testing.T) {
 		warnings := soakedWarnings()
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)

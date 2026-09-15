@@ -134,24 +134,20 @@ type searchFormCapture struct {
 	readsAtTUI int
 }
 
-func installSearchFormSeams(t *testing.T, lister resolver.SessionLister) *searchFormCapture {
+func installSearchFormSeams(t *testing.T) *searchFormCapture {
 	t.Helper()
 
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
 	sc := &searchFormCapture{seams: &recordingResolverSeams{}, source: &fakeSearchSource{}}
 
-	deps := OpenDeps{
+	withOpenDeps(t, OpenDeps{
 		SessionLister:  sc.seams,
 		AliasLookup:    sc.seams,
 		Zoxide:         sc.seams,
 		DirValidator:   sc.seams,
 		SearchSessions: sc.source,
-	}
-	if lister != nil {
-		deps.SessionLister = lister
-	}
-	withOpenDeps(t, deps)
+	})
 
 	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
 		sc.tuiCalled = true
@@ -188,7 +184,7 @@ func executeOpen(t *testing.T, argv ...string) {
 }
 
 func TestOpenCommand_SearchForm_OpensPickerOnTheTerm(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 
 	executeOpen(t, "/port")
 
@@ -207,7 +203,7 @@ func TestOpenCommand_SearchForm_OpensPickerOnTheTerm(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_ResolvesNothing(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 
 	executeOpen(t, "/port")
 
@@ -217,7 +213,7 @@ func TestOpenCommand_SearchForm_ResolvesNothing(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_GlobMetacharactersAreLiteralText(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "po*rt-x"}, {Name: "portal-a1b2"}}
 
 	executeOpen(t, "/po*")
@@ -231,7 +227,7 @@ func TestOpenCommand_SearchForm_GlobMetacharactersAreLiteralText(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_AttachesASessionWhoseNameEqualsTheTerm(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "port"}}
 
 	executeOpen(t, "/port")
@@ -258,7 +254,7 @@ func TestOpenCommand_SearchForm_EmitsNoResolveLine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sink := logtest.Install(t)
 
-			sc := installSearchFormSeams(t, nil)
+			sc := installSearchFormSeams(t)
 			sc.source.sessions = tt.sessions
 
 			executeOpen(t, "/port")
@@ -300,7 +296,7 @@ func TestOpenCommand_MultiSegmentPathPositional_StillMints(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_BareSigilIsNotAUsageError(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 
 	executeOpen(t, "/")
 
@@ -335,7 +331,7 @@ func executeOpenExpectingUsage(t *testing.T, wantMsg string, argv ...string) {
 }
 
 func TestValidateOpenArgs_RefusesSearchFormBesideAnotherTarget(t *testing.T) {
-	installSearchFormSeams(t, nil)
+	installSearchFormSeams(t)
 
 	tests := []struct {
 		name string
@@ -354,13 +350,13 @@ func TestValidateOpenArgs_RefusesSearchFormBesideAnotherTarget(t *testing.T) {
 }
 
 func TestValidateOpenArgs_RefusesSecondSearchForm(t *testing.T) {
-	installSearchFormSeams(t, nil)
+	installSearchFormSeams(t)
 
 	executeOpenExpectingUsage(t, "cannot use a /term search with another /term search", "/port", "/blog")
 }
 
 func TestValidateOpenArgs_RefusesSearchFormWithACommand(t *testing.T) {
-	installSearchFormSeams(t, nil)
+	installSearchFormSeams(t)
 
 	tests := []struct {
 		name string
@@ -379,13 +375,13 @@ func TestValidateOpenArgs_RefusesSearchFormWithACommand(t *testing.T) {
 }
 
 func TestValidateOpenArgs_RefusesSearchFormWithFilter(t *testing.T) {
-	installSearchFormSeams(t, nil)
+	installSearchFormSeams(t)
 
 	executeOpenExpectingUsage(t, "cannot use a /term search with -f/--filter", "/port", "-f", "blog")
 }
 
 func TestValidateOpenArgs_RefusesSearchFormWithEachDomainPin(t *testing.T) {
-	installSearchFormSeams(t, nil)
+	installSearchFormSeams(t)
 
 	for _, pin := range []string{"-s", "-p", "-a", "-z"} {
 		t.Run(pin, func(t *testing.T) {
@@ -395,7 +391,7 @@ func TestValidateOpenArgs_RefusesSearchFormWithEachDomainPin(t *testing.T) {
 }
 
 func TestValidateOpenArgs_RefusesSearchFormWithAck(t *testing.T) {
-	installSearchFormSeams(t, nil)
+	installSearchFormSeams(t)
 
 	executeOpenExpectingUsage(t, "cannot use a /term search with --ack", "/port", "--ack", "batch:token")
 }
@@ -452,7 +448,7 @@ func TestValidateOpenArgs_RefusedLineStartsNoBootstrap(t *testing.T) {
 }
 
 func TestValidateOpenArgs_StillAnswersHelpOnASearchFormLine(t *testing.T) {
-	installSearchFormSeams(t, nil)
+	installSearchFormSeams(t)
 
 	out, _, err := runRootCmd(t, "open", "/port", "--help")
 	if err != nil {
@@ -476,7 +472,7 @@ func TestValidateOpenArgs_AdmitsEveryNonSearchLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			installSearchFormSeams(t, nil)
+			installSearchFormSeams(t)
 
 			resetRootCmd()
 			rootCmd.SetArgs(append([]string{"open"}, tt.argv...))
@@ -512,7 +508,7 @@ func (f *fakeSearchSource) CurrentSessionName() (string, error) {
 }
 
 func TestOpenCommand_SearchForm_AttachesTheSingleMatch(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
 
 	executeOpen(t, "/port")
@@ -526,7 +522,7 @@ func TestOpenCommand_SearchForm_AttachesTheSingleMatch(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_AttachesASessionMatchedOnlyByItsRecordedDirectory(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{
 		{Name: "api-work", Dir: filepath.Join(os.Getenv("HOME"), "Code", "portal")},
 		{Name: "blog-c3d4"},
@@ -543,7 +539,7 @@ func TestOpenCommand_SearchForm_AttachesASessionMatchedOnlyByItsRecordedDirector
 }
 
 func TestOpenCommand_SearchForm_OpensPickerWhenNothingMatches(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "blog-c3d4"}, {Name: "api-e5f6"}}
 
 	_, errBuf, err := runRootCmd(t, "open", "/port")
@@ -562,7 +558,7 @@ func TestOpenCommand_SearchForm_OpensPickerWhenNothingMatches(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_OpensPickerWhenTwoOrMoreMatch(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}, {Name: "blog-c3d4"}}
 
 	executeOpen(t, "/port")
@@ -579,7 +575,7 @@ func TestOpenCommand_SearchForm_OpensPickerWhenTwoOrMoreMatch(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_OpensPickerWhenNoSessionsAreLive(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 
 	executeOpen(t, "/port")
 
@@ -592,7 +588,7 @@ func TestOpenCommand_SearchForm_OpensPickerWhenNoSessionsAreLive(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_TermLessFormTakesNoCount(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
 
 	executeOpen(t, "/")
@@ -610,7 +606,7 @@ func TestOpenCommand_SearchForm_TermLessFormTakesNoCount(t *testing.T) {
 }
 
 func TestOpenCommand_SearchForm_ExcludesTheCurrentSessionFromTheCount(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
 	sc.source.current = "portal-a1b2"
 
@@ -625,7 +621,7 @@ func TestOpenCommand_SearchForm_ExcludesTheCurrentSessionFromTheCount(t *testing
 }
 
 func TestOpenCommand_SearchForm_AttachesTheOtherMatchWhenTheCurrentSessionAlsoMatches(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
 	sc.source.current = "portal-a1b2"
 
@@ -640,7 +636,7 @@ func TestOpenCommand_SearchForm_AttachesTheOtherMatchWhenTheCurrentSessionAlsoMa
 }
 
 func TestOpenCommand_SearchForm_CountsNothingOutWhenTheCurrentSessionReadFails(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
 	sc.source.currentErr = errors.New("no current client")
 
@@ -657,7 +653,7 @@ func TestOpenCommand_SearchForm_CountsNothingOutWhenTheCurrentSessionReadFails(t
 func TestOpenCommand_SearchForm_ExcludesNothingOutsideTmux(t *testing.T) {
 	t.Setenv("TMUX", "")
 
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
 	sc.source.current = "portal-a1b2"
 
@@ -709,7 +705,7 @@ func TestSearchCandidates_LeavesTheEnumerationItWasHandedUnmodified(t *testing.T
 }
 
 func TestOpenCommand_SearchForm_CountsOverExactlyTheEnumeratedSessions(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.sessions = []tmux.Session{{Name: "_portal-saver"}, {Name: "portal-a1b2"}}
 
 	executeOpen(t, "/portal")
@@ -726,7 +722,7 @@ func TestOpenCommand_SearchForm_CountsOverExactlyTheEnumeratedSessions(t *testin
 }
 
 func TestOpenCommand_SearchForm_ReturnsAnEnumerationError(t *testing.T) {
-	sc := installSearchFormSeams(t, nil)
+	sc := installSearchFormSeams(t)
 	sc.source.listErr = errors.New("no server running")
 
 	resetRootCmd()
@@ -911,7 +907,7 @@ func TestValidateOpenArgs_KeepsTodaysRefusalPrecedence(t *testing.T) {
 }
 
 func TestValidateOpenArgs_StillAnswersHelpOnAMalformedFilterLine(t *testing.T) {
-	installSearchFormSeams(t, nil)
+	installSearchFormSeams(t)
 
 	out, _, err := runRootCmd(t, "open", "-f", "", "--help")
 	if err != nil {

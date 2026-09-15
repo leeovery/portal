@@ -42,7 +42,7 @@ func runDeferredSearch(t *testing.T, sc *searchFormCapture, term string) func() 
 
 func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 	t.Run("it takes no count when a bootstrap is in flight", func(t *testing.T) {
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
 
 		runDeferredSearch(t, sc, "port")
@@ -56,7 +56,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 	})
 
 	t.Run("it hands the picker a decision closure on the deferred route", func(t *testing.T) {
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 
 		runDeferredSearch(t, sc, "port")
 
@@ -67,7 +67,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 	})
 
 	t.Run("it returns the single matching session from the deferred closure", func(t *testing.T) {
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
 
 		decide := runDeferredSearch(t, sc, "port")
@@ -92,7 +92,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				sc := installSearchFormSeams(t, nil)
+				sc := installSearchFormSeams(t)
 				sc.source.sessions = tt.sessions
 
 				decide := runDeferredSearch(t, sc, "port")
@@ -110,7 +110,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 
 	t.Run("it returns the enumeration error from the deferred closure", func(t *testing.T) {
 		readErr := errors.New("no server running")
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.listErr = readErr
 
 		decide := runDeferredSearch(t, sc, "port")
@@ -125,7 +125,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 	})
 
 	t.Run("it excludes the current session from the deferred closure's candidates", func(t *testing.T) {
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
 		sc.source.current = "portal-a1b2"
 
@@ -148,7 +148,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 
 		for name, ctx := range routes {
 			t.Run(name, func(t *testing.T) {
-				sc := installSearchFormSeams(t, nil)
+				sc := installSearchFormSeams(t)
 				sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
 
 				if err := runSearchForm(searchCommand(ctx), ""); err != nil {
@@ -170,7 +170,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 
 func TestSearchForm_WarmInvocation_CountsUpFront(t *testing.T) {
 	t.Run("it counts up front with no closure on a warm invocation", func(t *testing.T) {
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
 
 		if err := runSearchForm(searchCommand(context.Background()), "port"); err != nil {
@@ -187,7 +187,7 @@ func TestSearchForm_WarmInvocation_CountsUpFront(t *testing.T) {
 	})
 
 	t.Run("it attaches the single match up front on a warm invocation", func(t *testing.T) {
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
 
 		if err := runSearchForm(searchCommand(context.Background()), "port"); err != nil {
@@ -204,7 +204,7 @@ func TestSearchForm_WarmInvocation_CountsUpFront(t *testing.T) {
 
 	t.Run("it returns the enumeration error up front on a warm invocation", func(t *testing.T) {
 		readErr := errors.New("no server running")
-		sc := installSearchFormSeams(t, nil)
+		sc := installSearchFormSeams(t)
 		sc.source.listErr = readErr
 
 		err := runSearchForm(searchCommand(context.Background()), "port")
