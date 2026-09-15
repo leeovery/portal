@@ -186,3 +186,49 @@ func TestContainmentFilterIsRaceFreeAgainstAConcurrentSet(t *testing.T) {
 	}
 	writers.Wait()
 }
+
+// collidingSessions are two distinct sessions whose filter values coincide: one
+// named for the very text the other's home-abbreviated directory renders as.
+func collidingSessions(t *testing.T) (named, recorded tmux.Session) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return tmux.Session{Name: "api ~/Code/api"},
+		tmux.Session{Name: "api", Dir: filepath.Join(home, "Code", "api")}
+}
+
+func TestContainmentFilterOnTwoSessionsSharingOneFilterValue(t *testing.T) {
+	t.Run("it ranks neither row when only one of them contains the term", func(t *testing.T) {
+		named, recorded := collidingSessions(t)
+		for _, order := range [][]list.Item{
+			{SessionItem{Session: named}, SessionItem{Session: recorded}},
+			{SessionItem{Session: recorded}, SessionItem{Session: named}},
+		} {
+			src := &searchItemSource{}
+			src.set(order)
+			targets := filterTargets(order)
+			if targets[0] != targets[1] {
+				t.Fatalf("test setup invariant: expected one filter value, got %q and %q", targets[0], targets[1])
+			}
+
+			got := containmentFilter("api ~", src)("api ~", targets)
+
+			if len(got) != 0 {
+				t.Fatalf("ranks = %v, want none — the rows disagree on the term", rankIndexes(got))
+			}
+		}
+	})
+
+	t.Run("it ranks both rows when both of them contain the term", func(t *testing.T) {
+		named, recorded := collidingSessions(t)
+		items := []list.Item{SessionItem{Session: named}, SessionItem{Session: recorded}}
+		src := &searchItemSource{}
+		src.set(items)
+
+		got := containmentFilter("api", src)("api", filterTargets(items))
+
+		if want := []int{0, 1}; !slices.Equal(rankIndexes(got), want) {
+			t.Fatalf("ranks = %v, want %v — both rows contain the term", rankIndexes(got), want)
+		}
+	})
+}
