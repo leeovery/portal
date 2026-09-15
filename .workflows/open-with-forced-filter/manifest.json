@@ -180,7 +180,10 @@
             "open-with-forced-filter-12-3": "tick-23141a",
             "open-with-forced-filter-12-4": "tick-8ecd82",
             "open-with-forced-filter-12-5": "tick-cb4c82",
-            "open-with-forced-filter-12-6": "tick-e538df"
+            "open-with-forced-filter-12-6": "tick-e538df",
+            "open-with-forced-filter-13": "tick-999d6f",
+            "open-with-forced-filter-13-1": "tick-360750",
+            "open-with-forced-filter-13-2": "tick-ef3d63"
           },
           "storage_paths": [
             ".tick/"
@@ -516,10 +519,10 @@
           ],
           "staging": {
             "c1": {
-              "gate_mode": "gated",
+              "gate_mode": "auto",
               "tasks": {
-                "1": "pending",
-                "2": "pending"
+                "1": "approved",
+                "2": "approved"
               }
             }
           }
