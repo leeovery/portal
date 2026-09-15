@@ -478,18 +478,13 @@ func (m Model) PendingBootstrapWarnings() []BootstrapWarning {
 	return m.pendingBootstrapWarnings
 }
 
-// WarningsOwedAtTeardown is the set the teardown still owes the terminal: the
-// buffered set when the search decision recorded an attach or a read failure,
-// since that exit leaves the loading gate without painting a picker frame, and
-// the staged set on every other exit.
-//
-// A cancelled loading page records no decision, so it falls to the staged set —
-// which a loading page empties when it takes the buffer — and is owed nothing.
+// WarningsOwedAtTeardown is the set the teardown still owes the terminal:
+// everything no surface put on screen, whichever exit this was. Each field is
+// emptied by whoever consumes it — the buffer by the picker's notice band or
+// stderr flush, the staged set by a loading gate folding it into the buffer —
+// so a set still sitting in either field is one nobody surfaced.
 func (m Model) WarningsOwedAtTeardown() []BootstrapWarning {
-	if m.searchAttached || m.searchErr != nil {
-		return m.bufferedWarnings
-	}
-	return m.pendingBootstrapWarnings
+	return slices.Concat(m.bufferedWarnings, m.pendingBootstrapWarnings)
 }
 
 // A loading page takes them off the model when the bootstrap completes and

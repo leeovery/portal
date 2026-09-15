@@ -267,7 +267,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 		assertOwed(t, model.WarningsOwedAtTeardown(), nil, "nothing was accumulated to owe")
 	})
 
-	t.Run("it owes nothing when the loading page was cancelled", func(t *testing.T) {
+	t.Run("it owes the buffered set when the loading page was cancelled", func(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		var model tea.Model = tui.Build(tui.Deps{
 			Lister:           &mockSessionLister{},
@@ -287,7 +287,34 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 			t.Fatal("a cancelled loading page records neither an attach nor an error")
 		}
 
-		assertOwed(t, m.WarningsOwedAtTeardown(), nil, "the user asked for nothing and is owed no report")
+		assertOwed(t, m.WarningsOwedAtTeardown(), warnings, "no surface ever showed what the gate took")
+	})
+
+	t.Run("it owes the buffered set when the loading page was cancelled with the decision still in flight", func(t *testing.T) {
+		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
+		var model tea.Model = tui.Build(tui.Deps{
+			Lister:           &mockSessionLister{},
+			ServerStarted:    true,
+			ProgressReceiver: receiver,
+			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
+		})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		// The decision command this returns is deliberately left unrun: the escape
+		// the user takes from a tmux server too slow to answer it.
+		model, decision := model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+		if decision == nil || model.(tui.Model).ActivePage() != tui.PageLoading {
+			t.Fatal("both gates satisfied must dispatch the decision and hold the loading page")
+		}
+
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+
+		m := model.(tui.Model)
+		if m.SearchAttached() || m.SearchError() != nil {
+			t.Fatal("an in-flight decision records neither an attach nor an error")
+		}
+
+		assertOwed(t, m.WarningsOwedAtTeardown(), warnings, "no surface ever showed what the gate took")
 	})
 }
 
@@ -449,7 +476,7 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 		}
 	})
 
-	t.Run("it writes nothing at teardown when the loading page was cancelled", func(t *testing.T) {
+	t.Run("it writes the warnings the gate took when the loading page was cancelled", func(t *testing.T) {
 		warnings := soakedWarnings()
 		m := tui.Build(tui.Deps{Lister: &mockSessionLister{}, ServerStarted: true})
 		m.SetPendingBootstrapWarnings(warnings)
@@ -469,8 +496,8 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 			t.Fatalf("finishTUI: %v", err)
 		}
 
-		if stderr.Len() != 0 {
-			t.Errorf("stderr = %q, want nothing — the user asked for nothing and is owed no report", stderr.String())
+		if want := wantWarningOutput(warnings); stderr.String() != want {
+			t.Errorf("stderr = %q, want %q — the cancel left them on no surface", stderr.String(), want)
 		}
 	})
 
