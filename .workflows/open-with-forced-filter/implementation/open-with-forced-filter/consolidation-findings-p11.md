@@ -1,0 +1,43 @@
+# Consolidation Findings: Open With Forced Filter (Phase 11)
+
+## Findings
+
+### F1: Two `Update` arms still carry the state-dropping return spelling the phase's new shape exists to make impossible
+
+- **Class**: behaviour
+- **Failure**: In `return m, <expr calling a pointer-receiver method on m>` Go leaves the order of the plain operand `m` and the mutating call unspecified, so the returned model may be the pre-mutation copy. Measured on this tree's toolchain (go1.27.1, darwin/arm64) the call is currently evaluated first and the mutation does land, so both sites are correct today and no test can see them — the failure is what a toolchain or compiler change makes of them, and it is silent when it arrives. At `model.go:1621` the lost write is `detectDispatched`, so the picker re-walks the host-terminal process tree on every later `SessionsMsg`: noticed as duplicated `spawn` DEBUG lines and a slower Sessions page. At `model.go:1720` the lost writes are `activePage = PageSessions` and the cleared `m.preview`, so dismissing the scrollback preview leaves the user on the preview page — and the dismiss key sends the same message again, so it is a wedge with no error, no log line and no way back.
+- **Evidence**:
+  - `internal/tui/model.go:1621` — `return m, tea.Batch(cmd, m.maybeDispatchDetectionCmd())`; the callee is the pointer-receiver latch at `internal/tui/spawn_detect.go:47` (`m.detectDispatched = true`).
+  - `internal/tui/model.go:1720` — `return m, m.exitPreviewToSessions(captured)`; the callee is the pointer-receiver page flip at `internal/tui/model.go:1383` (`m.activePage = PageSessions; m.preview = previewModel{}`).
+  - The phase's own converted shape, for contrast: `internal/tui/model.go:1508` `dismissLoadingGate`, `:1822` `createSession`, `:2858` `createSessionInCWD`, `internal/tui/search_decision.go:38` `resolveSearchDecision` — all now `(Model, tea.Cmd)`, and the three-line warning that named this trap (formerly above `createSession`) was deleted with them, so the package now carries no written record of it.
+  - The same detection call spelled safely two files over: `internal/tui/burst_progress.go:228` — `cmd = (&m).maybeDispatchDetectionCmd()`.
+  - A whole-package scan of `return m, …` against every `*Model` method finds exactly these two; every other `(&m).x()` call in the package is a statement or a local assignment, which is safe.
+- **Proposed shape**: Respell both sites so the mutation completes before `m` is read — `cmd := (&m).maybeDispatchDetectionCmd()` / `refreshCmd := (&m).exitPreviewToSessions(captured)` on their own lines, which is already the idiom the rest of the package uses (`burst_progress.go:228`, `model.go:1705`, `:2618`) — or convert the two callees to value-in/value-out as this phase converted the four. No guard test and no replacement warning comment: phase task 2 rejected both routes by name, on the ground that the shape should be carried by the call site or the signature.
+- **Bank**: reviewer entry from `open-with-forced-filter-11-2` ("the same order-unspecified return shape sits on two pre-existing sites this task was told to leave alone") — confirmed against the final state at both sites, with the callees' pointer receivers and mutations re-verified.
+
+### F2: The completer's sigil arm still fires for the first word after `--`, at every arity — wider than the residual the task recorded
+
+- **Class**: behaviour
+- **Failure**: `completingPreDashPositional` answers "pre-dash" for the word immediately following a `--` separator, so the search-form completion arm fires for the trailing command's own first word. `portal open api -- /usr/local/bin/tool<TAB>` is answered with live session names carrying a leading slash and `ShellCompDirectiveNoFileComp` — on a shell that honours the directive the user's path completion is suppressed and the only offer on screen is a session name in the command position; accepting it produces a command line that cannot run. It is noticed as a Tab that offers the wrong thing exactly where the phase's new bound was supposed to stop offering anything.
+- **Evidence**:
+  - `cmd/open_search.go:46-49` — `dash := cmd.ArgsLenAtDash(); return dash < 0 || len(args) <= dash`. The `<=` absorbs cobra's probe parse (a line with no separator reports `dash == len(args)`), but a line whose separator is the last complete word reports the same `dash == len(args)` from the real parse, so the two are not discriminated.
+  - Measured against cobra v1.10.2 with a `__complete` harness driving the real completion flow:
+    - `open /po` → `args=[] dash=0` → pre-dash **true** (correct)
+    - `open api /po` → `args=[api] dash=1` → pre-dash **true** (correct)
+    - `open api -- /po` → `args=[api] dash=1` → pre-dash **true** (**wrong** — `/po` is the trailing command)
+    - `open -- /po` → `args=[] dash=0` → pre-dash **true** (**wrong**, and the case the task recorded)
+    - `open api -- ls /po` → `args=[api ls] dash=1` → pre-dash **false** (correct)
+  - `cmd/completion.go:85-95` — the doc comment states the bound unconditionally ("A word the `--` separator leaves among the trailing command's own arguments belongs to that command, so it takes the session-name arm **however it is spelled**"), which the boundary word falsifies. Nothing in `cmd/open_search.go:36-49` records the exception either.
+  - `cmd/completion_test.go:582-648` — the new guard drives `-- ls /po` (position 2 past the separator) and the two no-separator lines; the boundary word `-- /po` is not driven, so the residual is unpinned as well as unrecorded.
+  - The residual was **accepted deliberately** — `analysis-tasks-c5.md`, task 3: "Accepted residual, pinned rather than fixed: the word immediately after the separator (`portal open -- /po`, the trailing command's own name) reaches the completer as `len(args) == 0, dash == 0`, byte-identical to the first pre-dash positional". Two things the record did not have: the residual is not confined to the zero-target line (`open api -- /po` hits it identically at `len(args)==1, dash==1`), and the two states are indistinguishable only *within the flag set* — the raw `__complete` argv in `os.Args` still holds the separator, and this package already recovers argv order that way (`orderedOpenTargets`, `cmd/open_burst.go`).
+- **Proposed shape**: One of two, the orchestrator's call.
+  - *Fix*: discriminate the boundary word from information the flag set does not carry — whether the last complete word of the `__complete` argv is `--` — keeping the rule stated once in `cmd/open_search.go` beside `preDashPositionals`, and add the `open api -- /po` and `open -- /po` cases to `TestCompleteOpenPositionalSeparatorBound`.
+  - *Re-affirm*: leave the behaviour and correct the code that now overstates it. `cmd/completion.go:88-89`, replace "belongs to that command, so it takes the session-name arm however it is spelled." with "belongs to that command, so it takes the session-name arm — except the word immediately after the separator, which the flag set cannot tell apart from the next pre-dash positional and which therefore still takes the sigil arm." Pin the boundary case as the accepted behaviour in `cmd/completion_test.go` so it is a decision rather than a gap.
+
+## Spec Defects
+
+### S1: §8.1 states the sigil's completion rule with no `--` bound, which the phase's completer now applies
+
+- **Claim**: §8.1, line 324 — "**`/po<TAB>` completes the term after — and excluding — the `/`, against live session names, leaving the sigil in place.**" The section states the offered set and its exclusions (the attached session, directories, slash-bearing names) and never reaches the separator; the separator bound appears only in §2's recognition rule (line 56: "Recognition applies to the arguments `open` parses as targets, and stops at a `--` separator").
+- **Observed**: `cmd/completion.go:90-95` gates the sigil arm on `completingPreDashPositional`, so `portal __complete open ~/Code/api -- ls /po` now answers with plain session names and no `/`-prefixed candidate (`cmd/completion_test.go:582-648`). Read literally, §8.1's rule is false for a post-dash `/`-word — and still accidentally true for the one word immediately after the separator (F2).
+- **Read**: spec stale. The code is right: §5.1 makes the sigil non-composing and line 56 bounds recognition at the separator, so a completer that offered a sigil past it would be offering what the parser will not honour. §8.1 simply never contemplated the case. The section already carries two corrigenda (2026-09-14) narrowing the same paragraph's offered set, so this is a third narrowing of the same kind rather than a new disagreement.
