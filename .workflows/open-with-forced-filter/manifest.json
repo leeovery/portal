@@ -178,7 +178,9 @@
             "open-with-forced-filter-12-1": "tick-5b120c",
             "open-with-forced-filter-12-2": "tick-716bd3",
             "open-with-forced-filter-12-3": "tick-23141a",
-            "open-with-forced-filter-12-4": "tick-8ecd82"
+            "open-with-forced-filter-12-4": "tick-8ecd82",
+            "open-with-forced-filter-12-5": "tick-cb4c82",
+            "open-with-forced-filter-12-6": "tick-e538df"
           },
           "storage_paths": [
             ".tick/"
@@ -314,7 +316,8 @@
             8,
             9,
             10,
-            11
+            11,
+            12
           ],
           "completed_phases": [
             1,
@@ -414,24 +417,16 @@
                 "3": "approved",
                 "4": "approved"
               }
+            },
+            "p12": {
+              "tasks": {
+                "1": "approved",
+                "2": "approved"
+              }
             }
           },
           "machine_phases": [
             6
-          ],
-          "bank": [
-            {
-              "task": "open-with-forced-filter-12-4",
-              "source": "reviewer",
-              "summary": "File completion is dead for every word past -- on portal open, which is the cost the spec says the separator bound avoids",
-              "failure": "A user typing a path argument for the trailing command — portal open ~/Code/api -- ls src/<TAB> — gets no candidates at all: session names never prefix-match a path fragment, and the directive suppresses the shells filename fallback. Noticed as Tab doing nothing where every other command completes files.",
-              "detail": "completeOpenPositional (cmd/completion.go:104) routes a post-dash word to completeSessionNames, which returns cobra.ShellCompDirectiveNoFileComp (cmd/completion.go:39) — the same suppression the sigil arm carries (:82). So both branches suppress files, and the reason section 8.1 gives for the separator bound (would suppress the filenames the user actually wanted in the same breath, spec line 332, pre-existing text this task did not author) describes a cost already paid on the arm the bound selects. The existing TestCompleteOpenPositionalSeparatorBound subtest it answers a post-dash word exactly as the plain session-name completer does pins the current directive, so the change is visible rather than silent. Resolving it is a behaviour change plus a spec decision — the post-dash arm is explicitly outside this tasks scope.",
-              "files": [
-                "cmd/completion.go",
-                "cmd/completion_test.go",
-                ".workflows/open-with-forced-filter/specification/open-with-forced-filter/specification.md"
-              ]
-            }
           ]
         }
       }
