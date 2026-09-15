@@ -9,6 +9,26 @@ sources: duplication
 **Solution**: Keep every named arm exactly as it stands, in its current order — a refusal must name what collided, and the fixed order is what makes a line colliding several ways always name the same one — and add one final arm that derives the rest of the verdict from the registration: walk the flags the line actually set (`cmd.LocalFlags().Visit`, which reports `open`'s own flags and not the root persistent ones the rule exempts) and refuse any set flag no earlier arm covered, naming it in the message. Settled as derive-the-verdict rather than the guard-test remedy the package already uses for `openTargetPins`, on the record's own ground: the specification states this rule as a closed one over the set ("any of `open`'s own flags on the same line is a usage error"), so the registration is the authority the verdict should be read from, and a derived arm refuses a new flag on the day it is registered rather than on the day someone runs the suite. The derived arm fires for no line that exists today — all seven current flags are covered by a named arm ahead of it — so every refusal `open` emits now stays byte-identical, and the new arm is reachable only by a flag that does not yet exist.
 **Outcome**: The collision rule's set is the flag set, read from the one place it is declared. A flag added to `openCmd` is refused beside a search form with no second edit, and the hand-authored wording survives for the flags that have it.
 
+**Do**:
+- Add `firstSetLocalFlag(cmd *cobra.Command) string` to `cmd/open_search.go` beside `validateSearchFormCollisions`: walk `cmd.LocalFlags().Visit` — which reports only the flags the line set, `open`'s own and not the root's inherited persistent ones — and return the first flag name it reports, empty when the line set none. pflag visits lexically with no early exit, so keep the first and ignore the rest.
+- Append one arm to `validateSearchFormCollisions`, after all six existing arms (the two positional ones and the four flag-naming ones) and never before them: when `firstSetLocalFlag` names a flag, return `NewUsageError(fmt.Sprintf("cannot use a /term search with --%s", name))` — the `--ack` arm's wording with the name substituted. The arm needs no list of what the earlier arms cover: reaching it means `exec`, `filter`, `ack` and all four domain pins are unset, so any flag still standing is by construction one no arm names.
+- Leave the six existing arms byte-identical in body and order, and leave `validateOpenArgs`, `searchFormPositionals` and `preDashPositionals` untouched.
+- Cover the new arm in `cmd/open_search_test.go` against a crafted `*cobra.Command` carrying one throwaway flag, in the style of `TestValueTakingFlagMissingPins_DetectsDrift` — pflag cannot un-register a flag, so `openCmd` must never be given one: build `&cobra.Command{Use: "open"}`, register `--zzz`, `Flags().Set("zzz", "v")`, call `validateSearchFormCollisions(c, []string{"/port"})` and assert the `*UsageError` names `--zzz`. The named arms read a crafted command correctly — `Flags().Changed` on an absent flag is false and `ArgsLenAtDash()` is -1 before any parse — so they fall through to the new arm.
+
+**Acceptance Criteria**:
+- [ ] `validateSearchFormCollisions` names exactly `"exec"`, `"filter"` and `"ack"` as literals (plus the `anyOpenDomainPin` call) and nothing more; the rest of the verdict is read from the registration through `LocalFlags().Visit`.
+- [ ] A search form beside a flag no named arm covers is refused with `cannot use a /term search with --<name>`, and the line opens no picker, resolves no target and starts no bootstrap.
+- [ ] Every refusal today's seven flags produce is byte-identical and still fires from its own named arm, in the current order — the collision suite at `cmd/open_search_test.go:337-401` passes with no edit.
+- [ ] A search-form line that set no flag is still admitted: `portal open /port` and `portal open /` reach the search, so the new arm fires on no line that exists today.
+- [ ] `portal open /port --help` still prints usage, and the arm carries no carve-out for cobra's auto-registered `help` flag: cobra resolves that flag at `cobra@v1.10.2/command.go:934`, ahead of `ValidateArgs` at `:968`, so the validator never sees it.
+- [ ] The walk is over `LocalFlags` rather than `Flags`, so a persistent flag inherited from the root command stays outside the rule, as the specification's carve-out requires.
+
+**Tests**:
+- `"it refuses a search form beside a flag no named arm covers, naming that flag"`
+- `"it admits a search form on a line that set no flag"`
+- `"it keeps each of the seven registered flags on its own hand-authored refusal"` — the existing `TestValidateOpenArgs_RefusesSearchFormWith…` set, unchanged
+- `"it still answers --help on a search-form line"` — the existing `TestValidateOpenArgs_StillAnswersHelpOnASearchFormLine`, unchanged
+
 ## Task 2: Give the four staging methods the value-in/value-out shape the package's handlers already use
 severity: medium
 sources: architecture
@@ -18,6 +38,29 @@ sources: architecture
 **Solution**: Convert all four to `func (m Model) x(...) (Model, tea.Cmd)` and update the four call sites to `m, cmd = m.x(...)`, so a caller reads `m, cmd := m.createSession(dir); return m, cmd` and the losing spelling (`return m, m.createSession(dir)`) fails to compile rather than silently dropping the staged state. The warning comment above `createSession` and the `(&m).` idiom both go with it; `createSessionInCWD` stays the one-line delegation it is, threading the model through. Behaviour-preserving on every route — the same state is written and the same commands are returned, only the route the written state travels changes from an address to a return value. This corrects the receiver clause of phase 4's approved "fold the two loading-gate dismissal blocks into one helper", which chose the pointer receiver on the ground that "every callee is compatible with an addressable receiver"; that task's actual direction — one helper holding the ordering for both gates — is untouched and stays exactly as it is. The ground for moving off the receiver is a project rule plus the language's own: the surrounding handlers are uniformly value-in/value-out, and Go specifies no order between a return statement's plain operand and its mutating call, so the shape's correctness cannot be stated in the signature it has.
 **Outcome**: The staging contract is carried by the compiler. There is no spelling of these calls that drops the state, so no guard test or prose warning is needed to protect it.
 
+**Do**:
+- Convert the four to value-in/value-out: `func (m Model) dismissLoadingGate() (Model, tea.Cmd)`, `func (m Model) createSession(dir string) (Model, tea.Cmd)` and `func (m Model) createSessionInCWD() (Model, tea.Cmd)` in `internal/tui/model.go`, `func (m Model) resolveSearchDecision() (Model, tea.Cmd)` in `internal/tui/search_decision.go`. Each returns the model it mutated on every path — the two that return `tea.Quit`, the early `nil` returns, and the single-shot clear of `searchDecide` alike.
+- Thread the model through `dismissLoadingGate`: take it back from `resolveSearchDecision` before testing that call's command, return that model with the quit, and otherwise run `transitionFromLoading` and the `tea.Batch(surfaceBufferedWarnings, refetchSessionsAfterRestore, maybeDispatchDetectionCmd)` on it in the existing order — the sequence this helper exists to hold is unchanged. `createSessionInCWD` stays the one-line delegation, returning both results of `m.createSession(m.cwd)`.
+- Respell the four production call sites — `internal/tui/model.go:1628` and `:1671` (`m, cmd = m.dismissLoadingGate()`), `:1942` (`m, cmd := m.createSession(pi.Project.Path)`), `:2855` (`m, cmd := m.createSessionInCWD()`) — and delete the three-line warning comment above `createSession` (`:1820-1822`), whose warning the signature now carries.
+- Respell the three in-package test calls at `internal/tui/staged_mint_band_test.go:32`, `:50` and `:69` to `m, _ = m.createSession("/tmp/alpha")`, leaving every assertion in that suite exactly as it stands.
+- Leave the package's other pointer-receiver helpers alone — `transitionFromLoading`, `resyncPageLayouts`, and the theme-panel and burst families that spell their calls `(&m).x()`: they go on mutating the addressable local inside a value receiver, and converting them is not this task.
+
+**Acceptance Criteria**:
+- [ ] All four declare a value receiver and return `(Model, tea.Cmd)`, and no `(&m).` prefix remains on any of the four at any call site, production or test (the package's other pointer-receiver helpers keep theirs).
+- [ ] `return m, m.createSession(dir)` — and the same shape for the other three — no longer compiles, two results being unable to fill one operand, so the state-dropping spelling is a build error rather than a silent bug.
+- [ ] The warning comment above `createSession` is gone, and nothing — comment, guard test or convention note — is added in its place.
+- [ ] Behaviour is unchanged on every route: the search decision still sets `selected`/`searchAttached`/`searchErr` on the model the program returns, a failed session read still quits with `searchErr` and no fatal frame, and a project pick taken while the bootstrap is in flight still stages `stagedMint`/`stagedMintDir` for the terminal `BootstrapCompleteMsg` arm to mint.
+- [ ] `go build ./...`, `go test ./...` and `golangci-lint run` are clean, and no test's semantics change beyond the three respelled calls.
+
+**Tests**: no new test — the signature is the contract now, and a guard test for it would be the prose warning in another form. The existing pins must stay green with their assertions untouched:
+- `"it attaches a single match without painting a picker"` — `TestSearchDecision_AttachesSingleMatchWithoutPainting`
+- `"it records a read failure without a fatal"` — `TestSearchDecision_RecordsReadFailureWithoutFatal`
+- `"it issues the decision exactly once"` — `TestSearchDecision_IssuedExactlyOnce`
+- `"it reports the wait in the projects band while a mint is staged, and shows the pending-command banner again once it is issued"` — `TestStagedMintProjectBand`, the suite whose three calls are respelled
+- `"createSessionInCWD delegates to createSession with cwd"` — `internal/tui/model_test.go:3085`
+- `"it dismisses the loading page only once both gates land"` — `TestLoading_TransitionDualGated`
+- the integration-lane `cmd/concurrent_search_decision_integration_test.go`
+
 ## Task 3: Bound the positional completer's sigil arm where the parser bounds it
 severity: low
 sources: architecture
@@ -26,3 +69,24 @@ sources: architecture
 
 **Solution**: Take the `*cobra.Command` and `args` cobra already supplies at the registration site instead of discarding them, and gate the sigil arm on the same boundary the parser applies — the word is a search form only when it is a pre-dash positional, which `preDashPositionals` / `ArgsLenAtDash()` already decides for `searchFormPositionals`. A post-dash word falls through to the completer's other arm, so the trailing command's own arguments complete the way every other non-sigil word does. Settled as moving the completer onto the parser's bound rather than the reverse: the parse-side bound is what the specification decided and what the user's line is actually resolved by, so the completer is the surface that must agree. Behaviour is unchanged for every pre-dash word, which is where the sigil is reachable at all.
 **Outcome**: One rule decides what is a sigil, and the completer offers only what the parser will honour.
+
+**Do**:
+- Add the boundary predicate to `cmd/open_search.go` beside `preDashPositionals`, e.g. `completingPreDashPositional(cmd *cobra.Command, args []string) bool`: the word being completed is the next positional, index `len(args)`, so it is pre-dash when `dash := cmd.ArgsLenAtDash(); dash < 0 || len(args) <= dash`.
+- The `<=` is load-bearing and must not be tightened to `<`: cobra probe-parses the line with an appended `--` before it calls the completer (`cobra@v1.10.2/completions.go:369`, re-parsing at `:373`), and pflag never resets `argsLenAtDash` between parses — the tree already records that at `cmd/root_test.go:67-71` — so a line carrying no separator reports `dash == len(args)` rather than `-1`. Under `<`, every word would read as post-dash and the sigil completion would silently disappear.
+- Change `completeOpenPositional` (`cmd/completion.go:87`) to `func completeOpenPositional(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective)` and gate its sigil arm on both `resolver.IsSearchSigil(toComplete)` and that predicate; every other word keeps falling to `completeSessionNames`, directive included.
+- Register it at `cmd/open.go:785-787` with the arguments cobra supplies instead of discarding them, leaving the `-p`/`-z` note above it and the two `RegisterFlagCompletionFunc` registrations below it as they are.
+- Update the existing direct callers in `cmd/completion_test.go` (`:449` and the table at `:479`) to pass a command and args; `openCmd.ValidArgsFunction(openCmd, nil, "/po")` at `:500` already supplies both.
+
+**Acceptance Criteria**:
+- [ ] `portal __complete open ~/Code/api -- ls /po` offers no `/`-prefixed candidate: it answers exactly what `completeSessionNames("/po")` answers, with `ShellCompDirectiveNoFileComp` — the arm every other non-sigil word takes.
+- [ ] Pre-dash completion is unchanged: `portal __complete open /po` still offers `/portal-a1b2`, `portal __complete open /` still offers the whole searched set, `portal __complete open api /po` still takes the sigil arm, and every non-sigil word answers as it does today.
+- [ ] The separator bound is stated once, in `cmd/open_search.go` beside `preDashPositionals` and read from `cmd.ArgsLenAtDash()`; `cmd/completion.go` states no rule of its own about `--`.
+- [ ] A line carrying no `--` completes as pre-dash even though cobra's probe parse leaves a non-negative dash index on the flag set.
+- [ ] Accepted residual, pinned rather than fixed: the word immediately after the separator (`portal open -- /po`, the trailing command's own name) reaches the completer as `len(args) == 0, dash == 0`, byte-identical to the first pre-dash positional, so it keeps today's sigil arm. The correction covers every position at least one word past the separator, which is where the reported failure sits.
+
+**Tests** (`cmd/completion_test.go`, end-to-end cases driven through `completionCandidates` so cobra's own parse populates the boundary):
+- `"it offers no sigil completion for a word among a trailing command's arguments"`
+- `"it answers a post-dash word exactly as the plain session-name completer does"` — candidates and directive both
+- `"it still offers sigil completions for a pre-dash word on a line with no separator"`
+- `"it still offers sigil completions for a pre-dash word beside another target"`
+- `"it reads a line with no separator as pre-dash despite cobra's probe parse"` — over the predicate directly, on a crafted command parsed the way cobra parses it: `ParseFlags([]string{"api", "--"})` then `ParseFlags([]string{"api"})`

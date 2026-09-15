@@ -167,7 +167,11 @@
             "open-with-forced-filter-10-2": "tick-430d00",
             "open-with-forced-filter-10-3": "tick-4c0f85",
             "open-with-forced-filter-10-4": "tick-623658",
-            "open-with-forced-filter-10-5": "tick-d24700"
+            "open-with-forced-filter-10-5": "tick-d24700",
+            "open-with-forced-filter-11": "tick-4b2f25",
+            "open-with-forced-filter-11-1": "tick-333efc",
+            "open-with-forced-filter-11-2": "tick-61e334",
+            "open-with-forced-filter-11-3": "tick-13a587"
           },
           "storage_paths": [
             ".tick/"
@@ -374,9 +378,9 @@
             },
             "c5": {
               "tasks": {
-                "1": "pending",
-                "2": "pending",
-                "3": "pending"
+                "1": "approved",
+                "2": "approved",
+                "3": "approved"
               }
             }
           },
