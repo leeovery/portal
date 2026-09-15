@@ -62,9 +62,7 @@ func capturedStates() []capturedStateWant {
 		// The floor's body is one list row, so the light badge's row is off the
 		// frame rather than missing from it.
 		{fixture: "theme-panel-min-height-message", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ couldn't save theme", "● dark"}, absent: []string{"No sessions yet", "● light"}},
-		// Rendered under the developer's own home, so the abbreviated forms this
-		// frame is judged on are asserted where HOME is pinned, not here.
-		{fixture: "sessions-search-results", page: tui.PageSessions, present: []string{"portal-a1b2", "api-work", "/opt/portal-tools"}, absent: []string{"evvi-sync-engine", "No sessions yet"}},
+		{fixture: "sessions-search-results", page: tui.PageSessions, present: []string{"portal-a1b2", "api-work", "~/code/portal", "~/code/portal-gateway", "/opt/portal-tools"}, absent: []string{"evvi-sync-engine", "No sessions yet"}},
 		{fixture: "projects", page: tui.PageProjects, present: []string{"flow-v1-api", "Projects"}},
 		{fixture: "projects-command-pending", page: tui.PageProjects, present: []string{"flow-v1-api", "Pick a project to run", "npm run dev"}},
 		{fixture: "preview-screen", present: []string{"aviva-proxy-qNyfEO", "Window 1/1", "kubectl rollout"}},

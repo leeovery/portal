@@ -7,11 +7,6 @@
 #
 # 1200x700 at FontSize 16 is 105 columns by 27 rows.
 #
-# $HOME is pinned on the RUN, not on the build: the fixture data lives under
-# /home/user, which AbbreviateHome only folds for a process whose home is that
-# directory, and `go run` under a pinned $HOME cannot initialise its build cache
-# (GOCACHE/GOPATH resolve from $HOME). That split is why there are two lines.
-#
 # WHAT TO LOOK AT: the directory beside each session name — one space after the
 # name, in the same muted rung as the window count (one step brighter on the
 # selected row); "~/code/portal" abbreviated, "/opt/portal-tools" left absolute,
@@ -24,10 +19,7 @@ Set FontSize 16
 Set Width 1200
 Set Height 700
 Set Shell "bash"
-Type "go build -o /tmp/portal-capturetool ./cmd/capturetool"
+Type "go run ./cmd/capturetool --fixture sessions-search-results --theme tokyo-night"
 Enter
-Sleep 8s
-Type "HOME=/home/user /tmp/portal-capturetool --fixture sessions-search-results --theme tokyo-night"
-Enter
-Sleep 4s
+Sleep 12s
 Screenshot "testdata/vhs/sessions-search-results.png"

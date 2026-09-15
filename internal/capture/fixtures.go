@@ -3,6 +3,8 @@ package capture
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -448,6 +450,20 @@ func sessionsNoTagsSignpostFixture() *Fixture {
 	}
 }
 
+// fixtureHome is the directory the search-results fixture's home-relative paths
+// are built under. It answers the running process's home so the renderer's
+// home-abbreviation folds them on whatever machine draws the frame, and falls
+// back to the /home/user literal on the same condition that abbreviation gives
+// up on — where it returns the path as given, so the frame carries whole
+// absolute paths rather than a half-folded one.
+func fixtureHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "/home/user"
+	}
+	return home
+}
+
 // One frame carrying every branch of the search-opened directory column: a home
 // path shown abbreviated, a row matched on its directory alone, a row whose
 // recorded directory is empty, a path deep enough to be left-truncated at the
@@ -460,20 +476,25 @@ func sessionsNoTagsSignpostFixture() *Fixture {
 // routes it to the catch-all rather than issuing a pane read the harness has no
 // server for.
 func sessionsSearchResultsFixture() *Fixture {
+	home := fixtureHome()
+	portalDir := filepath.Join(home, "code/portal")
+	gatewayDir := filepath.Join(home, "code/portal-gateway")
+	evviDir := filepath.Join(home, "code/evvi")
+
 	sessions := []tmux.Session{
-		{Name: "portal-a1b2", Windows: 3, Attached: true, Dir: "/home/user/code/portal"},
-		{Name: "api-work", Windows: 2, Attached: false, Dir: "/home/user/code/portal-gateway"},
+		{Name: "portal-a1b2", Windows: 3, Attached: true, Dir: portalDir},
+		{Name: "api-work", Windows: 2, Attached: false, Dir: gatewayDir},
 		{Name: "legacy-port-shim", Windows: 1, Attached: false},
-		{Name: "portal-design-exports-review", Windows: 2, Attached: false, Dir: "/home/user/code/portal/internal/capture/testdata/reference/design-exports/frames"},
+		{Name: "portal-design-exports-review", Windows: 2, Attached: false, Dir: filepath.Join(portalDir, "internal/capture/testdata/reference/design-exports/frames")},
 		{Name: "portal-notes", Windows: 1, Attached: false, Dir: "/opt/portal-tools"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
+		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: evviDir},
 	}
 
 	projects := []project.Project{
-		{Path: "/home/user/code/portal", Name: "portal", Tags: []string{"work"}},
-		{Path: "/home/user/code/portal-gateway", Name: "portal-gateway", Tags: []string{"work", "client"}},
+		{Path: portalDir, Name: "portal", Tags: []string{"work"}},
+		{Path: gatewayDir, Name: "portal-gateway", Tags: []string{"work", "client"}},
 		{Path: "/opt/portal-tools", Name: "portal-tools", Tags: []string{"tools"}},
-		{Path: "/home/user/code/evvi", Name: "evvi"},
+		{Path: evviDir, Name: "evvi"},
 	}
 
 	return &Fixture{

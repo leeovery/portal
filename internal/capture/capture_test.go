@@ -962,11 +962,6 @@ func TestFixtureNamesIncludesRenameRefusals(t *testing.T) {
 	}
 }
 
-// The fixture data lives under /home/user, which AbbreviateHome only folds for
-// a process whose home is that directory — so the abbreviated forms the frame
-// is judged on are unreachable without pinning it.
-const searchResultsHome = "/home/user"
-
 func searchResultsFrame(t *testing.T, keys ...tea.KeyPressMsg) string {
 	t.Helper()
 	frame, _ := searchResultsFrameModel(t, keys...)
@@ -978,7 +973,6 @@ func searchResultsFrame(t *testing.T, keys ...tea.KeyPressMsg) string {
 // which under a committed filter carries no mode indicator.
 func searchResultsFrameModel(t *testing.T, keys ...tea.KeyPressMsg) (string, tui.Model) {
 	t.Helper()
-	t.Setenv("HOME", searchResultsHome)
 
 	fx, err := capture.FixtureByName("sessions-search-results")
 	if err != nil {
@@ -1075,6 +1069,14 @@ func TestSessionsSearchResultsFixture(t *testing.T) {
 		}
 		if strings.Contains(frame, "evvi-sync-engine") {
 			t.Errorf("the frame carries evvi-sync-engine, which matches neither field — the list is not narrowed:\n%s", frame)
+		}
+	})
+
+	t.Run("it renders the fixture's home paths abbreviated under an arbitrary home directory", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		frame := searchResultsFrame(t)
+		if !strings.Contains(frame, "portal-a1b2 ~/code/portal") {
+			t.Errorf("the frame does not carry the abbreviated directory under a home the fixture was not written against:\n%s", frame)
 		}
 	})
 

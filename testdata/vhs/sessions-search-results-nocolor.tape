@@ -7,11 +7,6 @@
 #
 # 1200x700 at FontSize 16 is 105 columns by 27 rows.
 #
-# $HOME is pinned on the RUN, not on the build: the fixture data lives under
-# /home/user, which AbbreviateHome only folds for a process whose home is that
-# directory, and `go run` under a pinned $HOME cannot initialise its build cache
-# (GOCACHE/GOPATH resolve from $HOME). That split is why there are two lines.
-#
 # The colourless row is driven by the environment rather than by a fixture flag:
 # a flagged fixture is excluded from the swap-and-diff guard, and the harness
 # already honours NO_COLOR at render time.
@@ -25,10 +20,7 @@ Set FontSize 16
 Set Width 1200
 Set Height 700
 Set Shell "bash"
-Type "go build -o /tmp/portal-capturetool ./cmd/capturetool"
+Type "NO_COLOR=1 go run ./cmd/capturetool --fixture sessions-search-results --theme tokyo-night"
 Enter
-Sleep 8s
-Type "HOME=/home/user NO_COLOR=1 /tmp/portal-capturetool --fixture sessions-search-results --theme tokyo-night"
-Enter
-Sleep 4s
+Sleep 12s
 Screenshot "testdata/vhs/sessions-search-results-nocolor.png"
