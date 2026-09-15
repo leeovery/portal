@@ -782,9 +782,7 @@ func init() {
 
 	// -p/--path and -z/--zoxide deliberately register no completer, so cobra emits
 	// ShellCompDirectiveDefault and the shell provides file/default completion.
-	openCmd.ValidArgsFunction = func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return completeOpenPositional(toComplete)
-	}
+	openCmd.ValidArgsFunction = completeOpenPositional
 	_ = openCmd.RegisterFlagCompletionFunc("session", func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return completeSessionNames(toComplete)
 	})

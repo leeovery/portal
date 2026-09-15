@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -286,6 +287,14 @@ func TestCompletionExcludesInternalSessions(t *testing.T) {
 // returned candidates.
 func completionCandidates(t *testing.T, args ...string) []string {
 	t.Helper()
+	cands, _ := completionResult(t, args...)
+	return cands
+}
+
+// completionResult returns both halves of a __complete answer: the candidates
+// and the directive cobra ends the output with.
+func completionResult(t *testing.T, args ...string) ([]string, cobra.ShellCompDirective) {
+	t.Helper()
 	resetRootCmd()
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
@@ -296,14 +305,23 @@ func completionCandidates(t *testing.T, args ...string) []string {
 	}
 
 	var cands []string
+	directive := cobra.ShellCompDirectiveDefault
 	for line := range strings.SplitSeq(buf.String(), "\n") {
-		if line == "" || strings.HasPrefix(line, ":") {
+		if line == "" {
+			continue
+		}
+		if raw, found := strings.CutPrefix(line, ":"); found {
+			n, err := strconv.Atoi(raw)
+			if err != nil {
+				t.Fatalf("__complete %v: undecodable directive line %q: %v", args, line, err)
+			}
+			directive = cobra.ShellCompDirective(n)
 			continue
 		}
 		name, _, _ := strings.Cut(line, "\t")
 		cands = append(cands, name)
 	}
-	return cands
+	return cands, directive
 }
 
 func TestCompletionHidesInternalSurface(t *testing.T) {
@@ -446,7 +464,7 @@ func TestCompleteOpenPositional(t *testing.T) {
 	t.Run("it routes a search word through the search branch", func(t *testing.T) {
 		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
-		names, directive := completeOpenPositional("/po")
+		names, directive := completeOpenPositional(&cobra.Command{}, nil, "/po")
 
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
@@ -476,7 +494,7 @@ func TestCompleteOpenPositional(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
-				names, directive := completeOpenPositional(tt.toComplete)
+				names, directive := completeOpenPositional(&cobra.Command{}, nil, tt.toComplete)
 
 				if directive != cobra.ShellCompDirectiveNoFileComp {
 					t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
@@ -557,6 +575,75 @@ func TestSearchCompletionWiring(t *testing.T) {
 		}
 		if want := []string{"portal-a1b2", "web-9"}; !slices.Equal(names, want) {
 			t.Errorf("names = %v, want %v", names, want)
+		}
+	})
+}
+
+func TestCompleteOpenPositionalSeparatorBound(t *testing.T) {
+	twoSessions := func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} }
+
+	t.Run("it offers no sigil completion for a word among a trailing command's arguments", func(t *testing.T) {
+		withCompletionSessions(t, twoSessions)
+
+		cands := completionCandidates(t, "__complete", "open", "~/Code/api", "--", "ls", "/po")
+
+		for _, cand := range cands {
+			if strings.HasPrefix(cand, "/") {
+				t.Errorf("candidates = %v, want no /-prefixed candidate for a word past the separator", cands)
+			}
+		}
+	})
+
+	t.Run("it answers a post-dash word exactly as the plain session-name completer does", func(t *testing.T) {
+		withCompletionSessions(t, twoSessions)
+
+		cands, directive := completionResult(t, "__complete", "open", "~/Code/api", "--", "ls", "/po")
+
+		plain, plainDirective := completeSessionNames("/po")
+		if directive != plainDirective {
+			t.Errorf("directive = %v, want %v (identical to completeSessionNames)", directive, plainDirective)
+		}
+		if !slices.Equal(cands, plain) {
+			t.Errorf("candidates = %v, want %v (identical to completeSessionNames)", cands, plain)
+		}
+	})
+
+	t.Run("it still offers sigil completions for a pre-dash word on a line with no separator", func(t *testing.T) {
+		withCompletionSessions(t, twoSessions)
+
+		cands := completionCandidates(t, "__complete", "open", "/po")
+
+		if want := []string{"/portal-a1b2"}; !slices.Equal(cands, want) {
+			t.Errorf("candidates = %v, want %v", cands, want)
+		}
+	})
+
+	t.Run("it still offers sigil completions for a pre-dash word beside another target", func(t *testing.T) {
+		withCompletionSessions(t, twoSessions)
+
+		cands := completionCandidates(t, "__complete", "open", "api", "/po")
+
+		if want := []string{"/portal-a1b2"}; !slices.Equal(cands, want) {
+			t.Errorf("candidates = %v, want %v", cands, want)
+		}
+	})
+
+	t.Run("it reads a line with no separator as pre-dash despite cobra's probe parse", func(t *testing.T) {
+		cmd := &cobra.Command{Use: "open"}
+		// The two parses cobra runs before calling a completer: the probe with an
+		// appended separator, then the line itself.
+		if err := cmd.ParseFlags([]string{"api", "--"}); err != nil {
+			t.Fatalf("probe parse: %v", err)
+		}
+		if err := cmd.ParseFlags([]string{"api"}); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+
+		if dash := cmd.ArgsLenAtDash(); dash < 0 {
+			t.Fatalf("ArgsLenAtDash() = %d, want a non-negative index left by the probe parse", dash)
+		}
+		if !completingPreDashPositional(cmd, []string{"api"}) {
+			t.Error("completingPreDashPositional() = false, want true for a line carrying no separator")
 		}
 	})
 }

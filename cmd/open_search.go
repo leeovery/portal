@@ -33,6 +33,21 @@ func preDashPositionals(cmd *cobra.Command, args []string) []string {
 	return args
 }
 
+// completingPreDashPositional reports whether the word being completed is one
+// the `--` separator leaves ahead of the trailing command's own — the bound
+// preDashPositionals applies, so the completer offers a search form only where
+// the parser would read one. The word being completed is the next positional,
+// at index len(args).
+//
+// The `<=` is load-bearing and must not be tightened to `<`: cobra probe-parses
+// the line with an appended `--` before it calls a completer, and pflag never
+// resets its dash index between parses, so a line carrying no separator reports
+// a dash index of len(args) rather than -1.
+func completingPreDashPositional(cmd *cobra.Command, args []string) bool {
+	dash := cmd.ArgsLenAtDash()
+	return dash < 0 || len(args) <= dash
+}
+
 // pickerLanding is how the picker was reached: the filter text it opens with,
 // or the search form that opened it. A search form declares the session domain,
 // so the picker lands differently for it than for -f's text; a nil search is a
