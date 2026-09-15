@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 	"github.com/spf13/cobra"
 )
 
-func withCompletionSessionNames(t *testing.T, fn func() []string) {
+func withCompletionSessions(t *testing.T, fn func() []tmux.Session) {
 	t.Helper()
-	withFuncSeam(t, &completionSessionNames, fn)
+	withFuncSeam(t, &completionSessions, fn)
 }
 
 func withCompletionCurrentSession(t *testing.T, fn func() string) {
@@ -24,7 +25,7 @@ func withCompletionCurrentSession(t *testing.T, fn func() string) {
 
 func TestCompleteSessionNames(t *testing.T) {
 	t.Run("returns all names plus NoFileComp for empty prefix", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"api-1", "web-2"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "api-1"}, {Name: "web-2"}} })
 
 		names, directive := completeSessionNames("")
 
@@ -37,7 +38,7 @@ func TestCompleteSessionNames(t *testing.T) {
 	})
 
 	t.Run("prefix-filters by toComplete", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"api-1", "api-2", "web-3"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "api-1"}, {Name: "api-2"}, {Name: "web-3"}} })
 
 		names, directive := completeSessionNames("ap")
 
@@ -50,7 +51,7 @@ func TestCompleteSessionNames(t *testing.T) {
 	})
 
 	t.Run("it still offers the attached session on the plain session-name completer", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 		withCompletionCurrentSession(t, func() string { return "portal-a1b2" })
 
 		names, _ := completeSessionNames("")
@@ -61,7 +62,7 @@ func TestCompleteSessionNames(t *testing.T) {
 	})
 
 	t.Run("empty and no panic when seam returns nil (server down)", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return nil })
+		withCompletionSessions(t, func() []tmux.Session { return nil })
 
 		names, directive := completeSessionNames("")
 
@@ -157,7 +158,7 @@ func TestCompletionWiring(t *testing.T) {
 		if openCmd.ValidArgsFunction == nil {
 			t.Fatal("openCmd.ValidArgsFunction is nil; expected session-name completer")
 		}
-		withCompletionSessionNames(t, func() []string { return []string{"api-1", "web-2"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "api-1"}, {Name: "web-2"}} })
 
 		names, directive := openCmd.ValidArgsFunction(openCmd, nil, "")
 
@@ -174,7 +175,7 @@ func TestCompletionWiring(t *testing.T) {
 		if !ok {
 			t.Fatal("--session flag completion not registered")
 		}
-		withCompletionSessionNames(t, func() []string { return []string{"api-1"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "api-1"}} })
 
 		names, directive := fn(openCmd, nil, "")
 
@@ -219,7 +220,7 @@ func TestCompletionWiring(t *testing.T) {
 		if killCmd.ValidArgsFunction == nil {
 			t.Fatal("killCmd.ValidArgsFunction is nil; expected session-name completer")
 		}
-		withCompletionSessionNames(t, func() []string { return []string{"api-1", "web-2"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "api-1"}, {Name: "web-2"}} })
 
 		names, directive := killCmd.ValidArgsFunction(killCmd, nil, "")
 
@@ -232,7 +233,7 @@ func TestCompletionWiring(t *testing.T) {
 	})
 
 	t.Run("kill offers nothing once one positional present", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string {
+		withCompletionSessions(t, func() []tmux.Session {
 			t.Error("seam must not be called once a positional is present")
 			return nil
 		})
@@ -254,12 +255,12 @@ func TestCompletionExcludesInternalSessions(t *testing.T) {
 	socket.Run(t, "new-session", "-d", "-s", "_portal-x")
 
 	client := socket.Client()
-	withCompletionSessionNames(t, func() []string {
-		names, err := client.ListSessionNames()
+	withCompletionSessions(t, func() []tmux.Session {
+		sessions, err := client.ListSessions()
 		if err != nil {
 			return nil
 		}
-		return names
+		return sessions
 	})
 
 	names, directive := completeSessionNames("")
@@ -330,7 +331,7 @@ func TestCompletionHidesInternalSurface(t *testing.T) {
 
 func TestCompleteSearchTerm(t *testing.T) {
 	t.Run("it completes the term after the slash and keeps the slash on the candidate", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
 		names, directive := completeSearchTerm("/po")
 
@@ -343,7 +344,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 	})
 
 	t.Run("it offers every live session name for a bare slash", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
 		names, directive := completeSearchTerm("/")
 
@@ -356,7 +357,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 	})
 
 	t.Run("it offers nothing for a term that prefixes no name", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
 		names, directive := completeSearchTerm("/ort")
 
@@ -369,7 +370,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 	})
 
 	t.Run("it never offers a session name containing a slash", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"foo/bar", "foo-1"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "foo/bar"}, {Name: "foo-1"}} })
 
 		names, directive := completeSearchTerm("/foo")
 
@@ -382,7 +383,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 	})
 
 	t.Run("it holds back a slash-bearing name for the empty term too", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"foo/bar", "foo-1"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "foo/bar"}, {Name: "foo-1"}} })
 
 		names, _ := completeSearchTerm("/")
 
@@ -392,7 +393,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 	})
 
 	t.Run("it does not offer the session the caller is attached to", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "port-agent"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}} })
 		withCompletionCurrentSession(t, func() string { return "portal-a1b2" })
 
 		names, directive := completeSearchTerm("/po")
@@ -406,7 +407,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 	})
 
 	t.Run("it holds back the attached session for a bare slash too", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 		withCompletionCurrentSession(t, func() string { return "portal-a1b2" })
 
 		names, _ := completeSearchTerm("/")
@@ -417,7 +418,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 	})
 
 	t.Run("it offers every live name when the current-session read answers nothing", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 		withCompletionCurrentSession(t, func() string { return "" })
 
 		names, _ := completeSearchTerm("/")
@@ -428,7 +429,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 	})
 
 	t.Run("it offers no candidates when the session read fails", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return nil })
+		withCompletionSessions(t, func() []tmux.Session { return nil })
 
 		names, directive := completeSearchTerm("/po")
 
@@ -443,7 +444,7 @@ func TestCompleteSearchTerm(t *testing.T) {
 
 func TestCompleteOpenPositional(t *testing.T) {
 	t.Run("it routes a search word through the search branch", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
 		names, directive := completeOpenPositional("/po")
 
@@ -473,7 +474,7 @@ func TestCompleteOpenPositional(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+				withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
 				names, directive := completeOpenPositional(tt.toComplete)
 
@@ -494,7 +495,7 @@ func TestCompleteOpenPositional(t *testing.T) {
 
 func TestSearchCompletionWiring(t *testing.T) {
 	t.Run("it routes open's positional completer through the search branch", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
 		names, directive := openCmd.ValidArgsFunction(openCmd, nil, "/po")
 
@@ -507,7 +508,7 @@ func TestSearchCompletionWiring(t *testing.T) {
 	})
 
 	t.Run("it answers a search word end to end through __complete", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
 		cands := completionCandidates(t, "__complete", "open", "/po")
 
@@ -521,7 +522,7 @@ func TestSearchCompletionWiring(t *testing.T) {
 		if !ok {
 			t.Fatal("--session flag completion not registered")
 		}
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}} })
 
 		names, directive := fn(openCmd, nil, "/po")
 
@@ -534,7 +535,7 @@ func TestSearchCompletionWiring(t *testing.T) {
 	})
 
 	t.Run("it leaves kill's positional completer unchanged", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}} })
 
 		names, directive := killCmd.ValidArgsFunction(killCmd, nil, "/po")
 
@@ -547,7 +548,7 @@ func TestSearchCompletionWiring(t *testing.T) {
 	})
 
 	t.Run("it leaves a second positional on today's behaviour", func(t *testing.T) {
-		withCompletionSessionNames(t, func() []string { return []string{"portal-a1b2", "web-9"} })
+		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
 		names, directive := openCmd.ValidArgsFunction(openCmd, []string{"/term"}, "")
 

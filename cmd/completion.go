@@ -5,18 +5,19 @@ import (
 
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
-// completionSessionNames builds its own client rather than reaching for the
+// completionSessions builds its own client rather than reaching for the
 // context-injected one: completion runs on the bootstrap-exempt __complete
 // path, where cmd.Context() carries no client and tmuxClient would panic.
-var completionSessionNames = func() []string {
-	names, err := tmux.DefaultClient().ListSessionNames()
+var completionSessions = func() []tmux.Session {
+	sessions, err := tmux.DefaultClient().ListSessions()
 	if err != nil {
 		return nil
 	}
-	return names
+	return sessions
 }
 
 // completionCurrentSession builds its own client for the same reason as its
@@ -30,9 +31,9 @@ var completionCurrentSession = func() string {
 // completion so the shell never merges paths into the session-name list.
 func completeSessionNames(toComplete string) ([]string, cobra.ShellCompDirective) {
 	var matches []string
-	for _, name := range completionSessionNames() {
-		if strings.HasPrefix(name, toComplete) {
-			matches = append(matches, name)
+	for _, s := range completionSessions() {
+		if strings.HasPrefix(s.Name, toComplete) {
+			matches = append(matches, s.Name)
 		}
 	}
 	return matches, cobra.ShellCompDirectiveNoFileComp
@@ -59,28 +60,23 @@ func completeAliasKeys(toComplete string) ([]string, cobra.ShellCompDirective) {
 	return matches, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeSearchTerm completes a search-form word against live session names,
-// matching on the term after the slash and offering each candidate with the
-// slash still on the front: the shell discards any candidate that is not an
-// extension of the word being completed. A name carrying a slash is held back —
-// completing to it would compose a second slash, which reads as a path rather
-// than a search. The attached session is held back too: the sigil searches the
-// set the picker lists, which omits it, so offering it would complete to a name
-// the search cannot reach.
+// completeSearchTerm completes a search-form word against the sessions the sigil
+// searches, matching on the term after the slash and offering each candidate
+// with the slash still on the front: the shell discards any candidate that is
+// not an extension of the word being completed. The searched set comes from
+// tui.PickerSessions, and whether a completed name still composes a search word
+// is asked of resolver.IsSearchSigil — a name that fails it would compose a
+// second slash, which the parser reads as a path rather than a search.
 func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) {
 	term := resolver.SearchTerm(toComplete)
-	current := completionCurrentSession()
 
 	var matches []string
-	for _, name := range completionSessionNames() {
-		if strings.Contains(name, "/") {
+	for _, s := range tui.PickerSessions(completionSessions(), completionCurrentSession()) {
+		if !resolver.IsSearchSigil("/" + s.Name) {
 			continue
 		}
-		if current != "" && name == current {
-			continue
-		}
-		if strings.HasPrefix(name, term) {
-			matches = append(matches, "/"+name)
+		if strings.HasPrefix(s.Name, term) {
+			matches = append(matches, "/"+s.Name)
 		}
 	}
 	return matches, cobra.ShellCompDirectiveNoFileComp
