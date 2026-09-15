@@ -1,0 +1,42 @@
+AGENT: architecture
+FINDINGS:
+- FINDING: The completer restates the searched-set rule instead of composing through PickerSessions
+  SEVERITY: low
+  FAILURE: A later change to which sessions the picker lists lands in `tui.PickerSessions` and leaves the completer offering a name the search cannot reach. The user presses Tab, accepts the offered session, presses Enter, and lands on a picker filtered to zero rows with nothing on screen accounting for it — the exact defect the offered-set corrigendum was written to close, reappearing on the one route that does not derive its answer from the rule.
+  FILES: cmd/completion.go:70-87, internal/tui/picker_sessions.go:13-24, cmd/open_search.go:115-121
+  DESCRIPTION: "The set the picker lists" has one home — `tui.PickerSessions` — and two of its three consumers reach it: the model's `filteredSessions` and the count's `searchCandidates`. The completer is the third consumer and restates the rule inline as `if current != "" && name == current { continue }`, which is `PickerSessions`' own empty-current guard and its name comparison written out a second time. The restatement is invisible to both sides' tests: the completion suite pins the copy, the picker suite pins the original, and neither fails when the other moves. The shape of the divergence is not hypothetical — the offered set and the searched set have already drifted once on this feature and needed a corrigendum to reconcile them.
+  RECOMMENDATION: Derive the completer's candidate set from the same helper rather than restating it: enumerate sessions (not names) on the completion path and route them through `tui.PickerSessions(sessions, completionCurrentSession())`, taking names from the result. The `/`-bearing-name exclusion stays local to the completer — that one is a completion rule, not a searched-set rule.
+
+- FINDING: pickerLanding mirrors tui.SearchForm through three loose fields and a bool
+  SEVERITY: low
+  FAILURE: `pickerLanding{decide: fn}` without `search: true` compiles, type-checks and silently drops the classification: `buildTUIModel` takes the `else` arm, the closure is never handed to the model, and the cold-boot K = 1 attach stops working — the user gets the picker where they used to get the session, with no error and no log line. Only an integration test that exercises a cold boot at exactly one match would notice.
+  FILES: cmd/open_search.go:38-45, cmd/open.go:583-587, internal/tui/build.go:71-78
+  DESCRIPTION: `tui.SearchForm{Term, Decide}` already is the domain type for "the picker was opened by a search". `pickerLanding` unpacks it into three independent fields — `filter` doubling as the term, `search` as the discriminator, `decide` as the closure — and `buildTUIModel` repacks them one layer down. The bool is redundant with the pointer the TUI already takes, and the struct can represent two states that mean nothing: `decide` set without `search`, and `filter` set with `search` where the field name says "filter text" but the value is a search term. Correctness here rests on every construction site setting the flag alongside the field, which is caller discipline the type could enforce instead.
+  RECOMMENDATION: Give `pickerLanding` a `search *tui.SearchForm` field beside `filter string`, so the mode is `landing.search != nil` and term-and-decision travel as one value. `buildTUIModel` then assigns `deps.Search = landing.search` with no unpack/repack, and the invalid combinations stop being constructible.
+
+- FINDING: The teardown's warning routing is split across two model buckets that cmd must arbitrate
+  SEVERITY: low
+  FAILURE: The next exit path that leaves without painting a picker — this cycle added one, the K = 1 attach, to a teardown that previously had none — drops whatever the concurrent bootstrap accumulated unless its author remembers to widen a search-named predicate in a search-named file. A saver-down or restore warning then never reaches the user at all, and its absence is noticed only much later, when the thing it was warning about fails.
+  FILES: cmd/open.go:610-621, cmd/open_search.go:194-199, internal/tui/model.go:468-476
+  DESCRIPTION: `Model` exposes two warning buckets — `BufferedWarnings` (claimed by the loading gate) and `PendingBootstrapWarnings` (never claimed by a gate) — and `finishTUI` writes both, one through a search-specific emitter gated on `SearchAttached() || SearchError() != nil` and one directly. The question being answered is not search-specific: it is "what does this teardown still owe the terminal", and the model already holds every fact needed to answer it (`surfaceBufferedWarnings` nils the buffer precisely when a frame consumed it). Instead the answer is assembled in `cmd` from four accessors plus a comment asserting the two sets are disjoint — an invariant nothing checks.
+  RECOMMENDATION: Let the model answer it: a single `Model.WarningsOwedAtTeardown()` that returns the buffered set when the exit left no picker frame and the pending set otherwise, with the deliberate "a cancelled loading page is owed no report" carve-out expressed there. `finishTUI` then makes one write and the search feature stops owning a general teardown rule.
+
+- FINDING: open's argument refusals now live at two lifecycle points with no rule for which
+  SEVERITY: low
+  FAILURE: A maintainer adding open's next mutual-exclusion refusal picks between two plausible homes and, choosing `RunE` as the existing `-f`/`-e` refusals did, makes a malformed line on a cold machine start the tmux server, register hooks and restore every saved session before printing a usage error. The user waits through a full restore for a complaint about their argv; nothing in either file signposts that the choice decides this.
+  FILES: cmd/open_search.go:54-75, cmd/open.go:160, cmd/open.go:184-193, cmd/open.go:344-383
+  DESCRIPTION: `validateOpenArgs` is installed as open's `Args` validator — the general slot, previously `cobra.ArbitraryArgs` — but implements only the search form's collisions and returns nil for every other malformed line. open's remaining refusals (`-f` beside a target or a pin, an empty `-f`, `-e` together with `--`, an empty `-e`, a bare `--`) stay in `RunE`, downstream of `PersistentPreRunE`. The two sets are knowable from the argv alone and differ only in when they fire, so the property the search form now has — a refused line starts nothing — is one family's rather than the command's, and the validator's name gives no hint that it is partial.
+  RECOMMENDATION: Either narrow the name to what it validates (`validateSearchFormArgs`) and note in one line that open's other refusals are `RunE`'s, or — better — move the argv-only refusals out of `RunE` into the validator so every malformed open line is refused before any bootstrap runs. The flag-value checks that need no tmux (`-f ""`, `-e ""`, `-e` with `--`, `-f` with a pin) all qualify.
+
+COMMENT_CORRECTIONS:
+- internal/resolver/path.go:90-92 — "pure" overclaims: the result depends on $HOME, which is not an argument, and the file's own consumer comment (internal/tui/session_dir_column.go:20-22) says the opposite
+  OLD: // directory is rewritten to its `~/…` form and every other path is returned
+  // unchanged. It is a pure string test — it never touches the filesystem — so a
+  // path that does not exist abbreviates exactly as one that does, and a home
+  // directory that cannot be resolved degrades to the path as given.
+  NEW: // directory is rewritten to its `~/…` form and every other path is returned
+  // unchanged. It never touches the filesystem, so a path that does not exist
+  // abbreviates exactly as one that does; it does read the environment's home
+  // directory, so one value abbreviates differently under a different $HOME, and
+  // a home directory that cannot be resolved degrades to the path as given.
+SUMMARY: The feature composes cleanly where it matters — the containment rule, the search field set and the recorded-versus-derived directory separation each have exactly one home, and the cold-path decision seam is correctly sequenced ahead of the warning surface. What is left is four seam-shape issues: the completer restates the searched set instead of deriving it, `pickerLanding` mirrors `tui.SearchForm` through a bool that makes invalid states constructible, the teardown's warning arbitration sits in cmd rather than in the model that holds the facts, and open's argument refusals now fire at two different lifecycle points with nothing naming the rule.
