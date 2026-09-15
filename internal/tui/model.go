@@ -547,7 +547,8 @@ func WithRenamer(r SessionRenamer) Option {
 }
 
 // WithSearchForm declares that a session search opened the picker with term,
-// which lands as the committed sessions filter on the Sessions page.
+// which lands on the Sessions page as the committed sessions filter — or, for
+// an empty term, as that filter opened focused and empty.
 func WithSearchForm(term string) Option {
 	return func(m *Model) {
 		m.searchForm = true

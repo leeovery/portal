@@ -87,9 +87,10 @@ func ExpandTilde(path string) string {
 
 // AbbreviateHome is the inverse of ExpandTilde: a path under the user's home
 // directory is rewritten to its `~/…` form and every other path is returned
-// unchanged. It is a pure string test — it never touches the filesystem — so a
-// path that does not exist abbreviates exactly as one that does, and a home
-// directory that cannot be resolved degrades to the path as given.
+// unchanged. It never touches the filesystem, so a path that does not exist
+// abbreviates exactly as one that does; it does read the environment's home
+// directory, so one value abbreviates differently under a different $HOME, and
+// a home directory that cannot be resolved degrades to the path as given.
 func AbbreviateHome(path string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
