@@ -90,6 +90,17 @@ func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) 
 // the same index as the next pre-dash positional would, so the flag layer
 // completingPreDashPositional reads cannot tell the two apart and a search form
 // spelled there still takes the sigil arm.
+//
+// The separator is the only bound. A search form is offered wherever one could
+// be typed, including on a line the composition rule refuses — beside another
+// target, beside -f, beside a domain pin — so `open api /po<TAB>` offers a term
+// validateSearchFormCollisions then refuses on Enter. That is deliberate: the
+// word being completed genuinely is a search form and only the rest of the line
+// is illegal, which the user may still fix before pressing Enter, and deciding
+// what one word may be by reading the rest of the line is more than completing
+// the word in front of the cursor. Past the separator neither holds — the word
+// is not a search form at all, and offering sigil candidates there would
+// suppress the filenames the user wanted.
 func completeOpenPositional(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if resolver.IsSearchSigil(toComplete) && completingPreDashPositional(cmd, args) {
 		return completeSearchTerm(toComplete)

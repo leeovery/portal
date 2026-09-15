@@ -628,6 +628,16 @@ func TestCompleteOpenPositionalSeparatorBound(t *testing.T) {
 		}
 	})
 
+	t.Run("it still offers sigil completions for a pre-dash word on a line carrying -f", func(t *testing.T) {
+		withCompletionSessions(t, twoSessions)
+
+		cands := completionCandidates(t, "__complete", "open", "--filter", "api", "/po")
+
+		if want := []string{"/portal-a1b2"}; !slices.Equal(cands, want) {
+			t.Errorf("candidates = %v, want %v", cands, want)
+		}
+	})
+
 	t.Run("it keeps the sigil arm for the word immediately after the separator", func(t *testing.T) {
 		withCompletionSessions(t, twoSessions)
 
