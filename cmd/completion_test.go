@@ -568,7 +568,11 @@ func TestSearchCompletionWiring(t *testing.T) {
 	t.Run("it leaves a second positional on today's behaviour", func(t *testing.T) {
 		withCompletionSessions(t, func() []tmux.Session { return []tmux.Session{{Name: "portal-a1b2"}, {Name: "web-9"}} })
 
-		names, directive := openCmd.ValidArgsFunction(openCmd, []string{"/term"}, "")
+		// Routed through __complete rather than called directly: the completer
+		// reads openCmd's dash index, which pflag carries over from whatever a
+		// sibling test last parsed, and only a real completion run parses the
+		// line being asserted about.
+		names, directive := completionResult(t, "__complete", "open", "/term", "")
 
 		if directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
@@ -594,17 +598,29 @@ func TestCompleteOpenPositionalSeparatorBound(t *testing.T) {
 		}
 	})
 
-	t.Run("it answers a post-dash word exactly as the plain session-name completer does", func(t *testing.T) {
+	t.Run("it offers no session names for a word among a trailing command's arguments", func(t *testing.T) {
 		withCompletionSessions(t, twoSessions)
 
 		cands, directive := completionResult(t, "__complete", "open", "~/Code/api", "--", "ls", "/po")
 
-		plain, plainDirective := completeSessionNames("/po")
-		if directive != plainDirective {
-			t.Errorf("directive = %v, want %v (identical to completeSessionNames)", directive, plainDirective)
+		if directive != cobra.ShellCompDirectiveDefault {
+			t.Errorf("directive = %v, want ShellCompDirectiveDefault", directive)
 		}
-		if !slices.Equal(cands, plain) {
-			t.Errorf("candidates = %v, want %v (identical to completeSessionNames)", cands, plain)
+		if len(cands) != 0 {
+			t.Errorf("candidates = %v, want none past the separator", cands)
+		}
+	})
+
+	t.Run("it leaves filename completion on for a path argument to the trailing command", func(t *testing.T) {
+		withCompletionSessions(t, twoSessions)
+
+		cands, directive := completionResult(t, "__complete", "open", "~/Code/api", "--", "ls", "src/")
+
+		if directive != cobra.ShellCompDirectiveDefault {
+			t.Errorf("directive = %v, want ShellCompDirectiveDefault", directive)
+		}
+		if len(cands) != 0 {
+			t.Errorf("candidates = %v, want none past the separator", cands)
 		}
 	})
 

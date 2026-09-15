@@ -83,13 +83,14 @@ func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) 
 }
 
 // completeOpenPositional completes open's positional target: the search form
-// against the term after its slash, every other word against session names. A
-// word the `--` separator leaves among the trailing command's own arguments
-// belongs to that command, so it takes the session-name arm — with one
-// exception at the boundary: the word immediately after the separator sits at
-// the same index as the next pre-dash positional would, so the flag layer
-// completingPreDashPositional reads cannot tell the two apart and a search form
-// spelled there still takes the sigil arm.
+// against the term after its slash, every other pre-separator word against
+// session names, whose arm suppresses file completion. A word the `--`
+// separator leaves among the trailing command's own arguments belongs to that
+// command and is passed to it untouched, so Portal offers it nothing and leaves
+// the shell's own filename completion on — with one exception at the boundary:
+// the word immediately after the separator sits at the same index as the next
+// pre-dash positional would, so the flag layer completingPreDashPositional
+// reads cannot tell the two apart and it keeps the two pre-separator arms.
 //
 // The separator is the only bound. A search form is offered wherever one could
 // be typed, including on a line the composition rule refuses — beside another
@@ -99,10 +100,12 @@ func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) 
 // is illegal, which the user may still fix before pressing Enter, and deciding
 // what one word may be by reading the rest of the line is more than completing
 // the word in front of the cursor. Past the separator neither holds — the word
-// is not a search form at all, and offering sigil candidates there would
-// suppress the filenames the user wanted.
+// is not a search form at all, and it is not Portal's to complete.
 func completeOpenPositional(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if resolver.IsSearchSigil(toComplete) && completingPreDashPositional(cmd, args) {
+	if !completingPreDashPositional(cmd, args) {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	if resolver.IsSearchSigil(toComplete) {
 		return completeSearchTerm(toComplete)
 	}
 	return completeSessionNames(toComplete)
