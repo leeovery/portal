@@ -247,7 +247,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 12,
-          "current_task": null,
+          "current_task": "open-with-forced-filter-12-6",
           "completed_tasks": [
             "open-with-forced-filter-1-1",
             "open-with-forced-filter-1-2",
@@ -304,7 +304,8 @@
             "open-with-forced-filter-12-1",
             "open-with-forced-filter-12-2",
             "open-with-forced-filter-12-3",
-            "open-with-forced-filter-12-4"
+            "open-with-forced-filter-12-4",
+            "open-with-forced-filter-12-5"
           ],
           "consolidated_phases": [
             1,
