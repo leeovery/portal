@@ -212,7 +212,7 @@
     "implementation": {
       "items": {
         "open-with-forced-filter": {
-          "status": "completed",
+          "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
@@ -433,7 +433,8 @@
           },
           "machine_phases": [
             6
-          ]
+          ],
+          "updated": "2026-09-15"
         }
       }
     },
