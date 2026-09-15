@@ -195,7 +195,7 @@ func TestOpenCommand_SearchForm_OpensPickerOnTheTerm(t *testing.T) {
 	if !sc.tuiCalled {
 		t.Fatal("openTUIFunc must be called for a search form")
 	}
-	if got, want := shapeOfLanding(sc.landing), (landingShape{filter: "port", search: true}); got != want {
+	if got, want := shapeOfLanding(sc.landing), (landingShape{term: "port", search: true}); got != want {
 		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if sc.command != nil {
@@ -517,7 +517,7 @@ func TestOpenCommand_SearchForm_OpensPickerWhenNothingMatches(t *testing.T) {
 	if errBuf.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", errBuf.String())
 	}
-	if got, want := shapeOfLanding(sc.landing), (landingShape{filter: "port", search: true}); got != want {
+	if got, want := shapeOfLanding(sc.landing), (landingShape{term: "port", search: true}); got != want {
 		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if sc.sessionCalled {
@@ -534,7 +534,7 @@ func TestOpenCommand_SearchForm_OpensPickerWhenTwoOrMoreMatch(t *testing.T) {
 	if !sc.tuiCalled {
 		t.Fatal("two matches must open the picker")
 	}
-	if got, want := shapeOfLanding(sc.landing), (landingShape{filter: "port", search: true}); got != want {
+	if got, want := shapeOfLanding(sc.landing), (landingShape{term: "port", search: true}); got != want {
 		t.Errorf("landing = %+v, want %+v", got, want)
 	}
 	if sc.sessionCalled {

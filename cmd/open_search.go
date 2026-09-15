@@ -33,15 +33,12 @@ func preDashPositionals(cmd *cobra.Command, args []string) []string {
 }
 
 // pickerLanding is how the picker was reached: the filter text it opens with,
-// and whether that text is a search form's term. A search form declares the
-// session domain, so the picker lands differently for it than for -f's text.
+// or the search form that opened it. A search form declares the session domain,
+// so the picker lands differently for it than for -f's text; a nil search is a
+// picker no search form reached.
 type pickerLanding struct {
 	filter string
-	search bool
-	// decide classifies a search term against the live session list from inside
-	// the picker, for an invocation whose bootstrap has not run yet. Nil means
-	// the classification was already taken, or there was none to take.
-	decide func() (string, error)
+	search *tui.SearchForm
 }
 
 // validateOpenArgs refuses a search form beside anything else, a command scoped
@@ -179,14 +176,14 @@ func searchDecision(src SearchSessionSource, term string) func() (string, error)
 // hands the count to the picker instead of taking it here.
 func runSearchForm(cmd *cobra.Command, term string) error {
 	if term == "" {
-		return openTUIFunc(cmd, pickerLanding{search: true}, nil, serverWasStarted(cmd))
+		return openTUIFunc(cmd, pickerLanding{search: &tui.SearchForm{}}, nil, serverWasStarted(cmd))
 	}
 
 	decide := searchDecision(buildSearchSessionSource(cmd), term)
-	landing := pickerLanding{filter: term, search: true}
+	landing := pickerLanding{search: &tui.SearchForm{Term: term}}
 
 	if deferredBootstrapFromContext(cmd) != nil {
-		landing.decide = decide
+		landing.search.Decide = decide
 		return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
 	}
 

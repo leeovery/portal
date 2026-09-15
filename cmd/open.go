@@ -591,8 +591,8 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		SpawnGetenv:      cfg.spawnGetenv,
 		SpawnLogger:      cfg.spawnLogger,
 	}
-	if landing.search {
-		deps.Search = &tui.SearchForm{Term: landing.filter, Decide: landing.decide}
+	if landing.search != nil {
+		deps.Search = landing.search
 	} else {
 		deps.InitialFilter = landing.filter
 	}

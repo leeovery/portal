@@ -34,10 +34,10 @@ func runDeferredSearch(t *testing.T, sc *searchFormCapture, term string) func() 
 	if !sc.tuiCalled {
 		t.Fatal("a deferred search form must open the picker")
 	}
-	if sc.landing.decide == nil {
-		t.Fatal("landing.decide = nil, want the deferred decision closure")
+	if sc.landing.search == nil || sc.landing.search.Decide == nil {
+		t.Fatal("landing.search.Decide = nil, want the deferred decision closure")
 	}
-	return sc.landing.decide
+	return sc.landing.search.Decide
 }
 
 func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
@@ -60,7 +60,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 
 		runDeferredSearch(t, sc, "port")
 
-		got, want := shapeOfLanding(sc.landing), (landingShape{filter: "port", search: true, decided: true})
+		got, want := shapeOfLanding(sc.landing), (landingShape{term: "port", search: true, decided: true})
 		if got != want {
 			t.Errorf("landing = %+v, want %+v", got, want)
 		}
@@ -180,7 +180,7 @@ func TestSearchForm_WarmInvocation_CountsUpFront(t *testing.T) {
 		if sc.readsAtTUI == 0 {
 			t.Error("a warm invocation must take its count before the picker opens")
 		}
-		got, want := shapeOfLanding(sc.landing), (landingShape{filter: "port", search: true})
+		got, want := shapeOfLanding(sc.landing), (landingShape{term: "port", search: true})
 		if got != want {
 			t.Errorf("landing = %+v, want %+v", got, want)
 		}
