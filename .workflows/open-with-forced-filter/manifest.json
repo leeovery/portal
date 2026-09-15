@@ -397,6 +397,13 @@
                 "1": "approved",
                 "2": "approved"
               }
+            },
+            "c6": {
+              "tasks": {
+                "1": "pending",
+                "2": "pending",
+                "3": "pending"
+              }
             }
           },
           "machine_phases": [
