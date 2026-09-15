@@ -48,17 +48,23 @@ func init() {
 	initCmd.Flags().String("cmd", "x", "Custom name for shell functions (e.g., --cmd p creates p() and pctl())")
 }
 
+// openFunctionExpansion is what the session-opening function runs and what its
+// completion shim asks Portal to complete for. Both roles read it from here so a
+// change to one cannot leave the other asking for a command line nothing runs.
+const openFunctionExpansion = "portal open"
+
 // The generated script asks the typed word for its completions, and the session-opening
-// function expands to `portal open` — so its registration must name a shim that rewrites
-// the word rather than __start_portal itself, which would ask `portal open` instead.
-// The line must match the rewritten words or the cursor walk reads the wrong current
-// word from it, so it is substituted into rather than rebuilt: re-joining the array
-// would normalise the user's own spacing, and pinning the offset to the end would
-// move a cursor they left mid-line. The replacement is unanchored so it also lands on
-// a line that begins with whitespace.
+// function expands to openFunctionExpansion — so its registration must name a shim that
+// rewrites the word rather than __start_portal itself, which sends its request through the
+// typed word and so would ask the expansion, not portal, for the completions. The line must
+// match the rewritten words or the cursor walk reads the wrong current word from it, so it
+// is substituted into rather than rebuilt: re-joining the array would normalise the user's
+// own spacing, and pinning the offset to the end would move a cursor they left mid-line. The
+// replacement is unanchored so it also lands on a line that begins with whitespace. The shim
+// is a format string, so any % added to it must be escaped.
 const bashOpenCompletionShim = `__start_portal_open() {
-    local typed=${COMP_WORDS[0]} expansion="portal open"
-    COMP_WORDS=(portal open "${COMP_WORDS[@]:1}")
+    local typed=${COMP_WORDS[0]} expansion="%[1]s"
+    COMP_WORDS=(%[1]s "${COMP_WORDS[@]:1}")
     (( COMP_CWORD += 1 ))
     COMP_LINE=${COMP_LINE/"$typed"/$expansion}
     (( COMP_POINT += ${#expansion} - ${#typed} ))
@@ -67,7 +73,7 @@ const bashOpenCompletionShim = `__start_portal_open() {
 `
 
 const zshOpenCompletionShim = `_portal_open() {
-    words=(portal open "${(@)words[2,-1]}")
+    words=(%s "${(@)words[2,-1]}")
     (( CURRENT += 1 ))
     _portal "$@"
 }
@@ -76,7 +82,7 @@ const zshOpenCompletionShim = `_portal_open() {
 func emitBashInit(w io.Writer, cmdName string) error {
 	ctlName := cmdName + "ctl"
 
-	if _, err := fmt.Fprintf(w, "%s() { portal open \"$@\"; }\n", cmdName); err != nil {
+	if _, err := fmt.Fprintf(w, "%s() { %s \"$@\"; }\n", cmdName, openFunctionExpansion); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "%s() { portal \"$@\"; }\n", ctlName); err != nil {
@@ -93,7 +99,7 @@ func emitBashInit(w io.Writer, cmdName string) error {
 		return err
 	}
 
-	if _, err := fmt.Fprint(w, bashOpenCompletionShim); err != nil {
+	if _, err := fmt.Fprintf(w, bashOpenCompletionShim, openFunctionExpansion); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "complete -o default -F __start_portal_open %s\n", cmdName); err != nil {
@@ -109,7 +115,7 @@ func emitBashInit(w io.Writer, cmdName string) error {
 func emitFishInit(w io.Writer, cmdName string) error {
 	ctlName := cmdName + "ctl"
 
-	if _, err := fmt.Fprintf(w, "function %s\n    portal open $argv\nend\n", cmdName); err != nil {
+	if _, err := fmt.Fprintf(w, "function %s\n    %s $argv\nend\n", cmdName, openFunctionExpansion); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "function %s\n    portal $argv\nend\n", ctlName); err != nil {
@@ -129,7 +135,7 @@ func emitFishInit(w io.Writer, cmdName string) error {
 	if _, err := fmt.Fprintf(w, "complete -c %s -f\n", cmdName); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "complete -c %s -w 'portal open'\n", cmdName); err != nil {
+	if _, err := fmt.Fprintf(w, "complete -c %s -w '%s'\n", cmdName, openFunctionExpansion); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "complete -c %s -w portal\n", ctlName); err != nil {
@@ -142,7 +148,7 @@ func emitFishInit(w io.Writer, cmdName string) error {
 func emitZshInit(w io.Writer, cmdName string) error {
 	ctlName := cmdName + "ctl"
 
-	if _, err := fmt.Fprintf(w, "function %s() { portal open \"$@\" }\n", cmdName); err != nil {
+	if _, err := fmt.Fprintf(w, "function %s() { %s \"$@\" }\n", cmdName, openFunctionExpansion); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "function %s() { portal \"$@\" }\n", ctlName); err != nil {
@@ -159,7 +165,7 @@ func emitZshInit(w io.Writer, cmdName string) error {
 		return err
 	}
 
-	if _, err := fmt.Fprint(w, zshOpenCompletionShim); err != nil {
+	if _, err := fmt.Fprintf(w, zshOpenCompletionShim, openFunctionExpansion); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "compdef _portal_open %s\n", cmdName); err != nil {
