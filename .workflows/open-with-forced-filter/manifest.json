@@ -155,7 +155,8 @@
             "open-with-forced-filter-7-1": "tick-417c10",
             "open-with-forced-filter-7-2": "tick-424d49",
             "open-with-forced-filter-8": "tick-d837ea",
-            "open-with-forced-filter-8-1": "tick-e7336e"
+            "open-with-forced-filter-8-1": "tick-e7336e",
+            "open-with-forced-filter-8-2": "tick-11e361"
           },
           "storage_paths": [
             ".tick/"
@@ -188,7 +189,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
-          "consolidation_gate_mode": "gated",
+          "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 2,
           "linters": [
@@ -268,7 +269,8 @@
             3,
             4,
             5,
-            7
+            7,
+            8
           ],
           "completed_phases": [
             1,
@@ -321,23 +323,15 @@
               "tasks": {
                 "1": "approved"
               }
+            },
+            "p8": {
+              "tasks": {
+                "1": "approved"
+              }
             }
           },
           "machine_phases": [
             6
-          ],
-          "bank": [
-            {
-              "task": "open-with-forced-filter-8-1",
-              "source": "reviewer",
-              "summary": "README tab-completion sentence now overstates the offered set for the search form",
-              "failure": "A user inside tmux presses x /<TAB> and finds the session they are attached to absent from the candidates. Nothing in the docs accounts for the omission, so it reads as broken completion rather than a deliberate exclusion.",
-              "detail": "README.md:175 says x <TAB> offers your live session names and x /po<TAB> completes the term after the slash against those same names. After this task the search branch completes against those names less the attached session, while x <TAB> routes through the untouched completeSessionNames and still offers all of them. Specification section 8.1 carries the same overstatement.",
-              "files": [
-                "README.md",
-                ".workflows/open-with-forced-filter/specification/open-with-forced-filter/specification.md"
-              ]
-            }
           ]
         }
       }
