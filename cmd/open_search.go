@@ -170,8 +170,8 @@ func searchDecision(src SearchSessionSource, term string) func() (string, error)
 // the picker on the whole live list without reading the session set at all.
 //
 // An invocation whose bootstrap runs in a goroutine behind the picker's loading
-// page has no server to count against yet — every term would answer zero — so it
-// hands the count to the picker instead of taking it here.
+// page has no settled session list to count against yet — restore has not run — so
+// it hands the count to the picker, which takes it once that bootstrap completes.
 func runSearchForm(cmd *cobra.Command, term string) error {
 	if term == "" {
 		return openTUIFunc(cmd, pickerLanding{search: &tui.SearchForm{}}, nil, serverWasStarted(cmd))
@@ -187,7 +187,7 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 
 	name, err := decide()
 	if err != nil {
-		// This route paints no picker either, so the buffered warnings go to the
+		// This route paints no picker, so the buffered warnings go to the
 		// terminal.
 		bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 		return err
