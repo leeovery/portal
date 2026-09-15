@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -9,29 +10,6 @@ import (
 	"charm.land/bubbles/v2/list"
 	"github.com/leeovery/portal/internal/tmux"
 )
-
-func TestContainmentFilterFallsBackWhenTheSourceIsOutOfStep(t *testing.T) {
-	src := &searchItemSource{}
-	// The source holds a non-matching item, so a containment lookup against it
-	// would answer with nothing while the picker's own rule answers with a row.
-	src.set([]list.Item{SessionItem{Session: tmux.Session{Name: "pro-tools"}}})
-	targets := []string{"app-port", "pro-tools"}
-
-	got := containmentFilter("port", src)("port", targets)
-
-	want := list.DefaultFilter("port", targets)
-	if len(want) == 0 {
-		t.Fatalf("test setup invariant: expected the picker's own rule to match a target")
-	}
-	if len(got) != len(want) {
-		t.Fatalf("ranks = %v, want the picker's own rule's %v", got, want)
-	}
-	for i := range want {
-		if got[i].Index != want[i].Index {
-			t.Fatalf("ranks = %v, want the picker's own rule's %v", got, want)
-		}
-	}
-}
 
 func filterTargets(items []list.Item) []string {
 	targets := make([]string, len(items))
@@ -49,29 +27,80 @@ func rankIndexes(ranks []list.Rank) []int {
 	return indexes
 }
 
-func TestContainmentFilterFallsBackWhenTheSourceWasReplacedAtTheSameLength(t *testing.T) {
+// subsequenceOnlySession is matched by the picker's own fuzzy rule for the term
+// "port" (p·o·r·t across "~/Projects/rust-tools") and by containment not at all.
+func subsequenceOnlySession(t *testing.T) tmux.Session {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return tmux.Session{Name: "rust-tools", Dir: filepath.Join(home, "Projects", "rust-tools")}
+}
+
+func TestContainmentFilterRanksAStaleGenerationsTargetsByContainment(t *testing.T) {
+	scattered := SessionItem{Session: subsequenceOnlySession(t)}
+	matching := SessionItem{Session: tmux.Session{Name: "portal-a1b2"}}
 	src := &searchItemSource{}
-	// A same-length replacement: the recorded values no longer describe the
-	// targets, and a containment lookup would rank "app-port" at the index the
-	// replaced source holds it at rather than the one the targets do.
-	src.set([]list.Item{
-		SessionItem{Session: tmux.Session{Name: "app-port"}},
-		SessionItem{Session: tmux.Session{Name: "pro-tools"}},
-	})
-	targets := filterTargets([]list.Item{
-		SessionItem{Session: tmux.Session{Name: "pro-tools"}},
-		SessionItem{Session: tmux.Session{Name: "app-port"}},
-	})
+	// The source holds one generation; the pass is handed another's targets,
+	// in an order that generation never held them in.
+	src.set([]list.Item{matching, scattered})
+	targets := filterTargets([]list.Item{scattered, matching})
 
 	got := containmentFilter("port", src)("port", targets)
 
-	want := list.DefaultFilter("port", targets)
-	if !slices.Equal(rankIndexes(got), rankIndexes(want)) {
-		t.Fatalf("ranks = %v, want the picker's own rule's %v", rankIndexes(got), rankIndexes(want))
+	if want := []int{1}; !slices.Equal(rankIndexes(got), want) {
+		t.Fatalf("ranks = %v, want %v at the targets' own indexes", rankIndexes(got), want)
+	}
+	if fuzzy := list.DefaultFilter("port", targets); len(fuzzy) <= len(got) {
+		t.Fatalf("test setup invariant: expected the picker's own rule to rank more than containment does")
 	}
 }
 
-func TestContainmentFilterNarrowsWhenTheRecordedValuesMatchTheTargets(t *testing.T) {
+func TestContainmentFilterRanksEveryRowOfASessionListedUnderMoreThanOneTag(t *testing.T) {
+	repeated := SessionItem{Session: tmux.Session{Name: "portal-a1b2"}}
+	items := []list.Item{
+		HeaderItem{Heading: "Work", Count: 1},
+		SessionItem{Session: repeated.Session, GroupKey: "work"},
+		HeaderItem{Heading: "Side", Count: 1},
+		SessionItem{Session: repeated.Session, GroupKey: "side"},
+	}
+	src := &searchItemSource{}
+	src.set(items)
+
+	got := containmentFilter("port", src)("port", filterTargets(items))
+
+	if want := []int{1, 3}; !slices.Equal(rankIndexes(got), want) {
+		t.Fatalf("ranks = %v, want %v — one per row of the repeated session", rankIndexes(got), want)
+	}
+}
+
+func TestContainmentFilterRanksNothingForATargetTheSourceDoesNotHold(t *testing.T) {
+	src := &searchItemSource{}
+	src.set([]list.Item{SessionItem{Session: tmux.Session{Name: "portal-a1b2"}}})
+	targets := filterTargets([]list.Item{SessionItem{Session: tmux.Session{Name: "app-port"}}})
+
+	got := containmentFilter("port", src)("port", targets)
+
+	if len(got) != 0 {
+		t.Fatalf("ranks = %v, want none for a target the source does not hold", rankIndexes(got))
+	}
+}
+
+func TestContainmentFilterRanksNothingForAHeaderRowsEmptyFilterValue(t *testing.T) {
+	items := []list.Item{
+		HeaderItem{Heading: "Alpha", Count: 1},
+		SessionItem{Session: tmux.Session{Name: "app-port"}},
+	}
+	src := &searchItemSource{}
+	src.set(items)
+
+	got := containmentFilter("port", src)("port", filterTargets(items))
+
+	if want := []int{1}; !slices.Equal(rankIndexes(got), want) {
+		t.Fatalf("ranks = %v, want %v — the header ranks nothing", rankIndexes(got), want)
+	}
+}
+
+func TestContainmentFilterNarrowsToTheTargetsItContains(t *testing.T) {
 	items := []list.Item{
 		SessionItem{Session: tmux.Session{Name: "app-port"}},
 		HeaderItem{Heading: "Alpha", Count: 2},
@@ -93,7 +122,7 @@ func TestContainmentFilterNarrowsWhenTheRecordedValuesMatchTheTargets(t *testing
 	}
 }
 
-func TestContainmentFilterFallsBackWhenTheFilterTextIsNoLongerTheTerm(t *testing.T) {
+func TestContainmentFilterReturnsToThePickersOwnRuleOnceTheTextIsNoLongerTheTerm(t *testing.T) {
 	items := []list.Item{
 		SessionItem{Session: tmux.Session{Name: "app-port"}},
 		SessionItem{Session: tmux.Session{Name: "pro-tools"}},
@@ -105,6 +134,9 @@ func TestContainmentFilterFallsBackWhenTheFilterTextIsNoLongerTheTerm(t *testing
 	got := containmentFilter("port", src)("prt", targets)
 
 	want := list.DefaultFilter("prt", targets)
+	if len(want) == 0 {
+		t.Fatalf("test setup invariant: expected the picker's own rule to match a target")
+	}
 	if !slices.Equal(rankIndexes(got), rankIndexes(want)) {
 		t.Fatalf("ranks = %v, want the picker's own rule's %v", rankIndexes(got), rankIndexes(want))
 	}
@@ -119,7 +151,7 @@ func TestContainmentFilterOnASourceThatWasNeverSet(t *testing.T) {
 		}
 	})
 
-	t.Run("it falls back to the picker's own rule for a non-empty target list", func(t *testing.T) {
+	t.Run("it yields no ranks for a non-empty target list", func(t *testing.T) {
 		targets := filterTargets([]list.Item{
 			SessionItem{Session: tmux.Session{Name: "app-port"}},
 			SessionItem{Session: tmux.Session{Name: "pro-tools"}},
@@ -127,12 +159,8 @@ func TestContainmentFilterOnASourceThatWasNeverSet(t *testing.T) {
 
 		got := containmentFilter("port", &searchItemSource{})("port", targets)
 
-		want := list.DefaultFilter("port", targets)
-		if len(want) == 0 {
-			t.Fatalf("test setup invariant: expected the picker's own rule to match a target")
-		}
-		if !slices.Equal(rankIndexes(got), rankIndexes(want)) {
-			t.Fatalf("ranks = %v, want the picker's own rule's %v", rankIndexes(got), rankIndexes(want))
+		if len(got) != 0 {
+			t.Fatalf("ranks = %v, want none from a source holding nothing", rankIndexes(got))
 		}
 	})
 }

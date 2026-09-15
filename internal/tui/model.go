@@ -195,8 +195,8 @@ type Model struct {
 	searchDecide   func() (string, error)
 	searchAttached bool
 	searchErr      error
-	// searchItems is the item slice the containment filter resolves its ranks
-	// against; nil for every picker a search term did not open.
+	// searchItems holds the session fields the containment filter ranks its
+	// targets by; nil for every picker a search term did not open.
 	searchItems        *searchItemSource
 	insideTmux         bool
 	currentSession     string
@@ -1248,8 +1248,8 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 		items = ToListItems(filtered)
 	}
 
-	// Re-pointed before the items are handed over: the filter pass SetItems
-	// defers into a tea.Cmd resolves its ranks against that slice.
+	// Recorded before the items are handed over, so the filter pass SetItems
+	// defers into a tea.Cmd can resolve the targets it is given.
 	if m.searchItems != nil {
 		m.searchItems.set(items)
 	}

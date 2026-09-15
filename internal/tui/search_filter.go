@@ -1,69 +1,78 @@
 package tui
 
 import (
-	"slices"
 	"sync"
 
 	"charm.land/bubbles/v2/list"
 	"github.com/leeovery/portal/internal/resolver"
 )
 
-// searchItemSource holds the item slice a filter pass resolves its ranks
-// against, beside the filter values those items were built from. It is held by
-// pointer because Model is a value Bubble Tea copies on every Update: a slice
-// field would go stale in whichever copy the filter closure was built against,
-// while a pointer is shared by every copy. The mutex is load-bearing: the write
-// runs on the Update goroutine and the read on the goroutine Bubble Tea gives
-// the filter command, and the two are free to overlap.
-type searchItemSource struct {
-	mu       sync.RWMutex
-	items    []list.Item
-	recorded []string
+// searchEntry holds the session fields a filter value was built from, so a pass
+// can rank a target it was handed without holding the item it came from.
+type searchEntry struct {
+	name string
+	dir  string
 }
 
+// searchItemSource maps each session row's filter value to the fields that value
+// was built from, so a filter pass can answer for targets from any generation
+// the source has held. It is held by pointer because Model is a value Bubble Tea
+// copies on every Update: a map field would go stale in whichever copy the filter
+// closure was built against, while a pointer is shared by every copy. The mutex
+// is load-bearing: the write runs on the Update goroutine and the read on the
+// goroutine Bubble Tea gives the filter command, and the two are free to overlap.
+type searchItemSource struct {
+	mu      sync.RWMutex
+	entries map[string]searchEntry
+}
+
+// set records the session rows among items. Rows sharing a session collapse onto
+// one entry, and a header's empty filter value contributes none.
 func (s *searchItemSource) set(items []list.Item) {
-	recorded := make([]string, len(items))
-	for i, item := range items {
-		recorded[i] = item.FilterValue()
+	entries := make(map[string]searchEntry, len(items))
+	for _, item := range items {
+		si, ok := item.(SessionItem)
+		if !ok {
+			continue
+		}
+		entries[si.FilterValue()] = searchEntry{name: si.Session.Name, dir: si.Session.Dir}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.items = items
-	s.recorded = recorded
+	s.entries = entries
 }
 
-// current answers with both under one hold, so a reader can never pair one
-// call's items with another call's values.
-func (s *searchItemSource) current() ([]list.Item, []string) {
+// current answers with the whole map under one hold. set replaces it rather than
+// mutating it, so the caller may read the returned map with no hold.
+func (s *searchItemSource) current() map[string]searchEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.items, s.recorded
+	return s.entries
 }
 
-// containmentFilter narrows to the sessions whose own name or recorded
-// directory contains term, in the order the list already holds them, for as
-// long as the committed filter text is still term; any other value falls
-// through to the picker's own fuzzy rule. A rank indexes the unfiltered item
-// slice, headers included, so the source must hold exactly the slice the
-// targets were built from — recorded values differing from the targets mean it
-// is out of step, and the picker's rule stands rather than a lookup against the
-// wrong rows.
+// containmentFilter narrows to the sessions whose own name or recorded directory
+// contains term, in the order the list already holds them, for as long as the
+// committed filter text is still term; any other value falls through to the
+// picker's own fuzzy rule. Ranks index the targets the pass was handed, so they
+// resolve against the item generation that pass belongs to however many rebuilds
+// have landed since. A target the source does not hold ranks nothing, so a pass
+// running behind can only omit a row, never surface one the term does not match.
 //
 // MatchedIndexes is left nil, so a delegate that highlights matched runes would
 // get none from this rule.
 func containmentFilter(term string, src *searchItemSource) list.FilterFunc {
 	return func(query string, targets []string) []list.Rank {
-		items, recorded := src.current()
-		if query != term || !slices.Equal(recorded, targets) {
+		if query != term {
 			return list.DefaultFilter(query, targets)
 		}
+		entries := src.current()
 		var ranks []list.Rank
-		for i, item := range items {
-			si, ok := item.(SessionItem)
+		for i, target := range targets {
+			entry, ok := entries[target]
 			if !ok {
 				continue
 			}
-			if resolver.MatchesSearchTerm(query, si.Session.Name, si.Session.Dir) {
+			if resolver.MatchesSearchTerm(query, entry.name, entry.dir) {
 				ranks = append(ranks, list.Rank{Index: i})
 			}
 		}
