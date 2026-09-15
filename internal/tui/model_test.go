@@ -6897,15 +6897,14 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 		}
 	})
 
-	t.Run("it clears the pending warnings when the complete message buffers them", func(t *testing.T) {
+	t.Run("it empties the staged set once the loading gate has taken it", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
-		warnings := []tui.BootstrapWarning{{Lines: []string{"saver down"}}}
-		m.SetPendingBootstrapWarnings(warnings)
+		m.SetPendingBootstrapWarnings([]tui.BootstrapWarning{{Lines: []string{"saver down"}}})
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 
 		updated := model.(tui.Model)
 		if len(updated.BufferedWarnings()) != 1 {
@@ -6913,6 +6912,60 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 		}
 		if got := updated.PendingBootstrapWarnings(); len(got) != 0 {
 			t.Errorf("PendingBootstrapWarnings = %#v, want none — the loading gate now owns them", got)
+		}
+	})
+
+	t.Run("it buffers the staged set and the message's own, staged first", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		m.SetPendingBootstrapWarnings([]tui.BootstrapWarning{{Lines: []string{"staged"}}})
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		model, _ = model.Update(tui.BootstrapCompleteMsg{
+			Warnings: []tui.BootstrapWarning{{Lines: []string{"orchestrator"}}},
+		})
+
+		updated := model.(tui.Model)
+		got := updated.BufferedWarnings()
+		if len(got) != 2 {
+			t.Fatalf("BufferedWarnings len = %d, want 2 — the staged set and the message's own", len(got))
+		}
+		if got[0].Lines[0] != "staged" || got[1].Lines[0] != "orchestrator" {
+			t.Errorf("BufferedWarnings = %#v, want the staged warning first", got)
+		}
+	})
+
+	t.Run("it buffers a warm route's staged set exactly once", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		m.SetPendingBootstrapWarnings([]tui.BootstrapWarning{{Lines: []string{"saver down"}}})
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
+
+		got := model.(tui.Model).BufferedWarnings()
+		if len(got) != 1 || got[0].Lines[0] != "saver down" {
+			t.Errorf("BufferedWarnings = %#v, want the staged warning exactly once", got)
+		}
+	})
+
+	t.Run("the buffered union does not share a backing array with the staged slice", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		staged := make([]tui.BootstrapWarning, 1, 4)
+		staged[0] = tui.BootstrapWarning{Lines: []string{"staged"}}
+		m.SetPendingBootstrapWarnings(staged)
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
+
+		buffered := model.(tui.Model).BufferedWarnings()
+		_ = append(buffered, tui.BootstrapWarning{Lines: []string{"intruder"}})
+		if got := staged[:cap(staged)]; got[1].Lines != nil {
+			t.Errorf("appending to the buffered union wrote %#v into the staged slice's backing array", got[1])
 		}
 	})
 
@@ -7092,7 +7145,7 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 		}
 	})
 
-	t.Run("SetPendingBootstrapWarnings exposes warnings via Init", func(t *testing.T) {
+	t.Run("its warm-route synthesized complete message carries no warnings", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		warnings := []tui.BootstrapWarning{{Lines: []string{"pending"}}}
@@ -7130,8 +7183,11 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 		if found == nil {
 			t.Fatal("no batched cmd produced BootstrapCompleteMsg")
 		}
-		if len(found.Warnings) != 1 || len(found.Warnings[0].Lines) != 1 || found.Warnings[0].Lines[0] != "pending" {
-			t.Errorf("BootstrapCompleteMsg.Warnings = %#v, want [{Lines:[pending]}]", found.Warnings)
+		if len(found.Warnings) != 0 {
+			t.Errorf("BootstrapCompleteMsg.Warnings = %#v, want none — the staged set reaches the gate off the model", found.Warnings)
+		}
+		if got := m.PendingBootstrapWarnings(); len(got) != 1 {
+			t.Errorf("PendingBootstrapWarnings() = %#v, want the staged set left for the gate to take", got)
 		}
 	})
 }

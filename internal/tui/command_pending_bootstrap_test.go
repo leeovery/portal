@@ -146,6 +146,26 @@ func TestCommandPendingBootstrapDelivery(t *testing.T) {
 		}
 	})
 
+	t.Run("it leaves a command-pending model appending the message's warnings onto the staged set", func(t *testing.T) {
+		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
+
+		m := tui.Build(commandPendingDeps(receiver))
+		m.SetPendingBootstrapWarnings([]tui.BootstrapWarning{{Lines: []string{"staged"}}})
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{
+			Warnings: []tui.BootstrapWarning{{Lines: []string{"orchestrator"}}},
+		})
+
+		got := model.(tui.Model).PendingBootstrapWarnings()
+		if len(got) != 2 {
+			t.Fatalf("PendingBootstrapWarnings() = %#v, want both the staged warning and the message's own", got)
+		}
+		if got[0].Lines[0] != "staged" || got[1].Lines[0] != "orchestrator" {
+			t.Errorf("PendingBootstrapWarnings() = %#v, want the staged warning first", got)
+		}
+	})
+
 	t.Run("it leaves the loading page's complete-message handling unchanged", func(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		warnings := []tui.BootstrapWarning{{Lines: []string{"Portal's session saver is not running."}}}

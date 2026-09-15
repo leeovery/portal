@@ -211,6 +211,33 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 		assertOwed(t, model.WarningsOwedAtTeardown(), warnings, "the attach paints no picker frame")
 	})
 
+	t.Run("it still owes a staged warning at teardown when the gate quits on a search attach", func(t *testing.T) {
+		staged := []warning.Warning{{Lines: []string{"Portal's session saver is not running."}}}
+		orchestrator := []warning.Warning{{Lines: []string{"Saved state could not be restored."}}}
+
+		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
+		m := tui.Build(tui.Deps{
+			Lister:           &mockSessionLister{},
+			ServerStarted:    true,
+			ProgressReceiver: receiver,
+			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
+		})
+		m.SetPendingBootstrapWarnings(staged)
+
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: orchestrator})
+
+		updated := model.(tui.Model)
+		if !updated.SearchAttached() {
+			t.Fatal("model must record the search attach")
+		}
+
+		want := append(append([]warning.Warning{}, staged...), orchestrator...)
+		assertOwed(t, updated.WarningsOwedAtTeardown(), want, "a warning staged before the concurrent launch is owed too")
+	})
+
 	t.Run("it owes the buffered set when the loading gate quit on a failed session-list read", func(t *testing.T) {
 		readErr := errors.New("no server running")
 		model := searchTeardownModel(t, func() (string, error) { return "", readErr }, warnings)
@@ -407,7 +434,7 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
 		// What Init synthesizes on the warm loading-page route.
-		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() == tui.PageLoading {
@@ -431,7 +458,7 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
 		updated := model.(tui.Model)

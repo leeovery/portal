@@ -489,8 +489,9 @@ func (m Model) WarningsOwedAtTeardown() []BootstrapWarning {
 	return m.pendingBootstrapWarnings
 }
 
-// A loading page folds them into the BootstrapCompleteMsg from Init's first
-// tick; with no loading page they stay staged for the teardown to write.
+// A loading page takes them off the model when the bootstrap completes and
+// surfaces them when it dismisses; with no loading page they stay staged for
+// the teardown to write.
 func (m *Model) SetPendingBootstrapWarnings(warnings []BootstrapWarning) {
 	m.pendingBootstrapWarnings = warnings
 }
@@ -1552,8 +1553,9 @@ func (m Model) Init() tea.Cmd {
 			// route the channel owns the terminal BootstrapCompleteMsg, and
 			// synthesizing one here would dismiss the loading page before the
 			// orchestrator finished.
-			pending := m.pendingBootstrapWarnings
-			cmds = append(cmds, func() tea.Msg { return BootstrapCompleteMsg{Warnings: pending} })
+			// Carries no warnings: the message's field is the orchestrator's set
+			// alone, and the staged set reaches the gate off the model.
+			cmds = append(cmds, func() tea.Msg { return BootstrapCompleteMsg{} })
 		}
 	default:
 		cmds = append(cmds, m.fetchSessionsCmd(), m.loadProjects())
@@ -1646,7 +1648,9 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		// Warnings arriving after dismissal are dropped so they cannot
 		// accumulate dead state on the model.
 		if m.activePage == PageLoading {
-			m.bufferedWarnings = msg.Warnings
+			// A disjoint union into a fresh slice, so the buffer never shares a
+			// backing array with the staged set it just took.
+			m.bufferedWarnings = slices.Concat(m.pendingBootstrapWarnings, msg.Warnings)
 			// The gate owns them from here, so what stays pending is exactly what
 			// no gate ever consumed.
 			m.pendingBootstrapWarnings = nil
