@@ -628,6 +628,26 @@ func TestCompleteOpenPositionalSeparatorBound(t *testing.T) {
 		}
 	})
 
+	t.Run("it keeps the sigil arm for the word immediately after the separator", func(t *testing.T) {
+		withCompletionSessions(t, twoSessions)
+
+		cands := completionCandidates(t, "__complete", "open", "--", "/po")
+
+		if want := []string{"/portal-a1b2"}; !slices.Equal(cands, want) {
+			t.Errorf("candidates = %v, want %v", cands, want)
+		}
+	})
+
+	t.Run("it keeps the sigil arm for the boundary word beside a target", func(t *testing.T) {
+		withCompletionSessions(t, twoSessions)
+
+		cands := completionCandidates(t, "__complete", "open", "api", "--", "/po")
+
+		if want := []string{"/portal-a1b2"}; !slices.Equal(cands, want) {
+			t.Errorf("candidates = %v, want %v", cands, want)
+		}
+	})
+
 	t.Run("it reads a line with no separator as pre-dash despite cobra's probe parse", func(t *testing.T) {
 		cmd := &cobra.Command{Use: "open"}
 		// The two parses cobra runs before calling a completer: the probe with an

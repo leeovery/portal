@@ -85,8 +85,11 @@ func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) 
 // completeOpenPositional completes open's positional target: the search form
 // against the term after its slash, every other word against session names. A
 // word the `--` separator leaves among the trailing command's own arguments
-// belongs to that command, so it takes the session-name arm however it is
-// spelled.
+// belongs to that command, so it takes the session-name arm — with one
+// exception at the boundary: the word immediately after the separator sits at
+// the same index as the next pre-dash positional would, so the flag layer
+// completingPreDashPositional reads cannot tell the two apart and a search form
+// spelled there still takes the sigil arm.
 func completeOpenPositional(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if resolver.IsSearchSigil(toComplete) && completingPreDashPositional(cmd, args) {
 		return completeSearchTerm(toComplete)
