@@ -400,6 +400,42 @@ func TestValidateOpenArgs_RefusesSearchFormWithAck(t *testing.T) {
 	executeOpenExpectingUsage(t, "cannot use a /term search with --ack", "/port", "--ack", "batch:token")
 }
 
+// craftedOpenCommand returns a command shaped like open's positional surface
+// carrying one throwaway flag. A pflag.FlagSet cannot un-register a flag, so the
+// real openCmd is never given one.
+func craftedOpenCommand(t *testing.T, name string) *cobra.Command {
+	t.Helper()
+
+	c := &cobra.Command{Use: "open", Args: cobra.ArbitraryArgs}
+	c.Flags().String(name, "", "throwaway flag no named collision arm covers")
+	return c
+}
+
+func TestValidateSearchFormCollisions_RefusesAFlagNoNamedArmCovers(t *testing.T) {
+	c := craftedOpenCommand(t, "zzz")
+	if err := c.Flags().Set("zzz", "v"); err != nil {
+		t.Fatalf("setting --zzz: %v", err)
+	}
+
+	err := validateSearchFormCollisions(c, []string{"/port"})
+
+	usage, ok := errors.AsType[*UsageError](err)
+	if !ok {
+		t.Fatalf("error = %v (%T), want *UsageError", err, err)
+	}
+	if got, want := usage.Error(), "cannot use a /term search with --zzz"; got != want {
+		t.Errorf("message = %q, want %q", got, want)
+	}
+}
+
+func TestValidateSearchFormCollisions_AdmitsASearchFormThatSetNoFlag(t *testing.T) {
+	c := craftedOpenCommand(t, "zzz")
+
+	if err := validateSearchFormCollisions(c, []string{"/port"}); err != nil {
+		t.Errorf("a search form setting no flag must be admitted, got %v", err)
+	}
+}
+
 func TestValidateOpenArgs_RefusedLineStartsNoBootstrap(t *testing.T) {
 	runner := &recordingRunner{}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})

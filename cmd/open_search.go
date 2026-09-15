@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // searchFormPositionals returns, in argv order, the positionals carrying the
@@ -76,7 +79,35 @@ func validateSearchFormCollisions(cmd *cobra.Command, args []string) error {
 	case cmd.Flags().Changed("ack"):
 		return NewUsageError("cannot use a /term search with --ack")
 	}
+
+	// The named arms above cover open's registered flags by hand, so each refusal
+	// names what collided in its own words. This arm reads the rest of the rule
+	// from the registration: reaching it means every named flag is unset, so any
+	// flag the line still set is one no arm covers — a flag registered on open
+	// after these arms were written is refused the day it is registered.
+	if name := firstSetLocalFlag(cmd); name != "" {
+		return NewUsageError(fmt.Sprintf("cannot use a /term search with --%s", name))
+	}
 	return nil
+}
+
+// firstSetLocalFlag returns the name of the first flag the line set among the
+// command's own, and the empty string when it set none. Inherited persistent
+// flags are outside the set: the rule exempts them.
+//
+// The walk is VisitAll filtered on Changed rather than Visit: pflag records what
+// a line set on the flag set the value was parsed through, which is the command's
+// own Flags() — LocalFlags() is a second set holding the same *pflag.Flag values,
+// so Visit over it reports nothing while the shared Changed field is accurate.
+// pflag visits lexically with no early exit, so the first name visited is kept.
+func firstSetLocalFlag(cmd *cobra.Command) string {
+	var first string
+	cmd.LocalFlags().VisitAll(func(f *pflag.Flag) {
+		if first == "" && f.Changed {
+			first = f.Name
+		}
+	})
+	return first
 }
 
 // validateCommandScopeAndFilter refuses the non-search collisions, through the
