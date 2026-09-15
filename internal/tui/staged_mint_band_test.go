@@ -29,7 +29,7 @@ func TestStagedMintProjectBand(t *testing.T) {
 			t.Fatalf("pre-stage band = (%v, %q, %v), want the pending-command banner", role, message, ok)
 		}
 
-		(&m).createSession("/tmp/alpha")
+		m, _ = m.createSession("/tmp/alpha")
 
 		role, message, ok := m.activeProjectNoticeBand()
 		if !ok || role != bandInfo || message != stagedMintBandText {
@@ -47,7 +47,7 @@ func TestStagedMintProjectBand(t *testing.T) {
 
 	t.Run("it keeps a live flash ahead of the wait band", func(t *testing.T) {
 		m := stagedMintBandModel(t, 80)
-		(&m).createSession("/tmp/alpha")
+		m, _ = m.createSession("/tmp/alpha")
 		m.setFlash("__ORDINARY__")
 
 		wantRole, wantMessage, wantOK := m.flashSlotClaim()
@@ -66,7 +66,7 @@ func TestStagedMintProjectBand(t *testing.T) {
 		m := stagedMintBandModel(t, 34)
 		before := m.projectBandHeight()
 
-		(&m).createSession("/tmp/alpha")
+		m, _ = m.createSession("/tmp/alpha")
 
 		staged := m.projectBandHeight()
 		if staged <= before {

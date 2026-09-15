@@ -35,9 +35,9 @@ func (m Model) SearchError() error {
 // transition it is meant to pre-empt fire first. Clearing the field before the
 // call is the single-shot guard — Model is a value Bubble Tea copies per
 // Update, and the copy cleared here is the one returned.
-func (m *Model) resolveSearchDecision() tea.Cmd {
+func (m Model) resolveSearchDecision() (Model, tea.Cmd) {
 	if m.searchDecide == nil {
-		return nil
+		return m, nil
 	}
 	decide := m.searchDecide
 	m.searchDecide = nil
@@ -45,12 +45,12 @@ func (m *Model) resolveSearchDecision() tea.Cmd {
 	name, err := decide()
 	if err != nil {
 		m.searchErr = err
-		return tea.Quit
+		return m, tea.Quit
 	}
 	if name == "" {
-		return nil
+		return m, nil
 	}
 	m.selected = name
 	m.searchAttached = true
-	return tea.Quit
+	return m, tea.Quit
 }

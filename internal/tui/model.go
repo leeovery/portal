@@ -1505,12 +1505,14 @@ func (m *Model) transitionFromLoading() {
 // them lands second. The decision must precede surfaceBufferedWarnings: that
 // helper empties the buffer, and an attach leaves the TUI with the warnings
 // still owed to the caller.
-func (m *Model) dismissLoadingGate() tea.Cmd {
-	if quit := m.resolveSearchDecision(); quit != nil {
-		return quit
+func (m Model) dismissLoadingGate() (Model, tea.Cmd) {
+	m, quit := m.resolveSearchDecision()
+	if quit != nil {
+		return m, quit
 	}
 	m.transitionFromLoading()
-	return tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
+	cmd := tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
+	return m, cmd
 }
 
 func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
@@ -1625,7 +1627,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			return m, nil
 		}
 		if m.bootstrapComplete && m.activePage == PageLoading {
-			cmd := (&m).dismissLoadingGate()
+			m, cmd = m.dismissLoadingGate()
 			return m, cmd
 		}
 		return m, nil
@@ -1668,7 +1670,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			return m, m.mintSession(dir)
 		}
 		if m.minElapsed && m.activePage == PageLoading {
-			cmd := (&m).dismissLoadingGate()
+			m, cmd = m.dismissLoadingGate()
 			return m, cmd
 		}
 		return m, nil
@@ -1817,30 +1819,27 @@ func (m Model) bootstrapInFlight() bool {
 	return m.progressReceiver != nil && !m.bootstrapComplete
 }
 
-// Callers must assign the returned command to a local before returning the
-// model: `return m, m.createSession(dir)` leaves the order of the model read and
-// this mutating call unspecified, so the staging would be lost on the copy.
-func (m *Model) createSession(dir string) tea.Cmd {
+func (m Model) createSession(dir string) (Model, tea.Cmd) {
 	// The quit a fatal issues is asynchronous, so a keypress already queued can
 	// still reach this: a session minted against a half-bootstrapped server is
 	// exactly what the fatal exists to prevent.
 	if m.fatalActive {
-		return nil
+		return m, nil
 	}
 	if m.bootstrapInFlight() {
 		// First stage wins: the band has already announced the pick, so a silent
 		// re-target is worse than a keypress that visibly changes nothing.
 		if m.stagedMint {
-			return nil
+			return m, nil
 		}
 		m.stagedMint = true
 		m.stagedMintDir = dir
 		// The band is about to swap, and the Projects list budget is measured off
 		// the rendered slot.
 		m.resyncPageLayouts()
-		return nil
+		return m, nil
 	}
-	return m.mintSession(dir)
+	return m, m.mintSession(dir)
 }
 
 // The mint itself, with no gate: reached from the keypress on every model that
@@ -1939,7 +1938,7 @@ func (m Model) handleProjectEnter() (tea.Model, tea.Cmd) {
 	if m.sessionCreator == nil {
 		return m, nil
 	}
-	cmd := (&m).createSession(pi.Project.Path)
+	m, cmd := m.createSession(pi.Project.Path)
 	return m, cmd
 }
 
@@ -2852,11 +2851,11 @@ func (m Model) handleNewInCWD() (tea.Model, tea.Cmd) {
 	if m.sessionCreator == nil {
 		return m, nil
 	}
-	cmd := (&m).createSessionInCWD()
+	m, cmd := m.createSessionInCWD()
 	return m, cmd
 }
 
-func (m *Model) createSessionInCWD() tea.Cmd {
+func (m Model) createSessionInCWD() (Model, tea.Cmd) {
 	return m.createSession(m.cwd)
 }
 
