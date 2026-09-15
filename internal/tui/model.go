@@ -1618,7 +1618,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 		m.sessionsLoaded = true
 		m.evaluateDefaultPage()
-		return m, tea.Batch(cmd, m.maybeDispatchDetectionCmd())
+		detectCmd := m.maybeDispatchDetectionCmd()
+		return m, tea.Batch(cmd, detectCmd)
 	case LoadingMinElapsedMsg:
 		m.minElapsed = true
 		// A fatal parks the model in the error state — never dismiss into the
@@ -1717,7 +1718,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		// The sessionList is deliberately not mutated: cursor position and filter
 		// state must round-trip byte-identically.
 		captured := m.preview.session
-		return m, m.exitPreviewToSessions(captured)
+		refreshCmd := m.exitPreviewToSessions(captured)
+		return m, refreshCmd
 	case previewAttachBailMsg:
 		// Batch, not Sequence: the flash must render on the same frame as the
 		// page flip, with list consistency converging a render or two later.
