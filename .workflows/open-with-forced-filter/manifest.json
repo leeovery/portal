@@ -280,7 +280,8 @@
             4,
             5,
             7,
-            8
+            8,
+            9
           ],
           "completed_phases": [
             1,
@@ -290,7 +291,8 @@
             5,
             6,
             7,
-            8
+            8,
+            9
           ],
           "staging": {
             "p3": {
@@ -351,20 +353,6 @@
           },
           "machine_phases": [
             6
-          ],
-          "bank": [
-            {
-              "task": "open-with-forced-filter-9-2",
-              "source": "reviewer",
-              "summary": "The same flag-beside-value split removed from cmd still exists one layer down, behind two exported internal/tui options that must be applied together",
-              "failure": "A caller that applies WithSearchDecision without WithSearchForm compiles and type-checks. The classification still runs at the loading gate, but the model never declares the session domain, so on a machine whose session list is empty the picker lands on Projects instead of Sessions and a term is never applied to the list. No error, no log line; the user sees the wrong page.",
-              "detail": "internal/tui/model.go:552-557 (WithSearchForm sets searchForm + searchTerm) and internal/tui/search_decision.go:11-15 (WithSearchDecision sets searchDecide) are paired by exactly one production site, internal/tui/build.go:132-134. Collapsing them into one option taking a SearchForm would make the pairing structural, mirroring what pickerLanding now does.",
-              "files": [
-                "internal/tui/build.go",
-                "internal/tui/model.go",
-                "internal/tui/search_decision.go"
-              ]
-            }
           ]
         }
       }
