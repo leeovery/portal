@@ -214,9 +214,9 @@
         "open-with-forced-filter": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "auto",
-          "analysis_gate_mode": "auto",
-          "consolidation_gate_mode": "auto",
+          "fix_gate_mode": "gated",
+          "analysis_gate_mode": "gated",
+          "consolidation_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 7,
           "linters": [
@@ -249,8 +249,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 12,
-          "current_task": null,
+          "current_phase": 13,
+          "current_task": "open-with-forced-filter-13-2",
           "completed_tasks": [
             "open-with-forced-filter-1-1",
             "open-with-forced-filter-1-2",
@@ -309,7 +309,8 @@
             "open-with-forced-filter-12-3",
             "open-with-forced-filter-12-4",
             "open-with-forced-filter-12-5",
-            "open-with-forced-filter-12-6"
+            "open-with-forced-filter-12-6",
+            "open-with-forced-filter-13-1"
           ],
           "consolidated_phases": [
             1,
