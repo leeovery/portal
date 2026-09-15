@@ -1532,46 +1532,35 @@ func (m Model) Init() tea.Cmd {
 	// an already-resolved gate, which is harmless in Batch.
 	detectTimeout := m.themeState.gate.timeoutCmd()
 
-	if m.commandPending {
-		cmds := []tea.Cmd{requestBg, detectTimeout, m.loadProjects()}
-		// A command-pending picker paints from frame one and has no loading page,
-		// but on the cold route the orchestrator still runs behind it: without the
-		// receiver its warnings and its fatal reach no arm at all. Nothing is
-		// synthesized when it is nil — a warm route's warnings are already staged
-		// for the teardown to write.
-		if m.progressReceiver != nil {
-			cmds = append(cmds, m.progressReceiver)
-		}
-		return tea.Batch(cmds...)
-	}
-	fetchSessions := m.fetchSessionsCmd()
-	loadProjects := m.loadProjects()
+	cmds := []tea.Cmd{requestBg, detectTimeout}
 
-	if m.activePage == PageLoading {
+	switch {
+	case m.commandPending:
+		cmds = append(cmds, m.loadProjects())
+	case m.activePage == PageLoading:
 		loadingPadTick := tea.Tick(LoadingMinDuration, func(time.Time) tea.Msg {
 			return LoadingMinElapsedMsg{}
 		})
-		cmds := []tea.Cmd{requestBg, detectTimeout, fetchSessions, loadingPadTick}
-		if m.progressReceiver != nil {
-			// The channel owns the terminal BootstrapCompleteMsg; synthesizing one
-			// here would dismiss the loading page before the orchestrator finished.
-			cmds = append(cmds, m.progressReceiver)
-		} else {
+		cmds = append(cmds, m.fetchSessionsCmd(), loadingPadTick, m.loadProjects())
+		if m.progressReceiver == nil {
 			// Warm route: the orchestrator already ran before this Init, so
-			// satisfy the bootstrapComplete gate from the first tick.
+			// satisfy the bootstrapComplete gate from the first tick. On the cold
+			// route the channel owns the terminal BootstrapCompleteMsg, and
+			// synthesizing one here would dismiss the loading page before the
+			// orchestrator finished.
 			pending := m.pendingBootstrapWarnings
 			cmds = append(cmds, func() tea.Msg { return BootstrapCompleteMsg{Warnings: pending} })
 		}
-		if loadProjects != nil {
-			cmds = append(cmds, loadProjects)
-		}
-		return tea.Batch(cmds...)
+	default:
+		cmds = append(cmds, m.fetchSessionsCmd(), m.loadProjects())
 	}
 
-	if loadProjects != nil {
-		return tea.Batch(requestBg, detectTimeout, fetchSessions, loadProjects)
-	}
-	return tea.Batch(requestBg, detectTimeout, fetchSessions)
+	// Every branch subscribes from here, so a branch added later cannot silently
+	// drop the orchestrator's warnings and its fatal by omitting the rule. A nil
+	// receiver — a warm route, which has no bootstrap running behind this model —
+	// is dropped by Batch along with any other nil above it.
+	cmds = append(cmds, m.progressReceiver)
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
