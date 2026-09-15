@@ -247,7 +247,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 12,
-          "current_task": "open-with-forced-filter-12-6",
+          "current_task": null,
           "completed_tasks": [
             "open-with-forced-filter-1-1",
             "open-with-forced-filter-1-2",
@@ -305,7 +305,8 @@
             "open-with-forced-filter-12-2",
             "open-with-forced-filter-12-3",
             "open-with-forced-filter-12-4",
-            "open-with-forced-filter-12-5"
+            "open-with-forced-filter-12-5",
+            "open-with-forced-filter-12-6"
           ],
           "consolidated_phases": [
             1,
@@ -331,7 +332,8 @@
             8,
             9,
             10,
-            11
+            11,
+            12
           ],
           "staging": {
             "p3": {
@@ -428,6 +430,30 @@
           },
           "machine_phases": [
             6
+          ],
+          "bank": [
+            {
+              "task": "open-with-forced-filter-12-6",
+              "source": "reviewer",
+              "summary": "§2.2 still says Portal answers every completion request with NoFileComp, which this task falsified and which now contradicts §8.1",
+              "failure": "A reader or the next analysis cycle takes §2.2 at face value and re-asserts NoFileComp on the post-separator arm, silently undoing this fix (noticed when `portal open api -- ls src/<TAB>` goes silent again), or spends a cycle re-deriving that two sections of one spec disagree",
+              "detail": "specification.md:48. The consequence the sentence exists for (`portal open /tm<TAB>` never becoming `/tmp/`) still holds — only the quantifier is wrong. The universal was arguably already loose: -p/-z register no completer on purpose (cmd/open.go:783-784), so cobra answers those with Default too. Remedy: qualify it to Portal’s own arguments, or name it as a third corrected claim in the new corrigendum. Outside task 12-6’s authorised edits, hence banked.",
+              "files": [
+                ".workflows/open-with-forced-filter/specification/open-with-forced-filter/specification.md"
+              ]
+            },
+            {
+              "task": "open-with-forced-filter-12-6",
+              "source": "reviewer",
+              "summary": "The boundary word — where the user types the trailing command’s name — still answers with session names and NoFileComp",
+              "failure": "`portal open ~/Code/api -- l<TAB>` offers a live session name and suppresses the shell’s fallback, so the user gets a nonsense candidate and no command or filename completion — the same silence task 12-6 removed one word later. Verified live against the built binary: it returned a real session name with directive 4.",
+              "detail": "cmd/completion.go:104-111 with cmd/open_search.go:46-49. The position is documented as outside the bound (§8.1 and the doc comment) on the reason that the flag layer cannot distinguish it — true of ArgsLenAtDash() but not of the information available: cobra’s completion command sets DisableFlagParsing: true (completions.go:237), so the literal `--` is present in the process argv and the separator’s position is recoverable. Fixing it means a different input for the predicate, beyond task 12-6’s scope.",
+              "files": [
+                "cmd/completion.go",
+                "cmd/open_search.go",
+                ".workflows/open-with-forced-filter/specification/open-with-forced-filter/specification.md"
+              ]
+            }
           ]
         }
       }
