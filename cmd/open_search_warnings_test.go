@@ -191,64 +191,58 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	})
 }
 
-func TestEmitSearchTeardownWarnings(t *testing.T) {
+func TestWarningsOwedAtTeardown(t *testing.T) {
 	warnings := soakedWarnings()
 
-	t.Run("it writes the buffered warnings on a decision attach", func(t *testing.T) {
+	assertOwed := func(t *testing.T, owed, want []warning.Warning, reason string) {
+		t.Helper()
+		got, wantRendered := wantWarningOutput(owed), wantWarningOutput(want)
+		if got != wantRendered {
+			t.Errorf("owed = %q, want %q — %s", got, wantRendered, reason)
+		}
+	}
+
+	t.Run("it owes the buffered set when the loading gate quit on a named session", func(t *testing.T) {
 		model := searchTeardownModel(t, func() (string, error) { return "portal-a1b2", nil }, warnings)
 		if !model.SearchAttached() {
 			t.Fatal("model must record the search attach")
 		}
 
-		var buf bytes.Buffer
-		emitSearchTeardownWarnings(&buf, model)
-
-		if want := wantWarningOutput(warnings); buf.String() != want {
-			t.Errorf("wrote %q, want %q", buf.String(), want)
-		}
+		assertOwed(t, model.WarningsOwedAtTeardown(), warnings, "the attach paints no picker frame")
 	})
 
-	t.Run("it writes the buffered warnings on a decision read failure", func(t *testing.T) {
+	t.Run("it owes the buffered set when the loading gate quit on a failed session-list read", func(t *testing.T) {
 		readErr := errors.New("no server running")
 		model := searchTeardownModel(t, func() (string, error) { return "", readErr }, warnings)
 		if !errors.Is(model.SearchError(), readErr) {
 			t.Fatalf("SearchError() = %v, want %v", model.SearchError(), readErr)
 		}
 
-		var buf bytes.Buffer
-		emitSearchTeardownWarnings(&buf, model)
-
-		if want := wantWarningOutput(warnings); buf.String() != want {
-			t.Errorf("wrote %q, want %q", buf.String(), want)
-		}
+		assertOwed(t, model.WarningsOwedAtTeardown(), warnings, "the failed read paints no picker frame")
 	})
 
-	t.Run("it writes nothing after teardown when the picker opened", func(t *testing.T) {
+	t.Run("it owes the pending set when a picker frame was painted", func(t *testing.T) {
+		model := warmPickerModel(t, tui.Deps{}, warnings)
+
+		assertOwed(t, model.WarningsOwedAtTeardown(), warnings, "a warm picker has no loading gate to consume them")
+	})
+
+	t.Run("it owes nothing once a loading gate has surfaced the buffer", func(t *testing.T) {
 		model := searchTeardownModel(t, func() (string, error) { return "", nil }, warnings)
 		if model.SearchAttached() || model.SearchError() != nil {
 			t.Fatal("a picker decision records neither an attach nor an error")
 		}
 
-		var buf bytes.Buffer
-		emitSearchTeardownWarnings(&buf, model)
-
-		if buf.Len() != 0 {
-			t.Errorf("wrote %q, want nothing — the notice band owns a picker's warnings", buf.String())
-		}
+		assertOwed(t, model.WarningsOwedAtTeardown(), nil, "the notice band owns a picker's warnings")
 	})
 
-	t.Run("it writes nothing when no warnings accumulated", func(t *testing.T) {
+	t.Run("it owes nothing when no warnings accumulated", func(t *testing.T) {
 		model := searchTeardownModel(t, func() (string, error) { return "portal-a1b2", nil }, nil)
 
-		var buf bytes.Buffer
-		emitSearchTeardownWarnings(&buf, model)
-
-		if buf.Len() != 0 {
-			t.Errorf("wrote %q, want nothing", buf.String())
-		}
+		assertOwed(t, model.WarningsOwedAtTeardown(), nil, "nothing was accumulated to owe")
 	})
 
-	t.Run("it writes nothing when the loading page was cancelled", func(t *testing.T) {
+	t.Run("it owes nothing when the loading page was cancelled", func(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		var model tea.Model = tui.Build(tui.Deps{
 			Lister:           &mockSessionLister{},
@@ -268,17 +262,12 @@ func TestEmitSearchTeardownWarnings(t *testing.T) {
 			t.Fatal("a cancelled loading page records neither an attach nor an error")
 		}
 
-		var buf bytes.Buffer
-		emitSearchTeardownWarnings(&buf, m)
-
-		if buf.Len() != 0 {
-			t.Errorf("wrote %q, want nothing — the user asked for nothing and is owed no report", buf.String())
-		}
+		assertOwed(t, m.WarningsOwedAtTeardown(), nil, "the user asked for nothing and is owed no report")
 	})
 }
 
 func TestFinishTUI(t *testing.T) {
-	t.Run("it restores the canvas and writes the warnings before connecting", func(t *testing.T) {
+	t.Run("it writes the owed warnings once, before the connect", func(t *testing.T) {
 		warnings := soakedWarnings()
 		model := searchTeardownModel(t, func() (string, error) { return "portal-a1b2", nil }, warnings)
 		model = withCapturedBackground(t, model)
@@ -294,11 +283,33 @@ func TestFinishTUI(t *testing.T) {
 			t.Fatalf("finishTUI: %v", err)
 		}
 
-		if want := wantWarningOutput(warnings); warningsAtConnect != want {
+		want := wantWarningOutput(warnings)
+		if warningsAtConnect != want {
 			t.Errorf("warnings at connect = %q, want %q — the exec'd attach never returns", warningsAtConnect, want)
+		}
+		if stderr.String() != want {
+			t.Errorf("stderr after teardown = %q, want %q — the owed set is written exactly once", stderr.String(), want)
 		}
 		if canvasAtConnect == "" {
 			t.Error("nothing written to the canvas writer at connect, want the set-back — the attach leaves Portal's colour stuck otherwise")
+		}
+	})
+
+	t.Run("it writes the same lines as the CLI path", func(t *testing.T) {
+		warnings := soakedWarnings()
+		accumulateWarnings(t, warnings)
+		var cli bytes.Buffer
+		bootstrapWarnings.EmitTo(&cli)
+
+		model := searchTeardownModel(t, func() (string, error) { return "portal-a1b2", nil }, warnings)
+
+		var canvas, stderr bytes.Buffer
+		if err := finishTUI(model, &observingConnector{onConnect: func() {}}, &canvas, &stderr); err != nil {
+			t.Fatalf("finishTUI: %v", err)
+		}
+
+		if stderr.String() != cli.String() {
+			t.Errorf("teardown stderr = %q, want the CLI path's %q", stderr.String(), cli.String())
 		}
 	})
 }

@@ -475,6 +475,19 @@ func (m Model) PendingBootstrapWarnings() []BootstrapWarning {
 	return m.pendingBootstrapWarnings
 }
 
+// WarningsOwedAtTeardown is the set the teardown still owes the terminal: the
+// buffered set when the exit left the loading gate without painting a picker
+// frame, and the staged set on every other exit.
+//
+// A cancelled loading page records no decision, so it falls to the staged set —
+// which a loading page empties when it takes the buffer — and is owed nothing.
+func (m Model) WarningsOwedAtTeardown() []BootstrapWarning {
+	if m.activePage == PageLoading && (m.selected != "" || m.searchErr != nil) {
+		return m.bufferedWarnings
+	}
+	return m.pendingBootstrapWarnings
+}
+
 // A loading page folds them into the BootstrapCompleteMsg from Init's first
 // tick; with no loading page they stay staged for the teardown to write.
 func (m *Model) SetPendingBootstrapWarnings(warnings []BootstrapWarning) {

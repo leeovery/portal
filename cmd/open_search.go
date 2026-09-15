@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"io"
-
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
@@ -202,16 +200,4 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 		return openSessionFunc(cmd, name)
 	}
 	return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
-}
-
-// emitSearchTeardownWarnings writes the warnings a search form's picker
-// buffered but never surfaced, for the two teardowns that leave no picker
-// frame behind: the attach its decision named, and the session-list read that
-// failed. The picker owns its own warning surfacing, and a cancelled loading
-// page is owed no report.
-func emitSearchTeardownWarnings(w io.Writer, model tui.Model) {
-	if !model.SearchAttached() && model.SearchError() == nil {
-		return
-	}
-	tui.WriteBootstrapWarnings(w, model.BufferedWarnings())
 }

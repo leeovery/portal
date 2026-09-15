@@ -623,10 +623,7 @@ func finishTUI(model tui.Model, connector SessionConnector, canvas, warnings io.
 	// ignore Bubble Tea's OSC 111 reset keep the canvas colour after Portal quits.
 	tui.RestoreTerminalBackground(canvas, model)
 	// Before the connect: the outside-tmux attach execs and never returns.
-	emitSearchTeardownWarnings(warnings, model)
-	// Disjoint from the buffered set above: a warm picker has no loading gate to
-	// consume what was staged, so the terminal is the only place left to report it.
-	tui.WriteBootstrapWarnings(warnings, model.PendingBootstrapWarnings())
+	tui.WriteBootstrapWarnings(warnings, model.WarningsOwedAtTeardown())
 
 	return processTUIResult(model, connector)
 }
