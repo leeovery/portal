@@ -202,7 +202,7 @@
         "open-with-forced-filter": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
           "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
@@ -238,7 +238,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 11,
-          "current_task": "open-with-forced-filter-11-2",
+          "current_task": "open-with-forced-filter-11-3",
           "completed_tasks": [
             "open-with-forced-filter-1-1",
             "open-with-forced-filter-1-2",
@@ -287,7 +287,8 @@
             "open-with-forced-filter-10-3",
             "open-with-forced-filter-10-4",
             "open-with-forced-filter-10-5",
-            "open-with-forced-filter-11-1"
+            "open-with-forced-filter-11-1",
+            "open-with-forced-filter-11-2"
           ],
           "consolidated_phases": [
             1,
@@ -387,6 +388,18 @@
           },
           "machine_phases": [
             6
+          ],
+          "bank": [
+            {
+              "task": "open-with-forced-filter-11-2",
+              "source": "reviewer",
+              "summary": "The same order-unspecified return shape sits on two pre-existing sites this task was told to leave alone",
+              "failure": "A toolchain that copies a return statements plain operand before evaluating its calls silently drops the mutation. At the first site the lost write is the detection latch, so the picker walks the host-terminal process tree a second time per session, noticed only as duplicated spawn DEBUG lines and a slower Sessions page. At the second the lost writes are the active page and the cleared preview, so dismissing the scrollback preview leaves the user stranded on the preview page with no way back — a user-facing wedge with no error.",
+              "detail": "internal/tui/model.go:1620 — return m, tea.Batch(cmd, m.maybeDispatchDetectionCmd()) (pointer receiver, sets the detection latch); internal/tui/model.go:1719 — return m, m.exitPreviewToSessions(captured) (exitPreviewToSessions at :1383, pointer receiver, sets activePage and clears m.preview). Both predate this diff and both are outside this tasks four. The fix is the same one-line local-assignment respelling, or converting those two helpers to value-in/value-out. A repo-wide scan of return m, ... against every *Model method in the package found exactly these two beyond the in-scope :1514.",
+              "files": [
+                "internal/tui/model.go"
+              ]
+            }
           ]
         }
       }
