@@ -513,7 +513,16 @@
               "intent": "The progressReceiver field comment at internal/tui/model.go:237 ends \"when nil, Init synthesizes it\", unqualified, but only the PageLoading branch synthesizes a BootstrapCompleteMsg for a nil receiver (:1559-1567); the commandPending branch (:1552-1553) and the default branch (:1569-1570) synthesize nothing. Replacing the clause with \"when nil, the loading branch synthesizes it\" narrows the field's own contract to what Init does. Provenance checked: the comment text dates to commit 915e7fcbb (2026-08-11), a month before this work unit began (1ea439825, 2026-09-10), and both non-synthesizing routes existed in Init before it — this change-set's task 10-1 restructured the if-chain into a switch without introducing the wrong claim. The behaviour belongs to the cold-path startup flip.",
               "fails": "A maintainer reading the field's own doc while working the command-pending route concludes every nil-receiver model gets a synthesized terminal event, and synthesizing one on that branch is exactly what the warm command-pending route must not have."
             }
-          ]
+          ],
+          "staging": {
+            "c1": {
+              "gate_mode": "gated",
+              "tasks": {
+                "1": "pending",
+                "2": "pending"
+              }
+            }
+          }
         }
       }
     }
