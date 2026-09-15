@@ -12,7 +12,10 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/tui"
+	"github.com/leeovery/portal/internal/warning"
 )
 
 // lockBound is the lowered acquisition bound the lock-timeout suites drive the
@@ -250,4 +253,36 @@ func shapeOfLanding(l pickerLanding) landingShape {
 		shape.decided = l.search.Decide != nil
 	}
 	return shape
+}
+
+// driveLoadingGates satisfies both of the picker's loading gates and, when the
+// model answers by dispatching its search decision rather than dismissing,
+// runs that command and delivers its answer — the step a running Bubble Tea
+// program takes and a hand-driven model otherwise skips.
+func driveLoadingGates(t *testing.T, model tea.Model, warnings []warning.Warning) tea.Model {
+	t.Helper()
+
+	var dispatched tea.Cmd
+	for _, msg := range []tea.Msg{tui.LoadingMinElapsedMsg{}, tui.BootstrapCompleteMsg{Warnings: warnings}} {
+		var cmd tea.Cmd
+		model, cmd = model.Update(msg)
+		m, ok := model.(tui.Model)
+		if !ok {
+			t.Fatalf("model type = %T, want tui.Model", model)
+		}
+		// A command returned with the page still loading is the decision going
+		// out; one returned alongside the dismissal belongs to the picker.
+		if cmd != nil && m.ActivePage() == tui.PageLoading {
+			dispatched = cmd
+		}
+	}
+	if dispatched == nil {
+		return model
+	}
+	answer := dispatched()
+	if answer == nil {
+		return model
+	}
+	model, _ = model.Update(answer)
+	return model
 }

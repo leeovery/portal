@@ -46,9 +46,11 @@ type searchColdBootRun struct {
 }
 
 // driveSearchColdBoot runs the real ten-step orchestrator through the real
-// progress pipe into a real search-form model, pumping the pipe by hand. The
-// model's own returned commands are discarded deliberately: it carries the same
-// receiver closure, so running both would race two consumers on one channel.
+// progress pipe into a real search-form model, pumping the pipe by hand. Only
+// the command the terminal complete event returns is run — the one that
+// dispatches the search decision. Every other returned command is discarded
+// deliberately: a progress update re-issues the same receiver closure this loop
+// is already pumping, so running it would race two consumers on one channel.
 func driveSearchColdBoot(t *testing.T, client *tmux.Client, stateDir, term string) *searchColdBootRun {
 	t.Helper()
 
@@ -113,7 +115,15 @@ func driveSearchColdBoot(t *testing.T, client *tmux.Client, stateDir, term strin
 				return run
 			}
 
-			model, _ = model.Update(msg)
+			_, isComplete := msg.(tui.BootstrapCompleteMsg)
+
+			var cmd tea.Cmd
+			model, cmd = model.Update(msg)
+			if isComplete && cmd != nil {
+				if answer := cmd(); answer != nil {
+					model, _ = model.Update(answer)
+				}
+			}
 
 			if realStep {
 				assertStandingOnLoadingPage(t, model.(tui.Model), run)

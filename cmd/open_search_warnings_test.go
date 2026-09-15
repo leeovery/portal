@@ -63,8 +63,7 @@ func searchTeardownModel(t *testing.T, decide func() (string, error), warnings [
 		Search:           &tui.SearchForm{Term: "port", Decide: decide},
 	})
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(tui.LoadingMinElapsedMsg{})
-	model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+	model = driveLoadingGates(t, model, warnings)
 
 	m, ok := model.(tui.Model)
 	if !ok {
@@ -226,8 +225,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
-		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: orchestrator})
+		model = driveLoadingGates(t, model, orchestrator)
 
 		updated := model.(tui.Model)
 		if !updated.SearchAttached() {

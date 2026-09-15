@@ -26,31 +26,39 @@ func (m Model) SearchError() error {
 	return m.searchErr
 }
 
-// resolveSearchDecision runs the search classification at the loading-to-picker
-// gate and returns tea.Quit when the model must leave without a picker frame —
-// a named session to attach, or a read failure to report. A nil return means
-// the transition proceeds.
-//
-// The closure runs synchronously: deferring it through a tea.Cmd would let the
-// transition it is meant to pre-empt fire first. Clearing the field before the
-// call is the single-shot guard — Model is a value Bubble Tea copies per
-// Update, and the copy cleared here is the one returned.
-func (m Model) resolveSearchDecision() (Model, tea.Cmd) {
-	if m.searchDecide == nil {
-		return m, nil
-	}
-	decide := m.searchDecide
-	m.searchDecide = nil
+// searchDecisionMsg is the classification the dispatched closure answered with:
+// a session to attach, the empty string for the picker, or a failed read.
+type searchDecisionMsg struct {
+	name string
+	err  error
+}
 
-	name, err := decide()
-	if err != nil {
-		m.searchErr = err
+// searchDecisionCmd runs the classification off the update goroutine. The
+// closure is supplied by the caller and reads tmux, so its duration is
+// unbounded from here: running it inline would freeze the loading page — and
+// its Ctrl-C — for as long as the server takes to answer.
+func (m Model) searchDecisionCmd() tea.Cmd {
+	decide := m.searchDecide
+	return func() tea.Msg {
+		name, err := decide()
+		return searchDecisionMsg{name: name, err: err}
+	}
+}
+
+// applySearchDecision acts on the answered classification: tea.Quit without a
+// picker frame for an attach or a read failure, and today's dismissal sequence
+// for anything else.
+func (m Model) applySearchDecision(msg searchDecisionMsg) (Model, tea.Cmd) {
+	m.searchDecide = nil
+	m.searchDecideInFlight = false
+	if msg.err != nil {
+		m.searchErr = msg.err
 		return m, tea.Quit
 	}
-	if name == "" {
-		return m, nil
+	if msg.name != "" {
+		m.selected = msg.name
+		m.searchAttached = true
+		return m, tea.Quit
 	}
-	m.selected = name
-	m.searchAttached = true
-	return m, tea.Quit
+	return m.completeLoadingDismissal()
 }

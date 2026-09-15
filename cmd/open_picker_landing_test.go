@@ -69,8 +69,7 @@ func TestBuildTUIModel_PickerLanding(t *testing.T) {
 
 		var model tea.Model = buildTUIModel(cfg, landing, nil)
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		model, _ = model.Update(tui.BootstrapCompleteMsg{})
-		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model = driveLoadingGates(t, model, nil)
 
 		m, ok := model.(tui.Model)
 		if !ok {

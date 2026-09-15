@@ -189,12 +189,15 @@ type Model struct {
 	// action, so the landing never clears them.
 	searchForm bool
 	searchTerm string
-	// searchDecide is the cold-boot classification the loading gate runs once,
-	// cleared on the copy that runs it; nil for every picker no search form
-	// supplied one for.
-	searchDecide   func() (string, error)
-	searchAttached bool
-	searchErr      error
+	// searchDecide is the cold-boot classification the loading gate dispatches
+	// once; nil for every picker no search form supplied one for.
+	searchDecide func() (string, error)
+	// The gate's own state, not the closure field, is the single-shot guard: a
+	// repeated gate message while the decision is out must neither dispatch it
+	// again nor dismiss the page ahead of its answer.
+	searchDecideInFlight bool
+	searchAttached       bool
+	searchErr            error
 	// searchItems holds the session fields the containment filter ranks its
 	// targets by; nil for every picker a search term did not open.
 	searchItems        *searchItemSource
@@ -1503,14 +1506,25 @@ func (m *Model) transitionFromLoading() {
 }
 
 // Both loading gates dismiss through here, so the sequence holds whichever of
-// them lands second. The decision must precede surfaceBufferedWarnings: that
-// helper empties the buffer, and an attach leaves the TUI with the warnings
-// still owed to the caller.
+// them lands second. An outstanding search decision is a third condition on the
+// gate rather than a step within it: the page stays on PageLoading until the
+// dispatched command answers, which is what keeps the decision ahead of
+// surfaceBufferedWarnings — that helper empties the buffer, and an attach leaves
+// the TUI with the warnings still owed to the caller.
 func (m Model) dismissLoadingGate() (Model, tea.Cmd) {
-	m, quit := m.resolveSearchDecision()
-	if quit != nil {
-		return m, quit
+	if m.searchDecideInFlight {
+		// A repeat of either gate message while the decision is out: hold the
+		// page, since the decision's own message is what dismisses it.
+		return m, nil
 	}
+	if m.searchDecide != nil {
+		m.searchDecideInFlight = true
+		return m, m.searchDecisionCmd()
+	}
+	return m.completeLoadingDismissal()
+}
+
+func (m Model) completeLoadingDismissal() (Model, tea.Cmd) {
 	m.transitionFromLoading()
 	cmd := tea.Batch(m.surfaceBufferedWarnings(), m.refetchSessionsAfterRestore(), m.maybeDispatchDetectionCmd())
 	return m, cmd
@@ -1634,6 +1648,13 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
+	case searchDecisionMsg:
+		// A fatal parks the model in the error state — a decision answering after
+		// it must never dismiss the error frame.
+		if m.fatalActive {
+			return m, nil
+		}
+		return m.applySearchDecision(msg)
 	case BootstrapProgressMsg:
 		// Re-issuing the single blocking receive preserves exact event order even
 		// though Bubble Tea batches commands.

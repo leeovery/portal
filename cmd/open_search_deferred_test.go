@@ -232,8 +232,7 @@ func searchDecisionTUI(t *testing.T, decide func() (string, error)) tui.Model {
 		Search:           &tui.SearchForm{Term: "port", Decide: decide},
 	})
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(tui.BootstrapCompleteMsg{})
-	model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+	model = driveLoadingGates(t, model, nil)
 
 	m, ok := model.(tui.Model)
 	if !ok {
