@@ -179,16 +179,10 @@ in host-terminal windows.`,
 			return runSearchForm(cmd, resolver.SearchTerm(forms[0]))
 		}
 
-		// Ahead of resolution and the pin dispatch, so a filter combined with a pin
-		// is rejected rather than resolving the pin.
+		// Ahead of resolution and the pin dispatch: -f always opens the picker, and
+		// the Args validator has already refused every line where it would not.
 		if cmd.Flags().Changed("filter") {
 			filterVal, _ := cmd.Flags().GetString("filter")
-			if destination != "" || anyOpenDomainPin(cmd) {
-				return NewUsageError("cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)")
-			}
-			if filterVal == "" {
-				return NewUsageError("-f/--filter value must not be empty")
-			}
 			return openTUIFunc(cmd, pickerLanding{filter: filterVal}, command, serverWasStarted(cmd))
 		}
 
@@ -232,6 +226,23 @@ in host-terminal windows.`,
 		}
 		return openResolved(cmd, result, command)
 	},
+}
+
+// validateFilterFlag refuses the lines -f cannot open a picker for: it is the
+// whole-picker form, so it composes with neither a target nor a domain pin, and
+// it needs text to filter by. destination is the positional target the line
+// carries, empty when it carries none.
+func validateFilterFlag(cmd *cobra.Command, destination string) error {
+	if !cmd.Flags().Changed("filter") {
+		return nil
+	}
+	if destination != "" || anyOpenDomainPin(cmd) {
+		return NewUsageError("cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)")
+	}
+	if filterVal, _ := cmd.Flags().GetString("filter"); filterVal == "" {
+		return NewUsageError("-f/--filter value must not be empty")
+	}
+	return nil
 }
 
 // openDomainPinFlags order is load-bearing: it is the precedence the RunE

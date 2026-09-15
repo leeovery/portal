@@ -44,14 +44,24 @@ type pickerLanding struct {
 	decide func() (string, error)
 }
 
-// validateOpenArgs refuses a line carrying a search form beside anything else.
-// It runs as open's Args validator so the refusal is decided from the arguments
-// alone: cobra validates args before PersistentPreRunE, so a refused line starts
-// no tmux server, restores nothing and paints no frame.
+// validateOpenArgs refuses a search form beside anything else, a command scoped
+// both ways or scoped emptily, and a filter beside a target or with no text. It
+// runs as open's Args validator because each of those refusals is decided from
+// the arguments alone, and cobra validates args before PersistentPreRunE — so a
+// refused line starts no tmux server, restores nothing and paints no frame.
 //
-// The collisions are tested in a fixed order, so a line colliding several ways
+// The refusals are tested in a fixed order, so a line colliding several ways
 // always names the same one.
 func validateOpenArgs(cmd *cobra.Command, args []string) error {
+	if err := validateSearchFormCollisions(cmd, args); err != nil {
+		return err
+	}
+	return validateCommandScopeAndFilter(cmd, args)
+}
+
+// validateSearchFormCollisions refuses a line carrying a search form beside
+// anything else. A line carrying no search form collides with nothing here.
+func validateSearchFormCollisions(cmd *cobra.Command, args []string) error {
 	forms := searchFormPositionals(cmd, args)
 	if len(forms) == 0 {
 		return nil
@@ -72,6 +82,17 @@ func validateOpenArgs(cmd *cobra.Command, args []string) error {
 		return NewUsageError("cannot use a /term search with --ack")
 	}
 	return nil
+}
+
+// validateCommandScopeAndFilter refuses the non-search collisions, through the
+// same parse RunE takes the command and destination from, so the rules have one
+// home.
+func validateCommandScopeAndFilter(cmd *cobra.Command, args []string) error {
+	_, destination, err := parseCommandArgs(cmd, args)
+	if err != nil {
+		return err
+	}
+	return validateFilterFlag(cmd, destination)
 }
 
 // SearchSessionSource enumerates the live sessions a search term is counted

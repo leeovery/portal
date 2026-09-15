@@ -751,3 +751,157 @@ func TestCurrentPickerSession(t *testing.T) {
 		}
 	})
 }
+
+// executeOpenExpectingPreBootstrapUsage runs an open line expected to be refused
+// from the Args validator, and asserts the refusal cost the user nothing: no
+// bootstrap, no resolution, no picker.
+func executeOpenExpectingPreBootstrapUsage(t *testing.T, wantMsg string, argv ...string) {
+	t.Helper()
+
+	runner := &recordingRunner{}
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
+
+	seams := &recordingResolverSeams{}
+	withOpenDeps(t, OpenDeps{
+		SessionLister:  seams,
+		AliasLookup:    seams,
+		Zoxide:         seams,
+		DirValidator:   seams,
+		SearchSessions: &fakeSearchSource{},
+	})
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+		t.Error("a refused line must never reach the picker")
+		return nil
+	})
+
+	executeOpenExpectingUsage(t, wantMsg, argv...)
+
+	if runner.calls != 0 {
+		t.Errorf("bootstrap ran %d times for a refused line, want 0", runner.calls)
+	}
+	if seams.consulted() {
+		t.Error("a refused line must consult no resolver seam")
+	}
+}
+
+func TestValidateOpenArgs_RefusesAMalformedFilterLineBeforeBootstrap(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{
+			name: "empty value",
+			argv: []string{"-f", ""},
+			want: "-f/--filter value must not be empty",
+		},
+		{
+			name: "beside a positional target",
+			argv: []string{"-f", "blog", "api"},
+			want: "cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executeOpenExpectingPreBootstrapUsage(t, tt.want, tt.argv...)
+		})
+	}
+}
+
+func TestValidateOpenArgs_RefusesFilterBesideEachDomainPinBeforeBootstrap(t *testing.T) {
+	want := "cannot use -f/--filter with a target or a domain pin (-s/-p/-z/-a)"
+
+	for _, pin := range []string{"-s", "-p", "-a", "-z"} {
+		t.Run(pin, func(t *testing.T) {
+			executeOpenExpectingPreBootstrapUsage(t, want, "-f", "blog", pin, "api")
+		})
+	}
+}
+
+func TestValidateOpenArgs_RefusesAMalformedCommandScopeBeforeBootstrap(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{
+			name: "empty exec value",
+			argv: []string{"-e", ""},
+			want: "-e/--exec value must not be empty",
+		},
+		{
+			name: "exec together with a separator",
+			argv: []string{"-e", "vim", "--", "claude"},
+			want: "cannot use both -e/--exec and -- to specify a command",
+		},
+		{
+			name: "bare separator",
+			argv: []string{"--"},
+			want: "no command specified after --",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executeOpenExpectingPreBootstrapUsage(t, tt.want, tt.argv...)
+		})
+	}
+}
+
+func TestValidateOpenArgs_KeepsTodaysRefusalPrecedence(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{
+			name: "a search form outranks an empty -f",
+			argv: []string{"/port", "-f", ""},
+			want: "cannot use a /term search with -f/--filter",
+		},
+		{
+			name: "an empty -e outranks an empty -f",
+			argv: []string{"-e", "", "-f", ""},
+			want: "-e/--exec value must not be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executeOpenExpectingPreBootstrapUsage(t, tt.want, tt.argv...)
+		})
+	}
+}
+
+func TestValidateOpenArgs_StillAnswersHelpOnAMalformedFilterLine(t *testing.T) {
+	installSearchFormSeams(t, nil)
+
+	out, _, err := runRootCmd(t, "open", "-f", "", "--help")
+	if err != nil {
+		t.Fatalf(`portal open -f "" --help: unexpected error: %v`, err)
+	}
+	if !strings.Contains(out.String(), "Usage:") {
+		t.Errorf("help output missing usage section: %q", out.String())
+	}
+}
+
+func TestOpenCommand_MalformedAckStillRefusedFromTheCommandBody(t *testing.T) {
+	runner := &recordingRunner{}
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
+
+	seams := &recordingResolverSeams{}
+	withOpenDeps(t, OpenDeps{
+		SessionLister:  seams,
+		AliasLookup:    seams,
+		Zoxide:         seams,
+		DirValidator:   seams,
+		SearchSessions: &fakeSearchSource{},
+	})
+
+	executeOpenExpectingUsage(t, "open: --ack must be <batch>:<token>", "dev", "--ack", "notcolon")
+
+	if runner.calls != 1 {
+		t.Errorf("bootstrap ran %d times, want 1: --ack is refused from the command body, downstream of bootstrap", runner.calls)
+	}
+}
