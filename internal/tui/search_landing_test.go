@@ -210,3 +210,36 @@ func TestSearchFormLanding(t *testing.T) {
 		}
 	})
 }
+
+func TestSearchFormPrecedenceOverInitialFilter(t *testing.T) {
+	sessions := []tmux.Session{
+		{Name: "myapp-dev"},
+		{Name: "other"},
+	}
+
+	t.Run("it lands on the search term when a Deps carries both a search form and an initial filter", func(t *testing.T) {
+		m := Build(Deps{
+			Lister:        fakeLister{},
+			ProjectStore:  stubProjectStore{},
+			InitialMode:   prefs.ModeFlat,
+			Search:        &SearchForm{Term: "myapp"},
+			InitialFilter: "other",
+		})
+
+		if got := m.initialFilter; got != "" {
+			t.Errorf("initialFilter = %q, want the search form to have kept it off the model", got)
+		}
+
+		m = ingestLanding(t, m, sessions, nil)
+
+		if m.activePage != PageSessions {
+			t.Errorf("activePage = %v, want PageSessions", m.activePage)
+		}
+		if got := m.sessionList.FilterState(); got != list.FilterApplied {
+			t.Errorf("session filter state = %v, want FilterApplied", got)
+		}
+		if got := m.sessionList.FilterValue(); got != "myapp" {
+			t.Errorf("session filter value = %q, want the search term %q", got, "myapp")
+		}
+	})
+}

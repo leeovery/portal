@@ -1316,7 +1316,8 @@ func (m *Model) evaluateDefaultPage() {
 	m.applyInitialCursor()
 }
 
-// A search form carries no initial filter, so exactly one of the two applies.
+// Build wires no initial filter alongside a search form, so exactly one of the
+// two applies.
 func (m *Model) applySearchLanding() {
 	if !m.searchForm {
 		return

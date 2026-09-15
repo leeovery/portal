@@ -174,7 +174,7 @@ func Build(deps Deps) Model {
 	if len(deps.Command) > 0 {
 		m = m.WithCommand(deps.Command)
 	}
-	if deps.InitialFilter != "" {
+	if deps.Search == nil && deps.InitialFilter != "" {
 		m = m.WithInitialFilter(deps.InitialFilter)
 	}
 	if deps.InsideTmux && deps.CurrentSession != "" {
