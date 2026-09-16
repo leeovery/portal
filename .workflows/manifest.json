@@ -185,6 +185,9 @@
     },
     "open-with-forced-filter": {
       "work_type": "feature"
+    },
+    "lazy-resume-on-attach": {
+      "work_type": "feature"
     }
   },
   "defaults": {

@@ -1,0 +1,15 @@
+{
+  "name": "lazy-resume-on-attach",
+  "work_type": "feature",
+  "status": "in-progress",
+  "created": "2026-09-16",
+  "description": "Restored panes replay as today, but the resume hook is held behind an in-pane confirmation prompt instead of firing at boot — with a preference for eager or lazy resumption.",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-08-21-lazy-resume-on-attach.md",
+      "source": "inbox:idea",
+      "seeded_at": "2026-09-16T14:47:16Z"
+    }
+  ]
+}
