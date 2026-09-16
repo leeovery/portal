@@ -20,6 +20,17 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/skills/workflow-engine/scripts/engine.cjs\" session resume"
+          }
+        ]
+      }
     ]
   }
 }
