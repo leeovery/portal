@@ -232,3 +232,64 @@ func TestContainmentFilterOnTwoSessionsSharingOneFilterValue(t *testing.T) {
 		}
 	})
 }
+
+func TestContainmentFilterAcrossGenerationsOfOneCollidingFilterValue(t *testing.T) {
+	t.Run("it ranks nothing when a held generation's colliding entry matches and the session the target came from does not", func(t *testing.T) {
+		named, recorded := collidingSessions(t)
+		fromRecorded := []list.Item{SessionItem{Session: recorded}}
+		src := &searchItemSource{}
+		src.set(fromRecorded)
+		src.set([]list.Item{SessionItem{Session: named}})
+
+		got := containmentFilter("api ~", src)("api ~", filterTargets(fromRecorded))
+
+		if len(got) != 0 {
+			t.Fatalf("ranks = %v, want none — the target's own session does not contain the term", rankIndexes(got))
+		}
+	})
+
+	t.Run("it ranks nothing when the session the target came from matches and a since-departed generation's colliding entry does not", func(t *testing.T) {
+		named, recorded := collidingSessions(t)
+		fromNamed := []list.Item{SessionItem{Session: named}}
+		src := &searchItemSource{}
+		src.set([]list.Item{SessionItem{Session: recorded}})
+		src.set(fromNamed)
+
+		got := containmentFilter("api ~", src)("api ~", filterTargets(fromNamed))
+
+		if len(got) != 0 {
+			t.Fatalf("ranks = %v, want none — a generation under the same key does not contain the term", rankIndexes(got))
+		}
+	})
+
+	t.Run("it ranks every target under a colliding key once every generation's pairs contain the term", func(t *testing.T) {
+		named, recorded := collidingSessions(t)
+		src := &searchItemSource{}
+		src.set([]list.Item{SessionItem{Session: named}})
+		src.set([]list.Item{SessionItem{Session: recorded}})
+		targets := filterTargets([]list.Item{SessionItem{Session: named}, SessionItem{Session: recorded}})
+
+		got := containmentFilter("api", src)("api", targets)
+
+		if want := []int{0, 1}; !slices.Equal(rankIndexes(got), want) {
+			t.Fatalf("ranks = %v, want %v — every generation's pair contains the term", rankIndexes(got), want)
+		}
+	})
+
+	t.Run("it holds one entry per distinct field pair when the same generation is recorded repeatedly", func(t *testing.T) {
+		named, recorded := collidingSessions(t)
+		items := []list.Item{SessionItem{Session: named}, SessionItem{Session: recorded}}
+		src := &searchItemSource{}
+		for range 3 {
+			src.set(items)
+		}
+
+		entries := src.current()
+		if len(entries) != 1 {
+			t.Fatalf("keys = %d, want 1 — both rows share one filter value", len(entries))
+		}
+		if held := entries[items[0].FilterValue()]; len(held) != 2 {
+			t.Fatalf("entries under the shared key = %v, want one per distinct field pair", held)
+		}
+	})
+}

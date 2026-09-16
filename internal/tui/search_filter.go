@@ -16,10 +16,15 @@ type searchEntry struct {
 }
 
 // searchItemSource maps each session row's filter value to every distinct field
-// pair that produced it, so a filter pass can answer for targets from any
-// generation the source has held. A filter value is not injective — a session
-// named for the text another session's directory abbreviates to yields the same
-// one — so a key holds a set rather than a single pair. It is held by pointer
+// pair any generation of the list has produced for it, accumulated for the life
+// of the source, so a filter pass can answer for targets from any generation.
+// One source is built per picker run and every generation is recorded before its
+// items reach the list, so a pass can only be handed targets the source has
+// already held. A filter value is not injective — a session named for the text
+// another session's directory abbreviates to yields the same one — and two
+// generations can produce one value from different pairs, so a key holds a set
+// rather than a single pair, and accumulating it is what lets a pass see both
+// sides of such a collision. It is held by pointer
 // because Model is a value Bubble Tea copies on every Update: a map field would
 // go stale in whichever copy the filter closure was built against, while a
 // pointer is shared by every copy. The mutex is load-bearing: the write runs on
@@ -30,10 +35,18 @@ type searchItemSource struct {
 	entries map[string][]searchEntry
 }
 
-// set records the session rows among items. Rows sharing a session collapse onto
-// one entry, and a header's empty filter value contributes none.
+// set folds the session rows among items into what the source already holds.
+// Rows sharing a field pair collapse onto one entry, and a header's empty filter
+// value contributes none.
 func (s *searchItemSource) set(items []list.Item) {
-	entries := make(map[string][]searchEntry, len(items))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// A fresh map cloning every held slice, so neither the map nor the slices a
+	// concurrent reader already holds are written to.
+	entries := make(map[string][]searchEntry, len(s.entries)+len(items))
+	for value, held := range s.entries {
+		entries[value] = slices.Clone(held)
+	}
 	for _, item := range items {
 		si, ok := item.(SessionItem)
 		if !ok {
@@ -45,8 +58,6 @@ func (s *searchItemSource) set(items []list.Item) {
 			entries[value] = append(entries[value], entry)
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.entries = entries
 }
 
@@ -64,10 +75,11 @@ func (s *searchItemSource) current() map[string][]searchEntry {
 // picker's own fuzzy rule. Ranks index the targets the pass was handed, so they
 // resolve against the item generation that pass belongs to however many rebuilds
 // have landed since. A target ranks only when the source holds it and every field
-// pair under it matches: a target the source does not hold, and one whose pairs
-// disagree about the term, both rank nothing — so a pass running behind, or one
-// answering for a target two distinct sessions produced, can only omit a row,
-// never surface one the term does not match.
+// pair recorded under it matches: a target no generation has produced, and one
+// whose accumulated pairs disagree about the term, both rank nothing — so a pass
+// running behind a rebuild, a pass answering for a target two distinct sessions
+// produced, and a pass that is both at once can each only omit a row, never
+// surface one the term does not match.
 //
 // MatchedIndexes is left nil, so a delegate that highlights matched runes would
 // get none from this rule.
