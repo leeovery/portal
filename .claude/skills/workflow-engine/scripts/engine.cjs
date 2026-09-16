@@ -34,7 +34,7 @@ const { stampAnalysisCache } = require('./domain/cache.cjs');
 const agentState = require('./domain/agent-state.cjs');
 const { boot } = require('./domain/boot.cjs');
 const { beatPresence, clearPresence, beatQuietly, refreshQuietly, clearQuietly, scanPresence, scanProject, cleanupPresence, deferralSection, CODE_PHASES } = require('./domain/presence.cjs');
-const { applySessionLabel, restoreSessionLabel, repairSessionLabels, recordLabelChoice } = require('./domain/session-label.cjs');
+const { applySessionLabel, restoreSessionLabel, repairSessionLabels, resumeSessionLabel, recordLabelChoice } = require('./domain/session-label.cjs');
 const { createWorkUnit } = require('./domain/workunit-create.cjs');
 const { completeWorkUnit, cancelWorkUnit, reactivateWorkUnit, pivotWorkUnit } = require('./domain/workunit-lifecycle.cjs');
 const { absorbWorkUnit } = require('./domain/workunit-absorb.cjs');
@@ -55,6 +55,15 @@ function die(msg) {
 /** One decision-ready JSON line on stdout. @param {object} obj */
 function respond(obj) {
   process.stdout.write(JSON.stringify({ ok: true, ...obj }) + '\n');
+}
+
+/**
+ * The same line on stderr — for a SessionStart hook target, whose stdout
+ * Claude Code injects into the conversation as context.
+ * @param {object} obj
+ */
+function respondOnStderr(obj) {
+  process.stderr.write(JSON.stringify({ ok: true, ...obj }) + '\n');
 }
 
 /**
@@ -161,9 +170,11 @@ Commands:
   presence clear <work-unit> <phase> <topic>
   presence scan [work-unit]
   presence cleanup [session-id]
-  session label <work-unit> <phase> <topic>
+  session label <name> [<phase> <topic>]
   session label-config <true|false>
+  session repair
   session cleanup [session-id]
+  session resume [session-id]
   topic complete <work-unit> <phase> <topic>
   topic reopen <work-unit> <phase> <topic>
   topic supersede <work-unit> <phase> <topic> --by <topic>
@@ -308,6 +319,8 @@ Commands:
   render absorb-name-gate  <feature> --into <epic>
   render absorb-confirm-gate <feature>
   render plan-topics       <wu>
+  render archived-actions  --path <archived path>
+  render archived-delete-gate --path <archived path>
   render revisit-phases    <wu>
   render roadmap-view
   render roadmap-add-gate --horizon <name>
@@ -332,6 +345,9 @@ Commands:
   render baseline-offer-gate
   render migration-gate
   render label-gate
+  render knowledge-gate --variant reuse|deviate|mode|retry [--provider <name> --model <name>]
+  render legacy-split-gate --variant themes|plan|remove
+  render legacy-split-display --variant candidates|plan|errors --file <payload.json>
   render signpost <label> [--style step|substep] [--width N]     (dev aid)
   render box <title> [--width N]                                 (dev aid)
   render wrap <text> [--width N] [--prefix STR]                  (dev aid)
@@ -773,7 +789,7 @@ const TOPIC_COMMANDS = { start: startTopic, triage: triageTopic, complete: compl
 const TOPIC_BEATS = ['start'];
 
 /**
- * A SessionEnd hook target's session id: the argument when given, else the
+ * A session hook target's session id: the argument when given, else the
  * hook's stdin JSON.
  * @param {string[]} rest @param {string} usage @returns {string|null}
  */
@@ -787,7 +803,7 @@ function hookSessionId(rest, usage) {
 }
 
 /**
- * The project root a SessionEnd hook acts on: the invocation cwd when it is
+ * The project root a session hook acts on: the invocation cwd when it is
  * a project root (has `.workflows`), else CLAUDE_PROJECT_DIR for a hook
  * fired from a drifted cwd.
  * @returns {string}
@@ -847,11 +863,13 @@ function runSession(argv) {
   const [command, ...rest] = argv;
   try {
     if (command === 'label') {
-      const [workUnit, phase, topic] = rest;
-      if (!workUnit || !phase || !topic || rest.length !== 3) {
-        throw new Error('Usage: engine session label <work-unit> <phase> <topic>');
+      // A place labels itself: the name alone on arrival, name + phase +
+      // topic inside a phase — never a phase without its topic.
+      const [name, phase, topic] = rest;
+      if (![1, 3].includes(rest.length) || rest.some((a) => !a)) {
+        throw new Error('Usage: engine session label <name> [<phase> <topic>]');
       }
-      respond(applySessionLabel(process.cwd(), workUnit, phase, topic));
+      respond(applySessionLabel(process.cwd(), name, phase, topic));
       return;
     }
     if (command === 'label-config') {
@@ -872,7 +890,12 @@ function runSession(argv) {
       respond(restoreSessionLabel(hookProjectDir(), hookSessionId(rest, 'Usage: engine session cleanup [session-id]')));
       return;
     }
-    throw new Error('Usage: engine session <label|label-config|repair|cleanup> …');
+    if (command === 'resume') {
+      // The SessionStart hook's target.
+      respondOnStderr(resumeSessionLabel(hookProjectDir(), hookSessionId(rest, 'Usage: engine session resume [session-id]')));
+      return;
+    }
+    throw new Error('Usage: engine session <label|label-config|repair|cleanup|resume> …');
   } catch (err) {
     failJson(err);
   }

@@ -24,7 +24,7 @@ Load **[framework.md](../workflow-shared/references/framework.md)** and follow i
 █▀█░█▀▀░█▀▀░█▀█░▀█▀░▀█▀░█▀▀ █░█░█▀█░█▀▄░█░█░█▀▀░█░░░█▀█░█░█░█▀▀
 █▀█░█░█░█▀▀░█░█░░█░░░█░░█░░ █▄█░█░█░█▀▄░█▀▄░█▀▀░█░░░█░█░█▄█░▀▀█
 ▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀ ▀░▀░▀▀▀░▀░▀░▀░▀░▀░░░▀▀▀░▀▀▀░▀░▀░▀▀▀
-                                                        v0.7.49
+                                                        v0.7.54
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
@@ -104,7 +104,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render migration-gate
 
 **STOP.** Wait for user response.
 
-**If `continue`:**
+**If `yes`:**
 
 Commit the migration changes:
 
@@ -141,7 +141,7 @@ Branch on the boot response's `tmux_labels` — `prompt` means the session runs 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> You're running inside tmux. The workflows can rename your tmux session to show where you're working — `myproject · payments · discussion · auth-flow` — as you move through phases, restoring the original name when the session ends. You're asked once per project.
+> You're running inside tmux. The workflows can rename your tmux session to show where you're working — `myproject · payments · discussion · auth-flow` inside a phase, `myproject · payments` at its menu — putting the original name back at the start menu and when the session ends, and bringing the label back when you resume the session. You're asked once per project.
 ```
 
 Fetch the opt-in and emit its `MENU: label gate` section verbatim as markdown (not a code block):
