@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-09-16
+
+✨ Added
+- Session search — `x /term` attaches directly when exactly one live session matches, or opens the picker pre-filtered when several or none do; `x /` opens the picker with an empty, ready-to-type filter.
+- Tab completion for the session-opening function (`x <TAB>`) now offers live session names, and completes `/term` searches too, once you've re-sourced `portal init` output.
+- The search-opened picker shows each session's directory beside its name so you can tell apart sessions with similar names.
+
+🔧 Changed
+- A single-segment absolute path typed without a trailing slash (`x /tmp`) is now read as a search term rather than a directory to mint — use `x -p /tmp` to mint there.
+- Bootstrap warnings are now delivered at teardown rather than only after the loading page dismisses, so they're no longer lost on routes that skip the loading page (e.g. a direct session-search attach).
+- A pick made in the picker while startup is still finishing in the background is now queued and run once startup completes, instead of being silently dropped.
+
+🐛 Fixed
+- `portal doctor --fix` no longer under-reports stale-hook pruning when the hooks store can't be opened, and `doctor` no longer reports "not evaluable" when there are simply no hooks to check.
+- A `hooks.json` file that fails to parse is now treated as empty for reads (so a resume hook isn't silently lost) while a mutation now refuses to write over it (preventing accidental loss of every other entry).
+- Fixed a case where `hook list` could show the wrong location for a token shared by a window linked across sessions.
+- Session-to-directory grouping guesses (for legacy sessions with no recorded directory) are now kept separate from the session's actual recorded directory, preventing a guess from ever being mistaken for real data.
+
 ## [0.11.1] - 2026-09-09
 
 ✨ Added
