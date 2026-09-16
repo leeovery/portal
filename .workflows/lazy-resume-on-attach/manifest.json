@@ -4,7 +4,41 @@
   "status": "in-progress",
   "created": "2026-09-16",
   "description": "Restored panes replay as today, but the resume hook is held behind an in-pane confirmation prompt instead of firing at boot — with a preference for eager or lazy resumption.",
-  "phases": {},
+  "phases": {
+    "discussion": {
+      "items": {
+        "lazy-resume-on-attach": {
+          "status": "in-progress",
+          "subtopics": {
+            "prompt-surface": {
+              "status": "pending",
+              "parent": null
+            },
+            "decline-semantics": {
+              "status": "pending",
+              "parent": null
+            },
+            "prompt-persistence": {
+              "status": "pending",
+              "parent": null
+            },
+            "trigger-and-timing": {
+              "status": "pending",
+              "parent": null
+            },
+            "eager-lazy-preference": {
+              "status": "pending",
+              "parent": null
+            },
+            "restore-pipeline-integration": {
+              "status": "pending",
+              "parent": null
+            }
+          }
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-08-21-lazy-resume-on-attach.md",
