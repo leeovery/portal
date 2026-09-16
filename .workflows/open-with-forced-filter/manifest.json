@@ -220,7 +220,7 @@
           "analysis_gate_mode": "gated",
           "consolidation_gate_mode": "gated",
           "fix_attempts": 0,
-          "analysis_cycle_total": 7,
+          "analysis_cycle_total": 8,
           "linters": [
             {
               "name": "go vet",

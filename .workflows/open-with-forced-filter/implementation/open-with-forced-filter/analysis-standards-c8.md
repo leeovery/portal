@@ -1,0 +1,3 @@
+AGENT: standards
+FINDINGS: none
+SUMMARY: A full fresh pass over the specification (including all eight corrigenda) against every implementation file found no divergence that clears the finding floor: the sigil's shape rule, its whole-invocation refusals, the containment rule and its cumulative collision carve-out, the recorded-vs-derived directory separation, the search-scoped directory column, the cold-path classification and its staged-mint hold, the completion correction and its `--` bound, and the obliged help/README copy all match what was decided. `go build ./...`, `golangci-lint run` (0 issues) and the unit lane for `cmd`, `internal/tui`, `internal/resolver`, `internal/capture` and `internal/tmux` are green; no comment correction was warranted.
