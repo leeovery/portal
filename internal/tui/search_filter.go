@@ -19,8 +19,8 @@ type searchEntry struct {
 // pair any generation of the list has produced for it, accumulated for the life
 // of the source, so a filter pass can answer for targets from any generation.
 // One source is built per picker run and every generation is recorded before its
-// items reach the list, so a pass can only be handed targets the source has
-// already held. A filter value is not injective — a session named for the text
+// items reach the list, so a pass can only be handed session targets the source
+// has already held. A filter value is not injective — a session named for the text
 // another session's directory abbreviates to yields the same one — and two
 // generations can produce one value from different pairs, so a key holds a set
 // rather than a single pair, and accumulating it is what lets a pass see both
