@@ -531,6 +531,12 @@
                 "1": "approved",
                 "2": "approved"
               }
+            },
+            "c2": {
+              "gate_mode": "gated",
+              "tasks": {
+                "1": "pending"
+              }
             }
           }
         }
