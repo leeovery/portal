@@ -183,7 +183,9 @@
             "open-with-forced-filter-12-6": "tick-e538df",
             "open-with-forced-filter-13": "tick-999d6f",
             "open-with-forced-filter-13-1": "tick-360750",
-            "open-with-forced-filter-13-2": "tick-ef3d63"
+            "open-with-forced-filter-13-2": "tick-ef3d63",
+            "open-with-forced-filter-14": "tick-0ee99f",
+            "open-with-forced-filter-14-1": "tick-98583c"
           },
           "storage_paths": [
             ".tick/"
@@ -533,9 +535,9 @@
               }
             },
             "c2": {
-              "gate_mode": "gated",
+              "gate_mode": "auto",
               "tasks": {
-                "1": "pending"
+                "1": "approved"
               }
             }
           }
