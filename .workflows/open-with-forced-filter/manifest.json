@@ -450,7 +450,7 @@
     "review": {
       "items": {
         "open-with-forced-filter": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "open-with-forced-filter-1-1",
             "open-with-forced-filter-1-2",
