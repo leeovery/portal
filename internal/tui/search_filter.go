@@ -36,8 +36,7 @@ type searchItemSource struct {
 }
 
 // set folds the session rows among items into what the source already holds.
-// Rows sharing a field pair collapse onto one entry, and a header's empty filter
-// value contributes none.
+// Rows sharing a field pair collapse onto one entry.
 func (s *searchItemSource) set(items []list.Item) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
