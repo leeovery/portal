@@ -66,17 +66,21 @@ The session opened on a false premise: that decline's job is an escape hatch to 
 
 That reframes decline entirely. It is not an escape hatch; it is a retirement. The user's words: "I've decided, actually, I don't need that session." Pressing Escape is an act of disposal, not deferral — which is exactly why it has to be distinguishable from ignoring, and why the re-offer options are wrong. An offer that comes back after you have declined it is treating a decision as a hesitation.
 
-The user drew the equivalence to killing the tmux session outright: that would remove the resume too, and Escape is meant to be the same thing reached from inside the pane. Whether the equivalence extends to the session itself — whether "gone" reaches only the registration or the whole session — is the open half below.
+The user drew an equivalence to killing the tmux session outright, which was read too literally — as a proposal that Escape retire the whole session, dropping it from the saved set so it never restores again. That reading was put back to the user as a fork, on the argument that it would turn each reboot into a cull and answer the other half of the seed's complaint: that the saved population only ever grows. It was a false path. The user's phrase meant only that a dismissed resume is irrecoverable, not that the session goes with it. Killing a session stays a separate, deliberate act.
+
+The rejected option is worth keeping on the record because it is the tempting one: it solves the accumulation problem the seed names, and 43 of the 44 live sessions hold a single pane, so the multi-pane hazard that argues against it is rare. It is rejected on intent rather than on that hazard — declining a resume and disposing of a session are two different decisions, and binding them to one keystroke removes the user's ability to make only the first.
 
 ### Decision
 
-**Escape is destructive and permanent.** The pane's resume registration is removed. The prompt does not return on this boot, on the next attach, or after a future reboot. The pane falls through to a plain shell, with its replayed scrollback still above it, and the user can use it or close it.
+**Escape removes the pane's resume registration, permanently, and nothing else.** The entry is cleaned out of the store rather than suppressed for the boot, so the prompt does not return on this boot, on the next attach, or after any future reboot. The pane falls through to a plain shell with its replayed scrollback still above it. The tmux session is untouched: it stays live, stays saved, and restores on the next reboot as an ordinary hookless pane — bare shell, scrollback intact, no prompt. Killing it is a separate act the user takes when they want it.
+
+There is no "parent process" to fall back to, which the user was unsure about: the pane's only process during restore is Portal's hydrate helper, and it replaces itself with either the hook or the user's shell (`cmd/state_hydrate.go:153-196`). Declining means it takes the shell branch — exactly what a restored pane with no registered hook does today, so a declined pane is indistinguishable from one that never had a hook.
 
 This makes the in-pane Escape a third removal route alongside the existing `portal hook rm` and a hand edit of the store — reached from where the user already is, instead of by remembering a CLI verb.
 
 Sibling check: `resume-hooks-silently-lost` — its specification (2026-09-10) owns hook removal, defining the `hook rm` CLI, the rule that removing nothing always exits non-zero, and that a removal never unstamps the pane's durable token. This decision adds a route beside that CLI and contradicts none of those rules; because the key it removes is always a token baked from saved state, it also never touches the old-format entries that specification retains permanently.
 
-Confidence: high on the semantics. **Open within this subtopic**: how far "gone" reaches — the registration alone, or the tmux session with it.
+Confidence: high.
 
 ---
 
