@@ -187,6 +187,40 @@ Confidence: high on the surface itself. **Open below it**: what triggers the ren
 
 ---
 
+## Waiting Pane Residency
+
+### Context
+
+Two shapes hold a painted panel in a pane, indistinguishable to the user and different in what they cost the system.
+
+**A process stays.** The restore helper lays the scrollback, paints the card, and blocks on a keystroke instead of finishing. Answering drops the card and hands the pane over in place, with no restart and nothing re-laid.
+
+**Nothing stays.** The helper paints the card and exits; tmux holds the pane open dead. Answering restarts the pane — which wipes it — so the scrollback is laid at that moment instead.
+
+### Journey
+
+The residency question was reached by way of a mistake worth recording: the session drifted onto the dead-pane shape while chasing the memory figure, without flagging that it had abandoned the plan discovery started from, in which the helper stays and hands over in place. The user caught it.
+
+Costs were then mis-stated in the other direction. A waiting process was priced at "under 1 MB" from a measurement of a shell — but a shell cannot be the waiter, because declining has to remove the registration and that is Portal's own logic. The waiter is the Portal binary. Floor measured on 2026-09-17: a minimal Go program blocked on a read is **1.7 MB resident** (`ps -o rss=`), before any of Portal's own code, so a realistic waiter is several MB and a full waiting set is a few hundred MB rather than twenty.
+
+Against the existing code the two are not close in build cost. Restore never reads `hooks.json` — it bakes a token into each pane's helper command and nothing more — so the hook lookup happens inside the helper at the very end, where it *already* branches on hook-present (`cmd/state_hydrate.go:172-196`). The stay-resident shape is one new stage inserted at that existing fork, plus moving the freeze-release after the answer; restore is untouched, no tmux state is added, and the helper's existing unit coverage and injection seam extend to it. The dead-pane shape needs the helper's flow reordered so the lookup precedes the dump, `remain-on-exit` and a key table set on the pane, new commands behind Enter and Escape, the replay made callable a second time for the answer path, and a repaint hook for resize that the resident version does not need at all.
+
+The user chose the dead pane anyway, on design rather than on cost: a resident process per pending pane reinstates, at a sixtieth of the scale, exactly the pattern the feature exists to remove — a cost proportional to a saved set that only grows. At 41 sessions it is affordable; the premise of the work is that 41 is not where this stops. Zero load is the property worth paying build cost for.
+
+The secondary arguments run the same way. The pending state under the dead-pane shape is *derivable from state that already exists* — a pane that is dead, carries a `@portal-pane-id` token, and has an entry under that token — so there is no new "is pending" flag to leak or reconcile. It survives what a process does not: nothing to OOM, nothing a stray kill removes. It is inspectable, so `portal doctor` can ask tmux which panes are pending rather than asking whether a process is blocked somewhere. And declarative pane state tmux holds and Portal queries is a better substrate for the agent-aware direction than a blocked process.
+
+### Decision
+
+**Nothing stays in a waiting pane.** The pane is dead while its resume is pending, holding no process and costing no memory, however long it waits and however many panes wait at once.
+
+**The unwind is one place, not many.** Measured on tmux 3.7c: pane options survive `respawn-pane -k` — both `key-table` and `remain-on-exit` read back unchanged after a respawn — so answering must unset them explicitly. But they die with the pane: killing a pending pane left nothing behind on the surviving panes (`list-panes -a -F '#{pane_key_table}'` → empty). So no unwind is owed on pane close, window close, session kill or server death; tmux reclaims pane-scoped state itself. The only cleanup the feature owns is at the moment of answering, where both branches already converge on a single respawn. The earlier characterisation of this as several lifecycles to manage was pessimistic.
+
+**Key interception must be tmux's.** A pane with no process cannot receive a keystroke, so the only thing that can act on Enter or Escape there is the multiplexer. A per-pane key table is the scoped form — attached as a pane option, so it applies in that pane alone and changes nothing about those keys anywhere else in the user's configuration. Verified: a key bound only in a named table, with that table set on a dead pane, fired its command on a real keystroke from an attached client.
+
+**Containment.** One module owns the whole pending concept — making a pane pending, answering it in either direction, and enumerating the pending set — and is the only place that names the tmux options and the key table involved. Restore asks it to make a pane pending; the answer commands ask it to answer one; `doctor` asks it what is pending. This mirrors how Portal already confines its other tmux-option vocabulary to the package that owns it.
+
+---
+
 ## Pending Pane State
 
 ### Context
