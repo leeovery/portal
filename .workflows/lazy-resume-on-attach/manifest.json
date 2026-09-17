@@ -43,7 +43,7 @@
               "parent": null
             },
             "pending-pane-state": {
-              "status": "pending",
+              "status": "exploring",
               "parent": null
             }
           }

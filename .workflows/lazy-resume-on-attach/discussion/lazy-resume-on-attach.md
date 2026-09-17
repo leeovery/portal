@@ -159,7 +159,15 @@ Two properties were measured on tmux 3.7c before the call was made, both on a di
 
 This is the only one of the three that carries every property the feature needs at once: nothing resident per waiting pane, a centred and designed box rather than a painting, correct rendering after a resize with no repaint machinery, no contamination of the saved scrollback, and stickiness for free. The alternatives each buy one of those by giving up another.
 
-Confidence: high on the surface itself. **Open below it**: what the pane holds while a resume is pending, and what triggers the render.
+**The overlay is a near-full-pane bordered panel, not a small centred menu.** It is inset a little from the pane's edges, carries a border and a title, is styled from the Portal theme the user has chosen, and has room along its edges for metadata about what is being offered — the shape of Portal's own scrollback preview rather than a list of choices. The user's framing: "a floating overlay that's sort of slightly indented, but basically full screen… it has a border, a bit like the quick preview in Portal."
+
+That rules out `display-menu`, which renders a list of items sized to its contents and admits no arbitrary body, and selects `display-popup`, which takes explicit dimensions, a border style, a title and a body of Portal's own drawing. Rendered on a disposable socket at 90%×80% with rounded borders and a Nord-ish palette, over a pane carrying unrelated content, it produces exactly the described panel — and `capture-pane -p` on the pane beneath returns that pane's own content untouched, as with the menu.
+
+`display-popup` runs a command, so a process does exist — but only for as long as the panel is on screen, which is only while the user is standing in front of it deciding. That is categorically different from the resident-process option rejected above: the cost is per *decision*, not per waiting pane, and a waiting pane nobody is looking at still costs nothing. The on-demand reframing is what makes a process acceptable here, and it is what lets Portal draw the panel itself rather than accepting tmux's menu rendering.
+
+**Panes with no pending resume are untouched.** In the user's worked example — one window, a left pane that held a resumable session and a right pane that held a bare shell — the right pane restores exactly as it does today, its scrollback in place, and goes on capturing normally. Work done in it during one attachment shows up in its scrollback on the next, unchanged by this feature.
+
+Confidence: high on the surface itself. **Open below it**: what the pane holds behind the overlay, what triggers the render.
 
 ---
 
