@@ -239,6 +239,14 @@
         "sources": [
           "lazy-resume-on-attach/discussion/lazy-resume-on-attach.md"
         ]
+      },
+      "preferences-ui": {
+        "horizon": "next",
+        "summary": "A settings screen in the picker for install preferences — the eager/lazy resume default and whatever follows it — so prefs.json is not hand-edited; the theme picker is currently the only preference with any UI",
+        "origin": "park:lazy-resume-on-attach",
+        "sources": [
+          "lazy-resume-on-attach/discussion/lazy-resume-on-attach.md"
+        ]
       }
     }
   }
