@@ -11,7 +11,7 @@
           "status": "in-progress",
           "subtopics": {
             "prompt-surface": {
-              "status": "pending",
+              "status": "converging",
               "parent": null
             },
             "decline-semantics": {
@@ -36,6 +36,14 @@
             },
             "waiting-pane-capture": {
               "status": "decided",
+              "parent": null
+            },
+            "render-trigger": {
+              "status": "pending",
+              "parent": null
+            },
+            "pending-pane-state": {
+              "status": "pending",
               "parent": null
             }
           }

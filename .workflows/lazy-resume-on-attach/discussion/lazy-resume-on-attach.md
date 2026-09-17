@@ -104,13 +104,62 @@ No competing option was worth writing up. The user's response on seeing it: ther
 
 ### Decision
 
-**The pane stays frozen for as long as its prompt is unanswered.** The marker that already tells the saver to leave a pane alone is held through the waiting state instead of being cleared at the end of scrollback replay, and is cleared when the user answers — on Enter before the hook runs, on Escape before the pane falls through to a shell.
+**The pane stays frozen for as long as its resume is unanswered.** The marker that already tells the saver to leave a pane alone is held through the waiting state instead of being cleared at the end of scrollback replay, and is cleared when the user answers — on Enter before the hook runs, on Escape before the pane falls through to a shell.
 
-The cost is nil in practice: a pane sitting on a prompt has no new content worth saving, so freezing it at its last live state is exactly the desired end state. A waiting pane keeps its place in the saved set throughout, so it restores normally on every subsequent reboot — with its original content and a fresh prompt, however many reboots it waits through.
+The cost is nil in practice: a pane waiting on a resume has no new content worth saving, so freezing it at its last live state is exactly the desired end state. A waiting pane keeps its place in the saved set throughout, so it restores normally on every subsequent reboot — with its original content and a fresh prompt, however many reboots it waits through.
+
+**Revised in the same sitting.** The hazard this decision was written against was the prompt being *painted into the pane*, which is what would have overwritten the saved content. Under the surface the discussion then settled on — a tmux-drawn overlay that never enters the pane's buffer — the pane's content while waiting is byte-identical to what was already saved, so the saver's content-hash dedup would decline the write on its own and nothing would be corrupted even unfrozen. Measured on tmux 3.7c: with a menu displayed over a pane, `capture-pane -p` returns the pane's own content with no trace of the overlay.
+
+The freeze is kept anyway, as the cheaper guarantee. It costs nothing, it does not depend on the dedup continuing to behave this way, and it holds regardless of what the pane turns out to hold while pending — which the prompt-surface section leaves open. The decision stands; only its justification changed.
 
 Sibling check: `built-in-session-resurrection` — its specification records the marker lifecycle as "Helper unsets marker after dump + 100ms sleep", which is true of the code as it stands and is what this feature changes. No corrigendum is owed: that text is not a claim that has gone wrong, it is current behaviour this work supersedes, and the same reading applies to that specification's rejection of a Zellij-style confirmation prompt — a decision superseded by new product intent rather than a factual error.
 
 (resolves review-001 F1)
+
+---
+
+## Prompt Surface
+
+### Context
+
+Discovery settled that the restored pane carries an in-pane prompt stating what is about to be run, Enter to approve and Escape to decline, and that it is sticky — ignoring it is legitimate and it must still be waiting after a detach and reattach. What renders it was open, and the answer turned out to decide the feature's memory cost as well as its looks.
+
+### Options Considered
+
+**A resident process per waiting pane** — something sits in each pane drawing the prompt and listening for the keypress.
+- Pros: full control of the rendering; redraws itself on resize.
+- Cons: reinstates the cost the feature exists to remove — measured at 17 MB resident for the Portal binary (`ps -o rss -p $(pgrep -f '^portal state daemon')` → `17744` KB on 2026-09-17), roughly 700 MB across a full waiting set of 41.
+
+**A box painted into the pane, which then goes dead** — the helper draws the prompt as ordinary terminal output and exits; tmux holds the pane open showing it.
+- Pros: zero processes; fully designed rendering; durable by construction — the picture is the pane's content, so it survives anything.
+- Cons: it is a painting, not a widget. No process remains to re-centre it, so a resize leaves it off-centre or clipped unless a resize hook repaints it. And because it *is* pane content, the saver would capture it — the hazard the waiting-pane-capture section was written against.
+
+**A tmux-drawn overlay, rendered on demand** — nothing is held in the pane at all; the prompt is drawn by tmux when the user lands on a pane that has an unfired resume, and is gone again when they leave.
+- Pros: zero processes and nothing painted; tmux owns the drawing, so it is centred, styled from the theme, and re-centres on resize for free; it never enters the pane's buffer, so the saver cannot capture it; Enter and Escape are the overlay's own selections, so no key bindings are touched anywhere.
+- Cons: the overlay belongs to the attached client, so it cannot itself be the durable thing — persistence has to come from state the overlay is rendered *from*, and something has to decide when to render it.
+
+### Journey
+
+The first two options were reached by asking what could hold a prompt in a pane, and both answered that question at a cost — one in memory, one in fidelity. The session went a long way down the second, including verifying that a fully styled box (rounded borders, colour, bold heading, dim command text, coloured key hints) survives in a dead pane with no process, and that a dead pane can be repainted in place.
+
+The user then asked the question that dissolved it: does anything need to be displayed at all while the pane is not being looked at? A pane nobody is watching does not need to be holding a picture. What has to survive is the *fact* that a resume is pending — and that fact is already durable, because it is exactly the unfired hook entry. The prompt is a rendering of that fact, not a thing that has to persist.
+
+That reframing turns stickiness from a constraint into a consequence. Ignoring the prompt changes no state, so the next time the pane is looked at, the same state renders the same prompt. Detaching, closing the window, rebooting — none of them are dismissals, so none of them clear anything. Only Enter and Escape change the state, which is precisely the rule the decline-semantics section already settled.
+
+The tmux facility is `display-menu` — the same one behind the user's own Alt-M menu. Its sibling `display-popup` was rejected on sight: a popup runs a command in a floating mini-terminal, which puts a resident process back in the pane and undoes the whole gain.
+
+Two properties were measured on tmux 3.7c before the call was made, both on a disposable `-S` socket:
+
+- **The overlay is client-scoped, not pane-scoped.** Displayed with a client attached, it renders centred and styled over the pane; after a detach and reattach, the pane content is back and the menu is gone. Invoked with no client attached at all, tmux answers `no current client`. This is why the overlay cannot be the durable artifact.
+- **The overlay never enters the pane's buffer.** With a menu displayed over a pane, the client's screen shows the menu over the content while `capture-pane -p` on that pane returns the content alone. The saver would therefore record the pane's real scrollback throughout.
+
+### Decision
+
+**The prompt is a tmux-drawn overlay rendered on demand, not an artifact held in the pane.** The durable thing is the pending resume itself; the prompt is what that state looks like when the user is in front of it, and it is drawn by tmux over the pane's existing content.
+
+This is the only one of the three that carries every property the feature needs at once: nothing resident per waiting pane, a centred and designed box rather than a painting, correct rendering after a resize with no repaint machinery, no contamination of the saved scrollback, and stickiness for free. The alternatives each buy one of those by giving up another.
+
+Confidence: high on the surface itself. **Open below it**: what the pane holds while a resume is pending, and what triggers the render.
 
 ---
 
