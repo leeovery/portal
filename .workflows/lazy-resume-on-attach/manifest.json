@@ -49,10 +49,6 @@
             "panel-dismissal": {
               "status": "decided",
               "parent": null
-            },
-            "waiting-pane-residency": {
-              "status": "decided",
-              "parent": null
             }
           }
         }
