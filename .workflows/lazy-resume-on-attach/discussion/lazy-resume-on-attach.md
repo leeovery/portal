@@ -326,6 +326,28 @@ The lifecycle objection that favoured deriving was overstated. The clears are th
 
 ---
 
+## Eager Lazy Preference
+
+### Context
+
+Discovery settled that an install can choose eager resumption — today's behaviour, everything fires at boot — or lazy prompting, and framed the scope as "at the server level, at the user level" without settling it. A background review asked whether one setting is enough: the store holds arbitrary user-authored commands, and a thing the user walks up to behaves very differently under a prompt that waits forever than a thing that needs to be *up* whether or not anyone looks at it — a dev server, a tunnel, a watcher. The mechanism assumes every registration is the first kind; nothing requires it.
+
+### Journey
+
+The measured install does not settle it either way: every registration on it is the same kind of thing. So the question was put as whether the case exists at all, and the answer was to cover it rather than bet on it — the cost of the finer model turned out to be small enough that betting was the worse trade.
+
+### Decision
+
+**An install-wide default, with a three-state per-hook override.** A registration carries eager, lazy, or nothing; nothing means inherit, so an entry with no setting follows the install and changes with it. An entry that sets either one holds that choice regardless of what the install says. A user who wants a particular resume to always come back automatically sets it eager; one who wants a particular resume to always ask sets it lazy; everything else is governed centrally.
+
+That is additive on the stored entry — an existing registration decodes without the field and inherits, exactly as the pane token was added to the saved pane schema without a migration.
+
+**The install-wide setting has a home already; the way to change it does not.** `prefs.json` holds the install's UI preferences — the theme and the session-list grouping mode — and is the natural place for this. What does not exist is any surface for setting it: the theme picker is the only preference with a UI, so until a settings screen exists this one is changed by hand-editing a file. That raises the stakes on the default rather than changing where it lives.
+
+**Open**: what the install-wide default is.
+
+---
+
 ## Summary
 
 ### Key Insights

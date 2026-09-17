@@ -27,7 +27,7 @@
               "parent": null
             },
             "eager-lazy-preference": {
-              "status": "pending",
+              "status": "converging",
               "parent": null
             },
             "restore-pipeline-integration": {
