@@ -47,7 +47,7 @@
               "parent": null
             },
             "panel-dismissal": {
-              "status": "exploring",
+              "status": "decided",
               "parent": null
             }
           }

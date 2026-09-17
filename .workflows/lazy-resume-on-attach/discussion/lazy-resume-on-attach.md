@@ -161,9 +161,13 @@ This is the only one of the three that carries every property the feature needs 
 
 **The overlay is a near-full-pane bordered panel, not a small centred menu.** It is inset a little from the pane's edges, carries a border and a title, is styled from the Portal theme the user has chosen, and has room along its edges for metadata about what is being offered — the shape of Portal's own scrollback preview rather than a list of choices. The user's framing: "a floating overlay that's sort of slightly indented, but basically full screen… it has a border, a bit like the quick preview in Portal."
 
-That rules out `display-menu`, which renders a list of items sized to its contents and admits no arbitrary body, and selects `display-popup`, which takes explicit dimensions, a border style, a title and a body of Portal's own drawing. Rendered on a disposable socket at 90%×80% with rounded borders and a Nord-ish palette, over a pane carrying unrelated content, it produces exactly the described panel — and `capture-pane -p` on the pane beneath returns that pane's own content untouched, as with the menu.
+That rules out `display-menu`, which renders a list of items sized to its contents and admits no arbitrary body. It initially selected `display-popup`, which takes explicit dimensions, a border style, a title and a body of Portal's own drawing, and which produced exactly the described panel when rendered on a disposable socket over a pane carrying unrelated content.
 
-`display-popup` runs a command, so a process does exist — but only for as long as the panel is on screen, which is only while the user is standing in front of it deciding. That is categorically different from the resident-process option rejected above: the cost is per *decision*, not per waiting pane, and a waiting pane nobody is looking at still costs nothing. The on-demand reframing is what makes a process acceptable here, and it is what lets Portal draw the panel itself rather than accepting tmux's menu rendering.
+**The popup was then rejected outright: a tmux overlay captures the whole client's keyboard.** The user set a hard constraint — a waiting pane must never block the panes beside it — and the popup violates it. Measured on tmux 3.7c: with a two-pane window, the *right* pane selected as the active pane, and a popup opened over the *left* pane, keystrokes sent from the attached client were delivered to the popup and never reached the focused right pane at all. The intuition that panes are independent is correct and does not apply, because a popup is not a pane; tmux's own description is "a rectangular box drawn over the top of any panes", and it intercepts the client's input ahead of pane routing. `display-menu` is the same kind of object.
+
+**There is no pane-scoped overlay facility in tmux.** Both of its overlay primitives are client-scoped by construction, and nothing else in the command set draws over a pane — the remaining candidates put text in the pane's own content (`remain-on-exit-format`, pane borders) or in the status line. An overlay that floats above one pane while the others stay live is not something tmux offers.
+
+The user's own observation is what resolves it: Portal's rename modal — the reference for this panel — was never a tmux overlay either. It is Portal drawing with Lipgloss into a surface it owns. The painted panel is closer to how Portal already works than the popup ever was.
 
 **Panes with no pending resume are untouched.** In the user's worked example — one window, a left pane that held a resumable session and a right pane that held a bare shell — the right pane restores exactly as it does today, its scrollback in place, and goes on capturing normally. Work done in it during one attachment shows up in its scrollback on the next, unchanged by this feature.
 
@@ -171,9 +175,15 @@ That rules out `display-menu`, which renders a list of items sized to its conten
 
 The reuse is at the presentation layer, not the code path: the picker's modals are Bubble Tea components rendering into its own model, while this panel is drawn by a short-lived program hosted in a popup. What carries across is the theme tokens and the modal's visual grammar, which is what makes it read as Portal rather than as a tmux dialog.
 
-**The panel is confined to its own pane, not the window.** Measured on tmux 3.7c: a popup given a pane's own `pane_left` / `pane_top` / `pane_width` / `pane_height` renders within that pane's bounds alone — in a two-pane window the left pane is entirely covered by the canvas while the right pane stays fully visible beside it, its content untouched. A popup sized by percentage sizes against the client, so the geometry is resolved from the pane and passed as literal cell counts.
+**The panel is painted into the pane's alternate screen, so it never enters the scrollback.** The user's one hesitation about painting was that the panel is not user content — it is a hold placed on the session, never asked for — and once it is gone it should leave no trace in the history. The alternate screen is exactly that facility: the buffer `vim` and `less` draw on, which is not added to a pane's scrollback ring.
 
-Confidence: high on the surface itself. **Open below it**: what triggers the render, and how the panel is dismissed without answering it.
+Measured on tmux 3.7c: a pane printed two lines of real content, entered the alternate screen, painted a card, and exited without leaving it. The pane goes dead with the card visible and `alternate_on` set; `capture-pane -p` returns the card, while `capture-pane -a -p` returns the two original lines, intact underneath. The panel is therefore visible without ever being part of the pane's history, and the genuine scrollback is preserved beneath it the whole time it waits.
+
+Nothing blocks: the pane is dead, holds no process, and captures no input beyond its own key table. Panes beside it are fully live throughout.
+
+**Answering clears the pane, so the saved scrollback is re-laid at that moment.** `respawn-pane -k` wipes a pane's history, including its scrollback ring — measured: a pane holding two history lines, respawned, retains neither even with `capture-pane -S -`. Reviving a waiting pane therefore re-dumps the saved scrollback before running the resume, which is precisely what the restore helper does today, deferred to the moment the user answers. The freeze decided above is what keeps that saved file available to re-dump.
+
+Confidence: high on the surface itself. **Open below it**: what triggers the render, and the repaint on resize.
 
 ---
 
