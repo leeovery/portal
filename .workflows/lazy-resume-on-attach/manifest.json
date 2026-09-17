@@ -43,6 +43,10 @@
               "parent": null
             },
             "pending-pane-state": {
+              "status": "decided",
+              "parent": null
+            },
+            "panel-dismissal": {
               "status": "exploring",
               "parent": null
             }

@@ -167,7 +167,35 @@ That rules out `display-menu`, which renders a list of items sized to its conten
 
 **Panes with no pending resume are untouched.** In the user's worked example — one window, a left pane that held a resumable session and a right pane that held a bare shell — the right pane restores exactly as it does today, its scrollback in place, and goes on capturing normally. Work done in it during one attachment shows up in its scrollback on the next, unchanged by this feature.
 
-Confidence: high on the surface itself. **Open below it**: what the pane holds behind the overlay, what triggers the render.
+**The panel is a full-pane canvas with a small card centred on it, not a large box with text adrift in it.** The overlay fills the pane, painted in the active Portal theme so nothing behind it shows through, and the decision itself sits in a compact bordered card in the middle — the shape of Portal's existing rename modal: a header row carrying the title and a state badge, a body, and a footer row of key hints. A box stretched to near-full size with a few lines in the middle "might look quite lost on a big terminal window"; the canvas-plus-card shape is what Portal already uses everywhere else for exactly this reason.
+
+The reuse is at the presentation layer, not the code path: the picker's modals are Bubble Tea components rendering into its own model, while this panel is drawn by a short-lived program hosted in a popup. What carries across is the theme tokens and the modal's visual grammar, which is what makes it read as Portal rather than as a tmux dialog.
+
+**The panel is confined to its own pane, not the window.** Measured on tmux 3.7c: a popup given a pane's own `pane_left` / `pane_top` / `pane_width` / `pane_height` renders within that pane's bounds alone — in a two-pane window the left pane is entirely covered by the canvas while the right pane stays fully visible beside it, its content untouched. A popup sized by percentage sizes against the client, so the geometry is resolved from the pane and passed as literal cell counts.
+
+Confidence: high on the surface itself. **Open below it**: what triggers the render, and how the panel is dismissed without answering it.
+
+---
+
+## Pending Pane State
+
+### Context
+
+A pane whose resume has not fired still restores its saved scrollback — which, for the case that motivated this work, is a photograph of a session that is no longer running. Whether that content should be replayed at all behind the waiting prompt was put as a fork: replay it as today, or suppress it for panes with a pending resume so the pane is clean underneath.
+
+### Journey
+
+The case for suppressing rested on a claim that the replayed content is *deceptive*: it looks live and is not, and for a tool that redraws its own history on resume it is redundant as well.
+
+The user rejected the framing and the argument moved the call. A scrollback ending in an exited session is not a lie — it is an accurate record of what happened, and it is exactly what the pane would show if the session had been quit by hand. The visible end of the transcript says plainly that the thing is gone. There is nothing to be protected from.
+
+The second argument was decisive on scope: restoring a pane's content and resuming its process are two separate concerns, and making the first conditional on the second buys a small presentational gain at the cost of a conditional in the middle of the restore path. The user also noted that the resume is not the only route back — the tool's own resume picker is always available — so a pane that keeps its history is strictly more useful than one that does not.
+
+The presentational worry that prompted the fork is answered by the surface rather than by the restore path: the panel's canvas covers the pane while the decision is pending, so the old transcript is hidden until the user has chosen, and revealed only once they have declined and know what they are looking at.
+
+### Decision
+
+**Scrollback replays exactly as it does today, for every restored pane, whether or not a resume is pending.** Nothing in the restore path branches on whether a pane has an unfired hook. A declined pane is left showing its genuine history above a bare shell — the same end state as quitting the session by hand.
 
 ---
 
