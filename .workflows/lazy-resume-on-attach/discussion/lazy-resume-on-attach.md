@@ -300,4 +300,6 @@ What made the trigger necessary was the assumption that a waiting pane holds not
 
 ### Open Threads
 
+- **Picker row redesign** — parked on the product roadmap (`picker-row-redesign`, horizon `next`). Dropping the window count, which reads "1 window" on every row of the measured install (42 of 42 live sessions hold a single window, `tmux list-windows -a -F '#{session_name}' | sort | uniq -c`), dropping the "attached" word in favour of its glyph alone, right-aligning a status strip that grows leftward as indicators appear, and showing each session's directory path beside its name. It changes every row for every session and is driven by its own rationale rather than by this feature; the pending-resume indicator this feature needs is a single glyph that strip would host.
+
 ### Current State
