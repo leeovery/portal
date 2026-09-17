@@ -38,6 +38,48 @@ Named in the seed and carried forward rather than explored: the hydrate helper's
 
 ---
 
+## Decline Semantics
+
+### Context
+
+Discovery settled that ignoring the prompt keeps it waiting in perpetuity, and deliberately left open what Escape does as a distinct act. The answer changes what the feature is in daily use: whether declining is a "not now" the user can walk back, or a disposal.
+
+Scale, measured on the user's install on 2026-09-17: 44 live tmux sessions, 43 of them holding a single pane and one holding two (`tmux list-panes -a -F '#{session_name}' | sort | uniq -c | awk '{print $1}' | sort -n | uniq -c` → `43 × 1 pane, 1 × 2 panes`), against 41 registered resume hooks (`portal hook list | wc -l` → `41`). So the working shape is one session, one pane, one resumable process — a reboot would present roughly 41 waiting prompts, almost all of them alone in their session.
+
+### Options Considered
+
+**Per-boot decline** — Escape gives a shell and the pane stops offering until the next reboot, when the prompt returns.
+- Pros: "no" means no without destroying anything; the reboot is a natural re-decision point.
+- Cons: the offer keeps coming back for work the user has already finished with, so the population never shrinks.
+
+**Re-offer on next attach** — Escape gives a shell, but the prompt returns the next time the pane is attached.
+- Pros: the offer is never lost.
+- Cons: a pane you have declined keeps asking every time you visit it — a pane you cannot put down.
+
+**Destructive decline** — Escape retires the resume permanently; the registration is removed and never comes back, on this boot or any future one.
+- Pros: matches the intent — Escape is only ever pressed by someone who has decided this work is finished; gives the growing saved population a cull point.
+- Cons: irreversible, behind one keystroke, over a user-authored command with no other copy.
+
+### Journey
+
+The session opened on a false premise: that decline's job is an escape hatch to a usable shell, for the case where you reach a waiting pane and want a terminal in that directory rather than the session. The user rejected the framing outright — a pane holding a resumable process is *for* that process, and if they wanted a plain shell they would open a new session rather than dismiss a prompt to borrow the pane. The pane is occupied and paused, waiting for a yes or a no, and nothing else.
+
+That reframes decline entirely. It is not an escape hatch; it is a retirement. The user's words: "I've decided, actually, I don't need that session." Pressing Escape is an act of disposal, not deferral — which is exactly why it has to be distinguishable from ignoring, and why the re-offer options are wrong. An offer that comes back after you have declined it is treating a decision as a hesitation.
+
+The user drew the equivalence to killing the tmux session outright: that would remove the resume too, and Escape is meant to be the same thing reached from inside the pane. Whether the equivalence extends to the session itself — whether "gone" reaches only the registration or the whole session — is the open half below.
+
+### Decision
+
+**Escape is destructive and permanent.** The pane's resume registration is removed. The prompt does not return on this boot, on the next attach, or after a future reboot. The pane falls through to a plain shell, with its replayed scrollback still above it, and the user can use it or close it.
+
+This makes the in-pane Escape a third removal route alongside the existing `portal hook rm` and a hand edit of the store — reached from where the user already is, instead of by remembering a CLI verb.
+
+Sibling check: `resume-hooks-silently-lost` — its specification (2026-09-10) owns hook removal, defining the `hook rm` CLI, the rule that removing nothing always exits non-zero, and that a removal never unstamps the pane's durable token. This decision adds a route beside that CLI and contradicts none of those rules; because the key it removes is always a token baked from saved state, it also never touches the old-format entries that specification retains permanently.
+
+Confidence: high on the semantics. **Open within this subtopic**: how far "gone" reaches — the registration alone, or the tmux session with it.
+
+---
+
 ## Summary
 
 ### Key Insights
