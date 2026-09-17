@@ -344,7 +344,11 @@ That is additive on the stored entry — an existing registration decodes withou
 
 **The install-wide setting has a home already; the way to change it does not.** `prefs.json` holds the install's UI preferences — the theme and the session-list grouping mode — and is the natural place for this. What does not exist is any surface for setting it: the theme picker is the only preference with a UI, so until a settings screen exists this one is changed by hand-editing a file. That raises the stakes on the default rather than changing where it lives.
 
-**Open**: what the install-wide default is.
+**The install-wide default is lazy.** The feature ships on rather than waiting to be discovered, and an install that upgrades and reboots meets prompts rather than processes.
+
+Defaulting eager was weighed and rejected. It is the conservative choice — an upgrade changes nothing, and the new behaviour is opted into — but it leaves the feature switched off behind a setting with no UI, which is a poor place to leave the thing the work exists to deliver. What makes lazy safe is that it is not a silent change: a pane holding a prompt says what it is and what key answers it, so the worst first-boot outcome is a few extra keypresses landing the user exactly where eager would have put them. The risk that would have changed this is an install belonging to someone who did not choose the upgrade and reboots expecting their processes back; against one extra keypress on a self-explaining panel, it was not enough.
+
+A settings screen to change it without hand-editing `prefs.json` is parked on the roadmap (see Open Threads).
 
 ---
 
@@ -354,6 +358,7 @@ That is additive on the stored entry — an existing registration decodes withou
 
 ### Open Threads
 
+- **Preferences UI** — parked on the product roadmap (`preferences-ui`, horizon `next`). A settings screen in the picker for install preferences, so `prefs.json` is not hand-edited. The theme picker is currently the only preference with any UI, and this feature adds a second setting that needs one — and the agent-aware direction will add more.
 - **Picker row redesign** — parked on the product roadmap (`picker-row-redesign`, horizon `next`). Dropping the window count, which reads "1 window" on every row of the measured install (42 of 42 live sessions hold a single window, `tmux list-windows -a -F '#{session_name}' | sort | uniq -c`), dropping the "attached" word in favour of its glyph alone, right-aligning a status strip that grows leftward as indicators appear, and showing each session's directory path beside its name. It changes every row for every session and is driven by its own rationale rather than by this feature; the pending-resume indicator this feature needs is a single glyph that strip would host.
 
 ### Current State
