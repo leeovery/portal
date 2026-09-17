@@ -55,7 +55,11 @@
               "parent": null
             },
             "pending-visibility": {
-              "status": "exploring",
+              "status": "decided",
+              "parent": null
+            },
+            "panel-visual-design": {
+              "status": "pending",
               "parent": null
             }
           }
