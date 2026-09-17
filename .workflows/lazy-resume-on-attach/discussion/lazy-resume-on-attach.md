@@ -244,9 +244,37 @@ One route survives for the dead pane, and it is worse. Bind `Enter` and `Escape`
 
 ### Decision
 
-*Not yet taken — the user has not decided, and the measurement above is the material the decision now rests on.* What the measurement settles is narrower than the choice: the dead pane cannot intercept its own keys without either locking its sibling panes or globally rebinding two keys for the whole server. The waiting program needs no tmux key state at all, because a process in a pane reads the keys sent to it.
+**A waiting program in the pane.** The dead pane cannot intercept its own keys without locking its sibling panes or globally rebinding two keys for the whole server, and neither is acceptable. A process in a pane reads the keys sent to it and nothing else — the scoping the design needs is a property of processes, not something tmux has to provide.
 
-If the waiting program is chosen, the footprint of *what* waits is a separate and reducible question — the full Portal binary is the obvious waiter but not the only possible one — and it is an implementation concern rather than a design one, since either waiter satisfies the constraint identically.
+The choice was forced rather than preferred, and the reasoning that favoured the dead pane still stands on its own terms; it simply rests on a capability tmux does not have at pane granularity.
+
+**The resident cost is the runtime floor, not the binary.** Go pages in lazily, so linking a library costs disk rather than memory. Measured on this machine: a Go binary linking the rendering library and never touching it, blocked on a read, is **1680 KB** resident — indistinguishable from one importing nothing at all at 1696 KB, and 4.8 MB on disk. The 22 MB the daemon carries is the cost of doing work, not of existing.
+
+So no separate binary is warranted: the waiter is the same Portal binary entered on a path that does almost nothing. Roughly 2 MB per waiting pane, some 80 MB across a population of 41, against the 13.1 GB the seed measured.
+
+**The process that draws must hand off to a fresh one before waiting.** Drawing touches the theme and the rendering path, and those pages stay resident for that process's life. Drawing and then blocking in the same process would carry all of it for as long as the pane waits. Drawing and then replacing the process image with a minimal wait puts the resting state back at the floor — the helper already ends in exactly that kind of handover, so this is the shape the code is already built around, not a new one.
+
+A resize is the same handover run backwards: the waiter replaces itself with a fresh draw, which draws at the new width and hands back to a fresh wait. The resting state stays at the floor and the cost is paid only at the moment of the resize.
+
+**Enter and Escape act; every other key is swallowed, signals included.** The waiter is the pane's only process, so anything that kills it takes the pane with it — Ctrl-C, Ctrl-D, Ctrl-Z. It must refuse to die rather than exit. The rule that falls out is a safety property as much as a mechanism: a stray paste, an errant `send-keys`, or a key pressed in the wrong window cannot answer the prompt, because nothing but those two keys means anything to it.
+
+---
+
+## Render Trigger
+
+### Context
+
+Held open from the moment the prompt became something rendered on demand rather than something painted and left: if the panel is drawn when the user arrives at the pane, something has to notice them arriving. "Landing on a pane" is several different events — taking focus, switching to the session, attaching to a window where the pane is one of three — and picking the wrong one either flashes prompts at a user cycling past on their way somewhere else, or never offers a pane split into an existing session.
+
+### Journey
+
+The question dissolved rather than being answered. Once the waiting program was settled, there is nothing to trigger: the panel is drawn by the helper at hydration, which bootstrap already drives for every restored pane, and it simply stays on the pane's alternate screen until the user answers. Arriving at the pane is not an event Portal needs to observe, because the panel is already there.
+
+What made the trigger necessary was the assumption that a waiting pane holds nothing — and that assumption was what the key-scoping measurement retired.
+
+### Decision
+
+**No trigger.** The panel is drawn once, at restore, by the machinery that already runs for every pane. No focus hooks, no attach hooks, no per-event rendering. `client-attached` and `client-session-changed`, named in the seed as likely surfaces, are not touched by this feature.
 
 ---
 
