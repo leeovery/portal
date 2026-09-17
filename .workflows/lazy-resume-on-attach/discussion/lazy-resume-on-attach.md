@@ -209,6 +209,47 @@ The presentational worry that prompted the fork is answered by the surface rathe
 
 ---
 
+## Waiting Pane Mechanism
+
+### Context
+
+Two designs for what a pane *is* while its resume waits, indistinguishable to the user and close on merit:
+
+- **A waiting program.** The helper restore already puts in each pane does not finish. It lays down the scrollback, paints the card, and blocks on a keypress. Enter drops the card and hands the pane to the resume command in place — no restart, nothing re-laid.
+- **A dead pane.** The helper paints the card and exits. tmux holds the pane open with no process in it. Enter and Escape are tmux key bindings that restart the pane with the right payload.
+
+### Options Considered
+
+**A waiting program**
+- Pros: an insert at a branch that already exists — the helper's hook lookup already forks on hook-present, and the wait goes between that fork and the existing handover. Restore stays ignorant of hooks. No tmux state to unwind. Live rendering, so a resize repaints itself. Failure modes are a process's: killable, interruptible, and it leaves the pane in a defined state. Testable in the fast lane, beside the helper's existing nine unit-test files and its handover injection seam.
+- Cons: a resident process per waiting pane, whose cost scales with the saved set — the very quantity the seed says only grows. Measured floor: a minimal Go binary blocked on a read is 1.7 MB resident, so the real helper is several MB, a few hundred across a population of 41.
+
+**A dead pane**
+- Pros: no cost curve at all — the pending state is tmux's, not a process's. Nothing to OOM or kill. Inspectable: `portal doctor` could ask tmux which panes are pending. A better substrate for the agent-aware direction than "a process is blocked in there".
+- Cons: eight or nine distinct pieces against one, three of them tmux state with a lifecycle to unwind on every exit path — including a pane closed or a session killed mid-wait. The helper's flow must reorder (it dumps before it looks up today). The resize repaint becomes required machinery, because a dead pane cannot redraw itself. And a dead pane is a state the user has no intuition for: if its bindings fail, the prompt is visible and no key does anything.
+
+### Journey
+
+From first principles the dead pane looked like the better design, and the reasoning stood on the feature's own thesis: a cost proportional to a set that only grows is the shape of problem this work exists to remove. At 41 sessions a waiting program is a few hundred MB; at 200 it is a gigabyte, and 200 is where the seed says this is heading. The user reached the same place independently — "the right engineering design here is zero load + memory."
+
+Its containment was worked through and looked tractable. One module owning the pending state as a single concept, arming and disarming three tmux settings together and never independently; an idempotent disarm, so every plausible cleanup site can call it without first checking, which removes the need to enumerate exit paths; and a bootstrap sweep as the backstop, which is the idiom the codebase already uses for stale skeleton markers and orphan FIFOs. The leak window is further bounded by tmux itself: `remain-on-exit` and key bindings are server state, so a reboot clears them and the exposure is one server lifetime.
+
+**Then the key interception was measured, and it does not scope to a pane.** `key-table` is a session option, not a pane option. tmux accepts `set-option -p -t <pane> key-table <name>` without complaint and resolves it upward: set on one pane of a two-pane session, it reads back set on the session *and on the sibling pane that was never named*. Verified on tmux 3.7c — before the write, all three scopes report the option unset; after it, all three report `portal-wait`. And a custom key table swallows every key, not only its bound ones: with the table active, `Enter` fired the binding and the word typed after it never reached the pane's process at all.
+
+So arming one waiting pane's keys arms every pane in its session, and locks them. In the worked example — left pane waiting, right pane a shell the user wants to work in — the right pane's keyboard would be dead exactly as it was under the rejected popup, and for the same reason: the interception is not pane-scoped.
+
+That is the hard constraint the user set, and it is the constraint that already eliminated the tmux overlay.
+
+One route survives for the dead pane, and it is worse. Bind `Enter` and `Escape` in tmux's **root** table globally, each wrapped in a conditional that fires Portal's command when the focused pane is waiting and passes the key through otherwise. It satisfies the letter of the constraint, at the price of Portal permanently rebinding two keys across the user's entire tmux server, with a conditional evaluated on every press — `Escape` most of all, which every modal program on the machine depends on. That is not a trade worth making for a memory curve.
+
+### Decision
+
+*Not yet taken — the user has not decided, and the measurement above is the material the decision now rests on.* What the measurement settles is narrower than the choice: the dead pane cannot intercept its own keys without either locking its sibling panes or globally rebinding two keys for the whole server. The waiting program needs no tmux key state at all, because a process in a pane reads the keys sent to it.
+
+If the waiting program is chosen, the footprint of *what* waits is a separate and reducible question — the full Portal binary is the obvious waiter but not the only possible one — and it is an implementation concern rather than a design one, since either waiter satisfies the constraint identically.
+
+---
+
 ## Summary
 
 ### Key Insights

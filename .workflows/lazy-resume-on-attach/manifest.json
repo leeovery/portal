@@ -49,6 +49,10 @@
             "panel-dismissal": {
               "status": "decided",
               "parent": null
+            },
+            "waiting-pane-mechanism": {
+              "status": "exploring",
+              "parent": null
             }
           }
         }
