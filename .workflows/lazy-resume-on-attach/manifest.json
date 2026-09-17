@@ -33,6 +33,10 @@
             "restore-pipeline-integration": {
               "status": "pending",
               "parent": null
+            },
+            "waiting-pane-capture": {
+              "status": "decided",
+              "parent": null
             }
           }
         }

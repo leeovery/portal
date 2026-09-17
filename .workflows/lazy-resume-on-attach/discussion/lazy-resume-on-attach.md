@@ -84,6 +84,36 @@ Confidence: high.
 
 ---
 
+## Waiting Pane Capture
+
+### Context
+
+The feature's premise is that a restored pane still reads as restored before its hook fires — skeleton, geometry and scrollback replay exactly as today, so the pane shows the work the user left there. That holds on the restore side. Nothing held it on the save side, and a background review found the hole.
+
+Portal's saver re-reads every live pane on each tick and rewrites that pane's saved scrollback whenever the capture hashes differently from the last write (`cmd/state_daemon.go:263-290` — `CaptureAndHashPane` then `WriteScrollbackIfChanged`, which is a dedup, not a protection). A pane parked on a full-screen prompt therefore gets captured *as that prompt*, with no history behind it, within one tick of the prompt appearing.
+
+The suppression mechanism already exists and is already used for precisely this hazard: restore stamps each skeleton-restored pane with a marker, and the daemon's capture loop skips any pane carrying one (`cmd/state_daemon.go:244`, `271-273`). But the hydrate helper clears that marker the moment scrollback replay finishes and before it hands off — replay, settle sleep, unset, exec (`cmd/state_hydrate.go:139-148`). Under lazy resume that unset lands at exactly the moment the prompt goes up.
+
+Verified against the tree on 2026-09-17: the skip is scoped to the scrollback write alone. The pane is still enumerated into `sessions.json` by `CaptureStructure` and only its `.bin` rewrite is skipped, so freezing a pane does not drop it from the saved set.
+
+### Journey
+
+The compounding case is what makes this more than a lost file. The saved content becomes a picture of the prompt; the next reboot replays that picture and then draws a real prompt on top of it. The user comes back to a pane showing a dead screenshot of a question with a live copy of the same question over it — and the work they were returning for is gone with no copy anywhere.
+
+No competing option was worth writing up. The user's response on seeing it: there is only one answer here.
+
+### Decision
+
+**The pane stays frozen for as long as its prompt is unanswered.** The marker that already tells the saver to leave a pane alone is held through the waiting state instead of being cleared at the end of scrollback replay, and is cleared when the user answers — on Enter before the hook runs, on Escape before the pane falls through to a shell.
+
+The cost is nil in practice: a pane sitting on a prompt has no new content worth saving, so freezing it at its last live state is exactly the desired end state. A waiting pane keeps its place in the saved set throughout, so it restores normally on every subsequent reboot — with its original content and a fresh prompt, however many reboots it waits through.
+
+Sibling check: `built-in-session-resurrection` — its specification records the marker lifecycle as "Helper unsets marker after dump + 100ms sleep", which is true of the code as it stands and is what this feature changes. No corrigendum is owed: that text is not a claim that has gone wrong, it is current behaviour this work supersedes, and the same reading applies to that specification's rejection of a Zellij-style confirmation prompt — a decision superseded by new product intent rather than a factual error.
+
+(resolves review-001 F1)
+
+---
+
 ## Summary
 
 ### Key Insights
