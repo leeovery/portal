@@ -70,9 +70,25 @@ The user drew an equivalence to killing the tmux session outright, which was rea
 
 The rejected option is worth keeping on the record because it is the tempting one: it solves the accumulation problem the seed names, and 43 of the 44 live sessions hold a single pane, so the multi-pane hazard that argues against it is rare. It is rejected on intent rather than on that hazard — declining a resume and disposing of a session are two different decisions, and binding them to one keystroke removes the user's ability to make only the first.
 
+**The key binding was then revisited and reversed.** A background review put the destruction's cost against its ceremony: one unmodified keystroke, no confirmation, over a user-authored command with no other copy anywhere. The scenario it was argued from — a user walking dozens of panes pressing the discard key on the ones they are finished with — turned out not to be how the user would ever work; culling a batch of finished sessions happens in the picker, by marking them and killing them, not pane by pane. But the underlying objection survived the scenario that carried it.
+
+The decisive argument was the user's, and it is about consistency rather than danger. Everywhere else in Portal, Escape means *back out* — it reverses, it never acts. Binding it here to an irreversible deletion would make it the one place in the product where the reflex key destroys something. Assuming the positive instead — Enter resumes, a named key discards, a confirmation in front of the discard — restores that meaning everywhere, and leaves Escape on the resume panel with nothing to do, because there is nowhere to back out to. An inert Escape reads as cleaner than a dangerous one.
+
 ### Decision
 
-**Escape removes the pane's resume registration, permanently, and nothing else.** The entry is cleaned out of the store rather than suppressed for the boot, so the prompt does not return on this boot, on the next attach, or after any future reboot. The pane falls through to a plain shell with its replayed scrollback still above it. The tmux session is untouched: it stays live, stays saved, and restores on the next reboot as an ordinary hookless pane — bare shell, scrollback intact, no prompt. Killing it is a separate act the user takes when they want it.
+**Discarding removes the pane's resume registration, permanently, and nothing else.** The entry is cleaned out of the store rather than suppressed for the boot, so the prompt does not return on this boot, on the next attach, or after any future reboot. The pane falls through to a plain shell with its replayed scrollback still above it. The tmux session is untouched: it stays live, stays saved, and restores on the next reboot as an ordinary hookless pane — bare shell, scrollback intact, no prompt. Killing it is a separate act the user takes when they want it.
+
+**Escape is not the key that does it.** The discard is bound to its own deliberate key, and confirmed before it lands.
+
+- **Enter resumes.** The positive outcome is the assumed one and takes the most reflexive key.
+- **A named key discards**, opening a second confirmation over the first — *this is permanent* — where Enter agrees and Escape backs out to the resume panel.
+- **Escape on the resume panel does nothing at all.** There is nowhere to back out to, so it is inert.
+
+That last property is the point rather than a side effect: it makes Escape mean exactly one thing everywhere in Portal — *back out, change nothing* — with no site where it also destroys something. A key the user's hands press without consulting them can then never be the key that loses work.
+
+The discard key is **`d`**, derived from the picker's existing split rather than chosen fresh: `k` kills a live thing (a session), `d` deletes a persisted record (a project). Nothing is killed here — the session and the pane both survive — and what goes is a stored registration, which is `d`'s side of that line.
+
+**What the discard destroys is recorded.** The removed command is written to the log as it goes. Portal already destroys these entries two ways and treats them differently: the typed removal command records only which entry went, while the automatic stale sweep deliberately records the command itself, its own source comment calling that the recoverable form an operator copies back out of the log (`internal/hooks/store.go:371-373` against `:221`). This path is the sweep's situation rather than the typed command's — it is reached by a keystroke on a panel the user is walking through, not by naming a key on a command line — so it takes the sweep's treatment. The confirmation makes the act deliberate; the log line makes it recoverable anyway, and costs nothing.
 
 There is no "parent process" to fall back to, which the user was unsure about: the pane's only process during restore is Portal's hydrate helper, and it replaces itself with either the hook or the user's shell (`cmd/state_hydrate.go:153-196`). Declining means it takes the shell branch — exactly what a restored pane with no registered hook does today, so a declined pane is indistinguishable from one that never had a hook.
 
