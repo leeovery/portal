@@ -226,5 +226,20 @@
   },
   "baseline": {
     "status": "native"
+  },
+  "roadmap": {
+    "horizons": [
+      "next"
+    ],
+    "items": {
+      "picker-row-redesign": {
+        "horizon": "next",
+        "summary": "Drop the always-\"1 window\" count and the \"attached\" word from picker rows; right-align a status-glyph strip that grows leftward (attached, pending resume, later agent state); show each session directory path beside its name",
+        "origin": "park:lazy-resume-on-attach",
+        "sources": [
+          "lazy-resume-on-attach/discussion/lazy-resume-on-attach.md"
+        ]
+      }
+    }
   }
 }
