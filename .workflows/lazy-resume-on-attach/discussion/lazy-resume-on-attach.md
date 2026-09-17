@@ -294,6 +294,30 @@ What made the trigger necessary was the assumption that a waiting pane holds not
 
 ---
 
+## Pending Visibility
+
+### Context
+
+A reboot leaves roughly forty-one panes each holding a pending decision, and the panel exists only inside its own pane. A background review asked whether the feature owes any surface outside the pane at all — there is otherwise no way to ask what is waiting, short of walking into every pane to find out.
+
+### Journey
+
+The scenario the review argued from — walking dozens of panes pressing discard on the finished ones — is not how the user works. A batch of finished sessions gets culled from the picker: mark them, kill them. That kills the session outright, which takes its pending resume with it, so the bulk path already exists for the case that matters.
+
+It exists but it is not bulk. Measured against the tree: multi-select deliberately ignores the kill key, with the source stating why — none of the row actions compose with a marked set (`internal/tui/model.go:2588-2594`). So culling fifteen finished sessions today is fifteen rounds of select, confirm, repeat. That is the picker's gap rather than this feature's, and this feature neither widens nor narrows it.
+
+What the feature does owe is an answer to "what is waiting", because it creates a state that previously did not exist and puts it somewhere invisible.
+
+A dashboard was rejected: a pending-resume list is a second feature wearing this one's clothes, and the pane is the right place to decide, because the pane is where the context is. The decision needs the transcript above it, which no list can carry.
+
+### Decision
+
+**The panel in the pane is the whole interaction surface.** No list, no bulk answer path, no way to resume or discard from outside the pane it belongs to.
+
+**Pending panes are visible as a count in `portal doctor`**, which already reports on this machinery, and as a single glyph on the picker's session row — the state is new, and the picker is where the user would notice it. The row already carries an attached indicator; attached and pending-resume are independent, so it is a second glyph rather than a second meaning for the first. The wider row rework that would give those glyphs a proper home is parked on the roadmap (see Open Threads).
+
+---
+
 ## Summary
 
 ### Key Insights

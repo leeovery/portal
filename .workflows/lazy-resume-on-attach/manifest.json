@@ -53,6 +53,10 @@
             "waiting-pane-mechanism": {
               "status": "decided",
               "parent": null
+            },
+            "pending-visibility": {
+              "status": "exploring",
+              "parent": null
             }
           }
         }
