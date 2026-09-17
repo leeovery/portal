@@ -19,11 +19,11 @@
               "parent": null
             },
             "prompt-persistence": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "trigger-and-timing": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "eager-lazy-preference": {

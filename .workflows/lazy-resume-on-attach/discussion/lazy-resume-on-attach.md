@@ -292,6 +292,8 @@ What made the trigger necessary was the assumption that a waiting pane holds not
 
 **No trigger.** The panel is drawn once, at restore, by the machinery that already runs for every pane. No focus hooks, no attach hooks, no per-event rendering. `client-attached` and `client-session-changed`, named in the seed as likely surfaces, are not touched by this feature.
 
+*Folded in:* the seeded **trigger-and-timing** and **prompt-persistence** subtopics are both answered here and by the mechanism above. Timing has no remaining question — the panel exists from restore, so there is no moment at which it must be produced. Persistence likewise needs no machinery of its own: the waiting program holds the panel for as long as it waits, so ignoring the prompt, detaching, closing the window and reattaching all leave it exactly as it was, and a reboot restores the pane and draws it again from the still-unfired registration. Stickiness is the absence of any dismissal path rather than a feature — only Enter and the discard key change anything.
+
 ---
 
 ## Pending Visibility
