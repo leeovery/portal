@@ -354,6 +354,34 @@ A settings screen to change it without hand-editing `prefs.json` is parked on th
 
 ---
 
+## Restore Pipeline Integration
+
+### Context
+
+The feature inserts an indefinite pause into the middle of a pipeline built on the assumption that hydration completes in seconds. The surfaces named in the seed — the hydrate helper's exec chain, the restore engine's phase split, the eager signal pass at bootstrap, and the global attach hooks — were carried forward to be checked rather than assumed safe.
+
+### Journey
+
+The edges were measured against the tree rather than reasoned about, and most of them turned out to need nothing.
+
+**A second bootstrap does not disturb a waiting pane.** Every `portal open` runs the orchestrator, and restore runs inside it — but it skips any saved session whose name is already live (`internal/restore/restore.go:118`). A session holding a waiting pane is live, so it is never re-restored and its pane is never respawned out from under the user.
+
+**A frozen pane is not dropped from the saved set.** The freeze suppresses that pane's scrollback write, and the structural capture merges the pane's *previous* record back into the fresh index rather than omitting it — guarded so that a stale marker cannot resurrect a pane whose session, window or pane is gone (`internal/state/capture.go:96-127`). So a pane can wait indefinitely and still be restored on the next boot, with the transcript it had when it paused.
+
+**Bootstrap's two sweeps leave it alone.** The stale-marker sweep only unsets markers whose pane is no longer live, and a waiting pane is live. The orphan-FIFO sweep has nothing to reclaim: the helper unlinks its FIFO as soon as the hydrate signal arrives, long before the panel is drawn.
+
+**The eager signal pass is unchanged.** It still writes the hydrate byte to every freshly-armed pane, and the helper still replays on receiving it. What changes is only what the helper does afterwards.
+
+**The pending state is never persisted.** It is recomputed on each boot from a registration that has not fired, so nothing about it needs to reach `sessions.json` and no schema moves.
+
+### Decision
+
+**Nothing in the restore pipeline changes except the helper's own tail.** No new bootstrap step, no change to step ordering, no change to the eager signal pass, and no change to the global hooks the seed flagged. The insertion is contained to the one process that was already the last thing to run in a restored pane.
+
+**Open**: whether the marker the freeze rides on is durable enough to hold across a pane rearrangement mid-wait.
+
+---
+
 ## Summary
 
 ### Key Insights
