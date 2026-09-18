@@ -132,6 +132,21 @@ So an unfrozen waiting pane hashes differently from its last write and the saver
 
 The decision stands unchanged, and the freeze is load-bearing rather than insurance: without it a waiting pane's saved history silently accretes junk for as long as it waits. That raises how durably the freeze is held.
 
+### The freeze is held by the pane, not by the pane's position
+
+The marker that suppresses capture today is addressed positionally — session name plus window and pane index. The saver recomputes that address for every live pane each tick and skips only on an exact match (`cmd/state_daemon.go:263-273`), and bootstrap's stale-marker sweep unsets any marker no live positional address answers to, enumerating through the same positional format (`cmd/bootstrap/stale_marker_cleanup.go`). All three components of that address move: closing an earlier window renumbers, `break-pane` and `move-pane` relocate, and a rename changes the session half.
+
+Today that exposure is the few seconds between skeleton restore and handover, which is why it has never mattered. This feature stretches it to the whole waiting life. A pane waited on for a week, whose session is renamed or whose sibling window is closed, loses its protection twice over: the saver's skip stops matching and the capture lands, and the next `portal open` — which runs bootstrap, and which the user runs constantly — sweeps the marker away as stale. This is the failure `resume-hooks-silently-lost` already fixed once for hook keys, reappearing on a different marker.
+
+**The saver's skip gains a second condition rather than changing its first.** A pane is left alone when it is mid-restore — the existing positional marker, whose other jobs are unchanged — **or** when it is waiting, read from the pane-scoped pending marker decided in Pending Visibility. That marker travels with the pane through every rearrangement tmux can perform, measured in `resume-hooks-silently-lost` against `break-pane`, `move-pane`, a window close under `renumber-windows`, `respawn-pane -k` and a session rename.
+
+Two consequences follow and are part of the decision:
+
+- **The pending marker is set before the mid-restore marker is cleared.** A gap where neither is set is a one-tick window in which the saver writes the card into the pane's saved history — the whole failure, in the space between two steps.
+- **The saver reads it for free.** It already enumerates every pane on the server each tick with a per-pane format to build its structural index, and that format already carries the pane's durable token as a column. The pending marker joins it as another column rather than costing a second tmux call. The arity of that read changes, which is the same contained move the pane token made.
+
+The inverse failure — a marker wrongly left set, freezing a pane's saved content forever — is structurally hard to reach: the marker lives on the pane, the waiting program is the pane's only process, and it dies with the pane. There is no state in which the pane survives while the marker is wrong.
+
 Sibling check: `built-in-session-resurrection` — its specification records the marker lifecycle as "Helper unsets marker after dump + 100ms sleep", which is true of the code as it stands and is what this feature changes. No corrigendum is owed: that text is not a claim that has gone wrong, it is current behaviour this work supersedes, and the same reading applies to that specification's rejection of a Zellij-style confirmation prompt — a decision superseded by new product intent rather than a factual error.
 
 (resolves review-001 F1)
