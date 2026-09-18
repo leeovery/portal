@@ -273,6 +273,50 @@ Two consequences follow and are part of the decision:
 **The inverse failure — a marker wrongly left set, freezing a pane's saved content forever — is structurally hard to reach.** The marker lives on the pane, the waiting program is the pane's only process, and it dies with the pane. There is no state in which the pane survives while the marker is wrong.
 
 *Sibling check: `built-in-session-resurrection` records the marker lifecycle as "Helper unsets marker after dump + 100ms sleep", which is true of the code as it stands and is what this feature changes. No corrigendum is owed: that text is not a claim that has gone wrong, it is current behaviour this work supersedes — and the same reading applies to that specification's rejection of a Zellij-style confirmation prompt, a decision superseded by new product intent rather than a factual error.*
+
+### 8. Seeing What Is Waiting
+
+A reboot leaves roughly forty-one panes each holding a pending decision, and the panel exists only inside its own pane. The feature creates a state that previously did not exist and puts it somewhere invisible, so it owes an answer to "what is waiting".
+
+**The panel in the pane is the whole interaction surface.** No list, no bulk answer path, no way to resume or discard from outside the pane it belongs to.
+
+A dashboard was rejected: a pending-resume list is a second feature wearing this one's clothes, and the pane is the right place to decide, because the pane is where the context is. The decision needs the transcript above it, which no list can carry.
+
+Bulk culling is already the picker's job and already exists as a route: killing a session takes its pending resume with it. It is not a *bulk* route — multi-select deliberately ignores the kill key, with the source stating why: none of the row actions compose with a marked set (`internal/tui/model.go:2588-2594`). So culling fifteen finished sessions today is fifteen rounds of select, confirm, repeat. That is the picker's gap rather than this feature's, and this feature neither widens nor narrows it.
+
+#### 8.1 `portal doctor` reports a count
+
+**Pending panes are visible as a passing count in `portal doctor`**, which already reports on this machinery.
+
+**A non-zero pending count never fails the check and never changes doctor's exit code.** The number is detail on a line that passes.
+
+That follows from what doctor's exit code means against what this feature produces. A check passes or fails, the exit code is zero only if all pass, and the catalog's nearest neighbours — the stale-hook and stale-project counts — fail the moment their count is non-zero (`cmd/doctor.go:398`, `:420`). Pending resumes are not a fault. A correctly functioning install presents roughly forty-one of them after a reboot, which is precisely the state this feature is built to produce, so wiring the count like its neighbours would make `portal doctor` report failure on success and break the scriptable exit code its whole design rests on.
+
+#### 8.2 A pending pane is marked explicitly
+
+The marker is the pane user-option `@portal-resume-pending` (§7.3). **The helper sets it before it clears the mid-restore marker, and therefore before it paints** — so the pane is never unprotected. Resume and a confirmed discard each clear it, both in the waiting program, at the moment the user answers.
+
+**Deriving the state instead was argued for and rejected.** tmux reports what is actually running in every pane in one read, so a pane running the waiter is a waiting pane by definition — nothing to set, nothing to clear, nothing that can go stale. It fails on two counts. It does not compose: every consumer — the picker, doctor, and whatever an agent-aware Portal wants later — has to re-derive it and re-handle its ambiguity, since tmux reports a process's name without its arguments, so any pane briefly running another Portal command reads as pending. And it carries nothing: a marker set at the moment a pane starts waiting can hold metadata about the pause, which a process name cannot. What that metadata should be is open — the point is only that the facility exists, and that a derivation forecloses it.
+
+**The pending marker has no staleness case and owes no sweep.** A pane option is destroyed with its pane, so a pane closed mid-wait leaves nothing behind and there is no address by which a sweep could reach one. The clears are the two explicit actions above, and the unreachability of the inverse failure (§7.3) carries the rest.
+
+Bootstrap's existing stale-marker sweep is not a backstop here and could not be: it enumerates `@portal-skeleton-*` **server** options and unsets them as server options (`cmd/bootstrap/stale_marker_cleanup.go:50-58`, `internal/state/markers.go:12,45,82`), so it is structurally blind to a pane option — which is exactly why the saver's skip had to gain a second condition rather than reuse the existing marker.
+
+**A pane option rather than a server option keyed by position.** `resume-hooks-silently-lost` established this directly: positional keys go stale when tmux renumbers panes, and its measurements confirmed a pane user-option survives `break-pane`, `move-pane`, a window close under `renumber-windows`, `respawn-pane -k` and a session rename. Portal models every other pane and session condition as a tmux option — the restore markers, the restoring flag, the spawn acks, the directory stamp, the pane token — and this is that vocabulary rather than an addition to it. The whole-server enumeration for pane options already exists, so the picker and doctor each cost one read.
+
+#### 8.3 The picker's session row gains a second indicator
+
+The picker is where the user would notice a new state. The row already carries an attached indicator; attached and pending-resume are independent, so it is a second indicator rather than a second meaning for the first.
+
+**The session row drops the word `attached` and gains a second dot.** The green attached indicator loses its label and stands alone; a pending resume shows as a second dot in `accent.attention`.
+
+**The dots pack to the right in a fixed order — attached, then pending — rather than holding reserved lanes.** A row with one dot puts it hard right whichever it is; a row with both shows the attached dot pushed left to make room. This was built the other way first, with a reserved lane per indicator so the columns aligned down the list, and it was rejected: an indicator should not claim space it is not using.
+
+**Under `NO_COLOR` each indicator renders as a letter in the same cell** — `A` for attached, `P` for pending — so the packing order is untouched and there is no second row geometry: `A` alone, `P` alone, or `AP` when both. Portal's rule for that mode is that state stays glyph-backed and never colour-only, and two identically-shaped circles separated only by hue would not survive it. Uppercase rather than lowercase: a lone `a` in a status column reads as a typo, `A` reads as a status code.
+
+**A gone row is unaffected.** The transient `session gone` badge already replaces the whole trailing region, so it continues to, and a session flagged gone has no live pane to be pending.
+
+**Dropping `attached` is pulled into this feature; the rest of the row rework stays parked.** Removing the word is what makes room for a second indicator, so it cannot wait for the roadmap item — the window count, the session paths and the wider right-hand rework stay on `picker-row-redesign` (§10). One consequence rides with it: a bare indicator carries no meaning on its own, so **the help modal gains the legend in the same change** rather than after it.
 ---
 
 ## Working Notes
