@@ -234,7 +234,7 @@
     "items": {
       "picker-row-redesign": {
         "horizon": "next",
-        "summary": "Drop the always-\"1 window\" count and the \"attached\" word from picker rows; right-align a status-glyph strip that grows leftward (attached, pending resume, later agent state); show each session directory path beside its name",
+        "summary": "Picker row rework: drop the always-\"1 window\" count, show each session directory path beside its name, and finish the right-hand status strip. NOTE: dropping the \"attached\" word and adding the pending-resume dot are NOT here — lazy-resume-on-attach pulled them forward, since the word had to go to make room for a second indicator.",
         "origin": "park:lazy-resume-on-attach",
         "sources": [
           "lazy-resume-on-attach/discussion/lazy-resume-on-attach.md"
