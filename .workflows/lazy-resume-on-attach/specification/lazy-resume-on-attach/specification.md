@@ -237,11 +237,11 @@ The emission is one INFO line under the `hooks` component carrying the hook key 
 
 Portal's saver re-reads every live pane on each tick and rewrites that pane's saved scrollback whenever the capture hashes differently from the last write (`cmd/state_daemon.go:263-290` — `CaptureAndHashPane` then `WriteScrollbackIfChanged`, which is a dedup, not a protection).
 
-The saver reads a pane with `capture-pane -e -p -S -` (`internal/tmux/tmux.go:752`). Measured against that exact invocation on tmux 3.7c, with a live process holding the alternate screen open over a pane carrying 40 lines of prior output: the capture returns the **primary buffer's history with the alternate screen appended at the tail** — the real transcript, then the card's lines.
+The saver reads a pane with `capture-pane -e -p -S -` (`internal/tmux/tmux.go:752`). Measured against that exact invocation on tmux 3.7c, with a live process holding the alternate screen open over a pane carrying 40 lines of prior output: the capture returns **only the lines that had already scrolled out of view, then the card** — the most recent screenful of real output is absent. Those lines are still in the buffer `capture-pane -a -p` reads, which the saver never calls. (`tmux capture-pane -e -p -S -` over a pane holding `T-01…T-40` with the alternate screen on → `T-01…T-20` plus the card; `tmux capture-pane -a -p` on the same pane → `T-21…T-40`.)
 
-So an unfrozen waiting pane hashes differently from its last write and the saver rewrites its saved file as *transcript plus a picture of the card*. Once, not per tick — identical captures dedup. The transcript is not lost, which is milder than a replacement, but it is not recoverable either: the next reboot replays that file, so the dead card image returns as part of the pane's history and a live card is drawn over it. A pane waited on across three reboots accretes three dead cards into a transcript that can never shed them.
+So an unfrozen waiting pane hashes differently from its last write and the saver rewrites its saved file as *transcript-minus-its-last-screenful, plus a picture of the card*. Once, not per tick — identical captures dedup. The lost screenful is the part the user was last reading and the part a resumed session continues from, and there is no copy of it anywhere: the next reboot replays the truncated file, so that work is gone and a dead card image sits in the history where it was, with a live card drawn over that. A pane waited on across three reboots loses a screenful each time and accretes three dead cards it can never shed.
 
-An earlier reading of this used a bare `capture-pane -p`, which returns the visible screen alone; that is why the card first looked like a wholesale replacement rather than an addition. **Measuring with the caller's exact invocation is what changes the answer**, and the decision below rests on the second reading.
+Measuring with the caller's exact invocation is what changes the answer, and it took three readings to settle. A bare `capture-pane -p` returns the visible screen alone, which made the card look like a wholesale replacement. Reading the saver's own invocation as history-plus-card made it look like pure accretion. Neither held: the failure is loss of the most recent screenful *and* accretion of a dead card.
 
 #### 7.2 The pane stays frozen for as long as its resume is unanswered
 
@@ -253,7 +253,7 @@ The cost is nil in practice: a pane waiting on a resume has no new content worth
 
 **A waiting pane keeps its place in the saved set throughout.** The freeze suppresses that pane's scrollback write alone; the structural capture still enumerates the pane into `sessions.json` and merges its *previous* record back into the fresh index — guarded so a stale marker cannot resurrect a pane whose session, window or pane is gone (`internal/state/capture.go:96-127`). So a pane can wait indefinitely and still be restored on every subsequent reboot, with its original content and a fresh panel, however many reboots it waits through.
 
-**The freeze is load-bearing, not insurance.** Without it a waiting pane's saved history silently accretes junk for as long as it waits.
+**The freeze is load-bearing, and what it prevents is lost work rather than clutter.** Without it, the one-tick gap between the two markers (§7.3) costs the user a screenful of their own transcript every time it is hit.
 
 #### 7.3 The freeze is held by the pane, not by the pane's position
 
@@ -267,7 +267,7 @@ Today that exposure is the few seconds between skeleton restore and handover, wh
 
 Two consequences follow and are part of the decision:
 
-- **The pending marker is set before the mid-restore marker is cleared** — and therefore before the panel is painted. A gap where neither is set is a one-tick window in which the saver writes the card into the pane's saved history: the whole failure, in the space between two steps.
+- **The pending marker is set before the mid-restore marker is cleared** — and therefore before the panel is painted. A gap where neither is set is a one-tick window in which the saver truncates the pane's saved transcript and writes the card over the end of it (§7.1): the whole failure, in the space between two steps.
 - **The saver reads it for free.** It already enumerates every pane on the server each tick with a per-pane format to build its structural index, and that format already carries the pane's durable token as a column (`captureFormat`, `internal/state/capture.go:26`). The pending marker joins it as another column rather than costing a second tmux call. The arity of that read changes — `captureFieldCount` 11 → 12 — which is the same contained move the pane token made.
 
 **The inverse failure — a marker wrongly left set, freezing a pane's saved content forever — is structurally hard to reach.** The marker lives on the pane, the waiting program is the pane's only process, and it dies with the pane. There is no state in which the pane survives while the marker is wrong.
