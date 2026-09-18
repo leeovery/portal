@@ -345,6 +345,24 @@ Suppressing replay behind a waiting panel was considered and rejected. The case 
 #### 9.2 The pending state is never persisted
 
 It is recomputed on each boot from a registration that has not fired, so nothing about it reaches `sessions.json` and **no schema version moves**. The pane's waiting-ness lives on the pane as a tmux option for as long as the pane does (§8.2), and nowhere else.
+
+### 10. Not In This Feature
+
+Two capabilities this work touched are on the product roadmap rather than left as loose ends. Neither is a prerequisite: the feature ships complete without them.
+
+**Preferences UI** (`preferences-ui`, horizon `next`). A settings screen in the picker for install preferences, so `prefs.json` is not hand-edited. The theme picker is currently the only preference with any UI, and this feature adds a second setting that needs one. Until it exists, the install-wide resume mode is changed by hand-editing the file (§3.1) — which is what raised the stakes on the default (§2.1).
+
+**Picker row redesign** (`picker-row-redesign`, horizon `next`). Dropping the window count, which reads "1 window" on every row of the measured install (42 of 42 live sessions held a single window, `tmux list-windows -a -F '#{session_name}' | sort | uniq -c`, 2026-09-18), showing each session's directory path beside its name, and finishing the right-hand status strip. It changes every row for every session and is driven by its own rationale rather than by this feature.
+
+**Two pieces of the row rework are pulled forward into this feature** and are not on the roadmap item: dropping the `attached` word, and adding the pending-resume indicator beside it (§8.3). The word had to go to make room for a second indicator, so it could not wait — and the help-modal legend rides with it, because a bare indicator carries no meaning on its own.
+
+Also explicitly not built:
+
+- **A pending-resume dashboard or list.** Rejected on its merits, not deferred (§8).
+- **A bulk answer path.** Multi-select still ignores the row actions; culling finished sessions stays one-at-a-time in the picker. That gap predates this feature and is untouched by it (§8).
+- **A migration of `hooks.json`.** Both stored shapes are permanently valid and neither converts to the other (§3.2).
+- **Any change to the pane's durable token.** Discarding removes a registration and never unstamps a pane (§6.2).
+- **Any expiry or tidy pass over old-format hook keys.** The retention rule `resume-hooks-silently-lost` established is untouched; this feature only ever removes token-shaped keys.
 ---
 
 ## Working Notes
