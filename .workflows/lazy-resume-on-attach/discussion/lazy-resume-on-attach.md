@@ -641,6 +641,56 @@ Confidence: high.
 
 ---
 
+## When The Marker Cannot Be Written Or Cleared
+
+### Context
+
+The freeze rests on a marker written onto the pane in the moment before the panel goes up, and cleared when the user answers. Both are tmux writes, and both can fail. The design takes as given that no moment exists in which a pane is waiting without a marker, and that the marker goes when the wait does; neither was established as a rule.
+
+### Journey
+
+The two failures are not symmetric, and each derives from its own consequence.
+
+A wait with no marker is the one state the design refuses. The saver rewrites that pane's saved transcript as history-minus-its-last-screenful plus the card at the first tick that lands, for as long as the user takes to answer — which can be days — with no copy anywhere and nothing reporting it. Against that, the sanctioned place to degrade to is the one the feature already names: landing the user where eager would have put them. Painting anyway and accepting that a tick may cost a screenful trades the protection for the appearance of it; dropping to a plain shell loses the resume for that boot with nothing saying so.
+
+The failure to clear is worse, because the damage outlives the answer. The marker stays on the pane and the saver refuses that pane's scrollback write for the rest of the pane's life: the user resumes, works there for weeks, and every reboot restores the transcript it held at the moment it paused. Nothing reports it and nothing reclaims it — the reason for believing a marker can never be wrongly left set is that the waiting program dies with the pane, which stops being true the instant it hands the pane over, and no sweep reaches a marker carried by a pane. Handing the pane over anyway trades a saved transcript for a usable pane, which is the wrong way round for a feature whose whole point is not losing work.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by the freeze's own purpose — protection against lost work rather than clutter — and by the rule already taken for a discard the store will not accept: what the screen claims and what the pane holds never disagree. (review-gap-c2 F3, F4)
+
+**A pane that cannot be marked does not wait.** If the pending marker cannot be written, the helper does not paint: it fires the hook as an eager registration does, and the pane comes back as today's restore leaves it.
+
+**A freeze that cannot be lifted holds the answer.** If the marker cannot be cleared, the pane keeps the panel and says so in place; neither the hook nor the fall-through to a shell runs while the marker stands, and the key can be pressed again.
+
+Confidence: high.
+
+---
+
+## The Panel's Report Row And Its Redraw
+
+### Context
+
+Two consequences of decisions already taken had nowhere to land. The panel's contents were enumerated exhaustively — header, command under its label, two key hints, nothing else — while the discard rules require the panel to report in place when an answer cannot be carried out. And the resize handover was described as a cost paid at the moment of the resize, which a terminal being dragged does not deliver once.
+
+### Journey
+
+The report row follows from why the report exists. It is there so the screen and the store never disagree, and a report that can expire unseen fails exactly that: a user who looked away reads the unchanged panel as the key not registering, presses the discard key again, and never learns that nothing was removed — the one outcome the discard rules set out to rule out. A row inside the card also keeps the panel one object, on a pane that has room for nothing else.
+
+The redraw follows from what a drag actually produces. A terminal dragged to a new size delivers a stream of size changes to every pane in the window, and a full waiting set answering each of them with a fresh draw is hundreds of process launches a second for the length of the drag — the machine stalling and the panels stuttering, from an action the user takes without thinking about it. The panel holds nothing that moves, so a draw mid-drag shows nothing the user will still be looking at a moment later. Leaving the card as drawn until the next keypress costs nothing and leaves a mis-sized card on screen, which is the cheaper answer to the wrong question.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by why the report exists (the screen and the store never disagree) and by what a resize actually delivers against the resting-cost argument the waiter rests on. (review-gap-c2 F5, F6)
+
+**A card with something to report carries one more row.** The reason is stated on a single line between the command and the key hints, and it stays there until the next key is pressed rather than timing out. The row is present only when there is something to say; a panel with nothing to report carries exactly its three parts.
+
+**The redraw is taken once the size has settled, not once per size change.** One draw at the end of the stream is the whole of what a resize owes, so the cost stays a single handover per pane.
+
+Confidence: high.
+
+---
+
 ## Summary
 
 ### Key Insights
