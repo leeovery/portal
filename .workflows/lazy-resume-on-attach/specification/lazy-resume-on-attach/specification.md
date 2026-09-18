@@ -230,6 +230,49 @@ The emission is one INFO line under the `hooks` component carrying the hook key 
 - a new `via`, **`panel`**, because the existing four (`cli`, `internal`, `hydrate`, `doctor`) name none of them — the waiter is neither a typed command, nor Portal acting on its own behalf, nor a hydration lookup, nor a diagnosis.
 
 *Sibling check: `resume-hooks-silently-lost` owns hook removal — the `hook rm` CLI, the rule that removing nothing always exits non-zero, and that a removal never unstamps the pane's durable token. This section adds a route beside that CLI and contradicts none of those rules; because the key it removes is always a token baked from saved state, it also never touches the old-format entries that specification retains permanently.*
+
+### 7. Protecting the Waiting Pane's Saved Transcript
+
+#### 7.1 An unfrozen waiting pane accretes dead panels into its saved history
+
+Portal's saver re-reads every live pane on each tick and rewrites that pane's saved scrollback whenever the capture hashes differently from the last write (`cmd/state_daemon.go:263-290` — `CaptureAndHashPane` then `WriteScrollbackIfChanged`, which is a dedup, not a protection).
+
+The saver reads a pane with `capture-pane -e -p -S -` (`internal/tmux/tmux.go:752`). Measured against that exact invocation on tmux 3.7c, with a live process holding the alternate screen open over a pane carrying 40 lines of prior output: the capture returns the **primary buffer's history with the alternate screen appended at the tail** — the real transcript, then the card's lines.
+
+So an unfrozen waiting pane hashes differently from its last write and the saver rewrites its saved file as *transcript plus a picture of the card*. Once, not per tick — identical captures dedup. The transcript is not lost, which is milder than a replacement, but it is not recoverable either: the next reboot replays that file, so the dead card image returns as part of the pane's history and a live card is drawn over it. A pane waited on across three reboots accretes three dead cards into a transcript that can never shed them.
+
+An earlier reading of this used a bare `capture-pane -p`, which returns the visible screen alone; that is why the card first looked like a wholesale replacement rather than an addition. **Measuring with the caller's exact invocation is what changes the answer**, and the decision below rests on the second reading.
+
+#### 7.2 The pane stays frozen for as long as its resume is unanswered
+
+**The marker that already tells the saver to leave a pane alone is held through the waiting state** instead of being cleared at the end of scrollback replay. Today the hydrate helper clears it the moment replay finishes and before it hands off — replay, settle sleep, unset, exec (`cmd/state_hydrate.go:139-148`) — which under lazy resume would land at exactly the moment the panel goes up.
+
+**It is cleared when the user answers** — on Enter before the hook runs, and on a confirmed discard before the pane falls through to a shell (§6).
+
+The cost is nil in practice: a pane waiting on a resume has no new content worth saving, so freezing it at its last live state is exactly the desired end state.
+
+**A waiting pane keeps its place in the saved set throughout.** The freeze suppresses that pane's scrollback write alone; the structural capture still enumerates the pane into `sessions.json` and merges its *previous* record back into the fresh index — guarded so a stale marker cannot resurrect a pane whose session, window or pane is gone (`internal/state/capture.go:96-127`). So a pane can wait indefinitely and still be restored on every subsequent reboot, with its original content and a fresh panel, however many reboots it waits through.
+
+**The freeze is load-bearing, not insurance.** Without it a waiting pane's saved history silently accretes junk for as long as it waits.
+
+#### 7.3 The freeze is held by the pane, not by the pane's position
+
+The marker that suppresses capture today is addressed positionally — session name plus window and pane index. The saver recomputes that address for every live pane each tick and skips only on an exact match (`cmd/state_daemon.go:263-273`), and bootstrap's stale-marker sweep unsets any marker no live positional address answers to, enumerating through the same positional format (`cmd/bootstrap/stale_marker_cleanup.go`). All three components of that address move: closing an earlier window renumbers, `break-pane` and `move-pane` relocate, and a rename changes the session half.
+
+Today that exposure is the few seconds between skeleton restore and handover, which is why it has never mattered. This feature stretches it to the whole waiting life. A pane waited on for a week, whose session is renamed or whose sibling window is closed, loses its protection twice over: the saver's skip stops matching and the capture lands, and the next `portal open` — which runs bootstrap, and which the user runs constantly — sweeps the marker away as stale. This is the failure `resume-hooks-silently-lost` already fixed once for hook keys, reappearing on a different marker.
+
+**The saver's skip gains a second condition rather than changing its first.** A pane is left alone when it is mid-restore — the existing positional marker, whose other jobs are unchanged — **or** when it is waiting, read from a pane-scoped pending marker. That marker travels with the pane through every rearrangement tmux can perform, measured in `resume-hooks-silently-lost` against `break-pane`, `move-pane`, a window close under `renumber-windows`, `respawn-pane -k` and a session rename.
+
+**The marker is the pane user-option `@portal-resume-pending`, set to `1`** — the value convention the skeleton markers already use (`internal/state/markers.go:78`). Presence is what is read; any richer payload is a later change the shape already admits (§8.2).
+
+Two consequences follow and are part of the decision:
+
+- **The pending marker is set before the mid-restore marker is cleared** — and therefore before the panel is painted. A gap where neither is set is a one-tick window in which the saver writes the card into the pane's saved history: the whole failure, in the space between two steps.
+- **The saver reads it for free.** It already enumerates every pane on the server each tick with a per-pane format to build its structural index, and that format already carries the pane's durable token as a column (`captureFormat`, `internal/state/capture.go:26`). The pending marker joins it as another column rather than costing a second tmux call. The arity of that read changes — `captureFieldCount` 11 → 12 — which is the same contained move the pane token made.
+
+**The inverse failure — a marker wrongly left set, freezing a pane's saved content forever — is structurally hard to reach.** The marker lives on the pane, the waiting program is the pane's only process, and it dies with the pane. There is no state in which the pane survives while the marker is wrong.
+
+*Sibling check: `built-in-session-resurrection` records the marker lifecycle as "Helper unsets marker after dump + 100ms sleep", which is true of the code as it stands and is what this feature changes. No corrigendum is owed: that text is not a claim that has gone wrong, it is current behaviour this work supersedes — and the same reading applies to that specification's rejection of a Zellij-style confirmation prompt, a decision superseded by new product intent rather than a factual error.*
 ---
 
 ## Working Notes
