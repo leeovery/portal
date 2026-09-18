@@ -31,7 +31,7 @@
               "parent": null
             },
             "restore-pipeline-integration": {
-              "status": "converging",
+              "status": "decided",
               "parent": null
             },
             "waiting-pane-capture": {

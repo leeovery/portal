@@ -429,7 +429,7 @@ The edges were measured against the tree rather than reasoned about, and most of
 
 **Nothing in the restore pipeline changes except the helper's own tail.** No new bootstrap step, no change to step ordering, no change to the eager signal pass, and no change to the global hooks the seed flagged. The insertion is contained to the one process that was already the last thing to run in a restored pane.
 
-**Open**: whether the marker the freeze rides on is durable enough to hold across a pane rearrangement mid-wait.
+The one open question this section carried — whether the marker the freeze rides on survives a pane rearrangement mid-wait — is answered in Waiting Pane Capture: it does not, and the freeze gains a second condition read from the pane-scoped pending marker instead.
 
 ---
 
