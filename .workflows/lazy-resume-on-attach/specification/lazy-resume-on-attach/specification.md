@@ -127,6 +127,58 @@ An unbounded refusal would outlive the destruction of its own pane: culling fift
 There is nothing to trigger because the panel does not have to be produced when the user arrives — it is already there, held on the pane by the process waiting in it. Arriving at a pane is not an event Portal needs to observe.
 
 **Stickiness is the absence of a dismissal path rather than a feature.** Ignoring the panel changes no state, so it is still there next time. Detaching, closing the window, and rebooting are not dismissals, so none of them clear anything — and a reboot restores the pane and draws the panel again from the still-unfired registration. Only Enter and a confirmed discard change anything (§6).
+
+### 5. The Resume Panel
+
+#### 5.1 Painted into the pane's alternate screen, not floated over it
+
+**Nothing floats above the pane and nothing tmux draws is involved.** The panel is Portal drawing into a surface it owns, exactly as the picker's own modals are.
+
+**tmux's overlay primitives were measured and rejected.** `display-popup` produced exactly the described panel on a disposable socket — explicit dimensions, a border style, a title, a body of Portal's own drawing — and then failed the one hard constraint. **A tmux overlay captures the whole client's keyboard.** Measured on tmux 3.7c: with a two-pane window, the *right* pane selected as the active pane, and a popup opened over the *left* pane, keystrokes sent from the attached client were delivered to the popup and never reached the focused right pane at all. A popup is not a pane; tmux's own description is "a rectangular box drawn over the top of any panes", and it intercepts the client's input ahead of pane routing. `display-menu` is the same kind of object, and additionally renders a list sized to its contents with no room for an arbitrary body.
+
+**There is no pane-scoped overlay facility in tmux.** Both overlay primitives are client-scoped by construction, and nothing else in the command set draws over a pane — the remaining candidates put text in the pane's own content (`remain-on-exit-format`, pane borders) or in the status line. An overlay that floats above one pane while the others stay live is not something tmux offers. This is the same constraint that forced the waiting program over the dead pane (§4.1).
+
+**The panel is painted into the pane's alternate screen, so it never enters the scrollback.** The panel is not user content — it is a hold placed on the session, never asked for — and once it is gone it should leave no trace in the history. The alternate screen is exactly that facility: the buffer `vim` and `less` draw on, which is not added to a pane's scrollback ring.
+
+Measured on tmux 3.7c: a pane printed two lines of real content, entered the alternate screen, and painted a card. `capture-pane -p` returned the card; `capture-pane -a -p` returned the two original lines, intact underneath. The isolation is a property of the alternate screen and does not depend on whether a process remains — re-measured with a live process holding it open, the same isolation holds (§7.1 records what the saver's own invocation returns, which is a different reading of the same pane).
+
+**Nothing blocks.** The panel is the pane's own content and the program holding it reads only the keys sent to that pane. Panes beside it are fully live throughout.
+
+**Panes with no pending resume are untouched.** In the worked example — one window, a left pane that held a resumable session and a right pane that held a bare shell — the right pane restores exactly as it does today, its scrollback in place, and goes on capturing normally. Work done in it during one attachment shows up in its scrollback on the next, unchanged by this feature.
+
+#### 5.2 A full-pane canvas with a card centred on it
+
+**The overlay fills the pane, painted in the active Portal theme so nothing behind it shows through, and the decision sits in a compact bordered card in the middle.** A box stretched to near-full size with a few lines in the middle would look lost on a large terminal; the canvas-plus-card shape is what Portal already uses everywhere else for exactly this reason.
+
+The card is the shape of Portal's existing rename modal: a header row carrying the title and a state badge, a body, and a footer row of key hints, assembled through the same joined-panel frame the picker's modals use (`renderJoinedPanel`, `internal/tui/panel.go`).
+
+**The reuse is at the presentation layer, not the code path.** The picker's modals are Bubble Tea components rendering into its own model, while this panel is drawn straight into a pane by the program that then waits there. What carries across is the theme tokens and the modal's visual grammar, which is what makes it read as Portal rather than as a tmux dialog.
+
+Every colour is a theme token, as everywhere else in Portal — the panel holds no raw hex.
+
+#### 5.3 The waiting panel
+
+It carries this, and carries nothing else:
+
+- **Header** — `Resume session` on the left; a `● PAUSED` badge on the right in `accent.attention`, occupying the slot the rename modal gives `◉ EDIT MODE`.
+- **Body** — an `ON RESUME` label in `accent.primary`, the token the rename modal gives `NEW NAME`, with the registered command beneath it.
+- **Footer** — `⏎ resume` and `d discard`.
+
+A meta line carrying the directory and how long the pane had been paused was drafted and cut. It was invented rather than decided, and on the page it added nothing the command and the badge did not already say. The pending marker can carry metadata (§8.2) — this panel does not need it to.
+
+#### 5.4 The discard confirmation
+
+**The discard confirmation is the kill modal, retitled.** `▲ Discard resume?`, the command rendered in `state.destructive` where the kill modal puts the session name, a plain-language consequence line, and `y discard   esc cancel`. Nothing structural differs, which is the point: it is the same act the picker's kill confirm performs, so it is the same object, built through the same shared destructive-confirm builder (`internal/tui/destructive_confirm.go`).
+
+#### 5.5 Design references
+
+Three frames were built in the Paper file `Portal`, against the Nord artboards the user runs, so the new work sits beside the existing designs in the same palette:
+
+- **Resume panel — waiting (Nord)**
+- **Resume panel — discard confirm (Nord)**
+- **Sessions — pending resume dot (Nord)** (§8.3)
+
+The waiting panel's frame was built by duplicating the Nord kill modal, so its card geometry — width, header and footer rules, padding — is identical to the existing modals' rather than approximate. The frames are the design reference for implementation; the panel is built from Portal's own shared panel machinery, not from the frames' pixel dimensions.
 ---
 
 ## Working Notes
