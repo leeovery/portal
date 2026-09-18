@@ -60,8 +60,8 @@ Measurement 3 — the latch on the live install, `tmux show-options -s | grep -i
 @portal-bootstrapped 0.12.0
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Re-measured independently: `cmd/root.go:108-118` returns after `ensureSaverLiveness` when the latch holds, so no orchestrator, restore or sweep runs; the live server carries `@portal-bootstrapped 0.12.0`. Both conclusions leaning on the claim re-land from the corrected value unchanged — a positional marker stops matching on any rearrangement whether or not a sweep reaches it, and a waiting pane is disturbed less often rather than more — so the repair went in place in the discussion (both restatements sit outside a Decision block), and the specification's §7.3 and §9.1 were aligned to it.
 
 ---
 
