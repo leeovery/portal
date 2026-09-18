@@ -42,6 +42,12 @@ A crash between the synthesizer's write and the init — initialise the cycle fr
 
 → Proceed to **E. Approval Overview**.
 
+#### If the previous cycle's findings are committed and each records no findings
+
+The cycle came back clean — the analysis has converged.
+
+→ Return to **[the skill](../SKILL.md)** for **Step 8**.
+
 #### If the previous cycle's findings are committed and its synthesis never ran
 
 → Proceed to **D. Dispatch Synthesis Agent** over the existing findings.
@@ -69,7 +75,7 @@ Fetch and emit the `DISPLAY: cycle limit` section verbatim as a code block (a se
 node .claude/skills/workflow-engine/scripts/engine.cjs render cycle-limit {work_unit}.implementation.{topic}
 ```
 
-→ Load **[convergence-analysis.md](../../workflow-shared/references/convergence-analysis.md)** with loop_type = `analysis`, work_unit = `{work_unit}`, topic = `{topic}`.
+→ Load **[convergence-analysis.md](../../workflow-shared/references/convergence-analysis.md)** with loop_type = `analysis`, work_unit = `{work_unit}`, topic = `{topic}`, render_when = `always`.
 
 Fetch the cycle gate and emit its `MENU: cycle gate` section verbatim as markdown (not a code block):
 

@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 const { titlecase } = require('../conventions.cjs');
-const { section, CONTINUE_INSTRUCTION, callout, menu, cmdOption } = require('./surfaces.cjs');
+const { section, CONTINUE_INSTRUCTION, callout, menu, cmdOption, promptOption, bulletRow, indentedBody } = require('./surfaces.cjs');
 
 /**
  * The ⚑ advisory block: label line and reassurance tail. The instruction
@@ -86,13 +86,15 @@ function workunitReceipt(verb, workUnit, workType, { pipeline = false, skippedRe
 /**
  * topic complete / cancel / reactivate receipts. `complete` carries no
  * confirmation line — the calling flow owns its own conclusion display; it
- * renders the indexing advisory alone, empty without `--warn`.
+ * renders the indexing advisory alone, empty without `--warn`. `cancel` and
+ * `reactivate` confirm the unit by name, the reactivate naming the statuses
+ * its items returned to (none for a never-started topic).
  * @param {'complete'|'cancel'|'reactivate'} verb
- * @param {string} topic @param {string} phase @param {string|undefined} status
- * @param {{warn?: boolean}} [opts]
+ * @param {string} topic
+ * @param {{warn?: boolean, restored?: {phase: string, status: string}[]}} [opts]
  * @returns {string}
  */
-function topicReceipt(verb, topic, phase, status, { warn = false } = {}) {
+function topicReceipt(verb, topic, { warn = false, restored = [] } = {}) {
   const name = titlecase(topic);
   if (verb === 'complete') {
     return warn
@@ -102,12 +104,15 @@ function topicReceipt(verb, topic, phase, status, { warn = false } = {}) {
   if (verb === 'cancel') {
     return joined([
       warn ? warningBlock('Knowledge removal warning', 'The topic is cancelled. You can run knowledge remove manually later.') : null,
-      confirmation(`Cancelled "${name}" in ${phase}.`),
+      confirmation(`Cancelled "${name}".`),
     ]);
   }
+  const returned = restored.length > 0
+    ? ` Restored ${restored.map((r) => `${r.phase} [${r.status}]`).join(' · ')}.`
+    : '';
   return joined([
     warn ? warningBlock('Knowledge indexing warning', 'The artifact is saved. Indexing can be retried later.') : null,
-    confirmation(`Reactivated "${name}" in ${phase}. Status restored to ${status}.`),
+    confirmation(`Reactivated "${name}".${returned}`),
   ]);
 }
 
@@ -145,12 +150,14 @@ function absorbSummary(feature, epic, topic, facts) {
 
 /**
  * workunit absorb — the post-absorption summary. `experiments` is the moved
- * series' top-level record count — 0 when the feature had no series.
+ * series' top-level record count — 0 when the feature had no series;
+ * `renamed` names the imports a filename collision renamed, whose links the
+ * transaction rewrote in the documents it moved.
  * @param {string} epic @param {string} topic @param {string[]} moved
- * @param {{warn?: boolean, experiments?: number}} [opts]
+ * @param {{warn?: boolean, experiments?: number, renamed?: {from: string, to: string}[]}} [opts]
  * @returns {string}
  */
-function absorbReceipt(epic, topic, moved, { warn = false, experiments = 0 } = {}) {
+function absorbReceipt(epic, topic, moved, { warn = false, experiments = 0, renamed = [] } = {}) {
   // Heading and sentence at column 0; only the fact list is indented, and it
   // earns that by hanging off the sentence above it.
   const lines = [
@@ -164,6 +171,9 @@ function absorbReceipt(epic, topic, moved, { warn = false, experiments = 0 } = {
   if (experiments > 0) lines.push(`  • Experiments: ${experiments} moved`);
   if (moved.includes('seeds')) lines.push('  • Seed: moved');
   if (moved.includes('imports')) lines.push('  • Imports: moved');
+  for (const rename of renamed) {
+    lines.push(...bulletRow(`Renamed: ${rename.from} → ${rename.to} (links rewritten)`));
+  }
   lines.push('  • Feature: removed');
   return joined([
     warn ? warningBlock('Knowledge sync warning', 'The feature is absorbed. Indexing can be retried later.') : null,
@@ -174,10 +184,10 @@ function absorbReceipt(epic, topic, moved, { warn = false, experiments = 0 } = {
 /**
  * workunit promote — the promotion summary.
  * @param {string} workUnit @param {string} topic @param {string} ccWorkUnit
- * @param {{warn?: boolean}} [opts]
+ * @param {{warn?: boolean, imports?: number}} [opts]
  * @returns {string}
  */
-function promoteReceipt(workUnit, topic, ccWorkUnit, { warn = false } = {}) {
+function promoteReceipt(workUnit, topic, ccWorkUnit, { warn = false, imports = 0 } = {}) {
   // Same shape as its sibling above: column-0 sentence, bulleted facts.
   const lines = [
     'Promoted to Cross-Cutting',
@@ -188,12 +198,37 @@ function promoteReceipt(workUnit, topic, ccWorkUnit, { warn = false } = {}) {
     `  • Source: ${workUnit}`,
     '  • Discussion files: moved',
     '  • Specification: moved',
+    // Copied, not moved — the epic keeps its own, so the row says so.
+    ...(imports > 0 ? [`  • Imports: ${imports} copied`] : []),
     '  • Epic status: promoted',
   ];
   return joined([
     warn ? warningBlock('Knowledge warning', 'The promotion is committed. The knowledge base will catch up on the next sync.') : null,
     confirmation(lines.join('\n')),
   ]);
+}
+
+/**
+ * The import re-prompt — what a landing's `missing_imports` refusal asks for.
+ * Every lander validates its whole batch before copying anything, so the
+ * paths named here are the only ones the caller has to replace.
+ * @param {string[]} missing the refused source paths
+ * @returns {string}
+ */
+function importReprompt(missing) {
+  const body = [
+    ...indentedBody(['One or more paths could not be landed — nothing at the path, a folder rather than a file, or unreadable:'], { indent: '' }),
+    '',
+    ...missing.flatMap((p) => bulletRow(p)),
+  ];
+  return [
+    section('DISPLAY: missing imports', CONTINUE_INSTRUCTION, body.join('\n')),
+    section('MENU: import reprompt', "emit verbatim as markdown, then STOP for the user's response",
+      menu('', [
+        cmdOption('s', 'skip', 'Land nothing for these paths'),
+        promptOption('Provide file paths', 'one or more, space or newline separated'),
+      ], { question: 'How would you like to proceed?' })),
+  ].join('\n');
 }
 
 /**
@@ -242,4 +277,4 @@ function sessionReceipt({ warn = false } = {}) {
     : '';
 }
 
-module.exports = { workunitReceipt, topicReceipt, absorbSummary, absorbReceipt, promoteReceipt, pivotContinuationMenu, absorbContinuationMenu, sessionReceipt };
+module.exports = { workunitReceipt, topicReceipt, absorbSummary, absorbReceipt, promoteReceipt, importReprompt, pivotContinuationMenu, absorbContinuationMenu, sessionReceipt };

@@ -14,6 +14,7 @@ The caller provides these via context before loading:
 - `work_unit` — the work unit name
 - `topic` — the topic name
 - `internal_id` — (fix loop only) the task's internal ID
+- `render_when` — `always` | `churning`. `always` shows the diagnostic whatever the trend; `churning` shows it only where the trend classifies as churning, and otherwise hands the caller the classification alone
 
 ## Threshold Check
 
@@ -85,7 +86,7 @@ Read tracking files for all available cycles:
 .workflows/{work_unit}/specification/{topic}/review-gap-analysis-tracking-c{1..N}.md
 ```
 
-For each cycle, extract:
+For each cycle, read the `## Findings` section only — `## Observations` is never counted — and extract:
 - Each finding's title
 - Which stream it came from (claims, input review, or gap analysis — by tracking file)
 - Affects field (which specification section)
@@ -113,7 +114,7 @@ Compute:
 - `recurring_count` — findings persisting across cycles
 - `new_count` — findings appearing for the first time in the latest cycle
 - `stream_counts` — (multi-stream loop types only: `spec-review`, `planning-review`) latest-cycle finding counts per tracking stream, rendered `{label} {count}` and ` · `-joined in stream order
-- `review_growth` — (`spec-review` only, when the baseline exists) `live_words` minus `review_baseline_words`, sign and all: the net text review has added. Growth from source material being pulled in is the loop working; growth while findings churn is the loop reviewing its own writing — the trend beside it says which
+- `review_growth` — (`spec-review` only, when the baseline exists) `live_words` minus `review_baseline_words`, sign and all: the net text review has added. Growth is the loop working only where each addition traces to a source; growth from rules the review wrote itself is the review deciding for the user — the trend beside it says which
 - `trend` (first match wins):
   - **churning** — recurring_count is 0 or near 0 while resolved_count and new_count are both above 0 and roughly equal (every cycle's findings are new — the edits themselves are generating them)
   - **converging** — resolved_count > new_count (progress is being made)
@@ -125,6 +126,14 @@ Compute:
 ---
 
 ## C. Display Diagnostic
+
+#### If `render_when` is `churning` and `trend` is not `churning`
+
+Write nothing and render nothing — `trend` is in context for the caller's branch.
+
+→ Return to caller.
+
+#### Otherwise
 
 Open with one markdown sentence above the block — what the cycles show, in plain terms: what is resolving and what keeps coming back.
 

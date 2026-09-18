@@ -64,11 +64,11 @@ Apply per-operation validation gates **before** any STOP gate. If validation fai
 | Edit summary    | any                | —                                                                           |
 | Edit description| any                | —                                                                           |
 
-`cancelled` is also disallowed for Remove because the discovery item is the historical record of the topic ever having existed. Removal is for never-started topics only; cancel-then-vanish would erase the audit trail. The `a/cancel` flow in `/workflow-continue-epic` is the right tool for stopping in-flight work.
+`cancelled` is also disallowed for Remove because the discovery item is the record that the topic was raised and declined. Remove is for mistakes and duplicates — a never-started topic that should not be on the map. Not doing a topic, started or not, is the epic menu's `a/cancel`: it keeps the row and can be reversed.
 
 `fresh` alone does not guarantee Remove, Rename, or Change routing will succeed — any research or discussion item on record refuses engine-side, including a `triaged` stub of parked rerouted concerns (dump cue `triage=waiting`). Surface the engine's refusal as the rejection.
 
-Close as dead end is non-destructive — it sets a display/convergence marker (`handled` in the manifest), for a topic with nothing to carry forward under its own name. It's allowed from any actionable lifecycle; only an already-closed or `cancelled` topic is rejected. Reopen is its inverse — allowed on `handled` only, clearing the marker.
+Close as dead end is non-destructive — it sets a display/convergence marker (`handled` in the manifest), for a topic with nothing to carry forward under its own name. It's allowed from any actionable lifecycle; an already-closed or `cancelled` topic is rejected, and so is one carrying the `triage=waiting` cue — rerouted concerns are parked on it, and the engine refuses the close until they are heard. Reopen is its inverse — allowed on `handled` only, clearing the marker; a cancel marker over the dead end reads `cancelled`, and that is the reactivate's to clear.
 
 The engine enforces these same gates — `engine discovery-map` refuses an illegal op with an error naming the blocking lifecycle, so this pre-validation and the write path can never disagree. The rejection displays below stay this file's job, rendered from the pre-check here or from an engine error.
 
@@ -88,11 +88,11 @@ The engine enforces these same gates — `engine discovery-map` refuses an illeg
 - `ready_for_discussion` — `research has completed and discussion is queued` (superseded research: `its research was superseded and discussion is queued`)
 - `decided` — `discussion has concluded`
 - `handled` — `it is closed as a dead end and stays on the map as record`
-- `cancelled` — `it has phase work in cancelled state and stays on the map as historical record`
+- `cancelled` — `it is cancelled and stays on the map as record`
 
-`{recovery_pointer}`: for a `handled` target, `Say "reopen {topic}" to make it actionable again.` For any other disallowed lifecycle, `To stop work on it, use \`a\`/\`cancel\` from the epic menu instead.`
+`{recovery_pointer}`: for a `handled` target, `Say "reopen {topic}" to make it actionable again.` For a `cancelled` target, `Reactivate it from the epic menu first.` For any other disallowed lifecycle, `To stop work on it, use \`a\`/\`cancel\` from the epic menu instead.`
 
-**Marker-op rejection** — for a Close as dead end op on an already-closed or `cancelled` topic, or a Reopen op on a non-`handled` topic, render in a code block:
+**Marker-op rejection** — for a Close as dead end op on an already-closed, `cancelled`, or `triage=waiting` topic, or a Reopen op on a non-`handled` topic, render in a code block:
 
 > *Output the next fenced block as a code block:*
 
@@ -103,8 +103,10 @@ The engine enforces these same gates — `engine discovery-map` refuses an illeg
 `{marker_phrase}` examples:
 
 - Close as dead end on `handled` — `it's already closed`
-- Close as dead end on `cancelled` — `it's cancelled; reactivate the phase work from the epic menu first`
-- Reopen on a non-`handled` lifecycle — `it isn't closed as a dead end, so there's nothing to reopen`
+- Close as dead end on `cancelled` — `it's cancelled; reactivate it from the epic menu first`
+- Close as dead end on `triage=waiting` — `rerouted concerns are parked in its {research|discussion} triage; start the topic to drain them, or cancel the topic from the epic menu instead`
+- Reopen on `cancelled` — `it's cancelled; reactivate it from the epic menu first`
+- Reopen on any other non-`handled` lifecycle — `it isn't closed as a dead end, so there's nothing to reopen`
 
 **Name validation** — for each Rename operation, validate the proposed name via the shared reference:
 
@@ -381,6 +383,8 @@ Skip this operation. No manifest writes, no session-log entry, no commit.
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs discovery-map handle {work_unit} {name}
 ```
+
+If the command fails, surface the error and skip the commit — the engine validates before writing, so nothing changed.
 
 Append an Edits entry to the session log. If the log doesn't exist yet, create it first from [template.md](template.md). If **Edits** currently reads `(none)`, replace it with the bullet:
 

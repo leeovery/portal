@@ -102,9 +102,13 @@ One engine transaction owns the whole delivery: `topic triage` handles the item 
    node .claude/skills/workflow-engine/scripts/engine.cjs topic triage {work_unit} {landing_phase} {target} --concern .workflows/.cache/{work_unit}/{phase}/{origin}/concern-{slug}.md --slug {slug} -m "{phase}({work_unit}/{origin}): reroute concern to {target}"
    ```
 
-**If the response is `ok: false`:**
+**If the response is `ok: false` naming the topic closed** — `is cancelled — reactivate it from the epic menu first` or `is closed as a dead end — reopen it in discovery first`: a peer closed the target since **A** read the map. Surface the engine's error verbatim and re-resolve against the live state — the closed-target gate takes over.
 
-Surface the engine's error verbatim — it names the recovery path (e.g. a cancelled item routes through `topic reactivate`). Nothing has been written; set `result = cancelled`.
+→ Return to **A. Resolve the Target**.
+
+**If the response is `ok: false` for any other reason:**
+
+Surface the engine's error verbatim — it names the recovery path. Nothing has been written; set `result = cancelled`.
 
 → Return to caller.
 
@@ -134,13 +138,13 @@ Reopen the topic — for `handled`:
 node .claude/skills/workflow-engine/scripts/engine.cjs discovery-map unhandle {work_unit} {target}
 ```
 
-For `cancelled` (an engine transaction — it commits itself) — reactivate the phase item that is actually cancelled, never the map `routing` (the initial intent may name a phase, or be absent, while the cancelled work sits elsewhere). Read both phase item statuses (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.{discussion|research}.{target} status`) and set `{cancelled_phase}` to the phase whose item is `cancelled` — when both are, `discussion` (the later phase):
+For `cancelled` (an engine transaction — it commits itself) — reactivate the topic as one unit; every research and discussion item cancelled under its name returns with it:
 
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs topic reactivate {work_unit} {cancelled_phase} {target}
+node .claude/skills/workflow-engine/scripts/engine.cjs topic reactivate {work_unit} discovery {target}
 ```
 
-If the response is `ok: false`, surface the engine's error verbatim and re-fetch the gate above — the concern is still unlanded. Otherwise re-resolve against the fresh state:
+If the response is `ok: false`, surface the engine's error verbatim and re-fetch the gate above — the concern is still unlanded. Otherwise re-resolve against the fresh state — the response's `restored` names what came back:
 
 → Return to **A. Resolve the Target**.
 

@@ -101,7 +101,7 @@ node .claude/skills/workflow-continue-epic/scripts/gateway.cjs in-session-gate {
 
 Continue with the **Hard gate check** below.
 
-**Hard gate check** — specification reads the settled record; this refusal comes before the soft gate. Read `phase_counts` from DATA. (Blocked items never reach here — a blocked spec, a discussion held for its outstanding research, or a dep-blocked plan carries no menu row; the display tree shows the `blocked` cue or the research awaited, and the ⚑ list carries the plan detail.)
+**Hard gate check** — specification reads the settled record; this refusal comes before the soft gate. Read `phase_counts` from DATA. (Blocked items carry no menu row — a blocked spec, a discussion held for its outstanding research, a dep-blocked plan — so none reaches here, except a spec or discussion another session holds open: its struck row arrives through the in-session gate above, and its entry skill's own gate meets it next. The display tree shows the `blocked` cue or the research awaited, and the ⚑ list carries the plan detail.)
 
 **If `action` is `analyze_discussions` and `phase_counts` shows discussion items in-progress and no specification items exist:**
 
@@ -171,7 +171,7 @@ Store the selected entry's `phase`, `topic`, and `route`.
 
 ## E. Cancel Topic
 
-Render the cancellable-topics list and pick menu:
+Render the cancellable-topics list and pick menu — one row per unit, a topic (its research, discussion, and experiments together) or a specification (with its plan). Every unit is listed: a locked one carries its reason and no key, a unit a live session holds carries its in-session age (a cue, not a lock); when every row is locked the menu opens on a statement over `b/back` alone:
 
 ```bash
 node .claude/skills/workflow-continue-epic/scripts/gateway.cjs cancel-menu {work_unit}
@@ -185,9 +185,15 @@ Emit the TITLE section (markdown), then the DISPLAY section, then the MENU secti
 
 → Return to **A. State Display and Menu**.
 
+#### If the input matches no key
+
+A locked row's name is the usual case — the row carries its reason. Tell the user in one line: the reason from the row for a locked unit, or that the input matched no option; then re-present the sub-view.
+
+→ Return to **E. Cancel Topic**.
+
 #### If user chose a numbered topic
 
-Store the selected entry's `phase` and `topic`. Fetch and emit the confirm's `MENU: cancel gate` section:
+Store the selected entry's `phase` — the unit's stage, `discovery` or `specification` — and `topic`. Fetch and emit the confirm's `MENU: cancel gate` section; its statement names exactly what the cancel takes:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render cancel-gate {work_unit}.{phase}.{topic}
@@ -201,27 +207,21 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render cancel-gate {work_
 
 **If user chose `yes`:**
 
-Run the cancel transaction — one command stashes the current status, marks the item cancelled, stashes the execution order where the phase carries one (a research/discussion cancel the discovery map's, a specification cancel the build order's), removes its knowledge-base chunks where the phase is indexed (experiments have none), and commits. An experiment cancel also abandons every open record — the register keeps each row with the cancellation as its reason:
+Run the cancel transaction — one command cancels the unit (a topic: the map row marked, every research and discussion item under its name stashed and cancelled, every open experiment record abandoned with the cancellation as its reason, any proposed grouping over its discussion discarded; a specification: the specification and its plan), stashes the execution order, removes the cancelled artifacts' knowledge-base chunks, and commits:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs topic cancel {work_unit} {phase} {topic}
 ```
 
-**If the response is `ok: false` naming what the cancel takes with it** — specification(s) built from this topic collapsing, the evidence waits a series cancel releases, or the experiments a waiting conversation's cancel strands. Fetch the cascade confirm — the surface derives whichever apply from the manifest — and emit its section verbatim at its marked instruction:
+**If the response is `ok: false`:**
 
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs render cancel-cascade-gate {work_unit}.{phase}.{topic}
-```
+Surface the engine's error verbatim in one line — nothing was written.
 
-**STOP.** Wait for user response. On `no`: → Return to **A. State Display and Menu**. On `yes`, re-run with the cascade — one transaction cancels the topic and everything the gate named:
+→ Return to **A. State Display and Menu**.
 
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs topic cancel {work_unit} {phase} {topic} --cascade
-```
+**Otherwise:**
 
-Then continue below with the receipt.
-
-Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section — adding `--warn` when the response's `warnings` is non-empty. When the response carries `cascaded` or `discarded`, tell the user in one line which specification(s) went with the topic; when it carries `released_waits`, say where the ball sits — each waiting point reverts to open, surfaced at that conversation's next entry — and when it carries `abandoned`, name the records the cancel closed:
+Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section — adding `--warn` when the response's `warnings` is non-empty. When the response's `discarded` is non-empty, tell the user in one line which proposed grouping(s) went with the topic; when `abandoned` is non-empty, name the experiment records the cancel closed; when `released_waits` is non-empty, say where the ball sits — each waiting point reverts to open, surfaced when the topic is reactivated and that conversation next runs:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render topic-receipt {work_unit}.{phase}.{topic} --verb cancel [--warn]
@@ -233,7 +233,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render topic-receipt {wor
 
 ## F. Reactivate Topic
 
-Render the cancelled-topics list and pick menu:
+Render the cancelled-topics list and pick menu — one row per cancelled unit, each naming what a reactivate returns. A specification whose sources are unavailable — a source topic cancelled, or a source another started specification has since taken — carries its reason and no key; when every row is locked the menu opens on a statement over `b/back` alone:
 
 ```bash
 node .claude/skills/workflow-continue-epic/scripts/gateway.cjs reactivate-menu {work_unit}
@@ -247,15 +247,29 @@ Emit the TITLE section (markdown), then the DISPLAY section, then the MENU secti
 
 → Return to **A. State Display and Menu**.
 
+#### If the input matches no key
+
+A locked row's name is the usual case — the row carries its reason. Tell the user in one line: the reason from the row for a locked unit, or that the input matched no option; then re-present the sub-view.
+
+→ Return to **F. Reactivate Topic**.
+
 #### If user chose a numbered topic
 
-Store the selected entry's `phase` and `topic`. Run the reactivate transaction — one command restores the stashed status and execution order (a build-order number returns only while no live topic holds it — otherwise the next sequencing pass seats the topic), removes `previous_status`, re-indexes the artifact into the knowledge base when the restored status is `completed` in an indexed phase (research / discussion / investigation / specification), and commits:
+Store the selected entry's `phase` — the unit's stage, `discovery` or `specification` — and `topic`. Run the reactivate transaction — one command restores the unit's stashed statuses (an item cancelled with no stash returns to never started) and its execution order (the map's for a topic, the build order's for a specification; a number returns only while no live topic holds it — otherwise the next sequencing pass seats the topic), discards any proposed grouping over a specification's returning sources, re-indexes each restored `completed` artifact into the knowledge base, and commits:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs topic reactivate {work_unit} {phase} {topic}
 ```
 
-Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section — adding `--warn` when the response's `warnings` is non-empty:
+**If the response is `ok: false`:**
+
+Surface the engine's error verbatim in one line — nothing was written.
+
+→ Return to **A. State Display and Menu**.
+
+**Otherwise:**
+
+Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section, which names the statuses the unit's items returned to — adding `--warn` when the response's `warnings` is non-empty. The receipt lists only items that came back with a status: for each `restored` row whose `status` is `null`, tell the user in one line that its phase returned to never started; when the response's `discarded` is non-empty, tell the user in one line which proposed grouping(s) went with the reactivate:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render topic-receipt {work_unit}.{phase}.{topic} --verb reactivate [--warn]

@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 const { signpost, box, renderTree, wrap, wrapWithPrefix } = require('../../kernel/render.cjs');
-const { WORK_TYPE_PIPELINES, DERIVED_PHASES } = require('../../kernel/manifest-schema.cjs');
+const { WORK_TYPE_PIPELINES, DERIVED_PHASES, TERMINAL_STATUSES } = require('../../kernel/manifest-schema.cjs');
 const { OUTSTANDING_RESEARCH_STATUSES, CONVERSATION_ACTIONS, CLOSED_LIFECYCLES } = require('../derivations.cjs');
 const { TREE_WIDTH, treeHeader, titlecase, title, derivedFrom, stateNote, materialBlock, discoveryGlyph, discoveryLifecycleLabel } = require('../conventions.cjs');
 const { section, menuFrame, cmdOption, callout } = require('./surfaces.cjs');
@@ -24,6 +24,8 @@ const { buildOrderLive } = require('../build-order.cjs');
 /** @typedef {import('../epic-detail.cjs').NextPhaseEntry} NextPhaseEntry */
 /** @typedef {import('../epic-detail.cjs').DepBlocking} DepBlocking */
 /** @typedef {import('../epic-detail.cjs').ItemRef} ItemRef */
+/** @typedef {import('../epic-detail.cjs').UnitStage} UnitStage */
+/** @typedef {import('../epic-detail.cjs').CancelledUnit} CancelledUnit */
 
 /**
  * @typedef {object} NewArrivals
@@ -41,6 +43,7 @@ const { buildOrderLive } = require('../build-order.cjs');
  * @property {boolean} [recommended]
  * @property {boolean} [input_moved]   the entry's item (or its source item) carries a live reconcile flag
  * @property {boolean} [in_session]    a held session elsewhere occupies this topic's phase
+ * @property {string[]} [blocked_by]   what holds the entry's item shut at its entry skill — carried only by a held row, the one blocked row the menu offers; the in-session gate names it
  * @property {number} [session_age]    that session's last-active age in seconds
  * @property {{work_unit: string, phase: string, topic: string}} [session_holder] the held code row taking the slot, when it is not this entry's own topic
  * @property {boolean} [code_session]  the hold is the checkout's code slot — gated at the entry skill, never by this menu
@@ -241,10 +244,7 @@ function mapNodes(detail, heldAges) {
     const body = [];
     if (row.summary) body.push(row.summary);
     if (row.source_provenance) body.push(derivedFrom(row.source_provenance));
-    const age = heldAges.get(row.name);
-    body.push(stateNote(age === undefined
-      ? lifecycleLabel(row)
-      : `${lifecycleLabel(row)} · in session (last active ${fmtAge(age)} ago)`));
+    body.push(stateNote(`${lifecycleLabel(row)}${inSessionCue(heldAges.get(row.name))}`));
     return {
       title: title({ glyph: discoveryGlyph(row.lifecycle), label: titlecase(row.name) }),
       body,
@@ -257,22 +257,40 @@ function heldSessions(presence) {
   return (presence || []).filter((r) => r.held);
 }
 
+/** The held row on one (phase, topic), or undefined. @param {PresenceRow[]} held @param {string} phase @param {string|null} topic */
+function heldRow(held, phase, topic) {
+  return held.find((r) => r.phase === phase && r.topic === topic);
+}
+
 /**
- * Held map topics with the freshest last-active age among the sessions
- * holding each. The map is the research-and-discussion tree, so only those
- * phases' holds cue a row — a planning or code session on the same topic
- * shows on its own menu row, never as this row's age. A row spans both
- * phases, so one topic can be held twice.
- * @param {PresenceRow[]|undefined} presence @returns {Map<string, number>}
+ * Held topics with the freshest last-active age among the sessions holding
+ * each, counting holds in `phases` alone. A topic spans several phases, so
+ * one name can be held twice.
+ * @param {PresenceRow[]|undefined} presence @param {string[]} phases @returns {Map<string, number>}
  */
-function heldTopicAges(presence) {
+function heldAgesIn(presence, phases) {
   /** @type {Map<string, number>} */
   const ages = new Map();
   for (const r of heldSessions(presence)) {
-    if (!SOURCE_PHASES.includes(r.phase)) continue;
+    if (!phases.includes(r.phase)) continue;
     ages.set(r.topic, Math.min(r.age_seconds, ages.get(r.topic) ?? Infinity));
   }
   return ages;
+}
+
+/**
+ * Held map topics. The map is the research-and-discussion tree, so only
+ * those phases' holds cue a row — a planning or code session on the same
+ * topic shows on its own menu row, never as this row's age.
+ * @param {PresenceRow[]|undefined} presence @returns {Map<string, number>}
+ */
+function heldTopicAges(presence) {
+  return heldAgesIn(presence, SOURCE_PHASES);
+}
+
+/** The in-session cue a held row carries after its state. @param {number|undefined} age */
+function inSessionCue(age) {
+  return age === undefined ? '' : ` · in session (last active ${fmtAge(age)} ago)`;
 }
 
 /** First-matching recommendation for the no-map dashboard, or null. @param {EpicDetail} detail */
@@ -588,13 +606,33 @@ function experimentEntries(workUnit, detail) {
   return out;
 }
 
-/** Continue entries for one phase's in-progress items. @param {string} workUnit @param {EpicDetail} detail @param {string} phase @returns {MenuKey[]} */
-function continueEntries(workUnit, detail, phase) {
+// A blocked item is not actionable — no menu row; the display tree carries
+// its blocked state. A live session's hold is the one exception: its row
+// stands, struck through, so the menu never hides a session that is open.
+/** @param {string} phase @param {PhaseEntry} item @param {PresenceRow[]} held */
+function rowStands(phase, item, held) {
+  return item.blocked_by === undefined || heldRow(held, phase, item.name) !== undefined;
+}
+
+/**
+ * The map's face of the held-row rule. A discussion held shut for its
+ * outstanding research has no row of its own — the research row is the way
+ * in — unless a live session sits in it, when its continue row follows the
+ * research row, struck through, and the menu agrees with the map row's
+ * `in session` cue.
+ * @param {string} workUnit @param {EpicDetail} detail @param {MapRow} row @param {PresenceRow[]} held @returns {MenuKey|null}
+ */
+function heldDiscussionEntry(workUnit, detail, row, held) {
+  const item = (detail.phases.discussion || []).find((i) => i.name === row.name);
+  if (!item || item.status !== 'in-progress' || item.blocked_by === undefined) return null;
+  if (heldRow(held, 'discussion', item.name) === undefined) return null;
+  return { ...discoveryEntry(workUnit, row, 'continue_discussion'), blocked_by: item.blocked_by };
+}
+
+/** Continue entries for one phase's in-progress items. @param {string} workUnit @param {EpicDetail} detail @param {string} phase @param {PresenceRow[]} held @returns {MenuKey[]} */
+function continueEntries(workUnit, detail, phase, held) {
   return (detail.phases[phase] || [])
-    .filter((item) => item.status === 'in-progress')
-    // A blocked item is not actionable — no menu row; the display tree
-    // carries its blocked state.
-    .filter((item) => item.blocked_by === undefined)
+    .filter((item) => item.status === 'in-progress' && rowStands(phase, item, held))
     .map((item) => ({
       key: '',
       action: `continue_${phase}`,
@@ -602,6 +640,7 @@ function continueEntries(workUnit, detail, phase) {
       route: topicRoute(`continue_${phase}`, workUnit, item.name),
       label: continueLabel(phase, item),
       ...(item.reconcile_needed !== undefined ? { input_moved: true } : {}),
+      ...(item.blocked_by !== undefined ? { blocked_by: item.blocked_by } : {}),
     }));
 }
 
@@ -684,10 +723,10 @@ function commandOptions(workUnit, detail, hasMap) {
   if (detail.completed.some((i) => i.blocked_by === undefined)) {
     opts.push({ key: 'c', word: 'completed', action: 'resume_completed', topic: null, route: null, label: 'Resume a completed topic' });
   }
-  const cancellable = Object.values(detail.phases)
-    .some((items) => items.some((i) => i.status !== 'cancelled' && i.status !== 'promoted'));
-  if (cancellable) {
-    opts.push({ key: 'a', word: 'cancel', action: 'cancel_topic', topic: null, route: null, label: hasMap ? 'Cancel a topic (phase work)' : 'Cancel a topic' });
+  // Every unit shows, locked ones included: a user reaching for a cancel
+  // that is refused must see the row and its reason, never an absent option.
+  if (detail.cancellable.length > 0) {
+    opts.push({ key: 'a', word: 'cancel', action: 'cancel_topic', topic: null, route: null, label: 'Cancel a topic' });
   }
   if (detail.cancelled.length > 0) {
     opts.push({ key: 'e', word: 'reactivate', action: 'reactivate_topic', topic: null, route: null, label: 'Reactivate a cancelled topic' });
@@ -706,9 +745,9 @@ function commandOptions(workUnit, detail, hasMap) {
   return opts;
 }
 
-/** All live (non-cancelled, non-promoted) items of one phase. @param {EpicDetail} detail @param {string} phase */
+/** All live (non-terminal) items of one phase. @param {EpicDetail} detail @param {string} phase */
 function liveItems(detail, phase) {
-  return (detail.phases[phase] || []).filter((i) => i.status !== 'cancelled' && i.status !== 'promoted');
+  return (detail.phases[phase] || []).filter((i) => !TERMINAL_STATUSES.includes(i.status));
 }
 
 /**
@@ -813,7 +852,7 @@ function pickRecommendation(detail, numbered, options, hasMap) {
 function markHeldEntries(numbered, held, codeHeld = []) {
   for (const e of numbered) {
     const phase = ACTION_PHASE[/** @type {keyof typeof ACTION_PHASE} */ (e.action)];
-    const own = held.find((r) => r.phase === phase && r.topic === e.topic);
+    const own = heldRow(held, phase, e.topic);
     const foreign = own || !CODE_PHASES.includes(phase) ? undefined : codeHeld[0];
     const row = own || foreign;
     if (!row) continue;
@@ -839,6 +878,7 @@ function markHeldEntries(numbered, held, codeHeld = []) {
  */
 function epicMenu(workUnit, detail, opts = {}) {
   const hasMap = detail.discovery_map.length > 0;
+  const held = heldSessions(opts.presence);
 
   /** @type {MenuKey[]} */
   let numbered = [];
@@ -850,15 +890,18 @@ function epicMenu(workUnit, detail, opts = {}) {
   if (hasMap) {
     // Discovery topics — one entry per map row with a non-null next_action
     // (✓/⊙/⊘ rows have none), in map order; a decided row carries its
-    // research entry instead when research is outstanding beneath it.
+    // research entry instead when research is outstanding beneath it, and a
+    // held discussion its struck row beneath the research it awaits.
     for (const row of detail.discovery_map) {
       const research = researchEntry(workUnit, row);
       if (research) numbered.push(research);
       if (row.next_action) numbered.push(discoveryEntry(workUnit, row, row.next_action));
+      const heldDiscussion = heldDiscussionEntry(workUnit, detail, row, held);
+      if (heldDiscussion) numbered.push(heldDiscussion);
     }
     // Build-phase entries by pipeline position — continues, then gated starts.
     for (const phase of BUILD_PHASES) {
-      numbered.push(...continueEntries(workUnit, detail, phase));
+      numbered.push(...continueEntries(workUnit, detail, phase, held));
       numbered.push(...startEntries(workUnit, detail, phase));
     }
   } else {
@@ -867,7 +910,7 @@ function epicMenu(workUnit, detail, opts = {}) {
     // series, and a generic item row would double it.
     for (const phase of EPIC_PIPELINE) {
       if (DERIVED_PHASES.includes(phase)) continue;
-      numbered.push(...continueEntries(workUnit, detail, phase));
+      numbered.push(...continueEntries(workUnit, detail, phase, held));
     }
     // Next-phase-ready items — specification first, then planning,
     // implementation, review.
@@ -876,7 +919,7 @@ function epicMenu(workUnit, detail, opts = {}) {
     }
   }
 
-  markHeldEntries(numbered, heldSessions(opts.presence), opts.codeHeld || []);
+  markHeldEntries(numbered, held, opts.codeHeld || []);
 
   const options = commandOptions(workUnit, detail, hasMap);
 
@@ -914,15 +957,27 @@ function epicMenu(workUnit, detail, opts = {}) {
   return { keys: [...numbered, ...options], rendered: menuFrame(lines) };
 }
 
+// A struck row is the one blocked row the menu offers, so its gate also
+// names what holds the entry shut — a yes here would otherwise meet the
+// entry skill's refusal blind.
+/** @param {string} phase @param {string} topic @param {string[]|undefined} by */
+function entryHoldClause(phase, topic, by) {
+  if (by === undefined) return '';
+  const what = phase === 'discussion'
+    ? `research on "${titlecase(topic)}" is outstanding`
+    : `its sources are back in-progress (${by.map(titlecase).join(', ')})`;
+  return ` Its entry is also held shut — ${what} — so proceeding meets that gate next.`;
+}
+
 /**
  * Labelled confirm-gate section for one menu entry a held session occupies —
  * served by the gateway's `in-session-gate` verb, fetched by the flow at the
  * gate that displays it. Never blocks: the machine can verify that a process
  * still runs, never that its session still matters, so the gate states the
- * fact, names the consequence and the release, and lets the user decide.
- * Document phases only — a code entry's hold is the checkout's one slot, and
- * the `code-gate` surface at the entry skill owns that conversation, so the
- * user meets one gate per attempt.
+ * fact, names the consequence (and the entry hold, on a blocked row) and the
+ * release, and lets the user decide. Document phases only — a code entry's
+ * hold is the checkout's one slot, and the `code-gate` surface at the entry
+ * skill owns that conversation, so the user meets one gate per attempt.
  * @param {string} workUnit  this epic — the holder of the topic this entry would open
  * @param {MenuKey} entry
  * @returns {string} one labelled MENU section
@@ -932,12 +987,13 @@ function epicInSessionGate(workUnit, entry) {
   const topic = entry.topic || '';
   const fact = `"${titlecase(topic)}" is open in another session — last active ${fmtAge(entry.session_age ?? 0)} ago.`;
   const consequence = `Proceeding starts a second concurrent session on the same ${phase}; its work could conflict with that session's.`;
+  const hold = entryHoldClause(phase, topic, entry.blocked_by);
   const release = `node .claude/skills/workflow-engine/scripts/engine.cjs presence clear ${workUnit} ${phase} ${topic}`;
   return section(
     `MENU: in-session gate — ${entry.key}`,
     "emit verbatim as markdown, then STOP for the user's response",
     menuFrame([
-      `${fact} ${consequence} Only proceed if you know that session is no longer working; if it is wedged but alive, release its hold with \`${release}\`.`,
+      `${fact} ${consequence}${hold} Only proceed if you know that session is no longer working; if it is wedged but alive, release its hold with \`${release}\`.`,
       '',
       '**`◆ Proceed anyway?`**',
       '',
@@ -966,13 +1022,20 @@ function epicInSessionGate(workUnit, entry) {
  */
 
 /**
- * @typedef {object} SubViewRow
+ * @typedef {object} SubViewRowBase
  * @property {string} phase
  * @property {string} topic
  * @property {string} row     display line (unindented; the branch glyph and `{key}. ` are prefixed)
- * @property {string} label   pick-menu option label
  * @property {string|null} route
+ * @property {string} [group]  the display heading the row sits under — the titlecased phase when absent
  * @property {string} [dep]   unblock rows — the dependency topic to mark satisfied
+ */
+
+/**
+ * A pickable row carries its pick-menu label; a locked row carries the
+ * reason it cannot be picked instead — rendered keyless with the reason,
+ * no menu option.
+ * @typedef {SubViewRowBase & ({label: string, locked?: undefined} | {locked: string, label?: undefined})} SubViewRow
  */
 
 /** The back option every sub-view menu closes with. @returns {SubViewKey} */
@@ -980,45 +1043,64 @@ function backKey() {
   return { key: 'b', word: 'back', action: 'back', topic: null, phase: null, route: null, label: 'Return to menu' };
 }
 
+/** @param {SubViewRow} row */
+function groupOf(row) {
+  return row.group ?? titlecase(row.phase);
+}
+
 /**
- * Compose one selection sub-view from its rows: sequential numbering across
- * phase groups, blank line between groups, dotted pick menu with `b/back`.
- * The heading is the caller's TITLE section, never drawn here — so the phase
- * header sits at column 0 with its rows hanging two columns off it, the shape
- * every engine list shares. Picker rows are list rows: the `[tag]` rides
- * inline rather than columnising, matching the inbox pickup.
+ * Compose one selection sub-view from its rows: sequential numbering over
+ * the pickable rows across groups, blank line between groups, dotted pick
+ * menu with `b/back`. A locked row is shown where it sits — no number, its
+ * reason after a `·` — and takes no menu option: omitting it would hide the
+ * cause with the row. The heading is the caller's TITLE section, never
+ * drawn here — so the group header sits at column 0 with its rows hanging
+ * two columns off it, the shape every engine list shares. Picker rows are
+ * list rows: the `[tag]` rides inline rather than columnising, matching the
+ * inbox pickup. When rows exist but every one is locked, the menu opens on
+ * `allLocked` — a statement in the question's place, the rows carrying
+ * their reasons — over `b/back` alone.
  * @param {string} title     the view's chrome heading (TITLE section)
  * @param {string} empty     the display's stand-in when there are no rows
  * @param {string} question  the pick menu's first line
  * @param {string} action    the numbered entries' action key
- * @param {SubViewRow[]} rows  display order; grouped by contiguous `phase` runs
+ * @param {SubViewRow[]} rows  display order; grouped by contiguous `group` runs
+ * @param {{allLocked?: string}} [opts]
  * @returns {{keys: SubViewKey[], title: string, display: string, rendered: string}}
  */
-function selectionSubView(title, empty, question, action, rows) {
+function selectionSubView(title, empty, question, action, rows, { allLocked } = {}) {
   /** @type {SubViewKey[]} */
   const keys = [];
   const displayLines = [];
-  let phase = null;
+  let group = null;
   rows.forEach((r, i) => {
-    const key = String(i + 1);
-    keys.push({ key, action, topic: r.topic, phase: r.phase, route: r.route, label: r.label, ...(r.dep ? { dep: r.dep } : {}) });
-    if (r.phase !== phase) {
+    if (groupOf(r) !== group) {
       if (displayLines.length) displayLines.push('');
-      displayLines.push(titlecase(r.phase));
-      phase = r.phase;
+      group = groupOf(r);
+      displayLines.push(group);
     }
-    const lastInGroup = i === rows.length - 1 || rows[i + 1].phase !== r.phase;
+    let text;
+    let hang = 0;
+    if (r.locked === undefined) {
+      const key = String(keys.length + 1);
+      keys.push({ key, action, topic: r.topic, phase: r.phase, route: r.route, label: r.label, ...(r.dep ? { dep: r.dep } : {}) });
+      text = `${key}. ${r.row}`;
+      hang = `${key}. `.length;
+    } else {
+      text = `${r.row} · ${r.locked}`;
+    }
+    const lastInGroup = i === rows.length - 1 || groupOf(rows[i + 1]) !== group;
     // Sub-views are plain list rows (CONVENTIONS: selection sub-views use
     // the [term] form, not trees) — the branch glyphs are visual grouping,
     // so wrapped continuations align under the row text with no rail.
     const glyph = lastInGroup ? '└─' : '├─';
-    displayLines.push(...wrapWithPrefix(`${key}. ${r.row}`, {
-      width: TREE_WIDTH, prefix: `  ${glyph} `, hang: `${key}. `.length,
-    }).map((line, li) => (li === 0 ? line : line.replace(`  ${glyph} `, '     '))));
+    displayLines.push(...wrapWithPrefix(text, { width: TREE_WIDTH, prefix: `  ${glyph} `, hang })
+      .map((line, li) => (li === 0 ? line : line.replace(`  ${glyph} `, '     '))));
   });
+  const statement = rows.length > 0 && keys.length === 0 ? allLocked : undefined;
   keys.push(backKey());
 
-  const menuLines = [question, ''];
+  const menuLines = [statement ?? question, ''];
   for (const k of keys) {
     menuLines.push(cmdOption(k.key, k.word, k.label));
   }
@@ -1027,7 +1109,7 @@ function selectionSubView(title, empty, question, action, rows) {
     keys,
     title,
     display: (rows.length ? displayLines.join('\n') : empty) + '\n',
-    rendered: menuFrame(menuLines),
+    rendered: menuFrame(menuLines, { glyphLabel: statement === undefined }),
   };
 }
 
@@ -1045,8 +1127,9 @@ function pipelineOrdered(items) {
  * @returns {{keys: SubViewKey[], title: string, display: string, rendered: string}}
  */
 function epicCompletedMenu(workUnit, detail) {
-  // A held item is not actionable — no resume row; it returns once the hold
-  // releases, the way the main menu's continue rows do.
+  // A blocked item is not actionable — no resume row; it returns once its
+  // entry hold releases. No session sits in a completed item, so the main
+  // menu's held-row exception never applies here.
   const rows = pipelineOrdered(detail.completed.filter((item) => item.blocked_by === undefined)).map((item) => {
     const flagged = item.reconcile_needed !== undefined;
     return {
@@ -1060,49 +1143,74 @@ function epicCompletedMenu(workUnit, detail) {
   return selectionSubView('Completed Topics', 'No completed topics.', 'Which topic would you like to resume?', 'resume', rows);
 }
 
+// The cancel units' display groups — the stage each unit belongs to, in the
+// words the user sees. The key's `phase` stays the stage itself: it is the
+// verb's positional argument.
+/** @type {Record<UnitStage, string>} */
+const UNIT_GROUP = { discovery: 'Topics', specification: 'Specifications' };
+
+// The phases whose holds cue a unit's row — the laboratory counted with its
+// topic, the plan with its specification.
+/** @type {Record<UnitStage, string[]>} */
+const UNIT_PRESENCE_PHASES = { discovery: ['research', 'discussion', 'experiment'], specification: ['specification', 'planning'] };
+
 /**
- * Section E — the Cancellable Topics list and pick menu (non-cancelled,
- * non-promoted items). No routes — the flow continues to its confirmation gate.
- * @param {EpicDetail} detail
- * @returns {{keys: SubViewKey[], title: string, display: string, rendered: string}}
+ * One unit sub-view row: the title with its tag and tail, the in-session cue
+ * of a unit a live session holds, and either the pick label or the lock
+ * reason — a locked row takes no label.
+ * @param {{name: string, stage: UnitStage, locked?: string}} unit
+ * @param {{tag: string, tail?: string, verb: string, detail: string}} parts
+ * @param {PresenceRow[]|undefined} presence
+ * @returns {SubViewRow}
  */
-function epicCancelMenu(detail) {
-  /** @type {SubViewRow[]} */
-  const rows = [];
-  for (const [phase, items] of Object.entries(detail.phases)) {
-    for (const item of items) {
-      if (item.status === 'cancelled' || item.status === 'promoted') continue;
-      rows.push({
-        phase,
-        topic: item.name,
-        row: title({ label: titlecase(item.name), tag: item.status }),
-        label: `Cancel "${titlecase(item.name)}" — *${phase} [${item.status}]*`,
-        route: null,
-      });
-    }
-  }
-  return selectionSubView('Cancellable Topics', 'No cancellable topics.', 'Which topic would you like to cancel?', 'cancel', rows);
+function unitRow(unit, { tag, tail = '', verb, detail }, presence) {
+  const cue = inSessionCue(heldAgesIn(presence, UNIT_PRESENCE_PHASES[unit.stage]).get(unit.name));
+  const name = titlecase(unit.name);
+  const base = { phase: unit.stage, group: UNIT_GROUP[unit.stage], topic: unit.name, row: `${title({ label: name, tag })}${tail}${cue}`, route: null };
+  return unit.locked !== undefined
+    ? { ...base, locked: unit.locked }
+    : { ...base, label: `${verb} "${name}" — *${detail}*${cue}` };
 }
 
 /**
- * Section F — the Cancelled Topics list and pick menu, each row carrying the
- * stashed `previous_status`. No routes — the flow runs the reactivate
- * transaction.
+ * Section E — the Cancellable Topics list and pick menu: every unit, locked
+ * ones shown keyless with their reason, a unit a live session holds carrying
+ * its in-session age. No routes — the flow continues to its confirmation
+ * gate.
  * @param {EpicDetail} detail
+ * @param {{presence?: PresenceRow[]}} [opts]
  * @returns {{keys: SubViewKey[], title: string, display: string, rendered: string}}
  */
-function epicReactivateMenu(detail) {
-  const rows = pipelineOrdered(detail.cancelled).map((item) => {
-    const was = `(was: ${item.previous_status || 'unknown'})`;
-    return {
-      phase: item.phase,
-      topic: item.name,
-      row: `${title({ label: titlecase(item.name), tag: 'cancelled' })} ${was}`,
-      label: `Reactivate "${titlecase(item.name)}" — *${item.phase} ${was}*`,
-      route: null,
-    };
+function epicCancelMenu(detail, opts = {}) {
+  const rows = detail.cancellable.map((unit) => unitRow(unit, { tag: unit.state, verb: 'Cancel', detail: unit.state }, opts.presence));
+  return selectionSubView('Cancellable Topics', 'No cancellable topics.', 'Which topic would you like to cancel?', 'cancel', rows,
+    { allLocked: 'Nothing can be cancelled right now — each row names what holds it.' });
+}
+
+/** What a reactivate returns for a unit, in the row's words. @param {CancelledUnit} unit */
+function unitReturns(unit) {
+  if (unit.restores.length === 0) return 'never started';
+  return unit.restores
+    .map((r) => (r.previous_status === null ? `${r.phase} (never started)` : `${r.phase} [was ${r.previous_status}]`))
+    .join(' · ');
+}
+
+/**
+ * Section F — the Cancelled Topics list and pick menu, each row naming what
+ * a reactivate returns, a specification whose sources are unavailable shown
+ * keyless with its reason. No routes — the flow runs the reactivate
+ * transaction.
+ * @param {EpicDetail} detail
+ * @param {{presence?: PresenceRow[]}} [opts]
+ * @returns {{keys: SubViewKey[], title: string, display: string, rendered: string}}
+ */
+function epicReactivateMenu(detail, opts = {}) {
+  const rows = detail.cancelled.map((unit) => {
+    const returns = unitReturns(unit);
+    return unitRow(unit, { tag: 'cancelled', tail: ` — ${returns}`, verb: 'Reactivate', detail: returns }, opts.presence);
   });
-  return selectionSubView('Cancelled Topics', 'No cancelled topics.', 'Which topic would you like to reactivate?', 'reactivate', rows);
+  return selectionSubView('Cancelled Topics', 'No cancelled topics.', 'Which topic would you like to reactivate?', 'reactivate', rows,
+    { allLocked: 'Nothing can be reactivated right now — each row names what holds it.' });
 }
 
 /**

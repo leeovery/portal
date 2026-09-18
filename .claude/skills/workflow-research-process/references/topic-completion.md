@@ -26,6 +26,8 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render triage-block {work
 
 **If `count` is `0`:**
 
+Check for landed evidence next — follow **Landed Evidence** in **[session-loop.md](session-loop.md)**: a release between the rhythm's last check and this conclusion is read here, never concluded over (the engine refuses the completion while the flag stands). Its landed branch puts the evidence to the user and returns the conversation to the rhythm, where the next done-signal re-enters here; every other return continues here.
+
 Check the topic's waits next — a wait still open means the conclusion cannot pass, and the engine would refuse the completion anyway. Fetch the gate (empty when nothing is owed):
 
 ```bash
@@ -46,15 +48,15 @@ Commit any uncommitted session work with the session's cadence commit:
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} --topic research/{topic} -m "research({work_unit}/{topic}): {what changed}"
 ```
 
-Then say where the ball sits:
+Then hand off to the pipeline bridge as a pause:
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Paused with the waits queued — the closing ceremony runs once everything this research waits on has landed. Run `/clear`, then `/workflow-start`: the menu carries the way in, and this research concludes once every wait releases.
+> Paused with the waits queued — the closing ceremony runs once everything this research waits on has landed, and this research concludes once every wait releases.
 ```
 
-**STOP.** Do not proceed — terminal condition.
+Invoke `/workflow-bridge {work_unit} research none paused`.
 
 **If `keep`:**
 
