@@ -81,7 +81,7 @@ The decisive argument was the user's, and it is about consistency rather than da
 **Escape is not the key that does it.** The discard is bound to its own deliberate key, and confirmed before it lands.
 
 - **Enter resumes.** The positive outcome is the assumed one and takes the most reflexive key.
-- **A named key discards**, opening a second confirmation over the first — *this is permanent* — where Enter agrees and Escape backs out to the resume panel.
+- **A named key discards**, opening a second confirmation over the first — *this is permanent* — where **`y`** agrees and Escape backs out to the resume panel. *(Amended 2026-09-18 — this had Enter agreeing. Enter resumes on the panel one keystroke earlier, so confirming the discard with it makes the same key mean "bring it back" and "delete it forever" on consecutive screens; a user who presses `d` and then confirms the way they just did has thrown the registration away. Portal's two existing destructive confirmations — killing a session, deleting a project — both take `y` with `esc` to cancel, through one shared builder (`internal/tui/kill_modal.go:13`, `delete_modal.go:12`, `destructive_confirm.go:16`). The panel is modelled on those modals and the discard key `d` was itself derived from the picker's grammar; the confirm key was the one place that grammar was not carried across.)*
 - **Escape on the resume panel does nothing at all.** There is nowhere to back out to, so it is inert.
 
 That last property is the point rather than a side effect: it makes Escape mean exactly one thing everywhere in Portal — *back out, change nothing* — with no site where it also destroys something. A key the user's hands press without consulting them can then never be the key that loses work.
