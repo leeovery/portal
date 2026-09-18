@@ -433,6 +433,32 @@ The one open question this section carried — whether the marker the freeze rid
 
 ---
 
+## Panel Visual Design
+
+### Context
+
+The panel is the one genuinely new surface in Portal, and everything else about it was settled before what it says and shows. Three frames were built in the Paper file (`Portal`) against the Nord artboards the user actually runs, so the new work sits beside the existing designs in the same palette: **Resume panel — waiting (Nord)**, **Resume panel — discard confirm (Nord)**, and **Sessions — pending resume dot (Nord)**.
+
+### Decision
+
+**The waiting panel is the kill modal's shell with the rename modal's header.** It was built by duplicating the Nord kill modal, so its card geometry — 480px wide, header and footer rules, padding — is identical rather than approximate. It carries, and carries nothing else:
+
+- **Header**: `Resume session` on the left, a `● PAUSED` badge on the right in Nord's orange — the slot the rename modal uses for `EDIT MODE`.
+- **Body**: an `ON RESUME` label in the same violet the rename modal gives `NEW NAME`, with the registered command beneath it.
+- **Footer**: `⏎ resume` and `d discard`.
+
+A meta line carrying the directory and how long the pane had been paused was drafted and cut. It was invented rather than decided, and on the page it added nothing the command and the badge did not already say. The marker can carry metadata (see Pending Visibility) — this panel does not need it to.
+
+**The discard confirmation is the kill modal, retitled.** `▲ Discard resume?`, the command rendered in the destructive colour where the kill modal puts the session name, a plain-language consequence line, and `y discard   esc cancel`. Nothing structural differs, which is the point: it is the same act the picker's kill confirm performs, so it should be the same object.
+
+**The session row drops the word `attached` and gains a second dot.** The green attached indicator loses its label and stands alone; a pending resume shows as a second dot in Nord's orange.
+
+**The dots pack to the right in a fixed order — green, then orange — rather than holding reserved lanes.** A row with one dot puts it hard right whichever it is; a row with both shows green pushed left to make room for orange. This was built the other way first, with a reserved lane per indicator so the columns aligned down the list, and the user rejected it: an indicator should not claim space it is not using.
+
+**Dropping `attached` is pulled into this feature; the rest of the row rework stays parked.** Removing the word is what makes room for a second indicator, so it cannot wait for the roadmap item — but the window count, the session paths, and the wider right-hand rework stay on `picker-row-redesign` (see Open Threads). One consequence rides with it: a bare dot carries no meaning on its own, so the help modal gains the legend in the same change rather than after it.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -440,6 +466,6 @@ The one open question this section carried — whether the marker the freeze rid
 ### Open Threads
 
 - **Preferences UI** — parked on the product roadmap (`preferences-ui`, horizon `next`). A settings screen in the picker for install preferences, so `prefs.json` is not hand-edited. The theme picker is currently the only preference with any UI, and this feature adds a second setting that needs one — and the agent-aware direction will add more.
-- **Picker row redesign** — parked on the product roadmap (`picker-row-redesign`, horizon `next`). Dropping the window count, which reads "1 window" on every row of the measured install (42 of 42 live sessions hold a single window, `tmux list-windows -a -F '#{session_name}' | sort | uniq -c`), dropping the "attached" word in favour of its glyph alone, right-aligning a status strip that grows leftward as indicators appear, and showing each session's directory path beside its name. It changes every row for every session and is driven by its own rationale rather than by this feature; the pending-resume indicator this feature needs is a single glyph that strip would host.
+- **Picker row redesign** — parked on the product roadmap (`picker-row-redesign`, horizon `next`). Dropping the window count, which reads "1 window" on every row of the measured install (42 of 42 live sessions hold a single window, `tmux list-windows -a -F '#{session_name}' | sort | uniq -c`), showing each session's directory path beside its name, and finishing the right-hand status strip. It changes every row for every session and is driven by its own rationale rather than by this feature. **Narrowed since parking**: dropping the `attached` word and adding the pending-resume dot came back into this feature, because the word had to go to make room for a second indicator — the roadmap entry was amended to say so rather than leaving both records claiming the same work.
 
 ### Current State
