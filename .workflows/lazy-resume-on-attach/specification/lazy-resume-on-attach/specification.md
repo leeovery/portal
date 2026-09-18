@@ -62,6 +62,8 @@ The consequence is stated rather than mitigated: **a pin lives on the registrati
 
 That rule is load-bearing rather than cosmetic. The external Claude Code `SessionStart` hook fires `portal hook set` on every session start, and each call rewrites the whole file — so a writer that always emitted the object form would convert every entry on the install to the verbose shape on the next session start. Emitting the string form when there is nothing to carry keeps a hand-edited file looking as it does today, with the occasional expanded entry where something has been pinned. The object is open-ended, so it is room for whatever comes later rather than a slot cut for this one setting.
 
+**A stored value the reader cannot make sense of never fails a pane.** An object whose `resume` attribute is absent, empty, or holds anything other than `eager` or `lazy` carries no mode — the registration inherits the install-wide default exactly as a string-form entry does, and the mode column (§3.4) reads empty for it. An object carrying no command, or an empty one, is not a registration: the pane falls through to a plain shell as an unregistered pane does (§6.1). Nothing is rewritten to correct either case; the file stays as the user left it.
+
 This is a genuine change to the on-disk shape, not an additive field. `hooks.json` is `map[hook_key]map[event]command` — strings all the way down, with no slot for an attribute that is not a command (`internal/hooks/store.go:28-31`).
 
 **The alternative — a second entry beside `on-resume` in the same inner map — was rejected.** It keeps a `jq` reader working, but it puts a non-event in the event namespace and adds a row to `hook list`, which is a machine interface an external script parses.
@@ -152,13 +154,15 @@ Measured on tmux 3.7c: a pane printed two lines of real content, entered the alt
 
 **The overlay fills the pane, painted in the active Portal theme so nothing behind it shows through, and the decision sits in a compact bordered card in the middle.** A box stretched to near-full size with a few lines in the middle would look lost on a large terminal; the canvas-plus-card shape is what Portal already uses everywhere else for exactly this reason.
 
+**A pane too small for the card still says what it is.** Below the size the card needs, the panel degrades instead of disappearing: the canvas is painted as always, and the title, the command and the key hints stack plainly without the card frame, down to the smallest pane a restore can produce. Enter and `d` act at every size. A waiting pane swallows every other key (§4.3), so one that drew nothing would read as an ordinary restored pane with a dead keyboard.
+
 The card is the shape of Portal's existing rename modal: a header row carrying the title and a state badge, a body, and a footer row of key hints, assembled through the same joined-panel frame the picker's modals use (`renderJoinedPanel`, `internal/tui/panel.go`).
 
 **The reuse is at the presentation layer, not the code path.** The picker's modals are Bubble Tea components rendering into its own model, while this panel is drawn straight into a pane by the program that then waits there. What carries across is the theme tokens and the modal's visual grammar, which is what makes it read as Portal rather than as a tmux dialog.
 
 Every colour is a theme token, as everywhere else in Portal — the panel holds no raw hex.
 
-**The theme resolves as it does everywhere else in Portal.** A named theme paints from the first frame with no gate at all. A light/dark pair runs the same detect-or-timeout appearance gate the picker runs — a query to the terminal raced against the same short timeout (`appearanceDetectTimeout`, `internal/tui/appearance_gate.go:12`), resolving dark when there is no answer — in the process that draws. That process hands off before it waits (§4.2), so the gate is paid once per draw and nothing of it stays resident while the pane waits. A pane drawn with no client attached to it gets no answer and resolves dark, which is that fallback reached by the ordinary route rather than a second rule.
+**The theme resolves as it does everywhere else in Portal.** A named theme paints from the first frame with no gate at all. A light/dark pair runs the same detect-or-timeout appearance gate the picker runs — a query to the terminal raced against the same short timeout (`appearanceDetectTimeout`, `internal/tui/appearance_gate.go:12`), resolving dark when there is no answer — in the process that draws. That process hands off before it waits (§4.2), so the gate is paid once per draw and nothing of it stays resident while the pane waits. A pane drawn with no client attached to it gets no answer and resolves dark — that fallback reached by the ordinary route rather than a second rule. Most panes are drawn at restore with nobody watching them, so under a pair the dark half is what most first draws land on; a redraw with a client present resolves against the terminal in front of it.
 
 **Every string this surface renders is tool-agnostic.** Portal's resume machinery runs whatever command a registration holds, so nothing the panel shows names a particular tool — it states the command and says nothing about what the command is. That covers the discard confirmation's consequence line (§5.4) and the indicator legend that ships with the picker's pending dot (§8.3) as much as the panel itself.
 
@@ -169,6 +173,8 @@ It carries this, and carries nothing else:
 - **Header** — `Resume session` on the left; a `● PAUSED` badge on the right in `accent.attention`, occupying the slot the rename modal gives `◉ EDIT MODE`.
 - **Body** — an `ON RESUME` label in `accent.primary`, the token the rename modal gives `NEW NAME`, with the registered command beneath it.
 - **Footer** — `⏎ resume` and `d discard`.
+
+**A command longer than the card wraps rather than being cut.** The registered command is the only thing on the panel that says which piece of work the pane is holding, and a realistic one carries a directory and an identifier. It wraps within the card's inner width over at most three lines, with anything beyond marked `…`; the card's width is unchanged. The discard confirmation renders the command the same way (§5.4).
 
 A meta line carrying the directory and how long the pane had been paused was drafted and cut. It was invented rather than decided, and on the page it added nothing the command and the badge did not already say. The pending marker can carry metadata (§8.2) — this panel does not need it to.
 
@@ -204,7 +210,11 @@ A pane can wait for days, and in that time the entry can be removed by `portal h
 
 **`d` opens a second confirmation over the panel** — *this is permanent* — where **`y`** agrees and **Escape** backs out to the resume panel (§5.4).
 
+**While the confirmation is up, `y` and Escape are the only keys that act.** Enter, `d` and everything else are swallowed there exactly as they are on the waiting panel (§4.3) — the pane never acts on a key the screen in front of the user does not offer, and the reflex of confirming with Enter costs nothing but a second press of the key the footer names.
+
 **A confirmed discard removes the pane's resume registration, permanently, and nothing else.** The entry is cleaned out of the store rather than suppressed for the boot, so the panel does not return on this boot, on the next attach, or after any future reboot. The pending marker is cleared and the pane falls through to a plain shell with its replayed scrollback still above it — indistinguishable from a pane that never had a hook.
+
+**A discard that finds nothing to remove is still a discard.** If the entry has already gone — removed by `portal hook rm`, replaced by a re-registration, or hand-edited away while the pane waited — the marker clears and the pane falls through to a shell as it would after a removal, because the end state the user asked for is the state the store is already in. **A discard that cannot be written leaves the pane waiting and says so on the panel**: an unreadable store or an unavailable lock is reported in place, the registration and the marker both stand, and the key can be pressed again. The one outcome ruled out is a pane that drops its panel while the registration it named survives.
 
 **The tmux session is untouched.** It stays live, stays saved, and restores on the next reboot as an ordinary hookless pane — bare shell, scrollback intact, no panel. Killing it is a separate act the user takes when they want it.
 
