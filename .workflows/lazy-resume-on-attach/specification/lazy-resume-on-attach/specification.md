@@ -265,7 +265,7 @@ Measuring with the caller's exact invocation is what changes the answer, and it 
 
 #### 7.2 The pane stays frozen for as long as its resume is unanswered
 
-**The marker that already tells the saver to leave a pane alone is held through the waiting state** instead of being cleared at the end of scrollback replay. Today the hydrate helper clears it the moment replay finishes and before it hands off — replay, settle sleep, unset, exec (`cmd/state_hydrate.go:139-148`) — which under lazy resume would land at exactly the moment the panel goes up.
+**The saver is kept off a waiting pane for the whole of the wait.** Today the only thing that keeps it off is the mid-restore marker, which the hydrate helper clears the moment replay finishes and before it hands off — replay, settle sleep, unset, exec (`cmd/state_hydrate.go:139-148`) — which under lazy resume would land at exactly the moment the panel goes up. That marker keeps its lifecycle and its other jobs unchanged; what holds the freeze through the wait is a second marker carried by the pane itself, set before the mid-restore one is cleared (§7.3).
 
 **It is cleared when the user answers** — on Enter before the hook runs, and on a confirmed discard before the pane falls through to a shell (§6) — and on both paths only once the pane has left the panel's screen and is showing its own transcript again. Clearing while the card is still up leaves a window in which a single saver tick rewrites the pane's saved transcript as history-minus-its-last-screenful plus the card (§7.1) — the whole failure, in the space between two steps, on the path every resume takes. This is the mirror of the rule that sets the pending marker before the mid-restore one is cleared (§7.3).
 
@@ -314,7 +314,7 @@ That follows from what doctor's exit code means against what this feature produc
 
 #### 8.2 A pending pane is marked explicitly
 
-The marker is the pane user-option `@portal-resume-pending` (§7.3). **The helper sets it before it clears the mid-restore marker, and therefore before it paints** — so the pane is never unprotected. Resume and a confirmed discard each clear it, both in the waiting program, at the moment the user answers.
+The marker is the pane user-option `@portal-resume-pending` (§7.3). **The helper sets it before it clears the mid-restore marker, and therefore before it paints** — so the pane is never unprotected. Resume and a confirmed discard each clear it, both in the waiting program, on the ordering §7.2 sets.
 
 **Only a pane that is going to wait is marked.** The helper resolves the pane's mode (§2) before it clears the mid-restore marker, so a pane with no registration — and one whose registration resolves eager — is never marked and goes on being captured exactly as it is today. That condition is also what holds the unreachability below: the marker only ever lands on a pane whose sole process is the waiter, which dies with the pane. A marker set on a pane that then execs its hook would have nothing left to clear it, and the saver would refuse that pane's scrollback write for the rest of the pane's life.
 
