@@ -92,7 +92,7 @@ The discard key is **`d`**, derived from the picker's existing split rather than
 
 There is no "parent process" to fall back to, which the user was unsure about: the pane's only process during restore is Portal's hydrate helper, and it replaces itself with either the hook or the user's shell (`cmd/state_hydrate.go:153-196`). Declining means it takes the shell branch — exactly what a restored pane with no registered hook does today, so a declined pane is indistinguishable from one that never had a hook.
 
-This makes the in-pane Escape a third removal route alongside the existing `portal hook rm` and a hand edit of the store — reached from where the user already is, instead of by remembering a CLI verb.
+This makes the in-pane `d`, once confirmed, a third removal route alongside the existing `portal hook rm` and a hand edit of the store — reached from where the user already is, instead of by remembering a CLI verb. *(Amended 2026-09-18 — this named Escape as the route; the reversal below rebound the discard to `d` behind a confirmation and left Escape inert.)*
 
 Sibling check: `resume-hooks-silently-lost` — its specification (2026-09-10) owns hook removal, defining the `hook rm` CLI, the rule that removing nothing always exits non-zero, and that a removal never unstamps the pane's durable token. This decision adds a route beside that CLI and contradicts none of those rules; because the key it removes is always a token baked from saved state, it also never touches the old-format entries that specification retains permanently.
 
@@ -120,7 +120,7 @@ No competing option was worth writing up. The user's response on seeing it: ther
 
 ### Decision
 
-**The pane stays frozen for as long as its resume is unanswered.** The marker that already tells the saver to leave a pane alone is held through the waiting state instead of being cleared at the end of scrollback replay, and is cleared when the user answers — on Enter before the hook runs, on Escape before the pane falls through to a shell.
+**The pane stays frozen for as long as its resume is unanswered.** The marker that already tells the saver to leave a pane alone is held through the waiting state instead of being cleared at the end of scrollback replay, and is cleared when the user answers — on Enter before the hook runs, and on a confirmed discard before the pane falls through to a shell. *(Amended 2026-09-18 — this said "on Escape"; the decline decision rebound the discard to `d` behind a confirmation.)*
 
 The cost is nil in practice: a pane waiting on a resume has no new content worth saving, so freezing it at its last live state is exactly the desired end state. A waiting pane keeps its place in the saved set throughout, so it restores normally on every subsequent reboot — with its original content and a fresh prompt, however many reboots it waits through.
 
@@ -272,7 +272,7 @@ So no separate binary is warranted: the waiter is the same Portal binary entered
 
 A resize is the same handover run backwards: the waiter replaces itself with a fresh draw, which draws at the new width and hands back to a fresh wait. The resting state stays at the floor and the cost is paid only at the moment of the resize.
 
-**Enter and Escape act; every other key is swallowed, signals included.** The waiter is the pane's only process, so anything that kills it takes the pane with it — Ctrl-C, Ctrl-D, Ctrl-Z. It must refuse to die rather than exit. The rule that falls out is a safety property as much as a mechanism: a stray paste, an errant `send-keys`, or a key pressed in the wrong window cannot answer the prompt, because nothing but those two keys means anything to it.
+**Enter and `d` act; every other key is swallowed, signals included.** *(Amended 2026-09-18 — this read "Enter and Escape act"; the decline decision rebound the discard to `d` and made Escape inert on this panel. Escape is live only inside the confirmation `d` opens, where it backs out.)* The waiter is the pane's only process, so anything that kills it takes the pane with it — Ctrl-C, Ctrl-D, Ctrl-Z. It must refuse to die rather than exit. The rule that falls out is a safety property as much as a mechanism: a stray paste, an errant `send-keys`, or a key pressed in the wrong window cannot answer the prompt, because nothing but those keys means anything to it.
 
 ---
 
