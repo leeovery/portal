@@ -22,8 +22,8 @@ The freeze section states the guarantee — the saver is kept off a waiting pane
 **Proposed Text**:
 **The saver is kept off a waiting pane for the whole of the wait.** Today the only thing that keeps it off is the mid-restore marker, which the hydrate helper clears the moment replay finishes and before it hands off — replay, settle sleep, unset, exec (`cmd/state_hydrate.go:139-148`) — which under lazy resume would land at exactly the moment the panel goes up. That marker keeps its lifecycle and its other jobs unchanged; what holds the freeze through the wait is a second marker carried by the pane itself, set before the mid-restore one is cleared (§7.3).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Real contradiction — §7.2's opening survived from before §7.3 moved the freeze onto a pane-scoped marker. The spec's own decisions determine the wording.
 
 ---
 
@@ -47,8 +47,8 @@ Resume and a confirmed discard each clear it, both in the waiting program, at th
 **Proposed Text**:
 Resume and a confirmed discard each clear it, both in the waiting program, on the ordering §7.2 sets.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. One-home rule; §7.2 keeps the ordering, §8.2 references it.
 
 ---
 
@@ -71,8 +71,8 @@ Append to §8.2, after the paragraph beginning "Only a pane that is going to wai
 
 **A pane that cannot be marked does not wait.** If the pending marker cannot be written, the helper does not paint: it fires the hook as an eager registration does, and the pane comes back as today's restore leaves it. A wait with no marker on the pane is the one state the design refuses — the saver rewrites that pane's saved transcript as history-minus-its-last-screenful plus the card (§7.1) at the first tick that lands, for as long as the user takes to answer — and landing the user where eager would have put them is the degradation this feature already accepts (§2.1).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as part of the subtopic When The Marker Cannot Be Written Or Cleared, carrying the derivation marker; §8.2 aligned to it.
 
 ---
 
@@ -95,8 +95,8 @@ Append to §7.2, after the paragraph beginning "It is cleared when the user answ
 
 **A freeze that cannot be lifted holds the answer.** If the marker cannot be cleared, the pane keeps the panel and says so in place; neither the hook nor the fall-through to a shell runs while the marker stands, and the key can be pressed again. Handing the pane over with it still set would freeze that pane's saved scrollback for the rest of the pane's life — the pane goes on being used and every reboot restores the transcript it held when it paused — and nothing reports that state or reclaims it, since no sweep reaches a pane option (§8.2). This is the shape a discard that cannot be written already takes (§6.2): what the screen claims and what the pane holds never disagree.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as part of the subtopic When The Marker Cannot Be Written Or Cleared, carrying the derivation marker; §7.2 aligned to it.
 
 ---
 
@@ -119,8 +119,8 @@ Append to §5.3, after the paragraph beginning "A command longer than the card w
 
 **A card with something to report carries one more row.** When an answer cannot be carried out — a discard the store will not accept (§6.2) among them — the reason is stated on a single line between the command and the key hints, and it stays there until the next key is pressed rather than timing out: a report the user can miss leaves them believing the thing they asked for happened. The row is present only when there is something to say, and a panel with nothing to report carries exactly the three parts above.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as part of the subtopic The Panel's Report Row And Its Redraw, carrying the derivation marker; §5.3 aligned to it.
 
 ---
 
@@ -143,8 +143,8 @@ Append to §4.2, after the paragraph beginning "A resize is the same handover ru
 
 **The redraw is taken once the size has settled, not once per size change.** A terminal dragged to a new size delivers a stream of size changes to every pane in the window, and a full waiting set answering each of them with a fresh draw would be hundreds of process launches a second for the length of the drag. The panel holds nothing that moves, so one draw at the end of the stream is the whole of what it owes, and the cost of a resize stays a single handover per pane.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as part of the subtopic The Panel's Report Row And Its Redraw, carrying the derivation marker; §4.2 aligned to it.
 
 ---
 
