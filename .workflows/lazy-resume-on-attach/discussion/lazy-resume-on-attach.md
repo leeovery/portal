@@ -389,6 +389,8 @@ That last rule is load-bearing rather than cosmetic. The external Claude Code `S
 
 The alternative — a second entry beside `on-resume` in the same inner map — was rejected on that first consumer. It keeps `jq` working, but it puts a non-event in the event namespace and adds a row to `hook list`, which is a machine interface the live script parses. Nesting keeps that output honest and disturbs only the script that is already inert.
 
+**The override is set where the registration is made: `portal hook set`.** A flag on the command that writes the entry, alongside `--on-resume`. This follows from who writes registrations — the external `SessionStart` hook is a shell script, not a person at a screen, so the route has to be something a script can pass. The waiting panel is not the place for it: a panel offering "always resume this one without asking" would be setting a durable preference from a surface whose whole job is answering one instance of a question.
+
 **The install-wide setting has a home already; the way to change it does not.** `prefs.json` holds the install's UI preferences — the theme and the session-list grouping mode — and is the natural place for this. What does not exist is any surface for setting it: the theme picker is the only preference with a UI, so until a settings screen exists this one is changed by hand-editing a file. That raises the stakes on the default rather than changing where it lives.
 
 **The install-wide default is lazy.** The feature ships on rather than waiting to be discovered, and an install that upgrades and reboots meets prompts rather than processes.
