@@ -563,6 +563,80 @@ Confidence: high.
 
 ---
 
+## Unreadable Stored Registrations
+
+### Context
+
+The store is hand-editable by design, and the object form invites exactly the mistakes a hand edit makes: `"resume": "Lazy"`, `"resume": true`, a stray key, or an object that carries settings and no command at all. What the user gets in each case was never established, and the readings pull in opposite directions. Read an unrecognised mode as eager and one typo turns the whole restored set back into processes launching at boot — the cost this work exists to remove. Read it as a hard error and a single bad character can fail a pane's restore.
+
+### Journey
+
+The derivation runs from what Portal already does with a value it cannot read. `prefs.json` decodes every field tolerantly and independently, resolving anything missing, empty, corrupt or unrecognised to the shipped default rather than failing. The resume path's own answer to a lookup it cannot satisfy is the same shape: a lookup failure gives a bare shell, so the pane stays usable.
+
+Both alternatives were weighed against that. Treating an unrecognised mode as eager matches today's unconditional firing, and is the one reading whose failure is silent and expensive — the typo does not announce itself and the whole install resumes at boot. Refusing the entry loudly makes the typo visible at the cost of a pane that will not come back, which trades a cosmetic fault for a functional one.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by `prefs.json`'s tolerant-decode rule and the resume path's existing degradation to a usable pane. (review-gap-c1 F2)
+
+**A stored value the reader cannot make sense of never fails a pane.** An object whose `resume` attribute is absent, empty, or holds anything other than `eager` or `lazy` carries no mode — the registration inherits the install-wide default exactly as a string-form entry does, and the mode column reads empty for it. An object carrying no command, or an empty one, is not a registration: the pane falls through to a plain shell as an unregistered pane does.
+
+Nothing is rewritten to correct either case. The file stays as the user left it.
+
+Confidence: high.
+
+---
+
+## Discarding At The Edges
+
+### Context
+
+Three things about the discard were settled — what it removes, what confirms it, what it records — and three edges of the same act were not. The entry can already be gone by the time the key is pressed, days having passed since the panel was drawn. The write can fail, against a file another process can be holding. And once the confirmation is up, whether the keys from the screen underneath still act was never said.
+
+### Journey
+
+The first two derive from what a discard is. It is irreversible, over the only copy of a user-authored command, so the outcome worth refusing is not a failed discard — it is the user believing something was removed that was not. An already-gone entry is therefore not a failure at all: the end state the user asked for is the state the store is already in. A failed write is the opposite: the screen must not claim an outcome the disk does not hold.
+
+The third follows from the swallow rule and from why `y` was chosen over Enter. Enter resumes one keystroke earlier, and a user who presses `d` and then reflexively Enter — the reflex every confirmation dialog in the world trains — would get the session resumed, which is the opposite of what they just asked for. The swallow rule exists so nothing accidental can answer; a live Enter on the confirmation is precisely the accidental answer the two screens' key choices were arranged to avoid. The alternative — Enter stays live and resumes from the confirmation too, on the grounds that resuming is the non-destructive answer — was rejected because backing out to it is already what Escape does, so the live Enter buys nothing and costs the reflex.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by what a discard is (irreversible, over the only copy of the command) and by the swallow rule that already governs the waiting panel. (review-gap-c1 F4, F7)
+
+**A discard that finds nothing to remove is still a discard.** If the entry has already gone — removed by `portal hook rm`, replaced by a re-registration, or hand-edited away while the pane waited — the marker clears and the pane falls through to a shell as it would after a removal.
+
+**A discard that cannot be written leaves the pane waiting and says so on the panel.** An unreadable store or an unavailable lock is reported in place, the registration and the marker both stand, and the key can be pressed again. The one outcome ruled out is a pane that drops its panel while the registration it named survives.
+
+**While the confirmation is up, `y` and Escape are the only keys that act.** Enter, `d` and everything else are swallowed there exactly as they are on the waiting panel — the pane never acts on a key the screen in front of the user does not offer.
+
+Confidence: high.
+
+---
+
+## Panel Rendering Limits
+
+### Context
+
+The panel's shape was settled against a full-size pane and a short string, and neither is guaranteed. A real registration is long — the measured install's entries run to a quoted directory path plus a `--resume <id>` tail — while the card is the rename modal's geometry, sized for a session name. And restored panes come back at whatever size the user left them, which can be smaller than the card.
+
+### Journey
+
+Both derive from what the panel is for. The command is the only content on the panel that says which piece of work this pane is holding, and the same string is rendered again on the discard confirmation, where the user is being asked to destroy it permanently with nothing else to go on. Cutting it loses exactly the part that identifies the pane — at the tail the id that distinguishes one waiting pane from the next, at the head the directory that says which project it is. Three lines holds a realistic registration whole without the card growing to the size the canvas-plus-card shape exists to avoid.
+
+The small pane is the sharper of the two, because its failure is quiet in the worst way. A pane that declines to draw looks like an ordinary restored pane with its transcript in place, while silently swallowing everything the user types into it: no sign that the pane holds a decision, no clue that Enter answers it, and a keyboard that appears to be broken. The canvas is what distinguishes a waiting pane from a restored one, so it is the part that must survive at any size. Dropping the command below the floor was weighed and rejected — it keeps the smallest pane legible at the cost of not saying what would run, which is the one thing the panel exists to say.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by what the panel is for — the command is its only identifying content and the canvas is what says the pane is waiting — and by the swallow rule, which makes a pane that draws nothing read as a working pane with a dead keyboard. (review-gap-c1 F5, F6)
+
+**A command longer than the card wraps rather than being cut.** It wraps within the card's inner width over at most three lines, with anything beyond marked `…`; the card's width is unchanged. The discard confirmation renders the command the same way.
+
+**A pane too small for the card still says what it is.** Below the size the card needs, the panel degrades instead of disappearing: the canvas is painted as always, and the title, the command and the key hints stack plainly without the card frame, down to the smallest pane a restore can produce. Enter and `d` act at every size.
+
+Confidence: high.
+
+---
+
 ## Summary
 
 ### Key Insights
