@@ -179,6 +179,57 @@ Three frames were built in the Paper file `Portal`, against the Nord artboards t
 - **Sessions — pending resume dot (Nord)** (§8.3)
 
 The waiting panel's frame was built by duplicating the Nord kill modal, so its card geometry — width, header and footer rules, padding — is identical to the existing modals' rather than approximate. The frames are the design reference for implementation; the panel is built from Portal's own shared panel machinery, not from the frames' pixel dimensions.
+
+### 6. Answering the Panel
+
+Two keys change anything. Everything else is swallowed (§4.3).
+
+#### 6.1 Enter resumes
+
+**Enter hands the pane over in place; nothing is wiped and nothing is re-laid.** The replayed transcript is already in the pane's primary buffer, underneath the alternate screen the panel is drawn on, so leaving the alternate screen reveals it and the resume command starts over it. The pending marker is cleared before the hook runs (§7.2).
+
+**The command is read at the moment the user answers, not carried from when the panel was drawn.** The waiting program looks the registration up before it draws, to know whether to draw at all — and it reads it again when Enter is pressed, and runs what the store holds then.
+
+A pane can wait for days, and in that time the entry can be removed by `portal hook rm --pane-key`, rewritten by a re-registration, or hand-edited. Acting on a value read days earlier would resume something the user had already deregistered — the one case where the two readings differ, and the one where the stale reading is plainly wrong. Re-reading costs a single file read at a moment already doing far more.
+
+**An entry that has gone by then drops the pane through to a plain shell**, exactly as an unregistered pane does — a path the helper already has. So does an unreadable store: the existing degradation is that a lookup failure gives a bare shell so the pane stays usable, and that is unchanged. The marker clears either way; the pane is no longer waiting whatever the read returned.
+
+#### 6.2 `d` discards, behind a confirmation
+
+**`d` opens a second confirmation over the panel** — *this is permanent* — where **`y`** agrees and **Escape** backs out to the resume panel (§5.4).
+
+**A confirmed discard removes the pane's resume registration, permanently, and nothing else.** The entry is cleaned out of the store rather than suppressed for the boot, so the panel does not return on this boot, on the next attach, or after any future reboot. The pending marker is cleared and the pane falls through to a plain shell with its replayed scrollback still above it — indistinguishable from a pane that never had a hook.
+
+**The tmux session is untouched.** It stays live, stays saved, and restores on the next reboot as an ordinary hookless pane — bare shell, scrollback intact, no panel. Killing it is a separate act the user takes when they want it.
+
+Retiring the whole session on discard was considered and rejected. It would answer the other half of the problem — that the saved population only ever grows — and the multi-pane hazard that argues against it is rare (43 of 44 live sessions held a single pane, §1). It is rejected on intent rather than on that hazard: declining a resume and disposing of a session are two different decisions, and binding them to one keystroke removes the user's ability to make only the first.
+
+Per-boot decline and re-offer-on-next-attach were both rejected for the opposite reason. Pressing the discard key is an act of disposal, not deferral — "I've decided, actually, I don't need that session" — and an offer that comes back after you have declined it is treating a decision as a hesitation.
+
+**Discarding neither unstamps the pane's durable token nor touches any other entry.** It is a third removal route alongside `portal hook rm` and a hand edit of the store, reached from where the user already is instead of by remembering a CLI verb.
+
+#### 6.3 Escape on the waiting panel does nothing at all
+
+There is nowhere to back out to, so it is inert. Escape is live only inside the confirmation `d` opens, where it backs out.
+
+**That is the point rather than a side effect.** Everywhere else in Portal, Escape means *back out* — it reverses, it never acts. Binding it here to an irreversible deletion would make this the one place in the product where the reflex key destroys something. Assuming the positive instead — Enter resumes, a named key discards behind a confirmation — makes Escape mean exactly one thing everywhere, with no site where it also destroys. A key the user's hands press without consulting them can then never be the key that loses work. An inert Escape reads as cleaner than a dangerous one.
+
+**The discard key is `d`, derived from the picker's existing split** rather than chosen fresh: `k` kills a live thing (a session), `d` deletes a persisted record (a project). Nothing is killed here — the session and the pane both survive — and what goes is a stored registration, which is `d`'s side of that line.
+
+**The confirm key is `y`, matching Portal's two existing destructive confirmations.** Killing a session and deleting a project both take `y` with `esc` to cancel, through one shared builder (`internal/tui/kill_modal.go:13`, `delete_modal.go:12`, `destructive_confirm.go:16`). Enter was rejected for it: Enter resumes on the panel one keystroke earlier, so confirming the discard with it would make the same key mean "bring it back" and "delete it forever" on consecutive screens.
+
+#### 6.4 What the discard destroys is recorded
+
+**The removed command is written to the log as it goes.** The confirmation makes the act deliberate; the log line makes it recoverable anyway, and costs nothing.
+
+Portal already destroys these entries two ways and treats them differently. The typed removal command records only which entry went (`op=rm`, `internal/hooks/store.go:221`), while the automatic stale sweep deliberately records the command itself, its own source comment calling that the recoverable form an operator copies back out of the log (`op=clean-stale` carrying `value`, `internal/hooks/store.go:369-373`). This path is the sweep's situation rather than the typed command's — it is reached by a keystroke on a panel the user is walking through, not by naming a key on a command line — so it takes the sweep's treatment.
+
+The emission is one INFO line under the `hooks` component carrying the hook key and the removed command as `value`, at the production default level. It adds **two members to closed vocabularies**, amended here because a specification is the sanctioned route and a call site is not:
+
+- a new `op`, **`discard`**, so the three removal routes stay greppable apart;
+- a new `via`, **`panel`**, because the existing four (`cli`, `internal`, `hydrate`, `doctor`) name none of them — the waiter is neither a typed command, nor Portal acting on its own behalf, nor a hydration lookup, nor a diagnosis.
+
+*Sibling check: `resume-hooks-silently-lost` owns hook removal — the `hook rm` CLI, the rule that removing nothing always exits non-zero, and that a removal never unstamps the pane's durable token. This section adds a route beside that CLI and contradicts none of those rules; because the key it removes is always a token baked from saved state, it also never touches the old-format entries that specification retains permanently.*
 ---
 
 ## Working Notes
