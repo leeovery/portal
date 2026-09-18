@@ -74,6 +74,8 @@ This is a genuine change to the on-disk shape, not an additive field. `hooks.jso
 
 The waiting panel is not the place for it. A panel offering "always resume this one without asking" would be setting a durable preference from a surface whose whole job is answering one instance of a question.
 
+**A mode is always passed with the command it belongs to.** `--resume-mode` on its own, with no `--on-resume`, is refused — the command exits non-zero and writes nothing. A registration is written whole (§2.2) and both stored shapes carry a command (§3.2), so there is no entry a mode could attach to by itself; pinning an existing registration means re-passing its command alongside the flag.
+
 #### 3.4 Reading it back
 
 **A pinned registration is readable from `portal hook list`, as a fifth column.** A mode that could only be seen by opening `hooks.json` would be configuration you can set and cannot check.
@@ -251,7 +253,7 @@ Measuring with the caller's exact invocation is what changes the answer, and it 
 
 **The marker that already tells the saver to leave a pane alone is held through the waiting state** instead of being cleared at the end of scrollback replay. Today the hydrate helper clears it the moment replay finishes and before it hands off — replay, settle sleep, unset, exec (`cmd/state_hydrate.go:139-148`) — which under lazy resume would land at exactly the moment the panel goes up.
 
-**It is cleared when the user answers** — on Enter before the hook runs, and on a confirmed discard before the pane falls through to a shell (§6).
+**It is cleared when the user answers** — on Enter before the hook runs, and on a confirmed discard before the pane falls through to a shell (§6) — and on both paths only once the pane has left the panel's screen and is showing its own transcript again. Clearing while the card is still up leaves a window in which a single saver tick rewrites the pane's saved transcript as history-minus-its-last-screenful plus the card (§7.1) — the whole failure, in the space between two steps, on the path every resume takes. This is the mirror of the rule that sets the pending marker before the mid-restore one is cleared (§7.3).
 
 The cost is nil in practice: a pane waiting on a resume has no new content worth saving, so freezing it at its last live state is exactly the desired end state.
 
@@ -336,7 +338,7 @@ The one exception to that containment is the saver's capture skip, which gains a
 
 **A second bootstrap does not disturb a waiting pane.** Every `portal open` runs the orchestrator, and restore runs inside it — but it skips any saved session whose name is already live (`internal/restore/restore.go:118`). A session holding a waiting pane is live, so it is never re-restored and its pane is never respawned out from under the user.
 
-**A frozen pane is not dropped from the saved set.** The freeze suppresses that pane's scrollback write; the structural capture merges the pane's *previous* record back into the fresh index rather than omitting it, guarded so that a stale marker cannot resurrect a pane whose session, window or pane is gone (`internal/state/capture.go:96-127`). A pane can wait indefinitely and still be restored on the next boot, with the transcript it had when it paused.
+**A frozen pane is not dropped from the saved set.** The freeze suppresses that pane's scrollback write and nothing else, so a pane can wait indefinitely and still be restored on the next boot with the transcript it had when it paused (§7.2).
 
 **Bootstrap's two sweeps leave it alone.** The stale-marker sweep only unsets markers whose pane is no longer live, and a waiting pane is live. The orphan-FIFO sweep has nothing to reclaim: the helper unlinks its FIFO as soon as the hydrate signal arrives (`cmd/state_hydrate.go:107`), long before the panel is drawn.
 
