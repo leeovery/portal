@@ -535,6 +535,34 @@ Confidence: high.
 
 ---
 
+## Panel Theme Resolution
+
+### Context
+
+The panel is painted in the theme the user has chosen, which is what makes it read as Portal rather than as a tmux dialog. Portal's theme setting is not always a single answer: it is either one named theme, or a light/dark pair, and a pair is only half a decision until something establishes which half the terminal is.
+
+The picker settles that before it paints anything — a query to the terminal raced against a 50ms timeout, resolving dark when nothing answers (`internal/tui/appearance_gate.go:12`). The panel is painted by a different process, in a pane, at restore, and nothing said what that process does with a pair.
+
+### Journey
+
+The derivation runs from what the drawing process is already doing. It has to touch the theme and the rendering path to paint at all, and it hands off to a fresh wait immediately afterwards, so a gate placed there is paid once per draw and nothing of it is held while the pane waits. There is no cheaper moment and no later one — after the handover the waiter has neither the theme nor a reason to resolve it.
+
+What settles the choice is the shape of the failure rather than the cost. A pair resolved to the wrong half is not one pane looking odd: it is every restored pane at once, forty panels in the half of the user's own theme they do not use, with nothing in the product that looks like the cause. Against that, a bounded query the picker already runs is not a cost worth avoiding.
+
+The two alternatives are the same answer stated twice — resolving a pair straight to its dark half with no query, or having the panel ignore the pair and paint the shipped dark default. Both are free, and both are simply wrong on a light terminal that would have answered.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by the appearance gate the picker already runs and the moment the panel is drawn: the drawing process is the only point that holds the theme, and it hands off immediately, so the gate rides there or nowhere. (review-input-c1 F4)
+
+**The theme resolves as it does everywhere else in Portal.** A named theme paints from the first frame with no gate at all. A light/dark pair runs the same detect-or-timeout gate the picker runs — a query to the terminal raced against the same short timeout, resolving dark when there is no answer — in the process that draws, which hands off before it waits, so nothing of it stays resident while the pane waits.
+
+The consequence is stated rather than hidden: **a pane drawn with no client attached to it gets no answer and resolves dark.** That is the picker's own fallback reached by the ordinary route, not a second rule — most panes are drawn at restore with nobody watching them, so under a pair the dark half is what most first draws land on, and a redraw with a client present resolves against the terminal in front of it.
+
+Confidence: high.
+
+---
+
 ## Summary
 
 ### Key Insights
