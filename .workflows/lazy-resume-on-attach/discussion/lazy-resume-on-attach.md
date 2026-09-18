@@ -583,6 +583,10 @@ Both alternatives were weighed against that. Treating an unrecognised mode as ea
 
 Nothing is rewritten to correct either case. The file stays as the user left it.
 
+**The writer's side is the opposite, and deliberately so.** `portal hook set --resume-mode` takes `eager` or `lazy` and nothing else; any other value exits non-zero and writes nothing. The two rules differ because the people on each side of them do. The tolerant read exists for a file the user hand-edits, where failing a pane over a typo costs more than ignoring it. The flag is an explicit assertion by a writer still at the keyboard — or by a script whose exit code is checked — where refusing is free and silence is not: a mistyped pin on the one registration that has to come back automatically reports success, quietly follows the install default instead, and shows nothing for it but an empty cell in `hook list` the user has no reason to read.
+
+The alternatives keep one rule for both sides and pay for it in silence — storing the value verbatim and letting the tolerant read drop it, which leaves a pin that does not exist, or accepting the flag and dropping it unwritten, which is the same silence with less on disk.
+
 Confidence: high.
 
 ---
