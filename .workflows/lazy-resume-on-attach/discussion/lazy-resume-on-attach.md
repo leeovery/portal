@@ -163,7 +163,7 @@ Discovery settled that the restored pane carries an in-pane prompt stating what 
 
 **A resident process per waiting pane** — something sits in each pane drawing the prompt and listening for the keypress.
 - Pros: full control of the rendering; redraws itself on resize.
-- Cons: reinstates the cost the feature exists to remove — measured at 17 MB resident for the Portal binary (`ps -o rss -p $(pgrep -f '^portal state daemon')` → `17744` KB on 2026-09-17), roughly 700 MB across a full waiting set of 41.
+- Cons: reinstates the cost the feature exists to remove — priced at the time against the running daemon (`ps -o rss= -p $(pgrep -f '^portal state daemon')` → `17744` KB on 2026-09-17, `22496` KB on 2026-09-18), roughly 700 MB across a full waiting set of 41. That pricing was later shown to be wrong for a *waiting* process: the daemon's figure is the cost of doing work, not of existing (see Waiting Pane Mechanism's measured floor).
 
 **A box painted into the pane, which then goes dead** — the helper draws the prompt as ordinary terminal output and exits; tmux holds the pane open showing it.
 - Pros: zero processes; fully designed rendering; durable by construction — the picture is the pane's content, so it survives anything.
@@ -190,9 +190,11 @@ Two properties were measured on tmux 3.7c before the call was made, both on a di
 
 ### Decision
 
-**The prompt is a tmux-drawn overlay rendered on demand, not an artifact held in the pane.** The durable thing is the pending resume itself; the prompt is what that state looks like when the user is in front of it, and it is drawn by tmux over the pane's existing content.
+**The panel is drawn by Portal into the pane's own alternate screen, by a program that stays there until the user answers.** Nothing floats above the pane and nothing tmux draws is involved.
 
-This is the only one of the three that carries every property the feature needs at once: nothing resident per waiting pane, a centred and designed box rather than a painting, correct rendering after a resize with no repaint machinery, no contamination of the saved scrollback, and stickiness for free. The alternatives each buy one of those by giving up another.
+*(Amended 2026-09-18 — this section's decision was first written as "a tmux-drawn overlay rendered on demand, not an artifact held in the pane", with the durable thing being the pending resume and the prompt merely its rendering. The reframing behind it survives and is what made the rest of the design possible; the mechanism does not. The paragraphs below record why in the order they were established, and Waiting Pane Mechanism settles what holds the panel.)*
+
+The reframing that got here is worth keeping separately from the mechanism it first suggested: what has to survive is the *fact* that a resume is pending, not a picture. That fact is already durable — it is the unfired registration — so stickiness is a consequence rather than something to engineer, and only Enter and the discard key change it.
 
 **The overlay is a near-full-pane bordered panel, not a small centred menu.** It is inset a little from the pane's edges, carries a border and a title, is styled from the Portal theme the user has chosen, and has room along its edges for metadata about what is being offered — the shape of Portal's own scrollback preview rather than a list of choices. The user's framing: "a floating overlay that's sort of slightly indented, but basically full screen… it has a border, a bit like the quick preview in Portal."
 
@@ -208,13 +210,13 @@ The user's own observation is what resolves it: Portal's rename modal — the re
 
 **The panel is a full-pane canvas with a small card centred on it, not a large box with text adrift in it.** The overlay fills the pane, painted in the active Portal theme so nothing behind it shows through, and the decision itself sits in a compact bordered card in the middle — the shape of Portal's existing rename modal: a header row carrying the title and a state badge, a body, and a footer row of key hints. A box stretched to near-full size with a few lines in the middle "might look quite lost on a big terminal window"; the canvas-plus-card shape is what Portal already uses everywhere else for exactly this reason.
 
-The reuse is at the presentation layer, not the code path: the picker's modals are Bubble Tea components rendering into its own model, while this panel is drawn by a short-lived program hosted in a popup. What carries across is the theme tokens and the modal's visual grammar, which is what makes it read as Portal rather than as a tmux dialog.
+The reuse is at the presentation layer, not the code path: the picker's modals are Bubble Tea components rendering into its own model, while this panel is drawn straight into a pane by the program that then waits there. What carries across is the theme tokens and the modal's visual grammar, which is what makes it read as Portal rather than as a tmux dialog.
 
 **The panel is painted into the pane's alternate screen, so it never enters the scrollback.** The user's one hesitation about painting was that the panel is not user content — it is a hold placed on the session, never asked for — and once it is gone it should leave no trace in the history. The alternate screen is exactly that facility: the buffer `vim` and `less` draw on, which is not added to a pane's scrollback ring.
 
-Measured on tmux 3.7c: a pane printed two lines of real content, entered the alternate screen, painted a card, and exited without leaving it. The pane goes dead with the card visible and `alternate_on` set; `capture-pane -p` returns the card, while `capture-pane -a -p` returns the two original lines, intact underneath. The panel is therefore visible without ever being part of the pane's history, and the genuine scrollback is preserved beneath it the whole time it waits.
+Measured on tmux 3.7c, on the dead-pane variant that was live when the property was first checked: a pane printed two lines of real content, entered the alternate screen, painted a card, and exited without leaving it. The pane held the card with `alternate_on` set; `capture-pane -p` returned the card, while `capture-pane -a -p` returned the two original lines, intact underneath. The alternate screen's isolation is the property being measured and does not depend on whether a process remains — re-measured against the settled shape, with a **live** process holding the alternate screen open, the same isolation holds (see the capture measurement in Waiting Pane Capture). The panel is therefore visible without ever being part of the pane's history, and the genuine scrollback is preserved beneath it the whole time it waits.
 
-Nothing blocks: the pane is dead, holds no process, and captures no input beyond its own key table. Panes beside it are fully live throughout.
+Nothing blocks: the panel is the pane's own content and the program holding it reads only the keys sent to that pane. Panes beside it are fully live throughout, which is the constraint that eliminated every floating alternative.
 
 **Answering hands the pane over in place; nothing is wiped and nothing is re-laid.** *(Amended 2026-09-18 — this paragraph described answering as clearing the pane and re-dumping the scrollback, and attributed the capture freeze's purpose to keeping the saved file available for that re-dump. That was the dead-pane design, which the waiting-pane-mechanism decision rejected: a pane revived by `respawn-pane -k` does lose its history, but the settled design never respawns.)* The replayed transcript is already in the pane's primary buffer, underneath the alternate screen the panel is drawn on, so leaving the alternate screen reveals it and the resume command starts over it. The freeze's purpose is what the waiting-pane-capture section states, not this.
 
@@ -479,9 +481,27 @@ A meta line carrying the directory and how long the pane had been paused was dra
 
 ### Key Insights
 
+1. **The durable thing is the pending registration, not the prompt.** Once the prompt was understood as a rendering of an unfired hook rather than an object that had to persist, stickiness stopped being a requirement to engineer and became a consequence: ignoring changes no state, so the same state renders the same prompt next time. It also dissolved an entire subtopic — nothing has to notice the user arriving at a pane.
+
+2. **tmux has no pane-scoped way to draw over a pane or to capture a key.** Both overlay primitives belong to the client and swallow its whole keyboard; `key-table` is a session option that tmux accepts a `-p` write on and then resolves upward, arming every pane in the session. Measured, not assumed. The only thing that can own one pane's input is a process inside it — which is what forced the waiting program over the cheaper dead pane, against the design reasoning that favoured it.
+
+3. **Measuring with the caller's exact invocation changes the answer.** A bare `capture-pane -p` returns the visible screen and made the alternate-screen card look like it replaced a pane's saved transcript; the saver's own `capture-pane -e -p -S -` returns the primary history with the alternate screen appended, so the real failure is accretion rather than loss. Two readings of the same subject, a flag apart.
+
+4. **Go's resident cost is what a process touches, not what it links.** A binary linking the rendering library and never touching it is indistinguishable from one importing nothing — which is why the waiter is the same Portal binary rather than a sidecar, and why the drawing process must hand off to a fresh one instead of blocking with its rendering pages resident.
+
+5. **A reflex key must never destroy anything.** Escape means *back out* everywhere else in Portal, so binding it to an irreversible deletion would have made this the one place it acted. Assuming the positive — Enter resumes, a named key discards behind a confirmation — restores that meaning and leaves Escape with nothing to do here, which reads as cleaner than a guarded Escape would have.
+
+6. **Figures about the install are point-in-time, not constants.** The saved population moves between sittings — 44 live sessions and 41 registrations on 2026-09-17, 42 and 41 on 2026-09-18, 43 and 40 by the end of it. Each measurement below is dated and none supersedes another; the shape they agree on is one session, one pane, one registration, and a set that grows over months.
+
 ### Open Threads
 
 - **Preferences UI** — parked on the product roadmap (`preferences-ui`, horizon `next`). A settings screen in the picker for install preferences, so `prefs.json` is not hand-edited. The theme picker is currently the only preference with any UI, and this feature adds a second setting that needs one — and the agent-aware direction will add more.
 - **Picker row redesign** — parked on the product roadmap (`picker-row-redesign`, horizon `next`). Dropping the window count, which reads "1 window" on every row of the measured install (42 of 42 live sessions hold a single window, `tmux list-windows -a -F '#{session_name}' | sort | uniq -c`), showing each session's directory path beside its name, and finishing the right-hand status strip. It changes every row for every session and is driven by its own rationale rather than by this feature. **Narrowed since parking**: dropping the `attached` word and adding the pending-resume dot came back into this feature, because the word had to go to make room for a second indicator — the roadmap entry was amended to say so rather than leaving both records claiming the same work.
 
 ### Current State
+
+**Resolved.** What a waiting pane is (a Portal process holding a panel on the pane's alternate screen), what it shows and how it is styled (three frames in the Paper file, against the Nord artboards), what the keys do (Enter resumes, `d` discards behind a `y` confirmation, Escape inert, everything else swallowed), what discarding destroys and what it records, what protects the pane's saved transcript while it waits and which marker holds that protection, that scrollback replays unconditionally, that nothing in the restore pipeline changes but the helper's tail, how a pending pane is visible outside itself, and how eager and lazy are configured — install-wide default lazy, per-registration override written whole, readable from `hook list` and `doctor`.
+
+**Uncertain.** Two figures the feature's shape leans on are estimates rather than measurements, because they cannot be taken until something exists to measure: the waiter's actual resident size on the settled code path (~2 MB is the Go floor plus a guess at what its startup touches), and whether the draw-then-hand-off split keeps it at that floor in practice. Both are bounded — the floor is measured and the ceiling is the daemon's 22 MB — and neither changes a decision, but the memory case for the whole feature is stated against the lower one.
+
+**Not carried here.** Two capabilities this work touched but does not build — a preferences UI and the picker row rework — are on the roadmap rather than left as loose ends, and the one piece of the row rework this feature needs (dropping the `attached` word) was pulled forward explicitly, with the roadmap entry amended so neither record claims the other's work.
