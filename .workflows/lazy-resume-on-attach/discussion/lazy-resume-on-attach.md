@@ -218,7 +218,7 @@ Nothing blocks: the pane is dead, holds no process, and captures no input beyond
 
 **Answering hands the pane over in place; nothing is wiped and nothing is re-laid.** *(Amended 2026-09-18 — this paragraph described answering as clearing the pane and re-dumping the scrollback, and attributed the capture freeze's purpose to keeping the saved file available for that re-dump. That was the dead-pane design, which the waiting-pane-mechanism decision rejected: a pane revived by `respawn-pane -k` does lose its history, but the settled design never respawns.)* The replayed transcript is already in the pane's primary buffer, underneath the alternate screen the panel is drawn on, so leaving the alternate screen reveals it and the resume command starts over it. The freeze's purpose is what the waiting-pane-capture section states, not this.
 
-Confidence: high on the surface itself. **Open below it**: the repaint on resize.
+Confidence: high on the surface itself. *(Amended 2026-09-18 — this left the repaint on resize open, which it was while the painted-then-dead pane was the live design: a picture with no process behind it cannot re-centre itself. The waiting-program decision settled it — a resize is the same handover run backwards, the waiter replacing itself with a fresh draw at the new width and handing back to a fresh wait.)*
 
 ---
 
