@@ -96,8 +96,8 @@ Resolve it the way the rest of Portal does: a named theme paints from the first 
 **Proposed Text**:
 **The theme resolves as it does everywhere else in Portal.** A named theme paints from the first frame. A light/dark pair runs the same detect-or-timeout appearance gate the picker runs — a query to the terminal raced against a short timeout, resolving dark when there is no answer — in the process that draws. That process hands off before it waits (§4.2), so the gate is paid once per draw and nothing of it stays resident while the pane waits.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: The call landed in the discussion as a new subtopic, Panel Theme Resolution, carrying the derivation marker; §5.2 of the specification was then aligned to it. The no-client-attached consequence was made explicit at both landings.
 
 ---
 

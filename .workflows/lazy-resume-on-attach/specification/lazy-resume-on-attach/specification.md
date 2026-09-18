@@ -156,6 +156,8 @@ The card is the shape of Portal's existing rename modal: a header row carrying t
 
 Every colour is a theme token, as everywhere else in Portal — the panel holds no raw hex.
 
+**The theme resolves as it does everywhere else in Portal.** A named theme paints from the first frame with no gate at all. A light/dark pair runs the same detect-or-timeout appearance gate the picker runs — a query to the terminal raced against the same short timeout (`appearanceDetectTimeout`, `internal/tui/appearance_gate.go:12`), resolving dark when there is no answer — in the process that draws. That process hands off before it waits (§4.2), so the gate is paid once per draw and nothing of it stays resident while the pane waits. A pane drawn with no client attached to it gets no answer and resolves dark, which is that fallback reached by the ordinary route rather than a second rule.
+
 **Every string this surface renders is tool-agnostic.** Portal's resume machinery runs whatever command a registration holds, so nothing the panel shows names a particular tool — it states the command and says nothing about what the command is. That covers the discard confirmation's consequence line (§5.4) and the indicator legend that ships with the picker's pending dot (§8.3) as much as the panel itself.
 
 #### 5.3 The waiting panel
