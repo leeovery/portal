@@ -78,6 +78,8 @@ The waiting panel is not the place for it. A panel offering "always resume this 
 
 **A mode is always passed with the command it belongs to.** `--resume-mode` on its own, with no `--on-resume`, is refused — the command exits non-zero and writes nothing. A registration is written whole (§2.2) and both stored shapes carry a command (§3.2), so there is no entry a mode could attach to by itself; pinning an existing registration means re-passing its command alongside the flag.
 
+**A mode the command cannot recognise is refused with it.** `--resume-mode` takes `eager` or `lazy` and nothing else; any other value exits non-zero and writes nothing, so a mistyped pin fails where it was typed rather than landing on disk as a mode nothing reads. That is the writer's side and it does not soften the reader's: a value that reaches the file by hand edit still carries no mode and still never fails a pane (§3.2).
+
 #### 3.4 Reading it back
 
 **A pinned registration is readable from `portal hook list`, as a fifth column.** A mode that could only be seen by opening `hooks.json` would be configuration you can set and cannot check.

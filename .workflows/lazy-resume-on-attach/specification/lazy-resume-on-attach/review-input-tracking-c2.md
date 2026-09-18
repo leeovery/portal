@@ -23,8 +23,8 @@ Carry the existing carve-out onto the panel: no canvas fill, no appearance detec
 
 **`NO_COLOR` is the same carve-out here as everywhere else in Portal.** No canvas is painted, no appearance detection runs at all, and the panel renders colourless on the terminal's native foreground and background. Coverage does not depend on the fill: the panel sits on the pane's alternate screen (§5.1), so the transcript stays hidden underneath it whether or not a colour is painted over the pane. What the panel loses is hue alone — the card frame, the `● PAUSED` badge, the `ON RESUME` label and the key hints carry it on glyphs and words, and the discard confirmation keeps its `▲ Discard resume?` title and its `y discard   esc cancel` footer where the command loses `state.destructive`. That is the same rule the session row's indicators take (§8.3): state stays glyph-backed and never colour-only.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. The source states the carve-out as a Portal-wide rule at every rendering site, and §5.2 already binds the panel's theme to Portal's own resolution — the record determines it.
 
 ---
 
@@ -46,8 +46,8 @@ Refuse an unrecognised mode at the command: `--resume-mode` takes `eager` and `l
 
 **A mode the command cannot recognise is refused with it.** `--resume-mode` takes `eager` or `lazy` and nothing else; any other value exits non-zero and writes nothing, so a mistyped pin fails where it was typed rather than landing on disk as a mode nothing reads. That is the writer's side and it does not soften the reader's: a value that reaches the file by hand edit still carries no mode and still never fails a pane (§3.2).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: The call landed in the discussion, extending the Unreadable Stored Registrations decision with the writer's side; §3.3 aligned to it.
 
 ## Observations
 
