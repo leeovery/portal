@@ -120,6 +120,24 @@ No competing option was worth writing up. The user's response on seeing it: ther
 
 ### Decision
 
+#### 2026-09-18 — revised
+
+*Trigger: the capture measurement this block rested on was re-run with the saver's own invocation and did not hold. Over a pane holding the alternate screen open, `tmux capture-pane -e -p -S -` returned `T-01…T-20` and the card for a pane carrying `T-01…T-40` — the visible screenful is absent, and `capture-pane -a -p` returned exactly `T-21…T-40`. The capture is not the transcript plus the card; it is the transcript minus its last screenful, plus the card.*
+
+**The pane stays frozen for as long as its resume is unanswered.** The marker that already tells the saver to leave a pane alone is held through the waiting state instead of being cleared at the end of scrollback replay, and is cleared when the user answers — on Enter before the hook runs, and on a confirmed discard before the pane falls through to a shell.
+
+The cost is nil in practice: a pane waiting on a resume has no new content worth saving, so freezing it at its last live state is exactly the desired end state. A waiting pane keeps its place in the saved set throughout, so it restores normally on every subsequent reboot — with its original content and a fresh prompt, however many reboots it waits through.
+
+**The freeze is load-bearing, and what it prevents is lost work rather than clutter.**
+
+The settled panel is painted into the pane's **alternate screen**, and the saver reads a pane with `capture-pane -e -p -S -` (`internal/tmux/tmux.go:752`). Measured against that exact invocation on tmux 3.7c, with a live process holding the alternate screen open over a pane carrying 40 lines of prior output: the capture returns **only the lines that had already scrolled out of view, then the card** — the most recent screenful of real output is absent. Those lines are still in the buffer `capture-pane -a -p` reads, which the saver never calls.
+
+So an unfrozen waiting pane hashes differently from its last write and the saver rewrites its saved file as *transcript-minus-its-last-screenful, plus a picture of the card*. Once, not per tick — identical captures dedup. The lost screenful is the part the user was last reading and the part a resumed session continues from, and there is no copy of it anywhere: the next reboot replays the truncated file, so the work is gone and a dead card image sits in the history where it was, with a live card drawn over that.
+
+The decision stands unchanged and its margin is wider than the earlier reading gave it. The one-tick gap between the two markers is not a tidiness problem — it costs the user a screenful of their own transcript every time it is hit. That raises how durably the freeze is held.
+
+#### Initial
+
 **The pane stays frozen for as long as its resume is unanswered.** The marker that already tells the saver to leave a pane alone is held through the waiting state instead of being cleared at the end of scrollback replay, and is cleared when the user answers — on Enter before the hook runs, and on a confirmed discard before the pane falls through to a shell. *(Amended 2026-09-18 — this said "on Escape"; the decline decision rebound the discard to `d` behind a confirmation.)*
 
 The cost is nil in practice: a pane waiting on a resume has no new content worth saving, so freezing it at its last live state is exactly the desired end state. A waiting pane keeps its place in the saved set throughout, so it restores normally on every subsequent reboot — with its original content and a fresh prompt, however many reboots it waits through.
@@ -525,7 +543,7 @@ Confidence: high.
 
 2. **tmux has no pane-scoped way to draw over a pane or to capture a key.** Both overlay primitives belong to the client and swallow its whole keyboard; `key-table` is a session option that tmux accepts a `-p` write on and then resolves upward, arming every pane in the session. Measured, not assumed. The only thing that can own one pane's input is a process inside it — which is what forced the waiting program over the cheaper dead pane, against the design reasoning that favoured it.
 
-3. **Measuring with the caller's exact invocation changes the answer.** A bare `capture-pane -p` returns the visible screen and made the alternate-screen card look like it replaced a pane's saved transcript; the saver's own `capture-pane -e -p -S -` returns the primary history with the alternate screen appended, so the real failure is accretion rather than loss. Two readings of the same subject, a flag apart.
+3. **Measuring with the caller's exact invocation changes the answer, and the same subject took three readings to settle.** A bare `capture-pane -p` returns the visible screen and made the alternate-screen card look like it replaced a pane's saved transcript. The saver's own `capture-pane -e -p -S -` was then read as returning the primary history with the card appended — accretion rather than loss — and that reading was wrong too: re-run over a pane holding the alternate screen, it returns the scrolled-out history and the card with the *visible screenful missing*. The failure is loss of the most recent screenful, plus accretion of a dead card.
 
 4. **Go's resident cost is what a process touches, not what it links.** A binary linking the rendering library and never touching it is indistinguishable from one importing nothing — which is why the waiter is the same Portal binary rather than a sidecar, and why the drawing process must hand off to a fresh one instead of blocking with its rendering pages resident.
 
