@@ -132,8 +132,8 @@ The rest of §3.4 holds: neither status changes the exit code (`doctorUnhealthy`
 **Proposed Text**:
 "**It is reported by `portal doctor` instead, as a passing line** carrying the install's resume mode. Doctor already reports on this machinery, and this is the shape the pending count takes (§8.1) — a check that always passes, so it carries the `✓` and counts toward the total the summary line reports (`checkPass`, `cmd/doctor.go:400`). Like the pending count, it never fails the check and never changes the exit code."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim.
 
 ---
 
