@@ -102,7 +102,8 @@
   "imports": [
     {
       "path": "imports/portal-control-plane-plan.md",
-      "imported_at": "2026-06-26T14:14:35Z"
+      "imported_at": "2026-06-26T14:14:35Z",
+      "origin": "discovery"
     }
   ]
 }
