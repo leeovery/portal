@@ -21,8 +21,8 @@ Append to §3.3, after the paragraph introducing the flag:
 
 **A mode is always passed with the command it belongs to.** `--resume-mode` on its own, with no `--on-resume`, is refused — the command exits non-zero and writes nothing. A registration is written whole (§2.2) and both stored shapes carry a command (§3.2), so there is no entry a mode could attach to by itself; pinning an existing registration means re-passing its command alongside the flag.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Determined by the record — both stored shapes carry a command and a registration is written whole, so a mode-only invocation has no valid entry to write.
 
 ---
 
@@ -45,8 +45,8 @@ Append to §3.2, after the paragraph beginning "Neither shape is legacy":
 
 **A stored value the reader cannot make sense of never fails a pane.** An object whose `resume` attribute is absent, empty, or holds anything other than `eager` or `lazy` carries no mode — the registration inherits the install-wide default exactly as a string-form entry does, and the mode column (§3.4) reads empty for it. An object carrying no command, or an empty one, is not a registration: the pane falls through to a plain shell as an unregistered pane does (§6.1). Nothing is rewritten to correct either case; the file stays as the user left it.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as the subtopic Unreadable Stored Registrations, carrying the derivation marker; §3.2 aligned to it.
 
 ---
 
@@ -70,8 +70,8 @@ The pane leaves the panel's screen first, and the protection is dropped only onc
 **Proposed Text**:
 **It is cleared when the user answers** — on Enter before the hook runs, and on a confirmed discard before the pane falls through to a shell (§6) — and on both paths only once the pane has left the panel's screen and is showing its own transcript again. Clearing while the card is still up leaves a window in which a single saver tick rewrites the pane's saved transcript as history-minus-its-last-screenful plus the card (§7.1) — the whole failure, in the space between two steps, on the path every resume takes. This is the mirror of the rule that sets the pending marker before the mid-restore one is cleared (§7.3).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Determined by the corrected capture measurement (§7.1) and the mirror of the set-before-clear rule at the start of the wait.
 
 ---
 
@@ -94,8 +94,8 @@ Append to §6.2, after the paragraph beginning "A confirmed discard removes the 
 
 **A discard that finds nothing to remove is still a discard.** If the entry has already gone — removed by `portal hook rm`, replaced by a re-registration, or hand-edited away while the pane waited — the marker clears and the pane falls through to a shell as it would after a removal, because the end state the user asked for is the state the store is already in. **A discard that cannot be written leaves the pane waiting and says so on the panel**: an unreadable store or an unavailable lock is reported in place, the registration and the marker both stand, and the key can be pressed again. The one outcome ruled out is a pane that drops its panel while the registration it named survives.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as part of the subtopic Discarding At The Edges, carrying the derivation marker; §6.2 aligned to it.
 
 ---
 
@@ -118,8 +118,8 @@ Append to §5.3, after the bullet list:
 
 **A command longer than the card wraps rather than being cut.** The registered command is the only thing on the panel that says which piece of work the pane is holding, and a realistic one carries a directory and an identifier. It wraps within the card's inner width over at most three lines, with anything beyond marked `…`; the card's width is unchanged. The discard confirmation renders the command the same way (§5.4).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as part of the subtopic Panel Rendering Limits, carrying the derivation marker; §5.3 aligned to it.
 
 ---
 
@@ -142,8 +142,8 @@ Append to §5.2, after the paragraph beginning "The overlay fills the pane":
 
 **A pane too small for the card still says what it is.** Below the size the card needs, the panel degrades instead of disappearing: the canvas is painted as always, and the title, the command and the key hints stack plainly without the card frame, down to the smallest pane a restore can produce. Enter and `d` act at every size. A waiting pane swallows every other key (§4.3), so one that drew nothing would read as an ordinary restored pane with a dead keyboard.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as part of the subtopic Panel Rendering Limits, carrying the derivation marker; §5.2 aligned to it.
 
 ---
 
@@ -166,8 +166,8 @@ Append to §6.2, after the paragraph beginning "`d` opens a second confirmation"
 
 **While the confirmation is up, `y` and Escape are the only keys that act.** Enter, `d` and everything else are swallowed there exactly as they are on the waiting panel (§4.3) — the pane never acts on a key the screen in front of the user does not offer, and the reflex of confirming with Enter costs nothing but a second press of the key the footer names.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as part of the subtopic Discarding At The Edges, carrying the derivation marker; §6.2 aligned to it.
 
 ---
 
@@ -191,8 +191,8 @@ The rule keeps its home in §7.2, where the freeze is decided and its consequenc
 **Proposed Text**:
 **A frozen pane is not dropped from the saved set.** The freeze suppresses that pane's scrollback write and nothing else, so a pane can wait indefinitely and still be restored on the next boot with the transcript it had when it paused (§7.2).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. The one-home rule determines it; §7.2 keeps the rule, §9.1 takes a reference.
 
 ---
 
