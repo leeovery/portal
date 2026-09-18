@@ -83,6 +83,50 @@ Today the output is four tab-separated columns — key, event, command, location
 **The install-wide default is deliberately not in that listing.** It is one value for the whole install rather than a property of any row, and the only place to put it is a header or footer line — which breaks naive parsers of a machine interface for a fact that does not vary between rows.
 
 **It is reported by `portal doctor` instead, as a passing informational line** carrying the install's resume mode. Doctor already reports on this machinery, and this shape already exists there (`checkInfo`, `cmd/doctor.go:345-350`). Like the pending count (§8.1), it never fails the check and never changes the exit code.
+
+### 4. The Waiting Pane
+
+#### 4.1 A waiting program in the pane
+
+**A pane whose resume is lazy holds a live Portal process that draws the panel and blocks until the user answers.** The helper restore already puts in each pane does not finish: it lays down the scrollback as today, then — instead of handing the pane to the hook — draws the panel and waits.
+
+The alternative was a **dead pane**: the helper paints the panel and exits, tmux holds the pane open with no process in it, and Enter and the discard key are tmux key bindings that restart the pane with the right payload. It costs nothing at rest, which is the shape this feature's own thesis argues for — a cost proportional to a set that only grows is the problem the work exists to remove.
+
+**It was ruled out because tmux cannot capture a key at pane granularity.** `key-table` is a session option, not a pane option. tmux accepts `set-option -p -t <pane> key-table <name>` without complaint and resolves it upward: set on one pane of a two-pane session, it reads back set on the session *and on the sibling pane that was never named*. Verified on tmux 3.7c — before the write all three scopes report the option unset; after it all three report the custom table. And a custom key table swallows every key, not only its bound ones: with the table active, Enter fired the binding and the word typed after it never reached the pane's process at all.
+
+So arming one waiting pane's keys arms every pane in its session, and locks them. In the worked example — a left pane waiting and a right pane holding a shell the user wants to work in — the right pane's keyboard would be dead. **A waiting pane must never block the panes beside it**, which is the same constraint that eliminated every floating overlay (§5.1).
+
+One route survived for the dead pane and is worse: bind Enter and Escape in tmux's **root** table globally, each wrapped in a conditional that fires Portal's command when the focused pane is waiting and passes the key through otherwise. That is Portal permanently rebinding two keys across the user's entire tmux server, with a conditional evaluated on every press — Escape most of all, which every modal program on the machine depends on. Not a trade worth making for a memory curve.
+
+**A process in a pane reads the keys sent to it and nothing else.** The scoping the design needs is a property of processes, not something tmux has to provide. The choice was forced rather than preferred, and the reasoning that favoured the dead pane still stands on its own terms; it rests on a capability tmux does not have at pane granularity.
+
+#### 4.2 The waiter is the Portal binary, and it hands off before it waits
+
+**The resident cost is the runtime floor, not the binary.** Go pages in lazily, so linking a library costs disk rather than memory. Measured on the target machine: a Go binary linking the rendering library and never touching it, blocked on a read, is **1680 KB** resident — indistinguishable from one importing nothing at all at **1696 KB** — and 4.8 MB on disk. The 22 MB the daemon carries is the cost of doing work, not of existing (`ps -o rss= -p $(pgrep -f '^portal state daemon')` → `17744` KB on 2026-09-17, `22496` KB on 2026-09-18).
+
+**So no separate binary is warranted: the waiter is the same Portal binary entered on a path that does almost nothing.**
+
+**The process that draws must hand off to a fresh one before waiting.** Drawing touches the theme and the rendering path, and those pages stay resident for that process's life. Drawing and then blocking in the same process would carry all of it for as long as the pane waits. Drawing and then replacing the process image with a minimal wait puts the resting state back at the floor. The helper already ends in exactly that kind of handover (`ExecShell`, `cmd/state_hydrate.go:40`), so this is the shape the code is already built around, not a new one.
+
+**A resize is the same handover run backwards**: the waiter replaces itself with a fresh draw, which draws at the new width and hands back to a fresh wait. The resting state stays at the floor and the cost is paid only at the moment of the resize.
+
+Two figures the memory case rests on are estimates rather than measurements, because they cannot be taken until the code exists: the waiter's actual resident size on the settled path (~2 MB is the measured Go floor plus a guess at what Portal's startup touches), and whether the draw-then-hand-off split holds it at that floor in practice. Both are bounded — the floor is measured above and the ceiling is the daemon's 22 MB — and neither changes a decision. At the estimate, a full waiting set of 41 costs some 80 MB against the 13.1 GB the eager path was measured at (§1).
+
+#### 4.3 Enter and `d` act; everything else is swallowed
+
+**The waiter is the pane's only process, so anything that kills it takes the pane with it** — Ctrl-C, Ctrl-D, Ctrl-Z. It must refuse to die rather than exit. The rule that falls out is a safety property as much as a mechanism: a stray paste, an errant `send-keys`, or a key pressed in the wrong window cannot answer the panel, because nothing but Enter and `d` means anything to it.
+
+**That refusal covers what a person at the keyboard can send, and stops there.** When tmux tears the pane down — the user kills the session, closes the window, or the server shuts down — the waiter exits. It does not decline the hangup, and a closed terminal ends it.
+
+An unbounded refusal would outlive the destruction of its own pane: culling fifteen finished sessions from the picker would leave fifteen Portal processes running with nothing to attach to, reinstating the resident cost this work exists to remove, on the cleanup path. Neither bootstrap's marker sweep nor the tmux server's own exit reaps a process that has refused the hangup. The swallow rule's purpose is that nothing accidental can *answer* the panel, and pane teardown is not an answer.
+
+#### 4.4 Nothing triggers the panel
+
+**The panel is drawn once, at restore, by the machinery that already runs for every pane.** No focus hooks, no attach hooks, no per-event rendering. `client-attached` and `client-session-changed` are not touched by this feature.
+
+There is nothing to trigger because the panel does not have to be produced when the user arrives — it is already there, held on the pane by the process waiting in it. Arriving at a pane is not an event Portal needs to observe.
+
+**Stickiness is the absence of a dismissal path rather than a feature.** Ignoring the panel changes no state, so it is still there next time. Detaching, closing the window, and rebooting are not dismissals, so none of them clear anything — and a reboot restores the pane and draws the panel again from the still-unfired registration. Only Enter and a confirmed discard change anything (§6).
 ---
 
 ## Working Notes
