@@ -276,6 +276,10 @@ A resize is the same handover run backwards: the waiter replaces itself with a f
 
 **Enter and `d` act; every other key is swallowed, signals included.** *(Amended 2026-09-18 — this read "Enter and Escape act"; the decline decision rebound the discard to `d` and made Escape inert on this panel. Escape is live only inside the confirmation `d` opens, where it backs out.)* The waiter is the pane's only process, so anything that kills it takes the pane with it — Ctrl-C, Ctrl-D, Ctrl-Z. It must refuse to die rather than exit. The rule that falls out is a safety property as much as a mechanism: a stray paste, an errant `send-keys`, or a key pressed in the wrong window cannot answer the prompt, because nothing but those keys means anything to it.
 
+**That refusal covers what a person at the keyboard can send, and stops there.** When tmux tears the pane down — the user kills the session, closes the window, or the server shuts down — the waiter exits. It does not decline the hangup, and a closed terminal ends it.
+
+**Settled by derivation** (2026-09-18) — not discussed. Determined by the feature's own purpose: the rule as first written was unbounded, and a waiter that declines every signal outlives the destruction of its own pane, so culling fifteen finished sessions from the picker would leave fifteen Portal processes running with nothing to attach to — the resident cost this work exists to remove, reinstated on the cleanup path. Neither the bootstrap marker sweep nor the tmux server's own exit reaps a process that has refused the hangup. The swallow rule's stated purpose is that nothing accidental can *answer* the prompt, and pane teardown is not an answer. (review-002 F7)
+
 ---
 
 ## Render Trigger
