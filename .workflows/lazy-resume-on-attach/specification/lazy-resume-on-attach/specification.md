@@ -317,6 +317,34 @@ The picker is where the user would notice a new state. The row already carries a
 **A gone row is unaffected.** The transient `session gone` badge already replaces the whole trailing region, so it continues to, and a session flagged gone has no live pane to be pending.
 
 **Dropping `attached` is pulled into this feature; the rest of the row rework stays parked.** Removing the word is what makes room for a second indicator, so it cannot wait for the roadmap item — the window count, the session paths and the wider right-hand rework stay on `picker-row-redesign` (§10). One consequence rides with it: a bare indicator carries no meaning on its own, so **the help modal gains the legend in the same change** rather than after it.
+
+### 9. Restore Pipeline Integration
+
+The feature inserts an indefinite pause into the middle of a pipeline built on the assumption that hydration completes in seconds. Every edge was measured against the tree rather than reasoned about, and most of them need nothing.
+
+**Nothing in the restore pipeline changes except the helper's own tail.** No new bootstrap step, no change to step ordering, no change to the eager signal pass, and no change to the global hooks. The insertion is contained to the one process that was already the last thing to run in a restored pane.
+
+The one exception to that containment is the saver's capture skip, which gains a second condition (§7.3). That is the daemon, not the restore path.
+
+#### 9.1 What was measured and needs nothing
+
+**A second bootstrap does not disturb a waiting pane.** Every `portal open` runs the orchestrator, and restore runs inside it — but it skips any saved session whose name is already live (`internal/restore/restore.go:118`). A session holding a waiting pane is live, so it is never re-restored and its pane is never respawned out from under the user.
+
+**A frozen pane is not dropped from the saved set.** The freeze suppresses that pane's scrollback write; the structural capture merges the pane's *previous* record back into the fresh index rather than omitting it, guarded so that a stale marker cannot resurrect a pane whose session, window or pane is gone (`internal/state/capture.go:96-127`). A pane can wait indefinitely and still be restored on the next boot, with the transcript it had when it paused.
+
+**Bootstrap's two sweeps leave it alone.** The stale-marker sweep only unsets markers whose pane is no longer live, and a waiting pane is live. The orphan-FIFO sweep has nothing to reclaim: the helper unlinks its FIFO as soon as the hydrate signal arrives (`cmd/state_hydrate.go:107`), long before the panel is drawn.
+
+**The eager signal pass is unchanged.** Bootstrap step 7 still writes the hydrate byte to every freshly-armed pane, and the helper still replays on receiving it. What changes is only what the helper does afterwards.
+
+**The global attach hooks are untouched.** `client-attached` and `client-session-changed` were named as likely surfaces and are not reached — nothing triggers the panel (§4.4).
+
+**Scrollback replays exactly as it does today, for every restored pane, whether or not a resume is pending.** Nothing in the restore path branches on whether a pane has an unfired hook.
+
+Suppressing replay behind a waiting panel was considered and rejected. The case for it was that a replayed transcript ending in an exited session looks live and is not. It is not a lie — it is an accurate record of what happened, and exactly what the pane would show if the session had been quit by hand; the visible end of the transcript says plainly that the thing is gone. The decisive argument was scope: restoring a pane's content and resuming its process are two separate concerns, and making the first conditional on the second buys a small presentational gain at the cost of a conditional in the middle of the restore path. The presentational worry is answered by the surface instead — the panel's canvas covers the pane while the decision is pending, so the old transcript is hidden until the user has chosen, and revealed only once they have declined and know what they are looking at.
+
+#### 9.2 The pending state is never persisted
+
+It is recomputed on each boot from a registration that has not fired, so nothing about it reaches `sessions.json` and **no schema version moves**. The pane's waiting-ness lives on the pane as a tmux option for as long as the pane does (§8.2), and nowhere else.
 ---
 
 ## Working Notes
