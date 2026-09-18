@@ -403,6 +403,14 @@ The consequence is stated rather than mitigated: **a pin lives on the registrati
 
 **The override is set where the registration is made: `portal hook set`.** A flag on the command that writes the entry, alongside `--on-resume`. This follows from who writes registrations — the external `SessionStart` hook is a shell script, not a person at a screen, so the route has to be something a script can pass. The waiting panel is not the place for it: a panel offering "always resume this one without asking" would be setting a durable preference from a surface whose whole job is answering one instance of a question.
 
+**A pinned registration is readable from `portal hook list`, as a fifth column.** The listing is where a registration is read back, and a mode that could only be seen by opening `hooks.json` would be configuration you can set and cannot check.
+
+Today the output is four tab-separated columns — key, event, command, location. The mode is **appended** as a fifth rather than inserted, so anything reading the first four positionally is untouched; this is how the location column itself arrived. The cell holds `eager` or `lazy` when the registration carries one and is **empty when it does not**, matching how the location column already reads when it has nothing to say. So the column reports what is stored, and an empty cell means the entry follows the install.
+
+The install-wide default is deliberately **not** in that listing. It is one value for the whole install rather than a property of any row, and the only place to put it is a header or footer line — which breaks naive parsers of a machine interface for a fact that does not vary between rows.
+
+**It is reported by `portal doctor` instead, as a passing line.** Doctor already reports on this machinery and this feature already gives it a passing informational line for the pending-pane count; the install's resume mode is the same shape in the same place. Like that count, it never fails the check and never changes the exit code.
+
 **The install-wide setting has a home already; the way to change it does not.** `prefs.json` holds the install's UI preferences — the theme and the session-list grouping mode — and is the natural place for this. What does not exist is any surface for setting it: the theme picker is the only preference with a UI, so until a settings screen exists this one is changed by hand-editing a file. That raises the stakes on the default rather than changing where it lives.
 
 **The install-wide default is lazy.** The feature ships on rather than waiting to be discovered, and an install that upgrades and reboots meets prompts rather than processes.
