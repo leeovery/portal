@@ -156,6 +156,8 @@ The card is the shape of Portal's existing rename modal: a header row carrying t
 
 Every colour is a theme token, as everywhere else in Portal — the panel holds no raw hex.
 
+**Every string this surface renders is tool-agnostic.** Portal's resume machinery runs whatever command a registration holds, so nothing the panel shows names a particular tool — it states the command and says nothing about what the command is. That covers the discard confirmation's consequence line (§5.4) and the indicator legend that ships with the picker's pending dot (§8.3) as much as the panel itself.
+
 #### 5.3 The waiting panel
 
 It carries this, and carries nothing else:
@@ -296,6 +298,8 @@ That follows from what doctor's exit code means against what this feature produc
 
 The marker is the pane user-option `@portal-resume-pending` (§7.3). **The helper sets it before it clears the mid-restore marker, and therefore before it paints** — so the pane is never unprotected. Resume and a confirmed discard each clear it, both in the waiting program, at the moment the user answers.
 
+**Only a pane that is going to wait is marked.** The helper resolves the pane's mode (§2) before it clears the mid-restore marker, so a pane with no registration — and one whose registration resolves eager — is never marked and goes on being captured exactly as it is today. That condition is also what holds the unreachability below: the marker only ever lands on a pane whose sole process is the waiter, which dies with the pane. A marker set on a pane that then execs its hook would have nothing left to clear it, and the saver would refuse that pane's scrollback write for the rest of the pane's life.
+
 **Deriving the state instead was argued for and rejected.** tmux reports what is actually running in every pane in one read, so a pane running the waiter is a waiting pane by definition — nothing to set, nothing to clear, nothing that can go stale. It fails on two counts. It does not compose: every consumer — the picker, doctor, and whatever an agent-aware Portal wants later — has to re-derive it and re-handle its ambiguity, since tmux reports a process's name without its arguments, so any pane briefly running another Portal command reads as pending. And it carries nothing: a marker set at the moment a pane starts waiting can hold metadata about the pause, which a process name cannot. What that metadata should be is open — the point is only that the facility exists, and that a derivation forecloses it.
 
 **The pending marker has no staleness case and owes no sweep.** A pane option is destroyed with its pane, so a pane closed mid-wait leaves nothing behind and there is no address by which a sweep could reach one. The clears are the two explicit actions above, and the unreachability of the inverse failure (§7.3) carries the rest.
@@ -308,7 +312,7 @@ Bootstrap's existing stale-marker sweep is not a backstop here and could not be:
 
 The picker is where the user would notice a new state. The row already carries an attached indicator; attached and pending-resume are independent, so it is a second indicator rather than a second meaning for the first.
 
-**The session row drops the word `attached` and gains a second dot.** The green attached indicator loses its label and stands alone; a pending resume shows as a second dot in `accent.attention`.
+**The session row drops the word `attached` and gains a second dot.** The green attached indicator loses its label and stands alone; a pending resume shows as a second dot in `accent.attention`. **A row carries that dot when any pane in the session is waiting** — the row answers whether the session holds a decision, not how many it holds. Doctor counts panes (§8.1), so a session holding two waiting panes contributes two to that count and one dot to the list.
 
 **The dots pack to the right in a fixed order — attached, then pending — rather than holding reserved lanes.** A row with one dot puts it hard right whichever it is; a row with both shows the attached dot pushed left to make room. This was built the other way first, with a reserved lane per indicator so the columns aligned down the list, and it was rejected: an indicator should not claim space it is not using.
 

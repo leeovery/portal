@@ -23,8 +23,8 @@ Every colour is a theme token, as everywhere else in Portal — the panel holds 
 
 **Every string this surface renders is tool-agnostic.** Portal's resume machinery runs whatever command a registration holds, so nothing the panel shows names a particular tool — it states the command and says nothing about what the command is. That covers the discard confirmation's consequence line (§5.4) and the indicator legend that ships with the picker's pending dot (§8.3) as much as the panel itself.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. The constraint is stated in the discussion's inherited position; the record determines it.
 
 ---
 
@@ -51,8 +51,8 @@ The marker is the pane user-option `@portal-resume-pending` (§7.3). **The helpe
 
 **Only a pane that is going to wait is marked.** The helper resolves the pane's mode (§2) before it clears the mid-restore marker, so a pane with no registration — and one whose registration resolves eager — is never marked and goes on being captured exactly as it is today. That condition is also what holds the unreachability above: the marker only ever lands on a pane whose sole process is the waiter, which dies with the pane. A marker set on a pane that then execs its hook would have nothing left to clear it, and the saver would refuse that pane's scrollback write for the rest of the pane's life.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. The record determines it — the marker means pending, an eager pane is not pending, and the discussion's own unreachability argument rests on the waiter being the marked pane's only process.
 
 ---
 
@@ -75,8 +75,8 @@ Say that a row shows the pending dot when any pane in that session is waiting, a
 **Proposed Text**:
 **The session row drops the word `attached` and gains a second dot.** The green attached indicator loses its label and stands alone; a pending resume shows as a second dot in `accent.attention`. **A row carries that dot when any pane in the session is waiting** — the row answers whether the session holds a decision, not how many it holds. Doctor counts panes (§8.1), so a session holding two waiting panes contributes two to that count and one dot to the list.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Any-pane is the only reading that serves the purpose the discussion states for the indicator; a clean row over a waiting pane is the failure it exists to prevent.
 
 ---
 
