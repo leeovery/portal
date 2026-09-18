@@ -477,6 +477,46 @@ A meta line carrying the directory and how long the pane had been paused was dra
 
 ---
 
+## Colourless Indicator Rendering
+
+### Context
+
+The session row's two indicators are distinguished by hue: green for attached, orange for a pending resume, both drawn as the same filled circle. Portal has a `NO_COLOR` carve-out where the picker renders colourless on the terminal's native foreground and background, and the rule for that mode is that state stays glyph-backed and never colour-only — enforced at each site it matters (`internal/tui/destructive_confirm.go:37`, `loading_view.go:31`). The picker builds the mode from the environment (`internal/tui/build.go:137`) and the session delegate already carries it as a first-class branch.
+
+Under today's row the rule holds without effort, because the attached indicator carries a word: `● attached` loses its hue in that mode and still says what it is. Dropping the word to make room for a second indicator removes the only signal that survives, and two identically-shaped circles then read as one ambiguous mark, or as an indistinguishable pair.
+
+### Options Considered
+
+**Distinct glyphs in both modes** — attached keeps the filled circle, pending takes a different one.
+- Pros: one rendering satisfies both modes; geometry identical throughout.
+- Cons: changes the coloured design, where a matched pair separated by hue is what was drawn.
+
+**Letters under `NO_COLOR` only** — the circles and their colours are unchanged wherever colour exists; in the colourless mode each indicator renders as a letter in the same cell.
+- Pros: the coloured row is exactly as designed; a letter occupies the one cell a circle does, so the right-packing order is untouched and no second geometry exists.
+- Cons: a second rendering to hold, in a mode that is rarely looked at.
+
+**Loosen the rule for these two indicators** — accept colour-only, on the grounds that neither indicator is load-bearing.
+- Pros: nothing to build.
+- Cons: the rule stops being applicable — the next indicator has none to follow, and it may be one that matters.
+
+### Journey
+
+The collision is only visible from the colourless side. In Nord the two circles are unambiguous, and the mode where they are not is the one nobody looks at while designing.
+
+The first instinct was to split the glyphs in both modes, which satisfies the rule with a single rendering. It was rejected on the design: the matched pair of circles is what was drawn, and the hue is doing work in the coloured row that a shape change would take over.
+
+Loosening the rule was weighed honestly — neither indicator is essential, and a colourless user losing an at-a-glance attached hint is not data loss. It was rejected on what the rule is for rather than on this case's stakes. The rule is what stops the *next* indicator from being colour-only, and that one may matter; a carve-out turns it into "glyph-backed unless someone decided it wasn't essential", which nobody can apply. The cost of keeping it is one conditional in a function that already branches on the same flag.
+
+### Decision
+
+**The circles and their colours are unchanged; `NO_COLOR` substitutes a letter for each indicator's glyph.** Attached renders `A`, a pending resume renders `P`, each in the one cell its circle occupies — so the fixed right-packing order of Panel Visual Design is untouched and there is no second row geometry: `A` alone, `P` alone, or `AP` when both.
+
+Uppercase rather than lowercase: a lone `a` in a status column reads as a typo, `A` reads as a status code, which is what it is.
+
+Confidence: high.
+
+---
+
 ## Summary
 
 ### Key Insights
