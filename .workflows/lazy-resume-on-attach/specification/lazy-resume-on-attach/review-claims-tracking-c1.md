@@ -57,8 +57,8 @@ Source carrying the same claim: `.workflows/lazy-resume-on-attach/discussion/laz
 
 Everything else the section measures holds: the card never enters the primary scrollback (`capture-pane -a -p` returns the original lines intact), and the capture does hash differently from the last write, so the saver does rewrite the file.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Re-measured independently on a disposable `-L` socket (tmux 3.7c): `capture-pane -e -p -S -` over a pane holding `T-01…T-40` with the alternate screen on returned `T-01…T-20` plus the card; `capture-pane -a -p` returned exactly `T-21…T-40`. Confirmed. The corrected value undermines no conclusion — the freeze re-lands from it unchanged and with a wider margin — so it landed in the discussion as a dated timeline revision of the Waiting Pane Capture decision (trigger citing the failed measurement), with the Summary's Key Insight 3 repaired in place. The specification's §7.1, §7.2 and §7.3 were re-aligned to what the discussion now carries.
 
 ---
 
