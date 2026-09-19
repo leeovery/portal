@@ -110,7 +110,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 4,
-          "task": "lazy-resume-on-attach-4-1",
+          "task": "lazy-resume-on-attach-4-2",
           "task_map": {
             "lazy-resume-on-attach-1-1": "tick-b9944e",
             "lazy-resume-on-attach-1": "tick-fb24da",
@@ -132,7 +132,9 @@
             "lazy-resume-on-attach-3-3": "tick-8b70d3",
             "lazy-resume-on-attach-3-4": "tick-cbfffa",
             "lazy-resume-on-attach-3-5": "tick-ce5f67",
-            "lazy-resume-on-attach-3-6": "tick-161f58"
+            "lazy-resume-on-attach-3-6": "tick-161f58",
+            "lazy-resume-on-attach-4-1": "tick-0ce3a8",
+            "lazy-resume-on-attach-4": "tick-3dcbaa"
           },
           "storage_paths": [
             ".tick/"
@@ -146,7 +148,19 @@
               "p4": "2026-09-19"
             }
           },
-          "staging": {},
+          "staging": {
+            "author-p4": {
+              "tasks": {
+                "lazy-resume-on-attach-4-1": "approved",
+                "lazy-resume-on-attach-4-2": "approved",
+                "lazy-resume-on-attach-4-3": "approved",
+                "lazy-resume-on-attach-4-4": "approved",
+                "lazy-resume-on-attach-4-5": "approved",
+                "lazy-resume-on-attach-4-6": "approved",
+                "lazy-resume-on-attach-4-7": "approved"
+              }
+            }
+          },
           "external_id": "tick-c8b4f2"
         }
       }
