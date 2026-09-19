@@ -29,8 +29,8 @@ In §7.3, replacing the paragraph beginning "**The inverse failure — a marker 
 
 > **The inverse failure — a marker wrongly left set, freezing a pane's saved content forever — is reachable on one route only, and that route is recorded.** The marker lives on the pane and the pane's only process is the waiter, so the marker goes when the pane goes. Two routes to a live pane whose marker is wrong are closed outright: an answer whose clear failed is held rather than carried out, so the pane goes on waiting and the marker is still the truth (§7.2), and a restore never respawns a waiting pane, because it skips any session that is already live (§9.1). The third is a waiter that died and could not lift the freeze on its way out — it leaves a working shell on a frozen pane and a WARN naming it (§4.3). What is left is a pane respawned out from under its waiter by hand — the user destroying the process that held that pane's state, in the same class as a hand edit of the store.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: The call landed in the discussion, extending When The Waiter Itself Goes Away; §4.3 aligned to it. The retry question was left to the builder explicitly; the record was not.
 
 ---
 
