@@ -24,8 +24,8 @@ The pane outlives its waiter. If the waiter goes for any reason other than tmux 
 
 **A pane does not lose its session because its waiter died.** If the waiter goes for any reason other than tmux tearing the pane down — killed from outside, swept up by a `pkill portal`, or gone of its own accord — the pane stays open and comes back to the panel, carrying the pending marker it never lost. The wait is the pane's state and the process only holds it, which is the same reason the marker is carried by the pane rather than by anything that can move (§7.3). Letting the pane close instead would take a single-pane session with it, and 43 of the 44 live sessions on the measured install hold exactly one pane (§1): the session is destroyed, the next capture drops it from the saved set with its whole transcript, and nothing anywhere says it happened. Coming back as a plain shell instead would leave the pending marker standing with nothing left to clear it, which freezes that pane's saved transcript for the rest of its life (§7.2).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as the subtopic When The Waiter Itself Goes Away, carrying the derivation marker; §4.3 aligned to it. The call diverges from the staged proposal: rather than the pane outliving its waiter and returning to the panel (nothing is watching to respawn it, and a held-open dead pane is the design the key-scoping measurement ruled out), the waiter runs as the tail of a marker-clearing chain that execs the shell — the hydrate helper's existing shape.
 
 ---
 
@@ -55,8 +55,8 @@ Appended to §6.2, after the paragraph beginning "While the confirmation is up, 
 
 **`y` answers a confirmation the user has seen.** Input already in flight when `d` opened the confirmation is dropped rather than read as agreement, so a discard is completed only by a key pressed after that screen was in front of the user. Both letters are ordinary characters in ordinary text, and a line sent or pasted into the wrong pane that carries a `d` and then a `y` would otherwise walk the whole discard through with nobody having seen either screen — destroying the only copy of a user-authored command, permanently. The confirmation is there to make the act deliberate (§6.4); a key that arrived before the question did was not an answer to it.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Landed in the discussion as the subtopic Input Already In Flight, carrying the derivation marker; §4.3 aligned to it.
 
 ---
 
