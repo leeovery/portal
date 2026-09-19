@@ -109,8 +109,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 6,
-          "task": "lazy-resume-on-attach-6-8",
+          "phase": 7,
+          "task": null,
           "task_map": {
             "lazy-resume-on-attach-1-1": "tick-b9944e",
             "lazy-resume-on-attach-1": "tick-fb24da",
@@ -172,20 +172,7 @@
               "p6": "2026-09-19"
             }
           },
-          "staging": {
-            "author-p6": {
-              "tasks": {
-                "lazy-resume-on-attach-6-1": "approved",
-                "lazy-resume-on-attach-6-2": "approved",
-                "lazy-resume-on-attach-6-3": "approved",
-                "lazy-resume-on-attach-6-4": "approved",
-                "lazy-resume-on-attach-6-5": "approved",
-                "lazy-resume-on-attach-6-6": "approved",
-                "lazy-resume-on-attach-6-7": "approved",
-                "lazy-resume-on-attach-6-8": "approved"
-              }
-            }
-          },
+          "staging": {},
           "external_id": "tick-c8b4f2"
         }
       }
