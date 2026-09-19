@@ -88,7 +88,7 @@ Today the output is four tab-separated columns — key, event, command, location
 
 **The install-wide default is deliberately not in that listing.** It is one value for the whole install rather than a property of any row, and the only place to put it is a header or footer line — which breaks naive parsers of a machine interface for a fact that does not vary between rows.
 
-**It is reported by `portal doctor` instead, as a passing line** carrying the install's resume mode. Doctor already reports on this machinery, and this is the shape the pending count takes (§8.1) — a check that always passes, so it carries the `✓` and counts toward the total the summary line reports (`checkPass`, `cmd/doctor.go:400`). Like the pending count, it never fails the check and never changes the exit code.
+**It is reported by `portal doctor` instead, on an informational line** carrying the install's resume mode. Doctor already reports on this machinery, and this is the shape the pending count takes (§8.1). Like the pending count, it never fails the check and never changes the exit code.
 
 ### 4. The Waiting Pane
 
@@ -318,11 +318,13 @@ Bulk culling is already the picker's job and already exists as a route: killing 
 
 #### 8.1 `portal doctor` reports a count
 
-**Pending panes are visible as a passing count in `portal doctor`**, which already reports on this machinery.
+**Pending panes are visible as a count in `portal doctor`**, which already reports on this machinery.
 
-**A non-zero pending count never fails the check and never changes doctor's exit code.** The number is detail on a line that passes.
+**A non-zero pending count never fails the check and never changes doctor's exit code**, and neither does the resume-mode line beside it (§3.4). Both take doctor's **informational** status — the one it already reserves for a fact that is not a health verdict.
 
-That follows from what doctor's exit code means against what this feature produces. A check passes or fails, the exit code is zero only if all pass, and the catalog's nearest neighbours — the stale-hook and stale-project counts — fail the moment their count is non-zero (`cmd/doctor.go:398`, `:420`). Pending resumes are not a fault. A correctly functioning install presents roughly forty-one of them after a reboot, which is precisely the state this feature is built to produce, so wiring the count like its neighbours would make `portal doctor` report failure on success and break the scriptable exit code its whole design rests on.
+Doctor's status vocabulary is five members, not two: `checkUnknown`, `checkPass`, `checkFail`, `checkInfo` and `checkNotEvaluable`, of which the last two never drive the exit code (`cmd/doctor.go:34-42`, `doctorUnhealthy` at `:579`) and are excluded from both the passed and total counts the summary line reports (`doctorCheckCounts`, `:590`). `checkInfo` is already used for exactly this kind of fact — the host-terminal line, whose own comment reads "an environmental state, not a Portal-health defect".
+
+Both new lines are that kind of fact, so neither is wired like the catalog's count-bearing neighbours. The stale-hook and stale-project counts fail the moment their count is non-zero (`cmd/doctor.go:398`, `:420`); pending resumes are not a fault. A correctly functioning install presents roughly forty-one of them after a reboot, which is precisely the state this feature is built to produce, so wiring the count like those neighbours would make `portal doctor` report failure on success and break the scriptable exit code its whole design rests on — and rendering it as an always-true passing check would pad the "N checks passed" total with two lines that are not checks.
 
 #### 8.2 A pending pane is marked explicitly
 

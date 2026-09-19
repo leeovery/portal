@@ -106,8 +106,8 @@ exit=0
 
 Source carrying the claim: `.workflows/lazy-resume-on-attach/discussion/lazy-resume-on-attach.md`, `## Pending Visibility` (Decision), line 378 — "**Settled by derivation** (2026-09-18) — not discussed. Determined by what doctor's exit code means against what this feature produces: a check passes or fails, the exit code is zero only if all pass, and the catalog's nearest neighbours — the stale-hook and stale-project counts — fail the moment their count is non-zero. … (review-002 F8)"; and `## Eager Lazy Preference` (Decision), line 432 — "**It is reported by `portal doctor` instead, as a passing line.** Doctor already reports on this machinery and this feature already gives it a passing informational line for the pending-pane count".
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Re-measured independently: `cmd/doctor.go:34-42` declares five statuses with `checkInfo`/`checkNotEvaluable` commented "never drive the exit code"; `doctorUnhealthy` (:579) keys on fail/unknown alone; the host-terminal line's own comment reads "an environmental state, not a Portal-health defect". Confirmed. The decision resting on the claim — neither line fails or touches the exit code — survives unchanged; only the premise and the rendering that followed from it were wrong, so both were repaired in place in the discussion (the decision itself did not move) and §3.4/§8.1 were re-aligned. **This reverses cycle 1's claims finding 2**, which moved the resume-mode line from `checkInfo` to `checkPass` on the strength of the binary framing now refuted. Cycle 1 was right that the two lines must land alike and wrong about which way.
 
 ---
 
