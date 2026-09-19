@@ -192,6 +192,8 @@ A meta line carrying the directory and how long the pane had been paused was dra
 
 **The discard confirmation is the kill modal, retitled.** `▲ Discard resume?`, the command rendered in `state.destructive` where the kill modal puts the session name, a plain-language consequence line, and `y discard   esc cancel`. Nothing structural differs, which is the point: it is the same act the picker's kill confirm performs, so it is the same object, built through the same shared destructive-confirm builder (`internal/tui/destructive_confirm.go`).
 
+**The confirmation carries a report row too.** A discard the store will not accept (§6.2) is reported on the confirmation itself, on the same single line the waiting panel's card gives a report (§5.3), and `y` retries from there. The screen the user answered on stays in front of them: a confirmation that closed on a failed write would be indistinguishable from one that was backed out of, and the user would read a discard that did nothing as a discard they cancelled.
+
 #### 5.5 Design references
 
 Three frames were built in the Paper file `Portal`, against the Nord artboards the user runs, so the new work sits beside the existing designs in the same palette:

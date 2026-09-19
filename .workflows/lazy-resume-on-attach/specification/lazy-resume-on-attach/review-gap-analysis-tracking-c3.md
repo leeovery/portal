@@ -22,8 +22,8 @@ The pane leaves the panel's screen first on every answer, the freeze is lifted f
 **Proposed Text**:
 **A freeze that cannot be lifted holds the answer.** The pane leaves the panel's screen first, as every answer does; if the marker cannot then be cleared, the panel is drawn again carrying the reason on its report row (§5.3), and the key can be pressed again from it. Neither the hook nor the fall-through to a shell runs while the marker stands. Nothing is at risk in between: the freeze is still in force and the pane is showing its own transcript, so a tick landing there captures what is really in the pane. Handing the pane over with the marker still set would freeze that pane's saved scrollback for the rest of the pane's life — the pane goes on being used and every reboot restores the transcript it held when it paused — and nothing reports that state or reclaims it, since no sweep reaches a pane option (§8.2) and the waiter that would have died with the pane has just exec'd away. This is the shape a discard that cannot be written already takes (§6.2): what the screen claims and what the pane holds never disagree.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Real contradiction between the two rules cycle 2 landed; the redraw resolution is the only reading that satisfies both.
 
 ---
 
@@ -47,8 +47,8 @@ The claim is narrowed to what the record supports. The marker travels with the p
 **Proposed Text**:
 **The inverse failure — a marker wrongly left set, freezing a pane's saved content forever — has no route this feature leaves open.** The marker lives on the pane and the pane's only process is the waiter, so the marker goes when the pane goes. Two routes reach a live pane whose marker is wrong, and both are closed: an answer whose clear failed is held rather than carried out, so the pane goes on waiting and the marker is still the truth (§7.2), and a restore never respawns a waiting pane, because it skips any session that is already live (§9.1). What is left is a pane respawned out from under its waiter by hand — the user destroying the process that held that pane's state, in the same class as a hand edit of the store.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. The absolute claim predates cycle 2's failed-clear rule; narrowed to the routes the record closes.
 
 ---
 
@@ -71,8 +71,8 @@ Append to §4.2, after the paragraph beginning "The redraw is taken once the siz
 
 **Every screen the pane shows takes that same handover.** A wait is not one draw: `d` puts up the confirmation, Escape brings the card back, and an answer that cannot be carried out redraws the card with its report row (§5.3, §6.2). Each is a fresh draw that hands back to a fresh wait, exactly as a resize does, so the process holding a pane between screens carries the wait and nothing else — and the resting cost of a waiting set does not depend on how many of its panes the user has stopped to look at.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Determined by §4.2's own stated rule — the resize was one instance of it, not the only one.
 
 ---
 
@@ -95,8 +95,8 @@ Append to §5.4, after the paragraph beginning "The discard confirmation is the 
 
 **The confirmation carries a report row too.** A discard the store will not accept (§6.2) is reported on the confirmation itself, on the same single line the waiting panel's card gives a report (§5.3), and `y` retries from there. The screen the user answered on stays in front of them: a confirmation that closed on a failed write would be indistinguishable from one that was backed out of, and the user would read a discard that did nothing as a discard they cancelled.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: The call landed in the discussion, extending The Panel's Report Row And Its Redraw; §5.4 aligned to it.
 
 ---
 
