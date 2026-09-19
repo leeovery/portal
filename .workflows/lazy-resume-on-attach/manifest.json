@@ -131,7 +131,8 @@
             "lazy-resume-on-attach-3-2": "tick-7ec142",
             "lazy-resume-on-attach-3-3": "tick-8b70d3",
             "lazy-resume-on-attach-3-4": "tick-cbfffa",
-            "lazy-resume-on-attach-3-5": "tick-ce5f67"
+            "lazy-resume-on-attach-3-5": "tick-ce5f67",
+            "lazy-resume-on-attach-3-6": "tick-161f58"
           },
           "storage_paths": [
             ".tick/"
