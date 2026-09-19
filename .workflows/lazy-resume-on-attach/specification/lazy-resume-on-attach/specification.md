@@ -295,6 +295,12 @@ The cost is nil in practice: a pane waiting on a resume has no new content worth
 
 **A waiting pane keeps its place in the saved set throughout.** The freeze suppresses that pane's scrollback write alone; the structural capture still enumerates the pane into `sessions.json` and merges its *previous* record back into the fresh index — guarded so a stale marker cannot resurrect a pane whose session, window or pane is gone (`internal/state/capture.go:96-127`). So a pane can wait indefinitely and still be restored on every subsequent reboot, with its original content and a fresh panel, however many reboots it waits through.
 
+**That merge finds the pane by its durable token, not by its position.** The previous record carried forward is matched on the pane's `@portal-pane-id` — which the structural capture already reads as a column and the saved `Pane` already carries — and the merged record keeps pointing at the scrollback file that already holds its bytes, whatever the pane's address has become. Matched positionally, as every unfrozen pane's record is, a frozen pane loses its transcript permanently the first time tmux moves it: the merge finds nothing at the old address, the fresh record names a file nothing writes because the pane is skipped, and the housekeeping pass deletes the old file because the fresh index no longer references it (`ComputeReferencedSet`, `internal/state/commit.go:64`). The pane then restores empty. An unfrozen pane loses nothing to the same rearrangement — the next tick re-captures it under its new address a second later — so this loss exists only because the pane is frozen, and it runs for the whole of an indefinite wait rather than the few seconds §7.3 describes.
+
+**The token match costs nothing and introduces no new state.** A pane can only be waiting if it carries a registration, and registering one is what mints and stamps its token, so every pane this rule reaches is already stamped — no pane is stamped that would not otherwise be. One live pane answers to a token, so there is no collision to arbitrate, and the match is taken only against panes found in the same enumeration, which is what preserves the existing guard against resurrecting a pane whose session, window or pane is genuinely gone. Nothing downstream moves: restore already replays from the path the record stores (`internal/restore/session.go:69`) and the housekeeping pass already builds its reachable set from those stored paths verbatim, so the file keeping its original name is invisible to both. When the wait ends the pane returns to ordinary capture and is re-filed under its current address, and the old file falls out of reference and is reclaimed on the next commit.
+
+**One consequence is accepted rather than closed here: the picker's scrollback preview shows nothing for a waiting pane that has been rearranged.** That preview resolves a saved transcript from the pane's live position rather than from the record (`internal/tui/pagepreview.go:255`), so it looks for a file named for where the pane now is while the transcript sits under the name it was filed as. The transcript is intact and restores correctly; only the preview is blank, and it corrects itself the moment the pane resumes and is re-filed. The same artifact already exists for any pane that moves — it lasts about one tick, because the next capture re-files it — and the freeze is what makes it persist. Closing it means resolving the preview through the pane's token too, which belongs with the wider migration (§10).
+
 **The freeze is load-bearing, and what it prevents is lost work rather than clutter.** Without it, the one-tick gap between the two markers (§7.3) costs the user a screenful of their own transcript every time it is hit.
 
 #### 7.3 The freeze is held by the pane, not by the pane's position
@@ -398,11 +404,13 @@ It is recomputed on each boot from a registration that has not fired, so nothing
 
 ### 10. Not In This Feature
 
-Two capabilities this work touched are on the product roadmap rather than left as loose ends. Neither is a prerequisite: the feature ships complete without them.
+Three capabilities this work touched are on the product roadmap rather than left as loose ends. None is a prerequisite: the feature ships complete without them.
 
 **Preferences UI** (`preferences-ui`, horizon `next`). A settings screen in the picker for install preferences, so `prefs.json` is not hand-edited. The theme picker is currently the only preference with any UI, and this feature adds a second setting that needs one. Until it exists, the install-wide resume mode is changed by hand-editing the file (§3.1) — which is what raised the stakes on the default (§2.1).
 
 **Picker row redesign** (`picker-row-redesign`, horizon `next`). Dropping the window count, which reads "1 window" on every row of the measured install (42 of 42 live sessions held a single window, `tmux list-windows -a -F '#{session_name}' | sort | uniq -c`, 2026-09-18), showing each session's directory path beside its name, and finishing the right-hand status strip. It changes every row for every session and is driven by its own rationale rather than by this feature.
+
+**Durable pane identity** (`durable-pane-identity`, horizon `next`). Stamping every captured pane with its durable token rather than only panes carrying a registration, naming saved scrollback files by that token instead of by session name and window and pane index, and retiring the positional pane key from capture, restore and the scrollback housekeeping pass. This feature does the narrow half — a frozen pane's saved record is matched by its token (§7.2) — and leaves the preview artifact that section names standing. The wider migration closes that artifact and the same orphaning for unfrozen panes, where it currently costs nothing because the next capture re-files them a second later.
 
 **Two pieces of the row rework are pulled forward into this feature** and are not on the roadmap item: dropping the `attached` word, and adding the pending-resume indicator beside it (§8.3). The word had to go to make room for a second indicator, so it could not wait — and the help-modal legend rides with it, because a bare indicator carries no meaning on its own.
 
@@ -416,3 +424,9 @@ Also explicitly not built:
 ---
 
 ## Working Notes
+
+---
+
+## Corrigenda
+
+> **Corrigendum 2026-09-19** (from `planning/lazy-resume-on-attach`): §7.2 stated that a waiting pane "can wait indefinitely and still be restored on every subsequent reboot, with its original content" without stating how its previous record is found, leaving the positional match every other pane uses in force — under which one rearrangement during the wait orphans the pane's scrollback file, the housekeeping pass reclaims it, and the pane restores empty. Corrected: a frozen pane's previous record is matched on the pane's durable `@portal-pane-id` and the merged record keeps pointing at the file that already holds its bytes, with the picker preview artifact that follows named as accepted and the wider migration off positional pane keys parked as `durable-pane-identity` (§10).
