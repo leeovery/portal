@@ -85,7 +85,7 @@ status: draft
 - [ ] A named theme paints from the first frame; a light/dark pair runs the same detect-or-timeout appearance gate the picker runs and resolves dark with no answer. No raw hex appears at any call site.
 - [ ] Under `NO_COLOR` no canvas is painted and no detection runs, and every state on both screens is carried by glyphs and words rather than colour.
 - [ ] Every string either screen renders is tool-agnostic — it states the command and says nothing about what the command is.
-- [ ] Both screens can be rendered on demand at a chosen theme and width for visual check against the committed reference frames.
+- [ ] Both screens can be rendered on demand at a chosen theme and width for visual check against Portal's existing modal grammar, which both screens are built from.
 
 #### Tasks
 
