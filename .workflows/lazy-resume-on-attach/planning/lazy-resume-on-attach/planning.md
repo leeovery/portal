@@ -18,6 +18,23 @@ status: draft
 - [ ] `portal hook list` appends a fifth tab-separated column holding `eager`, `lazy`, or empty when the registration carries no mode; the first four columns are unchanged.
 - [ ] One resolution path answers eager-or-lazy for a registration from its own mode and the install default.
 
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| lazy-resume-on-attach-1-1 | Resume mode vocabulary and resolution | unrecognised stored value carries no mode, empty value carries no mode, case and whitespace variants unrecognised rather than coerced, strict flag parse refuses every value but the two words, resolution answers lazy when neither side names a mode |
+| lazy-resume-on-attach-1-2 | hooks.json accepts the object form and preserves what it did not write | unmodelled attribute survives a sibling rewrite, unrecognised resume value survives a sibling rewrite, a value that is neither string nor object never fails the load for other entries, clean-stale's recoverable value breadcrumb renders the command out of an object entry |
+| lazy-resume-on-attach-1-3 | hook set writes the registration whole in the shape its content chooses | a mode-only change is a modify not a set-noop, an identical object-form rewrite is still a noop, an object-form predecessor rewritten with no mode returns to the string form and loses its unmodelled attributes |
+| lazy-resume-on-attach-1-4 | The store's reads report the registration's mode | absent, empty or unrecognised resume reads as no mode, an object with no command key or an empty one is a lookup miss, a string-form entry reads as no mode, an unreadable store still degrades to no hook |
+| lazy-resume-on-attach-1-5 | prefs.json carries resume_mode | missing, empty, corrupt or unrecognised gives lazy, a wrong-typed value does not zero the rest of the tolerant record, a hand-set value survives a grouping-mode toggle and a theme commit, the strict write-path decode still aborts on a malformed file |
+| lazy-resume-on-attach-1-6 | portal hook set --resume-mode | --resume-mode with no --on-resume exits non-zero writing nothing, an unrecognised or empty value exits non-zero before any tmux read, token mint, pane stamp or save.requested touch, an unpassed flag writes a registration carrying no mode whatever its predecessor carried |
+| lazy-resume-on-attach-1-7 | portal hook list shows the mode in a fifth column | first four columns byte-identical for a positional external parser, an unrecognised stored resume renders empty, no second tmux read is added |
+
+**Planner's calls (structure, not product)**:
+- The eager/lazy vocabulary lands in a **new stdlib-only leaf package**, not inside `internal/hooks`. Both packages that need it — `internal/hooks` (the stored `resume` attribute) and `internal/prefs` (the `resume_mode` key) — are guarded leaves forbidden from importing each other by their own leaf-guard tests, which is the situation `internal/nanoid` already exists to answer. Each package's allowlist widens by that one entry.
+- `LookupOnResume` returns a **small result struct** rather than growing to four returns, because the Phase 4 call site in the hydrate helper reads the command and the mode together.
+
+
 ### Phase 2: The pending marker and the saver's freeze
 status: draft
 
