@@ -64,6 +64,8 @@ That rule is load-bearing rather than cosmetic. The external Claude Code `Sessio
 
 **A stored value the reader cannot make sense of never fails a pane.** An object whose `resume` attribute is absent, empty, or holds anything other than `eager` or `lazy` carries no mode — the registration inherits the install-wide default exactly as a string-form entry does, and the mode column (§3.4) reads empty for it. An object carrying no command, or an empty one, is not a registration: the pane falls through to a plain shell as an unregistered pane does (§6.1). Nothing is rewritten to correct either case; the file stays as the user left it.
 
+**A rewrite of one registration leaves every other entry exactly as it found it.** `portal hook set` rewrites the whole file, and an entry the call did not name is written back carrying what it carried — an attribute the reader does not model and a `resume` value it could not make sense of alike. Neither fails the load, so the typo that never fails a pane never fails another pane's registration either. Only the entry being written is written whole (§2.2): what that call is handed is all that entry keeps.
+
 This is a genuine change to the on-disk shape, not an additive field. `hooks.json` is `map[hook_key]map[event]command` — strings all the way down, with no slot for an attribute that is not a command (`internal/hooks/store.go:28-31`).
 
 **The alternative — a second entry beside `on-resume` in the same inner map — was rejected.** It keeps a `jq` reader working, but it puts a non-event in the event namespace and adds a row to `hook list`, which is a machine interface an external script parses.

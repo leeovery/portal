@@ -22,8 +22,8 @@ State that a rewrite leaves untouched entries exactly as it found them, and that
 
 **A rewrite of one registration leaves every other entry exactly as it found it.** `portal hook set` rewrites the whole file, and an entry the call did not name is written back carrying what it carried — an attribute the reader does not model and a `resume` value it could not make sense of alike. Neither fails the load, so the typo that never fails a pane never fails another pane's registration either. Only the entry being written is written whole (§2.2): what that call is handed is all that entry keeps.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Determined by §3.2's tolerant read against §2.2's confinement of the whole-write to the entry being written — the record admits one answer.
 
 ---
 
