@@ -87,6 +87,27 @@ status: draft
 - [ ] Every string either screen renders is tool-agnostic — it states the command and says nothing about what the command is.
 - [ ] Both screens can be rendered on demand at a chosen theme and width for visual check against the committed reference frames.
 
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| lazy-resume-on-attach-3-1 | The command block and the report row both screens share | a command longer than three wrapped lines is marked `…` on the third, a single unbroken token wraps at the inner width rather than overflowing the card, wrapping is on display width so a double-width or combining rune does not widen the card, control characters in a stored command cannot move the card's geometry, the card's width is the same whatever the command's length, a report is one row truncated with `…` rather than wrapped, no report row at all when there is nothing to report, an empty command renders an empty row rather than panicking |
+| lazy-resume-on-attach-3-2 | A card when it fits, a plain stack when it does not, on a full-pane canvas | the threshold is measured off the card just built rather than a restated dimension, a pane one column or one row short of the card gets the plain stack rather than a clipped frame, the plain stack keeps every part the card carried including the report row, content is clamped to the pane's rows and columns rather than overflowing, the smallest pane a restore can produce still draws the title the command and the key hints, a non-positive width or height falls back to a bounded render rather than panicking, every cell of the pane is painted so no terminal background shows through, under NO_COLOR the layout is unchanged and no canvas is painted |
+| lazy-resume-on-attach-3-3 | The waiting panel | the `● PAUSED` badge takes the rename modal's badge slot so the header pins to the card's content width, the report row sits between the command and the key hints and nowhere else, a panel with nothing to report carries exactly three parts, every string is tool-agnostic and says nothing about what the command is, under NO_COLOR the paused state reads from its glyph and its word rather than its hue, the card's width does not move with the command the report or the badge, no raw hex at any call site |
+| lazy-resume-on-attach-3-4 | The discard confirmation | the kill and delete modals render byte-identically after the builder's compartments are exposed, the command takes the multi-line block where the kill modal takes a one-line session name, a report row on the confirmation itself on the same single row the waiting panel gives one, the confirmation degrades with the pane exactly as the waiting panel does, under NO_COLOR the `▲` and the words carry the destructive signal where the token drops, the consequence line is plain language and names no tool, nothing structural differs from the kill modal |
+| lazy-resume-on-attach-3-5 | The theme the panel draws in | a constant nomination writes nothing to the terminal and paints from the first frame, the pair's query races the picker's own timeout constant rather than a second copy, the first to resolve wins and a late reply never flips a resolved answer, no answer an unparseable reply or a stdout that is not a terminal all resolve dark by the same route, a pane drawn with no client attached resolves dark with no second rule, NO_COLOR runs no detection at all and writes no query, the terminal's mode is restored on every path including the timeout and a read failure, no OSC 11 set is ever written from a pane draw |
+| lazy-resume-on-attach-3-6 | Both screens on demand for the visual gate | the surfaces render the production functions rather than a copy of the layout, the swap guard's single-skip assertion widens to a named set rather than silently admitting a second unguarded surface, the new surfaces carry their own palette diff so the completeness guard does not shrink, a degraded form is reachable by name at a pinned size rather than by resizing the terminal, the capture surface sets no terminal background so what a human sees is what a pane shows, NO_COLOR is honoured on the surface as it is on a fixture, `internal/capture` stays out of the production binary |
+
+**Planner's calls (structure, not product)**:
+- The renderer lives in `internal/tui` as exported pure functions rather than a Bubble Tea component. The card grammar the specification says to reuse is all unexported there — the joined-panel frame, the destructive-confirm builder, the header-with-badge and confirm-cancel footer, and the canvas backfill helpers — so a separate package would mean exporting or moving all of it. `cmd` already imports `internal/tui` in production, so the hydrate helper takes no new import edge, and that package's colour-literal guard enumerates every non-test file with no exemption, which is what makes "no raw hex at any call site" structural rather than policed by review.
+- The full-pane canvas fill is a new free function rather than a change to the picker's own fill, which carries the picker's gutter inset and the theme-panel composite and is a model method; the pane panel fills edge to edge.
+- The size ladder measures the card it just built rather than restating the card's dimensions, so a change to the card's width moves the threshold with it — which is why the entry point takes a parts builder called at the width it decides, not pre-built rows.
+- The destructive-confirm builder gains a compartments accessor so the confirmation can reach the same parts for the degraded stack; the picker's kill and delete modals keep it as their one call and must render byte-identically, which their existing byte-exact suites check.
+- The appearance query is a non-Bubble-Tea OSC 11 read placed beside the picker's existing gate, because the drawing process cannot be a Bubble Tea program — it must leave the alternate screen painted while it execs the waiter away — and that is where Portal's raw terminal-background I/O and its detect timeout already live.
+- The capture surfaces are standalone named entries alongside the contrast swatch rather than picker fixtures, since a fixture builds a picker model through the shared constructor and these screens are not one. The swap guard's "the swatch is the only skip" assertion widens to a named set, and in exchange the panel surfaces get their own palette-diff guard, so enrolling a second skip does not silently shrink the completeness guard.
+- Phase 3 produces strings and a resolved theme and touches no terminal except the appearance query and the capture tool. The alternate-screen entry, the write into the pane, the hand-off and the key dispatch are Phase 4.
+
+
 ### Phase 4: The waiting pane — hand-off, hold, and resume
 status: draft
 
@@ -105,6 +126,9 @@ status: draft
 - [ ] A clear that fails holds the answer: the panel is drawn again carrying the reason, the key can be pressed again, and neither the hook nor the shell runs while the marker stands.
 - [ ] A waiter torn down with its pane exits; one that exits without handing the pane over leaves the pane on its own transcript, clears the marker, records a WARN if that clear failed, and execs the user's shell either way.
 - [ ] Scrollback replays for every restored pane exactly as it does today, whether or not a resume is pending, and no bootstrap step, step ordering, eager signal pass or global hook changes.
+- [ ] The report row has no timeout: once something is reported it stands until the next keypress redraws the screen.
+- [ ] Enter and `d` act at every pane size, including below the size the card needs, where the frame is gone and the parts stack plainly.
+- [ ] The drawing process loads the same theme setting the picker loads and hands the resulting nomination to the panel's own appearance resolution.
 
 ### Phase 5: Discarding a resume from the panel
 status: draft
@@ -121,6 +145,7 @@ status: draft
 - [ ] A discard that finds nothing to remove is still a discard: the marker clears and the pane falls through to a shell.
 - [ ] A discard the store will not accept is reported on the confirmation itself and retried from there; the registration and the marker both stand, and the confirmation never closes on a failed write.
 - [ ] After the removal the pane leaves the panel's screen, the marker is cleared, and the pane falls through to a plain shell; a clear that fails brings the card back as it was drawn, naming the removed command, with the reason on its report row and both hints live.
+- [ ] `y` and Escape act at every pane size, on the degraded confirmation as much as the framed one.
 
 ### Phase 6: Seeing what is waiting
 status: draft
