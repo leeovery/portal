@@ -637,6 +637,8 @@ The small pane is the sharper of the two, because its failure is quiet in the wo
 
 **A pane too small for the card still says what it is.** Below the size the card needs, the panel degrades instead of disappearing: the canvas is painted as always, and the title, the command and the key hints stack plainly without the card frame, down to the smallest pane a restore can produce. Enter and `d` act at every size.
 
+**The discard confirmation degrades the same way.** Below that size its frame goes too and its parts stack plainly on the canvas — the title, the command, the consequence line and its two key hints — with both keys acting at every size. The reason the panel has this rule applies harder one keystroke later: a panel that drew nothing leaves a pane that swallows keys, while a confirmation that drew nothing leaves the user pressing the key the footer offered them a moment earlier against a question they never saw, and what goes is the only copy of a user-authored command. Refusing the discard key below the floor was weighed and rejected — it leaves a pane that can never be discarded from where the user is — as was letting the card clip, which shows a confirmation with its consequence line cut off.
+
 Confidence: high.
 
 ---
@@ -713,7 +715,9 @@ The cost is honest and worth naming: a resident shell parent per waiting pane, a
 
 **Settled by derivation** — not discussed. Determined by the chain the hydrate helper already runs for a hook, and by what a closed pane costs on an install of single-pane sessions. (review-gap-c5 F1)
 
-**A waiter that exits without having handed the pane over drops the pane to a plain shell.** It runs as the tail of a chain that clears the pending marker and then execs the user's shell, so a killed, crashed or reclaimed waiter leaves the pane alive with its transcript above it, the session intact, the marker cleared so capture resumes, and the registration untouched — the next reboot offers the panel afresh.
+**A waiter that exits without having handed the pane over drops the pane to a plain shell.** It runs as the tail of a chain that takes the pane off the panel's screen, clears the pending marker, and then execs the user's shell, so a killed, crashed or reclaimed waiter leaves the pane alive with its transcript above it, the session intact, the marker cleared so capture resumes, and the registration untouched — the next reboot offers the panel afresh. Those first two steps keep the order every answer takes: the pane is showing its own transcript again before its protection is dropped, because a tick landing while the card is still up writes that pane's saved transcript as history-minus-its-last-screenful plus the card, and a `pkill portal` puts every waiting pane on the install through that window at once.
+
+**The chain hands the pane over whether or not the clear succeeded, and records a clear that failed.** A closed pane is the failure this fallback exists to prevent, so the shell runs either way; but a clear that did not land leaves the second way a pane can be wrongly frozen, and the worse of the two. The pane looks entirely normal while its saved transcript stands still, and the picker dot and the pending count both go on claiming a decision is waiting there. The rule that holds an answer until the marker clears is unavailable here by definition — there is no waiter left to hold it — so the record is the only thing that makes the state findable, and it is the same WARN a marker that could not be written already gets. Whether the clear is retried before the chain gives up is the builder's; the record is not.
 
 Confidence: high.
 
