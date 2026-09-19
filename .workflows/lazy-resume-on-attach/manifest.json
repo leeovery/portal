@@ -110,7 +110,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "lazy-resume-on-attach-2-1",
+          "task": "lazy-resume-on-attach-2-2",
           "task_map": {
             "lazy-resume-on-attach-1-1": "tick-b9944e",
             "lazy-resume-on-attach-1": "tick-fb24da",
@@ -119,7 +119,9 @@
             "lazy-resume-on-attach-1-4": "tick-2a784b",
             "lazy-resume-on-attach-1-5": "tick-923e20",
             "lazy-resume-on-attach-1-6": "tick-8da5c0",
-            "lazy-resume-on-attach-1-7": "tick-9493a7"
+            "lazy-resume-on-attach-1-7": "tick-9493a7",
+            "lazy-resume-on-attach-2-1": "tick-ecf7fe",
+            "lazy-resume-on-attach-2": "tick-875568"
           },
           "storage_paths": [
             ".tick/"
@@ -131,7 +133,17 @@
               "p2": "2026-09-19"
             }
           },
-          "staging": {},
+          "staging": {
+            "author-p2": {
+              "tasks": {
+                "lazy-resume-on-attach-2-1": "approved",
+                "lazy-resume-on-attach-2-2": "approved",
+                "lazy-resume-on-attach-2-3": "approved",
+                "lazy-resume-on-attach-2-4": "approved",
+                "lazy-resume-on-attach-2-5": "approved"
+              }
+            }
+          },
           "external_id": "tick-c8b4f2"
         }
       }
