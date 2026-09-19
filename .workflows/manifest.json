@@ -247,6 +247,14 @@
         "sources": [
           "lazy-resume-on-attach/discussion/lazy-resume-on-attach.md"
         ]
+      },
+      "durable-pane-identity": {
+        "horizon": "next",
+        "summary": "Finish the move off position-based pane tracking: stamp every captured pane with its durable id rather than only panes carrying a resume hook, name saved scrollback files by that id instead of by session/window/pane position, and retire the positional pane key from capture, restore and the scrollback housekeeping pass. Today a pane moved between windows or sessions orphans its saved transcript and the housekeeping pass reaps it — harmless only because the next capture re-files it a second later. Also fixes the picker scrollback preview, which resolves a saved transcript by the pane's live position and so shows nothing for a pane that has moved. NOTE: lazy-resume-on-attach does the narrow half — a frozen (waiting) pane's saved record is matched by its id so an indefinite wait cannot lose the transcript — and leaves the preview artifact standing for a waiting pane that has been rearranged; this item finishes the migration and closes that artifact.",
+        "origin": "park:lazy-resume-on-attach",
+        "sources": [
+          "lazy-resume-on-attach/planning/lazy-resume-on-attach/planning.md"
+        ]
       }
     }
   }
