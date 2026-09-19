@@ -20,8 +20,8 @@ Add to §8.2, immediately after the paragraph beginning "**A pane that cannot be
 
 **The fall-through is recorded.** The helper emits one WARN as it fires the hook, naming the pane and the error that refused the marker — one more event on its existing hydrate catalog, not a new component. This is the only degradation the feature introduces that the user cannot read off the pane in front of them: a discard the store will not accept and a freeze that will not lift both report on the panel (§5.3). Without the line, an install that came back eager because a write failed is indistinguishable from one that is configured eager.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: The call landed in the discussion, extending the marker-write-failure decision in When The Marker Cannot Be Written Or Cleared; §8.2 aligned to it.
 
 ---
 
