@@ -22,8 +22,8 @@ A refused discard reports on the confirmation, and only there; the waiting panel
 **Proposed Text**:
 **A card with something to report carries one more row.** When an answer cannot be carried out, the reason is stated on a single line between the command and the key hints, and it stays there until the next key is pressed rather than timing out: a report the user can miss leaves them believing the thing they asked for happened. The row is present only when there is something to say, and a panel with nothing to report carries exactly the three parts above. The card carries the report for a freeze that will not lift (§7.2), on either answer. A discard the store will not accept never reaches the card: it is answered from the confirmation and reported there, on that screen's own row (§5.4), because a confirmation that closed on a failed write would be indistinguishable from one the user backed out of.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Real contradiction with the rule cycle 3 landed in §5.4; §5.4 is the home and §5.3 now defers to it.
 
 ---
 
@@ -46,8 +46,8 @@ Append to §7.2, after the paragraph beginning "A freeze that cannot be lifted h
 
 **The panel that comes back after a discard names a registration that is already gone.** On the discard path the entry is removed while the confirmation is still up, so a store that refuses the write can be reported there (§5.4); a marker that then refuses to clear brings the card back with nothing in the store behind it. It comes back as it was drawn — the removed command under its label, both key hints live — with the reason on its report row (§5.3). Enter reads the store again, finds nothing, and drops the pane through to a plain shell once the marker clears (§6.1), which is where the discard was going. The redraw is not a fresh decision about whether to draw at all: one that re-read the store would find no registration, paint nothing, and leave a pane that looks restored, swallows every key and has its saved transcript frozen for the rest of the pane's life.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Determined by the discard ordering and §6.1's re-read rule — the redraw shows what was drawn, not a fresh decision to draw.
 
 ---
 
