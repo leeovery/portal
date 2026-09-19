@@ -7,11 +7,23 @@
 **Type**: Missing from plan
 **Spec Reference**: §5.5 Design references (the three Paper frames as "the design reference for implementation"); §8.3 (the sessions row frame)
 **Plan Reference**: Phase 3 (Acceptance, Planner's calls, tasks `lazy-resume-on-attach-3-3` and `lazy-resume-on-attach-3-6`); Phase 6 (Acceptance, Planner's calls, task `lazy-resume-on-attach-6-8`)
-**Move**: settled
+**Move**: choice
 **Change Type**: update-task
 
 **Problem**:
 Three screens were designed for this feature — the waiting panel, the discard confirmation, and the session row carrying its new pending dot — and the plan signs all three off against something else. Phase 3 checks the two panel screens against Portal's existing modals, and Phase 6 checks the reworked session row against "its already-committed sessions reference frames", which are the frames of the row this feature is changing: the row that still carries the word `attached` and has one indicator. The row's new trailing region — a word removed, two indicators packed right, a colourless `AP` form — has no design reference in the plan at all, so its visual gate can pass a row that looks nothing like the one that was drawn and approved. Four statements in the plan ("not committed to the repository and are not an input", "No design frame is exported, committed or read anywhere in this phase") put this beyond an omission: the plan rules the designs out.
+
+**Options**:
+
+1. **Commit the row frame only** (recommended) — export and commit **Sessions — pending resume dot (Nord)**, and point Phase 6's visual gate at it. Phase 3 is left as planned: the two panel screens keep their check against Portal's existing modal grammar, which is what their frames were duplicated from. Applies edit blocks (E), (F) and (G).
+2. **Commit all three frames** — the reviewer's fix in full: both panel frames and the row frame committed, with every gate pointed at its own frame. Applies edit blocks (A) through (G).
+3. **Leave the plan as it stands** — no frame is committed, and Phase 6's row is signed off against Portal's existing row grammar alone.
+
+**Search named**: the specification names the three frames as the design reference for implementation (§5.5); the repo's own CLAUDE.md keeps `testdata/vhs/reference/` as the carve-out for committed design exports, so a route exists; and the user ruled this session that frames need not be surfaced, on the ground that the feature is "a minor addition with existing designed surfaces to copy from". That ruling holds for the two panel screens and does not reach the row, whose reworked trailing region has no existing designed surface — which is what makes this a fork rather than a derivation.
+
+**Reclassification**: the reviewer moved this `settled` on the derivation that committing the frames "is not a new decision". A user ruling this session made it one, so the finding takes the bar as a `choice`: it is product-level (whether the built row matches the drawn row), irreducible (the specification and the ruling point opposite ways), a side visibly costs the user (an unreferenced row can ship with the wrong packing), and the tie-break is the user's own design call.
+
+**Fix content follows — Proposal retained for the record**:
 
 **Proposal**:
 The specification names the frames as the design reference for implementation, so carrying them into the plan is not a new decision. The route is the one the repo already has: `testdata/vhs/reference/*.png` is CLAUDE.md's kept carve-out for "committed design exports — the frames the code was built *against*", so the three frames are exported from the Paper file `Portal` and committed there ahead of each phase's visual gate, and the gate reads them beside Portal's existing grammar. The specification's own limit stands unchanged — the screens are built from Portal's shared panel machinery, not from the frames' pixel dimensions — which is why this lands on the gates and the Context that frames them rather than on any renderer's acceptance criteria.
@@ -91,8 +103,8 @@ The specification names the frames as the design reference for implementation, s
 > The frame the specification names for this row — **Sessions — pending resume dot (Nord)** — is committed at `testdata/vhs/reference/sessions-pending-resume-dot-nord.png`, and it is the design reference the phase's visual gate reads: the sessions frames already in that directory show the row before the word was dropped, so they say nothing about where the indicators sit. These fixtures exist so the row can be viewed live and held against that frame and against Portal's own existing row grammar; that check is the phase's gate, not a criterion of this task.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Option 2 chosen — all three frames exported from the Paper file `Portal` via the design-tool MCP and committed to `testdata/vhs/reference/` as `resume-panel-waiting-nord.png`, `resume-panel-discard-confirm-nord.png` and `sessions-pending-resume-dot-nord.png`. The specification was amended by corrigendum to record the committed paths and to state the row frame as the sole reference for the reworked trailing region. All seven plan edit blocks applied, plus the equivalent paragraph in four tick task bodies (3-3, 3-4, 3-6, 6-8).
 
 ---
 

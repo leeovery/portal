@@ -185,7 +185,7 @@
 >
 > A meta line carrying the directory and how long the pane had been paused was drafted and cut. It was invented rather than decided, and on the page it added nothing the command and the badge did not already say.
 >
-> The design frames named in the specification are not committed to the repository and are not an input to this task. Both screens are built from Portal's own existing modal grammar — the kill modal, the rename modal's badge slot, the shared destructive-confirm builder and the joined-panel frame — which is what those frames were themselves built by duplicating.
+> The design frame the specification names for this screen — **Resume panel — waiting (Nord)** — is committed at `testdata/vhs/reference/resume-panel-waiting-nord.png` and is the design reference for what this screen looks like. It is read at the phase's visual gate, not copied from: the panel is built from Portal's own existing modal grammar — the kill modal, the rename modal's badge slot, the shared destructive-confirm builder and the joined-panel frame — which is what the frame was itself built by duplicating, so its card geometry is identical to the existing modals' rather than approximate.
 >
 > Reading the registration, deciding whether to draw at all, and dispatching Enter and `d` are Phase 4's. This task renders a string from a command, a report and a size.
 
@@ -380,7 +380,7 @@
 >
 > The capture surfaces are standalone named entries alongside the contrast swatch rather than picker fixtures, since a fixture builds a picker model through the shared constructor and these screens are not one. The swap guard's "the swatch is the only skip" assertion widens to a named set, and in exchange the panel surfaces get their own palette-diff guard, so enrolling a second skip does not silently shrink the completeness guard.
 >
-> The design frames named in the specification are not committed to the repository and are not an input here. These surfaces are checked against Portal's own existing modal grammar — the kill modal, the rename modal's badge slot and the shared panel frame — which are reachable through the picker fixtures the same tool already renders.
+> The two design frames the specification names are committed at `testdata/vhs/reference/resume-panel-waiting-nord.png` and `testdata/vhs/reference/resume-panel-discard-confirm-nord.png`. These surfaces exist so each screen can be rendered live and held against its frame at the phase's visual gate, and against Portal's own existing modal grammar — the kill modal, the rename modal's badge slot and the shared panel frame — which is reachable through the picker fixtures the same tool already renders.
 >
 > The `.tape` files and rendered PNGs under `testdata/vhs/` are scaffolding rather than a durable asset: they are written as work proceeds and cleared after sign-off. Nothing in this task commits an image.
 

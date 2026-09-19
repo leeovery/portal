@@ -471,7 +471,7 @@
 >
 > Capture seeds declare state, never text, so a fixture cannot put a paraphrase on a captured frame.
 >
-> No design frame is exported, committed or read anywhere in this phase, and no acceptance criterion names one. These fixtures exist so the row can be viewed live and checked against Portal's own existing row grammar and its already-committed sessions reference frames; that check is the phase's gate, not a criterion of this task.
+> The frame the specification names for this row — **Sessions — pending resume dot (Nord)** — is committed at `testdata/vhs/reference/sessions-pending-resume-dot-nord.png`, and it is the design reference the phase's visual gate reads: the sessions frames already in that directory show the row before the word was dropped, so they say nothing about where the indicators sit. These fixtures exist so the row can be viewed live and held against that frame and against Portal's own existing row grammar; that check is the phase's gate, not a criterion of this task.
 >
 > The `.tape` files and rendered PNGs under `testdata/vhs/` are scaffolding rather than a durable asset: they are written as work proceeds and cleared after sign-off. Nothing in this task commits an image.
 

@@ -85,7 +85,7 @@ status: draft
 - [ ] A named theme paints from the first frame; a light/dark pair runs the same detect-or-timeout appearance gate the picker runs and resolves dark with no answer. No raw hex appears at any call site.
 - [ ] Under `NO_COLOR` no canvas is painted and no detection runs, and every state on both screens is carried by glyphs and words rather than colour.
 - [ ] Every string either screen renders is tool-agnostic — it states the command and says nothing about what the command is.
-- [ ] Both screens can be rendered on demand at a chosen theme and width for visual check against Portal's existing modal grammar, which both screens are built from.
+- [ ] Both screens can be rendered on demand at a chosen theme and width for visual check against the committed reference frames `resume-panel-waiting-nord.png` and `resume-panel-discard-confirm-nord.png`, and against Portal's existing modal grammar, which both screens are built from.
 
 #### Tasks
 
@@ -105,6 +105,7 @@ status: draft
 - The destructive-confirm builder gains a compartments accessor so the confirmation can reach the same parts for the degraded stack; the picker's kill and delete modals keep it as their one call and must render byte-identically, which their existing byte-exact suites check.
 - The appearance query is a non-Bubble-Tea OSC 11 read placed beside the picker's existing gate, because the drawing process cannot be a Bubble Tea program — it must leave the alternate screen painted while it execs the waiter away — and that is where Portal's raw terminal-background I/O and its detect timeout already live.
 - The capture surfaces are standalone named entries alongside the contrast swatch rather than picker fixtures, since a fixture builds a picker model through the shared constructor and these screens are not one. The swap guard's "the swatch is the only skip" assertion widens to a named set, and in exchange the panel surfaces get their own palette-diff guard, so enrolling a second skip does not silently shrink the completeness guard.
+- The two frames the specification names for these screens — **Resume panel — waiting (Nord)** and **Resume panel — discard confirm (Nord)** — are committed at `testdata/vhs/reference/resume-panel-waiting-nord.png` and `testdata/vhs/reference/resume-panel-discard-confirm-nord.png`. That directory is the repo's kept carve-out for committed design exports — the frames the code is built against rather than renders of it — so they are a permanent artifact and not capture scaffolding. They are the design reference the gate reads beside the live capture-tool render; the screens are still built from Portal's own shared panel machinery rather than from the frames' pixel dimensions, which is what the frames were themselves built by duplicating.
 - Phase 3 produces strings and a resolved theme and touches no terminal except the appearance query and the capture tool. The alternate-screen entry, the write into the pane, the hand-off and the key dispatch are Phase 4.
 
 
@@ -207,7 +208,7 @@ status: draft
 - [ ] Under `NO_COLOR` each indicator renders as a letter in the same cell — `A`, `P`, or `AP` — with the packing order untouched and no second row geometry.
 - [ ] A row flagged gone is unaffected: the transient badge still replaces the whole trailing region.
 - [ ] The help modal gains a legend for both indicators, worded tool-agnostically.
-- [ ] The picker resolves pending state from a single whole-server read, and the row renders on demand for visual check against Portal's existing row grammar and its already-committed sessions reference frames.
+- [ ] The picker resolves pending state from a single whole-server read, and the row renders on demand for visual check against the committed reference frame `sessions-pending-resume-dot-nord.png` and against Portal's existing row grammar.
 
 #### Tasks
 
@@ -231,5 +232,5 @@ status: draft
 - The picker's pending set rides the session-list load rather than a once-per-picker cache. Host-terminal detection is cached for the picker's life because it cannot change underneath; pending state can — a pane resumed in another window while the picker is open. Taking both reads at the same moment through one path is what stops a row and its dot describing different moments, at one extra enumeration per list load rather than one per row.
 - The legend is not a keymap entry. The help modal is descriptor-driven and the dispatch guard derives dispatch from those descriptors, so expressing an indicator as an entry would demand a binding for a glyph that dispatches nothing. The legend is a separate block in the modal, and the guard is neither widened nor exempted.
 - Doc edits ride with the tasks that falsify them, as the earlier phases did: the README's doctor paragraph names the host-terminal line as the one informational line, and one sentence edit covers both new lines; CLAUDE.md's tmux row enumerates the client's pane-enumeration methods, and one line covers the new read.
-- No design frame is exported, committed or read anywhere in this phase, and no acceptance criterion names one. The capture surfaces exist so the row can be viewed live and checked against Portal's existing row grammar and its already-committed sessions reference frames; the check is the gate, not a criterion.
+- The frame the specification names for this row — **Sessions — pending resume dot (Nord)** — is committed at `testdata/vhs/reference/sessions-pending-resume-dot-nord.png`, beside the sessions frames already there. It is the only design reference that exists for the reworked trailing region: those existing frames show the row this phase changes, with the word `attached` and a single indicator, so they cannot settle the packing, the spacing or the colourless form. The capture fixtures exist so the row can be rendered live and held against that frame; the check is the gate, not a criterion.
 
