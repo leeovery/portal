@@ -210,11 +210,13 @@ A meta line carrying the directory and how long the pane had been paused was dra
 
 Three frames were built in the Paper file `Portal`, against the Nord artboards the user runs, so the new work sits beside the existing designs in the same palette:
 
-- **Resume panel — waiting (Nord)**
-- **Resume panel — discard confirm (Nord)**
-- **Sessions — pending resume dot (Nord)** (§8.3)
+- **Resume panel — waiting (Nord)** — committed at `testdata/vhs/reference/resume-panel-waiting-nord.png`
+- **Resume panel — discard confirm (Nord)** — committed at `testdata/vhs/reference/resume-panel-discard-confirm-nord.png`
+- **Sessions — pending resume dot (Nord)** (§8.3) — committed at `testdata/vhs/reference/sessions-pending-resume-dot-nord.png`
 
-The waiting panel's frame was built by duplicating the Nord kill modal, so its card geometry — width, header and footer rules, padding — is identical to the existing modals' rather than approximate. The frames are the design reference for implementation; the panel is built from Portal's own shared panel machinery, not from the frames' pixel dimensions.
+The waiting panel's frame was built by duplicating the Nord kill modal, so its card geometry — width, header and footer rules, padding — is identical to the existing modals' rather than approximate. **All three are exported and committed to `testdata/vhs/reference/`**, the repository's kept carve-out for design exports — the frames the code is built *against* rather than renders of it — so neither implementation nor review needs a live design-tool connection, and each is in place before the work that builds its screen. The frames are the design reference for implementation; the panel is built from Portal's own shared panel machinery, not from the frames' pixel dimensions.
+
+**The row frame is the only reference that exists for the reworked trailing region.** The sessions frames already in that directory show the row as it stands today — the word `attached` still on it, one indicator — so they can settle nothing about the packing, the spacing or the colourless form (§8.3). The comparison is judged for layout, structure and colour-role match rather than by pixel diff, and the tokens remain the contract: a colour value is never read off a frame.
 
 ### 6. Answering the Panel
 
@@ -440,3 +442,5 @@ Also explicitly not built:
 > **Corrigendum 2026-09-19** (from `planning/lazy-resume-on-attach`): §7.3 stated that the pending marker is set before the mid-restore marker is cleared, but §4.1 described the lazy branch only on the path where scrollback replayed — leaving the helper's two degraded tails (the hydrate signal never arriving, and a missing saved scrollback file), which clear that marker inside their own handlers and fire the hook today, to restore eagerly regardless of the resolved mode. Corrected: the mode is resolved and the marker written once, ahead of whichever clear runs, so whether a pane waits does not depend on whether its replay happened.
 
 > **Corrigendum 2026-09-19** (from `planning/lazy-resume-on-attach`): §3.1 stated the tolerant decode for a missing, empty, corrupt or unrecognised `resume_mode` value but not for a `prefs.json` that cannot be read at all, leaving the behaviour of an unreadable preferences file unstated on a setting that decides whether every restored pane waits. Corrected: an unreadable file resolves to the shipped default like every other unreadable case, stated with the reason — a panel is answerable in a keystroke and an unwanted resume is not undoable.
+
+> **Corrigendum 2026-09-19** (from `planning/lazy-resume-on-attach`): §5.5 named the three design frames as "the design reference for implementation" but recorded them only as existing in the Paper file, leaving the plan to sign every screen off against something else — and leaving the reworked session row, whose trailing region is new geometry, with the pre-change sessions frames as its only reference. Corrected: all three frames are exported and committed to `testdata/vhs/reference/` at named paths, with the row frame stated as the sole reference for the reworked trailing region and the existing judging rule (layout, structure and colour-role match rather than a pixel diff; tokens are the contract) carried alongside.
