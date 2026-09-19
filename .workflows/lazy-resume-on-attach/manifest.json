@@ -110,7 +110,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "lazy-resume-on-attach-2-4",
+          "task": "lazy-resume-on-attach-2-5",
           "task_map": {
             "lazy-resume-on-attach-1-1": "tick-b9944e",
             "lazy-resume-on-attach-1": "tick-fb24da",
@@ -123,7 +123,8 @@
             "lazy-resume-on-attach-2-1": "tick-ecf7fe",
             "lazy-resume-on-attach-2": "tick-875568",
             "lazy-resume-on-attach-2-2": "tick-268f1f",
-            "lazy-resume-on-attach-2-3": "tick-ea97fe"
+            "lazy-resume-on-attach-2-3": "tick-ea97fe",
+            "lazy-resume-on-attach-2-4": "tick-b3514f"
           },
           "storage_paths": [
             ".tick/"
