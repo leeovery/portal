@@ -110,7 +110,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 5,
-          "task": null,
+          "task": "lazy-resume-on-attach-5-1",
           "task_map": {
             "lazy-resume-on-attach-1-1": "tick-b9944e",
             "lazy-resume-on-attach-1": "tick-fb24da",
@@ -151,7 +151,8 @@
               "p1": "2026-09-19",
               "p2": "2026-09-19",
               "p3": "2026-09-19",
-              "p4": "2026-09-19"
+              "p4": "2026-09-19",
+              "p5": "2026-09-19"
             }
           },
           "staging": {},
