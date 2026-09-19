@@ -693,6 +693,58 @@ Confidence: high.
 
 ---
 
+## When The Waiter Itself Goes Away
+
+### Context
+
+Two ways a wait ends were settled — the user answers, or tmux tears the pane down — and a third was left open: the waiting program going away on its own. It is killed by name, it crashes, the machine reclaims it under memory pressure. The waiter is the pane's only process, so the ordinary consequence of that is the pane closing.
+
+### Journey
+
+The consequence is larger than a lost pane. On an install where nearly every session holds a single pane, the pane closing closes the session, and the next capture drops it from the saved set with its whole transcript — a thing the feature exists to protect. A single `pkill portal` would take every waiting pane on the machine at once, and a crash would take one at random.
+
+The route that looked right first was to have the pane outlive its waiter and come back to the panel. It does not survive contact: nothing is watching to respawn the waiter, and holding a dead pane open with the panel on it is precisely the design the key-scoping measurement already ruled out.
+
+The answer was already in the codebase. The hydrate helper does not hand a pane to a hook and hope; it runs `sh -c '<HOOK>; exec $SHELL'`, so a hook that ends by any route leaves the user a usable pane rather than a closed one. The same shape applies here, with one addition: the chain clears the pending marker before it execs the shell, so a pane whose waiter died is not left frozen.
+
+The cost is honest and worth naming: a resident shell parent per waiting pane, a megabyte or so on top of the floor, which works against the argument for handing off before waiting. It buys a waiting pane not taking its session and its transcript with it.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by the chain the hydrate helper already runs for a hook, and by what a closed pane costs on an install of single-pane sessions. (review-gap-c5 F1)
+
+**A waiter that exits without having handed the pane over drops the pane to a plain shell.** It runs as the tail of a chain that clears the pending marker and then execs the user's shell, so a killed, crashed or reclaimed waiter leaves the pane alive with its transcript above it, the session intact, the marker cleared so capture resumes, and the registration untouched — the next reboot offers the panel afresh.
+
+Confidence: high.
+
+---
+
+## Input Already In Flight
+
+### Context
+
+The swallow rule's stated purpose is that nothing accidental can answer the panel: a stray paste, an errant `send-keys`, or a key pressed in the wrong window means nothing to it, because only two keys mean anything at all.
+
+### Journey
+
+The claim does not survive the keys it was written beside. `d` and `y` are ordinary characters in ordinary text — `cd ~/dev && yarn` contains both, in order — so a line delivered to the wrong pane opens the confirmation on the `d` and agrees to it on the `y`, from the same buffer, faster than anything can be seen. The registration is gone, it was the only copy of a user-authored command, and nobody watched either screen.
+
+That is exactly the outcome the rule claims to prevent, which makes the claim false as written rather than merely incomplete. Leaving it and narrowing the claim alone was weighed — the confirmation is already a second deliberate act — and rejected: a second act that arrives in the same paste is not a second act.
+
+Changing the keys was not on the table. `d` and `y` were each derived from Portal's existing grammar and neither has a safer sibling; the problem is not which characters they are but that a burst of input is read as two decisions.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by the swallow rule's own stated purpose, read against the characters the two keys actually are. (review-gap-c5 F2)
+
+**Input already in flight when the confirmation opened is dropped rather than read as agreement.** Only a keystroke that arrives after the confirmation is on screen can confirm it. The keys are unchanged: `y` and Escape remain the only keys that act there.
+
+The swallow rule is stated as what it delivers — nothing accidental can *answer* the panel, and a burst of input cannot carry the discard through both screens.
+
+Confidence: high.
+
+---
+
 ## Summary
 
 ### Key Insights
