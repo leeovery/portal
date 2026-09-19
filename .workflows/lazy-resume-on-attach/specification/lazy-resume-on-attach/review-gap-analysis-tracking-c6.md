@@ -22,8 +22,8 @@ The pane comes off the panel's screen before its protection is dropped on this p
 **Proposed Text**:
 **A waiter that exits without having handed the pane over drops the pane to a plain shell.** It runs as the tail of a chain that takes the pane off the panel's screen, clears the pending marker, and then execs the user's shell — the shape the hydrate helper already uses for a hook (`sh -c '<HOOK>; exec $SHELL'`). Those two steps keep the order every answer takes (§7.2): the pane is showing its own transcript again before its protection is dropped, because a tick landing while the card is still up writes that pane's saved transcript as history-minus-its-last-screenful plus the card (§7.1), and a `pkill portal` puts every waiting pane on the install through that window at once. A killed, crashed or reclaimed waiter therefore leaves the pane alive with its transcript above it, the session intact, the marker cleared so capture resumes (§7.2), and the registration untouched, so the next reboot offers the panel afresh. Without it the pane closes — and on an install where 43 of 44 sessions hold a single pane (§1), the session closes with it and the next capture drops it from the saved set with its whole transcript. The cost is a resident shell parent per waiting pane, a megabyte or so on top of the floor (§4.2).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Determined by the answer-path ordering §7.2 already sets and the §7.1 measurement behind it.
 
 ---
 
@@ -47,8 +47,8 @@ The claim is narrowed to what the record supports: two routes are closed, one is
 **Proposed Text**:
 **The inverse failure — a marker wrongly left set, freezing a pane's saved content forever — is reachable one way, and that way is recorded.** The marker lives on the pane and the pane's only process is the waiter, so the marker goes when the pane goes. Two of the routes that reach a live pane whose marker is wrong are closed: an answer whose clear failed is held rather than carried out, so the pane goes on waiting and the marker is still the truth (§7.2), and a restore never respawns a waiting pane, because it skips any session that is already live (§9.1). One is open by design — a waiter that dies without handing the pane over hands it to a shell whether or not the clear landed, because a closed pane is the worse failure (§4.3). Nothing sweeps the marker it leaves behind (§8.2), so the WARN that chain emits is the whole of what makes that pane findable. Beyond those there is a pane respawned out from under its waiter by hand — the user destroying the process that held that pane's state, in the same class as a hand edit of the store.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Real contradiction with the route cycle 5's fallback opened by design; the claim is narrowed to name it and the WARN that makes it findable.
 
 ---
 
@@ -71,8 +71,8 @@ Append to §5.4, after the paragraph beginning "The confirmation carries a repor
 
 **The confirmation degrades with the pane, as the waiting panel does.** Below the size the card needs (§5.2) the frame goes and the parts stack plainly on the canvas — the `▲ Discard resume?` title, the command, the consequence line and `y discard   esc cancel` — and `y` and Escape act at every size, as Enter and `d` do. A confirmation that drew nothing there would leave the user pressing the key the footer offered a moment earlier against a question they never saw, and what goes is the only copy of a user-authored command.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: The call landed in the discussion, extending Panel Rendering Limits; §5.4 aligned to it.
 
 ---
 

@@ -202,6 +202,8 @@ A meta line carrying the directory and how long the pane had been paused was dra
 
 **The confirmation carries a report row too.** A discard the store will not accept (§6.2) is reported on the confirmation itself, on the same single line the waiting panel's card gives a report (§5.3), and `y` retries from there. The screen the user answered on stays in front of them: a confirmation that closed on a failed write would be indistinguishable from one that was backed out of, and the user would read a discard that did nothing as a discard they cancelled.
 
+**The confirmation degrades with the pane, as the waiting panel does.** Below the size the card needs (§5.2) the frame goes and the parts stack plainly on the canvas — the `▲ Discard resume?` title, the command, the consequence line and `y discard   esc cancel` — and `y` and Escape act at every size, as Enter and `d` do. A confirmation that drew nothing there would leave the user pressing the key the footer offered a moment earlier against a question they never saw, and what goes is the only copy of a user-authored command.
+
 #### 5.5 Design references
 
 Three frames were built in the Paper file `Portal`, against the Nord artboards the user runs, so the new work sits beside the existing designs in the same palette:
