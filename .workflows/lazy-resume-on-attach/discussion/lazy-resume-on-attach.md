@@ -685,6 +685,8 @@ The redraw follows from what a drag actually produces. A terminal dragged to a n
 
 **A card with something to report carries one more row.** The reason is stated on a single line between the command and the key hints, and it stays there until the next key is pressed rather than timing out. The row is present only when there is something to say; a panel with nothing to report carries exactly its three parts.
 
+**The report lands on the screen the key was pressed on.** A discard the store will not accept fails with the confirmation in front of the user, so the confirmation carries the row and the confirm key retries from there. A confirmation that closed on a failed write would be indistinguishable from one that was backed out of — the user reads a discard that did nothing as a discard they cancelled, presses the key again, confirms again, and never learns that nothing was removed either time. Closing the confirmation and reporting on the panel instead was weighed and rejected on exactly that reading.
+
 **The redraw is taken once the size has settled, not once per size change.** One draw at the end of the stream is the whole of what a resize owes, so the cost stays a single handover per pane.
 
 Confidence: high.
