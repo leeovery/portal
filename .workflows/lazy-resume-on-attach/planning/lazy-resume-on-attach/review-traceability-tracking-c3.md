@@ -47,8 +47,8 @@ Task 4.5, **Tests**, third entry — replaced by three entries:
 - `"it waits for a registration pinned lazy under an eager install"`
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 4-5's first criterion names both routes to eager and gains the reverse-pin criterion; its tests gain the no-mode-under-eager-install case and the lazy-pinned-under-eager-install case.
 
 ---
 
@@ -120,8 +120,8 @@ Task 4.7, **Tests**, second entry — replaced by two entries:
 - `"it shows the stored command on the panel through the shell the helper composed"`
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 4-7 now asserts the registered command on the panel, pins the fixture command to carry a space and an embedded single quote, and gains the criterion and the test that read it back through the shell the helper composed.
 
 ---
 
@@ -153,8 +153,8 @@ Restate the criterion with the specification's own sentence, as the task detail 
 - [ ] The discard confirmation is built through the same shared destructive-confirm builder as the picker's kill modal: `▲ Discard resume?`, the command in the destructive token, the consequence line `Removes this pane's resume command permanently. The session and its scrollback are untouched.` rendered verbatim, and `y discard   esc cancel`.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Phase 3's acceptance now carries the consequence line word for word, matching the task detail and the corrigendum.
 
 ---
 
@@ -187,5 +187,5 @@ Add the answered-pane half beside the abandoned-pane half in the phase's accepta
 - [ ] A pane that was answered is handed no second shell: the chain's tail reads the pending marker, does nothing at all for a pane that no longer carries one, and treats a read it could not take as still pending — so a resumed pane still closes on the first `exit`.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Phase 4's acceptance gains the answered-pane half of the tail's contract — marker read, nothing done for an answered pane, a failed read treated as still pending.

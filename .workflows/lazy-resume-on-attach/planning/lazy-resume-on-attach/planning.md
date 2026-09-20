@@ -80,7 +80,7 @@ status: draft
 - [ ] The waiting panel renders a full-pane canvas in the active theme with a centred card carrying `Resume session` and a `● PAUSED` badge, an `ON RESUME` label over the registered command, and `⏎ resume` / `d discard` hints.
 - [ ] A command longer than the card's inner width wraps over at most three lines with anything beyond marked `…`, and the card's width does not change.
 - [ ] Either screen carries one report row between the command and the key hints when there is something to report, and exactly its three parts when there is not.
-- [ ] The discard confirmation is built through the same shared destructive-confirm builder as the picker's kill modal: `▲ Discard resume?`, the command in the destructive token, a plain-language consequence line, and `y discard   esc cancel`.
+- [ ] The discard confirmation is built through the same shared destructive-confirm builder as the picker's kill modal: `▲ Discard resume?`, the command in the destructive token, the consequence line `Removes this pane's resume command permanently. The session and its scrollback are untouched.` rendered verbatim, and `y discard   esc cancel`.
 - [ ] Below the size the card needs, both screens drop the frame and stack their parts plainly on the canvas, down to the smallest pane a restore can produce; neither ever draws nothing.
 - [ ] A named theme paints from the first frame; a light/dark pair runs the same detect-or-timeout appearance gate the picker runs and resolves dark with no answer. No raw hex appears at any call site.
 - [ ] Under `NO_COLOR` no canvas is painted and no detection runs, and every state on both screens is carried by glyphs and words rather than colour.
@@ -126,6 +126,7 @@ status: draft
 - [ ] Enter takes the pane off the panel's screen, clears the marker, then reads the store again and runs what it holds then; an entry that has gone and an unreadable store both drop the pane to a plain shell, with the marker cleared either way.
 - [ ] A clear that fails holds the answer: the panel is drawn again carrying the reason, the key can be pressed again, and neither the hook nor the shell runs while the marker stands.
 - [ ] A waiter torn down with its pane exits; one that exits without handing the pane over leaves the pane on its own transcript, clears the marker, records a WARN if that clear failed, and execs the user's shell either way.
+- [ ] A pane that was answered is handed no second shell: the chain's tail reads the pending marker, does nothing at all for a pane that no longer carries one, and treats a read it could not take as still pending — so a resumed pane still closes on the first `exit`.
 - [ ] Scrollback replays for every restored pane exactly as it does today, whether or not a resume is pending, and no bootstrap step, step ordering, eager signal pass or global hook changes.
 - [ ] A pane beside a waiting one is fully live throughout: keys sent to it reach its own process, and its content and its capture are untouched by the neighbour holding the panel.
 - [ ] A pane still holding the panel when the state is captured comes back on the next reboot holding a fresh panel, over the transcript it paused on, with its pending marker set — an offer the user ignored is never spent, and a wait that spans reboots costs no content.
