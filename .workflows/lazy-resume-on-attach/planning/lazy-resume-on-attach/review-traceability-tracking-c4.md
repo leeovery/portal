@@ -44,7 +44,7 @@ Task 4.5 — **Acceptance Criteria**, final criterion, replaced by:
 - [ ] No README sentence still states that a registered command re-executes by itself after a reboot: the `xctl hook` section's opening, rename and **When hooks fire** paragraphs, and the **Automatic Server Bootstrap & Restoration** section's two resume-hook sentences, all describe the panel a lazy registration comes back holding and name `eager` as the mode that keeps today's behaviour.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 4-5's README edit now covers every sentence the change falsifies — the hook section's opening, rename and When-hooks-fire paragraphs, and the bootstrap-and-restoration section's two resume-hook sentences — with the criterion widened to match.
 
 ---
