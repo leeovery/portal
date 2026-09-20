@@ -95,8 +95,8 @@ Wrap the consequence at the width the stack is built for, exactly as the command
 - The consequence re-wraps with the pane in the degraded form. The card only fits a pane of roughly the builder's wrap width plus its frame, so the plain stack is what a two- or three-way split actually renders, and a consequence left at the builder's own width there is a row the canvas cuts mid-word — on the one screen whose job is to make an irreversible act deliberate. The framed path still passes the builder's own width, so the kill and delete modals and their byte-identical golden are untouched.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 3-4's compartments accessor gains a `wrapWidth` parameter (framed path passes `destructiveBodyWidth`, so kill/delete are untouched; the stack path passes the pane's width), the fourth Do bullet states the every-part-at-its-own-width rule, and one acceptance criterion, one test and one edge case pin it. Phase 3's task-table row carries the same clause. Tick body re-synced and byte-verified.
+**Notes**: Verified before applying — `destructiveBodyWidth = 52` at `internal/tui/destructive_confirm.go:15`, applied unconditionally by `ansi.Wordwrap` at line 65. Both `destructiveConfirmCompartments` call sites in the plan are inside task 3-4, so the signature change strands nothing outside it.
 
 ---
 
@@ -136,5 +136,5 @@ Say in the task that the frame predates the corrigendum, name the two divergence
 > Dispatching `d`, `y` and Escape, dropping input already in flight, and removing the registration are Phase 5's. This task renders the screen.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 3-4's Context gains a paragraph naming the frame, both divergences and the rule that the specification's strings govern while the frame is read for geometry, structure and colour roles. Tick body re-synced and byte-verified.
+**Notes**: Verified by opening the committed frame before applying: it does carry `Removes this pane's resume command for good. It won't come back after a restart. Can't be undone.` and a single-row `claude --resume 4560…  · ~/Code/flowx`, both as the finding states. The waiting-panel and pending-dot frames were left alone — neither was reported as diverging and neither is touched by this fix.
