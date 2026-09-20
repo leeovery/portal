@@ -133,6 +133,7 @@ status: draft
 - [ ] The report row has no timeout: once something is reported it stands until the next keypress redraws the screen.
 - [ ] Enter and `d` act at every pane size, including below the size the card needs, where the frame is gone and the parts stack plainly.
 - [ ] The drawing process loads the same theme setting the picker loads and hands the resulting nomination to the panel's own appearance resolution.
+- [ ] A waiting pane whose parked shell is destroyed along with its waiter — a hand `respawn-pane -k`, which takes the tail down with it — keeps its pending marker on a live pane, and nothing in this phase reaches that state. The residual is accepted, in the same class as a hand edit of the store: no sweep, no expiry and no repair is added for it.
 
 #### Tasks
 

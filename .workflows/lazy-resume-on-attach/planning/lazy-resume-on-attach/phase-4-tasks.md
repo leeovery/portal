@@ -90,7 +90,7 @@
 - Guard before the loop: a stdin that is not a terminal, or a `MakeRaw` that fails, returns an error without reading — there is nothing to wait on and spinning on a non-tty would burn a core for the life of the pane. `defer` the restore so it runs on every path out.
 - Read loop: `In.Read` into a **one-byte** buffer per iteration, never buffering ahead. `\r` and `\n` dispatch as Enter; `d` dispatches as discard; every other byte — `0x03`, `0x04`, `0x1a`, `0x1b` and the bytes of any escape sequence that follows it, `D`, printable text, anything — is discarded and the loop continues. A read returning an error or EOF ends the wait by returning that condition.
 - Dispatch through two named package functions, `resumeAnswerEnter(cfg) error` and `resumeAnswerDiscard(cfg) error`, both of which here resolve the binary through `resumeChainExe()`, restore the terminal and `ExecSelf` a fresh `resume-draw` carrying the payload unchanged (`resumeChainArgv(exe, "resume-draw", cfg.resumeChainPayload)`), each preceded by the existing `exec` INFO. A `resumeChainExe()` that fails is returned as the wait's ending condition, exactly as a read error is — the pending marker is still set, so the chain's tail recovers the pane to a usable shell rather than leaving a pane whose keys silently do nothing. Every later hand-off in the chain resolves the same way. Task 4.3 re-points `resumeAnswerEnter`; Phase 5 re-points `resumeAnswerDiscard`.
-- Install no handler for SIGHUP, SIGTERM or SIGINT, and arm no timer whose firing ends the wait or clears a report: the default disposition must continue to end the process when tmux tears the pane down, and a reported reason must stand until a key is pressed. Task 4.6 arms a settle timer for the resize redraw — it neither ends the wait nor expires a report — so write the guard below against those three signals and against the wait's own exit and report paths, not against the presence of a timer as such.
+- Install no handler for SIGHUP, SIGTERM or SIGINT, and arm no timer at all: the default disposition must continue to end the process when tmux tears the pane down, and a reported reason must stand until a key is pressed. The guard below covers the signal half, which is the half a source scan can decide — it reads every `signal.Notify` call on the wait path and fails on any signal but `syscall.SIGWINCH`, so task 4.6's resize seam leaves it green while a declined hangup fails it. Task 4.6 arms the one timer the wait path ever holds, a settle window for the resize redraw; that it neither ends the wait nor expires a report is a behavioural property and is asserted there, not by this guard.
 - Cover in `cmd/state_resume_wait_test.go` driving `In` from an `os.Pipe` (or a scripted reader) and recording `ExecSelf`, with a table over every swallowed byte asserting no exec, no write and no return.
 
 **Acceptance Criteria**:
@@ -101,7 +101,8 @@
 - [ ] The terminal restore runs on every path out: an answered key, a read error, an EOF, and a `MakeRaw` that succeeded followed by any later failure.
 - [ ] A stdin that is not a terminal, and a `MakeRaw` that fails, each return an error without reading a byte, without writing, and without exec'ing.
 - [ ] The restore runs **before** the hand-off exec, so the next process image inherits a cooked tty.
-- [ ] The command registers no handler for SIGHUP, SIGTERM or SIGINT, and arms no timer whose firing ends the wait or clears a report — asserted by a source guard over the wait path scoped to those three signals and to the wait's exit and report paths, so task 4.6's resize-settle timer leaves it green.
+- [ ] The command registers no handler for SIGHUP, SIGTERM or SIGINT — asserted by a source guard over the wait path that reads every `signal.Notify` call there and fails on any signal but `syscall.SIGWINCH`, so task 4.6's resize seam leaves it green.
+- [ ] The wait path arms no timer: a waiter launched with a non-empty `--report` is still reading, still holding that report and still dispatching both keys however long it is left alone with no input.
 - [ ] The wait path constructs no theme, calls no renderer and writes nothing to stdout while waiting.
 - [ ] The dispatch is size-independent: the same two keys act whatever `--width`/`--height` say, including values below the card's size and non-positive ones.
 
@@ -118,7 +119,8 @@
 - `"it ends the wait on a read error rather than spinning"`
 - `"it writes nothing and resolves no theme while waiting"`
 - `"it acts on both keys at a size below the card's"` (table over sizes)
-- `"it installs no hangup, terminate or interrupt handler and arms no wait-ending or report-expiring timer"` (source guard over the wait path)
+- `"it installs no hangup, terminate or interrupt handler"` (source guard over the wait path's signal.Notify calls)
+- `"it holds its report and goes on waiting with no input at all"`
 
 **Edge Cases**:
 - Ctrl-C, Ctrl-D and Ctrl-Z arrive as bytes under raw mode and are swallowed like any other key: raw mode clears ISIG and ICANON, so none of the three reaches the process as a signal or an EOF condition — they are `0x03`, `0x04` and `0x1a` in the read buffer and nothing more.
@@ -216,7 +218,7 @@
 
 ### Task 4.4: The chain's tail: a waiter that dies leaves a usable pane
 
-**Problem**: A waiter can stop being the pane's process without having handed the pane over — a `pkill portal`, a reclaim, a hand `respawn-pane`, a read error, or a draw that could not exec the waiter at all. The pane's only process is then gone and tmux closes the pane; on an install where 43 of 44 live sessions hold a single pane, the session closes with it and the next capture drops it from the saved set with its whole transcript. The recovery cannot be unconditional, though: a pane that *was* answered has already exec'd into the user's shell, and a recovery step that ran anyway would hand it a second one — `exit` would have to be pressed twice to close a restored pane, a regression against behaviour the repo already has a test for.
+**Problem**: A waiter can stop being the pane's process without having handed the pane over — a `pkill portal`, a reclaim, a read error, or a draw that could not exec the waiter at all. The pane's only process is then gone and tmux closes the pane; on an install where 43 of 44 live sessions hold a single pane, the session closes with it and the next capture drops it from the saved set with its whole transcript. The recovery cannot be unconditional, though: a pane that *was* answered has already exec'd into the user's shell, and a recovery step that ran anyway would hand it a second one — `exit` would have to be pressed twice to close a restored pane, a regression against behaviour the repo already has a test for.
 
 **Solution**: `portal state resume-recover` — the tail of the chain the helper parks, which reads the pending marker to tell the two apart. A pane no longer carrying one was answered, so the step does nothing at all and the parked shell exits with it. A pane still carrying one (or one whose marker could not be read) is recovered: off the panel's screen, marker cleared, a WARN if that clear did not land, and the user's shell exec'd whether or not it did.
 
@@ -262,6 +264,7 @@
 - A marker read that itself fails is treated as still pending rather than as answered: a live pane carrying an extra shell is the lesser failure against a pane that closes under the user.
 - The tail is reached when the draw could not exec the waiter and not only when the waiter died — the helper composes the chain with `;`, so a non-zero draw still falls through to it.
 - Nothing in the tail reads the store or draws anything: it exists to make a pane usable, and a tail that consulted a registration could resurrect a decision the user has already had taken away from them.
+- A hand `respawn-pane -k` is outside what the tail recovers, and nothing here attempts it. It kills the pane's command, which is the parked shell the tail runs in, so the tail dies with the waiter and the pending marker stays set on a pane that is now an ordinary shell — its saved scrollback frozen at the moment it paused, while the picker dot and the pending count go on claiming a decision is waiting there. The marker is destroyed only with its pane and there is no address by which a sweep could reach it, and the operation is the user destroying the process that held that pane's state — the same class as a hand edit of the store.
 
 **Context**:
 > A waiter that exits without having handed the pane over drops the pane to a plain shell. It runs as the tail of a chain that takes the pane off the panel's screen, clears the pending marker, and then execs the user's shell — the shape the hydrate helper already uses for a hook. Those two steps keep the order every answer takes. A killed, crashed or reclaimed waiter therefore leaves the pane alive with its transcript above it, the session intact, the marker cleared so capture resumes, and the registration untouched, so the next reboot offers the panel afresh. Without it the pane closes — and on an install where 43 of 44 sessions hold a single pane, the session closes with it and the next capture drops it from the saved set with its whole transcript. The cost is a resident shell parent per waiting pane, a megabyte or so on top of the floor.
@@ -393,7 +396,8 @@
 - [ ] Task 4.2's swallow table, terminal-restore table and non-terminal/raw-mode refusals all pass unchanged against the restructured loop.
 - [ ] At most one read is outstanding at any moment, so the loop never reads ahead: a burst delivered after the byte the loop dispatched is still queued for the next process image.
 - [ ] Nothing on the redraw path resolves a theme or renders — the redraw is a handover, so the resting process after it is a fresh wait.
-- [ ] Task 4.2's signal-and-timer source guard passes unchanged with the resize and settle seams in place: the resize notify does not widen to SIGHUP, SIGTERM or SIGINT, and the settle timer neither ends the wait nor clears the report.
+- [ ] Task 4.2's signal guard passes unchanged with the resize and settle seams in place: the wait path's only `signal.Notify` names `syscall.SIGWINCH`, and SIGHUP, SIGTERM and SIGINT keep their default disposition.
+- [ ] The settle timer's firing neither ends the wait nor clears the report, held by the two criteria above rather than by a guard: a matching settled size leaves the loop reading with a subsequent key still acting, and a differing one carries `--report` across unchanged.
 
 **Tests**:
 - `"it draws once for a burst of size changes"`

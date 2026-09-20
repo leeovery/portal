@@ -78,6 +78,7 @@
 - [ ] A registration built by a mutation and carrying no mode is written as a plain JSON string; one carrying a mode is written as an object holding `command` and `resume`.
 - [ ] `clean-stale`'s recoverable `value` breadcrumb carries the command out of an object-form entry, exactly as it does out of a string-form one, and a key holding several events still renders every `event=command` pair in event order.
 - [ ] `doctor`'s stale-hook count, the daemon's sweep and `StaleKeys` behave exactly as before across the existing suites.
+- [ ] Re-registering the same command over a hand-written object-form entry that carries a mode is a `modify` that writes, not a `set-noop`: the classification compares the registration to be written against the stored one on command and mode together, so the entry comes back as a plain string carrying no mode while every other entry keeps its bytes.
 
 **Tests**:
 - `"it loads a string value as a command carrying no mode"`
@@ -90,6 +91,7 @@
 - `"it marshals a registration carrying a mode as an object"`
 - `"it renders the clean-stale value breadcrumb out of an object entry"`
 - `"it renders every event=command pair for a key holding several events"` (existing behaviour, re-pinned over the new value type)
+- `"it treats a bare rewrite of a mode-carrying entry as a modify"` (object-form seed, `Set` with the same command, the file rewritten and the entry back in string form)
 
 **Edge Cases**:
 - An unmodelled attribute survives a sibling rewrite — the object is re-emitted from its retained bytes rather than re-marshalled from the two fields the reader models.
@@ -125,7 +127,7 @@
 
 **Do**:
 - Change the signature to `Set(key string, event Event, registration Registration, via Via) error`, storing the value it was handed directly into `h[key][event.String()]` — the passed registration carries no retained raw bytes, so the entry is re-encoded from its own content.
-- Generalise `classifySet` to compare the registration to be written against the stored one on command and mode together: unchanged on both is `set-noop` (DEBUG, no write, file untouched), an absent key or event is `set`, anything else is `modify`.
+- Carry that classification across to the new signature: `classifySet` already compares command and mode together, and now reads both off the `Registration` it is handed rather than off a command it composes one from — unchanged on both is `set-noop` (DEBUG, no write, file untouched), an absent key or event is `set`, anything else is `modify`.
 - Keep the breadcrumb vocabulary exactly as it is — same ops, same `hook_key`, same `via`, and `value` carrying the command — so no new log attr or op is introduced by this task.
 - Update the two non-test call sites: `cmd/hooks.go`'s `hooksSetCmd` (`hooks.Registration{Command: command}` — no mode passes through the CLI until the flag task) and `internal/hookstest/hooks.go`'s `SeedHooksJSON`; then the `internal/hooks` and `cmd` suites that call `Set` directly.
 - Add object-form coverage to `internal/hooks/store_test.go` (or a sibling file) staging fixtures through `hookstest.StageStore` with a raw `Seed`, asserting both the resulting on-disk shape and the emitted breadcrumb via `logtest.Install` + `logtest.AssertRecord`.

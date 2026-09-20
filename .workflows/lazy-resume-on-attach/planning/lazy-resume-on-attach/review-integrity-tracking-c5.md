@@ -56,7 +56,7 @@ Accept the residual rather than build for it, and say so where it will be read. 
 - A hand `respawn-pane -k` is outside what the tail recovers, and nothing here attempts it. It kills the pane's command, which is the parked shell the tail runs in, so the tail dies with the waiter and the pending marker stays set on a pane that is now an ordinary shell — its saved scrollback frozen at the moment it paused, while the picker dot and the pending count go on claiming a decision is waiting there. The marker is destroyed only with its pane and there is no address by which a sweep could reach it, and the operation is the user destroying the process that held that pane's state — the same class as a hand edit of the store.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed — Phase 4's acceptance gains a bullet accepting the hand-`respawn-pane -k` residual by name (the parked shell is the tail's own process, so the tail dies with the waiter and the marker outlives both with no address a sweep could reach it by), task 4.4's Problem drops `a hand respawn-pane` from the list it says the tail recovers, and its Edge Cases carry the residual and why it is the same class as a hand edit of the store.
 **Notes**:
 
 ---
@@ -126,7 +126,7 @@ Split the criterion where the repo's guards can actually hold. The guard covers 
 - [ ] The settle timer's firing neither ends the wait nor clears the report, held by the two criteria above rather than by a guard: a matching settled size leaves the loop reading with a subsequent key still acting, and a differing one carries `--report` across unchanged.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed — task 4.2's Do bullet, acceptance criterion and test now scope the source guard to the wait path's `signal.Notify` calls alone (fails on any signal but `syscall.SIGWINCH`), and the no-timer property becomes the behavioural criterion and test that a waiter holding a report goes on waiting and dispatching with no input. Task 4.6's criterion is restated to match, with the settle timer's inertness held by its own two behavioural criteria.
 **Notes**:
 
 ---
@@ -183,7 +183,7 @@ Cover the change where it lands and stop restating it. One acceptance criterion 
 - Carry that classification across to the new signature: `classifySet` already compares command and mode together, and now reads both off the `Registration` it is handed rather than off a command it composes one from — unchanged on both is `set-noop` (DEBUG, no write, file untouched), an absent key or event is `set`, anything else is `modify`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed — task 1.2 gains the criterion and test that a bare rewrite over a mode-carrying object-form entry classifies as `modify` and writes (the entry returning to string form, every other entry byte-unchanged), and task 1.3's classification bullet is reworded as a carry-across to the new signature rather than a second generalisation of the same rule.
 **Notes**:
 
 ---
@@ -226,7 +226,7 @@ settled — restore the width argument at both call sites. Both are card builder
 - Build the card's spec with `targetRows: resumeCommandRows(s.Command, resumeCardContentWidth, th.StateDestructive, true, …)`, `reportRows` from `resumeReportRow` at the same width, `title: discardConfirmTitle`, `consequence: discardConfirmConsequence`, `confirmKey: discardKeyConfirm`, `confirmLabel: discardLabelConfirm` — the `▲` glyph and the `esc cancel` half come from the builder unchanged.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed — tasks 3.3 and 3.4 restore the width argument at both call sites, each passing `resumeCardContentWidth` as the card builder it is.
 **Notes**:
 
 ---
