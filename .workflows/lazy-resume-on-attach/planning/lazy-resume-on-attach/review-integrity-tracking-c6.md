@@ -101,5 +101,5 @@ For each internal id, the body under `## {internal_id}` in its phase detail file
 
 All paths are relative to `.workflows/lazy-resume-on-attach/planning/lazy-resume-on-attach/`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — all 39 tick descriptions re-synced verbatim from their `phase-{N}-tasks.md` bodies (`**Problem**:` through `**Spec Reference**:`, heading and `### Task N.M:` line excluded), then read back and byte-compared against the source: 39/39 identical. Task 5-4's darwin/linux ioctl calls, task 4-2's key byte values, task 5-3's flag spellings and task 4-3's hook exec argv are all present in the store again.
+**Notes**: The defect was in the copy, not the content — the phase detail files were correct throughout and were not edited. Verified independently before applying: `tick-02e519`'s stored Do bullet did read "the terminal-flush ioctl with the read-side bit", and the tick adapter's `reading.md` confirms `tick show` is the implementation flow's read path, so the detail files are not among the executor's inputs.
