@@ -58,8 +58,8 @@ Say where the skip lives and move every site onto it, and replace the criterion 
 
 - The skip is declared once rather than at each enumerating site. Six places in two packages today name the swatch as the only enumerated name that does not resolve, and each of them fatals on a name it cannot resolve — so registering a surface without moving them takes `registryFixtures` down, and with it `guardedFixtures` and every swap guard that reads through it. One shared set is what makes the next surface an edit rather than an outage.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 3-6's Do gains the declare-once bullet naming all six enumerating sites, its second sub-test bullet points at the same shared set, the false "passes unchanged" criterion is replaced by one stating what holds, and a test and an edge case follow. Tick body re-synced and byte-verified.
+**Notes**: Verified in the tree before applying — `ContrastValidationFixture` appears in twelve Go files, the guard files among them exactly as the finding names them.
 
 ---
 
@@ -113,5 +113,5 @@ Enumerate the call sites the way the sibling tasks do, and say which lane each i
 
 - Five of the suites calling `Set` are `//go:build integration`, including `internal/restore`'s `setupExitClosesPane` — the fixture Phase 4's and Phase 5's end-to-end suites are built from. `go test ./...` does not compile a tagged file, so a green fast lane says nothing about them; the integration lane is what closes this signature change, and there is no CI to run it later.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 1-3's call-site bullet is split in two and enumerates every suite per lane, naming the five `//go:build integration` files the fast lane does not compile; a both-lanes-build criterion and an edge case follow. Tick body re-synced and byte-verified.
+**Notes**: Verified before applying — counted the `Set(` calls in each omitted file (hooksweep 2, hookstest staging 1, restore reboot_fixture 1, restore exit_closes_pane 1, bootstrap reboot_roundtrip 12, bootstrap phase2_hook_fire 1) and read each file's build line: five carry the integration tag, two do not, as stated. One correction made during application: the (b) block is an addition, not a replacement, and was first applied over the breadcrumb criterion; that criterion was restored and the new one placed after it, both verified present exactly once.

@@ -129,7 +129,8 @@
 - Change the signature to `Set(key string, event Event, registration Registration, via Via) error`, storing the value it was handed directly into `h[key][event.String()]` — the passed registration carries no retained raw bytes, so the entry is re-encoded from its own content.
 - Carry that classification across to the new signature: `classifySet` already compares command and mode together, and now reads both off the `Registration` it is handed rather than off a command it composes one from — unchanged on both is `set-noop` (DEBUG, no write, file untouched), an absent key or event is `set`, anything else is `modify`.
 - Keep the breadcrumb vocabulary exactly as it is — same ops, same `hook_key`, same `via`, and `value` carrying the command — so no new log attr or op is introduced by this task.
-- Update the two non-test call sites: `cmd/hooks.go`'s `hooksSetCmd` (`hooks.Registration{Command: command}` — no mode passes through the CLI until the flag task) and `internal/hookstest/hooks.go`'s `SeedHooksJSON`; then the `internal/hooks` and `cmd` suites that call `Set` directly.
+- Update the two non-test call sites: `cmd/hooks.go`'s `hooksSetCmd` (`hooks.Registration{Command: command}` — no mode passes through the CLI until the flag task) and `internal/hookstest/hooks.go`'s `SeedHooksJSON`.
+- Carry the signature through every suite that calls `Set` directly, across both lanes. Unit lane: `internal/hooks` (`store_test.go`, `event_test.go`, `lock_test.go`, `lock_write_test.go`, `read_lock_test.go`, `cleanstale_snapshot_test.go`), `internal/hookstest/staging_test.go`, `internal/hooksweep/snapshot_order_test.go`, `cmd/state_daemon_test.go`. Integration lane: `cmd/noncontiguous_window_reboot_integration_test.go`, `cmd/bootstrap/reboot_roundtrip_test.go`, `cmd/bootstrap/phase2_hook_fire_integration_test.go`, `internal/restore/reboot_fixture_test.go` and `internal/restore/exit_closes_pane_integration_test.go` — five `//go:build integration` files that `go test ./...` does not compile at all, so the fast lane cannot report one left behind.
 - Add object-form coverage to `internal/hooks/store_test.go` (or a sibling file) staging fixtures through `hookstest.StageStore` with a raw `Seed`, asserting both the resulting on-disk shape and the emitted breadcrumb via `logtest.Install` + `logtest.AssertRecord`.
 
 **Acceptance Criteria**:
@@ -139,6 +140,7 @@
 - [ ] An object-form predecessor rewritten with a registration carrying no mode comes back as a plain string and keeps none of its unmodelled attributes.
 - [ ] A rewrite still leaves every other entry in the file exactly as it found it.
 - [ ] The `set` / `modify` / `set-noop` breadcrumbs carry the same message, `op`, `hook_key`, `via` and `value` (the command) as before, out of either stored shape, and a failed save still carries `error` and `error_class` and no `value`-less shape change.
+- [ ] Both lanes build: `go test ./...` and `go test -tags integration -p 1 ./...` each compile the whole tree, so no integration-tagged suite is left calling the old signature.
 
 **Tests**:
 - `"it writes the object form for a registration carrying a mode"`
@@ -156,6 +158,7 @@
 - An object-form predecessor rewritten with no mode returns to the string form and loses its unmodelled attributes — this is the contract, not a defect.
 - An empty command is written as today, not refused: `Set` persists what it is handed, and the emptiness is the lookup's business.
 - A registration built in a test literal (`hooks.Registration{Command: …, Resume: …}`) carries no raw bytes, so it always encodes canonically.
+- Five of the suites calling `Set` are `//go:build integration`, including `internal/restore`'s `setupExitClosesPane` — the fixture Phase 4's and Phase 5's end-to-end suites are built from. `go test ./...` does not compile a tagged file, so a green fast lane says nothing about them; the integration lane is what closes this signature change, and there is no CI to run it later.
 
 **Context**:
 > Nothing survives a re-registration it was not given. `portal hook set` writes exactly what it is handed. A mode the caller does not pass is not a mode — no attribute from the entry being replaced is carried forward, and the store's existing wholesale overwrite of an event's value is the correct behaviour rather than something to work around.

@@ -357,7 +357,8 @@
 - Register six names, each one variable from its base: `resume-panel-waiting`, `resume-panel-waiting-report`, `resume-panel-waiting-degraded`, `resume-panel-discard`, `resume-panel-discard-report`, `resume-panel-discard-degraded` — the degraded pair pinned to a size below the card's, the report pair seeded with a report string, all six carrying a realistic long command (a directory plus an identifier) so the wrap is visible.
 - Extend `FixtureNames()` to append `SurfaceNames()` beside `ContrastValidationFixture` before the sort, leaving `FixtureByName` resolving `*Fixture` only.
 - In `cmd/capturetool/main.go`: route a surface name in `resolveProgram` before `resolveModel`, and extract the `NO_COLOR` env read into one helper both that branch and `resolveModel` use, so the two cannot drift; extend `renderSizeFilter` to pin a surface's size as it pins a fixture's.
-- Widen `TestThemeSwapGuard_EnumeratesRegistry`'s second sub-test in `internal/capture/theme_swap_guard_test.go` from "the swatch is the only skip" to a named skip set — the swatch plus `SurfaceNames()` — asserting every member is enumerated by `FixtureNames()`, that none of them resolves through `FixtureByName`, and that the guarded fixtures plus the skip set are exactly `FixtureNames()`.
+- Declare the skip once and move every enumerating site onto it. The enumerated names that do not resolve through `FixtureByName` become the swatch plus `SurfaceNames()`, where each site today spells the exception as `name == capture.ContrastValidationFixture` on its own: `internal/capture/theme_swap_guard_test.go`'s `registryFixtures` — which `guardedFixtures` and every swap guard read through — and the **first** sub-test of `TestThemeSwapGuard_EnumeratesRegistry`; `internal/capture/fixture_registry_test.go`'s `TestFixtureRegistry_NamesDeriveFromTheBuilders`, whose `want` is the builders' own names plus the swatch and becomes the builders' names plus the whole skip set, and its `TestFixtureByName_ResolvesEveryEnumeratedName`; `internal/capture/fixture_colourless_test.go`; `internal/capture/fixture_render_size_test.go`; `internal/capture/swap_harness_test.go`'s `buildBackedFixtureNames`; and `cmd/capturetool/theme_persister_test.go`. A surface added later then joins the skip at one edit rather than fataling six suites in two packages.
+- Widen `TestThemeSwapGuard_EnumeratesRegistry`'s second sub-test in `internal/capture/theme_swap_guard_test.go` from "the swatch is the only skip" to that same named set, asserting every member is enumerated by `FixtureNames()`, that none of them resolves through `FixtureByName`, and that the guarded fixtures plus the skip set are exactly `FixtureNames()`.
 - Add `internal/capture/resume_surface_swap_guard_test.go`: for each surface, render under `themetest.SyntheticPair`'s palettes A and B and assert no theme-A parameter run survives in the B render, that the observed token-name sets under A and under B are equal, and that the set is non-empty — reusing `tokenForms`, `carriesRun` and `observedTokens` from the fixture guard rather than restating them.
 - Add one clause to CLAUDE.md's "Visual capture harness" paragraph: `capturetool` also renders standalone named surfaces that are not picker fixtures — the contrast swatch and the resume panel's two screens — which `FixtureNames()` enumerates, `FixtureByName` does not resolve, and the swap guard skips by name in exchange for their own palette-diff guard.
 
@@ -370,7 +371,7 @@
 - [ ] The widened skip assertion fails if a surface name is enumerated but absent from the skip set, and fails if a name in the skip set resolves through `FixtureByName`.
 - [ ] The surface palette-diff guard fails when a token painted under palette A is not painted under palette B on the same surface, and fails when a surface paints no token at all.
 - [ ] `TestPortalBinaryDoesNotImportCapture` still passes — nothing added here reaches the production binary.
-- [ ] Every existing fixture guard (`TestThemeSwapGuard_*`, the colourless and render-size suites) passes unchanged.
+- [ ] Every existing fixture guard still covers exactly what it covered: `guardedFixtures` ranges over the same `*Fixture` set as before, and the registry, colourless, render-size, swap-harness and capturetool theme-persister suites each skip the six surface names through the shared skip set rather than fataling on a name they cannot resolve. No guard loses a fixture, and none is exempted.
 
 **Tests**:
 - `"it enumerates every resume surface by name"`
@@ -380,13 +381,20 @@
 - `"it renders the report row on the report surfaces"`
 - `"it sets no terminal background"`
 - `"it renders colourless under NO_COLOR"`
-- `"it skips exactly the named standalone surfaces"` (widened guard, plus a negative case)
+- `"it skips exactly the named standalone surfaces"`
+- `"it keeps every enumerating guard over its own set"` (the registry, colourless, render-size, swap-harness and theme-persister suites, run with the six surfaces registered) (widened guard, plus a negative case)
 - `"it paints the same token set under either palette"` (per surface)
 - `"it keeps internal/capture out of the production binary"` (existing guard, re-run)
 
 **Edge Cases**:
 - The surfaces render the production functions rather than a copy of the layout — a capture surface that reimplemented the screen would sign off a design the pane never draws, which is the one failure a visual gate cannot catch.
 - The swap guard's single-skip assertion widens to a named set rather than silently admitting a second unguarded surface: the assertion exists so a screen cannot drop out of the completeness guard unnoticed, and relaxing it to "some things are skipped" would remove exactly that property.
+- The skip is declared once rather than at each enumerating site. Six places in two packages today name the swatch as the only enumerated name that does not resolve, and each of them fatals on a name it cannot resolve — so registering a surface without moving them takes `registryFixtures` down, and with it `guardedFixtures` and every swap guard that reads through it. One shared set is what makes the next surface an edit rather than an outage.
+
+**Resolution**: Pending
+**Notes**:
+
+---
 - The new surfaces carry their own palette diff so the completeness guard does not shrink — they are skipped by the fixture guard because they are not `*Fixture`, and the exchange for that skip is an equivalent guard of their own.
 - A degraded form is reachable by name at a pinned size rather than by resizing the terminal: a human dragging a window to find the fallback point cannot reproduce it, and the fallback is where the screen is most likely to be wrong.
 - The capture surface sets no terminal background so what a human sees is what a pane shows — the picker and the swatch both own the whole terminal and set OSC 11; a pane draw never does, and a surface that did would be showing a canvas the real screen does not paint.
