@@ -108,7 +108,7 @@
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "auto",
-          "review_cycle": 1,
+          "review_cycle": 2,
           "phase": 7,
           "task": null,
           "task_map": {
@@ -176,7 +176,8 @@
           "external_id": "tick-c8b4f2",
           "tracking": {
             "review-traceability-tracking-c1": "complete",
-            "review-integrity-tracking-c1": "complete"
+            "review-integrity-tracking-c1": "complete",
+            "review-traceability-tracking-c2": "in-progress"
           }
         }
       }
