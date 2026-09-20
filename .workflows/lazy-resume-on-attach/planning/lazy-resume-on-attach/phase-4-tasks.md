@@ -28,6 +28,7 @@
 - [ ] A prefs store that cannot be resolved, a `LoadThemeKeys` that errors, and a `themeResolution` that errors each paint from the shipped light/dark pair rather than failing the command.
 - [ ] The theme read is `loadPrefsStoreNoMigrate` + `LoadThemeKeys` — no call reaches `loadPrefsStore`, so no draw dispatches the one-shot `appearance` translation or writes `prefs.json`.
 - [ ] An `ExecSelf` that returns (the exec failed) leaves the command exiting non-zero after one WARN, with the alternate screen still entered and the panel still painted.
+- [ ] The appearance probe is the only stdin read the draw performs, and it runs after any input drop and before the alternate-screen entry — so no byte it consumes can have arrived after a screen was painted.
 - [ ] `log.ResolveProcessRole` answers `hydrate` for `state resume-draw`, `state resume-wait` and `state resume-recover`, and the closed role space gains no member.
 
 **Tests**:
@@ -52,6 +53,7 @@
 - A themes directory that will not resolve still paints from the embedded built-ins: `themesDirPath()` answers `""` on failure and the loader reaches the built-ins with no path at all.
 - The process role resolves to the existing hydrate role so the closed role space gains no member — the mapping is argv matching, so the three names can be added before the commands that answer to them exist.
 - The exec target carries everything a redraw needs so no screen re-reads the store to decide whether to draw: a redraw that re-read the store after a discard would find nothing, paint nothing, and leave a pane that looks restored, swallows every key and is frozen for the rest of its life.
+- The appearance probe is the one read the draw performs, and it reads the pane's stdin: under an adaptive pair it writes the background-colour query and then reads until a terminator or the detect timeout, discarding whatever else was queued. A keystroke typed inside that window on a redraw is therefore swallowed rather than inherited by the waiter — the single narrowing of the wait task's inherited-bytes guarantee, bounded by that timeout and reachable only on a redraw under an adaptive pair. A constant nomination and `NO_COLOR` read nothing at all. The direction is the safe one and needs no guard of its own: the probe runs before the alternate-screen entry, so it can only reach input that arrived before a screen was painted, which is what the confirmation's own drop rule already requires of every byte.
 - An exec that fails exits non-zero and leaves the chain's tail to recover the pane — the tail is reached because the helper composes the chain with `;` rather than `&&`.
 
 **Context**:
@@ -86,7 +88,7 @@
 - Guard before the loop: a stdin that is not a terminal, or a `MakeRaw` that fails, returns an error without reading — there is nothing to wait on and spinning on a non-tty would burn a core for the life of the pane. `defer` the restore so it runs on every path out.
 - Read loop: `In.Read` into a **one-byte** buffer per iteration, never buffering ahead. `\r` and `\n` dispatch as Enter; `d` dispatches as discard; every other byte — `0x03`, `0x04`, `0x1a`, `0x1b` and the bytes of any escape sequence that follows it, `D`, printable text, anything — is discarded and the loop continues. A read returning an error or EOF ends the wait by returning that condition.
 - Dispatch through two named package functions, `resumeAnswerEnter(cfg) error` and `resumeAnswerDiscard(cfg) error`, both of which here restore the terminal and `ExecSelf` a fresh `resume-draw` carrying the payload unchanged (`resumeChainArgv(exe, "resume-draw", cfg.resumeChainPayload)`), each preceded by the existing `exec` INFO. Task 4.3 re-points `resumeAnswerEnter`; Phase 5 re-points `resumeAnswerDiscard`.
-- Install no handler for SIGHUP, SIGTERM or SIGINT and start no timer: the default disposition must continue to end the process when tmux tears the pane down, and a reported reason must stand until a key is pressed.
+- Install no handler for SIGHUP, SIGTERM or SIGINT, and arm no timer whose firing ends the wait or clears a report: the default disposition must continue to end the process when tmux tears the pane down, and a reported reason must stand until a key is pressed. Task 4.6 arms a settle timer for the resize redraw — it neither ends the wait nor expires a report — so write the guard below against those three signals and against the wait's own exit and report paths, not against the presence of a timer as such.
 - Cover in `cmd/state_resume_wait_test.go` driving `In` from an `os.Pipe` (or a scripted reader) and recording `ExecSelf`, with a table over every swallowed byte asserting no exec, no write and no return.
 
 **Acceptance Criteria**:
@@ -97,7 +99,7 @@
 - [ ] The terminal restore runs on every path out: an answered key, a read error, an EOF, and a `MakeRaw` that succeeded followed by any later failure.
 - [ ] A stdin that is not a terminal, and a `MakeRaw` that fails, each return an error without reading a byte, without writing, and without exec'ing.
 - [ ] The restore runs **before** the hand-off exec, so the next process image inherits a cooked tty.
-- [ ] The command registers no signal handler for SIGHUP, SIGTERM or SIGINT, and starts no timer — asserted by source inspection of the wait path alongside the behavioural tests.
+- [ ] The command registers no handler for SIGHUP, SIGTERM or SIGINT, and arms no timer whose firing ends the wait or clears a report — asserted by a source guard over the wait path scoped to those three signals and to the wait's exit and report paths, so task 4.6's resize-settle timer leaves it green.
 - [ ] The wait path constructs no theme, calls no renderer and writes nothing to stdout while waiting.
 - [ ] The dispatch is size-independent: the same two keys act whatever `--width`/`--height` say, including values below the card's size and non-positive ones.
 
@@ -114,7 +116,7 @@
 - `"it ends the wait on a read error rather than spinning"`
 - `"it writes nothing and resolves no theme while waiting"`
 - `"it acts on both keys at a size below the card's"` (table over sizes)
-- `"it installs no signal handler and starts no timer"` (source guard over the wait path)
+- `"it installs no hangup, terminate or interrupt handler and arms no wait-ending or report-expiring timer"` (source guard over the wait path)
 
 **Edge Cases**:
 - Ctrl-C, Ctrl-D and Ctrl-Z arrive as bytes under raw mode and are swallowed like any other key: raw mode clears ISIG and ICANON, so none of the three reaches the process as a signal or an EOF condition — they are `0x03`, `0x04` and `0x1a` in the read buffer and nothing more.
@@ -124,7 +126,7 @@
 - The hangup is not declined, so a killed session, a closed window or a server shutdown ends the waiter. The refusal covers what a person at the keyboard can send and stops there: an unbounded refusal would outlive the destruction of its own pane, leaving a Portal process per culled session with nothing to attach to.
 - A read error or a stdin that is not a terminal ends the wait rather than spinning — the pending marker is still set, so the chain's tail recovers the pane to a usable shell, which is the designed fallback rather than a loss.
 - The wait path resolves no theme and renders nothing so a pane between screens carries the wait alone: that split is the whole reason the draw hands off, and a waiter that touched the rendering path would put its pages back.
-- The waiter starts no timer of its own so a reported reason stands until a key is pressed — a report the user can miss leaves them believing the thing they asked for happened.
+- The waiter arms no timer of its own that ends the wait or expires a report, so a reported reason stands until a key is pressed — a report the user can miss leaves them believing the thing they asked for happened. The resize settle window task 4.6 adds is the one timer the wait path arms, and all it decides is whether to hand over to a redraw; it never ends the wait and never clears the report, which rides the redraw forward.
 - Both keys act at every pane size including one below the card's: the waiter never consults the size to decide what a key means, which is what makes "Enter and `d` act at every size" structural rather than a second rule.
 - In this phase both keys hand over to a fresh draw of the waiting panel. Enter's destination is task 4.3's and `d`'s is Phase 5's; nothing reaches this command until the helper composes the chain (task 4.5), so neither is a live wrong behaviour in the meantime.
 
@@ -283,13 +285,14 @@
 **Do**:
 - Add `type resumeDecision struct { Wait bool; Lookup hooks.OnResume }` and `Decision *resumeDecision` on `hydrateConfig` (a pointer so a downgrade taken inside a by-value handler is seen by the caller). Add `resolveResumeDecision(cfg hydrateConfig) *resumeDecision`, called once at the top of `runHydrate`: perform the single `LookupOnResume(cfg.HookKey, hooks.ViaHydrate)` — moving the existing `hook lookup` DEBUG records and the existing lookup-failure WARN here verbatim — read the install default through `loadPrefsStoreNoMigrate()` + `LoadResumeMode()` (error discarded; the returned value is already the shipped default), and set `Wait` when the lookup found a registration carrying a non-empty command and `resumemode.Resolve(lookup.Mode, install)` answers `Lazy`.
 - Add `markPendingThenUnsetSkeletonMarker(cfg hydrateConfig)` and call it in place of `unsetSkeletonMarkerOrLog` at all three sites (the replay path in `runHydrate`, `handleHydrateTimeout`, `handleHydrateFileMissing`). When the decision says wait it first resolves `$TMUX_PANE` and `resumeChainExe()` and calls `state.SetResumePendingMarker`; any of the three failing emits exactly one `hydrateLogger.Warn("set resume pending marker failed", "pane_key", …, "error", …)` and sets `Decision.Wait = false`. It then calls `unsetSkeletonMarkerOrLog(cfg)` unchanged.
-- Branch in `execShellOrHookAndExit`: when `cfg.Decision.Wait`, compose and exec the chain; otherwise take today's path, reading the command off `cfg.Decision.Lookup` rather than issuing a second store read.
+- Branch in `execShellOrHookAndExit` on a **nil-tolerant** `cfg.Decision`. A nil decision is today's behaviour unchanged: the function performs its own `LookupOnResume`, emits its own `hook lookup` DEBUG records and its own lookup-failure WARN, and execs the hook or the bare shell exactly as it does now — so the eight direct callers in `cmd/state_hydrate_exec_log_test.go` and `cmd/hooks_read_lock_test.go` compile and pass unmodified. A non-nil decision skips that read: when `cfg.Decision.Wait` it composes and execs the chain, otherwise it takes today's path reading the command off `cfg.Decision.Lookup`.
 - Add `execResumeChainAndExit(cfg hydrateConfig)` composing `shellWords(resumeChainArgv(exe, "resume-draw", payload)) + "; " + shellWords(resumeChainArgv(exe, "resume-recover", payload))`, where `shellWords` (in `cmd/state_resume_chain.go`) quotes every argv element through `shellquote.Single` and joins with a space; emit the existing `exec` INFO and `cfg.ExecShell("/bin/sh", []string{"sh", "-c", chained})`. The payload carries the command from the decision's lookup, the hook key, the pane id and the pane key from `state.PaneKeyFromFIFOPath(cfg.FIFO)`; the report is empty on a first draw.
 - Add `cmd/state_hydrate_lazy_test.go` covering all three tails against injected `HookStore`, `Client` and `ExecShell` seams plus a `logtest.Sink`; re-run the existing hydrate suites and `internal/restore`'s `TestExitClosesRestoredPane_*` / `TestNoParkedShWrapperPostRestore` unchanged.
 - Edit the "Resume hooks" paragraph of CLAUDE.md where it states the helper execs `sh -c '<HOOK>; exec $SHELL'` or a bare `$SHELL`: it now resolves the registration's mode first and, when that resolves lazy, parks a shell running the draw followed by the chain's tail instead.
 
 **Acceptance Criteria**:
 - [ ] A pane with no registration, and one whose registration resolves eager, produce byte-identical behaviour to today on all three tails: no `set-option -p`, no pending marker, the same skeleton-marker clear, the same `exec` argv and the same log records.
+- [ ] `execShellOrHookAndExit` called with a nil `Decision` is byte-identical to today: its own lookup, the same `hook lookup` hit/miss/error DEBUG records, the same lookup-failure WARN and the same exec — the eight existing direct callers pass with no edit.
 - [ ] `TestNoParkedShWrapperPostRestore`, `TestExitClosesRestoredPane_NoHook` and `TestExitClosesRestoredPane_WithHook` pass unmodified — the parked shell exists only on the lazy path.
 - [ ] On each of the three tails in turn, a lazy registration produces the pending `set-option -p` **before** the skeleton marker's unset, asserted on a shared call-order recorder.
 - [ ] A lazy registration execs `/bin/sh -c "<draw argv>; <recover argv>"`, with `;` and not `&&`, and with every interpolated value — the command above all — single-quoted, so a command holding spaces, quotes, `$`, backticks or a newline reaches the draw's flag parser as one token.
@@ -303,6 +306,7 @@
 
 **Tests**:
 - `"it restores a pane with no registration exactly as today"` (table over the three tails)
+- `"it falls back to its own lookup when no decision was resolved"` (nil `Decision`; records and exec unchanged)
 - `"it restores an eager registration exactly as today"` (table over the three tails)
 - `"it marks the pane pending before it clears the mid-restore marker"` (table over the three tails)
 - `"it parks the draw and the tail in one shell for a lazy registration"`
@@ -318,6 +322,7 @@
 - `"it treats an empty stored command as no registration"`
 
 **Edge Cases**:
+- A nil `Decision` is today's behaviour rather than a panic. `execShellOrHookAndExit` is reached directly by eight existing suites that build a `hydrateConfig` without one, and resolving the decision is `runHydrate`'s job — a call that arrives without one performs the lookup itself, which is exactly what the function does today. Making the field's absence mean "nobody decided" is what keeps the new branch beside the existing behaviour rather than inside it.
 - A pane with no registration and one that resolves eager are byte-identical to today, marker and all — the eager path is the whole of today's behaviour and the new branch sits beside it rather than inside it, which is what keeps the existing no-parked-shell and first-`exit`-closes-the-pane guarantees intact.
 - The mode is resolved and the marker set before the mid-restore marker is cleared on every tail the helper ends on — the replay, the signal timeout and the missing scrollback file alike. Deciding it after the clear would open the very window this rule closes: the saver truncates the pane's saved transcript and writes the card over the end of it, the whole failure in the space between two steps.
 - A pane that cannot be marked fires the hook as an eager registration does and records one WARN naming the pane and the error that refused it: a wait with no marker on the pane is the one state the design refuses, and landing the user where eager would have put them is the degradation this feature already accepts.
@@ -358,7 +363,7 @@
 
 **Do**:
 - Add `resumeResizeSettle = 150 * time.Millisecond` to `cmd/state_resume_wait.go` and three seams on `resumeWaitConfig`: `Winch <-chan os.Signal` (production: `signal.Notify` over `syscall.SIGWINCH`), `Settle func(time.Duration) <-chan time.Time` (production: `time.After`), and `Size func() (int, int, error)` (production: the same `term.GetSize` read the draw takes).
-- Restructure the read loop into a `select` over three sources, with a **request-driven** one-byte reader goroutine: the loop sends on a request channel, the goroutine performs exactly one `Read` and sends the byte back on an unbuffered channel. Only one read is ever outstanding, and an outstanding read has consumed nothing, so task 4.2's inherited-bytes guarantee survives the restructure.
+- Restructure the read loop into a `select` over three sources, with a **request-driven** one-byte reader goroutine: the loop sends on a request channel, the goroutine performs exactly one `Read` and sends the byte back on an unbuffered channel. Only one read is ever outstanding, so the loop never reads ahead of the byte it is waiting on and task 4.2's inherited-bytes guarantee holds for every key the loop dispatches.
 - On each `Winch` signal, arm `Settle(resumeResizeSettle)`, replacing whatever timer was armed; draw nothing on the signal itself.
 - When the settle timer fires: call `Size`; when it errors, hand over to a redraw at the value it reported (the draw resolves a non-positive or failed size to its own bounded fallback); when it equals `cfg.Width` and `cfg.Height`, drop the window and go on waiting with no exec at all; otherwise restore the terminal, emit the `exec` INFO and `ExecSelf` `resumeChainArgv(exe, "resume-draw", cfg.resumeChainPayload)` — the payload unchanged, so the command and the report ride across.
 - Keys keep priority and keep their meaning: a byte arriving while a settle window is open is dispatched exactly as task 4.2 dispatches it, and the pending redraw dies with the process image.
@@ -373,8 +378,9 @@
 - [ ] A key delivered while a settle window is open is dispatched immediately and produces its own hand-off; no second exec follows from the pending timer.
 - [ ] A `Size` that errors at settle time produces a redraw rather than ending the wait, and the argv it produces is the one the draw resolves to its bounded fallback.
 - [ ] Task 4.2's swallow table, terminal-restore table and non-terminal/raw-mode refusals all pass unchanged against the restructured loop.
-- [ ] At most one read is outstanding at any moment, so no byte is consumed by a read the loop never dispatched.
+- [ ] At most one read is outstanding at any moment, so the loop never reads ahead: a burst delivered after the byte the loop dispatched is still queued for the next process image.
 - [ ] Nothing on the redraw path resolves a theme or renders — the redraw is a handover, so the resting process after it is a fresh wait.
+- [ ] Task 4.2's signal-and-timer source guard passes unchanged with the resize and settle seams in place: the resize notify does not widen to SIGHUP, SIGTERM or SIGINT, and the settle timer neither ends the wait nor clears the report.
 
 **Tests**:
 - `"it draws once for a burst of size changes"`
@@ -396,6 +402,7 @@
 - The redraw carries the command and the report forward so a reported reason survives a resize: the report stands until the next key, and a resize is not a key.
 - The redraw is a handover so the resting process after it is a fresh wait rather than a draw that stayed — a resize is the same handover run backwards, and the resting state goes back to the floor.
 - A size read that fails at settle time redraws at the bounded fallback rather than ending the wait: ending it would hand the pane to the chain's tail and drop the panel over a transient read failure.
+- A byte arriving in the instant between the settle timer firing and the hand-off exec is lost: the outstanding read has already taken it off the tty queue, and the loop — having selected the settle branch — never receives it before the process image is replaced. The window is one scheduling gap wide and sits on the redraw path, where the inherited-bytes guarantee is already bounded by the draw's appearance probe. Nothing is built on a byte surviving it, and closing it would mean either reading ahead, which loses the guarantee outright, or arming a second timer on a wait path that is forbidden one.
 - The settle duration is not stated by the specification, which says only that the redraw is taken "once the size has settled". 150 ms is this task's call: a drag delivers changes every few tens of milliseconds, so the window closes only when the drag stops, and it is short enough that a deliberate single resize redraws without a perceptible pause.
 
 **Context**:

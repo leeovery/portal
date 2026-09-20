@@ -228,7 +228,7 @@
 - [ ] The `resume-wait` argv the draw execs never carries `--drop-input`, so the flag dies with the draw that honoured it.
 - [ ] A drop seam returning an error paints the **waiting panel** carrying that error's text on its report row, execs a waiter on the panel screen, and paints no confirmation — the confirmation is never presented.
 - [ ] A drop seam returning nil paints the confirmation exactly as task 5.2 paints it, with no report.
-- [ ] Nothing on the drop path reads stdin: the seam returns an error and no bytes, and the draw performs no read of its own.
+- [ ] The drop discards the queue rather than reading it: the seam consumes no byte and returns only an error, and nothing between the drop and the paint reads stdin except the appearance probe, which runs after the drop and is bounded by the detect timeout.
 - [ ] `flushTTYInput` errors for a non-tty file descriptor.
 - [ ] On a real pty: bytes written to the master before the flush are not readable from the slave after it, and bytes written after the flush are.
 - [ ] `flushTTYInput` has exactly one call site in the tree outside its declarations and its own tests.
@@ -241,7 +241,7 @@
 - `"it clears the drop flag from the hand-off"`
 - `"it paints the waiting panel with the reason when the drop fails"`
 - `"it paints no confirmation when the drop fails"`
-- `"it reads no byte on the drop path"`
+- `"it consumes no byte on the drop path"` (the seam returns an error and no bytes; the draw's only other stdin read is the injected theme resolver's)
 - `"it errors for a non-tty descriptor"`
 - `"it discards bytes queued before the flush and keeps bytes queued after it"` (real pty, darwin-tagged)
 - `"it touches the input queue in exactly one place"` (source assertion)

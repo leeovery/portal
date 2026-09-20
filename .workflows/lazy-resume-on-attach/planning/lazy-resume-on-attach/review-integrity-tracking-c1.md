@@ -47,8 +47,8 @@ Add to **Edge Cases**:
 - A nil `Decision` is today's behaviour rather than a panic. `execShellOrHookAndExit` is reached directly by eight existing suites that build a `hydrateConfig` without one, and resolving the decision is `runHydrate`'s job — a call that arrives without one performs the lookup itself, which is exactly what the function does today. Making the field's absence mean "nobody decided" is what keeps the new branch beside the existing behaviour rather than inside it.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. The helper's exec is nil-tolerant: no decision means today's behaviour — its own lookup, its own records, its own exec — with the criterion, test and edge case added. Task file and tick body both updated.
 
 ---
 
@@ -120,8 +120,8 @@ Task 4.6, **Acceptance Criteria** — add:
 - [ ] Task 4.2's signal-and-timer source guard passes unchanged with `Winch` and `Settle` in place: the SIGWINCH notify does not widen to SIGHUP, SIGTERM or SIGINT, and the settle timer neither ends the wait nor clears the report.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. The no-timer rule is scoped to the three signals and to any timer that ends the wait or clears a report, stated in 4-2's Do, criterion, test name and edge case, with 4-6 gaining the criterion that re-runs the guard. Both task files and both tick bodies updated.
 
 ---
 
@@ -177,8 +177,8 @@ Task 4.1, **Edge Cases** — add:
 - The appearance probe is the one read the draw performs, and it reads the pane's stdin: under an adaptive pair it writes the background-colour query and then reads until a terminator or `appearanceDetectTimeout`, discarding whatever else was queued. A keystroke typed inside that window on a redraw is therefore swallowed rather than inherited by the waiter — the single narrowing of task 4.2's inherited-bytes guarantee, bounded by that timeout and reachable only on a redraw under an adaptive pair. A constant nomination and `NO_COLOR` read nothing at all. The direction is the safe one and needs no guard of its own: the probe runs before the alternate-screen entry, so it can only reach input that arrived before a screen was painted, which is what the confirmation's own drop rule already requires of every byte.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 5-4's criterion narrows to the drop itself; task 4-1 gains the criterion and the edge case recording the probe as the draw's one stdin read, its ordering and the bounded narrowing of the inherited-bytes guarantee. Both task files and both tick bodies updated.
 
 ---
 
@@ -207,8 +207,8 @@ Name the churn, as the plan's own convention does. Nothing about the design chan
 - Carry the signature through every call site: the two production ones in `internal/tui/model.go` (the `SessionsMsg` arm and the `previewSessionsRefreshedMsg` arm) and the thirty-six `applySessions(…)` calls across the `internal/tui` suites, which pass a nil set and assert exactly as they do today. A suite left at the old arity stops compiling, which is the intended tripwire rather than a reason to keep a second way into the model's session state.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 6-6 names the two production call sites and the thirty-six suite calls, with the compile failure stated as the intended tripwire.
 
 ---
 
@@ -258,8 +258,8 @@ Fix the claim to the property the structure actually holds — no read-ahead, so
 - A byte arriving in the instant between the settle timer firing and the hand-off exec is lost: the outstanding read has already taken it off the tty queue, and the loop — having selected the settle branch — never receives it before the process image is replaced. The window is one scheduling gap wide and sits on the redraw path, where the inherited-bytes guarantee is already bounded by the draw's appearance probe. Nothing is built on a byte surviving it, and closing it would mean either reading ahead, which loses the guarantee outright, or arming a second timer on a wait path that is forbidden one.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. The read-ahead claim is corrected in the Do step and the criterion, and the one-scheduling-gap window is recorded as an accepted edge case beside the appearance probe's.
 
 ---
 
@@ -287,7 +287,7 @@ Say it plainly, in the terms the Edge Case already uses.
 - [ ] A nil pending set marks no row and never panics: every row renders exactly as it does under an empty set.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. The criterion is restated in the terms its own edge case already used.
 
 ---

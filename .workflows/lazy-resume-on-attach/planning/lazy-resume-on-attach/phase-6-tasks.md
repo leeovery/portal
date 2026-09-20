@@ -264,7 +264,7 @@
 - [ ] A session holding several waiting panes carries exactly one dot, because the set is keyed on the session name.
 - [ ] A gone row still replaces the whole trailing region with the badge and shows neither indicator, whatever the pending set says.
 - [ ] Under `NO_COLOR` the four combinations render as nothing, `A`, `P` and `AP`, in the same cells and the same order, with no second row geometry.
-- [ ] A nil pending set marks nothing and panics on no row.
+- [ ] A nil pending set marks no row and never panics: every row renders exactly as it does under an empty set.
 - [ ] The pending dot is `accent.attention`; no raw hex appears at the call site.
 
 **Tests**:
@@ -315,6 +315,7 @@
 - Add one unexported helper on the model that performs both reads in the order sessions-then-pending and returns the sessions, the session-name set and the **session** error only; a nil seam and a failed pending read both yield a nil set, and the pending error never reaches `SessionsMsg.Err`.
 - Route all four fetch sites through it: `fetchSessionsCmd`, `killAndRefresh`, `renameAndRefresh` and `refreshSessionsAfterPreviewCmd`, carrying the set on `SessionsMsg` and `previewSessionsRefreshedMsg`.
 - Extend `applySessions` to take the set alongside the sessions and store it on the model beside `m.sessions`, replacing it wholesale on every load exactly as `m.derivedDirs` is cleared, so nothing survives the list it described.
+- Carry the signature through every call site: the two production ones in `internal/tui/model.go` (the sessions-message arm and the preview-refresh arm) and the thirty-six calls across the `internal/tui` suites, which pass a nil set and assert exactly as they do today. A suite left at the old arity stops compiling, which is the intended tripwire rather than a reason to keep a second way into the model's session state.
 - Point the delegate's `Pending` at the model's set wherever `Selected` and `GoneFlagged` are already pointed, so `rebuildSessionList` re-renders from the cached set and issues no read of its own.
 - Cover in a new `internal/tui` suite over a fake reader: the four refresh paths, the failure and nil-seam degradations, the no-carry-over case, the grouped-rebuild read count, and a multi-tag By-Tag session showing its dot on every row.
 
