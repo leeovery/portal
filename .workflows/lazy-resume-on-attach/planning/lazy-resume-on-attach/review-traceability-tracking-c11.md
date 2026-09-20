@@ -85,8 +85,8 @@ In `planning.md`, the Phase 5 task-table row for `lazy-resume-on-attach-5-6` bec
 | lazy-resume-on-attach-5-6 | A real pane discards its resume | the confirmation is read out of the real pane through `capture-pane` with the pre-reboot transcript intact underneath it, Escape returns the waiting panel in the same run before the discard is driven, after `y` the key is absent from `hooks.json` and every other entry is byte-unchanged, the pane shows its own transcript again with no trace of either screen on it, the pane's durable token is still stamped and its session is still live and still enumerated into a fresh capture, the pending marker is cleared and the pane's saved scrollback resumes being written, the pane closes on the first `exit`, a second reboot of the same fixture restores that pane with no panel and no marker as an ordinary hookless pane, integration lane with isolated state a disposable socket and no daemon, the suite enumerates and signals no process it did not cause to exist |
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 5-6's sub-item (e) now reads the pane after `y`, and the task gains the matching acceptance criterion, the test `"it reveals the transcript that was underneath the confirmation"` and its edge case; Phase 5's task-table row carries the same clause. Tick body re-synced and byte-verified.
+**Notes**: Verified in the task before applying: its `capture-pane` reads sit at subtests (a), (b) and (c) and in the second-reboot subtest, with nothing between the `y` and the reboot — so the alternate-screen exit was genuinely unasserted. Task 4-7 carries the equivalent assertion for the resume answer, which is what the new one is modelled on.
 
 ---
 
@@ -153,7 +153,7 @@ Task 6.7's **Edge Cases** — one edge case inserted between the second and thir
 - Under `NO_COLOR` it names the letters rather than two dots the mode cannot tell apart — which is the whole reason the row renders letters there, and the legend inherits it by sharing the renderer rather than by a second rule.
 ```
 
-**Resolution**: Pending
-**Notes**: The plan's Phase 6 task table already lists "the wording states what the indicator means and names no tool" in this task's edge-case column, so no edit to `planning.md` is required — this restores the task file to what the table already states.
+**Resolution**: Fixed — task 6-7 gains the acceptance criterion, the test `"it names no tool in either legend label"` and the edge case, restoring the task file to what the phase table already states.
+**Notes**: Verified before applying — `tool-agnostic` appeared twice in the task, both in Context, and in no criterion, test or edge case. The plan's Phase 6 task table already lists "the wording states what the indicator means and names no tool" in this task's edge-case column, so no edit to `planning.md` is required — this restores the task file to what the table already states.
 
 ---

@@ -379,6 +379,7 @@
 
 **Acceptance Criteria**:
 - [ ] The Sessions help modal renders a legend row for each indicator, below the key rows, separated by the panel's own divider.
+- [ ] Each legend label says what its indicator means and names no particular tool: the rendered legend rows carry only the indicator forms the row's own renderer produces and the labels this task declares, and no other alphabetic text.
 - [ ] The Projects help body and the preview help body are byte-identical to their pre-change renders, in every built-in theme and in colourless mode.
 - [ ] Under `NO_COLOR` the legend names the letters `A` and `P` — the same forms the row renders — rather than two indistinguishable dots.
 - [ ] The legend's indicators come from the delegate's own renderer, so a change to the row's glyph or token moves the legend with it.
@@ -389,6 +390,7 @@
 
 **Tests**:
 - `"it renders a legend row for each indicator on the Sessions help"`
+- `"it names no tool in either legend label"`
 - `"it leaves the Projects help body byte-identical"`
 - `"it leaves the preview help body byte-identical"`
 - `"it names the letters under NO_COLOR"`
@@ -400,6 +402,7 @@
 **Edge Cases**:
 - The legend is not a keymap entry, so the descriptor-to-dispatch guard neither widens nor advertises a key: the help modal is descriptor-driven and the guard derives dispatch from those descriptors, so an indicator expressed as an entry would demand a binding for a glyph that dispatches nothing.
 - It renders on the Sessions help alone and the Projects help body is byte-unchanged — the indicators exist only on the sessions row, and a legend on the projects page would explain something that page does not draw. The byte-identity is asserted rather than eyeballed, because the legend parameter passes through the shared renderer.
+- The wording states what the indicator means and names no tool. Portal's resume machinery runs whatever command a registration holds, so a pending resume is a pending resume whatever produced it — and this is the one string in the feature whose wording is the executor's and whose surface is the picker's own help, where a tool name would be read as a statement about what Portal is for.
 - Under `NO_COLOR` it names the letters rather than two dots the mode cannot tell apart — which is the whole reason the row renders letters there, and the legend inherits it by sharing the renderer rather than by a second rule.
 - The modal still fits the smallest height it renders at with the extra rows: the panel is centred on the content region and does not scroll, so rows added to it cost height directly.
 - The `?` self-entry skip is unchanged: the legend is a new compartment, not a row in the entries slice, so the body's own filtering is untouched.
