@@ -29,7 +29,7 @@ Add the README edit to task 1.2's **Do** list, beside the CLAUDE.md edit already
 - Edit the `hooks.json` row of the README's configuration table, where it describes the file as `Per-pane resume hooks (pane → event → command)`: an event's value is either the command as a string or an object carrying the command alongside its settings. Both shapes are permanently valid, neither deprecates the other, and there is no migration between them — the writer picks by whether there is anything to carry, so an entry that is only a command stays a plain string and a hand-edited file goes on looking as it does today. Leave the rest of that row — the `hooks.json.lock` sentence — exactly as it is, and leave every other row of the table alone.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 1-2 gains the README configuration-table edit alongside the CLAUDE.md row it already carried; task file and tick body both updated.
 
 ---
