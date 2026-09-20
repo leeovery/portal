@@ -230,7 +230,7 @@ Add to the same task's **Edge Cases**:
 - The resident size is asserted against the daemon's 22 MB ceiling rather than against the ~2 MB estimate: the estimate is a guess at what Portal's startup touches, and pinning a test to it would fail on a change that costs nothing, while the ceiling catches the failure that matters — a draw that did not hand off, or a wait path that kept the rendering pages resident, which would put a full waiting set back where the eager path was.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Auto-approved and applied verbatim. Task 4-7's process-tree read gains the resident-size column, the criterion asserting the resting tree below the daemon's measured 22 MB ceiling, the test name and the edge case explaining why the ceiling rather than the estimate — in both the task detail file and the tick task body.
 
 ---
