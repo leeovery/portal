@@ -16,6 +16,7 @@
 - Cover the helpers in `internal/state/markers_test.go` over a pane-writer mock modelled on the existing `writerMock` (recording target, name and value), including error propagation and the "does not call the other method" pair the skeleton-marker tests already assert.
 - Pin the client method's argv in `internal/tmux/tmux_test.go` through `commandertest.Scripted`, and add `internal/tmux/pane_option_realtmux_test.go` (unit lane, `tmuxtest.SkipIfNoTmux`, disposable `tmuxtest.New` socket) round-tripping set → format read → unset → read → a second unset, plus an unset against a target no live pane answers to.
 - Edit the `state` row of CLAUDE.md's package table so the marker-helpers clause names `@portal-resume-pending` as the pane-scoped pending marker with its set/unset helpers and its presence rule, beside `@portal-restoring`.
+- Edit the `tmux` row of CLAUDE.md's package table in the two places `UnsetPaneOption` falsifies: the options clause, where `SetPaneOption` is followed by `UnsetPaneOption` — the pane-scoped `set-option -pu -t <pane> <name>` remover the pending marker is cleared through — and the list of methods handed an already-composed target, which gains `UnsetPaneOption` beside `SetPaneOption`.
 
 **Acceptance Criteria**:
 - [ ] `state.ResumePendingOption` is the only spelling of `@portal-resume-pending` in the tree — no format string, option argument or test restates the literal.

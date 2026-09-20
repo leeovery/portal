@@ -54,8 +54,8 @@ and, in the same task's `Acceptance Criteria`:
 - [ ] Exactly one hook-store lookup and one prefs load happen per helper run, whichever tail it ends on — the lookup read off the single `hook lookup` record in the sink, the prefs load off a counting `LoadPrefsStore` seam, on all three tails.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 4-5 gains `LoadPrefsStore func() (*prefs.Store, error)` on `hydrateConfig`, nil-defaulting to `loadPrefsStoreNoMigrate`; the decision reads the install default through that seam; the test-file bullet lists it beside the other injected seams; and the counting criterion is restated to the single `hook lookup` record plus one call on the seam. Tick body re-synced and byte-verified.
+**Notes**: Verified before applying — `hydrateConfig` already carries `ExecShell`, `OpenFIFO`, `HandleFileMissing` and `HandleTimeout` as nil-tolerant func fields (`cmd/state_hydrate.go:40-43`), and task 4.1 already puts this same non-migrating prefs read behind a `ResolveTheme` seam, so the shape is the plan's own rather than a new convention.
 
 ---
 
@@ -85,8 +85,8 @@ Name the two readers in the same bullet that names the other call sites, and say
 - Change `Snapshot` to `map[string]map[string]Registration`, and carry the change through the store: `Set` keeps its current `command string` parameter here and stores `Registration{Command: command}`; `classifySet` compares the registration that will be written against the stored one on both command and mode, so rewriting a mode-carrying entry with a bare command is a `modify` rather than a `set-noop`; `removedValue` renders each event's `Command`; and `LookupOnResume` and `List`, the two readers that take the inner map's value rather than its keys, read `.Command` off it. Both keep their current signatures here — reporting the mode they can now see is the next task's work, and nothing in this one should pull it forward.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 1-2's Snapshot bullet now names `LookupOnResume` and `List` as the two readers that take the inner map's value, says they read `.Command` off it, and pins both to their current signatures with the mode left to the next task. Tick body re-synced and byte-verified.
+**Notes**: Verified in the tree before applying: `LookupOnResume` at `internal/hooks/lookup.go:14` does `cmd, ok := events[EventOnResume.String()]` and `List` at `internal/hooks/store.go:227` ranges the inner map into `Hook{Command: command}` — both break on the value-type change exactly as the finding states.
 
 ---
 
@@ -131,5 +131,5 @@ Task `lazy-resume-on-attach-4-4`, last `Do` bullet:
 - Extend CLAUDE.md's `tmux` package row in the two places `ReadPaneOption` falsifies: the options clause, where it joins `SetPaneOption` and `UnsetPaneOption` as the single-pane read — a `show-options -p -t <target>` existence probe naming no option followed by the `display-message -F` format read, taking that shape for the same reason `ResolveHookKey` does, since the format read alone answers a target no live pane answers to with exit 0 and an empty string — and the list of methods handed an already-composed target, which gains `ReadPaneOption`.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 2-1 gains a `tmux`-row doc bullet covering both places `UnsetPaneOption` falsifies (the options clause and the composed-target method list), and task 4-4's bullet is restated to do the same two for `ReadPaneOption` alone rather than carrying 2-1's half. Both tick bodies re-synced and byte-verified.
+**Notes**: Verified in CLAUDE.md before applying: the `tmux` row names `SetPaneOption` in the options enumeration and again in the list of methods that declare `Target`, and nothing in the plan reached the second one.
