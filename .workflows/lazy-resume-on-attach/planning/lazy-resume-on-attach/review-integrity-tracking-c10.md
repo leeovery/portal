@@ -73,8 +73,8 @@ Phase 3 task table, row `lazy-resume-on-attach-3-5`:
 | lazy-resume-on-attach-3-5 | The theme the panel draws in | a constant nomination writes nothing to the terminal and paints from the first frame, the reply is read from a fresh `/dev/tty` open because `os.Stdin` refuses a read deadline on a terminal, the pair's query races the picker's own timeout constant rather than a second copy, the first to resolve wins and a late reply never flips a resolved answer, no answer an unparseable reply or a stdout that is not a terminal all resolve dark by the same route, a pane drawn with no client attached resolves dark with no second rule, NO_COLOR runs no detection at all and writes no query, the terminal's mode is restored on every path including the timeout and a read failure, no OSC 11 set is ever written from a pane draw |
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 3-5's probe gains an `openReader` seam whose production binding is `os.OpenFile("/dev/tty", os.O_RDONLY, 0)` rather than `os.Stdin`, with the measurement stated in line; the body returns dark without writing on a failed open and the restore closes the reader; a darwin-tagged `pane_appearance_realtty_test.go` pins the deadline against a real pty; three criteria, four test names and one edge case follow. Phase 3's task-table row carries the same clause. Tick body re-synced and byte-verified.
+**Notes**: Reproduced the measurement independently before applying, on a real pty slave on this machine (darwin, Go 1.27.1): `os.NewFile(tty.Fd())` answers `SetReadDeadline` with `file type does not support deadline`, while `os.OpenFile(tty.Name(), os.O_RDONLY, 0)` accepts it and the subsequent read returns `i/o timeout` at 52ms against a 50ms budget. The pty was opened and closed inside the probe program; no tmux server and nothing on the developer's machine was touched.
 
 ---
 
@@ -108,8 +108,8 @@ State the criterion as the behaviour the Do already pins ("one-byte buffer per i
 - `"it acts on the first acting key in a burst and leaves the rest unread"`
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 4-2's burst criterion now says the `y` is left unread and still readable from the reader after the hand-off, and the test name follows it. The edge case was already correct and is unchanged; phase 4's task table never carried the wrong wording. Tick body re-synced and byte-verified.
+**Notes**: The criterion was the only place stating the opposite rule, so the fix is one criterion and one test name.
 
 ---
 
@@ -137,5 +137,5 @@ Restate the criterion in the terms the phase actually delivers — six named sur
 - [ ] Both screens are reachable by name at a chosen theme — framed, carrying a report, and degraded — each at a size the surface pins rather than one reached by resizing a terminal, for visual check against the committed reference frames `resume-panel-waiting-nord.png` and `resume-panel-discard-confirm-nord.png`, and against Portal's existing modal grammar, which both screens are built from.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — Phase 3's final acceptance criterion is restated as the screens being reachable by name at a chosen theme, framed / reported / degraded, each at a size its surface pins.
+**Notes**: Verified before applying: `cmd/capturetool/main.go:36-37` declares `--fixture` and `--theme` and no other flag, so there is no width control for the old wording to have meant. planning.md only — no task body changed and no tick re-sync needed.

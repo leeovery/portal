@@ -97,7 +97,7 @@
 - [ ] `\r` and `\n` each produce exactly one hand-off; `d` produces exactly one hand-off; each is preceded by one `exec` INFO carrying `target` and `args`.
 - [ ] `0x03` (Ctrl-C), `0x04` (Ctrl-D), `0x1a` (Ctrl-Z), `0x1b` (Escape), `D`, `y`, `q` and a run of ordinary printable text each produce no hand-off, no write to stdout, and leave the loop running.
 - [ ] A three-byte escape sequence (`\x1b[A`) produces no hand-off — each of its bytes is discarded on its own, so no sequence assembles into an action.
-- [ ] A burst delivering `dy` in one write produces exactly one hand-off (the `d`) and the `y` is discarded, because nothing on this screen acts on `y`.
+- [ ] A burst delivering `dy` in one write produces exactly one hand-off (the `d`) and leaves the `y` unread — still readable from the reader after the hand-off — because the loop takes the byte it dispatched and no further, so whatever the hand-off execs inherits the rest.
 - [ ] The terminal restore runs on every path out: an answered key, a read error, an EOF, and a `MakeRaw` that succeeded followed by any later failure.
 - [ ] A stdin that is not a terminal, and a `MakeRaw` that fails, each return an error without reading a byte, without writing, and without exec'ing.
 - [ ] The restore runs **before** the hand-off exec, so the next process image inherits a cooked tty.
@@ -111,7 +111,7 @@
 - `"it hands the pane over on d"`
 - `"it swallows every other key"` (table: `\x03`, `\x04`, `\x1a`, `\x1b`, `D`, `y`, `q`, `a`, ` `)
 - `"it swallows the bytes of an escape sequence without assembling an action"`
-- `"it acts on the first acting key in a burst and swallows the rest"`
+- `"it acts on the first acting key in a burst and leaves the rest unread"`
 - `"it restores the terminal on every exit path"` (table: answered, read error, EOF)
 - `"it restores the terminal before the hand-off exec"`
 - `"it refuses to wait on a stdin that is not a terminal"`
