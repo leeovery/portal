@@ -73,7 +73,7 @@ Task `lazy-resume-on-attach-3-2`, **Edge Cases** — replace that bullet with:
 - The plain stack keeps every part its screen's builder hands it, including the report row — which parts a screen stacks is the screen's own decision, and which of them survive is decided by the pane's rows, not by the ladder.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 3-3's Do bullet drops the `ON RESUME` label from the plain stack and says why, its one stack criterion becomes two (the label's absence, and the four-row pane with a two-row command), and its Tests gain the label-drop and four-row entries. Task 3-2's ladder edge case is reworded so which parts a screen stacks is the screen's decision, and phase 3's task table carries the same sentence. Both tick bodies re-synced from the amended file and byte-verified.
+**Notes**: Verified against the specification before applying: §5.2 states the small-pane form as "the title, the command and the key hints", while the `ON RESUME` label appears only in §5.1's card Body and in the `NO_COLOR` list of card elements. The report row is kept in the stack deliberately — it is conditional content, and §5.3's post-discard redraw puts a reason on it at a size where both keys must still act. Phase 3's acceptance bullet needed no change: "both screens drop the frame and stack their parts plainly" is already per-screen.
 
 ---

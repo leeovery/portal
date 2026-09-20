@@ -105,7 +105,7 @@
 **Edge Cases**:
 - The threshold is measured off the card just built rather than a restated dimension — the card's content width is pinned in task 3.1, and a later change to it must move the fallback point with it rather than leaving a pane that renders a clipped frame.
 - A pane one column or one row short of the card gets the plain stack rather than a clipped frame: a frame missing its right edge reads as a rendering fault, and a frame missing its bottom rows hides the key hints.
-- The plain stack keeps every part the card carried, including the report row — the parts are the screen's, and which of them survive is decided by the pane's rows, not by which screen is drawing.
+- The plain stack keeps every part its screen's builder hands it, including the report row — which parts a screen stacks is the screen's own decision, and which of them survive is decided by the pane's rows, not by the ladder.
 - Content is clamped to the pane's rows and columns rather than overflowing: a render taller than the pane would scroll the pane's primary buffer, which is where the user's replayed transcript is sitting.
 - The smallest pane a restore can produce still draws the title, the command and the key hints — asserted at a realistically small pane as well as at the degenerate `1x1`, where the single row must be the title.
 - A non-positive width or height falls back to a bounded render rather than panicking: the drawing process reads the pane's size from its environment and can be handed a zero.
@@ -139,7 +139,7 @@
 - Add `internal/tui/resume_panel.go` with the constants `resumePanelTitle = "Resume session"`, `resumePausedBadge = "● PAUSED"`, `resumeCommandLabel = "ON RESUME"`, `resumeKeyResume = "⏎"`, `resumeLabelResume = "resume"`, `resumeKeyDiscard = "d"`, `resumeLabelDiscard = "discard"` — the whole of the screen's fixed copy, each verbatim from the specification.
 - Declare the exported render input beside them: `type ResumeScreen struct { Command, Report string; Width, Height int; Theme theme.Theme; Colourless bool }`, and `func RenderResumePanel(s ResumeScreen) string` routing through `renderPaneScreen` with the card and stack builders below.
 - Build the card through `renderJoinedPanel` with three compartments: header `renderHeaderWithBadge(title, resumeCardContentWidth, true, resumePausedBadge, …)` with the title in `text.primary` bold; body `resumeCommandLabel` in `accent.primary`, then `resumeCommandRows(s.Command, resumeCardContentWidth, th.TextPrimary, false, …)`, then the report row from `resumeReportRow` when it reports one; footer `renderConfirmCancelFooter(resumeKeyResume, resumeLabelResume, resumeKeyDiscard, resumeLabelDiscard, …)`.
-- Build the plain stack from the same pieces at the pane's width: the title row (with the badge appended after a gap when the width holds both, title alone when it does not), the label, the command rows wrapped to the pane's width, the report row when present, then the key-hint row.
+- Build the plain stack from the same pieces at the pane's width: the title row (with the badge appended after a gap when the width holds both, title alone when it does not), the command rows wrapped to the pane's width, the report row when present, then the key-hint row. The `ON RESUME` label belongs to the card and is not stacked: the small-pane form is the title, the command and the key hints, and every row ahead of the hints is a row the pane's top-down clamp can cost them.
 - Add the badge-text parameter to `renderHeaderWithBadge` in `internal/tui/edit_modal.go`, cutting the hidden-badge blank to the passed badge's width, and pass `editModeIndicator` from `editModalHeaderRow` and `renameModalHeaderRow`.
 - Cover the panel in `internal/tui/resume_panel_test.go` over `testDarkTheme(t)` / `testLightTheme(t)` and both colourless values, asserting on stripped text, on SGR parameter runs for the token roles (as `rename_modal_test.go` does for the badge), and on `lipgloss.Width` for the geometry; re-run the rename and edit modal suites unchanged.
 - Add one clause to the `tui` row of CLAUDE.md's package table naming `resume_panel.go` / `resume_panel_parts.go` / `resume_pane_canvas.go` as the pane-drawn resume panel's renderers — exported pure functions over the shared card grammar, not a Bubble Tea component.
@@ -151,7 +151,8 @@
 - [ ] The card's rendered width is identical for a one-character command, a three-line command, a long report and an empty report — no content moves the frame.
 - [ ] The rename modal and the edit modal render byte-identically to before the badge parameter (their existing suites and the kill/delete byte-exact goldens all pass unchanged).
 - [ ] Under `colourless` the stripped render is identical to the coloured one, so `●`, `PAUSED`, `ON RESUME`, `⏎` and `d` carry the state with no hue.
-- [ ] Below the card's size the panel renders the plain stack carrying the title, the label, the command, the report when present and the key hints, and never an empty screen.
+- [ ] Below the card's size the panel renders the plain stack carrying the title, the command, the report when present and the key hints, and never an empty screen; the `ON RESUME` label is absent from it.
+- [ ] A four-row pane holding a command that wraps to two rows renders the title, both command rows and the key hints — the stack spends no row on anything the small-pane form does not carry.
 - [ ] Stripping the fixed constants and the caller's command and report from the rendered screen leaves no alphabetic text — the screen names no tool and carries no copy beyond what this task declares.
 - [ ] `internal/tui`'s colour-literal guard passes with no exemption added.
 
@@ -164,6 +165,8 @@
 - `"it carries the report row between the command and the key hints"`
 - `"it renders the same card width whatever the command the report or the badge"` (table)
 - `"it renders the plain stack below the card's size"`
+- `"it drops the ON RESUME label from the plain stack"`
+- `"it renders the title the command and the key hints in a four-row pane"` (command wrapping to two rows)
 - `"it draws the title the command and the key hints at the smallest pane"`
 - `"it carries no copy beyond its own constants and the caller's text"`
 - `"it renders every state through glyphs and words under NO_COLOR"`
