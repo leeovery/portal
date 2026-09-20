@@ -108,7 +108,7 @@
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "auto",
-          "review_cycle": 3,
+          "review_cycle": 4,
           "phase": 7,
           "task": null,
           "task_map": {
@@ -180,7 +180,8 @@
             "review-traceability-tracking-c2": "complete",
             "review-integrity-tracking-c2": "complete",
             "review-traceability-tracking-c3": "complete",
-            "review-integrity-tracking-c3": "complete"
+            "review-integrity-tracking-c3": "complete",
+            "review-traceability-tracking-c4": "in-progress"
           }
         }
       }
