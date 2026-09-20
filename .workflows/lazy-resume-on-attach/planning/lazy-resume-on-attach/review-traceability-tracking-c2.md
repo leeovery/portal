@@ -80,8 +80,8 @@ The rig already exists: task 4.7 boots a real subject that is holding the panel,
 - A pane captured while it is still waiting is the only case in which the freeze's whole purpose is observable: its saved record is the token-matched merge's output, its scrollback file is one nothing has rewritten since it paused, and the panel that comes back is drawn afresh from a registration that was never fired. Every other check of those three stops at an in-memory index, a computed reference set, or the path a record names — none of them reaches the bytes a second restore replays, and the loss they are guarding against is silent when it happens.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 4-7 gains the second capture-and-reboot step in the middle of its ordered subtests (later letters shifted), two acceptance criteria, two test names and the edge case; Phase 4 gains the acceptance criterion. Task file and tick body both updated.
 
 ---
 
@@ -148,7 +148,7 @@ The behaviour is already directed in the task's steps ("a non-`ErrNotExist` read
 > **Corrigendum 2026-09-19**: a file that cannot be read at all resolves the same way — the shipped default arriving by the ordinary route rather than a second rule. The reason is stated with it: a panel can be answered in a keystroke, while a resume the user did not want cannot be taken back, so an unreadable preferences file lands the install on the safe side of the setting rather than the convenient one.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 1-5 gains the unreadable-file criterion, its test over a denied read, the edge case and the corrigendum's own words in Context. Task file and tick body both updated.
 
 ---

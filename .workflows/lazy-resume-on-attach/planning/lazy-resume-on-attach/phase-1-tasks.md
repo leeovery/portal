@@ -234,6 +234,7 @@
 **Acceptance Criteria**:
 - [ ] `LoadResumeMode` returns `Eager` for `"eager"` and `Lazy` for `"lazy"`.
 - [ ] It returns `Lazy` for an absent file, an absent key, an empty value, an unrecognised value (`"LAZY"`, `" lazy"`, `"off"`), a non-string value, and a wholly corrupt file.
+- [ ] A `prefs.json` that exists but cannot be read at all answers `Lazy` too — the value is the shipped default alongside whatever error is propagated, so a caller that takes the value meets panels rather than processes.
 - [ ] A wrong-typed `resume_mode` does not zero the rest of the tolerant record: the theme keys and the grouping mode beside it still load.
 - [ ] A hand-set `resume_mode` is still on disk, with its value unchanged, after `Save(ModeByTag)` and after `SaveTheme`/`SaveThemeSlot`.
 - [ ] An install that never set the key has no `resume_mode` in the file after any of those writes.
@@ -244,6 +245,7 @@
 - `"it reads eager and lazy from the persisted key"`
 - `"it answers lazy when the key is missing, empty, unrecognised or wrong-typed"` (table)
 - `"it answers lazy for an absent prefs.json and for a corrupt one"`
+- `"it answers lazy for a prefs.json that cannot be read at all"` (file staged unreadable, as `themetest.DenyRead` stages one)
 - `"it keeps the rest of the record when resume_mode is wrong-typed"`
 - `"it preserves a hand-set resume_mode across a grouping-mode toggle"`
 - `"it preserves a hand-set resume_mode across a theme commit"`
@@ -253,12 +255,15 @@
 
 **Edge Cases**:
 - Missing, empty, corrupt or unrecognised all give lazy — the shipped default — with no error and no repair of the file.
+- A file that cannot be read at all gives lazy as well, and by the same route: the accessor answers the default beside the error rather than leaving the mode undecided, so no caller has to invent a rule for the case. An install whose preferences file has gone unreadable meets panels rather than processes, which is the safe direction — a panel is answered in a keystroke and a resume the user did not want cannot be taken back.
 - A wrong-typed value (a number, an object) does not zero the rest of the tolerant record, because the field's own decoder absorbs it. It carries no mode, and — unlike an unrecognised *string*, which round-trips verbatim — it is not preserved through the next write. That asymmetry is this task's call: the spec requires tolerance and preservation of what the user typed, and a non-string value is not something any version of Portal reads.
 - The strict write-path decode still aborts on a malformed file; the new field must not soften it into a merge.
 - There is no writer: nothing in Portal sets this key, so no test should assert one exists.
 
 **Context**:
 > `prefs.json` holds the install's UI preferences — the theme and the session-list grouping mode — and is where this one lives, as the key `resume_mode`, holding `eager` or `lazy`. It decodes tolerantly and independently like every other field there, and the key is `omitempty` on write, so an install that never set it carries no key.
+>
+> **Corrigendum 2026-09-19**: a file that cannot be read at all resolves the same way — the shipped default arriving by the ordinary route rather than a second rule. The reason is stated with it: a panel can be answered in a keystroke, while a resume the user did not want cannot be taken back, so an unreadable preferences file lands the install on the safe side of the setting rather than the convenient one.
 >
 > There is no surface for changing it. The theme picker is the only preference with a UI, so until a settings screen exists this one is changed by hand-editing the file. That raises the stakes on the default rather than changing where it lives; a settings screen is parked on the roadmap as `preferences-ui`.
 >
