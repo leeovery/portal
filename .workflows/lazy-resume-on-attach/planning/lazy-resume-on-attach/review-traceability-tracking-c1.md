@@ -176,8 +176,8 @@ Add to the same task's **Edge Cases**:
 - Panes beside a waiting one are fully live throughout, and nothing short of a real two-pane window shows it: a waiting pane that captured the client's keyboard is exactly what ruled out the dead pane and every floating overlay, and it is invisible to every seam-driven test in the feature.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Phase 4 gains the sibling-liveness acceptance criterion; task 4-7 gains the second pane in its fixture, the two real-pane assertions, two test names and the edge case — in both the task detail file and the tick task body.
 
 ---
 

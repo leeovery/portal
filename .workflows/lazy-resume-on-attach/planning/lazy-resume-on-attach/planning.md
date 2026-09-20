@@ -127,6 +127,7 @@ status: draft
 - [ ] A clear that fails holds the answer: the panel is drawn again carrying the reason, the key can be pressed again, and neither the hook nor the shell runs while the marker stands.
 - [ ] A waiter torn down with its pane exits; one that exits without handing the pane over leaves the pane on its own transcript, clears the marker, records a WARN if that clear failed, and execs the user's shell either way.
 - [ ] Scrollback replays for every restored pane exactly as it does today, whether or not a resume is pending, and no bootstrap step, step ordering, eager signal pass or global hook changes.
+- [ ] A pane beside a waiting one is fully live throughout: keys sent to it reach its own process, and its content and its capture are untouched by the neighbour holding the panel.
 - [ ] The report row has no timeout: once something is reported it stands until the next keypress redraws the screen.
 - [ ] Enter and `d` act at every pane size, including below the size the card needs, where the frame is gone and the parts stack plainly.
 - [ ] The drawing process loads the same theme setting the picker loads and hands the resulting nomination to the panel's own appearance resolution.

@@ -421,7 +421,7 @@
 
 **Do**:
 - Add `internal/restore/lazy_resume_panel_integration_test.go` (`//go:build integration`, `package restore_test`, `-short` skip, `tmuxtest.SkipIfNoTmux`), with a setup helper modelled on the existing `setupExitClosesPane`: `restoretest.BuildPortalBinaryDir(t)`; `portaltest.IsolateStateForTest(t)` plus `t.Setenv("PORTAL_STATE_DIR", …)` and `state.EnsureDir()`; `PORTAL_HOOKS_FILE` and `PORTAL_PREFS_FILE` pointed into `t.TempDir()`; `portaltest.RegisterStateDirTeardownGuard(t, stateDir)`; `tmuxtest.New(t, "ptl-lazy-")`.
-- Seed two single-pane sessions on that socket: a **lazy subject** whose `hooks.json` entry is the string form (so it inherits the shipped lazy default with no `prefs.json` key set at all) and an **eager control** whose entry carries `resume: eager`. Stamp each pane's own token with `ts.StampPaneToken`, print a distinct recognisable line into each pane before the capture, and give each hook command its own sentinel file so the two cannot be confused.
+- Seed two sessions on that socket: a **lazy subject** whose `hooks.json` entry is the string form (so it inherits the shipped lazy default with no `prefs.json` key set at all) and an **eager control** whose entry carries `resume: eager`. Give the subject's window a second pane holding a plain shell and carrying no registration — the specification's worked example, a left pane that waits beside a right pane the user works in. Stamp each registered pane's own token with `ts.StampPaneToken`, print a distinct recognisable line into each pane before the capture, and give each hook command its own sentinel file so the two cannot be confused.
 - Capture with `state.CaptureStructure`, write `sessions.json` through `state.EncodeIndex`, `restoretest.RebootServer`, restore through `restoretest.NewRestoreOrchestrator` + `restoretest.RestoreWithMarker`, then `restoretest.DriveSignalHydrate` + `restoretest.WaitForSkeletonMarkersCleared`.
 - Assert in ordered subtests: (a) `state.CaptureStructure`'s pending set holds the subject pane's live key and not the control's; (b) `capture-pane -p` on the subject returns the panel's title and both key hints while `capture-pane -a -p` returns the pre-reboot line underneath it; (c) the control's sentinel appears within `restoretest.PaneReactionBudget` and its `capture-pane -p` shows its transcript and no panel; (d) the subject's process tree is exactly one `sh -c` parent over one `portal state resume-wait`, with no `resume-draw` still resident and no second shell; (e) after `send-keys Enter`, the marker clears (poll `tmux.ReadPaneOption`), the subject's sentinel appears, and `capture-pane -p` shows the pre-reboot line with the command's output over it; (f) after `send-keys exit`, the pane is gone within the existing budget on the first press.
 - Take the process-tree reading read-only and scoped: resolve the subject's `#{pane_pid}` from the fixture socket and run `ps -o pid,ppid,command` over that pid and its descendants alone. The suite signals nothing and enumerates no process it did not cause to exist.
@@ -432,6 +432,8 @@
 - [ ] `capture-pane -p` on the subject returns the panel — its title and both key hints — and `capture-pane -a -p` returns the line the pane held before the reboot, intact underneath it.
 - [ ] The eager control fires its hook within the existing pane-reaction budget in the same run, shows no panel, and carries no pending marker.
 - [ ] The subject's process tree under its `pane_pid` is one `sh -c` and one `portal state resume-wait`, and no `portal state resume-draw` survives the hand-off.
+- [ ] While the subject holds the panel, a command sent to its sibling pane with `send-keys` runs in that pane and its output is readable from `capture-pane -p` on the sibling — the waiting pane takes no key that was not sent to it.
+- [ ] The sibling pane carries no pending marker, is absent from the capture's pending set, shows no panel, and its scrollback file is written while the subject's is not.
 - [ ] `send-keys Enter` clears `@portal-resume-pending` on the subject within a bounded poll, produces the subject's sentinel, and leaves the pre-reboot line visible with the resumed command's output over it.
 - [ ] `send-keys exit` closes the subject's pane on the first press, within the same budget the existing restored-pane suite uses.
 - [ ] Every assertion about what Portal concludes goes through Portal's own reads (`state.CaptureStructure`, `tmux.ReadPaneOption`) and every assertion about what the pane shows goes through `capture-pane`; raw tmux is used only to stage the fixture and to send keys.
@@ -443,6 +445,8 @@
 - `"it shows the panel over the pane's own transcript"`
 - `"it fires an eager registration in the same run"`
 - `"it carries one shell parent and one waiter"`
+- `"it leaves the pane beside it live"` (a command sent to the sibling runs there while the subject waits)
+- `"it goes on capturing the pane beside it"`
 - `"it clears the marker and runs the command on Enter"`
 - `"it reveals the transcript that was underneath the panel"`
 - `"it closes the pane on the first exit after the resume"`
@@ -453,6 +457,7 @@
 - An eager registration on the same server restores exactly as today in the same run: the two modes ship live together, and a regression that only shows when both are present is exactly the one a single-mode fixture would miss.
 - Enter reveals the transcript that was underneath the panel and runs the registered command over it — the alternate screen is the whole mechanism by which the panel hides a transcript it never touched, and nothing short of a real pane demonstrates it.
 - The pane closes on the first `exit` after the resume as a restored pane does today: the parked shell's tail must find no marker and add no second shell, which is the corrigendum's whole point and is not observable without a real process tree.
+- Panes beside a waiting one are fully live throughout, and nothing short of a real two-pane window shows it: a waiting pane that captured the client's keyboard is exactly what ruled out the dead pane and every floating overlay, and it is invisible to every seam-driven test in the feature.
 - The pane's process tree carries one shell parent and one waiter rather than a stack of them — the specification accepts exactly one resident shell parent per waiting pane, and a chain that accumulated more would reinstate the resident cost the work exists to remove.
 - Integration lane with isolated state, a disposable socket and no daemon: the suite builds and execs a portal binary, so it belongs behind the tag; it needs no saver, so nothing here may spawn one.
 - The process-tree reading is the one place this suite looks outside tmux. It must resolve pids from the fixture's own pane and signal nothing — the developer's live tmux server and their real `portal state daemon` are present during every run.
