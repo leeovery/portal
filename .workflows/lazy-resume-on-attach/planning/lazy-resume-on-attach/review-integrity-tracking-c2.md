@@ -41,8 +41,8 @@ Carry both values on the decision the mark step already mutates. `resumeDecision
 - [ ] The chain is composed from the executable path and the pane id the mark step resolved: `os.Executable` and `$TMUX_PANE` are each read exactly once per helper run, and the argv the chain carries names those values — so no second resolution can fail after the marker has been written.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. The decision struct gains the executable path and the pane id, the mark step records them before the marker is written, the exec step reads them off the decision, and one criterion pins a single read of each per helper run.
 
 ---
 
@@ -71,8 +71,8 @@ State the draw's production wiring in the same breath the seams are declared, ta
 - Production wiring for the rest of those seams: `Stdout` is `os.Stdout`; `Size` is `term.GetSize` over stdin's fd — the pane's own tty, so the draw makes no tmux call at all and a boot's worth of panes costs none (task 4.6's settle redraw takes the same read); `ExecSelf` is the existing `defaultExecShell`, whose `syscall.Exec` replaces the process image so the drawing process is gone by the time the pane is waiting, and whose return path is already the WARN plus non-zero exit this task's acceptance criterion describes.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 4-1 now states the production binding for every seam it declares — standard output, the terminal size read over the pane's own input, and the existing shell-exec helper that replaces the process image.
 
 ---
 
@@ -100,8 +100,8 @@ Resolve it through the `resumeChainExe()` the chain already owns, at the moment 
 - Dispatch through two named package functions, `resumeAnswerEnter(cfg) error` and `resumeAnswerDiscard(cfg) error`, both of which here resolve the binary through `resumeChainExe()`, restore the terminal and `ExecSelf` a fresh `resume-draw` carrying the payload unchanged (`resumeChainArgv(exe, "resume-draw", cfg.resumeChainPayload)`), each preceded by the existing `exec` INFO. A `resumeChainExe()` that fails is returned as the wait's ending condition, exactly as a read error is — the pending marker is still set, so the chain's tail recovers the pane to a usable shell rather than leaving a pane whose keys silently do nothing. Every later hand-off in the chain resolves the same way. Task 4.3 re-points `resumeAnswerEnter`; Phase 5 re-points `resumeAnswerDiscard`.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Both hand-offs resolve the binary through the chain's own helper, and a failure returns as the wait's ending condition so the tail recovers the pane rather than leaving its keys inert.
 
 ---
 
@@ -129,5 +129,5 @@ Name the package where it first appears. `github.com/charmbracelet/x/term` is th
 - Add the probe behind a struct of seams — `out io.Writer`, a reader exposing `Read` plus `SetReadDeadline`, `isTerminal func() bool`, `makeRaw func() (restore func(), err error)`, and `timeout time.Duration` defaulted from `appearanceDetectTimeout` — with the production constructor binding `os.Stdout`, `os.Stdin`, `term.IsTerminal(os.Stdin.Fd())` and `term.MakeRaw`/`term.Restore`, over `github.com/charmbracelet/x/term`. That package is already in the module graph as an indirect requirement of the Bubble Tea stack and carries the `uintptr`-fd shape these calls are written against, so this edit promotes it to a direct requirement in `go.mod` rather than adding a module; it is also where the chain's later terminal calls come from — the waiter's raw-mode entry and the draw's size read alike — so one package serves all of them.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 3-5 names the terminal package the plan's own call signature selects, recording that it is already in the module graph indirectly and that the promotion serves the whole chain.
