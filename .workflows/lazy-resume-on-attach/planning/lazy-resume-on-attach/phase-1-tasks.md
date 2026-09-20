@@ -16,6 +16,7 @@
 - Add `Parse(s string) (Mode, bool)` — the single recogniser, matching the two spellings exactly with no trimming, no case folding and no prefix matching; every other input, the empty string included, answers `(Unset, false)`. Its two callers apply opposite policies to that `false` (a stored value tolerates it and carries no mode; the CLI flag refuses it), so `Parse` itself decides nothing beyond recognition.
 - Add `Resolve(registration, install Mode) Mode`: a registration that names a mode wins outright; otherwise the install's mode if it names one; otherwise `Default`. It is total — it never answers `Unset`.
 - Add `internal/resumemode/leaf_guard_test.go` modelled on `internal/nanoid/leaf_guard_test.go`: `sourceguardtest.AssertDepsWithin(t, resumeModePkg, nil, sourceguardtest.ForbiddingThirdParty(), lane)` over every lane in `sourceguardtest.Lanes()`.
+- Add a `resumemode` row to CLAUDE.md's package table, beside the other leaves: the closed eager/lazy vocabulary — the `Mode` kind with its `Unset` zero meaning "names no mode", the two on-disk spellings, the single strict `Parse` that recognises those two words and nothing else, the shipped `Default` (lazy), and the `Resolve` that answers a registration's mode against the install's — stdlib-only, so `internal/hooks` and `internal/prefs` can each reach it without an edge between them, pinned by its own dependency guard across both lanes.
 
 **Acceptance Criteria**:
 - [ ] `resumemode.Parse` recognises `"eager"` and `"lazy"` and nothing else; `"Lazy"`, `"LAZY"`, `" lazy"`, `"lazy "`, `"laz"`, `"lazyy"` and `""` all answer `(Unset, false)`.
@@ -67,6 +68,7 @@
 - Implement `MarshalJSON` on the value receiver: emit the retained raw bytes when they are present (an entry nobody replaced), otherwise the plain string form when `Resume` is unset and the `{"command":…,"resume":…}` object form when it is not. A registration a mutation builds carries no raw, so it is written in the shape its own content chooses.
 - Change `Snapshot` to `map[string]map[string]Registration`, and carry the change through the store: `Set` keeps its current `command string` parameter here and stores `Registration{Command: command}`; `classifySet` compares the registration that will be written against the stored one on both command and mode, so rewriting a mode-carrying entry with a bare command is a `modify` rather than a `set-noop`; `removedValue` renders each event's `Command`.
 - Update the `hooks.Snapshot` literals in `internal/hooksweep/sweep_test.go` and `internal/hooksweep/decline_error_test.go` to the new value type, and confirm `StaleKeys`, `narrowToSnapshot`, `hooksweep` and `cmd/doctor.go`'s `checkStaleHooks` still compile and pass untouched — they read keys and lengths only.
+- Edit the `hooks` row of CLAUDE.md's package table where it says the store holds per-pane on-resume commands: an event's stored value is a `Registration` decoded from either a JSON string (the command alone) or a JSON object (`command` plus `resume`), both shapes permanently valid with no migration between them; an entry a mutation did not name is re-emitted from the bytes it was decoded from, so an attribute the reader does not model and a `resume` value it cannot make sense of both survive a sibling's rewrite; and a value that is neither string nor object never fails the load for its neighbours.
 
 **Acceptance Criteria**:
 - [ ] A string value loads as a registration carrying that command and no mode; an object carrying `command` and `resume` loads as that command and that mode.
@@ -230,6 +232,7 @@
 - Add `LoadResumeMode() (resumemode.Mode, error)` over the tolerant `readFile`, returning `resumemode.Parse`'s answer when it recognises the stored string and `resumemode.Default` otherwise; a non-`ErrNotExist` read error propagates alongside `resumemode.Default`, as `Load` does with `ModeFlat`.
 - Add `github.com/leeovery/portal/internal/resumemode` to `prefsMayImport` in `internal/prefs/leaf_guard_test.go`; add no writer — there is no surface for changing this setting and nothing in Portal writes it.
 - Update the `prefs.json` row of the README's config table to name `resume_mode` alongside the grouping mode and the theme keys, stating that it holds `eager` or `lazy` and is the install-wide default a registration that names no mode of its own inherits.
+- Edit the `prefs` row of CLAUDE.md's package table: add the `resume_mode` key to the literal key shape it enumerates, state that the field decodes tolerantly and independently like every other one there — missing, empty, corrupt, unrecognised or a file that cannot be read at all all give the shipped default, lazy — and that nothing in Portal writes it; and widen the leaf clause from stdlib plus `fileutil` only to stdlib plus `fileutil` plus `internal/resumemode` only, leaving the no-`internal/log` rule and its reasoning exactly as they are.
 
 **Acceptance Criteria**:
 - [ ] `LoadResumeMode` returns `Eager` for `"eager"` and `Lazy` for `"lazy"`.
@@ -343,6 +346,7 @@
 - Print no header, footer or summary line: the install-wide default is not part of this output.
 - Update the expected-output strings in `cmd/hooks_test.go` (`TestHooksListCommand`, `TestHooksListLocationColumn`) for the extra field, and stage an object-form fixture through `hooksFileInTempDir`'s underlying `hookstest.StageStore` raw `Seed` for the new cases.
 - Update the `hook list` line in the README's `hook` example block to describe the fifth column and what an empty cell means.
+- Edit CLAUDE.md's **Resume-hook command** paragraph where it describes the location column as "a fourth tab-separated column after key/event/command": the location column is followed by a fifth holding the registration's mode — `eager`, `lazy`, or empty when it carries none — taken from the store read the listing already performs, so no second tmux read is added and the first four columns stay byte-identical for a positional parser.
 
 **Acceptance Criteria**:
 - [ ] Each row is five tab-separated fields ending in a newline, and the first four are byte-identical to today's output for the same store and the same live panes.

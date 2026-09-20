@@ -71,8 +71,8 @@ Task 1.7 — final **Do** bullet, with one bullet added after it:
 - Edit CLAUDE.md's **Resume-hook command** paragraph where it describes the location column as "a fourth tab-separated column after key/event/command": the location column is followed by a fifth holding the registration's mode — `eager`, `lazy`, or empty when it carries none — taken from the store read the listing already performs, so no second tmux read is added and the first four columns stay byte-identical for a positional parser.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Four documentation bullets added, one on each falsifying task: the vocabulary row on 1-1, the store's stored-value description on 1-2, the preferences key shape and widened leaf clause on 1-5, and the listing's fifth column on 1-7. Task files and tick bodies both updated.
 
 ---
 
@@ -114,7 +114,7 @@ Task 6.2 — fifth **Do** bullet:
 - Doc edits ride with the tasks that falsify them, as the earlier phases did: the README's doctor paragraph describes the host-terminal check but says nothing today about informational lines, so one added sentence introduces the category and the pending-resume line, and the resume-mode task extends that same sentence; CLAUDE.md's tmux row enumerates the client's pane-enumeration methods, and one line covers the new read.
 ```
 
-**Resolution**: Pending
-**Notes**: Task 6.3's own bullet ("Extend the README's `xctl doctor` sentence about informational lines to name the resume-mode line beside the pending-resume one") needs no change once 6.2 creates that sentence.
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 6-2's bullet is restated as the addition it is, anchored to the host-terminal sentence that does exist, and the Phase 6 planner's-call bullet is corrected alongside. Task 6-3's own bullet needs no change. Task 6.3's own bullet ("Extend the README's `xctl doctor` sentence about informational lines to name the resume-mode line beside the pending-resume one") needs no change once 6.2 creates that sentence.
 
 ---

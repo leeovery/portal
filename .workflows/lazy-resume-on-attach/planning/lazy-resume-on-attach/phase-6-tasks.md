@@ -77,7 +77,7 @@
 - Append the result in `runDoctorDiagnosis` after the conditional host-terminal append, so the informational lines trail the pass/fail catalog and a reader can expect a given check at a given place.
 - Add no repair: `runDoctorFix` gains nothing, because a pending resume is a decision waiting for the user rather than a fault to reverse.
 - Add `cmd/doctor_pending_resume_test.go` driving the command with an injected `PendingResumes` seam over the four cases (a count, zero, a read error, a down runtime) and asserting the rendered line, the exit code and the summary's counts.
-- Edit the `xctl doctor` paragraph of the README: the sentence that names the host-terminal line as informational no longer claims it is the only one — it names the pending-resume line beside it, stating that it reports how many panes are waiting and never affects the exit code.
+- Add a sentence to the `xctl doctor` paragraph of the README, after the one describing the host-terminal check: the report also carries informational lines that state rather than judge — the pending-resume line reporting how many panes are holding a resume decision — and, like the host-terminal line, they never affect the exit code. The paragraph makes no claim today about which lines are informational, so this is an addition rather than a correction of an existing sentence.
 
 **Acceptance Criteria**:
 - [ ] The rendered report carries one line for the pending count, after the pass/fail catalog, with the marker `checkInfo` renders.
