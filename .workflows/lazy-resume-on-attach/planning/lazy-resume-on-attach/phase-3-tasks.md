@@ -79,7 +79,7 @@
 **Do**:
 - Add `internal/tui/resume_pane_canvas.go` with `fillPaneCanvas(view string, w, h int, th theme.Theme, colourless bool) string`: clamp to `h` rows, pad every row to `w` through `padLineToCanvasWidth` over a canvas-background style, backfill mid-line gaps through `backfillCanvasBackground` / `canvasBgParams` as the picker's fill does, and pad short renders with blank canvas rows — with no gutter inset and no theme-panel composite. The colourless path routes through `fillColourless(view, w, h)` and paints no background.
 - Add `renderPaneScreen(parts paneScreenParts, w, h int, th theme.Theme, colourless bool) string` in the same file, where `paneScreenParts` is `struct { card func() string; stack func(width int) []string }`: resolve non-positive dimensions to `fallbackTermWidth` / `fallbackTermHeight`; call `parts.card()`; if `lipgloss.Width(card) <= w && lipgloss.Height(card) <= h`, place it centred with `placeModalOnClearedCanvas(card, w, h)`; otherwise join `parts.stack(w)` vertically. Wrap either result in `fillPaneCanvas`.
-- Clamp the plain stack to the pane's rows top-down (the title first) and to its columns, so a pane too short drops trailing rows rather than overflowing the pane and scrolling the transcript underneath it.
+- Clamp the plain stack to the pane's rows by keeping its first row and its last row and dropping from the end of the rows between them, and to its columns, so a pane too short loses body rows rather than the row its screen put last, and never overflows the pane and scrolls the transcript underneath it. A one-row pane renders the first row alone.
 - Cover both in `internal/tui/resume_pane_canvas_test.go` with fake parts builders (a fixed-size card, a stack that records the width it was called at) so the ladder is tested independently of either screen's content, plus a table over pane sizes including `1x1`, one-short-in-each-dimension, and exactly-fits.
 
 **Acceptance Criteria**:
@@ -89,7 +89,7 @@
 - [ ] Under a non-colourless render every cell carries the theme's `canvas` background — no line contains a background reset that is not immediately re-set.
 - [ ] Under `colourless` the `ansi.Strip`ped output is byte-identical to the non-colourless render's stripped output, and the colourless output carries no SGR background parameter at all.
 - [ ] A non-positive width or height renders at the fallback dimensions rather than panicking or returning an empty string.
-- [ ] Content taller or wider than the pane is clamped rather than overflowing: a stack of twenty rows in a five-row pane renders five rows, and they are the first five.
+- [ ] Content taller or wider than the pane is clamped rather than overflowing, and the clamp keeps the stack's first and last rows: a twenty-row stack in a five-row pane renders the first row, the three after it and the last row; a six-row stack in a three-row pane renders the first row, the one after it and the last row; a two-row pane renders the first and the last; a one-row pane renders the first alone.
 
 **Tests**:
 - `"it renders the card when the pane fits it"`
@@ -99,6 +99,7 @@
 - `"it calls the stack builder at the pane's width"`
 - `"it paints every cell of the pane"` (table over sizes)
 - `"it clamps content taller than the pane"`
+- `"it keeps the stack's first and last rows when it clamps"` (table: twenty rows in five, six rows in three, six rows in two, six rows in one)
 - `"it renders at the fallback size for a non-positive dimension"` (table: `0x0`, `-1x10`, `10x-1`)
 - `"it keeps the layout and paints no canvas under NO_COLOR"`
 
@@ -106,8 +107,8 @@
 - The threshold is measured off the card just built rather than a restated dimension — the card's content width is pinned in task 3.1, and a later change to it must move the fallback point with it rather than leaving a pane that renders a clipped frame.
 - A pane one column or one row short of the card gets the plain stack rather than a clipped frame: a frame missing its right edge reads as a rendering fault, and a frame missing its bottom rows hides the key hints.
 - The plain stack keeps every part its screen's builder hands it, including the report row — which parts a screen stacks is the screen's own decision, and which of them survive is decided by the pane's rows, not by the ladder.
-- Content is clamped to the pane's rows and columns rather than overflowing: a render taller than the pane would scroll the pane's primary buffer, which is where the user's replayed transcript is sitting.
-- The smallest pane a restore can produce still draws the title, the command and the key hints — asserted at a realistically small pane as well as at the degenerate `1x1`, where the single row must be the title.
+- Content is clamped to the pane's rows and columns rather than overflowing: a render taller than the pane would scroll the pane's primary buffer, which is where the user's replayed transcript is sitting. What goes is taken from the middle, because both screens stack their key hints last and a pane that swallows every key it is not answered with must never be the one that hides which keys answer it — the same failure a clipped frame produces, and the reason the degraded form exists at all.
+- The smallest pane a restore can produce still draws the title, the command and the key hints — asserted at a realistically small pane, at a three-row pane holding a command that wraps past one row, and at the degenerate `1x1`, where the single row must be the title.
 - A non-positive width or height falls back to a bounded render rather than panicking: the drawing process reads the pane's size from its environment and can be handed a zero.
 - Every cell of the pane is painted so no terminal background shows through — the panel is the pane's own content over the alternate screen, and an unpainted cell would show the terminal's own background through the canvas.
 - Under `NO_COLOR` the layout is unchanged and no canvas is painted: coverage does not depend on the fill, because the panel sits on the alternate screen, so the transcript stays hidden whether or not a colour is painted over it.
@@ -139,7 +140,7 @@
 - Add `internal/tui/resume_panel.go` with the constants `resumePanelTitle = "Resume session"`, `resumePausedBadge = "● PAUSED"`, `resumeCommandLabel = "ON RESUME"`, `resumeKeyResume = "⏎"`, `resumeLabelResume = "resume"`, `resumeKeyDiscard = "d"`, `resumeLabelDiscard = "discard"` — the whole of the screen's fixed copy, each verbatim from the specification.
 - Declare the exported render input beside them: `type ResumeScreen struct { Command, Report string; Width, Height int; Theme theme.Theme; Colourless bool }`, and `func RenderResumePanel(s ResumeScreen) string` routing through `renderPaneScreen` with the card and stack builders below.
 - Build the card through `renderJoinedPanel` with three compartments: header `renderHeaderWithBadge(title, resumeCardContentWidth, true, resumePausedBadge, …)` with the title in `text.primary` bold; body `resumeCommandLabel` in `accent.primary`, then `resumeCommandRows(s.Command, resumeCardContentWidth, th.TextPrimary, false, …)`, then the report row from `resumeReportRow` when it reports one; footer `renderConfirmCancelFooter(resumeKeyResume, resumeLabelResume, resumeKeyDiscard, resumeLabelDiscard, …)`.
-- Build the plain stack from the same pieces at the pane's width: the title row (with the badge appended after a gap when the width holds both, title alone when it does not), the command rows wrapped to the pane's width, the report row when present, then the key-hint row. The `ON RESUME` label belongs to the card and is not stacked: the small-pane form is the title, the command and the key hints, and every row ahead of the hints is a row the pane's top-down clamp can cost them.
+- Build the plain stack from the same pieces at the pane's width: the title row alone, the command rows wrapped to the pane's width, the report row when present, then the key-hint row. Neither the `● PAUSED` badge nor the `ON RESUME` label is stacked — both are card parts, the badge occupying a header slot a frameless screen does not have, and the small-pane form is the title, the command and the key hints. The title row is the stack's first row and the key-hint row its last, which is what the pane's clamp keeps.
 - Add the badge-text parameter to `renderHeaderWithBadge` in `internal/tui/edit_modal.go`, cutting the hidden-badge blank to the passed badge's width, and pass `editModeIndicator` from `editModalHeaderRow` and `renameModalHeaderRow`.
 - Cover the panel in `internal/tui/resume_panel_test.go` over `testDarkTheme(t)` / `testLightTheme(t)` and both colourless values, asserting on stripped text, on SGR parameter runs for the token roles (as `rename_modal_test.go` does for the badge), and on `lipgloss.Width` for the geometry; re-run the rename and edit modal suites unchanged.
 - Add one clause to the `tui` row of CLAUDE.md's package table naming `resume_panel.go` / `resume_panel_parts.go` / `resume_pane_canvas.go` as the pane-drawn resume panel's renderers — exported pure functions over the shared card grammar, not a Bubble Tea component.
@@ -151,7 +152,7 @@
 - [ ] The card's rendered width is identical for a one-character command, a three-line command, a long report and an empty report — no content moves the frame.
 - [ ] The rename modal and the edit modal render byte-identically to before the badge parameter (their existing suites and the kill/delete byte-exact goldens all pass unchanged).
 - [ ] Under `colourless` the stripped render is identical to the coloured one, so `●`, `PAUSED`, `ON RESUME`, `⏎` and `d` carry the state with no hue.
-- [ ] Below the card's size the panel renders the plain stack carrying the title, the command, the report when present and the key hints, and never an empty screen; the `ON RESUME` label is absent from it.
+- [ ] Below the card's size the panel renders the plain stack carrying the title, the command, the report when present and the key hints, and never an empty screen; neither the `ON RESUME` label nor the `● PAUSED` badge appears on it.
 - [ ] A four-row pane holding a command that wraps to two rows renders the title, both command rows and the key hints — the stack spends no row on anything the small-pane form does not carry.
 - [ ] Stripping the fixed constants and the caller's command and report from the rendered screen leaves no alphabetic text — the screen names no tool and carries no copy beyond what this task declares.
 - [ ] `internal/tui`'s colour-literal guard passes with no exemption added.
@@ -165,7 +166,7 @@
 - `"it carries the report row between the command and the key hints"`
 - `"it renders the same card width whatever the command the report or the badge"` (table)
 - `"it renders the plain stack below the card's size"`
-- `"it drops the ON RESUME label from the plain stack"`
+- `"it drops the ON RESUME label and the PAUSED badge from the plain stack"`
 - `"it renders the title the command and the key hints in a four-row pane"` (command wrapping to two rows)
 - `"it draws the title the command and the key hints at the smallest pane"`
 - `"it carries no copy beyond its own constants and the caller's text"`

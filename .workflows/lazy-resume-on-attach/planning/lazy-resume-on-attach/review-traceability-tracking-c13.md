@@ -61,8 +61,8 @@ Clamp by keeping the stack's first and last rows and dropping from the rows betw
 - The smallest pane a restore can produce still draws the title, the command and the key hints — asserted at a realistically small pane, at a three-row pane holding a command that wraps past one row, and at the degenerate `1x1`, where the single row must be the title.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 3-2's ladder now keeps the stack's first and last rows and drops from the middle; the clamp criterion enumerates four heights, the test gains a table case, and the two edge cases carry the reason and the three-row wrapped-command assertion. Phase 3's task-table row carries the same clause. Tick body re-synced and byte-verified.
+**Notes**: Verified in the task before applying — the Do did say "top-down (the title first)" and the criterion did say "they are the first five", and task 3-3's own Do already named the hazard ("every row ahead of the hints is a row the pane's top-down clamp can cost them") with nothing in the ladder acting on it.
 
 ---
 
@@ -106,5 +106,5 @@ Drop the badge from the plain stack, leaving the title row alone there. That is 
 - `"it drops the ON RESUME label and the PAUSED badge from the plain stack"`
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 3-3's plain-stack bullet drops the badge and says why, with the matching edge case and the phase-3 task-table row. Tick body re-synced and byte-verified.
+**Notes**: This reverses a retention cycle 7 made deliberately and that cycles 9 and 10 each examined and cleared, so it was disposed rather than taken on trust. What decides it: the plan already reads §5.2's three-part enumeration strictly — that is what removed the `ON RESUME` label from the stack in cycle 7 — so reading it loosely for the badge is an inconsistency within the plan rather than a second defensible reading. Cycle 7's stated reason for keeping it was that the badge carries the paused state under `NO_COLOR`; finding 1 of this cycle, applied immediately before, makes the key-hint row survive every pane height, so `⏎ resume` / `d discard` is always present and the state is legible with no hue and no badge. The badge is unchanged on the card.
