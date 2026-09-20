@@ -26,7 +26,7 @@ Insert the missing clause into the `lazy-resume-on-attach-4-1` table row in its 
 | lazy-resume-on-attach-4-1 | The panel-drawing process | a failed or zero size read falls back to the bounded render rather than painting nothing, the alternate-screen entry is written before the paint and never left by this process, the enter and leave sequences are the one pair `cmd` already owns rather than a second spelling, NO_COLOR paints no canvas and writes no query, a prefs read that fails degrades to the shipped pair rather than blocking the draw, the theme read is the non-migrating one so every pane drawing at boot never races the one-shot appearance translation, a themes directory that will not resolve still paints from the embedded built-ins, the process role resolves to the existing hydrate role so the closed role space gains no member, the exec target carries everything a redraw needs so no screen re-reads the store to decide whether to draw, the appearance probe is the draw's one stdin read and runs before the alternate-screen entry so a byte it swallows on a redraw can only be one that arrived before a screen was painted, an exec that fails exits non-zero and leaves the chain's tail to recover the pane |
 ```
 
-**Resolution**: Pending
-**Notes**: Task file `phase-4-tasks.md` and the tick body already carry the edge case in full; only the plan-level table row needs the edit. No task-file or tick change follows from this finding.
+**Resolution**: Fixed — the `lazy-resume-on-attach-4-1` table row gains the appearance-probe clause in its task-file position, between the exec-target and exec-failure clauses.
+**Notes**: Verified before applying — task 4-1 carries eleven edge cases and the table row carried ten, the missing one being exactly the probe clause. Task file `phase-4-tasks.md` and the tick body already carry the edge case in full; only the plan-level table row needs the edit. No task-file or tick change follows from this finding.
 
 ---
