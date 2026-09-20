@@ -14,12 +14,13 @@
 - Add `internal/tui/resume_panel_parts.go` with `const resumeCardContentWidth = destructiveBodyWidth` — one pinned content width both screens' card geometry is built on, taken off the destructive builder's existing wrap target so the two cards match.
 - Add `sanitiseCommandText(s string) string`: replace every rune below `0x20` and `0x7f` with a single space (which neutralises `\n`, `\t` and the `ESC` that opens an escape sequence in one rule, leaving the rest of that sequence as literal text), then collapse nothing else — the command is shown as it is stored.
 - Add `resumeCommandLines(command string, width int) []string`: sanitise, `ansi.Wrap(command, width, "")` (word-wrap that hard-breaks a word longer than the limit), split on `\n`; return at most three lines, and when there are more, replace the third with `ansi.Truncate(strings.Join(lines[2:], " "), width, "…")`. An empty command returns one empty line.
-- Add `resumeCommandRows(command string, tok theme.Token, bold bool, th theme.Theme, colourless bool) []string`: each line from `resumeCommandLines` rendered through `headerStyle(tok, th, colourless)` (with `.Bold(true)` when `bold`) and padded to `resumeCardContentWidth` with `headerPadRight`, so the widest row of the card is always the pinned width.
-- Add `resumeReportRow(report string, th theme.Theme, colourless bool) (string, bool)`: `("", false)` for an empty report; otherwise one row — sanitised, `ansi.Truncate(report, resumeCardContentWidth, "…")`, rendered in `accent.attention` and padded to the pinned width. Never wrapped.
+- Add `resumeCommandRows(command string, width int, tok theme.Token, bold bool, th theme.Theme, colourless bool) []string`: each line from `resumeCommandLines(command, width)` rendered through `headerStyle(tok, th, colourless)` (with `.Bold(true)` when `bold`) and padded to `width` with `headerPadRight`. A card call passes `resumeCardContentWidth`, so the widest row of the card is always the pinned width; a degraded stack passes the pane's width, so the rows it stacks are wrapped and `…`-marked at the width they will actually be shown at rather than cut mid-word by the canvas.
+- Add `resumeReportRow(report string, width int, th theme.Theme, colourless bool) (string, bool)`: `("", false)` for an empty report; otherwise one row — sanitised, `ansi.Truncate(report, width, "…")`, rendered in `accent.attention` and padded to `width`. Never wrapped. The width is the caller's for the same reason the command block's is.
 - Cover both in `internal/tui/resume_panel_parts_test.go` over `testDarkTheme(t)` / `testLightTheme(t)` and both colourless values, asserting on `lipgloss.Width` of the rendered rows and on `ansi.Strip`ped text.
 
 **Acceptance Criteria**:
-- [ ] Every row `resumeCommandRows` returns has `lipgloss.Width == resumeCardContentWidth`, for a one-character command, a command that wraps to exactly three lines, and a command ten times longer than three lines.
+- [ ] Every row `resumeCommandRows` returns has `lipgloss.Width == resumeCardContentWidth` when it is called at that width, for a one-character command, a command that wraps to exactly three lines, and a command ten times longer than three lines.
+- [ ] Called at a width narrower than the card's — the width a degraded stack passes — both helpers return rows at exactly that width, wrapped and `…`-marked to it, so neither ever hands the canvas a row it has to cut.
 - [ ] A command that wraps beyond three lines returns exactly three rows whose third ends in `…`, and that third row's display width is the pinned width.
 - [ ] A single unbroken token longer than the width is broken at the width rather than overflowing: three rows, each at the pinned width, the third ending in `…`.
 - [ ] A command carrying double-width runes (CJK) or combining marks produces rows whose display width is still exactly the pinned width — the measurement is display width, not byte or rune count.
@@ -37,6 +38,7 @@
 - `"it neutralises control characters without changing the geometry"` (table: `\n`, `\t`, `\x1b[31m`, `\x07`)
 - `"it renders the same width whatever the command's length"` (table over 1, 40, 52, 53, 500 characters)
 - `"it renders a report as one truncated row"`
+- `"it renders both blocks at the width its caller chose"` (table: the card's pinned width, a narrower pane's)
 - `"it reports no row at all for an empty report"`
 - `"it renders an empty command as one empty row"`
 - `"it renders the command in the token and emphasis its caller chose"` (table: `text.primary` unbolded, `state.destructive` bolded)
@@ -205,7 +207,7 @@
 - In `internal/tui/destructive_confirm.go`: add `targetRows []string` and `reportRows []string` to `destructiveConfirmSpec` — `targetRows`, when non-empty, replaces the single `destructiveNameRow`; `reportRows` is appended after the consequence rows — and split the compartment assembly into `destructiveConfirmCompartments(spec, th, colourless) [][]string`, with `renderDestructiveConfirm` reduced to `renderJoinedPanel(destructiveConfirmCompartments(…), th.Border, th, colourless)`.
 - Add `internal/tui/resume_discard_confirm.go` with the constants `discardConfirmTitle = "Discard resume?"`, `discardConfirmConsequence = "Removes this pane's resume command permanently. The session and its scrollback are untouched."`, `discardKeyConfirm = "y"`, `discardLabelConfirm = "discard"` — each verbatim from the specification — and `func RenderResumeDiscardConfirm(s ResumeScreen) string` routing through `renderPaneScreen` over the same `ResumeScreen` the waiting panel takes.
 - Build the card's spec with `targetRows: resumeCommandRows(s.Command, th.StateDestructive, true, …)`, `reportRows` from `resumeReportRow`, `title: discardConfirmTitle`, `consequence: discardConfirmConsequence`, `confirmKey: discardKeyConfirm`, `confirmLabel: discardLabelConfirm` — the `▲` glyph and the `esc cancel` half come from the builder unchanged.
-- Build the plain stack by flattening `destructiveConfirmCompartments` for the same spec at the pane's width, so the degraded screen carries the title, the command, the consequence line, the report when present and the key hints without the frame, and cannot drift from the card.
+- Build the plain stack by flattening `destructiveConfirmCompartments` for a spec built at the pane's width — the same title, consequence, confirm key and label, with `targetRows` and `reportRows` rebuilt through the shared helpers at that width — so the degraded screen carries the title, the command, the consequence line, the report when present and the key hints without the frame, cannot drift from the card, and wraps the command exactly as the waiting panel's stack does. The consequence keeps the builder's own wrap, as the kill modal's does.
 - Cover the confirmation in `internal/tui/resume_discard_confirm_test.go` over both test themes and both colourless values; extend `internal/tui/destructive_confirm_test.go` with the spec-level coverage of `targetRows` and `reportRows`, and leave `TestKillDeleteModalContent_ByteIdenticalGolden` untouched as the drift tripwire.
 
 **Acceptance Criteria**:
@@ -231,7 +233,7 @@
 - `"it degrades to the plain stack below the card's size"`
 - `"it keeps the destructive signal under NO_COLOR"`
 - `"it renders the same card width whatever the command and the report"`
-- `"it builds the plain stack from the same compartments as the card"` (stripped stack rows are the stripped card's content rows, in order)
+- `"it builds the plain stack from the same compartments as the card"` (at a pane width equal to the card's, the stripped stack rows are the stripped card's content rows, in order)
 
 **Edge Cases**:
 - The kill and delete modals render byte-identically after the builder's compartments are exposed — the split is a refactor with a golden already standing behind it, and that golden is the acceptance test for it.

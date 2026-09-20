@@ -71,8 +71,8 @@ Task 4.5 — **Tests**, ninth entry, with one added after it:
 - `"it composes the tail with the pane flags alone"`
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. The shared composer now emits only the flags the named subcommand registers, with the recovery step taking the pane and pane-key alone; one criterion in each of tasks 4-1 and 4-5 pins it, plus the composer test.
 
 ---
 
@@ -133,8 +133,8 @@ Task 4.5 — **Tests**, fourteenth entry, with two added after it:
 - `"it treats a hook store that could not be built as no registration"`
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. The decision step keeps the helper's existing absent-store guard and takes the shipped default without calling the accessor when the preferences loader answers with no store; one criterion and two tests added.
 
 ---
 
@@ -182,8 +182,8 @@ Task 4.5 — **Acceptance Criteria**, final criterion, with one added after it:
 - [ ] The README's `xctl hook` section no longer states that a registered command re-executes by itself after a reboot: its opening paragraph and its **When hooks fire** paragraph both describe the panel a lazy registration comes back holding and name `eager` as the mode that keeps today's behaviour.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Task 4-5 gains the README edit — the hook section's opening paragraph and its When-hooks-fire paragraph — plus the criterion that holds it.
 
 ---
 
@@ -269,5 +269,5 @@ Task 3.4 — **Tests**, final entry:
 - `"it builds the plain stack from the same compartments as the card"` (at a pane width equal to the card's, the stripped stack rows are the stripped card's content rows, in order)
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Both shared helpers take the width they render at, defaulting to the card's for every framed call; the confirmation's degraded stack rebuilds its rows at the pane's width, and one criterion and one test cover the narrow case.
