@@ -67,8 +67,8 @@ Give `ReadPaneOption` the probe-then-read shape `ResolveHookKey` already takes, 
 - A read against a target no live pane answers to fails on the probe's exit status and never on the format read — measured against tmux 3.7c on 2026-09-20, `display-message -p -t <gone pane> -F '#{@opt}'` exits 0 with an empty string, exactly what an unset option on a live pane reads as, so a single format read would report a pane that does not exist as one that was answered. `internal/tmuxtest`'s `ReadPaneToken` already documents that trap and `ResolveHookKey` already takes the probe-then-read shape against it; this method is the third reader to need the same discrimination and takes the same shape rather than a fourth.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed — task 4-4's Do gives `ReadPaneOption` the probe-then-read shape with the measurement stated in line, its CLAUDE.md edit bullet describes the same two reads, the acceptance criterion names both argvs in order and says the error comes off the probe's exit status, the scripted-commander test asserts both argvs in order, and a new Edge Case carries the measurement. Phase 4's task table carries the same edge case. Tick body re-synced and byte-verified.
+**Notes**: Re-measured independently before applying, on a disposable `-L` socket against tmux 3.7c (2026-09-20): `display-message -p -t %0 -F '#{@nosuchopt}'` on a live pane, `-t %999`, and `-t '=gonesess:0.0'` all exit 0 with an empty string; `show-options -p -t %0` naming no option exits 0, `-t %999` exits 1, and `show-options -p -t %0 @nosuchopt` gives `invalid option` at exit 1. Every figure in the finding reproduces. The developer's own server was never touched — the probe ran on its own socket and the server was killed after.
 
 ---
 
