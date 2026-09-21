@@ -186,7 +186,7 @@ func TestConstruction_ReadsNoThemesDirectory(t *testing.T) {
 
 	for file, calls := range packageCalls(t) {
 		for _, call := range calls {
-			if what, bad := banned[call]; bad {
+			if what, bad := banned[call]; bad && !opensThePanesTerminal(file, call) {
 				t.Errorf("%s calls %s (%s); TUI construction takes a LOADED nomination and must read nothing", file, call, what)
 			}
 			if strings.HasSuffix(call, ".Enumerate") {
@@ -221,6 +221,13 @@ func exportedFuncsInPackage(t *testing.T) []string {
 		}
 	}
 	return names
+}
+
+// The pane draw's appearance probe opens the pane's own terminal rather than
+// anything on the config route, and reaches no construction path; its argument is
+// pinned to paneTTYPath by the pane-appearance guard.
+func opensThePanesTerminal(file, call string) bool {
+	return file == "pane_appearance.go" && call == "os.OpenFile"
 }
 
 func packageCalls(t *testing.T) map[string][]string {
