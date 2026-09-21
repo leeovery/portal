@@ -25,8 +25,8 @@ type Registration struct {
 // UnmarshalJSON never fails: a value of a shape this reader cannot make sense
 // of decodes to a registration carrying nothing, so one junk entry never fails
 // the file for its neighbours. A JSON string is the command alone; a JSON
-// object's command and resume are read when each is a string the vocabulary
-// admits, and anything else leaves that field unset.
+// object's command is read when it is a string and its resume when it is one
+// the vocabulary admits, and anything else leaves that field unset.
 func (r *Registration) UnmarshalJSON(data []byte) error {
 	*r = Registration{raw: bytes.Clone(data)}
 
