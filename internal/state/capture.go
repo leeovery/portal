@@ -34,10 +34,13 @@ const internalSessionPrefix = "_"
 //
 // Panes whose paneKey is in skipSet keep their prev state, but only where
 // session, window and pane are all still live — a stale marker must not
-// resurrect a killed pane. A tmux enumeration failure yields an empty Index and
-// a wrapped error, never a partial one. A per-session failure is logged and
-// skipped, unless every session failed on something other than vanishing, which
-// errors so the caller refuses to commit over a broken read.
+// resurrect a killed pane. Independently of skipSet, a pane carrying the resume
+// pending marker keeps its prev record's CWD, CurrentCommand and
+// ScrollbackFile, matched on the pane's durable token rather than its address.
+// A tmux enumeration failure yields an empty Index and a wrapped error, never a
+// partial one. A per-session failure is logged and skipped, unless every
+// session failed on something other than vanishing, which errors so the caller
+// refuses to commit over a broken read.
 //
 // The second return holds the pane keys of every live pane carrying the resume
 // pending marker, at the pane's live address and only for sessions that reached
@@ -68,7 +71,7 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	}
 
 	sessions := make([]Session, 0, len(keep))
-	pending := map[string]struct{}{}
+	live := map[string]livePane{}
 	var anomalousErrs []error
 	naturalChurnCount := 0
 	for _, name := range sortedKeys(keep) {
@@ -88,7 +91,7 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 			Environment: parseShowEnvironment(envRaw),
 			Windows:     buildWindows(name, grouped[name]),
 		})
-		addPendingPaneKeys(pending, name, grouped[name])
+		addPendingPanes(live, name, grouped[name])
 	}
 
 	if len(keep) > 0 && len(sessions) == 0 && len(anomalousErrs) > 0 {
@@ -104,17 +107,40 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 		mergeSkippedPanes(&idx, *prev, skipSet)
 	}
 
+	if len(live) > 0 && prev != nil {
+		mergeFrozenPanes(&idx, *prev, live)
+	}
+
 	idx.Canonicalize()
-	return idx, pending, nil
+	return idx, paneKeySet(live), nil
 }
 
-func addPendingPaneKeys(pending map[string]struct{}, session string, rows []paneRow) {
+// livePane holds what the enumeration knows about a waiting pane, so the merge
+// reads its token and liveness from the read rather than from the fresh index,
+// which the skeleton merge may already have replaced with a previous record.
+type livePane struct {
+	token  string
+	active bool
+}
+
+func addPendingPanes(live map[string]livePane, session string, rows []paneRow) {
 	for _, r := range rows {
 		if !r.resumePending {
 			continue
 		}
-		pending[SanitizePaneKey(session, r.windowIdx, r.paneIdx)] = struct{}{}
+		live[SanitizePaneKey(session, r.windowIdx, r.paneIdx)] = livePane{
+			token:  r.portalPaneID,
+			active: r.paneActive,
+		}
 	}
+}
+
+func paneKeySet(live map[string]livePane) map[string]struct{} {
+	keys := make(map[string]struct{}, len(live))
+	for k := range live {
+		keys[k] = struct{}{}
+	}
+	return keys
 }
 
 func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
@@ -142,6 +168,105 @@ func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
 		}
 	}
 	resortIndex(fresh)
+}
+
+// mergeFrozenPanes carries a waiting pane's previous record onto its live
+// address, matched on the pane's durable token: the merged record keeps
+// pointing at the scrollback file that already holds the pane's bytes, whatever
+// the pane's address has become. It mutates only panes the live enumeration
+// returned, so a previous record whose pane is gone is never reintroduced.
+func mergeFrozenPanes(fresh *Index, prev Index, live map[string]livePane) {
+	byToken, byAddress := indexPrevPanes(prev)
+	for si := range fresh.Sessions {
+		s := &fresh.Sessions[si]
+		for wi := range s.Windows {
+			w := &s.Windows[wi]
+			for pi := range w.Panes {
+				p := &w.Panes[pi]
+				key := SanitizePaneKey(s.Name, w.Index, p.Index)
+				waiting, isWaiting := live[key]
+				if !isWaiting {
+					continue
+				}
+				p.PortalPaneID = waiting.token
+				p.Active = waiting.active
+				record, found := takePrevRecord(byToken, byAddress, waiting.token, key)
+				if !found {
+					continue
+				}
+				p.CWD = record.CWD
+				p.CurrentCommand = record.CurrentCommand
+				p.ScrollbackFile = record.ScrollbackFile
+			}
+		}
+	}
+}
+
+// indexPrevPanes reads prev in canonical order, so a token held by more than
+// one record resolves to the first of them.
+func indexPrevPanes(prev Index) (byToken, byAddress map[string]Pane) {
+	byToken = map[string]Pane{}
+	byAddress = map[string]Pane{}
+	for _, e := range canonicalPrevPanes(prev) {
+		if e.pane.PortalPaneID != "" {
+			if _, taken := byToken[e.pane.PortalPaneID]; !taken {
+				byToken[e.pane.PortalPaneID] = e.pane
+			}
+		}
+		byAddress[e.key] = e.pane
+	}
+	return byToken, byAddress
+}
+
+type prevPaneEntry struct {
+	session string
+	window  int
+	key     string
+	pane    Pane
+}
+
+func canonicalPrevPanes(prev Index) []prevPaneEntry {
+	var entries []prevPaneEntry
+	for _, s := range prev.Sessions {
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				entries = append(entries, prevPaneEntry{
+					session: s.Name,
+					window:  w.Index,
+					key:     SanitizePaneKey(s.Name, w.Index, p.Index),
+					pane:    p,
+				})
+			}
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.session != b.session {
+			return a.session < b.session
+		}
+		if a.window != b.window {
+			return a.window < b.window
+		}
+		return a.pane.Index < b.pane.Index
+	})
+	return entries
+}
+
+// takePrevRecord consumes the entry it returns, so one previous record serves
+// at most one live pane.
+func takePrevRecord(byToken, byAddress map[string]Pane, token, key string) (Pane, bool) {
+	if token != "" {
+		record, found := byToken[token]
+		if found {
+			delete(byToken, token)
+		}
+		return record, found
+	}
+	record, found := byAddress[key]
+	if found {
+		delete(byAddress, key)
+	}
+	return record, found
 }
 
 func buildLiveStructure(idx Index) map[string]map[int]map[int]struct{} {

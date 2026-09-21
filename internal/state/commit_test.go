@@ -445,3 +445,28 @@ func TestComputeReferencedSet_EmptyIndexProducesEmptySet(t *testing.T) {
 		t.Errorf("expected empty set; got %v", set)
 	}
 }
+
+func TestCommit_KeepsAFrozenPanesScrollbackFileAfterThePaneMoves(t *testing.T) {
+	dir := t.TempDir()
+	logger, _ := openTempLogger(t)
+
+	frozenFile := "scrollback/" + state.SanitizePaneKey("work", 0, 0) + ".bin"
+	frozenPath := writeOrphan(t, dir, state.SanitizePaneKey("work", 0, 0)+".bin", []byte("transcript"))
+	writeOrphan(t, dir, "unreferenced.bin", []byte("orphan"))
+
+	prev := prevIndexOf(prevPane{"work", 0, prevRecord(0, "/frozen", "claude", frozenFile, "tok-a")})
+	idx := captureAgainst(t, prev, nil, []string{"work"},
+		paneLineWithPending("work", 1, "main", "L", false, true, 2, "/live", true, "zsh", "tok-a", "1"))
+
+	if err := state.Commit(dir, idx, true, logger); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	if _, err := os.Stat(frozenPath); err != nil {
+		t.Errorf("expected the frozen pane's scrollback file to survive; stat err=%v", err)
+	}
+	orphan := filepath.Join(state.ScrollbackDir(dir), "unreferenced.bin")
+	if _, err := os.Stat(orphan); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected unreferenced.bin to be reclaimed; stat err=%v", err)
+	}
+}
