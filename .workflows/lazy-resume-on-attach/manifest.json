@@ -158,7 +158,11 @@
             "lazy-resume-on-attach-6-7": "tick-23983c",
             "lazy-resume-on-attach-6-8": "tick-ff28c4",
             "lazy-resume-on-attach-1-8": "tick-7b5d9b",
-            "lazy-resume-on-attach-2-6": "tick-77075b"
+            "lazy-resume-on-attach-2-6": "tick-77075b",
+            "lazy-resume-on-attach-3-7": "tick-174af4",
+            "lazy-resume-on-attach-3-8": "tick-7c0393",
+            "lazy-resume-on-attach-3-9": "tick-8af98c",
+            "lazy-resume-on-attach-3-10": "tick-84a398"
           },
           "storage_paths": [
             ".tick/"
@@ -296,87 +300,6 @@
           "completed_phases": [
             1,
             2
-          ],
-          "bank": [
-            {
-              "task": "lazy-resume-on-attach-3-1",
-              "source": "reviewer",
-              "summary": "The ansi.Wrap over-width rule this task discovered is restated, unhandled, at two older internal/tui wrap sites",
-              "failure": "A notice band renders a row one display cell wider than the terminal, so the terminal wraps it and the picker paints one more line than the height budget counted — the frame-overflow class that once pushed the title and cursor off the top of the screen. Reproduced by driving the real renderNoticeBand with a message carrying a long unbroken token (a path): off-width rows at widths 10, 15, 17, 21, 26, 29, 38, 51, 54, 58, 67, 74, 83, 95, 111, 113. Honest caveat: today shipped band copy (the spawn unsupported/no-op messages, at widths 20-120) does not reproduce it — the defect is latent and becomes live the moment a band message quotes a path, a long bundle id or a user-chosen session name. themePanelMessageText is the same shape and goes over-width at inner=47 with a slug-bearing message; its shipped copy is short, so it is the weaker of the two.",
-              "detail": "internal/tui/notice_band.go:123 splits ansi.Wrap(message, avail, \"\") and pads each row through noticeBandPadRight -> padRightWithStyle, which returns the segment unchanged when it is already at or past the width, so an over-wide line cannot be recovered. internal/tui/theme_panel_message.go:132-138 is a near-twin of resumeCommandLines (wrap -> keep N-1 -> join the remainder -> truncate with the ellipsis) with no trim and no clamp. The consolidation is to route both through this task wrappedLines/clampToWidth (internal/tui/resume_panel_parts.go:47-60), which would also collapse the twinned wrap-to-N-lines-and-mark logic into one implementation.",
-              "files": [
-                "internal/tui/notice_band.go",
-                "internal/tui/theme_panel_message.go",
-                "internal/tui/resume_panel_parts.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-3-1",
-              "source": "executor",
-              "summary": "The wrapping library over-packs at hyphen runs, so clampToWidth drops up to six characters of the command with no ellipsis marking the loss — needs a scope decision rather than a fix",
-              "failure": "A user reading the resume panel sees a command that differs from the one that will run — the worked case renders a standalone -- argument as a stray - — with nothing on screen saying anything was cut, so they approve or discard work on a misread of what the pane holds. Measured at 0.67% of realistic commands at the card width and 1.97% at the narrow width, over 50,000 synthetic commands built from realistic vocabulary.",
-              "detail": "internal/tui/resume_panel_parts.go:44-60 — ansi.Wrap returns over-wide lines at ordinary widths for hyphenated text, and clampToWidth truncates the overshoot permanently instead of re-flowing it into the next line. The geometry invariant is never violated; what is lost is fidelity of the one string on the panel that says which work the pane holds. The remedy (re-flow the overshoot into the following line instead of truncating) changes row text this task suite now pins at widths 1-3, so it cannot be folded into a fix round. Surfaced to the user at the escalation gate and explicitly left out of scope for the fix rounds.",
-              "files": [
-                "internal/tui/resume_panel_parts.go",
-                "internal/tui/resume_panel_parts_test.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-3-1",
-              "source": "reviewer",
-              "summary": "The wrap-to-at-most-N-rows-then-truncate rule now exists in three internal/tui files, and only the new one clamps the over-wide lines ansi.Wrap returns",
-              "failure": "themePanelMessageText and renderNoticeBand hand ansi.Wrap output straight into a fixed-width frame. ansi.Wrap over-packs on hyphen- and slash-dense text (the same property resume_panel_parts.go:47-53 documents and clamps for), so a message of that shape returns a line wider than the frame it is being placed in — the theme panel is 24-30 columns and the notice band renders arbitrary content including spawn guidance carrying bundle ids like dev.warp.Warp-Stable. The symptom is a panel that widens or a band that bleeds past the canvas edge on one particular message, with no test in any of the three places that would catch it, because the rule is written out three times rather than shared. A prior round measured both sites and found no overflow at today copy and widths, so this is a consolidation rather than a live defect — but the condition that round named (if this clamp lands, a shared wrap-to-rows helper is the natural phase-boundary consolidation) is now met.",
-              "detail": "internal/tui/resume_panel_parts.go:32-60 (wrap -> split -> keep N-1 -> join the rest -> truncate with the ellipsis, plus trim and clamp); internal/tui/theme_panel_message.go:127-139 (the same five steps, no trim, no clamp); internal/tui/notice_band.go:123 (ansi.Wrap split straight into styled rows, no clamp). Near-duplicate of the earlier entry from the same task; the pass folds them.",
-              "files": [
-                "internal/tui/resume_panel_parts.go",
-                "internal/tui/theme_panel_message.go",
-                "internal/tui/notice_band.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-3-1",
-              "source": "executor",
-              "summary": "Second symptom of the banked hyphen over-pack: the no-line-begins-or-ends-with-a-space invariant cannot be asserted today",
-              "failure": "A reviewer proposed asserting that no line resumeCommandLines returns begins or ends with a space, as a more robust guard than a pinned fixture. Measured before writing it: over 15 commands x widths 1-80 the function returns four such lines — d-e-f at width 6 and a-b-c-d-e-f at width 12 for the command a-b-c-d-e-f -- --port=3000 --resume (both the hyphen over-pack, where the clamp cuts at the width and leaves the space), plus two on degenerate widths 1 and 2. Adding the assertion would mean either failing the suite or writing carve-outs that encode the over-pack defect as expected behaviour. So the over-pack does not only cost command fidelity — it also blocks the stronger invariant that would guard the wrap machinery against future change.",
-              "detail": "Same root cause and same site as the other banked entry from this task (internal/tui/resume_panel_parts.go:44-60). Recorded separately because it is a second, independent cost of the same scope decision: if the over-pack remedy lands as a re-flow rather than a truncate, the invariant becomes true and the property assertion is worth adding at that point. Deposited so the phase-boundary pass can weigh both costs together rather than only the fidelity one.",
-              "files": [
-                "internal/tui/resume_panel_parts.go",
-                "internal/tui/resume_panel_parts_test.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-3-2",
-              "source": "reviewer",
-              "summary": "The pickers fillCanvas and the new fillPaneCanvas now hold the same canvas-painting kernel twice",
-              "failure": "A later correction to the per-cell background rule — a new SGR form that drops the background to default, a change in how trailing padding is emitted — lands on one copy and not the other. Neither suite cross-checks the other: each pins todays behaviour of its own copy, so both stay green. The symptom only appears on a users terminal, as a stripe of their own terminal background showing through either the pickers canvas or the resume panel on a restored pane. That is exactly the bleed class the backfill was introduced to fix.",
-              "detail": "internal/tui/model.go:3006-3022 (build canvas style + canvasBgParams + parser, loop with break at the height, backfillCanvasBackground then padLineToCanvasWidth, then blank-row padding) is the same eleven lines as internal/tui/resume_pane_canvas.go:55-69, and both colourless paths already delegate to the same fillColourless. The consolidation is available and clean: fillCanvas can call fillPaneCanvas(view, contentW, contentH, m.themeState.active, m.colourless), then apply overlayThemePanelOnContent and the inset (insetColourless / insetCanvasCanvas) on top, keeping the gutter and the panel composite exactly where they are. Out of scope in 3-2 because the fix reaches into the pickers pre-existing fill, which that task was explicitly told not to change.",
-              "files": [
-                "internal/tui/model.go",
-                "internal/tui/resume_pane_canvas.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-3-5",
-              "source": "reviewer",
-              "summary": "A terminal reply arriving after the appearance probe deadline leaves an ESC in the pane input queue, which is the discard confirmations cancel key",
-              "failure": "On a terminal slower than the 50ms appearance-detect deadline, the OSC 11 reply is not consumed by the probe — those bytes stay in the panes tty input queue. The leading byte is ESC, which is the discard confirmations cancel key, so the confirmation could back itself out of a screen the user just opened, with no input from them. The user presses d, sees the confirmation appear and vanish, and has no idea why.",
-              "detail": "internal/tui/pane_appearance.go reads with a deadline rather than binding os.Stdin, which is correct — it cannot consume a reply that arrives after the deadline, and a post-timeout drain might swallow a real keystroke, so the probe correctly does not try. The handling belongs to the input drop that guards the confirmation screen: task lazy-resume-on-attach-5-4 (The Confirmation Refuses Input That Was Already in Flight) and, for the waiting panel, task 4-2 (The Waiting Process: Two Keys, Everything Else Swallowed). Recorded here because the phase-3 boundary pass is the nearest sweep that will see it, and because whoever writes those two tasks needs to know the ESC can arrive without a keypress. Not a defect in task 3-5.",
-              "files": [
-                "internal/tui/pane_appearance.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-3-6",
-              "source": "reviewer",
-              "summary": "capturetool can resolve a screen name that no guard and no enumeration reaches — pre-existing, not introduced here, and now with a second precedent",
-              "failure": "resolveProgram decides what --fixture X renders through a branch chain (swatch -> surface -> fixture), and nothing ties the set of names that chain resolves back to FixtureNames(). A contributor adding a third kind of standalone screen as a fourth branch — the shape both existing standalone branches take — gets a screen renderable by name that FixtureNames() never lists, TestResumeSurfaces_SkipSet never sees, and no palette-diff or swap guard covers. It is noticed only when a theme change silently breaks that screen in a release, because the completeness guard reports full coverage while not knowing the screen exists. The widened skip assertion closes the skip set but not this, since a name that is never enumerated is never a skip.",
-              "detail": "cmd/capturetool/main.go:98-116 — the branch chain. internal/capture/theme_swap_guard_test.go:157-195 asserts registryFixtures union StandaloneNames() == FixtureNames(), i.e. the reverse direction only. No test in cmd/capturetool asserts that the set of names resolveProgram resolves is a subset of FixtureNames(); main_test.go:45 and :96 walk main.go for flags and the default-theme constant, not for branch names. The fix is one AST guard over main.go branch inventory in cmd/capturetool, which is a different subject from task 3-6 skip-set closure.",
-              "files": [
-                "cmd/capturetool/main.go",
-                "cmd/capturetool/main_test.go",
-                "internal/capture/theme_swap_guard_test.go"
-              ]
-            }
           ]
         }
       }
