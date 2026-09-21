@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -155,7 +157,7 @@ func TestDestructiveConsequenceRows_WordWrapAt52(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rows := destructiveConsequenceRows(tc.text, testDarkTheme(t), false)
+			rows := destructiveConsequenceRows(tc.text, destructiveBodyWidth, testDarkTheme(t), false)
 			if len(rows) != len(tc.want) {
 				t.Fatalf("want %d wrapped lines, got %d: %v", len(tc.want), len(rows), rows)
 			}
@@ -171,4 +173,60 @@ func TestDestructiveConsequenceRows_WordWrapAt52(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDestructiveConfirmSpec_TargetAndReportRows(t *testing.T) {
+	th := testDarkTheme(t)
+	base := destructiveConfirmSpec{
+		title:        "Discard resume?",
+		targetName:   "the-single-name-row",
+		consequence:  killConsequence,
+		confirmKey:   "y",
+		confirmLabel: "discard",
+	}
+
+	t.Run("it renders targetRows in place of the single name row", func(t *testing.T) {
+		spec := base
+		spec.targetRows = []string{
+			headerStyle(th.StateDestructive, th, true).Render("first target row"),
+			headerStyle(th.StateDestructive, th, true).Render("second target row"),
+		}
+		body := destructiveConfirmCompartments(spec, destructiveBodyWidth, th, true)[1]
+		if got := []string{ansi.Strip(body[0]), ansi.Strip(body[1])}; got[0] != "first target row" || got[1] != "second target row" {
+			t.Errorf("the body opens with %q, want the two target rows", got)
+		}
+		for _, row := range body {
+			if strings.Contains(ansi.Strip(row), base.targetName) {
+				t.Errorf("the body still carries the single name row %q", ansi.Strip(row))
+			}
+		}
+	})
+
+	t.Run("it appends reportRows after the consequence rows", func(t *testing.T) {
+		spec := base
+		spec.reportRows = []string{headerStyle(th.AccentAttention, th, true).Render("the store refused")}
+		body := destructiveConfirmCompartments(spec, destructiveBodyWidth, th, true)[1]
+		if got := ansi.Strip(body[len(body)-1]); got != "the store refused" {
+			t.Errorf("the body ends with %q, want the report row", got)
+		}
+		if got, want := ansi.Strip(body[len(body)-2]), "undone."; got != want {
+			t.Errorf("the row above the report reads %q, want the consequence's last row %q", got, want)
+		}
+		quiet := destructiveConfirmCompartments(base, destructiveBodyWidth, th, true)[1]
+		if len(body) != len(quiet)+1 {
+			t.Errorf("the report adds %d body rows, want exactly 1", len(body)-len(quiet))
+		}
+	})
+
+	t.Run("it wraps the consequence at the width it is handed", func(t *testing.T) {
+		body := destructiveConfirmCompartments(base, 24, th, true)[1]
+		var wrapped []string
+		for _, row := range body[2:] {
+			wrapped = append(wrapped, ansi.Strip(row))
+		}
+		want := []string{"Ends the tmux session", "and all its panes. Can't", "be undone."}
+		if !reflect.DeepEqual(wrapped, want) {
+			t.Errorf("the consequence wraps\n got: %q\nwant: %q", wrapped, want)
+		}
+	})
 }
