@@ -252,8 +252,8 @@ func canonicalPrevPanes(prev Index) []prevPaneEntry {
 	return entries
 }
 
-// takePrevRecord consumes the entry it returns, so one previous record serves
-// at most one live pane.
+// takePrevRecord consumes the entry it returns, so no two live panes matched
+// the same way take one previous record.
 func takePrevRecord(byToken, byAddress map[string]Pane, token, key string) (Pane, bool) {
 	if token != "" {
 		record, found := byToken[token]
