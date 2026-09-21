@@ -243,10 +243,24 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 1,
-          "current_task": "lazy-resume-on-attach-1-3",
+          "current_task": "lazy-resume-on-attach-1-4",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
-            "lazy-resume-on-attach-1-2"
+            "lazy-resume-on-attach-1-2",
+            "lazy-resume-on-attach-1-3"
+          ],
+          "bank": [
+            {
+              "task": "lazy-resume-on-attach-1-3",
+              "source": "reviewer",
+              "summary": "Store.Set accepts a Registration that may still carry its decoded raw bytes, so a read-modify-write caller silently writes the pre-edit value",
+              "failure": "A later task that loads a registration, adjusts it and passes it back writes the loaded raw bytes verbatim, so the edit never lands while classifySet reports modify and the INFO breadcrumb claims the write happened. The user sees a pin that silently does not take — a pane that comes back eager after being set lazy — with a log line saying it did. Nothing in the tree fails.",
+              "detail": "internal/hooks/store.go:158 stores the passed value directly, and Registration.MarshalJSON (internal/hooks/registration.go) returns r.raw whenever it is non-empty. Registration is exported with an unexported raw field, so an outside caller cannot construct one carrying bytes — but Store.Load hands out Snapshot values that do, and a struct copy carries the field. Foreclosing it is one line inside Set (re-project to Registration{Command, Resume} before storing) or a NewRegistration constructor the mutation path takes; both are spec-aligned, since §2.2 forbids carrying a replaced entry attributes forward. Out of scope in 1-3 because its Do step directs storing the handed value directly.",
+              "files": [
+                "internal/hooks/store.go",
+                "internal/hooks/registration.go"
+              ]
+            }
           ]
         }
       }
