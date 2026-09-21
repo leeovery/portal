@@ -39,11 +39,10 @@ func resumeCommandLines(command string, width int) []string {
 
 // ansi.Wrap rather than ansi.Wordwrap: a word longer than the limit must be
 // broken at it rather than left to overflow the card. Every line comes back no
-// wider than the width asked for, which ansi.Wrap on its own does not promise:
-// it carries the whitespace it broke at into the line it broke and does not
-// count a line's leading whitespace toward the limit, and below about four
-// columns it leaves lines over-wide outright. A row a cell too wide cannot be
-// padded back down, and widens the card built around it.
+// wider than the width asked for, which ansi.Wrap on its own does not promise —
+// it over-packs a run of hyphens past the limit at ordinary widths, and carries
+// the whitespace it broke at into the line it broke. A row a cell too wide
+// cannot be padded back down, and widens the card built around it.
 func wrappedLines(text string, width int) []string {
 	lines := strings.Split(ansi.Wrap(text, width, ""), "\n")
 	for i, line := range lines {
