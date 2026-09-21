@@ -19,6 +19,10 @@ const (
 	portalLogName     = "portal.log"
 	portalLogOldName  = "portal.log.old"
 	scrollbackSubdir  = "scrollback"
+
+	// pendingScrollbackPrefix opens the token-derived scrollback name. The
+	// namespaces are disjoint: a positional key always ends "__<window>.<pane>".
+	pendingScrollbackPrefix = "pane-"
 )
 
 // Dir resolves the absolute path to Portal's state directory: $PORTAL_STATE_DIR
@@ -83,6 +87,12 @@ func ScrollbackDir(dir string) string { return filepath.Join(dir, scrollbackSubd
 
 func ScrollbackFile(dir, paneKey string) string {
 	return filepath.Join(dir, scrollbackSubdir, paneKey+".bin")
+}
+
+// PendingScrollbackFile is the token-derived name a frozen pane's scrollback is
+// re-filed under, in the relative forward-slashed shape a Pane record stores.
+func PendingScrollbackFile(token string) string {
+	return filepath.ToSlash(filepath.Join(scrollbackSubdir, pendingScrollbackPrefix+token+".bin"))
 }
 
 func FIFOPath(dir, paneKey string) string {

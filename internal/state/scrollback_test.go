@@ -442,3 +442,264 @@ func TestWriteScrollbackIfChanged(t *testing.T) {
 		}
 	})
 }
+
+const waitingPaneToken = "ab12cd"
+
+func waitingIndex(token, scrollbackFile string) state.Index {
+	return state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:        "work",
+			Environment: map[string]string{},
+			Windows: []state.Window{{
+				Index: 0, Name: "main", Layout: "tiled", Active: true,
+				Panes: []state.Pane{{
+					Index:          1,
+					CWD:            "/tmp",
+					CurrentCommand: "zsh",
+					ScrollbackFile: scrollbackFile,
+					PortalPaneID:   token,
+				}},
+			}},
+		}},
+	}
+}
+
+func waitingPaneOf(t *testing.T, idx state.Index) state.Pane {
+	t.Helper()
+	return idx.Sessions[0].Windows[0].Panes[0]
+}
+
+func waitingSet() map[string]struct{} {
+	return map[string]struct{}{state.SanitizePaneKey("work", 0, 1): {}}
+}
+
+func seedScrollback(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	sb := state.ScrollbackDir(dir)
+	if err := os.MkdirAll(sb, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(sb, name)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return path
+}
+
+func readScrollback(t *testing.T, dir, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(state.ScrollbackDir(dir), name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(data)
+}
+
+func TestRefilePendingScrollback(t *testing.T) {
+	t.Run("it re-files a waiting pane's scrollback under its token and points the record at that path", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
+		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+		hm := state.HashMap{"work__0.1": 42}
+		logger, sink := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), hm, logger)
+
+		want := "scrollback/pane-" + waitingPaneToken + ".bin"
+		if got := waitingPaneOf(t, idx).ScrollbackFile; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readScrollback(t, dir, "pane-"+waitingPaneToken+".bin"); got != "frozen-body" {
+			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
+		}
+		if _, err := os.Stat(filepath.Join(state.ScrollbackDir(dir), "work__0.1.bin")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("positional file stat err = %v, want not-exist", err)
+		}
+		if _, held := hm["work__0.1"]; held {
+			t.Errorf("hash map still holds the vacated key: %v", hm)
+		}
+		if got := sink.Records(); len(got) != 0 {
+			t.Errorf("records on the success path = %v, want none", sink.Lines())
+		}
+	})
+
+	t.Run("it renames nothing on a second tick for a pane already filed under its token", func(t *testing.T) {
+		dir := t.TempDir()
+		tokenName := "pane-" + waitingPaneToken + ".bin"
+		seedScrollback(t, dir, tokenName, "frozen-body")
+		idx := waitingIndex(waitingPaneToken, "scrollback/"+tokenName)
+		hm := state.HashMap{"pane-" + waitingPaneToken: 42}
+		logger, sink := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), hm, logger)
+
+		if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/"+tokenName; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readScrollback(t, dir, tokenName); got != "frozen-body" {
+			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
+		}
+		if got, held := hm["pane-"+waitingPaneToken]; !held || got != 42 {
+			t.Errorf("hm[pane-%s] = (%d, %v), want (42, true)", waitingPaneToken, got, held)
+		}
+		if got := sink.Records(); len(got) != 0 {
+			t.Errorf("records = %v, want none", sink.Lines())
+		}
+	})
+
+	t.Run("it adopts the token path when the record still names a positional file that is gone", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+		hm := state.HashMap{"work__0.1": 42}
+		logger, sink := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), hm, logger)
+
+		want := "scrollback/pane-" + waitingPaneToken + ".bin"
+		if got := waitingPaneOf(t, idx).ScrollbackFile; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if _, held := hm["work__0.1"]; held {
+			t.Errorf("hash map still holds the vacated key: %v", hm)
+		}
+		if got := sink.Records(); len(got) != 0 {
+			t.Errorf("records = %v, want none", sink.Lines())
+		}
+	})
+
+	t.Run("it keeps the positional path for a waiting pane whose token is absent or not token-shaped", func(t *testing.T) {
+		tokens := map[string]string{
+			"absent":           "",
+			"too short":        "ab12",
+			"too long":         "ab12cdef",
+			"outside alphabet": "ab-2cd",
+		}
+		for name, token := range tokens {
+			t.Run(name, func(t *testing.T) {
+				dir := t.TempDir()
+				seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
+				idx := waitingIndex(token, "scrollback/work__0.1.bin")
+				hm := state.HashMap{"work__0.1": 42}
+				logger, sink := openTempLogger(t)
+
+				state.RefilePendingScrollback(dir, &idx, waitingSet(), hm, logger)
+
+				if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/work__0.1.bin"; got != want {
+					t.Errorf("ScrollbackFile = %q, want %q", got, want)
+				}
+				if got := readScrollback(t, dir, "work__0.1.bin"); got != "frozen-body" {
+					t.Errorf("positional file = %q, want %q", got, "frozen-body")
+				}
+				if got, held := hm["work__0.1"]; !held || got != 42 {
+					t.Errorf("hm[work__0.1] = (%d, %v), want (42, true)", got, held)
+				}
+				if got := sink.Records(); len(got) != 0 {
+					t.Errorf("records = %v, want none", sink.Lines())
+				}
+			})
+		}
+	})
+
+	t.Run("it warns once and leaves the record and the dedup entry alone when the rename fails", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
+		blocked := filepath.Join(state.ScrollbackDir(dir), "pane-"+waitingPaneToken+".bin")
+		if err := os.MkdirAll(filepath.Join(blocked, "occupant"), 0o700); err != nil {
+			t.Fatalf("seed blocking directory: %v", err)
+		}
+		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+		hm := state.HashMap{"work__0.1": 42}
+		logger, sink := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), hm, logger)
+
+		if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/work__0.1.bin"; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readScrollback(t, dir, "work__0.1.bin"); got != "frozen-body" {
+			t.Errorf("positional file = %q, want %q", got, "frozen-body")
+		}
+		if got, held := hm["work__0.1"]; !held || got != 42 {
+			t.Errorf("hm[work__0.1] = (%d, %v), want (42, true)", got, held)
+		}
+		rec := sink.Records().AtExactLevel(slog.LevelWarn).Only(t, "refile failure warning")
+		if got, want := rec.AttrOrEmpty("pane_key"), "work__0.1"; got != want {
+			t.Errorf("pane_key = %q, want %q", got, want)
+		}
+		if got, want := rec.AttrOrEmpty("path"), "scrollback/work__0.1.bin"; got != want {
+			t.Errorf("path = %q, want %q", got, want)
+		}
+		if !rec.HasAttr("error") {
+			t.Errorf("warning carries no error attr: %v", rec.Keys)
+		}
+		if got, want := len(sink.Records()), 1; got != want {
+			t.Errorf("records = %d, want %d: %v", got, want, sink.Lines())
+		}
+		for _, key := range rec.Keys {
+			switch key {
+			case "pane_key", "path", "error":
+			default:
+				t.Errorf("warning carries unexpected attr key %q", key)
+			}
+		}
+	})
+
+	t.Run("it tolerates a nil hash map and a nil logger", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
+		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), nil, nil)
+
+		want := "scrollback/pane-" + waitingPaneToken + ".bin"
+		if got := waitingPaneOf(t, idx).ScrollbackFile; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readScrollback(t, dir, "pane-"+waitingPaneToken+".bin"); got != "frozen-body" {
+			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
+		}
+	})
+
+	t.Run("it renames nothing when the record names no scrollback file", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		idx := waitingIndex(waitingPaneToken, "")
+		logger, sink := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), state.HashMap{}, logger)
+
+		want := "scrollback/pane-" + waitingPaneToken + ".bin"
+		if got := waitingPaneOf(t, idx).ScrollbackFile; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("state dir stat: %v", err)
+		}
+		if got := sink.Records(); len(got) != 0 {
+			t.Errorf("records = %v, want none", sink.Lines())
+		}
+	})
+
+	t.Run("it leaves a pane the live enumeration did not mark pending alone", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__0.1.bin", "live-body")
+		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+		hm := state.HashMap{"work__0.1": 42}
+		logger, _ := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, map[string]struct{}{}, hm, logger)
+
+		if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/work__0.1.bin"; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readScrollback(t, dir, "work__0.1.bin"); got != "live-body" {
+			t.Errorf("positional file = %q, want %q", got, "live-body")
+		}
+	})
+}

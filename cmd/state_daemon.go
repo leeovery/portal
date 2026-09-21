@@ -251,6 +251,11 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 		return fmt.Errorf("capture structure: %w", err)
 	}
 
+	// Ahead of the capture loop: a pane landing on the address a waiting pane
+	// vacated writes its own file this tick rather than deduping against bytes
+	// that have moved.
+	state.RefilePendingScrollback(deps.Dir, &idx, pendingSet, deps.HashMap, deps.Logger)
+
 	sessions := len(idx.Sessions)
 	var panes, naturalChurn, anomalous int
 

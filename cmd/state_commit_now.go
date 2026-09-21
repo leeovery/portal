@@ -118,10 +118,15 @@ var stateCommitNowCmd = &cobra.Command{
 		prev := loadPrevIndex(dir, deps.ReadIndex, logger)
 
 		client := deps.NewClient()
-		idx, _, err := deps.CaptureStructure(client, nil, &prev, logger)
+		idx, pendingSet, err := deps.CaptureStructure(client, nil, &prev, logger)
 		if err != nil {
 			return failCommitNow(logger, dir, deps.TouchSaveRequested, "capture structure", err)
 		}
+
+		// An index still naming a waiting pane's vacated positional path would
+		// make this commit's housekeeping pass reclaim the token-named file the
+		// bytes have moved into.
+		state.RefilePendingScrollback(dir, &idx, pendingSet, nil, logger)
 
 		if err := deps.Commit(dir, idx, false, logger); err != nil {
 			return failCommitNow(logger, dir, deps.TouchSaveRequested, "commit sessions.json", err)

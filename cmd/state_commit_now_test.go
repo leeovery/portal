@@ -1183,3 +1183,63 @@ func TestStateCommitNow_DiscardsThePendingSet(t *testing.T) {
 			f.commitArgs[0].Idx, captured)
 	}
 }
+
+func TestStateCommitNow_RefilesResumePendingScrollback(t *testing.T) {
+	t.Run("it commits the token path from commit-now and reclaims no token-named file", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(state.ScrollbackDir(dir), "work__0.1.bin"), []byte("frozen-body"), 0o600); err != nil {
+			t.Fatalf("seed positional scrollback: %v", err)
+		}
+
+		idx := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "work",
+				Environment: map[string]string{},
+				Windows: []state.Window{{
+					Index: 0, Name: "main", Layout: "tiled", Active: true,
+					Panes: []state.Pane{{
+						Index:          1,
+						CWD:            "/tmp",
+						CurrentCommand: "zsh",
+						ScrollbackFile: "scrollback/work__0.1.bin",
+						PortalPaneID:   waitingToken,
+					}},
+				}},
+			}},
+		}
+
+		f := &commitNowFixture{
+			client:         &fakeCaptureClient{sessions: []string{"work"}},
+			captureReturn:  idx,
+			capturePending: map[string]struct{}{state.SanitizePaneKey("work", 0, 1): {}},
+		}
+		installCommitNowDeps(t, f)
+
+		if _, _, err := runRootCmd(t, "state", "commit-now"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := "scrollback/" + waitingRefiled
+		if got := f.commitArgs[0].Idx.Sessions[0].Windows[0].Panes[0].ScrollbackFile; got != want {
+			t.Errorf("committed ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readSessionsJSON(t, dir).Sessions[0].Windows[0].Panes[0].ScrollbackFile; got != want {
+			t.Errorf("persisted ScrollbackFile = %q, want %q", got, want)
+		}
+		body, err := os.ReadFile(filepath.Join(state.ScrollbackDir(dir), waitingRefiled))
+		if err != nil {
+			t.Fatalf("read token-named file: %v", err)
+		}
+		if string(body) != "frozen-body" {
+			t.Errorf("token-named file = %q, want %q", string(body), "frozen-body")
+		}
+		if _, err := os.Stat(filepath.Join(state.ScrollbackDir(dir), "work__0.1.bin")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("positional file stat err = %v, want not-exist", err)
+		}
+	})
+}
