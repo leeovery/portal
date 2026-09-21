@@ -1,6 +1,6 @@
 // Package prefs persists UI preferences to prefs.json. Deliberately a leaf —
-// stdlib plus internal/fileutil only — so internal/tui can import it without a
-// cycle.
+// stdlib plus internal/fileutil and internal/resumemode only — so internal/tui
+// can import it without a cycle.
 package prefs
 
 import (
@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/leeovery/portal/internal/fileutil"
+	"github.com/leeovery/portal/internal/resumemode"
 )
 
 type SessionListMode int
@@ -66,6 +67,21 @@ func (m migrationMarker) MarshalJSON() ([]byte, error) {
 	return strconv.AppendBool(nil, bool(m)), nil
 }
 
+// Decodes any JSON value without error: a field-level error would zero the
+// tolerant load's whole record. A non-string value carries no mode and is not
+// preserved through the next write.
+type resumeModeValue string
+
+func (v *resumeModeValue) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		*v = ""
+		return nil
+	}
+	*v = resumeModeValue(s)
+	return nil
+}
+
 type prefsFile struct {
 	SessionListMode string `json:"session_list_mode,omitempty"`
 	// Preserved verbatim, never parsed. Do not delete the field: an undeclared
@@ -76,6 +92,8 @@ type prefsFile struct {
 	ThemeDark  string `json:"theme_dark,omitempty"`
 	// Must stay declared for the same re-encode reason as Appearance.
 	ThemeMigrated migrationMarker `json:"theme_migrated,omitempty"`
+	// Must stay declared for the same re-encode reason as Appearance.
+	ResumeMode resumeModeValue `json:"resume_mode,omitempty"`
 }
 
 // ThemeKeys carries the raw theme slugs from prefs.json verbatim — validation,
@@ -186,6 +204,21 @@ func (s *Store) Load() (SessionListMode, error) {
 		return ModeFlat, err
 	}
 	return parseMode(f.SessionListMode), nil
+}
+
+// LoadResumeMode reads the install-wide resume mode under the same tolerant
+// policy as Load: every value it cannot recognise yields resumemode.Default,
+// and a non-ErrNotExist read error propagates alongside that default rather
+// than leaving the mode undecided.
+func (s *Store) LoadResumeMode() (resumemode.Mode, error) {
+	f, _, err := s.readFile()
+	if err != nil {
+		return resumemode.Default, err
+	}
+	if mode, ok := resumemode.Parse(string(f.ResumeMode)); ok {
+		return mode, nil
+	}
+	return resumemode.Default, nil
 }
 
 // LoadThemeKeys reads the raw theme slugs verbatim, under the same tolerant
