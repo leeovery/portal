@@ -151,7 +151,7 @@ var hooksListCmd = &cobra.Command{
 		locations := paneLocationsByToken(hookSeams().PaneLister)
 
 		for _, h := range list {
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", h.Key, h.Event, h.Command, locations[h.Key]); err != nil {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\t%s\n", h.Key, h.Event, h.Command, locations[h.Key], h.Resume.String()); err != nil {
 				return err
 			}
 		}

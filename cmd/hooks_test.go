@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestHooksListCommand(t *testing.T) {
 		}}})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tmy-project-abc123:0.0\n"
+		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tmy-project-abc123:0.0\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -95,9 +96,9 @@ func TestHooksListCommand(t *testing.T) {
 		}}})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tother-proj:0.0\n" +
-			hookstest.SubjectSeedB + "\ton-resume\tclaude --resume abc123\tproj-abc:0.0\n" +
-			hookstest.SubjectSeedC + "\ton-resume\tclaude --resume def456\tproj-abc:1.0\n"
+		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tother-proj:0.0\t\n" +
+			hookstest.SubjectSeedB + "\ton-resume\tclaude --resume abc123\tproj-abc:0.0\t\n" +
+			hookstest.SubjectSeedC + "\ton-resume\tclaude --resume def456\tproj-abc:1.0\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -127,7 +128,7 @@ func TestHooksListLocationColumn(t *testing.T) {
 		}}})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tmy-project-abc123:0.0\n"
+		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tmy-project-abc123:0.0\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -143,7 +144,7 @@ func TestHooksListLocationColumn(t *testing.T) {
 		}}})
 
 		got := runHookList(t)
-		want := "\ton-resume\tnpm start\t\n"
+		want := "\ton-resume\tnpm start\t\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -160,7 +161,7 @@ func TestHooksListLocationColumn(t *testing.T) {
 		}}})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tfirst-sess:0.0\n"
+		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tfirst-sess:0.0\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -180,7 +181,7 @@ func TestHooksListLocationColumn(t *testing.T) {
 		}})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\t\n" + hookstest.SubjectSeedB + "\ton-resume\tnpm start\t\n"
+		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\t\t\n" + hookstest.SubjectSeedB + "\ton-resume\tnpm start\t\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -208,7 +209,7 @@ func TestHooksListLocationColumn(t *testing.T) {
 		}}})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedC + "\ton-resume\tnpm start\t\n"
+		want := hookstest.SubjectSeedC + "\ton-resume\tnpm start\t\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -225,8 +226,8 @@ func TestHooksListLocationColumn(t *testing.T) {
 		}}})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tsess:0.0\n" +
-			hookstest.UnjudgeableSeedA + "\ton-resume\tnpm start\t\n"
+		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tsess:0.0\t\n" +
+			hookstest.UnjudgeableSeedA + "\ton-resume\tnpm start\t\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -242,7 +243,7 @@ func TestHooksListLocationColumn(t *testing.T) {
 		}}})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\ta|b:0.0\n"
+		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\ta|b:0.0\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -267,6 +268,150 @@ func TestHooksListLocationColumn(t *testing.T) {
 			t.Errorf("enumeration reads = %d, want 1", lister.calls)
 		}
 	})
+}
+
+func TestHooksListModeColumn(t *testing.T) {
+	t.Run("it appends the registration's mode as a fifth column", func(t *testing.T) {
+		for _, mode := range []string{"eager", "lazy"} {
+			t.Run(mode, func(t *testing.T) {
+				seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":{"command":"npm start","resume":"`+mode+`"}}}`)
+
+				withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
+					{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
+				}}})
+
+				got := runHookList(t)
+				want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tmy-project:0.0\t" + mode + "\n"
+				if got != want {
+					t.Errorf("output = %q, want %q", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("it renders an empty fifth column for a registration carrying no mode", func(t *testing.T) {
+		hooksFileInTempDir(t, map[string]map[string]string{
+			hookstest.SubjectSeedA: {"on-resume": "npm start"},
+		})
+
+		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
+			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
+		}}})
+
+		got := runHookList(t)
+		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tmy-project:0.0\t\n"
+		if got != want {
+			t.Errorf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it renders an empty fifth column for an unrecognised stored resume value", func(t *testing.T) {
+		for _, tt := range []struct {
+			name   string
+			stored string
+		}{
+			{name: "unrecognised word", stored: `"whenever"`},
+			{name: "empty", stored: `""`},
+			{name: "capitalised", stored: `"Lazy"`},
+			{name: "non-string", stored: `7`},
+			{name: "absent", stored: ``},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				registration := `{"command":"npm start"}`
+				if tt.stored != "" {
+					registration = `{"command":"npm start","resume":` + tt.stored + `}`
+				}
+				seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":`+registration+`}}`)
+
+				withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
+					{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
+				}}})
+
+				got := runHookList(t)
+				want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tmy-project:0.0\t\n"
+				if got != want {
+					t.Errorf("output = %q, want %q", got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("it leaves the first four columns unchanged for a positional parser", func(t *testing.T) {
+		seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":{"command":"npm start","resume":"lazy"}},`+
+			`"`+hookstest.SubjectSeedB+`":{"on-resume":"claude --resume abc123"}}`)
+
+		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
+			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
+		}}})
+
+		wantFirstFour := [][]string{
+			{hookstest.SubjectSeedA, "on-resume", "npm start", "my-project:0.0"},
+			{hookstest.SubjectSeedB, "on-resume", "claude --resume abc123", ""},
+		}
+		lines := strings.Split(strings.TrimSuffix(runHookList(t), "\n"), "\n")
+		if len(lines) != len(wantFirstFour) {
+			t.Fatalf("lines = %d, want %d", len(lines), len(wantFirstFour))
+		}
+		for i, line := range lines {
+			fields := strings.Split(line, "\t")
+			if len(fields) != 5 {
+				t.Fatalf("line %d = %q, want five tab-separated fields", i, line)
+			}
+			if got := fields[:4]; !slices.Equal(got, wantFirstFour[i]) {
+				t.Errorf("line %d first four fields = %q, want %q", i, got, wantFirstFour[i])
+			}
+		}
+	})
+
+	t.Run("it adds no second tmux read", func(t *testing.T) {
+		seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":{"command":"npm start","resume":"lazy"}},`+
+			`"`+hookstest.SubjectSeedB+`":{"on-resume":{"command":"two","resume":"eager"}},`+
+			`"`+hookstest.SubjectSeedC+`":{"on-resume":"three"}}`)
+
+		lister := &recordingPaneHookLister{rows: []tmux.PaneHookRow{
+			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
+		}}
+		withHooksDeps(t, HooksDeps{PaneLister: lister})
+
+		runHookList(t)
+
+		if lister.calls != 1 {
+			t.Errorf("enumeration reads = %d, want 1", lister.calls)
+		}
+	})
+
+	t.Run("it takes no tmux read at all with no entries", func(t *testing.T) {
+		hooksFileInTempDir(t, map[string]map[string]string{})
+
+		withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
+
+		if got := runHookList(t); got != "" {
+			t.Errorf("output = %q, want empty string", got)
+		}
+	})
+
+	t.Run("it prints no line for the install-wide default", func(t *testing.T) {
+		seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":{"command":"npm start","resume":"lazy"}}}`)
+
+		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
+			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
+		}}})
+
+		got := runHookList(t)
+		if lines := strings.Count(got, "\n"); lines != 1 {
+			t.Errorf("lines = %d, want one line per registration and nothing else (output %q)", lines, got)
+		}
+	})
+}
+
+// seedHooksFile stages a hooks.json holding body verbatim and points the
+// commands at it, for a fixture whose subject is a stored shape the store's own
+// layout helpers do not express.
+func seedHooksFile(t *testing.T, body string) string {
+	t.Helper()
+	_, hooksFile := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), Seed: body})
+	t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+	return hooksFile
 }
 
 // loudPaneHookLister fails the test the moment it is read from: nothing to

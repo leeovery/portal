@@ -224,7 +224,7 @@ xctl hook set --on-resume "npm start"            # register a resume hook
 xctl hook set --on-resume "npm start" --resume-mode lazy   # register it pinned to a resume mode
 xctl hook rm --on-resume                         # remove the current pane's hook
 xctl hook rm --on-resume --pane-key 'k3Xp7Q'     # remove the entry under any hook key, verbatim (works outside tmux)
-xctl hook list                                   # list hooks: key, event, command, and the pane's current location (4th column, empty if no live pane carries the token)
+xctl hook list                                   # list hooks: key, event, command, the pane's current location (4th column, empty if no live pane carries the token), and the registration's resume mode (5th column: eager, lazy, or empty when it follows the install)
 ```
 
 `--resume-mode` takes `eager` or `lazy` and nothing else; any other value is refused and nothing is written. A registration carries eager, lazy or nothing, and carrying nothing means it follows the install-wide setting in `prefs.json`. The flag's zero value is "names no mode" rather than "keep what was there", so a `hook set` that does not pass it writes a registration carrying no mode whatever its predecessor carried — re-pass the mode alongside the command to keep a pin.
