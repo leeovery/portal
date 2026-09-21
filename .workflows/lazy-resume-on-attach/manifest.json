@@ -102,9 +102,9 @@
     "planning": {
       "items": {
         "lazy-resume-on-attach": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
-          "spec_commit": "65279d6390aad803d4991d22bee0dc7a5bd96f85",
+          "spec_commit": "d43d755a5a3fd7755ec32b1d031a335471efde4b",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "auto",
