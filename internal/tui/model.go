@@ -2942,14 +2942,18 @@ const (
 )
 
 func (m Model) termDims() (w, h int) {
-	w, h = m.termWidth, m.termHeight
-	if w <= 0 {
-		w = fallbackTermWidth
+	return dimsOrFallback(m.termWidth, m.termHeight)
+}
+
+func dimsOrFallback(w, h int) (width, height int) {
+	width, height = w, h
+	if width <= 0 {
+		width = fallbackTermWidth
 	}
-	if h <= 0 {
-		h = fallbackTermHeight
+	if height <= 0 {
+		height = fallbackTermHeight
 	}
-	return w, h
+	return width, height
 }
 
 // Clamps the inset to 0 when the dimension cannot hold it, so a tiny terminal
