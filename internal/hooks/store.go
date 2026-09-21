@@ -157,7 +157,9 @@ func (s *Store) Set(key string, event Event, registration Registration, via Via)
 	if h[key] == nil {
 		h[key] = make(map[string]Registration)
 	}
-	h[key][event.String()] = registration
+	// Storing the handed value instead reinstates the bytes it was decoded from,
+	// so a caller that loaded, adjusted and handed it back writes what it read.
+	h[key][event.String()] = Registration{Command: registration.Command, Resume: registration.Resume}
 
 	if err := s.save(h); err != nil {
 		logger.Warn(op, "op", op, "hook_key", key, "value", registration.Command, "via", via.String(),

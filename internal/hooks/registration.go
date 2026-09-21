@@ -16,9 +16,10 @@ type Registration struct {
 	Resume  resumemode.Mode
 	// raw is the value this registration was decoded from, re-emitted verbatim
 	// so a rewrite of one entry returns every other entry carrying what it
-	// carried — an attribute this reader does not model included. A
-	// registration a mutation builds carries none, so it is written in the
-	// shape its own content chooses.
+	// carried — an attribute this reader does not model included. A value a
+	// mutation stores is re-projected from its command and mode first, so a
+	// registration that reached it carrying decoded bytes is written from its
+	// own content.
 	raw json.RawMessage
 }
 

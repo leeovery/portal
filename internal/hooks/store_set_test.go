@@ -203,3 +203,150 @@ func TestSetWritesTheRegistrationWhole(t *testing.T) {
 		}
 	})
 }
+
+func TestSetReProjectsTheRegistrationItStores(t *testing.T) {
+	t.Run("it writes the mode a loaded registration was adjusted to rather than the bytes it was loaded from", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			seeded string
+			want   string
+		}{
+			{
+				name:   "string form pinned lazy",
+				seeded: `"npm start"`,
+				want:   `{"command":"npm start","resume":"lazy"}`,
+			},
+			{
+				name:   "object form moved from eager to lazy",
+				seeded: `{"command":"npm start","resume":"eager"}`,
+				want:   `{"command":"npm start","resume":"lazy"}`,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				store, path := hookstest.StageStore(t, hookstest.Staging{
+					Seed: fmt.Sprintf(`{%q:{"on-resume":%s}}`, hookstest.LiveSeedA, tt.seeded),
+				})
+				registration := loadedRegistration(t, store, hookstest.LiveSeedA)
+				registration.Resume = resumemode.Lazy
+
+				sink := logtest.Install(t)
+				if err := store.Set(hookstest.LiveSeedA, hooks.EventOnResume, registration, hooks.ViaCLI); err != nil {
+					t.Fatalf("Set: %v", err)
+				}
+
+				rec := sink.Records().Only(t, "log record")
+				logtest.AssertRecord(t, rec, logtest.RecordWant{
+					Level:     slog.LevelInfo,
+					Msg:       "modify",
+					Component: "hooks",
+					Op:        "modify",
+					Via:       "cli",
+				})
+				if got := rec.AttrString(t, "hook_key"); got != hookstest.LiveSeedA {
+					t.Errorf("hook_key = %q, want %q", got, hookstest.LiveSeedA)
+				}
+				if got := rec.AttrString(t, "value"); got != "npm start" {
+					t.Errorf("value = %q, want %q", got, "npm start")
+				}
+
+				if got := storedValue(t, path, hookstest.LiveSeedA, "on-resume"); string(got) != tt.want {
+					t.Errorf("stored value = %s, want %s", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("it drops the replaced entry's unmodelled attributes when the rewrite came out of the loaded snapshot", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{
+			Seed: fmt.Sprintf(`{%q:{"on-resume":{"command":"npm start","resume":"eager","nickname":"dev server"}}}`,
+				hookstest.LiveSeedA),
+		})
+		registration := loadedRegistration(t, store, hookstest.LiveSeedA)
+		registration.Resume = resumemode.Lazy
+
+		if err := store.Set(hookstest.LiveSeedA, hooks.EventOnResume, registration, hooks.ViaCLI); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+
+		want := `{"command":"npm start","resume":"lazy"}`
+		if got := storedValue(t, path, hookstest.LiveSeedA, "on-resume"); string(got) != want {
+			t.Errorf("stored value = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("it leaves every entry a loaded-value rewrite did not name byte-identical", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{
+			Seed: fmt.Sprintf(`{%q:{"on-resume":{"command":"npm start","nickname":"dev server"}},`+
+				`%q:{"on-resume":{"command":"serve","resume":"whenever"}},`+
+				`%q:{"on-resume":42},`+
+				`%q:{"on-resume":{"command":"subject","resume":"eager"}}}`,
+				hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC, hookstest.SubjectSeedA),
+		})
+		siblings := map[string][]byte{
+			hookstest.LiveSeedA: storedValue(t, path, hookstest.LiveSeedA, "on-resume"),
+			hookstest.LiveSeedB: storedValue(t, path, hookstest.LiveSeedB, "on-resume"),
+			hookstest.LiveSeedC: storedValue(t, path, hookstest.LiveSeedC, "on-resume"),
+		}
+
+		registration := loadedRegistration(t, store, hookstest.SubjectSeedA)
+		registration.Resume = resumemode.Lazy
+		if err := store.Set(hookstest.SubjectSeedA, hooks.EventOnResume, registration, hooks.ViaCLI); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+
+		for key, before := range siblings {
+			if after := storedValue(t, path, key, "on-resume"); !bytes.Equal(after, before) {
+				t.Errorf("untouched entry %q = %s, want %s", key, after, before)
+			}
+		}
+	})
+
+	t.Run("it treats a loaded registration handed straight back as a no-op and leaves the file untouched", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{
+			Seed: fmt.Sprintf(`{%q:{"on-resume":{"command":"npm start","resume":"lazy","nickname":"dev server"}}}`,
+				hookstest.LiveSeedA),
+		})
+		registration := loadedRegistration(t, store, hookstest.LiveSeedA)
+		before := readFileBytes(t, path)
+		beforeModTime := modTime(t, path)
+
+		sink := logtest.Install(t)
+		if err := store.Set(hookstest.LiveSeedA, hooks.EventOnResume, registration, hooks.ViaCLI); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+
+		rec := sink.Records().Only(t, "log record")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{
+			Level:     slog.LevelDebug,
+			Msg:       "set-noop",
+			Component: "hooks",
+			Op:        "set-noop",
+			Via:       "cli",
+		})
+
+		if after := readFileBytes(t, path); !bytes.Equal(after, before) {
+			t.Errorf("file = %s, want it byte-unchanged: %s", after, before)
+		}
+		if after := modTime(t, path); !after.Equal(beforeModTime) {
+			t.Error("file was rewritten on a loaded registration handed straight back")
+		}
+	})
+}
+
+// loadedRegistration reads an entry back through Load, so a test drives Set with
+// a value carrying the bytes it was decoded from — the route a read-modify-write
+// caller takes and a freshly-constructed registration cannot reach.
+func loadedRegistration(t *testing.T, store *hooks.Store, key string) hooks.Registration {
+	t.Helper()
+	h, err := store.Load(hooks.ViaInternal)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	registration, ok := h[key]["on-resume"]
+	if !ok {
+		t.Fatalf("the staged snapshot holds no on-resume entry for key %q", key)
+	}
+	return registration
+}
