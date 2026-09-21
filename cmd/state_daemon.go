@@ -246,7 +246,7 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 		return fmt.Errorf("list markers: %w", err)
 	}
 
-	idx, _, err := state.CaptureStructure(deps.Client, skipSet, deps.PrevIndex, deps.Logger)
+	idx, pendingSet, err := state.CaptureStructure(deps.Client, skipSet, deps.PrevIndex, deps.Logger)
 	if err != nil {
 		return fmt.Errorf("capture structure: %w", err)
 	}
@@ -270,7 +270,7 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 				default:
 				}
 				paneKey := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
-				if _, skipped := skipSet[paneKey]; skipped {
+				if paneSkipsScrollback(paneKey, skipSet, pendingSet) {
 					continue
 				}
 				panes++
@@ -314,6 +314,17 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 		log.Took(start),
 	)
 	return nil
+}
+
+// Capturing a pane held behind a waiting resume panel writes back its
+// transcript minus the screenful that panel covers, and no copy of those lines
+// survives anywhere else.
+func paneSkipsScrollback(paneKey string, skipSet, pendingSet map[string]struct{}) bool {
+	if _, skipped := skipSet[paneKey]; skipped {
+		return true
+	}
+	_, pending := pendingSet[paneKey]
+	return pending
 }
 
 // tmux does not sentinel-wrap a vanished pane, so the "can't find " stderr
