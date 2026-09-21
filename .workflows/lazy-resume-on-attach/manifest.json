@@ -244,7 +244,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 2,
-          "current_task": "lazy-resume-on-attach-2-4",
+          "current_task": "lazy-resume-on-attach-2-5",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -256,7 +256,8 @@
             "lazy-resume-on-attach-1-8",
             "lazy-resume-on-attach-2-1",
             "lazy-resume-on-attach-2-2",
-            "lazy-resume-on-attach-2-3"
+            "lazy-resume-on-attach-2-3",
+            "lazy-resume-on-attach-2-4"
           ],
           "staging": {
             "p1": {
@@ -270,6 +271,23 @@
           ],
           "completed_phases": [
             1
+          ],
+          "bank": [
+            {
+              "task": "lazy-resume-on-attach-2-4",
+              "source": "reviewer",
+              "summary": "A frozen pane's retained scrollback file is still addressed by pane position, so any live pane that lands on its old address silently overwrites it",
+              "failure": "A user who waits on a resume while tmux moves the pane (break-pane/move-pane, or a pane closing and a new split taking the vacated index) loses the whole transcript the freeze exists to protect: the frozen record goes on pointing at scrollback/<old-address>.bin while the pane now occupying that address is captured into the same file every tick. Nothing logs it, nothing detects two records claiming one path, and the housekeeping pass keeps the file because both records reference it. It is noticed at the next reboot, when the restored pane replays a DIFFERENT pane's history — and the user's own transcript is unrecoverable. Same class of loss §7.2 says the token match closes, arriving through the file name instead of the record lookup.",
+              "detail": "Reproduced empirically in the cmd package (overlay-only; nothing written to the repo): tick 1 captures pane tokP at work:0.1 (file work__0.1.bin = its transcript); tick 2 marks it pending (skipped, record merged by token, ScrollbackFile retained); tick 3 has tokP pending at work:1.0 and a new pane tokNEW at work:0.1. Result from the committed sessions.json: tokP → scrollback/work__0.1.bin and tokNEW → scrollback/work__0.1.bin, with the file holding INTRUDER-CONTENT. Mechanism: internal/state/capture.go:199 (frozen record keeps the previous ScrollbackFile, matched by token) meeting internal/state/scrollback.go:76-85 + internal/state/paths.go:84 (the write path is derived purely from the live paneKey). internal/state/commit.go:64-70 collects both references verbatim, so nothing flags the collision. The fix is beyond task 2-4's Do list (the skip alone) and contradicts spec §7.2's \"Nothing downstream moves\", so it likely needs a corrigendum alongside the code: either file a frozen pane's scrollback under its durable token, or have the write refuse a path another record already claims. NOTE: task 2-3's reviewer saw the same hazard and judged it parked by §10's durable-pane-identity roadmap item; this reviewer reproduced it and argues otherwise. The boundary pass should settle which reading holds.",
+              "files": [
+                "internal/state/capture.go",
+                "internal/state/scrollback.go",
+                "internal/state/paths.go",
+                "internal/state/commit.go",
+                "cmd/state_daemon.go",
+                ".workflows/lazy-resume-on-attach/specification/lazy-resume-on-attach/specification.md"
+              ]
+            }
           ]
         }
       }
