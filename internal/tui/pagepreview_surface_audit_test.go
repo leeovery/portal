@@ -201,6 +201,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"project":          {},
 		"resolver":         {},
 		"restore":          {},
+		"resumemode":       {},
 		"restoretest":      {},
 		"session":          {},
 		"shellquote":       {},
