@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -45,6 +46,7 @@ type commitNowFixture struct {
 	capturePrevs    []*state.Index
 	captureSkipSets []map[string]struct{}
 	captureReturn   state.Index
+	capturePending  map[string]struct{}
 	captureErr      error
 	commitCalls     int
 	commitArgs      []commitInvocation
@@ -72,14 +74,14 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 	t.Helper()
 	deps := &CommitNowDeps{
 		NewClient: func() state.CaptureClient { return f.client },
-		CaptureStructure: func(c state.CaptureClient, skipSet map[string]struct{}, p *state.Index, logger *slog.Logger) (state.Index, error) {
+		CaptureStructure: func(c state.CaptureClient, skipSet map[string]struct{}, p *state.Index, logger *slog.Logger) (state.Index, map[string]struct{}, error) {
 			f.captureCalls++
 			f.capturePrevs = append(f.capturePrevs, p)
 			f.captureSkipSets = append(f.captureSkipSets, skipSet)
 			if f.captureErr != nil {
-				return state.Index{}, f.captureErr
+				return state.Index{}, map[string]struct{}{}, f.captureErr
 			}
-			return f.captureReturn, nil
+			return f.captureReturn, f.capturePending, nil
 		},
 		Commit: func(dir string, idx state.Index, any bool, _ *slog.Logger) error {
 			f.commitCalls++
@@ -327,7 +329,7 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 	client := &fakeCaptureClient{
 		sessions: []string{"work", "_portal-saver"},
 		rows: strings.Join([]string{
-			"work|||0|||main|||tiled|||0|||1|||0|||/home/u|||1|||zsh|||",
+			"work|||0|||main|||tiled|||0|||1|||0|||/home/u|||1|||zsh||||||",
 		}, "\n"),
 		env: map[string]string{"work": "", "_portal-saver": ""},
 	}
@@ -1134,5 +1136,50 @@ func TestStateCommitNow_IsRegisteredAsStateSubcommand(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("commit-now must be registered as a subcommand of state")
+	}
+}
+
+func TestStateCommitNow_DiscardsThePendingSet(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	captured := state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{
+			{
+				Name:        "work",
+				Environment: map[string]string{},
+				Windows: []state.Window{
+					{Index: 0, Name: "main", Panes: []state.Pane{{Index: 0, CWD: "/tmp"}}},
+				},
+			},
+		},
+	}
+	f := &commitNowFixture{
+		client:         &fakeCaptureClient{sessions: []string{"work"}},
+		captureReturn:  captured,
+		capturePending: map[string]struct{}{state.SanitizePaneKey("work", 0, 0): {}},
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runRootCmd(t, "state", "commit-now"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if f.captureCalls != 1 {
+		t.Fatalf("CaptureStructure calls = %d, want 1", f.captureCalls)
+	}
+	if got := f.captureSkipSets[0]; got != nil {
+		t.Errorf("skipSet passed to CaptureStructure = %v, want nil", got)
+	}
+	if f.commitCalls != 1 {
+		t.Fatalf("Commit calls = %d, want 1", f.commitCalls)
+	}
+	if f.commitArgs[0].AnyScrollbackChanged {
+		t.Error("anyScrollbackChanged passed to Commit = true, want false")
+	}
+	if !reflect.DeepEqual(f.commitArgs[0].Idx, captured) {
+		t.Errorf("committed index = %+v, want the captured index unchanged by the pending set: %+v",
+			f.commitArgs[0].Idx, captured)
 	}
 }

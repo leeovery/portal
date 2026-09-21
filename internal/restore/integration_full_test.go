@@ -74,7 +74,7 @@ func TestPhase3Integration_FullRoundTrip(t *testing.T) {
 	createFullTopology(t, ts, alpha)
 	createFullTopology(t, ts, beta)
 
-	idx, err := state.CaptureStructure(client, nil, nil, nil)
+	idx, _, err := state.CaptureStructure(client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}

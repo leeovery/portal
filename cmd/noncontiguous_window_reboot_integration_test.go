@@ -313,7 +313,7 @@ func (fx *divergentRebootFixture) stampTokens(t *testing.T) {
 func (fx *divergentRebootFixture) saveIndex(t *testing.T) {
 	t.Helper()
 
-	idx, err := state.CaptureStructure(fx.client, nil, nil, nil)
+	idx, _, err := state.CaptureStructure(fx.client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}

@@ -246,7 +246,7 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 		return fmt.Errorf("list markers: %w", err)
 	}
 
-	idx, err := state.CaptureStructure(deps.Client, skipSet, deps.PrevIndex, deps.Logger)
+	idx, _, err := state.CaptureStructure(deps.Client, skipSet, deps.PrevIndex, deps.Logger)
 	if err != nil {
 		return fmt.Errorf("capture structure: %w", err)
 	}

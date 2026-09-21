@@ -42,7 +42,7 @@ func runDaemonTick(
 		t.Fatalf("ListSkeletonMarkers: %v", err)
 	}
 
-	idx, err := state.CaptureStructure(client, skipSet, nil, nil)
+	idx, _, err := state.CaptureStructure(client, skipSet, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}

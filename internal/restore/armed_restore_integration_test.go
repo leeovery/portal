@@ -35,7 +35,7 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 
 	client := ts.Client()
 
-	idx, err := state.CaptureStructure(client, nil, nil, nil)
+	idx, _, err := state.CaptureStructure(client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestPhase3Integration_RestoreUsesLiveIndicesUnderBaseIndexDrift(t *testing.
 	ts.WaitForSession(t, "alpha", 2*time.Second)
 
 	client := ts.Client()
-	idx, err := state.CaptureStructure(client, nil, nil, nil)
+	idx, _, err := state.CaptureStructure(client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}

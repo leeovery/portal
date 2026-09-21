@@ -32,8 +32,8 @@ func TestDaemonTick_LogsAnomalousShowEnvironmentFailureUnderComponentDaemon(t *t
 
 	fc := &daemonFakeCommander{
 		sessionsOut: "A|1|0|\nB|1|0|",
-		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
-			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||",
+		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||\n" +
+			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||",
 		envBySession: map[string]string{
 			"A": "FOO=bar",
 		},
@@ -84,8 +84,8 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 
 	fc := &daemonFakeCommander{
 		sessionsOut: "A|1|0|\nB|1|0|",
-		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
-			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||",
+		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||\n" +
+			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||",
 	}
 	wrapped := commandertest.Delegating(fc,
 		commandertest.When(showEnvironmentFor("A"), "", noSuchSessionCommandErr("A")),
@@ -181,8 +181,8 @@ func TestDaemonTick_CapturePaneFailureWarn(t *testing.T) {
 
 		fc := &daemonFakeCommander{
 			sessionsOut: "work|1|0|",
-			panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
-				"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||zsh|||",
+			panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||\n" +
+				"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||zsh||||||",
 			captureErrByTarget: map[string]error{"work:0.0": sentinel},
 			captureByTarget:    map[string]string{"work:0.1": "healthy"},
 		}

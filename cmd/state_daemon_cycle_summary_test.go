@@ -159,8 +159,8 @@ func TestCaptureAndCommit_NoSummaryWhenCtxCancelledAtObsPoint3(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh|||",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh||||||",
 		dispatchHook: func(args []string) {
 			if len(args) > 0 && args[0] == "capture-pane" {
 				cancel()
@@ -187,8 +187,8 @@ func TestCaptureAndCommit_AnomalousCapturePaneFailureIncrementsAnomalousAndWarns
 	sentinel := errors.New("capture-pane transport boom")
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh|||",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh||||||",
 		captureErrByTarget: map[string]error{"work:0.0": sentinel},
 	}
 	deps := makeCaptureDeps(t, dir, fc)
@@ -273,8 +273,8 @@ func TestCaptureAndCommit_CountsUserClosedPaneAsNaturalChurnNotAnomalous(t *test
 
 	fc := &daemonFakeCommander{
 		sessionsOut: "work|1|0|",
-		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||\n" +
-			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh|||",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh||||||",
 		captureErrByTarget: map[string]error{
 			"work:0.0": paneVanishedCommandErr("pane", "work:0.0"),
 		},

@@ -274,12 +274,12 @@ func commitNowSeamCases() []seamCase {
 		{
 			field: "CaptureStructure",
 			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{CaptureStructure: func(state.CaptureClient, map[string]struct{}, *state.Index, *slog.Logger) (state.Index, error) {
-					return state.Index{Version: 98}, nil
+				withCommitNowDeps(t, CommitNowDeps{CaptureStructure: func(state.CaptureClient, map[string]struct{}, *state.Index, *slog.Logger) (state.Index, map[string]struct{}, error) {
+					return state.Index{Version: 98}, map[string]struct{}{}, nil
 				}})
 			},
 			assert: func(t *testing.T) {
-				idx, _ := resolveCommitNowDeps().CaptureStructure(nil, nil, nil, nil)
+				idx, _, _ := resolveCommitNowDeps().CaptureStructure(nil, nil, nil, nil)
 				if idx.Version != 98 {
 					t.Errorf("CaptureStructure() version = %d; want the injected seam's 98", idx.Version)
 				}

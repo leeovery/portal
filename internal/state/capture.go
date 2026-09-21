@@ -23,9 +23,9 @@ type CaptureClient interface {
 
 // Fields are separated by "|||", which cannot occur in any captured tmux
 // value. Columns are consumed by position, so new fields append at the end.
-const captureFormat = "#{session_name}|||#{window_index}|||#{window_name}|||#{window_layout}|||#{window_zoomed_flag}|||#{window_active}|||#{pane_index}|||#{pane_current_path}|||#{pane_active}|||#{pane_current_command}|||#{" + PortalPaneIDOption + "}"
+const captureFormat = "#{session_name}|||#{window_index}|||#{window_name}|||#{window_layout}|||#{window_zoomed_flag}|||#{window_active}|||#{pane_index}|||#{pane_current_path}|||#{pane_active}|||#{pane_current_command}|||#{" + PortalPaneIDOption + "}|||#{" + ResumePendingOption + "}"
 
-const captureFieldCount = 11
+const captureFieldCount = 12
 
 const internalSessionPrefix = "_"
 
@@ -38,14 +38,19 @@ const internalSessionPrefix = "_"
 // a wrapped error, never a partial one. A per-session failure is logged and
 // skipped, unless every session failed on something other than vanishing, which
 // errors so the caller refuses to commit over a broken read.
-func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index, logger *slog.Logger) (Index, error) {
+//
+// The second return holds the pane keys of every live pane carrying the resume
+// pending marker, at the pane's live address and only for sessions that reached
+// the Index. It is non-nil on every return, and nothing about it is persisted.
+func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index, logger *slog.Logger) (Index, map[string]struct{}, error) {
 	logger = loggerOrDiscard(logger)
 	savedAt := time.Now().UTC()
 	empty := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}}
+	emptyPending := map[string]struct{}{}
 
 	names, err := c.ListSessionNames()
 	if err != nil {
-		return empty, err
+		return empty, emptyPending, err
 	}
 
 	keep := keepSessionNames(names)
@@ -54,15 +59,16 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	if len(keep) > 0 {
 		raw, err := c.ListAllPanesWithFormat(captureFormat)
 		if err != nil {
-			return empty, err
+			return empty, emptyPending, err
 		}
 		grouped, err = parsePaneRows(raw, keep)
 		if err != nil {
-			return empty, err
+			return empty, emptyPending, err
 		}
 	}
 
 	sessions := make([]Session, 0, len(keep))
+	pending := map[string]struct{}{}
 	var anomalousErrs []error
 	naturalChurnCount := 0
 	for _, name := range sortedKeys(keep) {
@@ -82,10 +88,11 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 			Environment: parseShowEnvironment(envRaw),
 			Windows:     buildWindows(name, grouped[name]),
 		})
+		addPendingPaneKeys(pending, name, grouped[name])
 	}
 
 	if len(keep) > 0 && len(sessions) == 0 && len(anomalousErrs) > 0 {
-		return empty, fmt.Errorf(
+		return empty, emptyPending, fmt.Errorf(
 			"capture: all %d sessions failed (%d anomalous, %d natural): %w",
 			len(keep), len(anomalousErrs), naturalChurnCount,
 			errors.Join(anomalousErrs...))
@@ -98,7 +105,16 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	}
 
 	idx.Canonicalize()
-	return idx, nil
+	return idx, pending, nil
+}
+
+func addPendingPaneKeys(pending map[string]struct{}, session string, rows []paneRow) {
+	for _, r := range rows {
+		if !r.resumePending {
+			continue
+		}
+		pending[SanitizePaneKey(session, r.windowIdx, r.paneIdx)] = struct{}{}
+	}
 }
 
 func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
@@ -234,6 +250,7 @@ type paneRow struct {
 	paneActive     bool
 	currentCommand string
 	portalPaneID   string
+	resumePending  bool
 }
 
 func parsePaneRows(raw string, keep map[string]struct{}) (map[string][]paneRow, error) {
@@ -283,6 +300,7 @@ func parsePaneRow(line string) (paneRow, error) {
 		paneActive:     parseTmuxBool(parts[8]),
 		currentCommand: parts[9],
 		portalPaneID:   parts[10],
+		resumePending:  ResumePendingSet(parts[11]),
 	}, nil
 }
 

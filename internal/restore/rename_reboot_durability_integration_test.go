@@ -32,7 +32,7 @@ func TestRenameRebootHook_DurableAcrossRepeatedReboots(t *testing.T) {
 	}
 	restoretest.AssertMarkerCount(t, hookFireFile, hookFiredMarker, 1)
 
-	nextIdx, err := state.CaptureStructure(fx.client, nil, nil, nil)
+	nextIdx, _, err := state.CaptureStructure(fx.client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("next CaptureStructure: %v", err)
 	}

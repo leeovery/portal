@@ -33,7 +33,7 @@ var commitNowDeps *CommitNowDeps
 // anyScrollbackChanged=false - commit-now writes no scrollback bytes.
 type CommitNowDeps struct {
 	ReadIndex        func(dir string) (state.Index, bool, error)
-	CaptureStructure func(c state.CaptureClient, skipSet map[string]struct{}, prev *state.Index, logger *slog.Logger) (state.Index, error)
+	CaptureStructure func(c state.CaptureClient, skipSet map[string]struct{}, prev *state.Index, logger *slog.Logger) (state.Index, map[string]struct{}, error)
 	Commit           func(dir string, idx state.Index, anyScrollbackChanged bool, logger *slog.Logger) error
 	NewClient        func() state.CaptureClient
 
@@ -118,7 +118,7 @@ var stateCommitNowCmd = &cobra.Command{
 		prev := loadPrevIndex(dir, deps.ReadIndex, logger)
 
 		client := deps.NewClient()
-		idx, err := deps.CaptureStructure(client, nil, &prev, logger)
+		idx, _, err := deps.CaptureStructure(client, nil, &prev, logger)
 		if err != nil {
 			return failCommitNow(logger, dir, deps.TouchSaveRequested, "capture structure", err)
 		}

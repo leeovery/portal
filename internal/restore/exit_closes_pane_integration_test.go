@@ -124,7 +124,7 @@ func setupExitClosesPane(t *testing.T, hookCmd string) (string, *tmuxtest.Socket
 	paneTarget := tmux.PaneTargetExact(sessionName, 0, 0)
 	ts.StampPaneToken(t, paneTarget, paneToken)
 
-	idx, err := state.CaptureStructure(client, nil, nil, nil)
+	idx, _, err := state.CaptureStructure(client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}

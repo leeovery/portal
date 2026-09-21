@@ -119,7 +119,7 @@ func (fx *rebootFixture) assertLivePanes(t *testing.T, sessionName string) {
 func (fx *rebootFixture) captureAndPersist(t *testing.T, sessionName string) {
 	t.Helper()
 
-	idx, err := state.CaptureStructure(fx.client, nil, nil, nil)
+	idx, _, err := state.CaptureStructure(fx.client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}

@@ -36,7 +36,7 @@ func TestCaptureStructureRealTmuxUnaddressableSessionName(t *testing.T) {
 				waitForListedSessions(t, ts, unaddressable, plainSession)
 
 				logger, sink := openTestLogger(t, t.TempDir())
-				idx, err := state.CaptureStructure(client, nil, nil, logger)
+				idx, _, err := state.CaptureStructure(client, nil, nil, logger)
 				if err != nil {
 					t.Fatalf("CaptureStructure: %v", err)
 				}
