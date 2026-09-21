@@ -395,3 +395,116 @@ func TestRestoreWindowActive(t *testing.T) {
 		}
 	})
 }
+
+type paneTarget string
+
+type paneWriterMock struct {
+	setCalls   []paneSetCall
+	unsetCalls []paneUnsetCall
+	setErr     error
+	unsetErr   error
+}
+
+type paneSetCall struct {
+	target paneTarget
+	name   string
+	value  string
+}
+
+type paneUnsetCall struct {
+	target paneTarget
+	name   string
+}
+
+func (m *paneWriterMock) SetPaneOption(target paneTarget, name, value string) error {
+	m.setCalls = append(m.setCalls, paneSetCall{target: target, name: name, value: value})
+	return m.setErr
+}
+
+func (m *paneWriterMock) UnsetPaneOption(target paneTarget, name string) error {
+	m.unsetCalls = append(m.unsetCalls, paneUnsetCall{target: target, name: name})
+	return m.unsetErr
+}
+
+func TestSetResumePendingMarker(t *testing.T) {
+	t.Run("it sets the pending marker to 1 on the target it was handed", func(t *testing.T) {
+		w := &paneWriterMock{}
+		if err := state.SetResumePendingMarker(w, paneTarget("%3")); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(w.setCalls) != 1 {
+			t.Fatalf("got %d SetPaneOption calls, want 1", len(w.setCalls))
+		}
+		want := paneSetCall{target: "%3", name: state.ResumePendingOption, value: "1"}
+		if w.setCalls[0] != want {
+			t.Errorf("got %+v, want %+v", w.setCalls[0], want)
+		}
+	})
+
+	t.Run("it propagates a writer failure from each helper", func(t *testing.T) {
+		sentinel := errors.New("tmux exploded")
+		err := state.SetResumePendingMarker(&paneWriterMock{setErr: sentinel}, paneTarget("%3"))
+		if !errors.Is(err, sentinel) {
+			t.Errorf("err = %v, want the writer's error unchanged", err)
+		}
+	})
+
+	t.Run("it calls neither the other writer method", func(t *testing.T) {
+		w := &paneWriterMock{}
+		_ = state.SetResumePendingMarker(w, paneTarget("%3"))
+		if len(w.unsetCalls) != 0 {
+			t.Errorf("got %d UnsetPaneOption calls, want 0", len(w.unsetCalls))
+		}
+	})
+}
+
+func TestUnsetResumePendingMarker(t *testing.T) {
+	t.Run("it unsets the pending marker on the target it was handed", func(t *testing.T) {
+		w := &paneWriterMock{}
+		if err := state.UnsetResumePendingMarker(w, paneTarget("%3")); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(w.unsetCalls) != 1 {
+			t.Fatalf("got %d UnsetPaneOption calls, want 1", len(w.unsetCalls))
+		}
+		want := paneUnsetCall{target: "%3", name: state.ResumePendingOption}
+		if w.unsetCalls[0] != want {
+			t.Errorf("got %+v, want %+v", w.unsetCalls[0], want)
+		}
+	})
+
+	t.Run("it propagates a writer failure from each helper", func(t *testing.T) {
+		sentinel := errors.New("tmux exploded")
+		err := state.UnsetResumePendingMarker(&paneWriterMock{unsetErr: sentinel}, paneTarget("%3"))
+		if !errors.Is(err, sentinel) {
+			t.Errorf("err = %v, want the writer's error unchanged", err)
+		}
+	})
+
+	t.Run("it calls neither the other writer method", func(t *testing.T) {
+		w := &paneWriterMock{}
+		_ = state.UnsetResumePendingMarker(w, paneTarget("%3"))
+		if len(w.setCalls) != 0 {
+			t.Errorf("got %d SetPaneOption calls, want 0", len(w.setCalls))
+		}
+	})
+}
+
+func TestResumePendingSet(t *testing.T) {
+	t.Run("it reads any non-empty option value as pending and an empty one as absent", func(t *testing.T) {
+		cases := []struct {
+			value string
+			want  bool
+		}{
+			{value: "1", want: true},
+			{value: "0", want: true},
+			{value: "yes", want: true},
+			{value: "", want: false},
+		}
+		for _, tc := range cases {
+			if got := state.ResumePendingSet(tc.value); got != tc.want {
+				t.Errorf("ResumePendingSet(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		}
+	})
+}

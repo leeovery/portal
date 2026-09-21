@@ -58,3 +58,36 @@ func TestSetPaneOption(t *testing.T) {
 		}
 	})
 }
+
+func TestUnsetPaneOption(t *testing.T) {
+	t.Run("it composes set-option -pu with the pane target", func(t *testing.T) {
+		mock := commandertest.New(t, commandertest.Returns("", "set-option"))
+		client := tmux.NewClient(mock)
+
+		if err := client.UnsetPaneOption("%3", state.ResumePendingOption); err != nil {
+			t.Fatalf("UnsetPaneOption: %v", err)
+		}
+
+		if len(mock.Calls()) != 1 {
+			t.Fatalf("call count = %d, want 1", len(mock.Calls()))
+		}
+		want := "set-option -pu -t %3 " + state.ResumePendingOption
+		if got := strings.Join(mock.Calls()[0], " "); got != want {
+			t.Errorf("called with %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it wraps a tmux failure with the pane and the option name", func(t *testing.T) {
+		client := tmux.NewClient(commandertest.New(t, commandertest.Fails(fmt.Errorf("no such pane: %%999"), "set-option")))
+
+		err := client.UnsetPaneOption("%999", state.ResumePendingOption)
+		if err == nil {
+			t.Fatal("expected an error, got nil")
+		}
+		for _, want := range []string{"%999", state.ResumePendingOption, "no such pane"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err.Error(), want)
+			}
+		}
+	})
+}

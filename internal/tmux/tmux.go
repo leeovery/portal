@@ -337,6 +337,16 @@ func (c *Client) SetPaneOption(target Target, name, value string) error {
 	return nil
 }
 
+// UnsetPaneOption removes a tmux option scoped to one pane. Removing an option
+// the pane does not carry succeeds; a target naming no live pane fails here.
+func (c *Client) UnsetPaneOption(target Target, name string) error {
+	_, err := c.cmd.Run("set-option", "-pu", "-t", string(target), name)
+	if err != nil {
+		return fmt.Errorf("failed to unset pane option %s on %s: %w", name, target, err)
+	}
+	return nil
+}
+
 // SetSessionOption sets a tmux option scoped to one session. Callers must not
 // route global (-g) options through it: the -t scoping is what keeps the write
 // out of the global namespace.
