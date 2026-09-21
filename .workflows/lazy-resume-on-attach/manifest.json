@@ -245,7 +245,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 3,
-          "current_task": "lazy-resume-on-attach-3-2",
+          "current_task": "lazy-resume-on-attach-3-3",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -261,7 +261,8 @@
             "lazy-resume-on-attach-2-4",
             "lazy-resume-on-attach-2-5",
             "lazy-resume-on-attach-2-6",
-            "lazy-resume-on-attach-3-1"
+            "lazy-resume-on-attach-3-1",
+            "lazy-resume-on-attach-3-2"
           ],
           "staging": {
             "p1": {
@@ -328,6 +329,17 @@
               "files": [
                 "internal/tui/resume_panel_parts.go",
                 "internal/tui/resume_panel_parts_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-3-2",
+              "source": "reviewer",
+              "summary": "The pickers fillCanvas and the new fillPaneCanvas now hold the same canvas-painting kernel twice",
+              "failure": "A later correction to the per-cell background rule — a new SGR form that drops the background to default, a change in how trailing padding is emitted — lands on one copy and not the other. Neither suite cross-checks the other: each pins todays behaviour of its own copy, so both stay green. The symptom only appears on a users terminal, as a stripe of their own terminal background showing through either the pickers canvas or the resume panel on a restored pane. That is exactly the bleed class the backfill was introduced to fix.",
+              "detail": "internal/tui/model.go:3006-3022 (build canvas style + canvasBgParams + parser, loop with break at the height, backfillCanvasBackground then padLineToCanvasWidth, then blank-row padding) is the same eleven lines as internal/tui/resume_pane_canvas.go:55-69, and both colourless paths already delegate to the same fillColourless. The consolidation is available and clean: fillCanvas can call fillPaneCanvas(view, contentW, contentH, m.themeState.active, m.colourless), then apply overlayThemePanelOnContent and the inset (insetColourless / insetCanvasCanvas) on top, keeping the gutter and the panel composite exactly where they are. Out of scope in 3-2 because the fix reaches into the pickers pre-existing fill, which that task was explicitly told not to change.",
+              "files": [
+                "internal/tui/model.go",
+                "internal/tui/resume_pane_canvas.go"
               ]
             }
           ]
