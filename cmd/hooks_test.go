@@ -296,8 +296,8 @@ func TestHooksSetCommand(t *testing.T) {
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"], "claude --resume abc123")
+		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc123")
 		}
 	})
 
@@ -391,8 +391,8 @@ func TestHooksSetCommand(t *testing.T) {
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"] != "new-cmd" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"], "new-cmd")
+		if data[hookstest.SubjectSeedA]["on-resume"].Command != "new-cmd" {
+			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "new-cmd")
 		}
 	})
 
@@ -423,8 +423,8 @@ func TestHooksSetCommand(t *testing.T) {
 		if len(events) != 1 {
 			t.Fatalf("expected 1 event for %s, got %d", hookstest.SubjectSeedA, len(events))
 		}
-		if events["on-resume"] != "claude --resume abc123" {
-			t.Errorf("on-resume = %q, want %q", events["on-resume"], "claude --resume abc123")
+		if events["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("on-resume = %q, want %q", events["on-resume"].Command, "claude --resume abc123")
 		}
 	})
 
@@ -468,8 +468,8 @@ func TestHooksSetCommand(t *testing.T) {
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"], "claude --resume abc123")
+		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc123")
 		}
 	})
 }
@@ -591,8 +591,8 @@ func TestHooksRmCommand(t *testing.T) {
 		if _, ok := data[hookstest.SubjectSeedA]; ok {
 			t.Error("expected the named entry to be removed via --pane-key")
 		}
-		if data[hookstest.UnjudgeableSeedA]["on-resume"] != "npm start" {
-			t.Errorf("the untouched entry's on-resume = %q, want %q", data[hookstest.UnjudgeableSeedA]["on-resume"], "npm start")
+		if data[hookstest.UnjudgeableSeedA]["on-resume"].Command != "npm start" {
+			t.Errorf("the untouched entry's on-resume = %q, want %q", data[hookstest.UnjudgeableSeedA]["on-resume"].Command, "npm start")
 		}
 		assertNoPaneTmuxCalls(t, resolver, stamper)
 	})
@@ -706,8 +706,8 @@ func TestHookCommandRename(t *testing.T) {
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"], "claude --resume abc123")
+		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc123")
 		}
 	})
 }
@@ -784,8 +784,8 @@ func TestHooksSetTouchesSaveRequested(t *testing.T) {
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"] != "claude --resume abc" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"], "claude --resume abc")
+		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc" {
+			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc")
 		}
 		assertTouchWarn(t, sink, hookstest.SubjectSeedA)
 	})
@@ -810,8 +810,8 @@ func TestHooksSetTouchesSaveRequested(t *testing.T) {
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"] != "claude --resume abc" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"], "claude --resume abc")
+		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc" {
+			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc")
 		}
 		assertTouchWarn(t, sink, hookstest.SubjectSeedA)
 	})

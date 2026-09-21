@@ -7,6 +7,7 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/nanoid"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/xdg"
@@ -33,6 +34,8 @@ var (
 	_ PaneHookLister   = (*tmux.Client)(nil)
 	_ PaneOptionSetter = (*tmux.Client)(nil)
 )
+
+const resumeModeFlagName = "resume-mode"
 
 var hooksDeps *HooksDeps
 
@@ -191,12 +194,19 @@ var hooksSetCmd = &cobra.Command{
 	Short: "Register a resume hook for the current pane",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hookKey, paneID, err := resolveCurrentPaneKey()
+		// Resolved before anything reads tmux or touches a file: a refused value
+		// must leave behind neither a stamped pane nor a written entry.
+		mode, err := resumeModeFlag(cmd)
 		if err != nil {
 			return err
 		}
 
 		command, err := cmd.Flags().GetString("on-resume")
+		if err != nil {
+			return err
+		}
+
+		hookKey, paneID, err := resolveCurrentPaneKey()
 		if err != nil {
 			return err
 		}
@@ -214,13 +224,35 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		if err := store.Set(hookKey, hooks.EventOnResume, hooks.Registration{Command: command}, hooks.ViaCLI); err != nil {
+		if err := store.Set(hookKey, hooks.EventOnResume, hooks.Registration{Command: command, Resume: mode}, hooks.ViaCLI); err != nil {
 			return err
 		}
 
 		touchSaveRequestedForHook(hookKey)
 		return nil
 	},
+}
+
+// resumeModeFlag reads the registration's resume-mode pin: an unpassed flag
+// names no mode, and a passed one must spell a mode the vocabulary admits —
+// the empty string included, which is a value rather than an absence.
+func resumeModeFlag(cmd *cobra.Command) (resumemode.Mode, error) {
+	if !cmd.Flags().Changed(resumeModeFlagName) {
+		return resumemode.Unset, nil
+	}
+
+	value, err := cmd.Flags().GetString(resumeModeFlagName)
+	if err != nil {
+		return resumemode.Unset, err
+	}
+
+	mode, ok := resumemode.Parse(value)
+	if !ok {
+		return resumemode.Unset, NewUsageError(fmt.Sprintf("--%s must be %q or %q",
+			resumeModeFlagName, resumemode.Eager, resumemode.Lazy))
+	}
+
+	return mode, nil
 }
 
 // touchSaveRequestedForHook nudges the daemon into capturing the pane's token on
@@ -302,6 +334,7 @@ var hooksRmCmd = &cobra.Command{
 
 func init() {
 	hooksSetCmd.Flags().String("on-resume", "", "Command to run when resuming the pane")
+	hooksSetCmd.Flags().String(resumeModeFlagName, "", "Resume mode this registration is pinned to: eager or lazy (default: the install-wide setting)")
 	_ = hooksSetCmd.MarkFlagRequired("on-resume")
 
 	hooksRmCmd.Flags().Bool("on-resume", false, "Remove the on-resume hook")

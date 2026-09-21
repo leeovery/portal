@@ -267,7 +267,7 @@ func TestHooksRmExitsZeroOnlyWhenItRemoved(t *testing.T) {
 		if _, ok := data["%42"]; ok {
 			t.Error("raw pane ID %42 should not be used as key")
 		}
-		if data[hookstest.SubjectSeedB]["on-resume"] != "npm start" {
+		if data[hookstest.SubjectSeedB]["on-resume"].Command != "npm start" {
 			t.Errorf("hooks.json = %v, want the other pane's entry left in place", data)
 		}
 	})

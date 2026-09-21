@@ -73,6 +73,10 @@ func resetRootCmd() {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
+	if f := hooksSetCmd.Flags().Lookup(resumeModeFlagName); f != nil {
+		_ = f.Value.Set("")
+		f.Changed = false
+	}
 	if f := hooksRmCmd.Flags().Lookup("on-resume"); f != nil {
 		_ = f.Value.Set("false")
 		f.Changed = false

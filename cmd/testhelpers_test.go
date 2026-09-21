@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/leeovery/portal/internal/warning"
@@ -174,15 +175,15 @@ func hooksFileInTempDir(t *testing.T, body map[string]map[string]string) (dir, h
 	return dir, hooksFile
 }
 
-// runHookSet drives `hook set --on-resume command` with both streams captured,
-// returning what the command wrote alongside its own error.
-func runHookSet(t *testing.T, command string) (string, error) {
+// runHookSet drives `hook set --on-resume command [extra…]` with both streams
+// captured, returning what the command wrote alongside its own error.
+func runHookSet(t *testing.T, command string, extra ...string) (string, error) {
 	t.Helper()
 	buf := new(bytes.Buffer)
 	resetRootCmd()
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"hook", "set", "--on-resume", command})
+	rootCmd.SetArgs(append([]string{"hook", "set", "--on-resume", command}, extra...))
 	err := rootCmd.Execute()
 	return buf.String(), err
 }
@@ -215,13 +216,15 @@ func runHookList(t *testing.T) string {
 	return buf.String()
 }
 
-func readHooksJSON(t *testing.T, path string) map[string]map[string]string {
+// readHooksJSON decodes hooks.json through the store's own types, so an entry
+// of either stored shape reads as the registration it holds.
+func readHooksJSON(t *testing.T, path string) hooks.Snapshot {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read hooks file: %v", err)
 	}
-	var data map[string]map[string]string
+	var data hooks.Snapshot
 	if err := json.Unmarshal(b, &data); err != nil {
 		t.Fatalf("failed to unmarshal hooks JSON: %v", err)
 	}

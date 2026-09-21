@@ -160,7 +160,7 @@ func TestHookSetLockTimeout(t *testing.T) {
 		if len(data) != 1 {
 			t.Fatalf("hooks.json = %v, want exactly one entry", data)
 		}
-		if data[hookstest.SubjectSeedC]["on-resume"] != "claude --resume abc" {
+		if data[hookstest.SubjectSeedC]["on-resume"].Command != "claude --resume abc" {
 			t.Errorf("hooks.json = %v, want the entry under %s", data, hookstest.SubjectSeedC)
 		}
 	})

@@ -39,7 +39,7 @@ func TestHooksSetStampsPaneToken(t *testing.T) {
 		if len(data) != 1 {
 			t.Fatalf("hooks.json entry count = %d, want 1 (%v)", len(data), data)
 		}
-		if data[call.value]["on-resume"] != "claude --resume abc123" {
+		if data[call.value]["on-resume"].Command != "claude --resume abc123" {
 			t.Errorf("entry under the stamped token %q = %v, want the registered command", call.value, data)
 		}
 		if !nanoid.IsTokenShaped(call.value) {
@@ -62,7 +62,7 @@ func TestHooksSetStampsPaneToken(t *testing.T) {
 			t.Errorf("set-option call count = %d, want 0 (a stamped pane must not be re-minted): %+v", len(stamper.calls), stamper.calls)
 		}
 		data := readHooksJSON(t, hooksFile)
-		if len(data) != 1 || data[hookstest.SubjectSeedA]["on-resume"] != "some-cmd" {
+		if len(data) != 1 || data[hookstest.SubjectSeedA]["on-resume"].Command != "some-cmd" {
 			t.Errorf("hooks.json = %v, want a single entry under the pane's existing token", data)
 		}
 	})

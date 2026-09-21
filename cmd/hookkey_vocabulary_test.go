@@ -177,13 +177,16 @@ func paneKeyPathSeams() (*mockKeyResolver, *recordingPaneStamper) {
 	return &mockKeyResolver{err: errPaneKeyResolverCalled}, &recordingPaneStamper{err: errPaneKeyStamperCalled}
 }
 
+// assertNoPaneTmuxCalls reports the seams that were reached on a path that must
+// reach tmux for nothing, whichever path that is: the call counts are the proof,
+// and an armed seam only turns a reached one into a louder failure.
 func assertNoPaneTmuxCalls(t *testing.T, resolver *mockKeyResolver, stamper *recordingPaneStamper) {
 	t.Helper()
 	if resolver.calls != 0 {
-		t.Errorf("resolver call count = %d, want 0 on the --pane-key path", resolver.calls)
+		t.Errorf("hook-key read count = %d, want 0 — this path must reach tmux for nothing", resolver.calls)
 	}
 	if len(stamper.calls) != 0 {
-		t.Errorf("set-option call count = %d, want 0 on the --pane-key path: %+v", len(stamper.calls), stamper.calls)
+		t.Errorf("set-option call count = %d, want 0 — this path must reach tmux for nothing: %+v", len(stamper.calls), stamper.calls)
 	}
 }
 
