@@ -150,19 +150,19 @@ func (m Model) editModalHeaderRow(th theme.Theme, colourless bool) string {
 	prefix := headerStyle(th.TextPrimary, th, colourless).Bold(true).Render(editHeaderPrefix)
 	name := headerStyle(th.TextMuted, th, colourless).Render(m.editProject.Name)
 	left := lipgloss.JoinHorizontal(lipgloss.Top, prefix, name)
-	return renderHeaderWithBadge(left, m.editPanelContentWidth(), m.editMode == editModeEdit, th, colourless)
+	return renderHeaderWithBadge(left, m.editPanelContentWidth(), m.editMode == editModeEdit, editModeIndicator, th, colourless)
 }
 
 // A hidden badge renders as a same-width blank so toggling never resizes the panel.
-func renderHeaderWithBadge(left string, contentWidth int, showBadge bool, th theme.Theme, colourless bool) string {
+func renderHeaderWithBadge(left string, contentWidth int, showBadge bool, badgeText string, th theme.Theme, colourless bool) string {
 	leftWidth := lipgloss.Width(left)
-	badgeWidth := lipgloss.Width(editModeIndicator)
+	badgeWidth := lipgloss.Width(badgeText)
 	spacerWidth := max(contentWidth-leftWidth-badgeWidth, 0)
 	spacer := headerCanvasBg(th, colourless).Render(strings.Repeat(" ", spacerWidth))
 
 	var badge string
 	if showBadge {
-		badge = headerStyle(th.AccentAttention, th, colourless).Bold(true).Render(editModeIndicator)
+		badge = headerStyle(th.AccentAttention, th, colourless).Bold(true).Render(badgeText)
 	} else {
 		badge = headerCanvasBg(th, colourless).Render(strings.Repeat(" ", badgeWidth))
 	}

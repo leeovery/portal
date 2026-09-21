@@ -32,7 +32,7 @@ func renderRenameModalContent(input textinput.Model, oldName string, th theme.Th
 // Always editing — there is no navigate state — so the badge always shows.
 func renameModalHeaderRow(th theme.Theme, colourless bool) string {
 	title := headerStyle(th.TextPrimary, th, colourless).Bold(true).Render(renameTitle)
-	return renderHeaderWithBadge(title, renamePanelContentWidth(), true, th, colourless)
+	return renderHeaderWithBadge(title, renamePanelContentWidth(), true, editModeIndicator, th, colourless)
 }
 
 // The input box is the widest body element and anchors the panel width, so the
