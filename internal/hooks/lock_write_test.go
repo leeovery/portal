@@ -20,7 +20,7 @@ func TestMutationLockTimeoutWritesNothing(t *testing.T) {
 			path := hookstest.HooksPath(t, t.TempDir())
 			hookstest.HoldHooksSidecar(t, path)
 
-			err := hooks.NewStore(path).Set("tok123", "on-resume", "npm start", hooks.ViaCLI)
+			err := hooks.NewStore(path).Set("tok123", "on-resume", hooks.Registration{Command: "npm start"}, hooks.ViaCLI)
 			if err == nil {
 				t.Fatal("expected an error when the lock will not yield, got nil")
 			}
@@ -37,7 +37,7 @@ func TestMutationLockTimeoutWritesNothing(t *testing.T) {
 			before := readFileBytes(t, path)
 			hookstest.HoldHooksSidecar(t, path)
 
-			if err := hooks.NewStore(path).Set("tok123", "on-resume", "npm start", hooks.ViaCLI); err == nil {
+			if err := hooks.NewStore(path).Set("tok123", "on-resume", hooks.Registration{Command: "npm start"}, hooks.ViaCLI); err == nil {
 				t.Fatal("expected an error when the lock will not yield, got nil")
 			}
 
@@ -72,7 +72,7 @@ func TestMutationLockTimeoutWritesNothing(t *testing.T) {
 		hookstest.HoldHooksSidecar(t, path)
 		store := hooks.NewStore(path)
 
-		setErr := store.Set("tok123", "on-resume", "npm start", hooks.ViaCLI)
+		setErr := store.Set("tok123", "on-resume", hooks.Registration{Command: "npm start"}, hooks.ViaCLI)
 		if !errors.Is(setErr, hooks.ErrLockHeld) {
 			t.Errorf("Set error = %v, want errors.Is ErrLockHeld", setErr)
 		}
@@ -91,7 +91,7 @@ func TestMutationLockTimeoutLogging(t *testing.T) {
 		hookstest.HoldHooksSidecar(t, path)
 
 		sink := logtest.Install(t)
-		if err := hooks.NewStore(path).Set("tok123", "on-resume", "npm start", hooks.ViaCLI); err == nil {
+		if err := hooks.NewStore(path).Set("tok123", "on-resume", hooks.Registration{Command: "npm start"}, hooks.ViaCLI); err == nil {
 			t.Fatal("expected an error when the lock will not yield, got nil")
 		}
 
@@ -110,7 +110,7 @@ func TestMutationLockTimeoutLogging(t *testing.T) {
 		hookstest.HoldHooksSidecar(t, path)
 
 		sink := logtest.Install(t)
-		if err := hooks.NewStore(path).Set("tok123", "on-resume", "npm start", hooks.ViaCLI); err == nil {
+		if err := hooks.NewStore(path).Set("tok123", "on-resume", hooks.Registration{Command: "npm start"}, hooks.ViaCLI); err == nil {
 			t.Fatal("expected an error when the lock will not yield, got nil")
 		}
 
@@ -140,7 +140,7 @@ func TestMutationLockTimeoutLogging(t *testing.T) {
 	t.Run("it still emits nothing when Remove removes nothing", func(t *testing.T) {
 		path := hookstest.HooksPath(t, t.TempDir())
 		store := hooks.NewStore(path)
-		if err := store.Set("tok999", "on-resume", "npm start", hooks.ViaCLI); err != nil {
+		if err := store.Set("tok999", "on-resume", hooks.Registration{Command: "npm start"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 		before := readFileBytes(t, path)
@@ -193,7 +193,7 @@ func TestMutationLockTimeoutLogging(t *testing.T) {
 		path := hookstest.HooksPath(t, filepath.Join(parent, "portal"))
 
 		sink := logtest.Install(t)
-		if err := hooks.NewStore(path).Set("tok123", "on-resume", "npm start", hooks.ViaCLI); err == nil {
+		if err := hooks.NewStore(path).Set("tok123", "on-resume", hooks.Registration{Command: "npm start"}, hooks.ViaCLI); err == nil {
 			t.Fatal("Set succeeded under a directory that permits no file creation")
 		}
 

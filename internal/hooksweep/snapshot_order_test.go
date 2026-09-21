@@ -19,7 +19,7 @@ func TestHookSweepSnapshotPrecedesEnumeration(t *testing.T) {
 		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: fmt.Sprintf(`{%q: {"on-resume": "cmd-live"}}`, hookstest.LiveSeedA)})
 
 		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA), during: func() {
-			if err := store.Set(hookstest.ReapableSeedA, "on-resume", "cmd-fresh", hooks.ViaCLI); err != nil {
+			if err := store.Set(hookstest.ReapableSeedA, "on-resume", hooks.Registration{Command: "cmd-fresh"}, hooks.ViaCLI); err != nil {
 				t.Errorf("register a hook during the enumeration: %v", err)
 			}
 		}}
@@ -77,7 +77,7 @@ func TestHookSweepSnapshotPrecedesEnumeration(t *testing.T) {
 			if _, err := store.Remove(hookstest.ReapableSeedC, "on-resume", hooks.ViaCLI); err != nil {
 				t.Errorf("remove a hook during the enumeration: %v", err)
 			}
-			if err := store.Set(hookstest.ReapableSeedD, "on-resume", "cmd-fresh", hooks.ViaCLI); err != nil {
+			if err := store.Set(hookstest.ReapableSeedD, "on-resume", hooks.Registration{Command: "cmd-fresh"}, hooks.ViaCLI); err != nil {
 				t.Errorf("register a hook during the enumeration: %v", err)
 			}
 		}}

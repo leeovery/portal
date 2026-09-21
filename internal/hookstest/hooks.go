@@ -76,7 +76,7 @@ func SeedHooksJSON(t *testing.T, env []string, entries map[string]string) {
 
 	store := hooks.NewStore(path)
 	for key, cmd := range entries {
-		if err := store.Set(key, hooks.EventOnResume, cmd, hooks.ViaCLI); err != nil {
+		if err := store.Set(key, hooks.EventOnResume, hooks.Registration{Command: cmd}, hooks.ViaCLI); err != nil {
 			t.Fatalf("hookstest.SeedHooksJSON: set %s=%q: %v", key, cmd, err)
 		}
 	}

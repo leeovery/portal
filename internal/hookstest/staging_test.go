@@ -64,7 +64,7 @@ func TestStageStore(t *testing.T) {
 			t.Fatalf("stat sidecar: %v", err)
 		}
 
-		err := store.Set("tok02", "on-resume", "ls", hooks.ViaCLI)
+		err := store.Set("tok02", "on-resume", hooks.Registration{Command: "ls"}, hooks.ViaCLI)
 		if err == nil {
 			t.Fatal("Set succeeded under a directory that permits no file creation")
 		}

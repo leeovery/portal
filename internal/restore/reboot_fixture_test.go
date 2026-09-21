@@ -68,7 +68,7 @@ func newRebootFixture(t *testing.T, socketPrefix, sessionName string, panes []re
 		if p.hookCmd == "" {
 			continue
 		}
-		if err := store.Set(p.token, "on-resume", p.hookCmd, hooks.ViaCLI); err != nil {
+		if err := store.Set(p.token, "on-resume", hooks.Registration{Command: p.hookCmd}, hooks.ViaCLI); err != nil {
 			t.Fatalf("hooks.Set pane %d: %v", i, err)
 		}
 		verifyHookKeyed(t, fx.hooksPath, p.token)

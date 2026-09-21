@@ -20,7 +20,7 @@ func TestEventRoundTrip(t *testing.T) {
 	t.Run("it persists and reads back an entry through the Event constant", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{})
 
-		if err := store.Set(hookstest.SubjectSeedA, hooks.EventOnResume, "echo hi", hooks.ViaCLI); err != nil {
+		if err := store.Set(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.Registration{Command: "echo hi"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 

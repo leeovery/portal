@@ -124,10 +124,12 @@ func (s *Store) save(h Snapshot) error {
 	return fileutil.AtomicWrite(s.path, data)
 }
 
-// Set adds or overwrites the hook for key and event. Writing a registration the
-// stored one already matches on command and mode is a no-op: the file is left
-// untouched. via records the mutation origin for the audit breadcrumb.
-func (s *Store) Set(key string, event Event, command string, via Via) error {
+// Set adds or overwrites the hook for key and event with the whole of
+// registration: nothing the replaced value held survives a rewrite it was not
+// given. Writing a registration the stored one already matches on command and
+// mode is a no-op: the file is left untouched. via records the mutation origin
+// for the audit breadcrumb.
+func (s *Store) Set(key string, event Event, registration Registration, via Via) error {
 	lock, err := s.acquireMutationLock()
 	if err != nil {
 		// Under the method's own op, not classifySet's verdict: that verdict reads
@@ -144,8 +146,6 @@ func (s *Store) Set(key string, event Event, command string, via Via) error {
 		return fmt.Errorf("failed to load hooks: %w", err)
 	}
 
-	registration := Registration{Command: command}
-
 	op := classifySet(h, key, event, registration)
 	if op == "set-noop" {
 		logger.Debug("set-noop", "op", "set-noop", "hook_key", key, "via", via.String())
@@ -158,12 +158,12 @@ func (s *Store) Set(key string, event Event, command string, via Via) error {
 	h[key][event.String()] = registration
 
 	if err := s.save(h); err != nil {
-		logger.Warn(op, "op", op, "hook_key", key, "value", command, "via", via.String(),
+		logger.Warn(op, "op", op, "hook_key", key, "value", registration.Command, "via", via.String(),
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info(op, "op", op, "hook_key", key, "value", command, "via", via.String())
+	logger.Info(op, "op", op, "hook_key", key, "value", registration.Command, "via", via.String())
 	return nil
 }
 

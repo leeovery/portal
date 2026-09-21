@@ -770,7 +770,7 @@ func TestStateDaemon_HooksCleanupWiring(t *testing.T) {
 		// Seeded through the same path a foreground `portal hook set` resolves, so a
 		// daemon store pointed at a different file would fail to read it back.
 		const key = "proj-AbC123:0.0"
-		if err := hooks.NewStore(hooksPath).Set(key, "on-resume", "echo hi", hooks.ViaCLI); err != nil {
+		if err := hooks.NewStore(hooksPath).Set(key, "on-resume", hooks.Registration{Command: "echo hi"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("seed hooks.json: %v", err)
 		}
 

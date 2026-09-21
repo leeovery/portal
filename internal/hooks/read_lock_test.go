@@ -74,7 +74,7 @@ func TestReadSharedLock(t *testing.T) {
 
 		// A mutation follows without contending with a read that already
 		// returned — the sweep's pre-read must not make its own CleanStale wait.
-		if err := store.Set("k99", "on-resume", "cmd99", hooks.ViaCLI); err != nil {
+		if err := store.Set("k99", "on-resume", hooks.Registration{Command: "cmd99"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("mutation after reads: %v", err)
 		}
 	})
@@ -209,7 +209,7 @@ func TestReadSharedLock(t *testing.T) {
 		store := hooks.NewStore(path)
 
 		sink := logtest.Install(t)
-		if err := store.Set("k0", "on-resume", "cmd0", hooks.ViaCLI); err != nil {
+		if err := store.Set("k0", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("Set: %v", err)
 		}
 		if got := hookstest.UnlockedRecords(t, sink); len(got) != 0 {

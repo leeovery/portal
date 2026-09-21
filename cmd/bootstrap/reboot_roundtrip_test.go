@@ -79,7 +79,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 
 	hookCmd := fmt.Sprintf("echo HOOK_FIRED >> %s", hookFireFile)
 	store := hooks.NewStore(hooksPath)
-	if err := store.Set(savedHookKey, "on-resume", hookCmd, hooks.ViaCLI); err != nil {
+	if err := store.Set(savedHookKey, "on-resume", hooks.Registration{Command: hookCmd}, hooks.ViaCLI); err != nil {
 		t.Fatalf("hooks.Set: %v", err)
 	}
 

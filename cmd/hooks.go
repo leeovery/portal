@@ -214,7 +214,7 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		if err := store.Set(hookKey, hooks.EventOnResume, command, hooks.ViaCLI); err != nil {
+		if err := store.Set(hookKey, hooks.EventOnResume, hooks.Registration{Command: command}, hooks.ViaCLI); err != nil {
 			return err
 		}
 

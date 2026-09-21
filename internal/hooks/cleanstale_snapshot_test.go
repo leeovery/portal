@@ -51,7 +51,7 @@ func TestCleanStaleSnapshotNarrowing(t *testing.T) {
 		// The registration that lands while the enumeration runs: token-shaped,
 		// absent from the live set, and therefore reapable on shape alone.
 		removed, err := store.CleanStale(func(hooks.Snapshot) ([]string, error) {
-			if err := store.Set(hookstest.ReapableSeedB, "on-resume", "fresh", hooks.ViaCLI); err != nil {
+			if err := store.Set(hookstest.ReapableSeedB, "on-resume", hooks.Registration{Command: "fresh"}, hooks.ViaCLI); err != nil {
 				return nil, fmt.Errorf("seed the late registration: %w", err)
 			}
 			return nil, nil
@@ -77,7 +77,7 @@ func TestCleanStaleSnapshotNarrowing(t *testing.T) {
 
 		var seen []string
 		if _, err := store.CleanStale(func(snapshot hooks.Snapshot) ([]string, error) {
-			if err := store.Set(hookstest.ReapableSeedB, "on-resume", "fresh", hooks.ViaCLI); err != nil {
+			if err := store.Set(hookstest.ReapableSeedB, "on-resume", hooks.Registration{Command: "fresh"}, hooks.ViaCLI); err != nil {
 				return nil, fmt.Errorf("seed the late registration: %w", err)
 			}
 			seen = keysOf(snapshot)
@@ -95,7 +95,7 @@ func TestCleanStaleSnapshotNarrowing(t *testing.T) {
 		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: fmt.Sprintf(`{%q:{"on-resume":"gone"}}`, hookstest.ReapableSeedA)})
 		// A live entry beside the stale one, so the delete set is narrower than
 		// the file.
-		if err := store.Set(hookstest.LiveSeedA, "on-resume", "live", hooks.ViaCLI); err != nil {
+		if err := store.Set(hookstest.LiveSeedA, "on-resume", hooks.Registration{Command: "live"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("register the live entry: %v", err)
 		}
 
@@ -119,7 +119,7 @@ func TestCleanStaleSnapshotNarrowing(t *testing.T) {
 		// A live entry beside the stale one, registered before the sink is
 		// installed so its own breadcrumb is not counted against the aborted
 		// clean, which must emit nothing at all.
-		if err := store.Set(hookstest.LiveSeedA, "on-resume", "live", hooks.ViaCLI); err != nil {
+		if err := store.Set(hookstest.LiveSeedA, "on-resume", hooks.Registration{Command: "live"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("register the live entry: %v", err)
 		}
 		before := readFileBytes(t, path)

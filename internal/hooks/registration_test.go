@@ -144,7 +144,7 @@ func TestRegistrationPreservationThroughASiblingRewrite(t *testing.T) {
 
 		before := storedValue(t, path, hookstest.LiveSeedA, "on-resume")
 
-		if err := store.Set(hookstest.LiveSeedB, hooks.EventOnResume, "new", hooks.ViaInternal); err != nil {
+		if err := store.Set(hookstest.LiveSeedB, hooks.EventOnResume, hooks.Registration{Command: "new"}, hooks.ViaInternal); err != nil {
 			t.Fatalf("Set: %v", err)
 		}
 
@@ -181,7 +181,7 @@ func TestRegistrationRewriteClassification(t *testing.T) {
 		sibling := storedValue(t, path, hookstest.LiveSeedB, "on-resume")
 
 		sink := logtest.Install(t)
-		if err := store.Set(hookstest.LiveSeedA, hooks.EventOnResume, "npm start", hooks.ViaInternal); err != nil {
+		if err := store.Set(hookstest.LiveSeedA, hooks.EventOnResume, hooks.Registration{Command: "npm start"}, hooks.ViaInternal); err != nil {
 			t.Fatalf("Set: %v", err)
 		}
 
