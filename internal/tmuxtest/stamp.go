@@ -31,3 +31,22 @@ func (s *Socket) ReadPaneToken(t *testing.T, target tmux.Target) string {
 	}
 	return strings.TrimSpace(out)
 }
+
+// MarkResumePending writes Portal's resume-pending pane option onto target
+// using raw tmux, so a fixture never stages itself through the code under test.
+func (s *Socket) MarkResumePending(t *testing.T, target tmux.Target) {
+	t.Helper()
+	s.Run(t, "set-option", "-p", "-t", string(target), state.ResumePendingOption, "1")
+}
+
+// ReadResumePending reads Portal's resume-pending pane option back off target
+// using raw tmux, reporting "" when the option is unset, on the reasoning
+// ReadPaneToken states.
+func (s *Socket) ReadResumePending(t *testing.T, target tmux.Target) string {
+	t.Helper()
+	out, err := s.TryRun("show-options", "-p", "-t", string(target), "-v", state.ResumePendingOption)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
