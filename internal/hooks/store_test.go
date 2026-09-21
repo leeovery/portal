@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/resumemode"
 )
 
 // readFileBytes returns the file's exact bytes, failing when it is absent, so a
@@ -547,6 +549,27 @@ func TestList(t *testing.T) {
 			if hook.Command != wantCmds[i] {
 				t.Errorf("list[%d].Command = %q, want %q", i, hook.Command, wantCmds[i])
 			}
+		}
+	})
+
+	t.Run("it carries each entry's mode through List in key then event order", func(t *testing.T) {
+		store, _ := hookstest.StageStore(t, hookstest.Staging{
+			Seed: `{"my-session:0.1":{"on-resume":{"command":"cmd1","resume":"lazy"}},` +
+				`"my-session:0.0":{"on-start":{"command":"cmd0s","resume":"eager"},"on-resume":"cmd0r"}}`,
+		})
+
+		list, err := store.List(hooks.ViaCLI)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []hooks.Hook{
+			{Key: "my-session:0.0", Event: "on-resume", Command: "cmd0r"},
+			{Key: "my-session:0.0", Event: "on-start", Command: "cmd0s", Resume: resumemode.Eager},
+			{Key: "my-session:0.1", Event: "on-resume", Command: "cmd1", Resume: resumemode.Lazy},
+		}
+		if !reflect.DeepEqual(list, want) {
+			t.Errorf("List() = %+v, want %+v", list, want)
 		}
 	})
 }

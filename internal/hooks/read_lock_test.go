@@ -66,7 +66,7 @@ func TestReadSharedLock(t *testing.T) {
 		if _, err := store.CleanStale(abortingEnumeration(nil)); !errors.Is(err, errAbortEnumeration) {
 			t.Fatalf("CleanStale snapshot read: %v", err)
 		}
-		if _, _, err := store.LookupOnResume("k00", hooks.ViaHydrate); err != nil {
+		if _, err := store.LookupOnResume("k00", hooks.ViaHydrate); err != nil {
 			t.Fatalf("LookupOnResume: %v", err)
 		}
 
@@ -247,7 +247,7 @@ func TestReadSharedLockBoundSelection(t *testing.T) {
 			"Load": func() error { _, err := store.Load(hooks.ViaCLI); return err },
 			"List": func() error { _, err := store.List(hooks.ViaCLI); return err },
 			"LookupOnResume": func() error {
-				_, _, err := store.LookupOnResume("k00", hooks.ViaHydrate)
+				_, err := store.LookupOnResume("k00", hooks.ViaHydrate)
 				return err
 			},
 		}
@@ -282,7 +282,7 @@ func TestReadSharedLockVia(t *testing.T) {
 			return nil
 		}},
 		{"LookupOnResume", hooks.ViaHydrate, func(s *hooks.Store) error {
-			_, _, err := s.LookupOnResume("k00", hooks.ViaHydrate)
+			_, err := s.LookupOnResume("k00", hooks.ViaHydrate)
 			return err
 		}},
 	}
@@ -310,12 +310,12 @@ func TestLookupOnResumeUnderHeldLock(t *testing.T) {
 		hookstest.HoldHooksSidecar(t, path)
 
 		sink := logtest.Install(t)
-		cmd, ok, err := store.LookupOnResume("tok01", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("tok01", hooks.ViaHydrate)
 		if err != nil {
 			t.Fatalf("LookupOnResume returned an error under a held lock: %v", err)
 		}
-		if !ok || cmd != "claude --resume abc" {
-			t.Fatalf("got (%q, %v), want the registered command — a busy lock must not drop a pane to a bare shell", cmd, ok)
+		if want := (hooks.OnResume{Command: "claude --resume abc", Found: true}); got != want {
+			t.Fatalf("got %+v, want %+v — a busy lock must not drop a pane to a bare shell", got, want)
 		}
 		hookstest.AssertDegradedRead(t, sink, "hydrate")
 	})
@@ -327,11 +327,11 @@ func TestLookupOnResumeUnderHeldLock(t *testing.T) {
 
 		sink := logtest.Install(t)
 		start := time.Now()
-		cmd, ok, err := store.LookupOnResume("", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("", hooks.ViaHydrate)
 		elapsed := time.Since(start)
 
-		if err != nil || ok || cmd != "" {
-			t.Fatalf("got (%q, %v, %v), want the empty-key early return", cmd, ok, err)
+		if err != nil || got != (hooks.OnResume{}) {
+			t.Fatalf("got (%+v, %v), want the empty-key early return", got, err)
 		}
 		if elapsed >= 100*time.Millisecond {
 			t.Errorf("empty-key lookup took %v — it reached the acquire", elapsed)

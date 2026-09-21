@@ -176,21 +176,21 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 		execShellAndExit(cfg)
 		return
 	}
-	command, found, err := cfg.HookStore.LookupOnResume(cfg.HookKey, hooks.ViaHydrate)
+	onResume, err := cfg.HookStore.LookupOnResume(cfg.HookKey, hooks.ViaHydrate)
 	if err != nil {
 		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "error", "error", err)
 		cfg.Logger.Warn("lookup on-resume hook failed", "hook_key", cfg.HookKey, "error", err)
 		execShellAndExit(cfg)
 		return
 	}
-	if !found {
+	if !onResume.Found {
 		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
 		execShellAndExit(cfg)
 		return
 	}
 	cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "hit")
 	shell := resolveShell()
-	chained := command + "; exec " + shell
+	chained := onResume.Command + "; exec " + shell
 	args := []string{"sh", "-c", chained}
 	// Must stay the statement immediately before the exec, as in execShellAndExit.
 	cfg.Logger.Info("exec", "target", "/bin/sh", "args", strings.Join(args, " "), "hook_present", true)

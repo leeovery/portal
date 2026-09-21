@@ -118,15 +118,15 @@ func TestTransientListPanesHelpers_Smoke(t *testing.T) {
 		path := hookstest.ResolveHooksFilePathFromEnv(t, env)
 		store := hooks.NewStore(path)
 		for key, want := range entries {
-			cmd, ok, err := store.LookupOnResume(key, hooks.ViaHydrate)
+			got, err := store.LookupOnResume(key, hooks.ViaHydrate)
 			if err != nil {
 				t.Fatalf("LookupOnResume(%s): %v", key, err)
 			}
-			if !ok {
+			if !got.Found {
 				t.Fatalf("LookupOnResume(%s): not found", key)
 			}
-			if cmd != want {
-				t.Fatalf("LookupOnResume(%s): got %q, want %q", key, cmd, want)
+			if got.Command != want {
+				t.Fatalf("LookupOnResume(%s): got %q, want %q", key, got.Command, want)
 			}
 		}
 

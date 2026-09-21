@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/nanoid"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/storelog"
 )
 
@@ -24,6 +25,7 @@ type Hook struct {
 	Key     string
 	Event   string
 	Command string
+	Resume  resumemode.Mode
 }
 
 // Snapshot is the on-disk shape: map[hook_key]map[event]registration. The clean
@@ -239,6 +241,7 @@ func (s *Store) List(via Via) ([]Hook, error) {
 				Key:     key,
 				Event:   event,
 				Command: registration.Command,
+				Resume:  registration.Resume,
 			})
 		}
 	}

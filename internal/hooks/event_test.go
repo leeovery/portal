@@ -32,12 +32,12 @@ func TestEventRoundTrip(t *testing.T) {
 			t.Errorf("persisted on-resume command = %q, want %q", got, "echo hi")
 		}
 
-		cmd, ok, err := store.LookupOnResume(hookstest.SubjectSeedA, hooks.ViaHydrate)
+		got, err := store.LookupOnResume(hookstest.SubjectSeedA, hooks.ViaHydrate)
 		if err != nil {
 			t.Fatalf("unexpected error on lookup: %v", err)
 		}
-		if !ok || cmd != "echo hi" {
-			t.Errorf("lookup = (%q, %v), want (%q, true)", cmd, ok, "echo hi")
+		if want := (hooks.OnResume{Command: "echo hi", Found: true}); got != want {
+			t.Errorf("lookup = %+v, want %+v", got, want)
 		}
 
 		removed, err := store.Remove(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaCLI)
