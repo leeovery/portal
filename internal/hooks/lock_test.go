@@ -187,10 +187,10 @@ func TestMutationLockExclusion(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if loaded["k1"]["on-resume"] != "cmd1" {
+		if loaded["k1"]["on-resume"].Command != "cmd1" {
 			t.Errorf("k1 lost — the blocked mutation loaded before the release: %v", loaded)
 		}
-		if loaded["k2"]["on-resume"] != "cmd2" {
+		if loaded["k2"]["on-resume"].Command != "cmd2" {
 			t.Errorf("k2 missing: %v", loaded)
 		}
 	})

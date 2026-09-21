@@ -28,7 +28,7 @@ func TestStageStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if h["tok01"]["on-resume"] != "npm start" {
+		if h["tok01"]["on-resume"].Command != "npm start" {
 			t.Errorf("entries did not come back: %v", h)
 		}
 		if got := hookstest.UnlockedRecords(t, sink); len(got) != 0 {
@@ -103,10 +103,10 @@ func TestStageStore(t *testing.T) {
 		if len(h) != 2 {
 			t.Fatalf("got %d entries, want 2: %v", len(h), h)
 		}
-		if got := h["tok01"]["on-resume"]; got != "claude --resume abc" {
+		if got := h["tok01"]["on-resume"].Command; got != "claude --resume abc" {
 			t.Errorf("tok01 on-resume = %q, want %q", got, "claude --resume abc")
 		}
-		if got := h["tok02"]["on-resume"]; got != "npm start" {
+		if got := h["tok02"]["on-resume"].Command; got != "npm start" {
 			t.Errorf("tok02 on-resume = %q, want %q", got, "npm start")
 		}
 	})
@@ -145,7 +145,7 @@ func TestStageStoreBody(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if got, want := h["tok01"]["on-resume"], "npm start"; got != want {
+		if got, want := h["tok01"]["on-resume"].Command, "npm start"; got != want {
 			t.Errorf("on-resume = %q, want %q", got, want)
 		}
 	})

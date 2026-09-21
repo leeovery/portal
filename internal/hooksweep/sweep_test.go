@@ -526,7 +526,7 @@ func TestHookSweepWithNothingPersisted(t *testing.T) {
 			t.Errorf("empty snapshot err = %v, want %v", err, errNothingPersisted)
 		}
 
-		tokens, err := enumerate(hooks.Snapshot{hookstest.LiveSeedA: {"on-resume": "cmd-live"}})
+		tokens, err := enumerate(hooks.Snapshot{hookstest.LiveSeedA: {"on-resume": {Command: "cmd-live"}}})
 		if err != nil {
 			t.Fatalf("enumerate: %v", err)
 		}

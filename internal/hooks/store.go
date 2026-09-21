@@ -26,10 +26,10 @@ type Hook struct {
 	Command string
 }
 
-// Snapshot is the on-disk shape: map[hook_key]map[event]command. The clean also
-// names its pre-enumeration read of the file by this type — the older view a
-// deletion may be narrowed by.
-type Snapshot map[string]map[string]string
+// Snapshot is the on-disk shape: map[hook_key]map[event]registration. The clean
+// also names its pre-enumeration read of the file by this type — the older view
+// a deletion may be narrowed by.
+type Snapshot map[string]map[string]Registration
 
 type Store struct {
 	path string
@@ -124,9 +124,9 @@ func (s *Store) save(h Snapshot) error {
 	return fileutil.AtomicWrite(s.path, data)
 }
 
-// Set adds or overwrites the hook for key and event. Writing the same command
-// again is a no-op: the file is left untouched. via records the mutation origin
-// for the audit breadcrumb.
+// Set adds or overwrites the hook for key and event. Writing a registration the
+// stored one already matches on command and mode is a no-op: the file is left
+// untouched. via records the mutation origin for the audit breadcrumb.
 func (s *Store) Set(key string, event Event, command string, via Via) error {
 	lock, err := s.acquireMutationLock()
 	if err != nil {
@@ -144,16 +144,18 @@ func (s *Store) Set(key string, event Event, command string, via Via) error {
 		return fmt.Errorf("failed to load hooks: %w", err)
 	}
 
-	op := classifySet(h, key, event, command)
+	registration := Registration{Command: command}
+
+	op := classifySet(h, key, event, registration)
 	if op == "set-noop" {
 		logger.Debug("set-noop", "op", "set-noop", "hook_key", key, "via", via.String())
 		return nil
 	}
 
 	if h[key] == nil {
-		h[key] = make(map[string]string)
+		h[key] = make(map[string]Registration)
 	}
-	h[key][event.String()] = command
+	h[key][event.String()] = registration
 
 	if err := s.save(h); err != nil {
 		logger.Warn(op, "op", op, "hook_key", key, "value", command, "via", via.String(),
@@ -165,7 +167,7 @@ func (s *Store) Set(key string, event Event, command string, via Via) error {
 	return nil
 }
 
-func classifySet(h Snapshot, key string, event Event, command string) string {
+func classifySet(h Snapshot, key string, event Event, registration Registration) string {
 	events, ok := h[key]
 	if !ok {
 		return "set"
@@ -174,7 +176,7 @@ func classifySet(h Snapshot, key string, event Event, command string) string {
 	if !ok {
 		return "set"
 	}
-	if existing == command {
+	if sameRegistration(existing, registration) {
 		return "set-noop"
 	}
 	return "modify"
@@ -232,11 +234,11 @@ func (s *Store) List(via Via) ([]Hook, error) {
 
 	var list []Hook
 	for key, events := range h {
-		for event, command := range events {
+		for event, registration := range events {
 			list = append(list, Hook{
 				Key:     key,
 				Event:   event,
-				Command: command,
+				Command: registration.Command,
 			})
 		}
 	}
@@ -384,10 +386,10 @@ func (s *Store) deleteStale(live []string, snapshot Snapshot) ([]string, error) 
 // alone — the recoverable form an operator copies back out of the log — and a
 // key holding several renders every event=command pair in event order, since
 // naming one of them would misreport the rest.
-func removedValue(events map[string]string) string {
+func removedValue(events map[string]Registration) string {
 	if len(events) == 1 {
-		for _, command := range events {
-			return command
+		for _, registration := range events {
+			return registration.Command
 		}
 	}
 
@@ -399,7 +401,7 @@ func removedValue(events map[string]string) string {
 
 	pairs := make([]string, 0, len(names))
 	for _, event := range names {
-		pairs = append(pairs, event+"="+events[event])
+		pairs = append(pairs, event+"="+events[event].Command)
 	}
 	return strings.Join(pairs, "; ")
 }

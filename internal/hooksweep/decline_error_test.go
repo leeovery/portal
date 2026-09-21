@@ -16,7 +16,7 @@ func TestHookSweepDeclineReasonTravelsWithTheError(t *testing.T) {
 	t.Run("it carries the decline reason inside the error the closure returns", func(t *testing.T) {
 		enumerate := liveTokenEnumeration(&stubReader{rows: nil})
 
-		tokens, err := enumerate(hooks.Snapshot{hookstest.ReapableSeedA: {"on-resume": "cmd-gone"}})
+		tokens, err := enumerate(hooks.Snapshot{hookstest.ReapableSeedA: {"on-resume": {Command: "cmd-gone"}}})
 
 		if tokens != nil {
 			t.Errorf("tokens = %v, want none on a decline", tokens)

@@ -793,7 +793,7 @@ func TestStateDaemon_HooksCleanupWiring(t *testing.T) {
 		if !ok {
 			t.Fatalf("daemon hook store did not resolve the foreground hooks.json; loaded=%v", loaded)
 		}
-		if got := events["on-resume"]; got != "echo hi" {
+		if got := events["on-resume"].Command; got != "echo hi" {
 			t.Errorf("on-resume command = %q; want %q", got, "echo hi")
 		}
 	})

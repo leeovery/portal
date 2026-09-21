@@ -23,6 +23,7 @@ var hooksMayImport = []string{
 	modulePrefix + "internal/fileutil",
 	modulePrefix + "internal/log",
 	modulePrefix + "internal/nanoid",
+	modulePrefix + "internal/resumemode",
 	modulePrefix + "internal/storelog",
 }
 

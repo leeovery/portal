@@ -28,7 +28,7 @@ func TestEventRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error on load: %v", err)
 		}
-		if got := h[hookstest.SubjectSeedA]["on-resume"]; got != "echo hi" {
+		if got := h[hookstest.SubjectSeedA]["on-resume"].Command; got != "echo hi" {
 			t.Errorf("persisted on-resume command = %q, want %q", got, "echo hi")
 		}
 

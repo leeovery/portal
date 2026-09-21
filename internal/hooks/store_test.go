@@ -85,11 +85,11 @@ func TestLoad(t *testing.T) {
 			t.Fatalf("got %d keys, want 2", len(h))
 		}
 
-		if h["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume abc123")
+		if h["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
 		}
-		if h["my-session:0.1"]["on-resume"] != "claude --resume def456" {
-			t.Errorf("my-session:0.1 on-resume = %q, want %q", h["my-session:0.1"]["on-resume"], "claude --resume def456")
+		if h["my-session:0.1"]["on-resume"].Command != "claude --resume def456" {
+			t.Errorf("my-session:0.1 on-resume = %q, want %q", h["my-session:0.1"]["on-resume"].Command, "claude --resume def456")
 		}
 	})
 }
@@ -134,11 +134,11 @@ func TestPersistence(t *testing.T) {
 		if len(loaded) != 2 {
 			t.Fatalf("got %d keys, want 2", len(loaded))
 		}
-		if loaded["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", loaded["my-session:0.0"]["on-resume"], "claude --resume abc123")
+		if loaded["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", loaded["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
 		}
-		if loaded["my-session:0.1"]["on-resume"] != "claude --resume def456" {
-			t.Errorf("my-session:0.1 on-resume = %q, want %q", loaded["my-session:0.1"]["on-resume"], "claude --resume def456")
+		if loaded["my-session:0.1"]["on-resume"].Command != "claude --resume def456" {
+			t.Errorf("my-session:0.1 on-resume = %q, want %q", loaded["my-session:0.1"]["on-resume"].Command, "claude --resume def456")
 		}
 	})
 
@@ -190,8 +190,8 @@ func TestSet(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if h["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume abc123")
+		if h["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
 		}
 	})
 
@@ -218,11 +218,11 @@ func TestSet(t *testing.T) {
 		if len(h["my-session:0.0"]) != 2 {
 			t.Fatalf("got %d events for my-session:0.0, want 2", len(h["my-session:0.0"]))
 		}
-		if h["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume abc123")
+		if h["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
 		}
-		if h["my-session:0.0"]["on-start"] != "echo hello" {
-			t.Errorf("my-session:0.0 on-start = %q, want %q", h["my-session:0.0"]["on-start"], "echo hello")
+		if h["my-session:0.0"]["on-start"].Command != "echo hello" {
+			t.Errorf("my-session:0.0 on-start = %q, want %q", h["my-session:0.0"]["on-start"].Command, "echo hello")
 		}
 	})
 
@@ -261,8 +261,8 @@ func TestSet(t *testing.T) {
 		if len(h["my-session:0.0"]) != 1 {
 			t.Fatalf("got %d events for my-session:0.0, want 1", len(h["my-session:0.0"]))
 		}
-		if h["my-session:0.0"]["on-resume"] != "claude --resume xyz789" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume xyz789")
+		if h["my-session:0.0"]["on-resume"].Command != "claude --resume xyz789" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume xyz789")
 		}
 	})
 }
@@ -299,8 +299,8 @@ func TestRemove(t *testing.T) {
 		if _, ok := h["my-session:0.0"]; ok {
 			t.Error("key my-session:0.0 should have been removed")
 		}
-		if h["my-session:0.1"]["on-resume"] != "claude --resume def456" {
-			t.Errorf("my-session:0.1 on-resume = %q, want %q", h["my-session:0.1"]["on-resume"], "claude --resume def456")
+		if h["my-session:0.1"]["on-resume"].Command != "claude --resume def456" {
+			t.Errorf("my-session:0.1 on-resume = %q, want %q", h["my-session:0.1"]["on-resume"].Command, "claude --resume def456")
 		}
 	})
 
@@ -366,8 +366,8 @@ func TestRemove(t *testing.T) {
 		if _, ok := events["on-resume"]; ok {
 			t.Error("on-resume should have been removed")
 		}
-		if events["on-start"] != "echo hello" {
-			t.Errorf("on-start = %q, want %q", events["on-start"], "echo hello")
+		if events["on-start"].Command != "echo hello" {
+			t.Errorf("on-start = %q, want %q", events["on-start"].Command, "echo hello")
 		}
 	})
 
@@ -435,8 +435,8 @@ func TestRemove(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if h["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume abc123")
+		if h["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
 		}
 	})
 
@@ -782,11 +782,11 @@ func TestCleanStale(t *testing.T) {
 
 func TestStaleKeys(t *testing.T) {
 	t.Run("returns persisted keys absent from the live set", func(t *testing.T) {
-		persisted := map[string]map[string]string{
-			"live-a:0.0":            {"on-resume": "x"},
-			hookstest.ReapableSeedB: {"on-resume": "y"},
-			"live-c:0.0":            {"on-resume": "z"},
-			hookstest.ReapableSeedD: {"on-resume": "w"},
+		persisted := hooks.Snapshot{
+			"live-a:0.0":            {"on-resume": {Command: "x"}},
+			hookstest.ReapableSeedB: {"on-resume": {Command: "y"}},
+			"live-c:0.0":            {"on-resume": {Command: "z"}},
+			hookstest.ReapableSeedD: {"on-resume": {Command: "w"}},
 		}
 		live := []string{"live-a:0.0", "live-c:0.0", "extra-e:0.0"}
 
@@ -805,9 +805,9 @@ func TestStaleKeys(t *testing.T) {
 	})
 
 	t.Run("returns empty when every persisted key is live", func(t *testing.T) {
-		persisted := map[string]map[string]string{
-			"a:0.0": {"on-resume": "x"},
-			"b:0.0": {"on-resume": "y"},
+		persisted := hooks.Snapshot{
+			"a:0.0": {"on-resume": {Command: "x"}},
+			"b:0.0": {"on-resume": {Command: "y"}},
 		}
 		got := hooks.StaleKeys(persisted, []string{"a:0.0", "b:0.0", "c:0.0"})
 		if len(got) != 0 {
@@ -816,9 +816,9 @@ func TestStaleKeys(t *testing.T) {
 	})
 
 	t.Run("returns every judgeable persisted key when the live set is empty", func(t *testing.T) {
-		persisted := map[string]map[string]string{
-			hookstest.ReapableSeedA: {"on-resume": "x"},
-			hookstest.ReapableSeedB: {"on-resume": "y"},
+		persisted := hooks.Snapshot{
+			hookstest.ReapableSeedA: {"on-resume": {Command: "x"}},
+			hookstest.ReapableSeedB: {"on-resume": {Command: "y"}},
 		}
 		got := hooks.StaleKeys(persisted, []string{})
 		if len(got) != 2 {
@@ -827,7 +827,7 @@ func TestStaleKeys(t *testing.T) {
 	})
 
 	t.Run("returns empty for an empty persisted map", func(t *testing.T) {
-		got := hooks.StaleKeys(map[string]map[string]string{}, []string{"a:0.0"})
+		got := hooks.StaleKeys(hooks.Snapshot{}, []string{"a:0.0"})
 		if len(got) != 0 {
 			t.Errorf("StaleKeys = %v, want empty", got)
 		}
@@ -999,6 +999,39 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 		if got := removed.AttrString(t, "value"); got != "x" {
 			t.Errorf("value = %q, want %q", got, "x")
+		}
+	})
+
+	t.Run("it renders the clean-stale value breadcrumb out of an object entry", func(t *testing.T) {
+		store, _ := hookstest.StageStore(t, hookstest.Staging{
+			Seed: fmt.Sprintf(`{%q:{"on-resume":{"command":"cmd1","resume":"lazy"}}}`, hookstest.ReapableSeedA),
+		})
+
+		sink := logtest.Install(t)
+		if _, err := store.CleanStale(enumerating("my-session:0.0")); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		perKey, _ := partitionCleanStaleRecords(t, sink.Records())
+		if got := perKey.Only(t, "per-key clean-stale record").AttrString(t, "value"); got != "cmd1" {
+			t.Errorf("value = %q, want %q", got, "cmd1")
+		}
+	})
+
+	t.Run("it renders every event=command pair for a key holding several events", func(t *testing.T) {
+		store, _ := hookstest.StageStore(t, hookstest.Staging{
+			Seed: fmt.Sprintf(`{%q:{"on-resume":{"command":"cmd1","resume":"lazy"},"on-exit":"x"}}`, hookstest.ReapableSeedA),
+		})
+
+		sink := logtest.Install(t)
+		if _, err := store.CleanStale(enumerating("my-session:0.0")); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		perKey, _ := partitionCleanStaleRecords(t, sink.Records())
+		want := "on-exit=x; on-resume=cmd1"
+		if got := perKey.Only(t, "per-key clean-stale record").AttrString(t, "value"); got != want {
+			t.Errorf("value = %q, want %q", got, want)
 		}
 	})
 

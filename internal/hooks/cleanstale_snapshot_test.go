@@ -189,7 +189,7 @@ func TestCleanStaleSnapshotNarrowing(t *testing.T) {
 	})
 }
 
-func keysOf(h map[string]map[string]string) []string {
+func keysOf(h hooks.Snapshot) []string {
 	keys := make([]string, 0, len(h))
 	for k := range h {
 		keys = append(keys, k)

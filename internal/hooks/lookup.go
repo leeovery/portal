@@ -23,9 +23,9 @@ func (s *Store) LookupOnResume(hookKey string, via Via) (string, bool, error) {
 	if !ok {
 		return "", false, nil
 	}
-	cmd, ok := events[EventOnResume.String()]
-	if !ok || cmd == "" {
+	registration, ok := events[EventOnResume.String()]
+	if !ok || registration.Command == "" {
 		return "", false, nil
 	}
-	return cmd, true, nil
+	return registration.Command, true, nil
 }

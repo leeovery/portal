@@ -175,7 +175,7 @@ func TestReadSharedLock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if h["k0"]["on-resume"] != "cmd0" {
+		if h["k0"]["on-resume"].Command != "cmd0" {
 			t.Fatalf("entries did not come back: %v", h)
 		}
 		if _, statErr := os.Stat(path + ".lock"); !os.IsNotExist(statErr) {
