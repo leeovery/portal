@@ -245,7 +245,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 3,
-          "current_task": "lazy-resume-on-attach-3-5",
+          "current_task": "lazy-resume-on-attach-3-6",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -264,7 +264,8 @@
             "lazy-resume-on-attach-3-1",
             "lazy-resume-on-attach-3-2",
             "lazy-resume-on-attach-3-3",
-            "lazy-resume-on-attach-3-4"
+            "lazy-resume-on-attach-3-4",
+            "lazy-resume-on-attach-3-5"
           ],
           "staging": {
             "p1": {
@@ -342,6 +343,16 @@
               "files": [
                 "internal/tui/model.go",
                 "internal/tui/resume_pane_canvas.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-3-5",
+              "source": "reviewer",
+              "summary": "A terminal reply arriving after the appearance probe deadline leaves an ESC in the pane input queue, which is the discard confirmations cancel key",
+              "failure": "On a terminal slower than the 50ms appearance-detect deadline, the OSC 11 reply is not consumed by the probe — those bytes stay in the panes tty input queue. The leading byte is ESC, which is the discard confirmations cancel key, so the confirmation could back itself out of a screen the user just opened, with no input from them. The user presses d, sees the confirmation appear and vanish, and has no idea why.",
+              "detail": "internal/tui/pane_appearance.go reads with a deadline rather than binding os.Stdin, which is correct — it cannot consume a reply that arrives after the deadline, and a post-timeout drain might swallow a real keystroke, so the probe correctly does not try. The handling belongs to the input drop that guards the confirmation screen: task lazy-resume-on-attach-5-4 (The Confirmation Refuses Input That Was Already in Flight) and, for the waiting panel, task 4-2 (The Waiting Process: Two Keys, Everything Else Swallowed). Recorded here because the phase-3 boundary pass is the nearest sweep that will see it, and because whoever writes those two tasks needs to know the ESC can arrive without a keypress. Not a defect in task 3-5.",
+              "files": [
+                "internal/tui/pane_appearance.go"
               ]
             }
           ]
