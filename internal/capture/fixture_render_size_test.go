@@ -74,7 +74,7 @@ func TestFixtureRenderSize_DeclaredOnlyByTheGeometryFixtures(t *testing.T) {
 	const callerW, callerH = 100, 30
 
 	for _, name := range capture.FixtureNames() {
-		if _, geometry := geometryFixtureBases[name]; geometry || name == capture.ContrastValidationFixture {
+		if _, geometry := geometryFixtureBases[name]; geometry || capture.IsStandalone(name) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {

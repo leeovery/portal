@@ -21,8 +21,7 @@ const (
 )
 
 func buildBackedFixtureNames() []string {
-	names := capture.FixtureNames()
-	return slices.DeleteFunc(names, func(n string) bool { return n == capture.ContrastValidationFixture })
+	return slices.DeleteFunc(capture.FixtureNames(), capture.IsStandalone)
 }
 
 type capturedStateWant struct {

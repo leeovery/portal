@@ -18,7 +18,7 @@ func TestCapturetool_NoThemePersister(t *testing.T) {
 	}
 
 	for _, name := range names {
-		if name == capture.ContrastValidationFixture {
+		if capture.IsStandalone(name) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {

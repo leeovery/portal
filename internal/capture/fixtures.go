@@ -182,15 +182,17 @@ func FixtureByName(name string) (*Fixture, error) {
 	return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 }
 
-// FixtureNames includes the contrast-validation swatch, which is a standalone
-// tea.Model rather than a *Fixture.
+// FixtureNames includes the standalone names too — the contrast-validation
+// swatch and the resume surfaces — which are tea.Models of their own rather
+// than a *Fixture. StandaloneNames() is the set FixtureByName does not resolve.
 func FixtureNames() []string {
 	builders := fixtureBuilders()
-	names := make([]string, 0, len(builders)+1)
+	standalone := StandaloneNames()
+	names := make([]string, 0, len(builders)+len(standalone))
 	for _, build := range builders {
 		names = append(names, build().Name())
 	}
-	names = append(names, ContrastValidationFixture)
+	names = append(names, standalone...)
 	slices.Sort(names)
 	return names
 }

@@ -57,11 +57,17 @@ func (f *Fixture) ModelAt(th theme.Theme, w, h int) tui.Model {
 // caller's, so every consumer renders a geometry fixture at the size that
 // produces its frame without a branch of its own.
 func (f *Fixture) renderSize(w, h int) (int, int) {
-	if f.width > 0 {
-		w = f.width
+	return substituteDeclaredSize(f.width, f.height, w, h)
+}
+
+// The one substitution rule, shared with the standalone surfaces: a declared
+// dimension replaces the caller's, and a zero one takes it.
+func substituteDeclaredSize(declaredW, declaredH, w, h int) (int, int) {
+	if declaredW > 0 {
+		w = declaredW
 	}
-	if f.height > 0 {
-		h = f.height
+	if declaredH > 0 {
+		h = declaredH
 	}
 	return w, h
 }

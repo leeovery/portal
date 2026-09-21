@@ -29,7 +29,7 @@ func TestFixtureColourless_ReadsDepsNoColor(t *testing.T) {
 
 	t.Run("every registered fixture agrees with its own Deps", func(t *testing.T) {
 		for _, name := range FixtureNames() {
-			if name == ContrastValidationFixture {
+			if IsStandalone(name) {
 				continue
 			}
 			fx, err := FixtureByName(name)

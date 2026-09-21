@@ -99,12 +99,12 @@ func registryFixtures(t *testing.T) []*capture.Fixture {
 	names := capture.FixtureNames()
 	fixtures := make([]*capture.Fixture, 0, len(names))
 	for _, name := range names {
-		if name == capture.ContrastValidationFixture {
+		if capture.IsStandalone(name) {
 			continue
 		}
 		fx, err := capture.FixtureByName(name)
 		if err != nil {
-			t.Fatalf("FixtureByName(%s): %v — every enumerated name but %s must resolve; skipping one silently would read as coverage", name, err, capture.ContrastValidationFixture)
+			t.Fatalf("FixtureByName(%s): %v — every enumerated name outside %v must resolve; skipping one silently would read as coverage", name, err, capture.StandaloneNames())
 		}
 		fixtures = append(fixtures, fx)
 	}
@@ -137,7 +137,7 @@ func sameColour(got, want color.Color) bool {
 }
 
 func TestThemeSwapGuard_EnumeratesRegistry(t *testing.T) {
-	t.Run("every enumerated name but the swatch resolves to a fixture", func(t *testing.T) {
+	t.Run("every enumerated name outside the standalone set resolves to a fixture", func(t *testing.T) {
 		resolved := make([]string, 0, len(capture.FixtureNames()))
 		for _, fx := range registryFixtures(t) {
 			resolved = append(resolved, fx.Name())
@@ -145,18 +145,52 @@ func TestThemeSwapGuard_EnumeratesRegistry(t *testing.T) {
 		if len(resolved) == 0 {
 			t.Fatal("the registry enumerated no build-backed fixtures; the guard would assert over nothing")
 		}
-		want := slices.DeleteFunc(capture.FixtureNames(), func(n string) bool {
-			return n == capture.ContrastValidationFixture
-		})
+		want := slices.DeleteFunc(capture.FixtureNames(), capture.IsStandalone)
 		slices.Sort(resolved)
 		if !slices.Equal(resolved, want) {
 			t.Errorf("the guard covers %v, want every enumerated fixture %v", resolved, want)
 		}
 	})
 
-	t.Run("the swatch is the only skip, and it is not a build-backed fixture", func(t *testing.T) {
-		if _, err := capture.FixtureByName(capture.ContrastValidationFixture); err == nil {
-			t.Errorf("FixtureByName(%s) resolved a fixture; it is skipped as a standalone tea.Model, so a resolvable one must go under the guard instead", capture.ContrastValidationFixture)
+	t.Run("it skips exactly the named standalone surfaces", func(t *testing.T) {
+		skip := capture.StandaloneNames()
+		if len(skip) == 0 {
+			t.Fatal("the skip set is empty; the assertions below would pass vacuously")
+		}
+		enumerated := capture.FixtureNames()
+		// The hazard the widening exists for: a standalone screen that is
+		// rendered by name but not named here drops out of the skip, and every
+		// enumerating guard fatals on a name it cannot resolve.
+		for _, name := range capture.SurfaceNames() {
+			if !slices.Contains(skip, name) {
+				t.Errorf("surface %s is renderable by name but absent from the skip set %v; each enumerating guard reads through that set and would fatal on it", name, skip)
+			}
+		}
+		for _, name := range skip {
+			if name == capture.ContrastValidationFixture {
+				continue
+			}
+			if _, ok := capture.SurfaceByName(name); !ok {
+				t.Errorf("%s is skipped but resolves to no surface either; a skip names a screen with a guard of its own, and this one is rendered by nothing", name)
+			}
+		}
+		for _, name := range skip {
+			if !slices.Contains(enumerated, name) {
+				t.Errorf("%s is skipped but not enumerated by FixtureNames(); a skip names a screen the guard gives up in exchange for a guard of its own, not a screen nothing reaches", name)
+			}
+			if _, err := capture.FixtureByName(name); err == nil {
+				t.Errorf("FixtureByName(%s) resolved a fixture; it is skipped as a standalone tea.Model, so a resolvable one must go under the guard instead", name)
+			}
+		}
+
+		covered := make([]string, 0, len(enumerated))
+		for _, fx := range registryFixtures(t) {
+			covered = append(covered, fx.Name())
+		}
+		covered = append(covered, skip...)
+		slices.Sort(covered)
+		if !slices.Equal(covered, enumerated) {
+			t.Errorf("the resolved fixtures plus the skip set are %v, want exactly FixtureNames() %v — an enumerated name that is neither is a screen no guard covers", covered, enumerated)
 		}
 	})
 }

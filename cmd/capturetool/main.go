@@ -74,11 +74,16 @@ func run(fixture, themeArg string) error {
 	return nil
 }
 
-// A live window is the terminal's size rather than the fixture's choice, so a
-// fixture that declares a render size has it substituted into the resize on its
-// way to the model. The swatch is no *Fixture and declares none, as does an
-// unresolvable name — which the program never reaches.
+// A live window is the terminal's size rather than the screen's choice, so a
+// fixture or surface that declares a render size has it substituted into the
+// resize on its way to the model. A surface pins both dimensions — which of the
+// card and the degraded stack is captured is the surface's decision, never the
+// window's. The swatch declares none, as does an unresolvable name — which the
+// program never reaches.
 func renderSizeFilter(fixture string) func(tea.Model, tea.Msg) tea.Msg {
+	if sf, ok := capture.SurfaceByName(fixture); ok {
+		return func(_ tea.Model, msg tea.Msg) tea.Msg { return sf.PinRenderSize(msg) }
+	}
 	fx, err := capture.FixtureByName(fixture)
 	if err != nil {
 		return func(_ tea.Model, msg tea.Msg) tea.Msg { return msg }
@@ -97,6 +102,11 @@ func resolveProgram(fixture, themeArg string, warnings io.Writer) (tea.Model, er
 	}
 	if fixture == capture.ContrastValidationFixture {
 		return capture.NewContrastValidationModel(pinned), nil
+	}
+	// Before the fixture lookup: a surface is no *Fixture, and FixtureByName
+	// rejects its name as unknown.
+	if sf, ok := capture.SurfaceByName(fixture); ok {
+		return sf.WithTheme(pinned, noColourRequested()), nil
 	}
 	m, err := resolveModel(fixture, pinned)
 	if err != nil {
@@ -183,10 +193,15 @@ func resolveModel(fixture string, pinned theme.Theme) (tui.Model, error) {
 	// Handed to Deps rather than assigned afterwards: the palette drives both
 	// the nomination and the faked ThemeSource, which must agree.
 	deps := fx.Deps(pinned)
-	// NO_COLOR wins over --theme (there is no canvas to select), so the capture
-	// shows no painted canvas whatever palette was named.
-	if v, ok := os.LookupEnv("NO_COLOR"); ok && v != "" {
-		deps.NoColor = true
-	}
+	deps.NoColor = noColourRequested()
 	return tui.Build(deps), nil
+}
+
+// The one read, shared by the surface branch and the fixture one: NO_COLOR wins
+// over --theme (there is no canvas to select), so a capture shows no painted
+// canvas whatever palette was named, and the two routes cannot disagree about
+// when that is.
+func noColourRequested() bool {
+	v, ok := os.LookupEnv("NO_COLOR")
+	return ok && v != ""
 }

@@ -26,26 +26,27 @@ func TestFixtureRegistry_BuilderNamesAreUnique(t *testing.T) {
 }
 
 func TestFixtureRegistry_NamesDeriveFromTheBuilders(t *testing.T) {
-	want := make([]string, 0, len(fixtureBuilders())+1)
+	standalone := StandaloneNames()
+	want := make([]string, 0, len(fixtureBuilders())+len(standalone))
 	for _, build := range fixtureBuilders() {
 		want = append(want, build().Name())
 	}
-	want = append(want, ContrastValidationFixture)
+	want = append(want, standalone...)
 	slices.Sort(want)
 
 	if got := FixtureNames(); !slices.Equal(got, want) {
-		t.Errorf("FixtureNames() = %v, want the builders' own names plus %s, sorted: %v", got, ContrastValidationFixture, want)
+		t.Errorf("FixtureNames() = %v, want the builders' own names plus the standalone set %v, sorted: %v", got, standalone, want)
 	}
 }
 
 func TestFixtureByName_ResolvesEveryEnumeratedName(t *testing.T) {
 	for _, name := range FixtureNames() {
-		if name == ContrastValidationFixture {
+		if IsStandalone(name) {
 			continue
 		}
 		fx, err := FixtureByName(name)
 		if err != nil {
-			t.Errorf("FixtureByName(%s): %v — every enumerated name but %s must resolve", name, err, ContrastValidationFixture)
+			t.Errorf("FixtureByName(%s): %v — every enumerated name outside %v must resolve", name, err, StandaloneNames())
 			continue
 		}
 		if fx.Name() != name {
