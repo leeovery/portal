@@ -1,0 +1,173 @@
+package cmd
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"strings"
+	"sync"
+
+	"github.com/charmbracelet/x/term"
+	"github.com/spf13/cobra"
+)
+
+const (
+	resumeKeyEnterCR = '\r'
+	resumeKeyEnterLF = '\n'
+	resumeKeyDiscard = 'd'
+)
+
+type resumeWaitConfig struct {
+	resumeChainPayload
+
+	Stdout     io.Writer
+	In         io.Reader
+	Logger     *slog.Logger
+	IsTerminal func() bool
+	MakeRaw    func() (restore func(), err error)
+	ExecSelf   func(prog string, args []string)
+
+	// Set by runResumeWait from MakeRaw, so an answer hands the pane on in a
+	// cooked tty. An answer reached without a wait restores nothing.
+	restoreTerminal func()
+}
+
+func (cfg resumeWaitConfig) restore() {
+	if cfg.restoreTerminal != nil {
+		cfg.restoreTerminal()
+	}
+}
+
+// runResumeWait holds the pane on whatever the draw painted until Enter or d
+// answers it. Every other byte is discarded, so nothing the user did not send —
+// a paste, a send-keys, a key aimed at another window — can answer the panel,
+// and the three keys that would kill a foreground process are bytes like any
+// other under raw mode. No signal is declined: tmux tearing the pane down ends
+// the waiter.
+func runResumeWait(cfg resumeWaitConfig) error {
+	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
+
+	// Spinning on a reader that is not a tty would burn a core for the life of
+	// the pane, and raw mode is what makes the kill keys arrive as bytes.
+	if !cfg.IsTerminal() {
+		return errors.New("resume wait: stdin is not a terminal")
+	}
+	restore, err := cfg.MakeRaw()
+	if err != nil {
+		return fmt.Errorf("resume wait: enter raw mode: %w", err)
+	}
+	cfg.restoreTerminal = sync.OnceFunc(restore)
+	defer cfg.restore()
+
+	// One byte per read and never ahead: input still queued when a key is
+	// answered is inherited by the process image the hand-off execs.
+	buf := make([]byte, 1)
+	for {
+		n, err := cfg.In.Read(buf)
+		if n > 0 {
+			switch buf[0] {
+			case resumeKeyEnterCR, resumeKeyEnterLF:
+				return resumeAnswerEnter(cfg)
+			case resumeKeyDiscard:
+				return resumeAnswerDiscard(cfg)
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("resume wait: read: %w", err)
+		}
+	}
+}
+
+func resumeAnswerEnter(cfg resumeWaitConfig) error {
+	return resumeRedraw(cfg)
+}
+
+func resumeAnswerDiscard(cfg resumeWaitConfig) error {
+	return resumeRedraw(cfg)
+}
+
+// resumeRedraw hands the pane to a fresh draw of the screen it is already
+// showing, carrying the payload unchanged. A binary that cannot be resolved ends
+// the wait as a read error does: the pending marker is still set, so the chain's
+// tail recovers the pane to a usable shell rather than leaving one whose keys
+// silently do nothing.
+func resumeRedraw(cfg resumeWaitConfig) error {
+	exe, err := resumeChainExe()
+	if err != nil {
+		return fmt.Errorf("resolve portal executable: %w", err)
+	}
+	cfg.restore()
+
+	argv := resumeChainArgv(exe, resumeDrawSubcommand, cfg.resumeChainPayload)
+
+	// Must stay the statement immediately before the exec: the unbuffered writer
+	// puts the marker in the kernel before the process image is replaced.
+	cfg.Logger.Info("exec", "target", exe, "args", strings.Join(argv, " "))
+	cfg.ExecSelf(exe, argv)
+	return nil
+}
+
+func stdinIsTerminal() bool {
+	return term.IsTerminal(os.Stdin.Fd())
+}
+
+func makeStdinRaw() (func(), error) {
+	fd := os.Stdin.Fd()
+	prior, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = term.Restore(fd, prior) }, nil
+}
+
+var resumeWaitRunFunc = runResumeWait
+
+// stateResumeWaitCmd holds a pane between the screens of its resume panel.
+var stateResumeWaitCmd = &cobra.Command{
+	Use:    resumeWaitSubcommand,
+	Short:  "Hold a pane showing the resume panel until it is answered (internal)",
+	Args:   cobra.NoArgs,
+	Hidden: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		command, _ := cmd.Flags().GetString(resumeFlagCommand)
+		report, _ := cmd.Flags().GetString(resumeFlagReport)
+		hookKey, _ := cmd.Flags().GetString(resumeFlagHookKey)
+		pane, _ := cmd.Flags().GetString(resumeFlagPane)
+		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
+		width, _ := cmd.Flags().GetInt(resumeFlagWidth)
+		height, _ := cmd.Flags().GetInt(resumeFlagHeight)
+
+		return resumeWaitRunFunc(resumeWaitConfig{
+			resumeChainPayload: resumeChainPayload{
+				Command: command,
+				Report:  report,
+				HookKey: hookKey,
+				Pane:    pane,
+				PaneKey: paneKey,
+				Width:   width,
+				Height:  height,
+			},
+			Stdout:     os.Stdout,
+			In:         os.Stdin,
+			Logger:     hydrateLogger,
+			IsTerminal: stdinIsTerminal,
+			MakeRaw:    makeStdinRaw,
+			ExecSelf:   defaultExecShell,
+		})
+	},
+}
+
+func init() {
+	stateResumeWaitCmd.Flags().String(resumeFlagCommand, "", "The registered on-resume command the panel states")
+	stateResumeWaitCmd.Flags().String(resumeFlagReport, "", "What an answer that could not be carried out reported")
+	stateResumeWaitCmd.Flags().String(resumeFlagHookKey, "", "Saved pane token identifying the pane's resume hook")
+	stateResumeWaitCmd.Flags().String(resumeFlagPane, "", "The pane id the marker writes address")
+	stateResumeWaitCmd.Flags().String(resumeFlagPaneKey, "", "The pane key the chain's records name the pane by")
+	stateResumeWaitCmd.Flags().Int(resumeFlagWidth, 0, "Width the screen the pane is showing was drawn at")
+	stateResumeWaitCmd.Flags().Int(resumeFlagHeight, 0, "Height the screen the pane is showing was drawn at")
+	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagCommand)
+
+	stateCmd.AddCommand(stateResumeWaitCmd)
+}
