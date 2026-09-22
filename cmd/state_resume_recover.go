@@ -4,7 +4,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -56,10 +55,7 @@ func runResumeRecover(cfg resumeRecoverConfig) error {
 	shell := resolveShell()
 	args := []string{shell}
 
-	// Must stay the statement immediately before the exec: the unbuffered writer
-	// puts the marker in the kernel before the process image is replaced.
-	cfg.Logger.Info("exec", "target", shell, "args", strings.Join(args, " "), "hook_present", false)
-	cfg.ExecShell(shell, args)
+	execHandOff(cfg.Logger, cfg.ExecShell, shell, args, false)
 	return nil
 }
 

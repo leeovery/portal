@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/prefs"
@@ -30,8 +28,7 @@ type resumeDrawConfig struct {
 // runResumeDraw paints one screen of the waiting pane and replaces its own
 // process image with the waiter, so nothing the draw touched stays resident for
 // as long as the pane waits. The leave sequence is never written here: it
-// belongs to whatever answers the panel. The trailing return is unreachable in
-// production, where ExecSelf replaces the process image.
+// belongs to whatever answers the panel.
 func runResumeDraw(cfg resumeDrawConfig) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 
@@ -53,20 +50,9 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 		Colourless: cfg.Colourless,
 	}))
 
-	exe, err := resumeChainExe()
-	if err != nil {
-		return fmt.Errorf("resolve portal executable: %w", err)
-	}
-
 	next := cfg.resumeChainPayload
 	next.Width, next.Height = width, height
-	argv := resumeChainArgv(exe, resumeWaitSubcommand, next)
-
-	// Must stay the statement immediately before the exec: the unbuffered writer
-	// puts the marker in the kernel before the process image is replaced.
-	cfg.Logger.Info("exec", "target", exe, "args", strings.Join(argv, " "))
-	cfg.ExecSelf(exe, argv)
-	return nil
+	return resumeHandOff(cfg.Logger, cfg.ExecSelf, resumeWaitSubcommand, next)
 }
 
 // paneDrawTheme is the palette one draw paints in, read through the

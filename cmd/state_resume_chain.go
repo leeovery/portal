@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -84,17 +86,45 @@ func flagArg(name string) string {
 	return "--" + name
 }
 
+var osExecutable = os.Executable
+
 // An empty path is an error: exec'ing it would replace the process image with
-// nothing.
+// nothing. Both failures carry the whole clause, so no consumer wraps them
+// again and a pane's stderr names the resolution once.
 func resumeChainExe() (string, error) {
-	exe, err := os.Executable()
+	exe, err := osExecutable()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve portal executable: %w", err)
 	}
 	if exe == "" {
 		return "", errors.New("resolve portal executable: empty path")
 	}
 	return exe, nil
+}
+
+// resumeHandOff replaces the pane's process image with the chain's next
+// subcommand. The exec marker must stay the statement immediately before the
+// exec: the writer behind it is unbuffered, so it reaches the kernel before the
+// image is replaced, and a marker emitted after the exec is never written at
+// all. The trailing return is unreachable in production.
+func resumeHandOff(logger *slog.Logger, execSelf func(prog string, args []string), subcommand string, p resumeChainPayload) error {
+	exe, err := resumeChainExe()
+	if err != nil {
+		return err
+	}
+	argv := resumeChainArgv(exe, subcommand, p)
+
+	logger.Info("exec", "target", exe, "args", strings.Join(argv, " "))
+	execSelf(exe, argv)
+	return nil
+}
+
+// execHandOff is the same hand-off under the same ordering rule, for the
+// sites whose marker also records whether the pane carried a registered
+// command.
+func execHandOff(logger *slog.Logger, execShell func(prog string, args []string), prog string, args []string, hookPresent bool) {
+	logger.Info("exec", "target", prog, "args", strings.Join(args, " "), "hook_present", hookPresent)
+	execShell(prog, args)
 }
 
 // hookExecArgs composes the argv a pane's registered command is run as. The

@@ -178,10 +178,7 @@ func runHydrate(cfg hydrateConfig) error {
 
 func execShellAndExit(cfg hydrateConfig) {
 	shell := resolveShell()
-	// Must stay the statement immediately before the exec: the unbuffered writer
-	// puts the marker in the kernel before the process image is replaced.
-	cfg.Logger.Info("exec", "target", shell, "args", strings.Join([]string{shell}, " "), "hook_present", false)
-	cfg.ExecShell(shell, []string{shell})
+	execHandOff(cfg.Logger, cfg.ExecShell, shell, []string{shell}, false)
 }
 
 func resolveShell() string {
@@ -259,9 +256,7 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 		return
 	}
 	prog, args := hookExecArgs(lookup.Command, resolveShell())
-	// Must stay the statement immediately before the exec, as in execShellAndExit.
-	cfg.Logger.Info("exec", "target", prog, "args", strings.Join(args, " "), "hook_present", true)
-	cfg.ExecShell(prog, args)
+	execHandOff(cfg.Logger, cfg.ExecShell, prog, args, true)
 }
 
 // execResumeChainAndExit parks the pane on the draw followed by the chain's
@@ -279,10 +274,7 @@ func execResumeChainAndExit(cfg hydrateConfig) {
 	chained := shellWords(resumeChainArgv(cfg.Decision.Exe, resumeDrawSubcommand, payload)) + "; " +
 		shellWords(resumeChainArgv(cfg.Decision.Exe, resumeRecoverSubcommand, payload))
 	args := []string{"sh", "-c", chained}
-
-	// Must stay the statement immediately before the exec, as in execShellAndExit.
-	cfg.Logger.Info("exec", "target", "/bin/sh", "args", strings.Join(args, " "), "hook_present", true)
-	cfg.ExecShell("/bin/sh", args)
+	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", args, true)
 }
 
 // Clearing the skeleton marker is the recovery: the FIFO is already unlinked, so

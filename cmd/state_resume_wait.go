@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -189,10 +188,7 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 		prog, args = hookExecArgs(command, shell)
 	}
 
-	// Must stay the statement immediately before the exec: the unbuffered writer
-	// puts the marker in the kernel before the process image is replaced.
-	cfg.Logger.Info("exec", "target", prog, "args", strings.Join(args, " "), "hook_present", command != "")
-	cfg.ExecSelf(prog, args)
+	execHandOff(cfg.Logger, cfg.ExecSelf, prog, args, command != "")
 	return nil
 }
 
@@ -224,19 +220,8 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 // set, so the chain's tail recovers the pane to a usable shell rather than
 // leaving one whose keys silently do nothing.
 func resumeRedraw(cfg resumeWaitConfig) error {
-	exe, err := resumeChainExe()
-	if err != nil {
-		return fmt.Errorf("resolve portal executable: %w", err)
-	}
 	cfg.restore()
-
-	argv := resumeChainArgv(exe, resumeDrawSubcommand, cfg.resumeChainPayload)
-
-	// Must stay the statement immediately before the exec: the unbuffered writer
-	// puts the marker in the kernel before the process image is replaced.
-	cfg.Logger.Info("exec", "target", exe, "args", strings.Join(argv, " "))
-	cfg.ExecSelf(exe, argv)
-	return nil
+	return resumeHandOff(cfg.Logger, cfg.ExecSelf, resumeDrawSubcommand, cfg.resumeChainPayload)
 }
 
 // A store that cannot even be resolved reads as no registration, which drops
