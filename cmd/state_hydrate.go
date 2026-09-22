@@ -19,8 +19,11 @@ import (
 )
 
 // The reset sequences make the cursor visible, leave the alternate screen and
-// reset SGR; the postamble adds CRLF so the shell prompt lands at column 0.
+// reset SGR; the postamble adds CRLF so the shell prompt lands at column 0. The
+// entry is their pair: a second one written to a pane already on the alternate
+// screen does not nest, so a redraw may re-write it.
 const (
+	hydrateAltScreenEnter = "\x1b[?1049h\x1b[?25l"
 	hydrateResetPreamble  = "\x1b[?25h\x1b[?1049l\x1b[0m"
 	hydrateResetPostamble = "\x1b[?25h\x1b[?1049l\x1b[0m\r\n"
 	hydrateTimeout        = 3 * time.Second

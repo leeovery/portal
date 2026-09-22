@@ -24,7 +24,7 @@ func ResolveProcessRole(args []string) string {
 		switch path[1] {
 		case "daemon":
 			return roleDaemon
-		case "hydrate", "signal-hydrate":
+		case "hydrate", "signal-hydrate", "resume-draw", "resume-wait", "resume-recover":
 			return roleHydrate
 		}
 	}

@@ -75,7 +75,7 @@ func TestStateCommandRegistration(t *testing.T) {
 				t.Errorf("portal state --help must not list removed subcommand %q; got %v", removed, listed)
 			}
 		}
-		hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "commit-now"}
+		hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "commit-now", "resume-draw"}
 		for _, h := range hidden {
 			if listed[h] {
 				t.Errorf("portal state --help must not list hidden subcommand %q; got %v", h, listed)
@@ -220,6 +220,7 @@ var stateChildCommands = []*cobra.Command{
 	stateSignalHydrateCmd,
 	stateNotifyCmd,
 	stateCommitNowCmd,
+	stateResumeDrawCmd,
 }
 
 func TestStateParentIsHidden(t *testing.T) {
@@ -232,9 +233,9 @@ func TestStateParentIsHidden(t *testing.T) {
 }
 
 func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
-	t.Run("it registers exactly five hidden state children", func(t *testing.T) {
-		if len(stateChildCommands) != 5 {
-			t.Fatalf("stateChildCommands has %d entries, want 5", len(stateChildCommands))
+	t.Run("it registers exactly six hidden state children", func(t *testing.T) {
+		if len(stateChildCommands) != 6 {
+			t.Fatalf("stateChildCommands has %d entries, want 6", len(stateChildCommands))
 		}
 		for _, c := range stateChildCommands {
 			if !c.Hidden {
@@ -257,7 +258,7 @@ func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 }
 
 func TestStateChildrenRemainInvocableByArgv(t *testing.T) {
-	names := []string{"daemon", "hydrate", "signal-hydrate", "notify", "commit-now"}
+	names := []string{"daemon", "hydrate", "signal-hydrate", "notify", "commit-now", "resume-draw"}
 	for _, name := range names {
 		t.Run(name+" resolves via Find", func(t *testing.T) {
 			resetRootCmd()
@@ -283,7 +284,7 @@ func TestStateMigrateRenameIsRetired(t *testing.T) {
 }
 
 func TestStateHiddenSubcommandsAbsentFromShellCompletions(t *testing.T) {
-	hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "commit-now"}
+	hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "commit-now", "resume-draw"}
 	// The completion boilerplate contains the word "statement(s)", so a bare
 	// substring check for "state" false-positives; \bstate\b matches only a
 	// standalone command entry.

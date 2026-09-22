@@ -15,10 +15,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Two files are exempt in full because each is a separate verb no `portal open`
-// invocation reaches. The runtime half does not back that exemption up: doctor
-// hands its loader log.Discard(), so a doctor-side helper called from the exec
-// path would read the poisoned directory and still write no record.
+// Three files are exempt in full because each is a separate verb no `portal
+// open` invocation reaches. For the two whose loader is silent, the runtime half
+// does not back that exemption up: doctor hands its loader log.Discard(), so a
+// doctor-side helper called from the exec path would read the poisoned directory
+// and still write no record.
 func TestOpenExecPath_DoesNoThemeWork(t *testing.T) {
 	t.Run("no theme call site sits outside TUI construction", func(t *testing.T) {
 		allowed := map[string]bool{
@@ -34,7 +35,7 @@ func TestOpenExecPath_DoesNoThemeWork(t *testing.T) {
 			// sweep anywhere. The `local` map below tracks it instead.
 		}
 
-		exemptFiles := map[string]bool{"theme.go": true, "doctor_theme.go": true}
+		exemptFiles := map[string]bool{"theme.go": true, "doctor_theme.go": true, "state_resume_draw.go": true}
 
 		for file, callers := range themeCallSites(t) {
 			if exemptFiles[file] {

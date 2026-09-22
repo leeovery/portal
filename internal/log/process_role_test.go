@@ -13,6 +13,9 @@ func TestResolveProcessRole(t *testing.T) {
 
 		{"state hydrate", []string{"state", "hydrate"}, "hydrate"},
 		{"state signal-hydrate", []string{"state", "signal-hydrate"}, "hydrate"},
+		{"state resume-draw", []string{"state", "resume-draw"}, "hydrate"},
+		{"state resume-wait", []string{"state", "resume-wait"}, "hydrate"},
+		{"state resume-recover", []string{"state", "resume-recover"}, "hydrate"},
 
 		{"hook set on-resume", []string{"hook", "set", "--on-resume", "x"}, "hooks_cli"},
 		{"hook alone", []string{"hook"}, "hooks_cli"},
