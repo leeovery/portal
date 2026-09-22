@@ -13,6 +13,8 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -44,6 +46,26 @@ type hydrateConfig struct {
 	OpenFIFO          func(path string, timeout time.Duration) (*os.File, error)
 	HandleFileMissing func(cfg hydrateConfig, ctx hydrateFileMissingContext) error
 	HandleTimeout     func(cfg hydrateConfig) error
+
+	// LoadPrefsStore and ResolveExe are nil-tolerant: unset takes the
+	// non-migrating prefs route and the running binary's own path.
+	LoadPrefsStore func() (*prefs.Store, error)
+	ResolveExe     func() (string, error)
+
+	// Decision is what the pane's registration resolved to, held by pointer so
+	// a refusal taken inside a by-value handler reaches the exec. A nil one is
+	// a call that resolved nothing, which looks its registration up itself.
+	Decision *resumeDecision
+}
+
+// resumeDecision carries one pane's resolved resume mode from the top of the
+// helper to whichever tail it ends on. Exe and Pane are resolved by the mark
+// step, which is where a refusal to wait has to be taken.
+type resumeDecision struct {
+	Wait   bool
+	Lookup hooks.OnResume
+	Exe    string
+	Pane   string
 }
 
 func hydrateLoggerOrDefault(logger *slog.Logger) *slog.Logger {
@@ -81,6 +103,7 @@ func openFIFOWithTimeout(path string, timeout time.Duration) (*os.File, error) {
 // process image.
 func runHydrate(cfg hydrateConfig) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
+	cfg.Decision = resolveResumeDecision(cfg)
 	f, err := cfg.OpenFIFO(cfg.FIFO, hydrateTimeout)
 	if err != nil {
 		if errors.Is(err, ErrHydrateTimeout) {
@@ -145,7 +168,7 @@ func runHydrate(cfg hydrateConfig) error {
 	// Let tmux's PTY parser finish ingesting the dump before the marker is unset.
 	time.Sleep(hydrateSettleSleep)
 
-	unsetSkeletonMarkerOrLog(cfg)
+	markPendingThenUnsetSkeletonMarker(cfg)
 
 	cfg.Logger.Info("scrollback replayed", "bytes", n, "took", took)
 
@@ -169,32 +192,97 @@ func resolveShell() string {
 	return shell
 }
 
-// A lookup failure degrades to a bare shell so the pane stays usable when
-// hooks.json is unreadable.
-func execShellOrHookAndExit(cfg hydrateConfig) {
-	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
+// resolveResumeDecision reads the pane's registration and the install-wide
+// default once, at the top of the helper, so every tail it can end on decides
+// the same way and pays for the reads once.
+func resolveResumeDecision(cfg hydrateConfig) *resumeDecision {
+	lookup := lookupOnResumeOrLog(cfg)
+	wait := lookup.Found && lookup.Command != "" &&
+		resumemode.Resolve(lookup.Mode, installResumeMode(cfg)) == resumemode.Lazy
+	return &resumeDecision{Wait: wait, Lookup: lookup}
+}
+
+// A prefs store that cannot be built, and a read that fails, both take the
+// shipped default: a panel is answered in a keystroke, while a resume the user
+// did not want cannot be taken back.
+func installResumeMode(cfg hydrateConfig) resumemode.Mode {
+	load := cfg.LoadPrefsStore
+	if load == nil {
+		load = loadPrefsStoreNoMigrate
+	}
+	store, err := load()
+	if err != nil || store == nil {
+		return resumemode.Default
+	}
+	// The error is discarded because the mode beside it is already the default.
+	mode, _ := store.LoadResumeMode()
+	return mode
+}
+
+// An absent store, a failed read and an unregistered key are all "no hook", and
+// each is recorded as the hydrate catalog already words it.
+func lookupOnResumeOrLog(cfg hydrateConfig) hooks.OnResume {
 	if cfg.HookStore == nil {
 		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
-		execShellAndExit(cfg)
-		return
+		return hooks.OnResume{}
 	}
 	onResume, err := cfg.HookStore.LookupOnResume(cfg.HookKey, hooks.ViaHydrate)
 	if err != nil {
 		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "error", "error", err)
 		cfg.Logger.Warn("lookup on-resume hook failed", "hook_key", cfg.HookKey, "error", err)
-		execShellAndExit(cfg)
-		return
+		return hooks.OnResume{}
 	}
 	if !onResume.Found {
 		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
+		return hooks.OnResume{}
+	}
+	cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "hit")
+	return onResume
+}
+
+// A lookup failure degrades to a bare shell so the pane stays usable when
+// hooks.json is unreadable.
+func execShellOrHookAndExit(cfg hydrateConfig) {
+	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
+	var lookup hooks.OnResume
+	switch {
+	case cfg.Decision == nil:
+		lookup = lookupOnResumeOrLog(cfg)
+	case cfg.Decision.Wait:
+		execResumeChainAndExit(cfg)
+		return
+	default:
+		lookup = cfg.Decision.Lookup
+	}
+	if !lookup.Found {
 		execShellAndExit(cfg)
 		return
 	}
-	cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "hit")
-	prog, args := hookExecArgs(onResume.Command, resolveShell())
+	prog, args := hookExecArgs(lookup.Command, resolveShell())
 	// Must stay the statement immediately before the exec, as in execShellAndExit.
 	cfg.Logger.Info("exec", "target", prog, "args", strings.Join(args, " "), "hook_present", true)
 	cfg.ExecShell(prog, args)
+}
+
+// execResumeChainAndExit parks the pane on the draw followed by the chain's
+// tail, so a waiter that ends without answering leaves a pane its user can
+// still type into. Both halves are composed from the decision, which resolves
+// nothing further: a resolution failing after the marker is written would leave
+// the pane frozen for life.
+func execResumeChainAndExit(cfg hydrateConfig) {
+	payload := resumeChainPayload{
+		Command: cfg.Decision.Lookup.Command,
+		HookKey: cfg.HookKey,
+		Pane:    cfg.Decision.Pane,
+		PaneKey: state.PaneKeyFromFIFOPath(cfg.FIFO),
+	}
+	chained := shellWords(resumeChainArgv(cfg.Decision.Exe, resumeDrawSubcommand, payload)) + "; " +
+		shellWords(resumeChainArgv(cfg.Decision.Exe, resumeRecoverSubcommand, payload))
+	args := []string{"sh", "-c", chained}
+
+	// Must stay the statement immediately before the exec, as in execShellAndExit.
+	cfg.Logger.Info("exec", "target", "/bin/sh", "args", strings.Join(args, " "), "hook_present", true)
+	cfg.ExecShell("/bin/sh", args)
 }
 
 // Clearing the skeleton marker is the recovery: the FIFO is already unlinked, so
@@ -211,7 +299,7 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 
 	cfg.Logger.Info("signal timeout", "took", hydrateTimeout)
 
-	unsetSkeletonMarkerOrLog(cfg)
+	markPendingThenUnsetSkeletonMarker(cfg)
 	return nil
 }
 
@@ -233,8 +321,42 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 
 	// Unlike the timeout path: with no scrollback to dump, the save loop should
 	// resume capturing this pane on the next tick rather than skip it forever.
-	unsetSkeletonMarkerOrLog(cfg)
+	markPendingThenUnsetSkeletonMarker(cfg)
 	return nil
+}
+
+// markPendingThenUnsetSkeletonMarker holds the ordering the pane's saved
+// transcript depends on: a pane that is going to wait carries its own marker
+// before the mid-restore one is dropped, so no tick lands on an unprotected
+// pane. A pane that cannot be marked does not wait.
+func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig) {
+	if cfg.Decision != nil && cfg.Decision.Wait {
+		if err := markResumePending(cfg); err != nil {
+			cfg.Logger.Warn("set resume pending marker failed", "pane_key", state.PaneKeyFromFIFOPath(cfg.FIFO), "error", err)
+			cfg.Decision.Wait = false
+		}
+	}
+	unsetSkeletonMarkerOrLog(cfg)
+}
+
+// The pane and the executable are resolved before the write, so a refusal is
+// taken while the pane is still an eager one: a marked pane whose chain could
+// not be composed would fire its hook and freeze its saved scrollback for life.
+func markResumePending(cfg hydrateConfig) error {
+	pane, err := requireTmuxPane()
+	if err != nil {
+		return err
+	}
+	resolveExe := cfg.ResolveExe
+	if resolveExe == nil {
+		resolveExe = resumeChainExe
+	}
+	exe, err := resolveExe()
+	if err != nil {
+		return err
+	}
+	cfg.Decision.Pane, cfg.Decision.Exe = string(pane), exe
+	return state.SetResumePendingMarker(cfg.Client, pane)
 }
 
 // Failure is non-fatal: the next bootstrap re-skeletons the pane and clears it.

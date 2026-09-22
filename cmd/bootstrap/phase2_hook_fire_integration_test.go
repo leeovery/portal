@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
@@ -43,7 +44,7 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 
 	hookCmd := fmt.Sprintf("touch %s", sentinelFile)
 	store := hooks.NewStore(hooksPath)
-	if err := store.Set(betaHookKey, "on-resume", hooks.Registration{Command: hookCmd}, hooks.ViaCLI); err != nil {
+	if err := store.Set(betaHookKey, "on-resume", hooks.Registration{Command: hookCmd, Resume: resumemode.Eager}, hooks.ViaCLI); err != nil {
 		t.Fatalf("hooks.Set: %v", err)
 	}
 

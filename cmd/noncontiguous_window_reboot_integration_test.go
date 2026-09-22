@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -342,11 +343,11 @@ func (fx *divergentRebootFixture) saveIndex(t *testing.T) {
 		// from the pane's environment. Recording it is what makes a hook firing
 		// in the wrong pane fail rather than pass.
 		cmd := "echo " + p.markerText + " $TMUX_PANE >> " + p.markerFile
-		if err := fx.store.Set(p.token, "on-resume", hooks.Registration{Command: cmd}, hooks.ViaCLI); err != nil {
+		if err := fx.store.Set(p.token, "on-resume", hooks.Registration{Command: cmd, Resume: resumemode.Eager}, hooks.ViaCLI); err != nil {
 			t.Fatalf("hooks.Set %s: %v", p.role, err)
 		}
 	}
-	if err := fx.store.Set(fx.staleKey, "on-resume", hooks.Registration{Command: "echo stale"}, hooks.ViaCLI); err != nil {
+	if err := fx.store.Set(fx.staleKey, "on-resume", hooks.Registration{Command: "echo stale", Resume: resumemode.Eager}, hooks.ViaCLI); err != nil {
 		t.Fatalf("hooks.Set stale: %v", err)
 	}
 

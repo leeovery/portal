@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -19,7 +20,8 @@ import (
 
 // rebootPane is one pane of the arranged session, described by the two things
 // the suites arranging it differ in: the durable token it is stamped with, and
-// the resume hook registered against that token. Both are optional — an empty
+// the resume hook registered against that token, pinned eager so the restore
+// runs it rather than offering it on a panel. Both are optional — an empty
 // token leaves the pane un-stamped, which is the legacy shape a restore must
 // still land on a bare shell.
 type rebootPane struct {
@@ -68,7 +70,7 @@ func newRebootFixture(t *testing.T, socketPrefix, sessionName string, panes []re
 		if p.hookCmd == "" {
 			continue
 		}
-		if err := store.Set(p.token, "on-resume", hooks.Registration{Command: p.hookCmd}, hooks.ViaCLI); err != nil {
+		if err := store.Set(p.token, "on-resume", hooks.Registration{Command: p.hookCmd, Resume: resumemode.Eager}, hooks.ViaCLI); err != nil {
 			t.Fatalf("hooks.Set pane %d: %v", i, err)
 		}
 		verifyHookKeyed(t, fx.hooksPath, p.token)

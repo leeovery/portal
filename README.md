@@ -83,7 +83,7 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
 - **Modern Vivid TUI**: a colourful, keyboard-driven picker that owns its own canvas, with an in-app `?` keymap on every page. Three themes ship — Tokyo Night, Tokyo Night Day, and Nord — switched with `t` and matched to your terminal's background unless you pin one; drop-in `.theme` files restyle every screen, and `NO_COLOR` is honoured.
 - **Session grouping and tags**: flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
 - **Scrollback preview**: hit `Space` for a read-only peek at any session's saved scrollback, cycling windows and panes without attaching.
-- **Reboot-safe sessions**: starts the tmux server and restores structure, layout, working dirs, and ANSI scrollback after a reboot, optionally re-running per-pane commands via resume hooks. Replaces tmux-resurrect / tmux-continuum.
+- **Reboot-safe sessions**: starts the tmux server and restores structure, layout, working dirs, and ANSI scrollback after a reboot, bringing back per-pane commands via resume hooks — each pane comes back holding a panel showing its command, which runs when you answer it. Replaces tmux-resurrect / tmux-continuum.
 - **Multi-window open**: name several targets (`x work api db`) or mark them with `m` in the picker and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
 - **Fast open**: jump to a project by path, alias, or zoxide (`x work`), or attach an existing session by name or glob (`x api`, `x 'api-*'`), with git-root resolution and project memory built in.
 
@@ -211,11 +211,11 @@ xctl alias list                      # list all aliases
 
 ### `xctl hook`
 
-Register per-pane commands that re-execute automatically when a session is attached after a reboot. `hook set` must be run from inside a tmux pane; `hook rm` defaults to the current pane's token but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including panes that no longer exist, and the old-format `<session>:<window>.<pane>` keys the stale-entry sweep retains forever rather than guessing at — hand removal through this flag is the sanctioned route for those). `hook rm` exits non-zero when it removes nothing — a missing entry, a pane with no hook of its own, or a pane that is already gone — so a scripted caller can tell a real removal from a no-op.
+Register per-pane commands to bring back after a reboot. Under the shipped default a restored pane comes back holding the resume panel, showing the registered command with `⏎ resume` and `d discard`, and the command runs when you answer it; a registration pinned `eager` runs its command as the pane is restored, with no panel. `hook set` must be run from inside a tmux pane; `hook rm` defaults to the current pane's token but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including panes that no longer exist, and the old-format `<session>:<window>.<pane>` keys the stale-entry sweep retains forever rather than guessing at — hand removal through this flag is the sanctioned route for those). `hook rm` exits non-zero when it removes nothing — a missing entry, a pane with no hook of its own, or a pane that is already gone — so a scripted caller can tell a real removal from a no-op.
 
 The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent alias, so existing `xctl hooks …` scripts keep working unchanged.
 
-Hooks stay attached to a session even if you rename it, whether from the picker's `r` modal or an external `tmux rename-session`. A renamed session still re-runs its command after the next reboot.
+Hooks stay attached to a session even if you rename it, whether from the picker's `r` modal or an external `tmux rename-session`. A renamed session still brings its command back after the next reboot — as the panel under the shipped default, and as a fired command under `eager`.
 
 Three kinds of name are refused, by the picker's `r` modal and by Portal's own rename alike, because tmux cannot address them afterwards through the exact-match target every per-session operation composes, or reads them as something other than a name: `":" isn't allowed in a session name — tmux reads it as a separator`, `"$" isn't allowed at the start of a session name — tmux reads it as a session ID`, and `"-" isn't allowed at the start of a session name — tmux reads it as a command flag`. The picker says exactly that and leaves the session under its old name; nothing is renamed, and a hook already registered against the pane is untouched.
 
@@ -229,11 +229,12 @@ xctl hook list                                   # list hooks: key, event, comma
 
 `--resume-mode` takes `eager` or `lazy` and nothing else; any other value is refused and nothing is written. A registration carries eager, lazy or nothing, and carrying nothing means it follows the install-wide setting in `prefs.json`. The flag's zero value is "names no mode" rather than "keep what was there", so a `hook set` that does not pass it writes a registration carrying no mode whatever its predecessor carried — re-pass the mode alongside the command to keep a pin.
 
-**When hooks fire:** resume hooks run only when Portal recreates a pane from saved state
-after a reboot, once the tmux server has started fresh. They do not run on an ordinary
-detach and reattach within the same server lifetime, because the pane and its process
-are still alive; re-running the hook then would launch a second copy of a long-running
-command such as a dev server.
+**When hooks fire:** a resume hook is only ever offered — as the panel, or fired outright
+under `eager` — when Portal recreates a pane from saved state after a reboot, once the
+tmux server has started fresh. Nothing happens on an ordinary detach and reattach within
+the same server lifetime, because the pane and its process are still alive; bringing the
+command back then would launch a second copy of a long-running command such as a dev
+server.
 
 ### `xctl doctor`
 
@@ -398,13 +399,15 @@ Whenever you run a command that needs tmux, Portal checks that the server is run
 starts it if it is not. In the same step it re-creates any saved sessions that are not
 already live, so after a reboot your sessions come back with their structure, layout,
 zoom, and working directories intact. Scrollback (including ANSI colour) loads as you
-attach, and resume hooks run on the recreated panes.
+attach, and each recreated pane carrying a resume hook comes back holding the resume
+panel, which runs the command when you answer it.
 
 This replaces tmux-continuum and tmux-resurrect for session persistence. If you have
 either installed, remove it (or set `@continuum-restore off`) to avoid restoring twice.
 
-Pair restoration with [resume hooks](#xctl-hook) to re-run pane commands such as dev
-servers and editors after a reboot.
+Pair restoration with [resume hooks](#xctl-hook) to bring pane commands such as dev
+servers and editors back after a reboot — on a panel you answer per pane, or fired
+outright for a registration pinned `eager`.
 
 ## Configuration
 

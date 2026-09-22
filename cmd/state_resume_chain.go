@@ -4,6 +4,9 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
+
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 // The flags the resume chain's subcommands are addressed by. A pane is named
@@ -64,6 +67,17 @@ func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 		argv = append(argv, flagArg(resumeFlagHeight), strconv.Itoa(p.Height))
 	}
 	return argv
+}
+
+// shellWords renders an argv as one shell command word-for-word, so a value
+// holding spaces, quotes, an expansion or a newline reaches the command it is
+// composed into as the single argument it left as.
+func shellWords(argv []string) string {
+	words := make([]string, len(argv))
+	for i, arg := range argv {
+		words[i] = shellquote.Single(arg)
+	}
+	return strings.Join(words, " ")
 }
 
 func flagArg(name string) string {

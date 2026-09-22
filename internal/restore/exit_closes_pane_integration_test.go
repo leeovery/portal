@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -135,7 +136,7 @@ func setupExitClosesPane(t *testing.T, hookCmd string) (string, *tmuxtest.Socket
 
 	if hookCmd != "" {
 		store := hooks.NewStore(hooksPath)
-		if err := store.Set(paneToken, "on-resume", hooks.Registration{Command: hookCmd}, hooks.ViaCLI); err != nil {
+		if err := store.Set(paneToken, "on-resume", hooks.Registration{Command: hookCmd, Resume: resumemode.Eager}, hooks.ViaCLI); err != nil {
 			t.Fatalf("hooks.Set: %v", err)
 		}
 	}

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 	"github.com/leeovery/portal/internal/commandertest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -961,6 +964,23 @@ const (
 	hydrateAbsentFileMissing
 )
 
+// hydrateStoreWithMode stages a hooks.json holding one on-resume registration
+// under the named resume mode. resumemode.Unset stages the bare-command shape,
+// which names no mode of its own and so follows the install.
+func hydrateStoreWithMode(t *testing.T, key, command string, mode resumemode.Mode) *hooks.Store {
+	t.Helper()
+	var value any = command
+	if mode != resumemode.Unset {
+		value = map[string]string{"command": command, "resume": mode.String()}
+	}
+	seed, err := json.Marshal(map[string]map[string]any{key: {hooks.EventOnResume.String(): value}})
+	if err != nil {
+		t.Fatalf("marshal seed hooks.json: %v", err)
+	}
+	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), SidecarAbsent: true, Seed: string(seed)})
+	return store
+}
+
 // hydrateCfgOpts names the parts a hydrate case varies. Stdout, Commander and
 // ExecShell default when unset — a discarded stdout, a fresh recording
 // commander, and a stub exec whose recordings nobody reads. Logger and HookStore
@@ -984,6 +1004,8 @@ type hydrateCfgOpts struct {
 	Logger            *slog.Logger
 	HookStore         *hooks.Store
 	ExecShell         func(prog string, args []string)
+	LoadPrefsStore    func() (*prefs.Store, error)
+	ResolveExe        func() (string, error)
 	HandleFileMissing func(cfg hydrateConfig, ctx hydrateFileMissingContext) error
 	HandleTimeout     func(cfg hydrateConfig) error
 	AbsentHandler     hydrateAbsentHandler
@@ -1025,6 +1047,8 @@ func hydrateCfg(t *testing.T, opts hydrateCfgOpts) hydrateConfig {
 		Logger:            opts.Logger,
 		HookStore:         opts.HookStore,
 		ExecShell:         opts.ExecShell,
+		LoadPrefsStore:    opts.LoadPrefsStore,
+		ResolveExe:        opts.ResolveExe,
 		OpenFIFO:          opts.OpenFIFO,
 		HandleFileMissing: fileMissing,
 		HandleTimeout:     timeout,
@@ -1282,9 +1306,7 @@ func TestHydrate_SignalArrived_ExecsHookChainWhenHookRegistered(t *testing.T) {
 	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-		"work:0.0": {"on-resume": "echo hi"},
-	}})
+	store := hydrateStoreWithMode(t, "work:0.0", "echo hi", resumemode.Eager)
 
 	exec := &stubExecShell{}
 	cfg := hydrateCfg(t, hydrateCfgOpts{
@@ -1352,9 +1374,7 @@ func TestHydrate_FileMissing_ExecsHookChainWhenHookRegistered(t *testing.T) {
 	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-		"fmh:0.0": {"on-resume": "claude --resume abc"},
-	}})
+	store := hydrateStoreWithMode(t, "fmh:0.0", "claude --resume abc", resumemode.Eager)
 
 	exec := &stubExecShell{}
 	cfg := hydrateCfg(t, hydrateCfgOpts{
@@ -1417,9 +1437,7 @@ func TestHydrate_Timeout_FiresHookWhenRegistered(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-tfh__0.0.fifo")
 
 	t.Setenv("SHELL", "/bin/zsh")
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-		"tfh:0.0": {"on-resume": "echo hi"},
-	}})
+	store := hydrateStoreWithMode(t, "tfh:0.0", "echo hi", resumemode.Eager)
 
 	exec := &stubExecShell{}
 	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: filepath.Join(dir, "sb"), HookKey: "tfh:0.0",
@@ -1582,9 +1600,7 @@ func TestHydrate_LooksUpHooksByHookKeyVerbatimNotByLivePaneKey(t *testing.T) {
 	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-		"saved:0.0": {"on-resume": "echo saved"},
-	}})
+	store := hydrateStoreWithMode(t, "saved:0.0", "echo saved", resumemode.Eager)
 
 	exec := &stubExecShell{}
 	cfg := hydrateCfg(t, hydrateCfgOpts{
@@ -1619,9 +1635,7 @@ func TestHydrate_PassesHookCommandAsSingleArgvElementToShDashC(t *testing.T) {
 
 	t.Setenv("SHELL", "/bin/zsh")
 	rawCmd := "echo 'it works' && echo \"\\$x\""
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-		"q:0.0": {"on-resume": rawCmd},
-	}})
+	store := hydrateStoreWithMode(t, "q:0.0", rawCmd, resumemode.Eager)
 
 	exec := &stubExecShell{}
 	cfg := hydrateCfg(t, hydrateCfgOpts{
@@ -1651,8 +1665,8 @@ func TestHydrate_PassesHookCommandAsSingleArgvElementToShDashC(t *testing.T) {
 }
 
 func TestHydrate_SignalArrived_LookupHappensAfterSleepAndMarkerUnset(t *testing.T) {
-	// Order matters: the marker unset must precede the hooks lookup, so the
-	// test timestamps the set-option call and the hooks.json read and compares.
+	// Order matters: the marker unset must precede the hand-off, so the test
+	// timestamps the set-option call and the exec and compares.
 	dir := t.TempDir()
 	fifo := makeFIFO(t, dir, "hydrate-ord__0.0.fifo")
 	scrollback := filepath.Join(dir, "sb")
@@ -1706,12 +1720,12 @@ func TestHydrate_SignalArrived_LookupHappensAfterSleepAndMarkerUnset(t *testing.
 		t.Errorf("marker-unset at %v, expected >= startSleep + 100ms (= %v)", markerUnsetAt, startSleep.Add(100*time.Millisecond))
 	}
 	if !execAt.After(markerUnsetAt) {
-		t.Errorf("ExecShell (%v) did not occur after marker-unset (%v) — lookup must follow marker-unset", execAt, markerUnsetAt)
+		t.Errorf("ExecShell (%v) did not occur after marker-unset (%v) — the hand-off must follow marker-unset", execAt, markerUnsetAt)
 	}
 }
 
 func TestHydrate_FileMissing_LookupHappensAfterMarkerUnset(t *testing.T) {
-	// Order matters: the marker unset must precede the hooks lookup. No settle
+	// Order matters: the marker unset must precede the hand-off. No settle
 	// sleep here — nothing was dumped.
 	dir := t.TempDir()
 	fifo := makeFIFO(t, dir, "hydrate-fmo__0.0.fifo")
