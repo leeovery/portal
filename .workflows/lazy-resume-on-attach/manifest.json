@@ -249,7 +249,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 4,
-          "current_task": "lazy-resume-on-attach-4-5",
+          "current_task": "lazy-resume-on-attach-4-6",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -278,7 +278,8 @@
             "lazy-resume-on-attach-4-1",
             "lazy-resume-on-attach-4-2",
             "lazy-resume-on-attach-4-3",
-            "lazy-resume-on-attach-4-4"
+            "lazy-resume-on-attach-4-4",
+            "lazy-resume-on-attach-4-5"
           ],
           "staging": {
             "p1": {
@@ -390,6 +391,28 @@
                 "internal/tmux/tmux.go",
                 "internal/tmux/resolve_hookkey_test.go",
                 "internal/tmux/pane_option_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-5",
+              "source": "reviewer",
+              "summary": "The argv→shell-command-string renderer is now declared twice, in two packages, with identical bodies.",
+              "failure": "internal/shellquote is the tree's single declaration of the POSIX quoting rule because naive composition corrupts a user-authored command; the joining half of that rule is now declared separately in cmd.shellWords and internal/spawn.renderCommandString, with no exported route to it. The next site that has to render an argv into a shell word list — phase 5's redraw/discard chain is the near-term candidate — has no obvious helper to reach for and hand-rolls a third copy, or concatenates. Noticed by a user whose resume command holds a space, a quote or a $ reaching the panel's draw as several arguments, or truncated.",
+              "detail": "cmd/state_resume_chain.go:75-83 and internal/spawn/recipe.go:70-76 are byte-identical modulo variable names (make([]string, len(argv)) → shellquote.Single per element → strings.Join(…, \" \")). The consolidation is an exported joiner on internal/shellquote (which both already import) with both call sites routed through it; it reaches internal/spawn, so it is outside task 4-5's scope.",
+              "files": [
+                "cmd/state_resume_chain.go",
+                "internal/spawn/recipe.go",
+                "internal/shellquote/shellquote.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-5",
+              "source": "orchestrator",
+              "summary": "Two hydrate test names now state the inverse of the ordering this phase established; they are the last statement of the superseded ordering left in the repo.",
+              "failure": "TestHydrate_SignalArrived_LookupHappensAfterSleepAndMarkerUnset and TestHydrate_FileMissing_LookupHappensAfterMarkerUnset name an ordering that no longer holds — the lookup now happens at the top of runHydrate, before both clears. The executor corrected the comments inside both bodies to say \"hand-off\", so each test now carries a name and a comment that contradict each other. A later reader trusting the name re-derives the superseded ordering, and the bodies do still pin a real property, so nothing goes red to correct them.",
+              "detail": "cmd/state_hydrate_test.go:1667 and :1727. The whole remedy is renaming both to name the hand-off rather than the lookup. Raised by the 4-5 reviewer as an observation rather than a finding, since finding-floor.md excludes test-file naming; recorded here so the boundary pass can confirm or drop it against the final state.",
+              "files": [
+                "cmd/state_hydrate_test.go"
               ]
             }
           ]
