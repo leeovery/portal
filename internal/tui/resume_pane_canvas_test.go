@@ -295,6 +295,12 @@ func TestRenderPaneScreen_ClampsToThePane(t *testing.T) {
 			[]string{"stack-0", strings.Repeat("x", w), "stack-2"})
 	})
 
+	t.Run("it truncates rather than re-flows the degraded stack", func(t *testing.T) {
+		rows := []string{"a-b-c-d-e-f -- --port=3000 --resume", "resume  d  discard"}
+		clamped := clampStackToPane(rows, 12, len(rows))
+		assertPaneRows(t, clamped, []string{"a-b-c-d-e-f ", "resume  d  d"})
+	})
+
 	t.Run("it keeps the stack's first and last rows when it clamps", func(t *testing.T) {
 		for _, tc := range []struct {
 			name string
