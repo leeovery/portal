@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 func realAttachArgv() []string {
@@ -128,7 +130,7 @@ func TestWrapWithShellFallback(t *testing.T) {
 		if wrapped[1] != "-lc" {
 			t.Errorf("wrapped[1] = %q, want %q", wrapped[1], "-lc")
 		}
-		wantPayload := renderCommandString(cmd) + shellFallbackSuffix
+		wantPayload := shellquote.Join(cmd) + shellFallbackSuffix
 		if wrapped[2] != wantPayload {
 			t.Errorf("wrapped[2] = %q, want %q", wrapped[2], wantPayload)
 		}
@@ -148,7 +150,7 @@ func TestWrapWithShellFallback(t *testing.T) {
 		if mint[0] != "bash" || mint[1] != "-lc" {
 			t.Errorf("mint wrapper prefix = [%q %q], want [bash -lc]", mint[0], mint[1])
 		}
-		wantPayload := renderCommandString(mintArgvWithSpecials()) + shellFallbackSuffix
+		wantPayload := shellquote.Join(mintArgvWithSpecials()) + shellFallbackSuffix
 		if mint[2] != wantPayload {
 			t.Errorf("mint wrapped[2] = %q, want %q", mint[2], wantPayload)
 		}

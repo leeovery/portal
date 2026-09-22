@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 func TestScriptRecipeAdapterOpenWindow_RealExec(t *testing.T) {
 	const key = "com.example.MyTerm"
 	command := []string{"/abs/portal", "attach", "proj-abc123"}
-	wantArg := renderCommandString(command)
+	wantArg := shellquote.Join(command)
 
 	t.Run("integration: it execs a real shebang script, maps a clean exit to success, and observes $1", func(t *testing.T) {
 		dir := t.TempDir()

@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resumemode"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -260,8 +261,8 @@ func execResumeChainAndExit(cfg hydrateConfig) {
 		Pane:    cfg.Decision.Pane,
 		PaneKey: state.PaneKeyFromFIFOPath(cfg.FIFO),
 	}
-	chained := shellWords(resumeChainArgv(cfg.Decision.Exe, resumeDrawSubcommand, payload)) + "; " +
-		shellWords(resumeChainArgv(cfg.Decision.Exe, resumeRecoverSubcommand, payload))
+	chained := shellquote.Join(resumeChainArgv(cfg.Decision.Exe, resumeDrawSubcommand, payload)) + "; " +
+		shellquote.Join(resumeChainArgv(cfg.Decision.Exe, resumeRecoverSubcommand, payload))
 	args := []string{"sh", "-c", chained}
 	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", args, true)
 }

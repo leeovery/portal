@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 // err reports a non-exit execution failure (e.g. the binary missing on PATH),
@@ -49,7 +50,7 @@ type argvRecipeAdapter struct {
 }
 
 func (a *argvRecipeAdapter) OpenWindow(command []string) Result {
-	final := substituteCommand(a.template, renderCommandString(command))
+	final := substituteCommand(a.template, shellquote.Join(command))
 	out, code, err := a.runner.Run(final)
 	return mapRecipeResult(out, code, err)
 }
@@ -81,7 +82,7 @@ type scriptRecipeAdapter struct {
 }
 
 func (a *scriptRecipeAdapter) OpenWindow(command []string) Result {
-	final := []string{a.scriptPath, renderCommandString(command)}
+	final := []string{a.scriptPath, shellquote.Join(command)}
 	out, code, err := a.runner.Run(final)
 	return mapRecipeResult(out, code, err)
 }

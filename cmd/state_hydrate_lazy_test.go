@@ -114,8 +114,8 @@ func lazyChainArgs(command, paneKey string) []string {
 		Pane:    lazyPaneID,
 		PaneKey: paneKey,
 	}
-	draw := shellWords(resumeChainArgv(lazyExe, resumeDrawSubcommand, payload))
-	recover := shellWords(resumeChainArgv(lazyExe, resumeRecoverSubcommand, payload))
+	draw := shellquote.Join(resumeChainArgv(lazyExe, resumeDrawSubcommand, payload))
+	recover := shellquote.Join(resumeChainArgv(lazyExe, resumeRecoverSubcommand, payload))
 	return []string{"sh", "-c", draw + "; " + recover}
 }
 
@@ -268,7 +268,7 @@ func TestHydrateLazy_ComposesTheTailWithThePaneFlagsAlone(t *testing.T) {
 	if !found {
 		t.Fatalf("chain %q has no tail", exec.args[2])
 	}
-	want := shellWords([]string{lazyExe, "state", resumeRecoverSubcommand, "--pane", lazyPaneID, "--pane-key", paneKey})
+	want := shellquote.Join([]string{lazyExe, "state", resumeRecoverSubcommand, "--pane", lazyPaneID, "--pane-key", paneKey})
 	if tail != want {
 		t.Errorf("tail = %q, want %q", tail, want)
 	}

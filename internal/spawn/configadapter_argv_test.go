@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 type fakeRecipeRunner struct {
@@ -33,7 +35,7 @@ func TestSubstituteCommand(t *testing.T) {
 			"-e",
 			`tell app "Warp" to create window with command "{command}"`,
 		}
-		commandStr := renderCommandString(spacedCommand())
+		commandStr := shellquote.Join(spacedCommand())
 
 		final := substituteCommand(template, commandStr)
 
@@ -54,7 +56,7 @@ func TestSubstituteCommand(t *testing.T) {
 
 	t.Run("it substitutes a standalone {command} element as the whole command string", func(t *testing.T) {
 		template := []string{"kitty", "@", "launch", "{command}"}
-		commandStr := renderCommandString(spacedCommand())
+		commandStr := shellquote.Join(spacedCommand())
 
 		final := substituteCommand(template, commandStr)
 
@@ -73,7 +75,7 @@ func TestSubstituteCommand(t *testing.T) {
 
 	t.Run("it returns a new slice and does not mutate the template", func(t *testing.T) {
 		template := []string{"kitty", "@", "launch", "{command}"}
-		commandStr := renderCommandString(spacedCommand())
+		commandStr := shellquote.Join(spacedCommand())
 
 		_ = substituteCommand(template, commandStr)
 
@@ -92,7 +94,7 @@ func TestArgvRecipeAdapterOpenWindow(t *testing.T) {
 
 		adapter.OpenWindow(command)
 
-		want := substituteCommand(template, renderCommandString(command))
+		want := substituteCommand(template, shellquote.Join(command))
 		if !slices.Equal(fake.gotArgv, want) {
 			t.Errorf("runner received argv %#v, want the substituted final argv %#v", fake.gotArgv, want)
 		}

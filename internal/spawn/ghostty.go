@@ -3,6 +3,8 @@ package spawn
 import (
 	"fmt"
 	"strings"
+
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 // `new window with configuration {record}` is the only form Ghostty's scripting
@@ -16,17 +18,17 @@ end tell`
 // Ghostty prepends `exec -l` to a window command, so the explicit
 // `bash -lc '<argv>; exec "$SHELL" -il'` wrapper is required — an appended
 // `; exec "$SHELL"` would be unreachable, leaving the window on Ghostty's
-// "Process exited" dead-end. The payload stays unquoted here: renderCommandString
+// "Process exited" dead-end. The payload stays unquoted here: shellquote.Join
 // owns the nested close-escape-reopen quoting.
 func wrapWithShellFallback(command []string) []string {
-	payload := renderCommandString(command) + `; exec "$SHELL" -il`
+	payload := shellquote.Join(command) + `; exec "$SHELL" -il`
 	return []string{"bash", "-lc", payload}
 }
 
 // Escape order is load-bearing: backslash before quote. Escaping the quote first
 // would double the backslash the quote-escape introduced.
 func ghosttyEmbed(command []string) string {
-	embedded := renderCommandString(wrapWithShellFallback(command))
+	embedded := shellquote.Join(wrapWithShellFallback(command))
 	embedded = strings.ReplaceAll(embedded, `\`, `\\`)
 	embedded = strings.ReplaceAll(embedded, `"`, `\"`)
 	return embedded

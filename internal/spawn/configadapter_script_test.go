@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 func writeExecutableScript(t *testing.T, path string) {
@@ -37,7 +38,7 @@ func TestNewScriptRecipeAdapter(t *testing.T) {
 		command := spacedCommand()
 		adapter.OpenWindow(command)
 
-		want := []string{scriptPath, renderCommandString(command)}
+		want := []string{scriptPath, shellquote.Join(command)}
 		if !slices.Equal(fake.gotArgv, want) {
 			t.Errorf("runner received argv %#v, want %#v (argv[0] the ~-expanded script path, argv[1] the composed command)", fake.gotArgv, want)
 		}
@@ -63,7 +64,7 @@ func TestNewScriptRecipeAdapter(t *testing.T) {
 		if fake.gotArgv[0] != scriptPath {
 			t.Errorf("argv[0] = %q, want the resolved script path %q", fake.gotArgv[0], scriptPath)
 		}
-		want := renderCommandString(command)
+		want := shellquote.Join(command)
 		if fake.gotArgv[1] != want {
 			t.Errorf("argv[1] = %q, want the composed command as a single positional arg %q", fake.gotArgv[1], want)
 		}

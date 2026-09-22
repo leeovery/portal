@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/leeovery/portal/internal/shellquote"
 )
 
 // RecipeKind's zero value is an explicit invalid sentinel, never a valid form.
@@ -62,15 +60,4 @@ func validRecipeForEntry(key string, e TerminalEntry) (Recipe, RecipeKind, bool)
 		return Recipe{}, 0, false
 	}
 	return *e.Commands.Open, kind, true
-}
-
-// renderCommandString renders command as one shell command line: every element
-// quoted so it survives word-splitting, joined by the separator a shell reads as
-// a word boundary.
-func renderCommandString(command []string) string {
-	quoted := make([]string, len(command))
-	for i, el := range command {
-		quoted[i] = shellquote.Single(el)
-	}
-	return strings.Join(quoted, " ")
 }

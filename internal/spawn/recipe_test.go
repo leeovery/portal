@@ -161,36 +161,3 @@ func TestValidRecipeForEntry(t *testing.T) {
 		}
 	})
 }
-
-func TestRenderCommandString(t *testing.T) {
-	t.Run("it POSIX-single-quotes each element and space-joins them", func(t *testing.T) {
-		command := []string{"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE", "PATH=/b", "/abs/portal", "open", "--session", "proj-x", "--ack", "b1:t1"}
-
-		got := renderCommandString(command)
-
-		want := "'/usr/bin/env' '-u' 'TMUX' '-u' 'TMUX_PANE' 'PATH=/b' '/abs/portal' 'open' '--session' 'proj-x' '--ack' 'b1:t1'"
-		if got != want {
-			t.Errorf("renderCommandString = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("it keeps an element containing a space as one quoted word so a shell re-split reproduces the argv", func(t *testing.T) {
-		// A session name can carry a space; a naive space-join would let a
-		// downstream shell re-split it and shred the attach target.
-		got := renderCommandString([]string{"/abs/portal", "open", "My Project-abc123"})
-
-		want := "'/abs/portal' 'open' 'My Project-abc123'"
-		if got != want {
-			t.Errorf("renderCommandString = %q, want %q (spaced element stays one quoted word)", got, want)
-		}
-	})
-
-	t.Run("it escapes an embedded single quote with the close-escape-reopen sequence", func(t *testing.T) {
-		got := renderCommandString([]string{"it's"})
-
-		want := `'it'\''s'`
-		if got != want {
-			t.Errorf("renderCommandString = %q, want %q", got, want)
-		}
-	})
-}
