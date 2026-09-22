@@ -162,7 +162,13 @@
             "lazy-resume-on-attach-3-7": "tick-174af4",
             "lazy-resume-on-attach-3-8": "tick-7c0393",
             "lazy-resume-on-attach-3-9": "tick-8af98c",
-            "lazy-resume-on-attach-3-10": "tick-84a398"
+            "lazy-resume-on-attach-3-10": "tick-84a398",
+            "lazy-resume-on-attach-4-8": "tick-aac423",
+            "lazy-resume-on-attach-4-9": "tick-501ae4",
+            "lazy-resume-on-attach-4-10": "tick-cf9613",
+            "lazy-resume-on-attach-4-11": "tick-15fa10",
+            "lazy-resume-on-attach-4-12": "tick-79884c",
+            "lazy-resume-on-attach-4-13": "tick-d425dd"
           },
           "storage_paths": [
             ".tick/"
@@ -215,7 +221,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
-          "consolidation_gate_mode": "gated",
+          "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 0,
           "linters": [
@@ -301,158 +307,28 @@
                 "3": "approved",
                 "4": "approved"
               }
+            },
+            "p4": {
+              "tasks": {
+                "1": "approved",
+                "2": "approved",
+                "3": "approved",
+                "4": "approved",
+                "5": "approved",
+                "6": "approved"
+              }
             }
           },
           "consolidated_phases": [
             1,
             2,
-            3
+            3,
+            4
           ],
           "completed_phases": [
             1,
             2,
             3
-          ],
-          "bank": [
-            {
-              "task": "lazy-resume-on-attach-4-1",
-              "source": "reviewer",
-              "summary": "Derive cmd/state_test.go's hand-written hidden-state-child name lists from stateChildCommands rather than restating them.",
-              "failure": "A new hidden state subcommand is added to the compile-checked stateChildCommands and silently escapes the two enumerations that have no catch-all, so the completions-leak guard and the argv-resolution guard stop covering the newest verbs. It ships green and is noticed either by a user tab-completing an internal verb or by a restored pane whose chain exec fails to resolve — which closes the pane. This task already hit it (resume-draw missing from both), and tasks 4.2 and 4.4 add two more chain subcommands that will hit it again.",
-              "detail": "names at cmd/state_test.go:261 (TestStateChildrenRemainInvocableByArgv) and hidden at cmd/state_test.go:287 (TestStateHiddenSubcommandsAbsentFromShellCompletions) are complete-set lists with no catch-all; hidden at :78 is the same list but backed by an unexpected-command catch-all, and :103 is deliberately partial. Replace the first two with a loop over stateChildCommands reading c.Name().",
-              "files": [
-                "cmd/state_test.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-1",
-              "source": "reviewer",
-              "summary": "Fold the resume-chain commands' flag reset into resetRootCmd rather than leaving a second, locally-called reset helper.",
-              "failure": "A cmd test that drives a resume-chain subcommand through resetRootCmd() + Execute inherits flag values left Changed on the shared command instance by an earlier Execute, so its assertion passes while checking nothing. Demonstrated, not hypothetical — the executor hit it in this task (the --command refusal subtest passed vacuously when run after its sibling) and patched it with a helper local to one test file. Tasks 4.2 and 4.4 register resume-wait and resume-recover with the same flag set and the same shared-instance hazard, and whoever writes them has no signal the reset exists or must be called. It ships green; the defect it hides surfaces as a resume-chain command parsing a stale payload in a restored pane.",
-              "detail": "resetRootCmd (cmd/root_test.go:20-95) is the canonical per-command flag reset and already carries stateHydrateCmd's three flags at :90-95. resetResumeDrawFlags (cmd/state_resume_draw_test.go:348) is a second home for that same responsibility, reachable only from its own file. A VisitAll-over-stateChildCommands loop inside resetRootCmd would cover the hydrate flags, resume-draw, and the two chain commands still to land, in one edit. Pairs naturally with the already-banked stateChildCommands derivation for cmd/state_test.go.",
-              "files": [
-                "cmd/root_test.go",
-                "cmd/state_resume_draw_test.go",
-                "cmd/state_test.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-2",
-              "source": "reviewer",
-              "summary": "The resume chain's hand-off block (resolve exe → compose argv → exec INFO → ExecSelf) is now authored twice and Phase 4/5 will add three more copies.",
-              "failure": "The \"exec INFO is the statement immediately before the exec\" rule is enforced by nothing — every test fakes ExecSelf, so a later site that emits the marker after the exec, or omits it, fails no test and produces no symptom until an operator reconstructs why a pane fell through to a shell and finds the chain's last image unrecorded in portal.log. The same consolidation fixes the doubled prefix the empty-path branch produces today (\"resolve portal executable: resolve portal executable: empty path\"), since both call sites wrap an error that already carries that prefix.",
-              "detail": "cmd/state_resume_draw.go:56-68 and cmd/state_resume_wait.go:96-109 are the two copies; the natural home for one resumeHandOff(logger, execSelf, subcommand, payload) is cmd/state_resume_chain.go, beside resumeChainArgv/resumeChainExe, where the empty-path error string (state_resume_chain.go:81) can lose its duplicate prefix at the same time. Worth taking at the phase boundary, once 4.3, 4.4 and Phase 5 have added their sites and the shape has stopped moving.",
-              "files": [
-                "cmd/state_resume_draw.go",
-                "cmd/state_resume_wait.go",
-                "cmd/state_resume_chain.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-3",
-              "source": "executor",
-              "summary": "The store-lookup degradation rule is now written twice, once per resume path.",
-              "failure": "The eager path (execShellOrHookAndExit) and the lazy path (resumeCommandAtAnswer) each decide independently that a miss, an empty command or a read error means a bare shell, and each emits its own hook lookup DEBUG / lookup on-resume hook failed WARN. A later change to one — a new result value, a mode check, a different fallback — compiles and leaves both suites green, so a pane resumed from the panel behaves differently from the same pane resumed at hydrate, and the user sees it only as \"my hook ran on reboot but not when I pressed Enter\".",
-              "detail": "cmd/state_hydrate.go:174-198 (execShellOrHookAndExit) and cmd/state_resume_wait.go:122-139 (resumeCommandAtAnswer) encode the same three-branch rule over two different config types; a shared \"logger + hook key\" shape would give it one home. Phase 5's discard path reads the same store again and may add a third site.",
-              "files": [
-                "cmd/state_hydrate.go",
-                "cmd/state_resume_wait.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-3",
-              "source": "reviewer",
-              "summary": "The line that lifts the freeze has no end-to-end verification, and cannot get one until the arming side exists.",
-              "failure": "state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane)) is exercised by nothing. internal/state pins the marker function against a mock writer and internal/tmux pins the option write, but the composition is untested, and its two silent mis-wirings both compile: cfg.PaneKey in place of cfg.Pane (plain strings on the same payload, registered as adjacent flags on the same command), or tmux.PaneTarget in place of tmux.PaneIDTarget (both return tmux.Target). Either yields a target no pane answers to — Enter then loops the panel forever with a tmux error on its report row — or, worse, a target that does answer, clearing another pane's marker while this pane is handed over still frozen. That last state is precisely what §7.2 exists to prevent: the pane's saved scrollback frozen for the rest of its life, every reboot restoring the transcript it held when it paused, with no sweep that reaches a pane option and no waiter left to report it. The user notices weeks later, as a session that restores stale content.",
-              "detail": "cmd/state_resume_wait.go:223-225 (the ClearMarker closure). No unit-lane route exists because the closure hardcodes tmux.DefaultClient(); no integration route exists because nothing in production sets the marker yet (state.SetResumePendingMarker has no production caller). Once arming lands, one integration test over a tmuxtest socket closes it for both answer paths at once — mark via Socket.MarkResumePending, answer the wait, assert Socket.ReadResumePending reads empty — since Phase 5's discard clears the same marker through the same seam.",
-              "files": [
-                "cmd/state_resume_wait.go",
-                "internal/tmuxtest/stamp.go",
-                "internal/state/markers.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-3",
-              "source": "reviewer",
-              "summary": "Sharpening of the store-degradation entry: the two sites have ALREADY diverged on a Found result carrying an empty command.",
-              "failure": "execShellOrHookAndExit treats Found with an empty command as a hit and would exec sh -c \"; exec $SHELL\", while resumeCommandAtAnswer treats it as a miss. The divergence is currently harmless only because LookupOnResume never produces that state (internal/hooks/lookup.go:36-39 degrades a stored value carrying no command to the zero result) — which is evidence for consolidating the rule rather than against it. A change to that degradation makes the two paths disagree immediately.",
-              "detail": "Attaches to the executor-banked entry naming cmd/state_hydrate.go:174-198 and cmd/state_resume_wait.go:122-139. Consequence to note when folding: the \"empty command\" acceptance criterion of task 4-3 is satisfiable only through a seam-level fake, since that branch is unreachable via the production lookup.",
-              "files": [
-                "cmd/state_hydrate.go",
-                "cmd/state_resume_wait.go",
-                "internal/hooks/lookup.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-4",
-              "source": "executor",
-              "summary": "ResolveHookKey and the new ReadPaneOption each carry their own copy of the measured probe-then-read discrimination, in the same package.",
-              "failure": "The two copies encode one tmux fact (a format read answers a gone pane with exit 0 and an empty string, so the option-less show-options probe is what separates \"gone\" from \"unset\"). If someone simplifies either copy to a lone display-message — it looks redundant and every test that only uses live panes stays green — a gone pane starts reading as a live pane carrying no option. On ResolveHookKey's path that turns portal hook set against a vanished pane from a clean failure into a mint-stamp-write against nothing, which is the junk-key class of bug the probe was added to close; on ReadPaneOption's path a gone pane reads as \"answered\" and the chain tail silently declines to recover it. Noticed only as a stray hooks.json entry or a pane that closed, long after the edit.",
-              "detail": "ResolveHookKey (internal/tmux/tmux.go:250-263) could be expressed as ReadPaneOption(paneID, state.PortalPaneIDOption) — identical two-read sequence, differing only in the error wording and in passing the format positionally rather than under -F (behaviourally the same to tmux). Consolidating leaves one declaration of the rule and one place the probe can be wrongly removed from.",
-              "files": [
-                "internal/tmux/tmux.go",
-                "internal/tmux/resolve_hookkey_test.go",
-                "internal/tmux/pane_option_test.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-5",
-              "source": "reviewer",
-              "summary": "The argv→shell-command-string renderer is now declared twice, in two packages, with identical bodies.",
-              "failure": "internal/shellquote is the tree's single declaration of the POSIX quoting rule because naive composition corrupts a user-authored command; the joining half of that rule is now declared separately in cmd.shellWords and internal/spawn.renderCommandString, with no exported route to it. The next site that has to render an argv into a shell word list — phase 5's redraw/discard chain is the near-term candidate — has no obvious helper to reach for and hand-rolls a third copy, or concatenates. Noticed by a user whose resume command holds a space, a quote or a $ reaching the panel's draw as several arguments, or truncated.",
-              "detail": "cmd/state_resume_chain.go:75-83 and internal/spawn/recipe.go:70-76 are byte-identical modulo variable names (make([]string, len(argv)) → shellquote.Single per element → strings.Join(…, \" \")). The consolidation is an exported joiner on internal/shellquote (which both already import) with both call sites routed through it; it reaches internal/spawn, so it is outside task 4-5's scope.",
-              "files": [
-                "cmd/state_resume_chain.go",
-                "internal/spawn/recipe.go",
-                "internal/shellquote/shellquote.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-5",
-              "source": "orchestrator",
-              "summary": "Two hydrate test names now state the inverse of the ordering this phase established; they are the last statement of the superseded ordering left in the repo.",
-              "failure": "TestHydrate_SignalArrived_LookupHappensAfterSleepAndMarkerUnset and TestHydrate_FileMissing_LookupHappensAfterMarkerUnset name an ordering that no longer holds — the lookup now happens at the top of runHydrate, before both clears. The executor corrected the comments inside both bodies to say \"hand-off\", so each test now carries a name and a comment that contradict each other. A later reader trusting the name re-derives the superseded ordering, and the bodies do still pin a real property, so nothing goes red to correct them.",
-              "detail": "cmd/state_hydrate_test.go:1667 and :1727. The whole remedy is renaming both to name the hand-off rather than the lookup. Raised by the 4-5 reviewer as an observation rather than a finding, since finding-floor.md excludes test-file naming; recorded here so the boundary pass can confirm or drop it against the final state.",
-              "files": [
-                "cmd/state_hydrate_test.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-7",
-              "source": "executor",
-              "summary": "The measured resting cost of a waiting pane is ~10 MB, not the ~2 MB the specification estimates — a spec claim the landed work now has a real measurement for.",
-              "failure": "Spec §4.2 carries ~2 MB as an estimate for the waiter's resident cost, and the memory case for the whole feature rests on it. The integration suite now measures the real resting tree at 9.9-10.3 MB combined (~2.1 MB parked sh -c + ~8.0 MB portal state resume-wait), stable across five runs. At 41 waiting panes that is ~410 MB rather than ~80 MB. Not a defect — the draw hands off cleanly, exactly one shell and one waiter, no resume-draw survives, and the asserted 22 MB ceiling holds — but the figure the design argument quotes is 4x off, and a later reader weighing the feature's cost against the eager path would be reasoning from the estimate.",
-              "detail": "Measured by internal/restore/lazy_resume_panel_integration_test.go, which reports the combined rss via t.Logf on every run whether it passes or fails. The spec flags ~2 MB as an estimate rather than a measurement, so this is a claim the landed work can now replace rather than a contradiction. The boundary pass reports spec claims the work reveals as defective; this is one.",
-              "files": [
-                ".workflows/lazy-resume-on-attach/specification/lazy-resume-on-attach/specification.md",
-                "internal/restore/lazy_resume_panel_integration_test.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-7",
-              "source": "reviewer",
-              "summary": "Route TestNoParkedShWrapperPostRestore's machine-wide pgrep onto the pane-scoped process read this task introduced.",
-              "failure": "internal/restore/exit_closes_pane_integration_test.go:76 enumerates every process on the machine (pgrep -fl \"sh -c.*state hydrate.*<paneKey>\"), which is the read CLAUDE.md's ABSOLUTE INVARIANT forbids a test from taking — today it is saved only by a pane key derived from the test's own name, so any loosening of that pattern silently starts reading the developer's live restored panes, noticed as a spurious failure (or a false pass) that nothing in the test controls. The same file also sleeps exitClosesPaneBudget unconditionally (line 71) where a bounded poll on the tree would do.",
-              "detail": "internal/restore/exit_closes_pane_integration_test.go:61-97 vs internal/restore/lazy_resume_panel_integration_test.go:611-638. A scoped reading (readProcessTree/collectDescendants/childPIDs, rooted at the fixture's own #{pane_pid}) now exists in the same package, so the consolidation is a re-point rather than new machinery. Reaches another task's output (an existing suite), hence banked rather than raised as an issue.",
-              "files": [
-                "internal/restore/exit_closes_pane_integration_test.go",
-                "internal/restore/lazy_resume_panel_integration_test.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-4-7",
-              "source": "reviewer",
-              "summary": "The frozen-pane capture cycle's ordering invariant is restated in three places with no shared implementation.",
-              "failure": "A later change to the daemon's cycle — a new step, a reordering, or a change to what the dump skips — lands in captureAndCommit alone. commit-now and the integration fixture go on running the old sequence; the fixture keeps passing while asserting against a route production no longer takes, so the very loss it exists to catch (a frozen pane's transcript reclaimed or overwritten) ships silently. The user notices it as an empty restored pane two reboots after a pane was left waiting, with no copy of the transcript anywhere. Not hypothetical: attempt 1 of task 4-7 shipped a copy missing two of the four steps and every assertion still passed.",
-              "detail": "cmd/state_daemon.go:243-310 holds the full cycle (CaptureStructure → RefilePendingScrollback → dump skipping skipSet∪pending → Commit); cmd/state_commit_now.go:120-132 holds the structural-only variant of the same ordering rule; internal/restore/lazy_resume_panel_integration_test.go:375-422 holds a third hand-written copy. The rule that cannot be violated silently — the pending set must drive the refile before anything commits — is encoded three times and checked nowhere. A shared ordered helper (or at minimum a state-level composite of capture+refile that a caller cannot commit around) would make the omission unrepresentable, the way restoretest's constructors do for the Exe field.",
-              "files": [
-                "cmd/state_daemon.go",
-                "cmd/state_commit_now.go",
-                "internal/state/scrollback.go",
-                "internal/state/commit.go",
-                "internal/restore/lazy_resume_panel_integration_test.go"
-              ]
-            }
           ]
         }
       }
