@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/commandertest"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -55,7 +56,7 @@ func TestResolveHookKey_ProbeOrdering(t *testing.T) {
 
 		wantCalls := [][]string{
 			{"show-options", "-p", "-t", "%3"},
-			{"display-message", "-p", "-t", "%3", tmux.HookKeyFormat},
+			{"display-message", "-p", "-t", "%3", "-F", "#{" + state.PortalPaneIDOption + "}"},
 		}
 		if len(mock.Calls()) != len(wantCalls) {
 			t.Fatalf("tmux calls = %v, want %v", mock.Calls(), wantCalls)

@@ -139,7 +139,7 @@ func TestTargetTakingMethodsComposeUnchangedArgv(t *testing.T) {
 
 		want := [][]string{
 			{"show-options", "-p", "-t", "%7"},
-			{"display-message", "-p", "-t", "%7", routeTargetHookKey},
+			{"display-message", "-p", "-t", "%7", "-F", routeTargetHookKey},
 		}
 		if got := mock.Calls(); !reflect.DeepEqual(got, want) {
 			t.Errorf("argv = %q, want %q", got, want)
