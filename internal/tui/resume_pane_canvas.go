@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
 )
 
@@ -44,28 +43,4 @@ func clampStackToPane(rows []string, w, h int) []string {
 	}
 	kept := clamped[: h-1 : h-1]
 	return append(kept, clamped[len(clamped)-1])
-}
-
-// The pane panel's fill: edge to edge, with none of the picker's gutter inset
-// and no theme-panel composite.
-func fillPaneCanvas(view string, w, h int, th theme.Theme, colourless bool) string {
-	if colourless {
-		return fillColourless(view, w, h)
-	}
-	canvas := lipgloss.NewStyle().Background(th.Canvas.Color())
-	canvasBg := canvasBgParams(th.Canvas.Color())
-	parser := ansi.NewParser()
-
-	out := make([]string, 0, h)
-	for line := range strings.SplitSeq(view, "\n") {
-		if len(out) == h {
-			break
-		}
-		out = append(out, padLineToCanvasWidth(backfillCanvasBackground(line, canvasBg, parser), w, canvas))
-	}
-	blank := canvas.Render(strings.Repeat(" ", w))
-	for len(out) < h {
-		out = append(out, blank)
-	}
-	return strings.Join(out, "\n")
 }

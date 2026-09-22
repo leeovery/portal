@@ -2989,40 +2989,19 @@ func (m Model) contentHeight() int {
 }
 
 // The last layer over the composed page, bar the theme slide-over, which is
-// composited on the way out so the fill never paints over a panel cell. Each
-// line is padded individually rather than via lipgloss.Place, which pads only
-// beyond the single widest line. Content taller than the region is clamped.
+// composited on the way out so the fill never paints over a panel cell.
 func (m Model) fillCanvas(view string) string {
 	w, h := m.termDims()
 	contentW := m.contentWidth()
 	contentH := m.contentHeight()
-	// NO_COLOR: keep the layout, but every padding/gutter cell is a plain space
-	// with no background SGR.
+	filled := fillPaneCanvas(view, contentW, contentH, m.themeState.active, m.colourless)
+	content := m.overlayThemePanelOnContent(filled, contentW, contentH)
+	// NO_COLOR: keep the layout, but every gutter cell is a plain space with no
+	// background SGR.
 	if m.colourless {
-		content := m.overlayThemePanelOnContent(fillColourless(view, contentW, contentH), contentW, contentH)
 		return insetColourless(content, w, h, contentW, contentH)
 	}
-	canvas := lipgloss.NewStyle().Background(m.themeState.active.Canvas.Color())
-	canvasBg := canvasBgParams(m.themeState.active.Canvas.Color())
-	parser := ansi.NewParser()
-
-	lines := strings.Split(view, "\n")
-	out := make([]string, 0, contentH)
-	for _, line := range lines {
-		if len(out) == contentH {
-			break
-		}
-		// Backfill mid-line gaps before padding, so every interior cell carries
-		// the canvas bg without depending on OSC 11.
-		line = backfillCanvasBackground(line, canvasBg, parser)
-		out = append(out, padLineToCanvasWidth(line, contentW, canvas))
-	}
-	blank := canvas.Render(strings.Repeat(" ", contentW))
-	for len(out) < contentH {
-		out = append(out, blank)
-	}
-	content := m.overlayThemePanelOnContent(strings.Join(out, "\n"), contentW, contentH)
-	return insetCanvasCanvas(strings.Split(content, "\n"), w, h, contentW, canvas)
+	return insetCanvasCanvas(strings.Split(content, "\n"), w, h, contentW, canvasStyle(m.themeState.active))
 }
 
 // The position is load-bearing: after the fill, because the panel is opaque and
@@ -3089,7 +3068,7 @@ func insetCanvasCanvas(contentRows []string, w, h, contentW int, canvas lipgloss
 	return strings.Join(out, "\n")
 }
 
-// Must keep fillCanvas's line geometry; only the SGR-free padding differs.
+// Must keep fillPaneCanvas's line geometry; only the SGR-free padding differs.
 func fillColourless(view string, w, h int) string {
 	blank := strings.Repeat(" ", w)
 	lines := strings.Split(view, "\n")

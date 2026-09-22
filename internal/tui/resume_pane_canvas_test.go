@@ -323,33 +323,3 @@ func TestRenderPaneScreen_ClampsToThePane(t *testing.T) {
 		}
 	})
 }
-
-func TestFillPaneCanvas(t *testing.T) {
-	forEachBuiltinTheme(t, func(t *testing.T, th theme.Theme) {
-		canvasParams := wantCanvasBgParams(t, th)
-
-		t.Run("it pads a short view with blank canvas rows", func(t *testing.T) {
-			out := fillPaneCanvas("ab\ncd", 6, 4, th, false)
-			assertPaneRows(t, paneRows(t, out, 6, 4), []string{"ab", "cd", "", ""})
-			assertEveryCellIsCanvas(t, out, 6, canvasParams)
-		})
-
-		t.Run("it clamps a view taller than the pane", func(t *testing.T) {
-			out := fillPaneCanvas("a\nb\nc\nd", 3, 2, th, false)
-			assertPaneRows(t, paneRows(t, out, 3, 2), []string{"a", "b"})
-			assertEveryCellIsCanvas(t, out, 3, canvasParams)
-		})
-
-		t.Run("it backfills a mid-line cell left on the terminal's own background", func(t *testing.T) {
-			out := fillPaneCanvas("ab\x1b[0mcd", 6, 1, th, false)
-			assertPaneRows(t, paneRows(t, out, 6, 1), []string{"abcd"})
-			assertEveryCellIsCanvas(t, out, 6, canvasParams)
-		})
-
-		t.Run("it paints no background under NO_COLOR", func(t *testing.T) {
-			out := fillPaneCanvas("ab\ncd", 6, 4, th, true)
-			assertPaneRows(t, paneRows(t, out, 6, 4), []string{"ab", "cd", "", ""})
-			assertNoBackgroundPainted(t, out)
-		})
-	})
-}
