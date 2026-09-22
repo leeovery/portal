@@ -57,11 +57,24 @@ func newPaneAppearanceProbe() paneAppearanceProbe {
 // both without writing a byte to the terminal; a pair is raced against the
 // picker's own detect timeout and resolves dark for every way the question can
 // go unanswered.
-func ResolvePaneTheme(n theme.Nomination, colourless bool) theme.Theme {
-	return resolvePaneTheme(n, colourless, newPaneAppearanceProbe())
+//
+// dropInput runs once the appearance question has resolved and never before it:
+// the terminal's own answer can arrive after the probe's deadline, and a drop
+// taken first cannot clear it. A nil dropInput is a no-op. The palette is
+// returned whether or not the drop succeeded, alongside the drop's own error.
+func ResolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() error) (theme.Theme, error) {
+	return resolvePaneTheme(n, colourless, dropInput, newPaneAppearanceProbe())
 }
 
-func resolvePaneTheme(n theme.Nomination, colourless bool, p paneAppearanceProbe) theme.Theme {
+func resolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() error, p paneAppearanceProbe) (theme.Theme, error) {
+	resolved := selectPaneTheme(n, colourless, p)
+	if dropInput == nil {
+		return resolved, nil
+	}
+	return resolved, dropInput()
+}
+
+func selectPaneTheme(n theme.Nomination, colourless bool, p paneAppearanceProbe) theme.Theme {
 	if n.IsConstant() {
 		return n.Constant()
 	}

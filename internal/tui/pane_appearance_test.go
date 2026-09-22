@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,8 +31,15 @@ const testProbeTimeout = 60 * time.Millisecond
 
 var errSeam = errors.New("seam failure")
 
+const (
+	eventWriteQuery  = "write query"
+	eventCloseReader = "close reader"
+	eventDrop        = "drop input"
+)
+
 type fakePaneReader struct {
 	f           *os.File
+	record      func(string)
 	readErr     error
 	deadlineErr error
 	reads       int
@@ -57,7 +65,20 @@ func (r *fakePaneReader) SetReadDeadline(t time.Time) error {
 
 func (r *fakePaneReader) Close() error {
 	r.closes++
+	r.record(eventCloseReader)
 	return r.f.Close()
+}
+
+// recordingWriter puts the query write into the same sequence as the reader's
+// close and the drop, so their order is one assertion rather than three.
+type recordingWriter struct {
+	buf    *bytes.Buffer
+	record func(string)
+}
+
+func (w recordingWriter) Write(p []byte) (int, error) {
+	w.record(eventWriteQuery)
+	return w.buf.Write(p)
 }
 
 type probeHarness struct {
@@ -69,6 +90,8 @@ type probeHarness struct {
 	rawErr   error
 	opens    int
 	restores int
+	drops    int
+	events   []string
 }
 
 func newProbeHarness(t *testing.T) *probeHarness {
@@ -81,17 +104,31 @@ func newProbeHarness(t *testing.T) *probeHarness {
 		_ = read.Close()
 		_ = write.Close()
 	})
-	return &probeHarness{
+	h := &probeHarness{
 		out:      &bytes.Buffer{},
 		reader:   &fakePaneReader{f: read},
 		replies:  write,
 		terminal: true,
 	}
+	h.reader.record = h.record
+	return h
+}
+
+func (h *probeHarness) record(event string) {
+	h.events = append(h.events, event)
+}
+
+func (h *probeHarness) dropInput(err error) func() error {
+	return func() error {
+		h.drops++
+		h.record(eventDrop)
+		return err
+	}
 }
 
 func (h *probeHarness) probe() paneAppearanceProbe {
 	return paneAppearanceProbe{
-		out: h.out,
+		out: recordingWriter{buf: h.out, record: h.record},
 		openReader: func() (paneReader, error) {
 			h.opens++
 			if h.openErr != nil {
@@ -131,6 +168,13 @@ func (h *probeHarness) assertWroteNothing(t *testing.T) {
 	}
 }
 
+func assertNoDropError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("returned error %v, want nil — no drop was supplied to fail", err)
+	}
+}
+
 func adaptivePair(t *testing.T) (theme.Nomination, theme.Theme, theme.Theme) {
 	t.Helper()
 	light, dark := themetest.DefaultLight(t), themetest.DefaultDark(t)
@@ -142,11 +186,12 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		constant := themetest.DefaultLight(t)
 
-		got := resolvePaneTheme(theme.ConstantNomination(constant), false, h.probe())
+		got, err := resolvePaneTheme(theme.ConstantNomination(constant), false, nil, h.probe())
 
 		if got != constant {
 			t.Errorf("resolved %q, want the constant nomination's palette %q", got.Canvas.Value, constant.Canvas.Value)
 		}
+		assertNoDropError(t, err)
 		h.assertWroteNothing(t)
 		if h.opens != 0 {
 			t.Errorf("opened the terminal %d times for a constant nomination, want 0 — the gate is never consulted", h.opens)
@@ -156,11 +201,12 @@ func TestResolvePaneTheme(t *testing.T) {
 	t.Run("it returns the zero theme for a zero nomination", func(t *testing.T) {
 		h := newProbeHarness(t)
 
-		got := resolvePaneTheme(theme.Nomination{}, false, h.probe())
+		got, err := resolvePaneTheme(theme.Nomination{}, false, nil, h.probe())
 
 		if got != (theme.Theme{}) {
 			t.Errorf("resolved a theme with canvas %q for a zero nomination, want the zero theme", got.Canvas.Value)
 		}
+		assertNoDropError(t, err)
 		h.assertWroteNothing(t)
 		if h.opens != 0 {
 			t.Errorf("opened the terminal %d times for a zero nomination, want 0", h.opens)
@@ -184,11 +230,12 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, lightReply)
 
-				got := resolvePaneTheme(tc.n, true, h.probe())
+				got, err := resolvePaneTheme(tc.n, true, nil, h.probe())
 
 				if got != tc.want {
 					t.Errorf("resolved canvas %q under NO_COLOR, want %q", got.Canvas.Value, tc.want.Canvas.Value)
 				}
+				assertNoDropError(t, err)
 				h.assertWroteNothing(t)
 				if h.opens != 0 {
 					t.Errorf("opened the terminal %d times under NO_COLOR, want 0 — no detection runs at all", h.opens)
@@ -215,12 +262,129 @@ func TestResolvePaneTheme(t *testing.T) {
 					h.reply(t, tc.reply)
 				}
 
-				got := resolvePaneTheme(pair, false, h.probe())
+				got, err := resolvePaneTheme(pair, false, nil, h.probe())
 
 				if got != tc.want {
 					t.Errorf("resolved canvas %q, want %q", got.Canvas.Value, tc.want.Canvas.Value)
 				}
+				assertNoDropError(t, err)
 			})
+		}
+	})
+
+	t.Run("it runs the drop after the appearance query resolves", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		probed := []string{eventWriteQuery, eventCloseReader, eventDrop}
+		cases := []struct {
+			name    string
+			arrange func(h *probeHarness)
+			want    []string
+		}{
+			{"a reply before the deadline", func(h *probeHarness) { h.reply(t, darkReply) }, probed},
+			{"a reply that never comes", func(*probeHarness) {}, probed},
+			{"a terminal that cannot be opened", func(h *probeHarness) { h.openErr = errSeam }, []string{eventDrop}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				tc.arrange(h)
+
+				_, _ = resolvePaneTheme(pair, false, h.dropInput(nil), h.probe())
+
+				if !slices.Equal(h.events, tc.want) {
+					t.Errorf("ran %v with %s, want %v — a drop taken before the query resolves cannot clear the query's own reply", h.events, tc.name, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("it runs the drop exactly once for every nomination", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		cases := []struct {
+			name       string
+			n          theme.Nomination
+			colourless bool
+			detects    bool
+		}{
+			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, false},
+			{"zero", theme.Nomination{}, false, false},
+			{"adaptive pair", pair, false, true},
+			{"colourless", pair, true, false},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.reply(t, darkReply)
+
+				_, _ = resolvePaneTheme(tc.n, tc.colourless, h.dropInput(nil), h.probe())
+
+				if h.drops != 1 {
+					t.Errorf("ran the drop %d times for a %s resolution, want exactly 1 — every pane draw owes one drop", h.drops, tc.name)
+				}
+				if tc.detects {
+					return
+				}
+				h.assertWroteNothing(t)
+				if h.opens != 0 {
+					t.Errorf("opened the terminal %d times for a %s resolution, want 0 — the drop does not drag the gate in with it", h.opens, tc.name)
+				}
+			})
+		}
+	})
+
+	t.Run("it resolves the same palette with no drop supplied", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		cases := []struct {
+			name       string
+			n          theme.Nomination
+			colourless bool
+		}{
+			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false},
+			{"zero", theme.Nomination{}, false},
+			{"adaptive pair", pair, false},
+			{"colourless", pair, true},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				bare, dropping := newProbeHarness(t), newProbeHarness(t)
+				bare.reply(t, lightReply)
+				dropping.reply(t, lightReply)
+
+				got, err := resolvePaneTheme(tc.n, tc.colourless, nil, bare.probe())
+				want, _ := resolvePaneTheme(tc.n, tc.colourless, dropping.dropInput(nil), dropping.probe())
+
+				if got != want {
+					t.Errorf("resolved canvas %q with no drop and %q with one, want a draw that owes no drop to paint what it paints today", got.Canvas.Value, want.Canvas.Value)
+				}
+				assertNoDropError(t, err)
+			})
+		}
+	})
+
+	t.Run("it returns the resolved palette when the drop fails", func(t *testing.T) {
+		pair, light, _ := adaptivePair(t)
+		h := newProbeHarness(t)
+		h.reply(t, lightReply)
+
+		got, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+
+		if got != light {
+			t.Errorf("resolved canvas %q after a failed drop, want the probe's own answer %q — the caller still has a fallback screen to paint", got.Canvas.Value, light.Canvas.Value)
+		}
+		if err == nil {
+			t.Error("returned a nil error after a failed drop, want the failure reported so the caller can say why")
+		}
+	})
+
+	t.Run("it returns the drop's own error", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		h := newProbeHarness(t)
+		h.reply(t, darkReply)
+
+		_, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+
+		if !errors.Is(err, errSeam) {
+			t.Errorf("returned %v, want the drop's own error %v unchanged — nothing here wraps it, retries it or swallows it", err, errSeam)
 		}
 	})
 }

@@ -16,6 +16,7 @@ const (
 	detectTimeoutConst = "appearanceDetectTimeout"
 	terminalPathConst  = "paneTTYPath"
 	terminalOpenerName = "openTTYPath"
+	probeBuilderName   = "newPaneAppearanceProbe"
 )
 
 var durationUnits = []string{"Nanosecond", "Microsecond", "Millisecond", "Second", "Minute", "Hour"}
@@ -48,6 +49,28 @@ func TestBackgroundSet_ConfinedToRestore(t *testing.T) {
 	t.Run("it finds the call site it polices", func(t *testing.T) {
 		if !slices.Contains(callers, backgroundSetOwner) {
 			t.Errorf("no non-test file calls ansi.%s; the guard above would pass over a package it has stopped reading", backgroundSetCall)
+		}
+	})
+}
+
+// The drop's ordering against the appearance query is held by the one function
+// that builds a probe; a second builder call would resolve a pane's palette with
+// the drop somewhere else, leaving the terminal's own reply in the pane's input
+// queue for the discard confirmation to read as a keypress.
+func TestPaneAppearance_ReachesTheProbeFromOnePlace(t *testing.T) {
+	var callers []string
+	for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
+		ast.Inspect(source.File, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok && sourceguardtest.CalleeName(call) == probeBuilderName {
+				callers = append(callers, source.Position(call.Pos()).String())
+			}
+			return true
+		})
+	}
+
+	t.Run("it reaches the probe from one place alone", func(t *testing.T) {
+		if len(callers) != 1 {
+			t.Errorf("%s is called from %d places (%v), want exactly 1 — every pane draw must resolve its palette through the seam that runs the input drop after the query", probeBuilderName, len(callers), callers)
 		}
 	})
 }
