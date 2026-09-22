@@ -194,8 +194,7 @@ func resolveShell() string {
 // the same way and pays for the reads once.
 func resolveResumeDecision(cfg hydrateConfig) *resumeDecision {
 	lookup := lookupOnResumeOrLog(cfg)
-	wait := lookup.Found && lookup.Command != "" &&
-		resumemode.Resolve(lookup.Mode, installResumeMode(cfg)) == resumemode.Lazy
+	wait := lookup.Found && resumemode.Resolve(lookup.Mode, installResumeMode(cfg)) == resumemode.Lazy
 	return &resumeDecision{Wait: wait, Lookup: lookup}
 }
 
@@ -216,25 +215,15 @@ func installResumeMode(cfg hydrateConfig) resumemode.Mode {
 	return mode
 }
 
-// An absent store, a failed read and an unregistered key are all "no hook", and
-// each is recorded as the hydrate catalog already words it.
+// An absent store reads as an unregistered key, which the shared rule records
+// and answers as any other miss.
 func lookupOnResumeOrLog(cfg hydrateConfig) hooks.OnResume {
-	if cfg.HookStore == nil {
-		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
-		return hooks.OnResume{}
-	}
-	onResume, err := cfg.HookStore.LookupOnResume(cfg.HookKey, hooks.ViaHydrate)
-	if err != nil {
-		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "error", "error", err)
-		cfg.Logger.Warn("lookup on-resume hook failed", "hook_key", cfg.HookKey, "error", err)
-		return hooks.OnResume{}
-	}
-	if !onResume.Found {
-		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
-		return hooks.OnResume{}
-	}
-	cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "hit")
-	return onResume
+	return resumeRegistrationOrLog(cfg.Logger, func(hookKey string) (hooks.OnResume, error) {
+		if cfg.HookStore == nil {
+			return hooks.OnResume{}, nil
+		}
+		return cfg.HookStore.LookupOnResume(hookKey, hooks.ViaHydrate)
+	}, cfg.HookKey)
 }
 
 // A lookup failure degrades to a bare shell so the pane stays usable when

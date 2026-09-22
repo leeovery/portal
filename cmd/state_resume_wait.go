@@ -179,7 +179,7 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 		return resumeRedraw(reported)
 	}
 
-	command := resumeCommandAtAnswer(cfg)
+	command := resumeRegistrationOrLog(cfg.Logger, cfg.LookupResume, cfg.HookKey).Command
 	cfg.restore()
 
 	shell := resolveShell()
@@ -190,24 +190,6 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 
 	execHandOff(cfg.Logger, cfg.ExecSelf, prog, args, command != "")
 	return nil
-}
-
-// An entry that has gone and a store that cannot be read both answer with no
-// command, which drops the pane to a plain shell: the marker is already cleared,
-// so the pane is no longer waiting whatever the read returned.
-func resumeCommandAtAnswer(cfg resumeWaitConfig) string {
-	result, err := cfg.LookupResume(cfg.HookKey)
-	if err != nil {
-		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "error", "error", err)
-		cfg.Logger.Warn("lookup on-resume hook failed", "hook_key", cfg.HookKey, "error", err)
-		return ""
-	}
-	if !result.Found || result.Command == "" {
-		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
-		return ""
-	}
-	cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "hit")
-	return result.Command
 }
 
 func resumeAnswerDiscard(cfg resumeWaitConfig) error {

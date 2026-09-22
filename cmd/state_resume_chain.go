@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/shellquote"
 )
 
@@ -125,6 +126,24 @@ func resumeHandOff(logger *slog.Logger, execSelf func(prog string, args []string
 func execHandOff(logger *slog.Logger, execShell func(prog string, args []string), prog string, args []string, hookPresent bool) {
 	logger.Info("exec", "target", prog, "args", strings.Join(args, " "), "hook_present", hookPresent)
 	execShell(prog, args)
+}
+
+// resumeRegistrationOrLog answers the zero value for a registration carrying no
+// command as it does for a miss, so no caller can hand hookExecArgs an empty
+// command and compose sh -c "; exec $SHELL".
+func resumeRegistrationOrLog(logger *slog.Logger, lookup func(hookKey string) (hooks.OnResume, error), hookKey string) hooks.OnResume {
+	onResume, err := lookup(hookKey)
+	if err != nil {
+		logger.Debug("hook lookup", "hook_key", hookKey, "result", "error", "error", err)
+		logger.Warn("lookup on-resume hook failed", "hook_key", hookKey, "error", err)
+		return hooks.OnResume{}
+	}
+	if !onResume.Found || onResume.Command == "" {
+		logger.Debug("hook lookup", "hook_key", hookKey, "result", "miss")
+		return hooks.OnResume{}
+	}
+	logger.Debug("hook lookup", "hook_key", hookKey, "result", "hit")
+	return onResume
 }
 
 // hookExecArgs composes the argv a pane's registered command is run as. The
