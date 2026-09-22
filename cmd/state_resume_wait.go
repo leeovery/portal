@@ -6,8 +6,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/hooks"
@@ -22,6 +25,12 @@ const (
 	resumeKeyDiscard = 'd'
 )
 
+// resumeResizeSettle is how long a size change waits for the next one before
+// the panel is redrawn. A drag delivers changes every few tens of milliseconds,
+// so the window closes when the drag stops rather than during it, and a single
+// deliberate resize redraws with no perceptible pause.
+const resumeResizeSettle = 150 * time.Millisecond
+
 type resumeWaitConfig struct {
 	resumeChainPayload
 
@@ -31,6 +40,13 @@ type resumeWaitConfig struct {
 	IsTerminal func() bool
 	MakeRaw    func() (restore func(), err error)
 	ExecSelf   func(prog string, args []string)
+
+	// Winch and Settle are the resize pair: a change arms the settle window and
+	// each further change restarts it, so a drag of any length costs at most one
+	// redraw. Size reads the pane at the moment the window elapses.
+	Winch  <-chan os.Signal
+	Settle func(d time.Duration) <-chan time.Time
+	Size   func() (int, int, error)
 
 	// ClearMarker lifts the pane's freeze; LookupResume reads the registration
 	// at the moment the key is pressed rather than carrying what the panel was
@@ -70,23 +86,83 @@ func runResumeWait(cfg resumeWaitConfig) error {
 	cfg.restoreTerminal = sync.OnceFunc(restore)
 	defer cfg.restore()
 
-	// One byte per read and never ahead: input still queued when a key is
-	// answered is inherited by the process image the hand-off execs.
-	buf := make([]byte, 1)
+	return resumeWaitLoop(cfg)
+}
+
+// The pending redraw dies with the process image a dispatched key execs, so a
+// key answered inside a settle window cancels nothing.
+func resumeWaitLoop(cfg resumeWaitConfig) error {
+	reader := startResumeReader(cfg.In)
+	defer close(reader.requests)
+
+	var settled <-chan time.Time
+	outstanding := false
 	for {
-		n, err := cfg.In.Read(buf)
-		if n > 0 {
-			switch buf[0] {
-			case resumeKeyEnterCR, resumeKeyEnterLF:
-				return resumeAnswerEnter(cfg)
-			case resumeKeyDiscard:
-				return resumeAnswerDiscard(cfg)
-			}
+		if !outstanding {
+			reader.requests <- struct{}{}
+			outstanding = true
 		}
-		if err != nil {
-			return fmt.Errorf("resume wait: read: %w", err)
+
+		select {
+		case read := <-reader.results:
+			outstanding = false
+			if read.n > 0 {
+				switch read.b {
+				case resumeKeyEnterCR, resumeKeyEnterLF:
+					return resumeAnswerEnter(cfg)
+				case resumeKeyDiscard:
+					return resumeAnswerDiscard(cfg)
+				}
+			}
+			if read.err != nil {
+				return fmt.Errorf("resume wait: read: %w", read.err)
+			}
+
+		case <-cfg.Winch:
+			settled = cfg.Settle(resumeResizeSettle)
+
+		case <-settled:
+			settled = nil
+			if resumeSizeUnchanged(cfg) {
+				continue
+			}
+			return resumeRedraw(cfg)
 		}
 	}
+}
+
+// A size that could not be read is not a size the panel was drawn at: the
+// redraw resolves it to the renderer's own bounded fallback, where ending the
+// wait would drop the panel over a transient failure.
+func resumeSizeUnchanged(cfg resumeWaitConfig) bool {
+	width, height, err := cfg.Size()
+	return err == nil && width == cfg.Width && height == cfg.Height
+}
+
+type resumeRead struct {
+	b   byte
+	n   int
+	err error
+}
+
+type resumeReader struct {
+	requests chan struct{}
+	results  chan resumeRead
+}
+
+// startResumeReader reads one byte per request and never ahead: exactly one read
+// is outstanding at a time, so input still queued when a key is answered is
+// inherited by the process image the hand-off execs.
+func startResumeReader(in io.Reader) resumeReader {
+	reader := resumeReader{requests: make(chan struct{}), results: make(chan resumeRead, 1)}
+	go func() {
+		buf := make([]byte, 1)
+		for range reader.requests {
+			n, err := in.Read(buf)
+			reader.results <- resumeRead{b: buf[0], n: n, err: err}
+		}
+	}()
+	return reader
 }
 
 // resumeAnswerEnter hands the pane back to its own transcript and starts what
@@ -173,6 +249,15 @@ func lookupResumeRegistration(hookKey string) (hooks.OnResume, error) {
 	return store.LookupOnResume(hookKey, hooks.ViaHydrate)
 }
 
+// The pane's own resizes reach the waiter as a signal, which is the one signal
+// it takes off nothing: every other keeps its default disposition, so tmux
+// tearing the pane down ends the waiter with it.
+func winchSignals() <-chan os.Signal {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGWINCH)
+	return ch
+}
+
 func stdinIsTerminal() bool {
 	return term.IsTerminal(os.Stdin.Fd())
 }
@@ -219,6 +304,9 @@ var stateResumeWaitCmd = &cobra.Command{
 			IsTerminal: stdinIsTerminal,
 			MakeRaw:    makeStdinRaw,
 			ExecSelf:   defaultExecShell,
+			Winch:      winchSignals(),
+			Settle:     time.After,
+			Size:       paneSizeFromStdin,
 			ClearMarker: func() error {
 				return state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane))
 			},
