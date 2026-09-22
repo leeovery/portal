@@ -165,7 +165,7 @@ func runHydrate(cfg hydrateConfig) error {
 
 	_, _ = io.WriteString(cfg.Stdout, hydrateResetPostamble)
 
-	// Let tmux's PTY parser finish ingesting the dump before the marker is unset.
+	// Let tmux's PTY parser finish ingesting the dump before the skeleton marker is unset.
 	time.Sleep(hydrateSettleSleep)
 
 	markPendingThenUnsetSkeletonMarker(cfg)
