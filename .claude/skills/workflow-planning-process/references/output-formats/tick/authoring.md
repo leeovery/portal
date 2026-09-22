@@ -36,7 +36,7 @@ Create the topic task — this is the plan-level entity in tick. Always set `--r
 tick create "{topic:(titlecase)}" --refs "{topic}"
 ```
 
-Returns the topic task ID (e.g., `tick-a1b2`). This is the plan's external identifier.
+The `id:` line of the returned document is the topic's tick id (e.g., `tick-a1b2`) — the plan's external identifier.
 
 ## Phase Structure
 
@@ -49,7 +49,7 @@ tick create "Phase 1: {phase:(titlecase)}" --parent <topic-tick-id> --refs "{top
 tick create "Phase 2: {phase:(titlecase)}" --parent <topic-tick-id> --refs "{topic}-2"  # returns tick-e5f6
 ```
 
-Each command returns the phase's tick ID — this is the phase's external identifier.
+The `id:` line of each returned document is that phase's tick id — the phase's external identifier.
 
 ## Task Storage
 
@@ -85,7 +85,7 @@ See **Task Properties** below for details on each flag.
 
 ## Post-Creation Verification
 
-After every `tick create`, run `tick show <tick-id>` and confirm that the title, description, and parent were all set correctly.
+`tick create` answers with the stored record read back — the same document `tick show <tick-id>` prints. Confirm from it that the title, parent, and description are what was passed; a task created without a description carries no `description:` line at all. Never move on from a create whose document lacks a field that was passed.
 
 #### If any field is empty or wrong
 
@@ -130,19 +130,6 @@ tick ready --parent <tick-id> --tag security
 ### References
 
 Set via `--refs` to store the internal ID on each tick task, linking it back to the planning system. Set at all levels — topic, phase, and task — as shown in the Task Storage examples above. References are comma-separated if multiple are needed.
-
-## Flagging
-
-When information is missing, prefix the task title with `[NEEDS INFO]` and include questions in the description:
-
-```bash
-tick create "[NEEDS INFO] Rate limiting strategy" \
-  --parent tick-c3d4 \
-  --description "Needs clarification:
-- What is the rate limit threshold?
-- Per-user or per-IP?
-- What response code on limit exceeded?"
-```
 
 ## Cleanup (Restart)
 

@@ -41,6 +41,22 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 ---
 
+## Backlogging
+
+The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `research`, from any point in the phase.
+
+→ On return, resume the interrupted flow, re-presenting any gate that was pending — never fall through to Step 0.
+
+---
+
+## Cancelling the Topic
+
+The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `research`, from any point in the phase.
+
+→ On return, resume the interrupted flow, re-presenting any gate that was pending — never fall through to Step 0.
+
+---
+
 ## Step 0: Resume Detection
 
 Refresh the tmux session label — a no-op unless the user opted in and this session runs inside tmux:
@@ -91,7 +107,7 @@ Emit the DISPLAY section verbatim as a code block — never the `===` marker lin
 
 Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)** with artifact = `research`, file = `.workflows/{work_unit}/research/{topic}.md`, continue_step = `Step 2`, restart_targets = `the research file, the manifest's thread register when the item carries one (node .claude/skills/workflow-engine/scripts/engine.cjs manifest exists {work_unit}.research.{topic} threads, then manifest delete on true), and the phase cache directory (rm -rf .workflows/.cache/{work_unit}/research/{topic}/ — content and agent state together) — a landed report would otherwise fold into the restarted session as its own`, commit = `research({work_unit}): restart research`.
 
-→ On return, proceed as the reference directed.
+→ On return, proceed as the reference directed — `continue` lands on **Step 2**, `restart` on **Step 1**.
 
 ---
 

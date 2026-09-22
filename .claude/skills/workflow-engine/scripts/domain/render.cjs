@@ -17,12 +17,12 @@ const path = require('path');
 const { loadManifest, loadProjectManifest } = require('./reads.cjs');
 const { signpost } = require('../kernel/render.cjs');
 const { TREE_WIDTH, titlecase, WORKLIST_GLYPH, DISCOVERY_GLYPH, discoveryLifecycleLabel } = require('./conventions.cjs');
-const { section, CONTINUE_INSTRUCTION, CONTINUE_MARKDOWN_INSTRUCTION, AUTO_GATE_INSTRUCTION, menu, menuFrame, MENU_GLYPH, cmdOption, bareOption, promptOption, callout, indentedBody, bulletRow, subDetail, treeList } = require('./projections/surfaces.cjs');
+const { section, titleSection, CONTINUE_INSTRUCTION, CONTINUE_MARKDOWN_INSTRUCTION, AUTO_GATE_INSTRUCTION, AUTO_GATE_MARKDOWN_INSTRUCTION, menu, menuFrame, MENU_GLYPH, cmdOption, bareOption, promptOption, callout, indentedBody, bulletRow, subDetail, treeList } = require('./projections/surfaces.cjs');
 const { buildOrderLive } = require('./build-order.cjs');
 const { worklist, escapeMarkdown } = require('./projections/worklist.cjs');
 const { blockedTasksMenu, taskGateSection, fixGateSection, cycleLimitDisplay, specCorrectionsDisplay, cycleGateMenu } = require('./projections/tasks.cjs');
 const { workunitReceipt, topicReceipt, absorbSummary, absorbReceipt, promoteReceipt, importReprompt, pivotContinuationMenu, absorbContinuationMenu, sessionReceipt } = require('./projections/transactions.cjs');
-const { absorbTargetMenu, absorbNameGate, absorbConfirmGate, planTopicsMenu, archivedActions, archivedDeleteGate } = require('./projections/start.cjs');
+const { absorbTargetMenu, absorbConfirmGate, planTopicsMenu, archivedActions, archivedDeleteGate } = require('./projections/start.cjs');
 const { archivedItem } = require('./inbox-set.cjs');
 const {
   baselineProgress, baselineAreaGate, baselinePaused, baselineReceipt,
@@ -30,6 +30,9 @@ const {
   baselineOfferGate,
 } = require('./projections/baseline.cjs');
 const { baselineState } = require('./baseline.cjs');
+const {
+  ORIGINS: WALKTHROUGH_ORIGINS, loadScreen, loadCard, walkthroughScreen, walkthroughHome, walkthroughTopics, walkthroughTopic,
+} = require('./projections/walkthrough.cjs');
 const { migrationGate, labelGate, knowledgeGate, KNOWLEDGE_GATE_VARIANTS } = require('./projections/boot.cjs');
 const { heldCodeSessions, heldDocument, beatQuietly, fmtAge, CODE_PHASES } = require('./presence.cjs');
 const { roadmapState } = require('./roadmap.cjs');
@@ -46,12 +49,12 @@ const { experimentRegister, experimentApprovalGate, experimentPick, experimentNe
 const { researchThreads } = require('./projections/research-threads.cjs');
 const { registerState } = require('./research-threads.cjs');
 const { waitGate, phasePaused, researchWaitState } = require('./projections/wait.cjs');
-const { compareExperimentIds, isParentExperimentId, DERIVED_PHASES, EXPERIMENT_TERMINAL_STATUSES, EXPERIMENT_SPAWN_PHASES, TERMINAL_STATUSES } = require('../kernel/manifest-schema.cjs');
+const { compareExperimentIds, isParentExperimentId, DERIVED_PHASES, EXPERIMENT_TERMINAL_STATUSES, EXPERIMENT_SPAWN_PHASES, WAITING_PHASES, TERMINAL_STATUSES } = require('../kernel/manifest-schema.cjs');
 const { WORK_UNIT_TYPES, typeConfig: workUnitTypeConfig, completedPhases } = require('./workunit-detail.cjs');
 const {
   phaseItems, computeNextPhase, computeTopicLifecycle, lifecyclePhrase, awaitedExperiments, waits, itemOf,
   outstandingResearch, outstandingResearchPhrase, CLOSED_LIFECYCLES,
-  sourceRows, UNIT_PHASES, liveUnitItems, discoveryUnitExists, lockingSpecs, deliveryStarted, cancelPlan,
+  sourceRows, OPEN_SOURCE_STATUSES, specUnsettled, specUnsettledPhrase, UNIT_PHASES, liveUnitItems, discoveryUnitExists, lockingSpecs, deliveryStarted, cancelPlan,
 } = require('./derivations.cjs');
 const { manageDetail } = require('./workunit-manage.cjs');
 const { gateOf, counterOf, FIX_THRESHOLD, CYCLE_LIMIT } = require('./tasks.cjs');
@@ -332,7 +335,7 @@ function taskList(cwd, { dotpath, file, variant: variantArg }) {
 // the form of the output, the flow owns the mode.
 // Two altitudes, picked by the payload: a proposal carries title, problem and
 // solution (outcome only when it adds something the solution doesn't); a task
-// adds the Do/Acceptance Criteria/Tests blocks. Judging comes before
+// adds the Acceptance Criteria and Do blocks. Judging comes before
 // authoring, and detail that doesn't exist yet can't be rendered.
 // A proposal carrying an open decision is raised, never rendered: the
 // DISPLAY slims to the title and meta lines — no Problem, no Solution, no
@@ -386,7 +389,7 @@ function proposedTask(cwd, args) {
   }
   /** @type {Record<string, string[]>} */
   const blocks = {};
-  for (const field of ['steps', 'criteria', 'tests']) {
+  for (const field of ['steps', 'criteria']) {
     if (p[field] === undefined) continue;
     const lines = stringLines(p[field], 'proposed-task', field);
     if (lines.length === 0) throw new Error(`render proposed-task: "${field}" must be non-empty`);
@@ -416,8 +419,8 @@ function proposedTask(cwd, args) {
     if (!isFilled(p.stakes)) {
       throw new Error('render proposed-task: "stakes" must be a non-empty string when "decision" is present — the argument for the stop: each side\'s product consequence, and why no investigation settles the tie');
     }
-    if (blocks.steps || blocks.criteria || blocks.tests) {
-      throw new Error('render proposed-task: "decision" excludes steps/criteria/tests — the direction is settled before bodies are authored');
+    if (blocks.steps || blocks.criteria) {
+      throw new Error('render proposed-task: "decision" excludes steps/criteria — the direction is settled before bodies are authored');
     }
     if (p.outcome !== undefined) {
       throw new Error('render proposed-task: "decision" excludes outcome — the raise carries what the change would look like; the record keeps the rest');
@@ -442,7 +445,7 @@ function proposedTask(cwd, args) {
   if (!p.decision) {
     body.push('', `**Problem**: ${p.problem}`, '', `**Solution**: ${p.solution}`);
     if (isFilled(p.outcome)) body.push('', `**Outcome**: ${p.outcome}`);
-    for (const [field, heading] of [['steps', 'Do'], ['criteria', 'Acceptance Criteria'], ['tests', 'Tests']]) {
+    for (const [field, heading] of [['criteria', 'Acceptance Criteria'], ['steps', 'Do']]) {
       if (!blocks[field]) continue;
       body.push('', `**${heading}**:`, ...blocks[field]);
     }
@@ -527,10 +530,22 @@ function specReviewGate(cwd, { dotpath, variant }) {
 
 const CONVERGENCE_LOOPS = { fix: 'Fix Loop', analysis: 'Analysis', 'planning-review': 'Plan Review', 'spec-review': 'Spec Review' };
 const CONVERGENCE_TRENDS = {
-  churning: 'Findings resolve but are replaced at the same rate — the edits are generating the next cycle\'s findings. Read what the last cycle added before running another.',
-  converging: 'Continuing is likely to resolve remaining items.',
-  stable: 'Same issues are cycling. Consider manual intervention on the recurring items.',
-  diverging: 'Fixes are introducing new issues. Consider reviewing the approach.',
+  churning: 'Findings resolve but are replaced at the same rate — the edits are generating the next cycle\'s findings.',
+  converging: 'Resolved findings outnumber new ones — the cycles are closing ground.',
+  stable: 'Resolved and new findings match cycle for cycle — the loop is holding where it is.',
+  diverging: 'New findings outnumber resolved ones — the fixes are introducing new issues.',
+};
+const CONVERGENCE_GROWTH = {
+  'spec-review': {
+    document: 'construction',
+    churn: 'The cycles are adding words while findings churn — the review is writing rules the record never decided. A finding adds what a source states or removes what is wrong; anything else is a decision nobody made.',
+    note: 'Growth is the loop working only where each addition traces to a source; growth from review-authored rules is the review deciding for the user.',
+  },
+  'planning-review': {
+    document: 'plan',
+    churn: 'The cycles are adding words while findings churn — the review is writing mechanism the specification never decided. A finding restates a behaviour the record decides and the criterion that proves it, or removes what is wrong; a corrected mechanism is the builder\'s.',
+    note: 'Growth is the loop working only where each addition traces to the specification; growth from review-authored mechanism is the review deciding for the builder.',
+  },
 };
 
 /**
@@ -581,8 +596,8 @@ function convergenceDiagnostic(cwd, { dotpath, file }) {
   }
   const hasGrowth = p.review_baseline_words !== undefined || p.live_words !== undefined;
   if (hasGrowth) {
-    if (p.loop_type !== 'spec-review') {
-      throw new Error('render convergence-diagnostic: document growth belongs to spec-review — omit the word counts');
+    if (!multi) {
+      throw new Error('render convergence-diagnostic: document growth belongs to spec-review and planning-review — omit the word counts');
     }
     if (!Number.isInteger(p.review_baseline_words) || !Number.isInteger(p.live_words) || p.review_baseline_words < 0 || p.live_words < 0) {
       throw new Error('render convergence-diagnostic: "review_baseline_words" and "live_words" travel together as non-negative integers');
@@ -614,11 +629,12 @@ function convergenceDiagnostic(cwd, { dotpath, file }) {
   }
 
   const flags = [callout(CONVERGENCE_TRENDS[p.trend])];
-  if (p.loop_type === 'spec-review' && p.trend === 'churning' && growth > 0) {
-    flags.push(callout('The cycles are adding words while findings churn — the review is writing rules the record never decided. A finding adds what a source states or removes what is wrong; anything else is a decision nobody made. Check the additions against the sources before running another cycle.'));
+  const doc = hasGrowth ? CONVERGENCE_GROWTH[p.loop_type] : null;
+  if (doc && p.trend === 'churning' && growth > 0) {
+    flags.push(callout(doc.churn));
   }
-  if (hasGrowth && growth > p.review_baseline_words / 4) {
-    flags.push(callout(`Review has added ${growth} words to a ${p.review_baseline_words}-word construction. Growth is the loop working only where each addition traces to a source; growth from review-authored rules is the review deciding for the user.`));
+  if (doc && growth > p.review_baseline_words / 4) {
+    flags.push(callout(`Review has added ${growth} words to a ${p.review_baseline_words}-word ${doc.document}. ${doc.note}`));
   }
   parts.push(flags.join('\n'));
 
@@ -1300,9 +1316,12 @@ function linters(cwd, { dotpath, file, variant }) {
 //   conflict  — the settle-it-here menu: one numbered option per documented
 //               side (recommended first) plus Comment — classification is
 //               Claude's, the menu offers only the documented sides
-//   gap-route — the gap raise plus its acknowledgement gate: the menu states
-//               the routing intent and confirms it (no "no" — an objection
-//               arrives as Comment and drops into the settleable exchange)
+//   gap-route — the gap raise plus its gate (no "no" — an objection arrives
+//               as Comment and drops into the settleable exchange): a linear
+//               work unit has one home for the gap, so the menu states the
+//               routing intent and confirms it; an epic has three — the
+//               reopen, a new topic on the map, the roadmap — so it asks the
+//               fork
 //   held-doc  — the fallback when another session holds the owning document
 // The raise body takes the finding idiom: bold head, one meta bullet per
 // cited quote, a labelled context paragraph, stakes beneath.
@@ -1385,15 +1404,27 @@ function incoherenceGate(cwd, args) {
       return [display, section('MENU: incoherence conflict', INCOHERENCE_STOP,
         menu(overAuto ? AUTO_OVERRIDE_LINE : '', options, { question: 'Which decision stands?' }))].join('\n');
     }
+    const gap = manifest.work_type === 'epic'
+      ? {
+        statement: `The gap needs the room. Reopening "${p.doc}" with it pauses this specification until the answer lands; the map offers two other homes.`,
+        question: 'Reopen it?',
+        rows: [
+          cmdOption('y', 'yes', `Reopen "${p.doc}" with the gap and pause here`),
+          cmdOption('t', 'topic', 'Open a new topic on the map for it — this specification waits for it to conclude'),
+          cmdOption('r', 'roadmap', "Park it on the roadmap — outside this specification's scope"),
+        ],
+      }
+      : {
+        statement: `Routing this to "${p.doc}" — it reopens with the gap, and this specification pauses until the answer lands.`,
+        question: 'Proceed?',
+        rows: [cmdOption('y', 'yes', 'Land the gap and pause here')],
+      };
     return [
       section('DISPLAY: incoherence gap', 'emit verbatim as markdown', body.join('\n')),
       section('MENU: incoherence gap', INCOHERENCE_STOP, menu(
-        `${overAuto ? `${AUTO_OVERRIDE_LINE}\n\n` : ''}Routing this to "${p.doc}" — it reopens with the gap, and this specification pauses until the answer lands.`,
-        [
-          cmdOption('y', 'yes', 'Land the gap and pause here'),
-          promptOption('Comment', 'Tell me what you\'re thinking before it moves'),
-        ],
-        { question: 'Proceed?' },
+        `${overAuto ? `${AUTO_OVERRIDE_LINE}\n\n` : ''}${gap.statement}`,
+        [...gap.rows, promptOption('Comment', 'Tell me what you\'re thinking before it moves')],
+        { question: gap.question },
       )),
     ].join('\n');
   }
@@ -1744,7 +1775,7 @@ function reviewPresentation(cwd, { dotpath, file }) {
 
   const title = titlecase(p.topic);
   const sections = [
-    section('TITLE', "emit verbatim as markdown — the view's chrome heading", `# **\`■ Review — ${title}\`**`),
+    titleSection(`Review — ${title}`),
   ];
   if (p.verdict === 'fail') {
     const n = replan.length;
@@ -2122,7 +2153,7 @@ function offTopicOffer(cwd, { dotpath, file, variant }) {
   const options = [cmdOption('l', 'log', 'Capture it as an idea in the inbox for later')];
   // The roadmap park is discussion's valve — research has no roadmap route.
   if (discussion) {
-    options.push(cmdOption('r', 'roadmap', 'Park it on the product roadmap with a horizon'));
+    options.push(cmdOption('r', 'roadmap', 'Put it on the product roadmap for a later release'));
   }
   if (manifest.work_type === 'feature') {
     options.push(cmdOption('p', 'pivot', 'Convert this work to an epic so it can hold the concern as its own topic'));
@@ -2133,6 +2164,26 @@ function offTopicOffer(cwd, { dotpath, file, variant }) {
     "emit verbatim as markdown, then STOP for the user's response",
     menu(`**${p.concern}** is beyond this topic's scope.`, options),
   );
+}
+
+/**
+ * @param {string} cwd
+ * @param {{dotpath: string, file?: string}} args
+ * @returns {string}
+ */
+function backlogGate(cwd, { dotpath, file }) {
+  if (!file) throw new Error('render backlog-gate: --file <payload.json> is required');
+  resolveAddress(cwd, dotpath, 'backlog-gate');
+  const p = readJsonPayload(cwd, file, 'backlog-gate');
+  if (!isFilled(p.idea)) throw new Error('render backlog-gate: "idea" must be a non-empty string');
+  return section('MENU: backlog gate', STOP_FOR_RESPONSE, menu(
+    `Setting **${p.idea}** aside.`,
+    [
+      cmdOption('r', 'roadmap', 'The product roadmap — next, or soon after this work'),
+      cmdOption('i', 'inbox', 'The inbox — someday, picked up when it is picked up'),
+    ],
+    { question: 'Which backlog?' },
+  ));
 }
 
 // reroute-candidates — the ambiguous reroute's selection gate. The plausible
@@ -2417,19 +2468,6 @@ function candidateGate(cwd, { dotpath, file }) {
   ], { question: 'Add this topic to the map?' }))].join('\n');
 }
 
-// topic-collision-gate — the shared topic-creation core's exit after a
-// proposed name collided with an active map item. Static: the rejection
-// itself was rendered by the validation, and this gate only asks what to do
-// about it.
-
-/** @param {string} _cwd @param {object} _args @returns {string} */
-function topicCollisionGate(_cwd, _args) {
-  return section('MENU: topic collision gate', STOP_FOR_RESPONSE, menu('', [
-    cmdOption('c', 'cancel', 'Abandon creating this topic'),
-    promptOption('Pick another', 'Tell me a different name'),
-  ], { question: 'How would you like to proceed?' }));
-}
-
 // triage-closed-target — the reroute's stop over a target no future session
 // will surface. The address names the target and the surface derives its
 // lifecycle with the same join every other map consumer uses, so the two
@@ -2700,17 +2738,28 @@ function experimentNextGateSurface(cwd, { dotpath }) {
 }
 
 /**
+ * Resolve an address restricted to a set of phases. Loud on any other.
+ * @param {string} cwd @param {string} dotpath @param {string} surface
+ * @param {string[]} phases  the phases the surface serves
+ * @param {string} noun      what the address names, for the refusal
+ * @returns {{phase: string, topic: string, manifest: object}}
+ */
+function resolvePhaseItem(cwd, dotpath, surface, phases, noun) {
+  const { phase, topic, manifest } = resolveAddress(cwd, dotpath, surface);
+  if (!phases.includes(phase)) {
+    throw new Error(`render ${surface}: address must be <work_unit>.<${phases.join('|')}>.<topic> — ${noun}; got phase "${phase}"`);
+  }
+  return { phase, topic, manifest };
+}
+
+/**
  * Resolve a conversation address — a research or discussion item, the two
- * phases that spawn experiments and hold waits. Loud on any other phase.
+ * phases that spawn experiments.
  * @param {string} cwd @param {string} dotpath @param {string} surface
  * @returns {{phase: string, topic: string, manifest: object}}
  */
 function resolveConversation(cwd, dotpath, surface) {
-  const { phase, topic, manifest } = resolveAddress(cwd, dotpath, surface);
-  if (!EXPERIMENT_SPAWN_PHASES.includes(phase)) {
-    throw new Error(`render ${surface}: address must be <work_unit>.<${EXPERIMENT_SPAWN_PHASES.join('|')}>.<topic> — the conversation's own item; got phase "${phase}"`);
-  }
-  return { phase, topic, manifest };
+  return resolvePhaseItem(cwd, dotpath, surface, EXPERIMENT_SPAWN_PHASES, "the conversation's own item");
 }
 
 /**
@@ -2731,15 +2780,16 @@ function experimentSpawnGateSurface(cwd, { dotpath, id }) {
 
 /**
  * The blocked-conclusion gate over every wait the item holds — the research
- * a discussion stands on, the experiments a conversation spawned. Empty
- * when nothing is owed: the calling flow branches on the response, so one
- * fetch stands in for the read-then-render pair.
+ * a discussion stands on, the specification a plan stands on, the
+ * experiments a conversation spawned. Empty when nothing is owed: the
+ * calling flow branches on the response, so one fetch stands in for the
+ * read-then-render pair.
  * @param {string} cwd
  * @param {{dotpath: string}} args
  * @returns {string} the gate's sections, or '' when nothing blocks conclusion
  */
 function waitGateSurface(cwd, { dotpath }) {
-  const { phase, topic, manifest } = resolveConversation(cwd, dotpath, 'wait-gate');
+  const { phase, topic, manifest } = resolvePhaseItem(cwd, dotpath, 'wait-gate', WAITING_PHASES, 'the waiting item itself');
   if (!itemOf(manifest, phase, topic)) {
     throw new Error(`render wait-gate: no ${phase} item "${topic}" — nothing to hold shut`);
   }
@@ -2862,24 +2912,56 @@ function checkpointFilesGate(cwd, { dotpath }) {
 }
 
 // executor-block-gate — the task loop's stop after an executor returns
-// blocked or failed. The executor's own ISSUES text is echoed above; the
-// three ways out are fixed.
+// blocked or failed. Neither offers a way out of the task — during the build
+// a task is finished or being fixed. A failure offers the retry, with Comment
+// to steer it. A block is the product fork the executor met: its sides ride
+// in a payload, numbered with the recommended side first, and Comment is the
+// exchange; the override line heads the menu when the task gate is auto or
+// bounded, since the stop is one auto never takes for the user.
+const FAILED_ROWS = [
+  cmdOption('r', 'retry', 'Run the executor again with the guidance above and anything you add'),
+  promptOption('Comment', 'Ask about the failure, or steer the next attempt'),
+];
 
 /**
  * @param {string} cwd
- * @param {{dotpath: string}} args
+ * @param {{dotpath: string, result?: string, file?: string}} args
  * @returns {string}
  */
-function executorBlockGate(cwd, { dotpath }) {
-  const { phase } = resolveAddress(cwd, dotpath, 'executor-block-gate');
+function executorBlockGate(cwd, { dotpath, result, file }) {
+  if (result !== 'blocked' && result !== 'failed') {
+    throw new Error(`render executor-block-gate: --result must be one of blocked, failed, got "${result}"`);
+  }
+  const { phase, topic, manifest } = resolveAddress(cwd, dotpath, 'executor-block-gate');
   if (phase !== 'implementation') {
     throw new Error(`render executor-block-gate: address must be <work_unit>.implementation.<topic>, got phase "${phase}"`);
   }
-  return section('MENU: executor block gate', STOP_FOR_RESPONSE, menu('', [
-    cmdOption('r', 'retry', 'Re-invoke the executor with your comments (provide below)'),
-    cmdOption('s', 'skip', 'Skip this task and move to the next'),
-    cmdOption('t', 'stop', 'Stop implementation entirely'),
-  ], { question: 'How would you like to proceed?' }));
+  if (result === 'failed') {
+    if (file !== undefined) throw new Error('render executor-block-gate: --file belongs to --result blocked — a failure carries no sides');
+    return section('MENU: executor block gate', STOP_FOR_RESPONSE, menu('', FAILED_ROWS, { question: 'How would you like to proceed?' }));
+  }
+  if (!file) throw new Error('render executor-block-gate: --file <sides.json> is required with --result blocked');
+  const item = itemOf(manifest, 'implementation', topic);
+  if (!item) throw new Error(`render executor-block-gate: no implementation item "${topic}"`);
+  const p = readJsonPayload(cwd, file, 'executor-block-gate');
+  if (!Array.isArray(p.options) || p.options.length < 2 || p.options.length > 4) {
+    throw new Error('render executor-block-gate: "options" must be an array of 2–4 sides');
+  }
+  const sides = p.options.map((/** @type {unknown} */ o, /** @type {number} */ i) => {
+    const side = /** @type {{summary?: unknown, recommended?: unknown}} */ (
+      typeof o === 'string' ? { summary: o } : (o && typeof o === 'object' && !Array.isArray(o) ? o : {}));
+    if (!isFilled(side.summary)) {
+      throw new Error(`render executor-block-gate: options[${i}] must be a non-empty string or an object carrying "summary"`);
+    }
+    return { summary: side.summary, recommended: side.recommended === true };
+  });
+  const rows = recommendedMenuRows(sides, 'render executor-block-gate: at most one option may be recommended');
+  const mode = gateOf(item, 'task_gate_mode');
+  const label = mode === 'auto' || mode === 'bounded' ? AUTO_OVERRIDE_LINE : '';
+  return section('MENU: executor block gate', STOP_FOR_RESPONSE, menu(label, [
+    ...rows,
+    promptOption('Comment', "Ask about the options, or tell me what I've missed"),
+  ], { question: 'Which way?' }));
 }
 
 // dependency-approval-gate — planning's three approvals over dependency
@@ -3050,19 +3132,42 @@ function findingAnnounce(cwd, { dotpath, file }) {
 
 // finding-batch — a surfacing lane whose findings need at most a scan from
 // the user: the `apply` batch (corrections determined by decisions already
-// made), the `decide` batch (calls the session made, presented for veto
-// before they land), and the `route` batch
-// (concerns owned by a sibling topic). The lane fixes the chrome; the
-// payload carries only judgment content, so the screen is one call and the
-// prose holds no template. A screen holds at most BATCH_MAX items — a
-// larger lane renders over successive screens, each approved on its own.
+// made), the call batch (`settled` at the specification, `decide` at every
+// other door — calls the session made, presented for a scan before they
+// land), and the `route` batch (concerns owned by a sibling topic). The lane
+// fixes the chrome; the payload carries only judgment content, so the screen
+// is one call and the prose holds no template. A screen holds at most
+// BATCH_MAX items — a larger lane renders over successive screens, each
+// approved on its own.
+//
+// The settled lane at the specification is the one screen a gate mode
+// reaches: it carries the row that sets the mode, and under auto it renders
+// as a display of what is landing, with no menu — a scan the user opted out
+// of is a screen with nothing on it to do. Every other lane is a scan for a
+// user who is present, and renders its gated screen whatever the mode says.
 
 const BATCH_MAX = 5;
 
 /** A confirm's remainder tail — how many of the lane wait beyond this screen. @param {number} more */
 const moreTail = (more) => (more > 0 ? ` (${more} more after this)` : '');
 
-/** @type {Record<string, {intro: (n: number) => string, question: (n: number) => string, confirm: (n: number, more: number) => string, discuss?: string, ask: string, fields: string[]}>} */
+// The call screen — one presentation under the name each door uses. The
+// `auto` member rides the specification's name alone: its walk is the one
+// with a gate mode this screen can flip, so its lane is the only one with an
+// unstopped form.
+/** @type {{intro: (n: number) => string, question: (n: number) => string, confirm: (n: number, more: number) => string, discuss: string, ask: string, fields: string[]}} */
+const CALL_LANE = {
+  intro: (n) => (n === 1
+    ? "This one is a call I've made, with what it rests on named beside it."
+    : "Each of these is a call I've made, with what it rests on named beside it."),
+  question: (n) => (n === 1 ? 'Document it?' : 'Document them?'),
+  confirm: (n, more) => `${n === 1 ? 'Document it' : `Document all ${n}`} and move on${moreTail(more)}`,
+  discuss: "Say discuss and a number — I'll raise it after the rest land",
+  ask: 'Tell me a number to expand',
+  fields: ['title', 'detail'],
+};
+
+/** @type {Record<string, {intro: (n: number) => string, question: (n: number) => string, confirm: (n: number, more: number) => string, discuss?: string, ask: string, auto?: {row: string, line: (n: number) => string}, fields: string[]}>} */
 const BATCH_LANES = {
   apply: {
     intro: () => "The fix follows from what's already decided. Nothing here is a choice.",
@@ -3071,16 +3176,17 @@ const BATCH_LANES = {
     ask: "Tell me a number to expand, or one you don't think is settled",
     fields: ['title', 'detail'],
   },
-  decide: {
-    intro: (n) => (n === 1
-      ? "This one is a call I've made, with what it rests on named beside it."
-      : "Each of these is a call I've made, with what it rests on named beside it."),
-    question: (n) => (n === 1 ? 'Document it?' : 'Document them?'),
-    confirm: (n, more) => `${n === 1 ? 'Document it' : `Document all ${n}`} and move on${moreTail(more)}`,
-    discuss: "Say discuss and a number — I'll raise it after the rest land",
-    ask: 'Tell me a number to expand',
-    fields: ['title', 'detail'],
+  settled: {
+    ...CALL_LANE,
+    // The opt-in and its unstopped form: the row that sets the gate mode,
+    // and the line the screen closes on once it is set. The landings follow
+    // the line, so it speaks in the present.
+    auto: {
+      row: 'Document this screen and every remaining settled finding automatically',
+      line: (n) => (n === 1 ? 'Documenting it' : `Documenting all ${n}`),
+    },
   },
+  decide: CALL_LANE,
   route: {
     intro: (n) => (n === 1
       ? "Not this topic's to answer. It goes to its owner's triage queue as a concern, carrying the context built here."
@@ -3092,6 +3198,16 @@ const BATCH_LANES = {
   },
 };
 
+// The call screen's two names, and the fact that picks between them: the
+// specification batches the calls its review has made, every other caller
+// walks them. Both surfaces read it — it names the batch lane here, and at
+// `render finding` it says whether a settled finding carries its own gate.
+const CALL_LANE_NAMES = ['settled', 'decide'];
+const SETTLED_BATCH_PHASE = 'specification';
+
+/** The call lane the address serves — the other name is refused there. @param {string} phase */
+const callLaneOf = (phase) => (phase === SETTLED_BATCH_PHASE ? 'settled' : 'decide');
+
 /**
  * @param {string} cwd
  * @param {{dotpath: string, file?: string}} args
@@ -3101,9 +3217,12 @@ function findingBatch(cwd, { dotpath, file }) {
   if (!file) throw new Error('render finding-batch: --file <payload.json> is required');
   const { manifest, phase, topic } = resolveAddress(cwd, dotpath, 'finding-batch');
   const p = readJsonPayload(cwd, file, 'finding-batch');
-  const lane = BATCH_LANES[p.lane];
-  if (!lane) {
+  if (!Object.hasOwn(BATCH_LANES, p.lane)) {
     throw new Error(`render finding-batch: "lane" must be one of ${Object.keys(BATCH_LANES).join(', ')}`);
+  }
+  const lane = BATCH_LANES[p.lane];
+  if (CALL_LANE_NAMES.includes(p.lane) && p.lane !== callLaneOf(phase)) {
+    throw new Error(`render finding-batch: lane "${p.lane}" is not served at the ${phase} phase — its call lane is "${callLaneOf(phase)}"`);
   }
   if (!Array.isArray(p.items) || p.items.length === 0) {
     throw new Error(`render finding-batch: "items" must be a non-empty array of {${lane.fields.join(', ')}}`);
@@ -3120,23 +3239,28 @@ function findingBatch(cwd, { dotpath, file }) {
       if (!isFilled(it[field])) throw new Error(`render finding-batch: item ${i + 1} is missing "${field}"`);
     }
   });
-  const overAuto = laneHoldsAuto(itemOf(manifest, phase, topic) || {}, 'review');
+  const count = p.items.length;
   // Batch rows carry no walk-state — the lane is all-or-nothing, so no
   // glyph column. A route row's destination rides the tag slot.
   const body = worklist({
-    intro: lane.intro(p.items.length),
+    intro: lane.intro(count),
     items: p.items.map((it) => ({ title: it.title, tag: it.target ? `→ ${it.target}` : undefined, note: it.detail })),
   });
+  if (lane.auto && laneHoldsAuto(itemOf(manifest, phase, topic) || {}, 'review')) {
+    return section('DISPLAY: finding batch auto-approved', AUTO_GATE_MARKDOWN_INSTRUCTION,
+      `${body}\n\n${lane.auto.line(count)} [auto].`);
+  }
   return [
     section('DISPLAY: finding batch', 'emit verbatim as markdown', body),
     section(
       'MENU: finding batch',
       "emit verbatim as markdown, then STOP for the user's response",
-      menu(overAuto ? AUTO_OVERRIDE_LINE : '', [
-        cmdOption('y', 'yes', lane.confirm(p.items.length, more)),
+      menu('', [
+        cmdOption('y', 'yes', lane.confirm(count, more)),
+        ...(lane.auto ? [cmdOption('a', 'auto', lane.auto.row)] : []),
         ...(lane.discuss ? [promptOption('Discuss', lane.discuss)] : []),
         promptOption('Ask', lane.ask),
-      ], { question: lane.question(p.items.length) }),
+      ], { question: lane.question(count) }),
     ),
   ].join('\n');
 }
@@ -3150,13 +3274,14 @@ const FINDING_CATEGORIES = ['enhancement', 'new-topic', 'gap', 'duplication', 'c
 const ROUTED_CATEGORIES = ['source-defect', 'unsourced-decision'];
 
 // The move owed — what the user has to do about the finding, which is the
-// only question that determines its shape. `settled`: the record determines
-// the answer, so the finding carries the call and what determined it,
-// and `auto` applies it without a stop. `choice`: real options exist and
-// picking is the user's, so the finding proposes nothing and the stop
-// overrides `auto` — the stays-gated rule is that a choice exists, never a
-// category. `route` belongs to resolve-source-incoherence and `decide` to the
-// finding-batch veto screen; both refuse here by name.
+// only question that determines its shape. `settled`: the call is made and
+// what it rests on is named, so nothing here needs the user — it applies
+// without a stop wherever the gate is off, and at the specification, where
+// the batch screen is its gate, it renders as a report and nothing else.
+// `choice`: real options exist and picking is the user's, so the finding
+// proposes nothing and the stop overrides `auto` — the stays-gated rule is
+// that a choice exists, never a category. `route` belongs to
+// resolve-source-incoherence and refuses here by name.
 const FINDING_MOVES = ['settled', 'choice'];
 
 /**
@@ -3182,9 +3307,6 @@ function finding(cwd, { dotpath, file, view }) {
   if (p.move === 'route') {
     throw new Error('render finding: a "route" finding goes to resolve-source-incoherence and never renders at the gate');
   }
-  if (p.move === 'decide') {
-    throw new Error('render finding: a "decide" finding is held for the veto batch and renders through finding-batch, never at the gate');
-  }
   if (!FINDING_MOVES.includes(p.move)) {
     throw new Error(`render finding: "move" must be one of ${FINDING_MOVES.join('/')} — the move owed picks the shape, not the category`);
   }
@@ -3203,7 +3325,10 @@ function finding(cwd, { dotpath, file, view }) {
     if (view) throw new Error('render finding: --view serves a settled finding\'s wording; a choice proposes none');
     return findingChoice(p, head, itemOf(manifest, phase, topic) || {});
   }
-  return findingSettled(p, head, itemOf(manifest, phase, topic) || {}, view === 'full');
+  return findingSettled(p, head, itemOf(manifest, phase, topic) || {}, {
+    view: view === 'full',
+    batched: phase === SETTLED_BATCH_PHASE,
+  });
 }
 
 /**
@@ -3241,10 +3366,14 @@ function findingChoice(p, head, item) {
  * A settled call: the body carries what determined it, a short diff renders
  * in place, and whole proposed content is held behind `v/view` rather than
  * dumped — the finding is a report, and the artifact text is the payload of
- * the fix, not its explanation.
- * @param {any} p @param {string[]} head @param {any} item @param {boolean} view @returns {string}
+ * the fix, not its explanation. Where the phase batches its calls the gate
+ * is the batch screen and this render is its `ask N` expansion: no menu, and
+ * the wording rides the report, the expansion being the ask `v/view` would
+ * otherwise answer.
+ * @param {any} p @param {string[]} head @param {any} item
+ * @param {{view: boolean, batched: boolean}} mode @returns {string}
  */
-function findingSettled(p, head, item, view) {
+function findingSettled(p, head, item, { view, batched }) {
   if (!isFilled(p.proposal)) {
     throw new Error('render finding: a "settled" finding must carry a "proposal" — the call and what determined it');
   }
@@ -3277,15 +3406,16 @@ function findingSettled(p, head, item, view) {
     return section('MENU: finding gate', STOP_FOR_RESPONSE, menu('', options, { question: 'Apply this?' }));
   };
 
+  /** The proposed content as markdown — its label, then the lines verbatim. */
+  const wording = () => section('DISPLAY: finding wording', 'emit verbatim as markdown',
+    [`**${p.content.label}**`, '', ...p.content.lines].join('\n'));
+
   // `--view` answers the gate's own v/view row: the wording the user asked
   // for, and the gate again minus that row. The report is not repeated —
   // re-rendering it whole is how one finding comes to fill a screen twice.
   if (view) {
     if (!p.content) throw new Error('render finding: --view needs "content" — a diff finding shows its change in place');
-    return [
-      section('DISPLAY: finding wording', 'emit verbatim as markdown', [`**${p.content.label}**`, '', ...p.content.lines].join('\n')),
-      gateMenu(false),
-    ].join('\n');
+    return batched ? wording() : [wording(), gateMenu(false)].join('\n');
   }
 
   head.push('', p.proposal);
@@ -3303,9 +3433,14 @@ function findingSettled(p, head, item, view) {
     }
     parts.push(section('DISPLAY: diff', 'emit verbatim as a diff code block (```diff fence)', body.join('\n')));
   }
-  // Whole-section content is validated above and never rendered here — source
-  // read aloud is what buried the report; it waits for `v/view`, where it
-  // renders as markdown rather than as a wall of syntax.
+  // At a walked gate whole-section content waits for `v/view` — source read
+  // aloud is what buried the report. A batched address has no such row: the
+  // expansion is the user asking to see the finding, so the wording comes
+  // with it, as markdown rather than as a wall of syntax.
+  if (batched) {
+    if (p.content) parts.push(wording());
+    return parts.join('\n');
+  }
 
   if (item.finding_gate_mode === 'auto') {
     parts.push(section(
@@ -3527,11 +3662,11 @@ function phaseCompleted(cwd, { dotpath, phase, paths }) {
 }
 
 /**
- * The bridge's paused banner — `phase-completed`'s sibling for a
- * conversation leaving on a wait. Derived, never told: the phase's
- * in-progress items holding waits, each named with what it awaits. A peer
- * can land the wait between the gate and the bridge, so no holder left
- * renders the bare line rather than refusing.
+ * The bridge's paused banner — `phase-completed`'s sibling for a phase
+ * leaving on a wait. Derived, never told: the phase's in-progress items
+ * holding waits, each named with what it awaits. A peer can land the wait
+ * between the gate and the bridge, so no holder left renders the bare line
+ * rather than refusing.
  * @param {string} cwd
  * @param {{dotpath: string, phase?: string}} args
  * @returns {string}
@@ -3539,8 +3674,8 @@ function phaseCompleted(cwd, { dotpath, phase, paths }) {
 function phasePausedSurface(cwd, { dotpath, phase }) {
   const { workUnit, manifest } = resolveWorkUnit(cwd, dotpath, 'phase-paused');
   if (!isFilled(phase)) throw new Error('render phase-paused: --phase is required');
-  if (!EXPERIMENT_SPAWN_PHASES.includes(phase)) {
-    throw new Error(`render phase-paused: --phase must be <${EXPERIMENT_SPAWN_PHASES.join('|')}> — the conversations that pause on a wait; got "${phase}"`);
+  if (!WAITING_PHASES.includes(phase)) {
+    throw new Error(`render phase-paused: --phase must be <${WAITING_PHASES.join('|')}> — the phases that pause on a wait; got "${phase}"`);
   }
   const holders = phaseItems(manifest, phase)
     .filter((item) => item.status === 'in-progress')
@@ -3703,10 +3838,11 @@ function specificationCancelStatement(manifest, spec) {
 }
 
 /**
- * The epic menu's cancel confirm over one unit — `<wu>.discovery.<topic>`
- * or `<wu>.specification.<spec>`. The statement names exactly what the
- * cancel takes and stays context; the short question takes the glyph. A
- * locked or already-cancelled unit refuses: the menu never offers it.
+ * The cancel confirm over one unit — `<wu>.discovery.<topic>` or
+ * `<wu>.specification.<spec>` — fetched by the epic menu and by a session
+ * cancelling its own topic. The statement names exactly what the cancel
+ * takes and stays context; the short question takes the glyph. A locked or
+ * already-cancelled unit refuses: the menu never offers it.
  * @param {string} cwd
  * @param {{dotpath: string}} args
  * @returns {string}
@@ -3724,7 +3860,7 @@ function cancelGate(cwd, { dotpath }) {
     "emit verbatim as markdown, then STOP for the user's response",
     menu(statement, [
       cmdOption('y', 'yes', 'Confirm cancellation'),
-      cmdOption('n', 'no', 'Return to menu'),
+      cmdOption('n', 'no', 'Keep it'),
     ], { question: 'Cancel it?' }),
   );
 }
@@ -4008,6 +4144,19 @@ function entryGate(cwd, { dotpath, own }) {
         'Cross-cutting specifications inform other plans — they are not planned directly.',
       );
     }
+    // A specification reading `completed` can still be a record in motion —
+    // its input moved, or a source row is not yet extracted or has moved
+    // beneath the extraction — and a plan built from one is built from a
+    // document about to change.
+    const unsettled = specUnsettled(manifest, topic);
+    if (unsettled) {
+      return blocker(
+        `Entry blocked — the specification for "${t}" is unsettled (${specUnsettledPhrase(unsettled)})`,
+        manifest.work_type === 'epic'
+          ? 'Return to the epic menu — the specification is the way in: its row, or c/completed while it still reads completed.'
+          : 'Continue the work unit — the specification is its next step.',
+      );
+    }
     return '';
   }
 
@@ -4086,16 +4235,17 @@ function entryGate(cwd, { dotpath, own }) {
         );
       }
       // The topic's own sources must be settled: a source discussion back
-      // in-progress (a gap routed into it) blocks this spec until it
-      // re-concludes. sourceRows decodes the map and legacy array forms.
+      // in-progress (a gap routed into it), or one the gap exit opened as a
+      // new topic and parked, blocks this spec until it concludes.
+      // sourceRows decodes the map and legacy array forms.
       const spec = itemOf(manifest, 'specification', topic);
       const open = sourceRows(spec && spec.sources)
         .map(([n]) => n)
-        .filter((n) => n && items[n] && items[n].status === 'in-progress');
+        .filter((n) => n && items[n] && OPEN_SOURCE_STATUSES.includes(items[n].status));
       if (open.length > 0) {
         return blocker(
-          `Sources for "${t}" are back in-progress: ${open.join(', ')}`,
-          'A specification cannot be built from an in-flight record — conclude the reopened discussion(s), then re-enter this specification.',
+          `Sources for "${t}" are not concluded: ${open.join(', ')}`,
+          'A specification cannot be built from a record still open — conclude the discussion(s), then re-enter this specification.',
         );
       }
       return '';
@@ -4638,23 +4788,6 @@ function absorbTarget(cwd, args) {
   return absorbTargetMenu(md);
 }
 
-/** @param {string} cwd @param {{dotpath: string, into?: string}} args @returns {string} */
-function absorbNameGateSurface(cwd, args) {
-  const { workUnit } = resolveWorkUnit(cwd, args.dotpath, 'absorb-name-gate');
-  const md = manageDetail(cwd, workUnit);
-  if (!md) throw new Error(`render absorb-name-gate: work unit "${workUnit}" not found`);
-  if (!md.absorb_available) {
-    throw new Error(`render absorb-name-gate: "${workUnit}" is not absorbable — the guard (discussion, no spec-or-beyond, an in-progress epic) does not hold`);
-  }
-  if (!isFilled(args.into)) {
-    throw new Error('render absorb-name-gate: --into is required — the selected target epic');
-  }
-  if (!md.available_epics.includes(/** @type {string} */ (args.into))) {
-    throw new Error(`render absorb-name-gate: "${args.into}" is not an absorb target — available: ${md.available_epics.join(', ') || '(none)'}`);
-  }
-  return absorbNameGate(md, /** @type {string} */ (args.into));
-}
-
 /** @param {string} cwd @param {{dotpath: string}} args @returns {string} */
 function absorbConfirmGateSurface(cwd, args) {
   const { workUnit } = resolveWorkUnit(cwd, args.dotpath, 'absorb-confirm-gate');
@@ -4756,6 +4889,46 @@ function roadmapAddGateSurface(cwd, args) {
   );
 }
 
+/** @param {string} cwd @param {object} _args @returns {string} */
+function horizonPick(cwd, _args) {
+  const state = roadmapState(cwd);
+  if (!state.exists) {
+    throw new Error('render horizon-pick: no roadmap on the project manifest — the park names its first horizon in prose');
+  }
+  if (state.horizons.length === 0) {
+    throw new Error('render horizon-pick: the roadmap holds no horizons — the park names one in prose');
+  }
+  const options = state.horizons.map((horizon, i) => {
+    const waiting = state.items.filter((r) => r.horizon === horizon && r.state === 'waiting').length;
+    return cmdOption(String(i + 1), null, `${horizon} — *${waiting} waiting*`);
+  });
+  options.push(cmdOption('n', 'new', 'A new horizon — name it'));
+  return section('MENU: horizon pick', STOP_FOR_RESPONSE, menu('Which horizon?', options));
+}
+
+/** @param {string} cwd @param {Record<string, string|undefined>} args @returns {string} */
+function parkGate(cwd, args) {
+  const { name, horizon, summary, source } = args;
+  if (!isFilled(name)) throw new Error('render park-gate: --name is required');
+  if (!isFilled(horizon)) throw new Error('render park-gate: --horizon is required');
+  if (!isFilled(summary)) throw new Error('render park-gate: --summary is required');
+  const state = roadmapState(cwd);
+  if (state.items.some((r) => r.name === name)) {
+    throw new Error(`render park-gate: "${name}" is already on the roadmap — edit it, or pick a different name`);
+  }
+  const isNew = state.exists && !state.horizons.includes(horizon);
+  const statement = [
+    `Parking **${titlecase(name)}** — ${summary} — puts it on the roadmap under "${horizon}"${isNew ? ' (new)' : ''}, waiting until it is pulled into work.`,
+    ...(state.exists ? [] : ['The roadmap is created with it.']),
+    ...(isFilled(source) ? [`Its source is \`${source}\`.`] : []),
+  ].join(' ');
+  return section('MENU: park gate', STOP_FOR_RESPONSE, menu(statement, [
+    cmdOption('y', 'yes', 'Park it'),
+    cmdOption('n', 'no', 'Leave it — nothing is recorded'),
+    promptOption('Comment', 'Tell me what to change (name, horizon, or summary)'),
+  ], { question: 'Park it on the roadmap?' }));
+}
+
 /** @param {string} _cwd @param {Record<string, string|undefined>} args @returns {string} */
 function roadmapSessionReceiptSurface(_cwd, args) {
   return sessionReceipt({ warn: args.warn === '1' });
@@ -4783,26 +4956,6 @@ function roadmapShapeGateSurface(_cwd, _args) {
 // The cross-flow static gates — adopted engine-side as their files were
 // touched (menus are engine-rendered, static sets included). Wording is
 // the gates' own; each is fetched at the exact point it displays.
-
-/**
- * Discovery's work-unit name confirm; `--variant collision` is the re-ask
- * after a name collided with an existing unit.
- * @param {string} _cwd @param {Record<string, string|undefined>} args @returns {string}
- */
-function nameGateSurface(_cwd, { variant }) {
-  if (variant !== undefined && variant !== 'collision') {
-    throw new Error('render name-gate: --variant takes "collision" (omit it for the confirm shape)');
-  }
-  const body = variant === 'collision'
-    ? menu('', [
-      promptOption('A different name', 'Tell me what to call it instead'),
-    ], { question: 'Choose a different name, or resume via /workflow-start.' })
-    : menu('', [
-      cmdOption('y', 'yes', 'Use this name'),
-      promptOption('A different name', 'Tell me what to call it instead'),
-    ], { question: 'Is this name okay?' });
-  return section('MENU: name gate', STOP_FOR_RESPONSE, body);
-}
 
 /** Discovery's work-type commit confirm — the shaping conversation's hinge. @param {string} _cwd @param {object} _args @returns {string} */
 function shapeGateSurface(_cwd, _args) {
@@ -5107,6 +5260,48 @@ function baselineDocPickSurface(cwd, _args) {
   return baselineDocPick();
 }
 
+// ---------------------------------------------------------------------------
+// The walkthrough surfaces — project-level, no address, no state. A screen is
+// a content file, so the only things to resolve are which screen and where
+// the walk was entered from; the recorded answer drives the offer alone, and
+// no surface reads it.
+// ---------------------------------------------------------------------------
+
+/**
+ * One screen of the walk. `--from` carries the caller, which is what varies
+ * the exits: a first run can skip to the start menu, a walk opened from help
+ * goes back to it. `--menu-only` serves the return from a question — the
+ * screen is already on the reader's terminal.
+ * @param {string} _cwd @param {Record<string, string|undefined>} args @returns {string}
+ */
+function walkthroughScreenSurface(_cwd, args) {
+  const origin = args.from;
+  if (origin === undefined || !WALKTHROUGH_ORIGINS.includes(origin)) {
+    throw new Error(`render walkthrough-screen: --from must be one of ${WALKTHROUGH_ORIGINS.join(', ')}, got "${origin ?? ''}"`);
+  }
+  return walkthroughScreen(loadScreen(args.screen), origin, Boolean(args['menu-only']));
+}
+
+/** @param {string} _cwd @param {object} _args @returns {string} */
+function walkthroughHomeSurface(_cwd, _args) {
+  return walkthroughHome();
+}
+
+/** @param {string} _cwd @param {object} _args @returns {string} */
+function walkthroughTopicsSurface(_cwd, _args) {
+  return walkthroughTopics();
+}
+
+/**
+ * One reference card, addressed by the slug the topics menu's DATA table
+ * gives for the number the reader pressed. `--menu-only` serves the return
+ * from a question, as it does on a screen.
+ * @param {string} _cwd @param {Record<string, string|undefined>} args @returns {string}
+ */
+function walkthroughTopicSurface(_cwd, args) {
+  return walkthroughTopic(loadCard(args.name), Boolean(args['menu-only']));
+}
+
 /**
  * workflow-start's knowledge gate menus. `--provider` and `--model` belong to
  * the reuse variant alone — the system configuration its yes row names. A
@@ -5160,9 +5355,9 @@ const SURFACES = {
   'review-findings-gate': reviewFindingsGate,
   'reroute-candidates': rerouteCandidates,
   'off-topic-offer': offTopicOffer,
+  'backlog-gate': backlogGate,
   'map-op-gate': mapOpGate,
   'candidate-gate': candidateGate,
-  'topic-collision-gate': topicCollisionGate,
   'triage-closed-target': triageClosedTarget,
   'conclude-gate': concludeGate,
   'closing-gate': closingGate,
@@ -5217,7 +5412,6 @@ const SURFACES = {
   'pivot-continuation': pivotContinuation,
   'session-receipt': sessionReceiptSurface,
   'absorb-target': absorbTarget,
-  'absorb-name-gate': absorbNameGateSurface,
   'absorb-confirm-gate': absorbConfirmGateSurface,
   'plan-topics': planTopics,
   'archived-actions': archivedActionsSurface,
@@ -5225,11 +5419,12 @@ const SURFACES = {
   'revisit-phases': revisitPhasesSurface,
   'roadmap-view': roadmapViewSurface,
   'roadmap-add-gate': roadmapAddGateSurface,
+  'horizon-pick': horizonPick,
+  'park-gate': parkGate,
   'roadmap-session-receipt': roadmapSessionReceiptSurface,
   'roadmap-harvest-gate': roadmapHarvestGateSurface,
   'roadmap-parks-gate': roadmapParksGateSurface,
   'roadmap-shape-gate': roadmapShapeGateSurface,
-  'name-gate': nameGateSurface,
   'shape-gate': shapeGateSurface,
   'synthesis-gate': synthesisGateSurface,
   'query-failure-gate': queryFailureGateSurface,
@@ -5243,6 +5438,10 @@ const SURFACES = {
   'baseline-manage-gate': baselineManageGateSurface,
   'baseline-doc-pick': baselineDocPickSurface,
   'baseline-offer-gate': baselineOfferGateSurface,
+  'walkthrough-screen': walkthroughScreenSurface,
+  'walkthrough-home': walkthroughHomeSurface,
+  'walkthrough-topics': walkthroughTopicsSurface,
+  'walkthrough-topic': walkthroughTopicSurface,
   'migration-gate': () => migrationGate(),
   'label-gate': () => labelGate(),
   'knowledge-gate': knowledgeGateSurface,

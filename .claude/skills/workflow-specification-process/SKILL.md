@@ -64,6 +64,22 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 ---
 
+## Backlogging
+
+The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `specification`, from any point in the phase.
+
+→ On return, resume the interrupted flow, re-presenting any gate that was pending — never fall through to Step 0.
+
+---
+
+## Cancelling the Topic
+
+The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `specification`, from any point in the phase.
+
+→ On return, resume the interrupted flow, re-presenting any gate that was pending — never fall through to Step 0.
+
+---
+
 ## Step 0: Resume Detection
 
 Refresh the tmux session label — a no-op unless the user opted in and this session runs inside tmux:
@@ -94,7 +110,7 @@ Check if `.workflows/{work_unit}/specification/{topic}/specification.md` exists.
 
 Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)** with artifact = `specification`, file = `.workflows/{work_unit}/specification/{topic}/specification.md`, continue_step = `Step 3`, restart_targets = `the specification file and all review tracking files (review-*-tracking-c*.md) in .workflows/{work_unit}/specification/{topic}/`, restart_resets = `every sources.{name}.status and consult_references.{name}.status row under {work_unit}.specification.{topic} to pending via engine manifest set — initialization never overwrites an existing row, so without this reset the fresh file would never get its content re-extracted — and the tracking subtree and review_baseline_words deleted where present (engine manifest delete {work_unit}.specification.{topic} tracking, then the same for review_baseline_words — an absent field's delete errors and is skipped) to match the deleted tracking files`, commit = `spec({work_unit}): restart specification`.
 
-→ On return, proceed as the reference directed.
+→ On return, proceed as the reference directed — `continue` lands on **Step 3**, `restart` on **Step 1**.
 
 ---
 
@@ -187,7 +203,7 @@ Load **[dependencies.md](references/dependencies.md)** and follow its instructio
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Reviewing the specification. Agents will measure its claims against the codebase and analyse it against source material for gaps and inconsistencies. Settled findings carry their fix; calls the record leaves open come to you as a batch to veto; genuine choices stop for your call, and any finding can be talked through — adjusted, challenged, or declined.
+> Reviewing the specification. Agents will measure its claims against the codebase and analyse it against source material for gaps and inconsistencies. Settled findings come as a batch, each carrying the call and what it rests on; genuine choices stop for your call, and any finding can be talked through — adjusted, challenged, or declined.
 ```
 
 Load **[spec-review.md](references/spec-review.md)** and follow its instructions as written.

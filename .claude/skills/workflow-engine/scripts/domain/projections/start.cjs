@@ -110,9 +110,12 @@ function roadmapMenuRow(detail) {
   if (!detail.roadmap.exists) return null;
   const label = detail.roadmap.active_session !== null
     ? 'Resume the product session — *roadmap, in progress*'
-    : 'Roadmap — the product conversation, the map, or pull a slice';
+    : 'Open the product roadmap';
   return { key: 'r', word: 'roadmap', action: 'open_roadmap', route: '/workflow-roadmap open', label };
 }
+
+/** @type {StartMenuKey} */
+const HELP_ROW = { key: 'h', word: 'help', action: 'open_help', route: '/workflow-help', label: 'How the workflows work' };
 
 // ---------------------------------------------------------------------------
 // Overview
@@ -229,6 +232,7 @@ function startMenu(detail) {
     options.push({ key: 'v', word: 'view', action: 'view_completed', route: null, label: 'View completed & cancelled work units' });
   }
   options.push({ key: 'm', word: 'manage', action: 'manage', route: null, label: "Manage a work unit's lifecycle" });
+  options.push(HELP_ROW);
 
   const lines = ['What would you like to do?', ''];
   for (const e of numbered) {
@@ -312,6 +316,7 @@ function emptyMenu(detail) {
   if (detail.completed_count > 0 || detail.cancelled_count > 0) {
     options.push({ key: 'v', word: 'view', action: 'view_completed', route: null, label: 'View completed & cancelled work units' });
   }
+  options.push(HELP_ROW);
 
   const lines = ['What would you like to start?', ''];
   for (const o of options) {
@@ -705,24 +710,6 @@ function absorbTargetMenu(md) {
 }
 
 /**
- * The absorb name-confirm gate, served by `render absorb-name-gate` — the
- * default topic name (the feature's own) offered before the collision check.
- * @param {ManageDetail} md @param {string} epic
- * @returns {string}
- */
-function absorbNameGate(md, epic) {
-  return labelled(
-    'MENU: absorb name gate',
-    "emit verbatim as markdown, then STOP for the user's response",
-    menu(`Topic name in **${titlecase(epic)}**: **${md.work_unit}**`, [
-      cmdOption('y', 'yes', 'Use this name'),
-      cmdOption('b', 'back', 'Return'),
-      promptOption('Rename', 'Enter a different name (kebab-case)'),
-    ], { question: 'Is this name okay?' }),
-  );
-}
-
-/**
  * The absorb proceed gate, served by `render absorb-confirm-gate` beneath
  * the summary the calling prose renders — the transaction's consent.
  * @returns {string}
@@ -862,7 +849,6 @@ module.exports = {
   manageListView,
   manageUnitView,
   absorbTargetMenu,
-  absorbNameGate,
   absorbConfirmGate,
   planTopicsMenu,
   completedView,
