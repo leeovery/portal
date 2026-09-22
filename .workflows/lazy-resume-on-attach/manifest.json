@@ -213,7 +213,7 @@
         "lazy-resume-on-attach": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
           "consolidation_gate_mode": "gated",
           "fix_attempts": 0,
@@ -248,8 +248,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 3,
-          "current_task": "lazy-resume-on-attach-4-1",
+          "current_phase": 4,
+          "current_task": "lazy-resume-on-attach-4-2",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -274,7 +274,8 @@
             "lazy-resume-on-attach-3-7",
             "lazy-resume-on-attach-3-8",
             "lazy-resume-on-attach-3-9",
-            "lazy-resume-on-attach-3-10"
+            "lazy-resume-on-attach-3-10",
+            "lazy-resume-on-attach-4-1"
           ],
           "staging": {
             "p1": {
@@ -305,6 +306,30 @@
             1,
             2,
             3
+          ],
+          "bank": [
+            {
+              "task": "lazy-resume-on-attach-4-1",
+              "source": "reviewer",
+              "summary": "Derive cmd/state_test.go's hand-written hidden-state-child name lists from stateChildCommands rather than restating them.",
+              "failure": "A new hidden state subcommand is added to the compile-checked stateChildCommands and silently escapes the two enumerations that have no catch-all, so the completions-leak guard and the argv-resolution guard stop covering the newest verbs. It ships green and is noticed either by a user tab-completing an internal verb or by a restored pane whose chain exec fails to resolve — which closes the pane. This task already hit it (resume-draw missing from both), and tasks 4.2 and 4.4 add two more chain subcommands that will hit it again.",
+              "detail": "names at cmd/state_test.go:261 (TestStateChildrenRemainInvocableByArgv) and hidden at cmd/state_test.go:287 (TestStateHiddenSubcommandsAbsentFromShellCompletions) are complete-set lists with no catch-all; hidden at :78 is the same list but backed by an unexpected-command catch-all, and :103 is deliberately partial. Replace the first two with a loop over stateChildCommands reading c.Name().",
+              "files": [
+                "cmd/state_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-1",
+              "source": "reviewer",
+              "summary": "Fold the resume-chain commands' flag reset into resetRootCmd rather than leaving a second, locally-called reset helper.",
+              "failure": "A cmd test that drives a resume-chain subcommand through resetRootCmd() + Execute inherits flag values left Changed on the shared command instance by an earlier Execute, so its assertion passes while checking nothing. Demonstrated, not hypothetical — the executor hit it in this task (the --command refusal subtest passed vacuously when run after its sibling) and patched it with a helper local to one test file. Tasks 4.2 and 4.4 register resume-wait and resume-recover with the same flag set and the same shared-instance hazard, and whoever writes them has no signal the reset exists or must be called. It ships green; the defect it hides surfaces as a resume-chain command parsing a stale payload in a restored pane.",
+              "detail": "resetRootCmd (cmd/root_test.go:20-95) is the canonical per-command flag reset and already carries stateHydrateCmd's three flags at :90-95. resetResumeDrawFlags (cmd/state_resume_draw_test.go:348) is a second home for that same responsibility, reachable only from its own file. A VisitAll-over-stateChildCommands loop inside resetRootCmd would cover the hydrate flags, resume-draw, and the two chain commands still to land, in one edit. Pairs naturally with the already-banked stateChildCommands derivation for cmd/state_test.go.",
+              "files": [
+                "cmd/root_test.go",
+                "cmd/state_resume_draw_test.go",
+                "cmd/state_test.go"
+              ]
+            }
           ]
         }
       }
