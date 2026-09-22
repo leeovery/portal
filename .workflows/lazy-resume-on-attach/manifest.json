@@ -249,7 +249,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 4,
-          "current_task": "lazy-resume-on-attach-4-7",
+          "current_task": null,
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -280,7 +280,8 @@
             "lazy-resume-on-attach-4-3",
             "lazy-resume-on-attach-4-4",
             "lazy-resume-on-attach-4-5",
-            "lazy-resume-on-attach-4-6"
+            "lazy-resume-on-attach-4-6",
+            "lazy-resume-on-attach-4-7"
           ],
           "staging": {
             "p1": {
@@ -414,6 +415,42 @@
               "detail": "cmd/state_hydrate_test.go:1667 and :1727. The whole remedy is renaming both to name the hand-off rather than the lookup. Raised by the 4-5 reviewer as an observation rather than a finding, since finding-floor.md excludes test-file naming; recorded here so the boundary pass can confirm or drop it against the final state.",
               "files": [
                 "cmd/state_hydrate_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-7",
+              "source": "executor",
+              "summary": "The measured resting cost of a waiting pane is ~10 MB, not the ~2 MB the specification estimates — a spec claim the landed work now has a real measurement for.",
+              "failure": "Spec §4.2 carries ~2 MB as an estimate for the waiter's resident cost, and the memory case for the whole feature rests on it. The integration suite now measures the real resting tree at 9.9-10.3 MB combined (~2.1 MB parked sh -c + ~8.0 MB portal state resume-wait), stable across five runs. At 41 waiting panes that is ~410 MB rather than ~80 MB. Not a defect — the draw hands off cleanly, exactly one shell and one waiter, no resume-draw survives, and the asserted 22 MB ceiling holds — but the figure the design argument quotes is 4x off, and a later reader weighing the feature's cost against the eager path would be reasoning from the estimate.",
+              "detail": "Measured by internal/restore/lazy_resume_panel_integration_test.go, which reports the combined rss via t.Logf on every run whether it passes or fails. The spec flags ~2 MB as an estimate rather than a measurement, so this is a claim the landed work can now replace rather than a contradiction. The boundary pass reports spec claims the work reveals as defective; this is one.",
+              "files": [
+                ".workflows/lazy-resume-on-attach/specification/lazy-resume-on-attach/specification.md",
+                "internal/restore/lazy_resume_panel_integration_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-7",
+              "source": "reviewer",
+              "summary": "Route TestNoParkedShWrapperPostRestore's machine-wide pgrep onto the pane-scoped process read this task introduced.",
+              "failure": "internal/restore/exit_closes_pane_integration_test.go:76 enumerates every process on the machine (pgrep -fl \"sh -c.*state hydrate.*<paneKey>\"), which is the read CLAUDE.md's ABSOLUTE INVARIANT forbids a test from taking — today it is saved only by a pane key derived from the test's own name, so any loosening of that pattern silently starts reading the developer's live restored panes, noticed as a spurious failure (or a false pass) that nothing in the test controls. The same file also sleeps exitClosesPaneBudget unconditionally (line 71) where a bounded poll on the tree would do.",
+              "detail": "internal/restore/exit_closes_pane_integration_test.go:61-97 vs internal/restore/lazy_resume_panel_integration_test.go:611-638. A scoped reading (readProcessTree/collectDescendants/childPIDs, rooted at the fixture's own #{pane_pid}) now exists in the same package, so the consolidation is a re-point rather than new machinery. Reaches another task's output (an existing suite), hence banked rather than raised as an issue.",
+              "files": [
+                "internal/restore/exit_closes_pane_integration_test.go",
+                "internal/restore/lazy_resume_panel_integration_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-7",
+              "source": "reviewer",
+              "summary": "The frozen-pane capture cycle's ordering invariant is restated in three places with no shared implementation.",
+              "failure": "A later change to the daemon's cycle — a new step, a reordering, or a change to what the dump skips — lands in captureAndCommit alone. commit-now and the integration fixture go on running the old sequence; the fixture keeps passing while asserting against a route production no longer takes, so the very loss it exists to catch (a frozen pane's transcript reclaimed or overwritten) ships silently. The user notices it as an empty restored pane two reboots after a pane was left waiting, with no copy of the transcript anywhere. Not hypothetical: attempt 1 of task 4-7 shipped a copy missing two of the four steps and every assertion still passed.",
+              "detail": "cmd/state_daemon.go:243-310 holds the full cycle (CaptureStructure → RefilePendingScrollback → dump skipping skipSet∪pending → Commit); cmd/state_commit_now.go:120-132 holds the structural-only variant of the same ordering rule; internal/restore/lazy_resume_panel_integration_test.go:375-422 holds a third hand-written copy. The rule that cannot be violated silently — the pending set must drive the refile before anything commits — is encoded three times and checked nowhere. A shared ordered helper (or at minimum a state-level composite of capture+refile that a caller cannot commit around) would make the omission unrepresentable, the way restoretest's constructors do for the Exe field.",
+              "files": [
+                "cmd/state_daemon.go",
+                "cmd/state_commit_now.go",
+                "internal/state/scrollback.go",
+                "internal/state/commit.go",
+                "internal/restore/lazy_resume_panel_integration_test.go"
               ]
             }
           ]
