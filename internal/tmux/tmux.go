@@ -347,6 +347,27 @@ func (c *Client) UnsetPaneOption(target Target, name string) error {
 	return nil
 }
 
+// ReadPaneOption reads one pane-scoped tmux option, answering the empty string
+// for an option the pane does not carry and an error for a target no live pane
+// answers to.
+//
+// The format read cannot make that distinction alone: display-message answers a
+// target no live pane answers to with exit 0 and an empty expansion, which is
+// byte-for-byte what an unset option on a live pane reads as. The probe that
+// discriminates them must name no option, since show-options rejects an option
+// the pane does not carry with the same exit status it rejects a missing pane.
+func (c *Client) ReadPaneOption(target Target, name string) (string, error) {
+	if _, err := c.cmd.Run("show-options", "-p", "-t", string(target)); err != nil {
+		return "", fmt.Errorf("no pane answers to %q: %w", target, err)
+	}
+
+	value, err := c.cmd.Run("display-message", "-p", "-t", string(target), "-F", "#{"+name+"}")
+	if err != nil {
+		return "", fmt.Errorf("failed to read pane option %s on %s: %w", name, target, err)
+	}
+	return value, nil
+}
+
 // SetSessionOption sets a tmux option scoped to one session. Callers must not
 // route global (-g) options through it: the -t scoping is what keeps the write
 // out of the global namespace.
