@@ -249,7 +249,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 4,
-          "current_task": "lazy-resume-on-attach-4-4",
+          "current_task": "lazy-resume-on-attach-4-5",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -277,7 +277,8 @@
             "lazy-resume-on-attach-3-10",
             "lazy-resume-on-attach-4-1",
             "lazy-resume-on-attach-4-2",
-            "lazy-resume-on-attach-4-3"
+            "lazy-resume-on-attach-4-3",
+            "lazy-resume-on-attach-4-4"
           ],
           "staging": {
             "p1": {
@@ -377,6 +378,18 @@
                 "cmd/state_hydrate.go",
                 "cmd/state_resume_wait.go",
                 "internal/hooks/lookup.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-4",
+              "source": "executor",
+              "summary": "ResolveHookKey and the new ReadPaneOption each carry their own copy of the measured probe-then-read discrimination, in the same package.",
+              "failure": "The two copies encode one tmux fact (a format read answers a gone pane with exit 0 and an empty string, so the option-less show-options probe is what separates \"gone\" from \"unset\"). If someone simplifies either copy to a lone display-message — it looks redundant and every test that only uses live panes stays green — a gone pane starts reading as a live pane carrying no option. On ResolveHookKey's path that turns portal hook set against a vanished pane from a clean failure into a mint-stamp-write against nothing, which is the junk-key class of bug the probe was added to close; on ReadPaneOption's path a gone pane reads as \"answered\" and the chain tail silently declines to recover it. Noticed only as a stray hooks.json entry or a pane that closed, long after the edit.",
+              "detail": "ResolveHookKey (internal/tmux/tmux.go:250-263) could be expressed as ReadPaneOption(paneID, state.PortalPaneIDOption) — identical two-read sequence, differing only in the error wording and in passing the format positionally rather than under -F (behaviourally the same to tmux). Consolidating leaves one declaration of the rule and one place the probe can be wrongly removed from.",
+              "files": [
+                "internal/tmux/tmux.go",
+                "internal/tmux/resolve_hookkey_test.go",
+                "internal/tmux/pane_option_test.go"
               ]
             }
           ]
