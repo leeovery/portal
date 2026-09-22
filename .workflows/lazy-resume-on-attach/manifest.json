@@ -249,7 +249,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 4,
-          "current_task": "lazy-resume-on-attach-4-3",
+          "current_task": "lazy-resume-on-attach-4-4",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -276,7 +276,8 @@
             "lazy-resume-on-attach-3-9",
             "lazy-resume-on-attach-3-10",
             "lazy-resume-on-attach-4-1",
-            "lazy-resume-on-attach-4-2"
+            "lazy-resume-on-attach-4-2",
+            "lazy-resume-on-attach-4-3"
           ],
           "staging": {
             "p1": {
@@ -341,6 +342,41 @@
                 "cmd/state_resume_draw.go",
                 "cmd/state_resume_wait.go",
                 "cmd/state_resume_chain.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-3",
+              "source": "executor",
+              "summary": "The store-lookup degradation rule is now written twice, once per resume path.",
+              "failure": "The eager path (execShellOrHookAndExit) and the lazy path (resumeCommandAtAnswer) each decide independently that a miss, an empty command or a read error means a bare shell, and each emits its own hook lookup DEBUG / lookup on-resume hook failed WARN. A later change to one — a new result value, a mode check, a different fallback — compiles and leaves both suites green, so a pane resumed from the panel behaves differently from the same pane resumed at hydrate, and the user sees it only as \"my hook ran on reboot but not when I pressed Enter\".",
+              "detail": "cmd/state_hydrate.go:174-198 (execShellOrHookAndExit) and cmd/state_resume_wait.go:122-139 (resumeCommandAtAnswer) encode the same three-branch rule over two different config types; a shared \"logger + hook key\" shape would give it one home. Phase 5's discard path reads the same store again and may add a third site.",
+              "files": [
+                "cmd/state_hydrate.go",
+                "cmd/state_resume_wait.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-3",
+              "source": "reviewer",
+              "summary": "The line that lifts the freeze has no end-to-end verification, and cannot get one until the arming side exists.",
+              "failure": "state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane)) is exercised by nothing. internal/state pins the marker function against a mock writer and internal/tmux pins the option write, but the composition is untested, and its two silent mis-wirings both compile: cfg.PaneKey in place of cfg.Pane (plain strings on the same payload, registered as adjacent flags on the same command), or tmux.PaneTarget in place of tmux.PaneIDTarget (both return tmux.Target). Either yields a target no pane answers to — Enter then loops the panel forever with a tmux error on its report row — or, worse, a target that does answer, clearing another pane's marker while this pane is handed over still frozen. That last state is precisely what §7.2 exists to prevent: the pane's saved scrollback frozen for the rest of its life, every reboot restoring the transcript it held when it paused, with no sweep that reaches a pane option and no waiter left to report it. The user notices weeks later, as a session that restores stale content.",
+              "detail": "cmd/state_resume_wait.go:223-225 (the ClearMarker closure). No unit-lane route exists because the closure hardcodes tmux.DefaultClient(); no integration route exists because nothing in production sets the marker yet (state.SetResumePendingMarker has no production caller). Once arming lands, one integration test over a tmuxtest socket closes it for both answer paths at once — mark via Socket.MarkResumePending, answer the wait, assert Socket.ReadResumePending reads empty — since Phase 5's discard clears the same marker through the same seam.",
+              "files": [
+                "cmd/state_resume_wait.go",
+                "internal/tmuxtest/stamp.go",
+                "internal/state/markers.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-3",
+              "source": "reviewer",
+              "summary": "Sharpening of the store-degradation entry: the two sites have ALREADY diverged on a Found result carrying an empty command.",
+              "failure": "execShellOrHookAndExit treats Found with an empty command as a hit and would exec sh -c \"; exec $SHELL\", while resumeCommandAtAnswer treats it as a miss. The divergence is currently harmless only because LookupOnResume never produces that state (internal/hooks/lookup.go:36-39 degrades a stored value carrying no command to the zero result) — which is evidence for consolidating the rule rather than against it. A change to that degradation makes the two paths disagree immediately.",
+              "detail": "Attaches to the executor-banked entry naming cmd/state_hydrate.go:174-198 and cmd/state_resume_wait.go:122-139. Consequence to note when folding: the \"empty command\" acceptance criterion of task 4-3 is satisfiable only through a seam-level fake, since that branch is unreachable via the production lookup.",
+              "files": [
+                "cmd/state_hydrate.go",
+                "cmd/state_resume_wait.go",
+                "internal/hooks/lookup.go"
               ]
             }
           ]
