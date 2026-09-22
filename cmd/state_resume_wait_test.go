@@ -14,7 +14,6 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
-	"github.com/spf13/pflag"
 )
 
 // resumeWaitProbe records what the wait hands to its seams, so a test asserts on
@@ -483,15 +482,6 @@ func keyName(key string) string {
 	return key
 }
 
-// Cobra leaves a flag Changed on the shared command instance between Execute
-// calls, so each run starts from the defaults.
-func resetResumeWaitFlags() {
-	stateResumeWaitCmd.Flags().VisitAll(func(f *pflag.Flag) {
-		_ = f.Value.Set(f.DefValue)
-		f.Changed = false
-	})
-}
-
 func TestStateResumeWaitCommand(t *testing.T) {
 	t.Run("it parses the chain argv into the payload it was composed from", func(t *testing.T) {
 		payload := resumeChainPayload{
@@ -511,7 +501,6 @@ func TestStateResumeWaitCommand(t *testing.T) {
 		})
 
 		resetRootCmd()
-		resetResumeWaitFlags()
 		rootCmd.SetOut(new(bytes.Buffer))
 		errBuf := new(bytes.Buffer)
 		rootCmd.SetErr(errBuf)
@@ -529,7 +518,6 @@ func TestStateResumeWaitCommand(t *testing.T) {
 		withFuncSeam(t, &resumeWaitRunFunc, func(resumeWaitConfig) error { return nil })
 
 		resetRootCmd()
-		resetResumeWaitFlags()
 		rootCmd.SetOut(new(bytes.Buffer))
 		rootCmd.SetErr(new(bytes.Buffer))
 		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--pane", "%7"})

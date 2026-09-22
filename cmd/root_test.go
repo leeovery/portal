@@ -89,11 +89,14 @@ func resetRootCmd() {
 		_ = f.Value.Set("false")
 		f.Changed = false
 	}
-	for _, name := range []string{"fifo", "file", "hook-key"} {
-		if f := stateHydrateCmd.Flags().Lookup(name); f != nil {
-			_ = f.Value.Set("")
+	// Cobra's required-flag check is satisfied by a flag left Changed on the
+	// shared command instance by an earlier Execute, so a refusal subtest would
+	// pass while checking nothing.
+	for _, c := range stateChildCommands {
+		c.Flags().VisitAll(func(f *pflag.Flag) {
+			_ = f.Value.Set(f.DefValue)
 			f.Changed = false
-		}
+		})
 	}
 }
 
@@ -700,4 +703,77 @@ func TestExecute_NonFatalErrorWritesNothingToFatalStream(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("fatalErrorStderr unexpectedly written: %q", stderr.String())
 	}
+}
+
+func TestResetRootCmdClearsStateChildFlags(t *testing.T) {
+	t.Run("it clears every flag on every state child", func(t *testing.T) {
+		reset := 0
+		for _, c := range stateChildCommands {
+			c.Flags().VisitAll(func(f *pflag.Flag) {
+				if err := f.Value.Set(nonDefaultFlagValue(t, f)); err != nil {
+					t.Fatalf("setting %s --%s to a non-default: %v", c.Name(), f.Name, err)
+				}
+				f.Changed = true
+				reset++
+			})
+		}
+
+		resetRootCmd()
+
+		for _, c := range stateChildCommands {
+			c.Flags().VisitAll(func(f *pflag.Flag) {
+				if got := f.Value.String(); got != f.DefValue {
+					t.Errorf("%s --%s = %q after resetRootCmd, want its default %q", c.Name(), f.Name, got, f.DefValue)
+				}
+				if f.Changed {
+					t.Errorf("%s --%s is still Changed after resetRootCmd", c.Name(), f.Name)
+				}
+			})
+		}
+		if reset == 0 {
+			t.Fatal("no state child declares a flag; the reset was asserted over nothing")
+		}
+	})
+
+	t.Run("it refuses a resume-wait naming no command after a sibling set one", func(t *testing.T) {
+		withFuncSeam(t, &resumeWaitRunFunc, func(resumeWaitConfig) error { return nil })
+
+		payload := resumeChainPayload{Command: "make deploy", HookKey: "tok123", Pane: "%7", PaneKey: "proj-a1b2:0.1"}
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		errBuf := new(bytes.Buffer)
+		rootCmd.SetErr(errBuf)
+		rootCmd.SetArgs(resumeChainArgv("portal", resumeWaitSubcommand, payload)[1:])
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("executing the composed argv: %v\nstderr: %s", err, errBuf)
+		}
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--pane", "%7"})
+		if err := rootCmd.Execute(); err == nil {
+			t.Error("executing resume-wait with no --command succeeded; the sibling's --command outlived the reset")
+		}
+	})
+}
+
+func nonDefaultFlagValue(t *testing.T, f *pflag.Flag) string {
+	t.Helper()
+	switch f.Value.Type() {
+	case "bool":
+		if f.DefValue == "true" {
+			return "false"
+		}
+		return "true"
+	case "int":
+		if f.DefValue == "7" {
+			return "9"
+		}
+		return "7"
+	case "string":
+		return "set-by-a-prior-run"
+	}
+	t.Fatalf("no non-default value known for --%s of type %s", f.Name, f.Value.Type())
+	return ""
 }

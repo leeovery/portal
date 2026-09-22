@@ -13,7 +13,6 @@ import (
 
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
-	"github.com/spf13/pflag"
 )
 
 // resumeRecoverProbe records what the tail hands to its seams, so a test asserts
@@ -281,15 +280,6 @@ func TestRunResumeRecover_FailedClearRecord(t *testing.T) {
 	})
 }
 
-// Cobra leaves a flag Changed on the shared command instance between Execute
-// calls, so each run starts from the defaults.
-func resetResumeRecoverFlags() {
-	stateResumeRecoverCmd.Flags().VisitAll(func(f *pflag.Flag) {
-		_ = f.Value.Set(f.DefValue)
-		f.Changed = false
-	})
-}
-
 func TestStateResumeRecoverCommand(t *testing.T) {
 	t.Run("it parses the chain argv the waiter parks it with", func(t *testing.T) {
 		payload := resumeChainPayload{
@@ -306,7 +296,6 @@ func TestStateResumeRecoverCommand(t *testing.T) {
 		})
 
 		resetRootCmd()
-		resetResumeRecoverFlags()
 		rootCmd.SetOut(new(bytes.Buffer))
 		errBuf := new(bytes.Buffer)
 		rootCmd.SetErr(errBuf)

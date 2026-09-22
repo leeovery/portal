@@ -17,7 +17,6 @@ import (
 	"github.com/leeovery/portal/internal/themetest"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/leeovery/portal/internal/xdg"
-	"github.com/spf13/pflag"
 )
 
 // resumeDrawProbe records everything the draw hands to its seams, so a test can
@@ -343,15 +342,6 @@ func TestPaneDrawNomination(t *testing.T) {
 	})
 }
 
-// Cobra's required-flag check is satisfied by a flag left Changed on the shared
-// command instance by an earlier Execute, so each run starts from the defaults.
-func resetResumeDrawFlags() {
-	stateResumeDrawCmd.Flags().VisitAll(func(f *pflag.Flag) {
-		_ = f.Value.Set(f.DefValue)
-		f.Changed = false
-	})
-}
-
 // The command is driven end to end because the flag names live in two places —
 // what resumeChainArgv emits and what the command registers — and a
 // transposition between them compiles.
@@ -374,7 +364,6 @@ func TestStateResumeDrawCommand(t *testing.T) {
 		})
 
 		resetRootCmd()
-		resetResumeDrawFlags()
 		rootCmd.SetOut(new(bytes.Buffer))
 		errBuf := new(bytes.Buffer)
 		rootCmd.SetErr(errBuf)
@@ -396,7 +385,6 @@ func TestStateResumeDrawCommand(t *testing.T) {
 		withFuncSeam(t, &resumeDrawRunFunc, func(resumeDrawConfig) error { return nil })
 
 		resetRootCmd()
-		resetResumeDrawFlags()
 		rootCmd.SetOut(new(bytes.Buffer))
 		rootCmd.SetErr(new(bytes.Buffer))
 		rootCmd.SetArgs([]string{"state", resumeDrawSubcommand, "--pane", "%7"})
