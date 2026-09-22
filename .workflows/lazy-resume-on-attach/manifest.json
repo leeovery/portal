@@ -249,7 +249,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 4,
-          "current_task": "lazy-resume-on-attach-4-2",
+          "current_task": "lazy-resume-on-attach-4-3",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -275,7 +275,8 @@
             "lazy-resume-on-attach-3-8",
             "lazy-resume-on-attach-3-9",
             "lazy-resume-on-attach-3-10",
-            "lazy-resume-on-attach-4-1"
+            "lazy-resume-on-attach-4-1",
+            "lazy-resume-on-attach-4-2"
           ],
           "staging": {
             "p1": {
@@ -328,6 +329,18 @@
                 "cmd/root_test.go",
                 "cmd/state_resume_draw_test.go",
                 "cmd/state_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-4-2",
+              "source": "reviewer",
+              "summary": "The resume chain's hand-off block (resolve exe → compose argv → exec INFO → ExecSelf) is now authored twice and Phase 4/5 will add three more copies.",
+              "failure": "The \"exec INFO is the statement immediately before the exec\" rule is enforced by nothing — every test fakes ExecSelf, so a later site that emits the marker after the exec, or omits it, fails no test and produces no symptom until an operator reconstructs why a pane fell through to a shell and finds the chain's last image unrecorded in portal.log. The same consolidation fixes the doubled prefix the empty-path branch produces today (\"resolve portal executable: resolve portal executable: empty path\"), since both call sites wrap an error that already carries that prefix.",
+              "detail": "cmd/state_resume_draw.go:56-68 and cmd/state_resume_wait.go:96-109 are the two copies; the natural home for one resumeHandOff(logger, execSelf, subcommand, payload) is cmd/state_resume_chain.go, beside resumeChainArgv/resumeChainExe, where the empty-path error string (state_resume_chain.go:81) can lose its duplicate prefix at the same time. Worth taking at the phase boundary, once 4.3, 4.4 and Phase 5 have added their sites and the shape has stopped moving.",
+              "files": [
+                "cmd/state_resume_draw.go",
+                "cmd/state_resume_wait.go",
+                "cmd/state_resume_chain.go"
               ]
             }
           ]
