@@ -10,6 +10,9 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/x/term"
+	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +31,12 @@ type resumeWaitConfig struct {
 	IsTerminal func() bool
 	MakeRaw    func() (restore func(), err error)
 	ExecSelf   func(prog string, args []string)
+
+	// ClearMarker lifts the pane's freeze; LookupResume reads the registration
+	// at the moment the key is pressed rather than carrying what the panel was
+	// drawn from, since the store can have changed over an indefinite wait.
+	ClearMarker  func() error
+	LookupResume func(hookKey string) (hooks.OnResume, error)
 
 	// Set by runResumeWait from MakeRaw, so an answer hands the pane on in a
 	// cooked tty. An answer reached without a wait restores nothing.
@@ -80,8 +89,53 @@ func runResumeWait(cfg resumeWaitConfig) error {
 	}
 }
 
+// resumeAnswerEnter hands the pane back to its own transcript and starts what
+// the store holds now over it. The order is the protection: the pane leaves the
+// panel's screen first, so a saver tick landing mid-answer captures what is
+// really in the pane, and nothing runs while the marker stands, since a pane
+// handed over frozen stays frozen for the rest of its life with nothing left to
+// report it.
 func resumeAnswerEnter(cfg resumeWaitConfig) error {
-	return resumeRedraw(cfg)
+	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
+
+	if err := cfg.ClearMarker(); err != nil {
+		reported := cfg
+		reported.Report = err.Error()
+		return resumeRedraw(reported)
+	}
+
+	command := resumeCommandAtAnswer(cfg)
+	cfg.restore()
+
+	shell := resolveShell()
+	prog, args := shell, []string{shell}
+	if command != "" {
+		prog, args = hookExecArgs(command, shell)
+	}
+
+	// Must stay the statement immediately before the exec: the unbuffered writer
+	// puts the marker in the kernel before the process image is replaced.
+	cfg.Logger.Info("exec", "target", prog, "args", strings.Join(args, " "), "hook_present", command != "")
+	cfg.ExecSelf(prog, args)
+	return nil
+}
+
+// An entry that has gone and a store that cannot be read both answer with no
+// command, which drops the pane to a plain shell: the marker is already cleared,
+// so the pane is no longer waiting whatever the read returned.
+func resumeCommandAtAnswer(cfg resumeWaitConfig) string {
+	result, err := cfg.LookupResume(cfg.HookKey)
+	if err != nil {
+		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "error", "error", err)
+		cfg.Logger.Warn("lookup on-resume hook failed", "hook_key", cfg.HookKey, "error", err)
+		return ""
+	}
+	if !result.Found || result.Command == "" {
+		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
+		return ""
+	}
+	cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "hit")
+	return result.Command
 }
 
 func resumeAnswerDiscard(cfg resumeWaitConfig) error {
@@ -89,10 +143,10 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 }
 
 // resumeRedraw hands the pane to a fresh draw of the screen it is already
-// showing, carrying the payload unchanged. A binary that cannot be resolved ends
-// the wait as a read error does: the pending marker is still set, so the chain's
-// tail recovers the pane to a usable shell rather than leaving one whose keys
-// silently do nothing.
+// showing, carrying whatever payload its caller hands it. A binary that cannot
+// be resolved ends the wait as a read error does: the pending marker is still
+// set, so the chain's tail recovers the pane to a usable shell rather than
+// leaving one whose keys silently do nothing.
 func resumeRedraw(cfg resumeWaitConfig) error {
 	exe, err := resumeChainExe()
 	if err != nil {
@@ -107,6 +161,16 @@ func resumeRedraw(cfg resumeWaitConfig) error {
 	cfg.Logger.Info("exec", "target", exe, "args", strings.Join(argv, " "))
 	cfg.ExecSelf(exe, argv)
 	return nil
+}
+
+// A store that cannot even be resolved reads as no registration, which drops
+// the pane to a plain shell exactly as an unreadable one does.
+func lookupResumeRegistration(hookKey string) (hooks.OnResume, error) {
+	store, _ := loadHookStore()
+	if store == nil {
+		return hooks.OnResume{}, nil
+	}
+	return store.LookupOnResume(hookKey, hooks.ViaHydrate)
 }
 
 func stdinIsTerminal() bool {
@@ -155,6 +219,10 @@ var stateResumeWaitCmd = &cobra.Command{
 			IsTerminal: stdinIsTerminal,
 			MakeRaw:    makeStdinRaw,
 			ExecSelf:   defaultExecShell,
+			ClearMarker: func() error {
+				return state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane))
+			},
+			LookupResume: lookupResumeRegistration,
 		})
 	},
 }

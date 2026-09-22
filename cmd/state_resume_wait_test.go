@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 	"github.com/spf13/pflag"
@@ -31,6 +32,26 @@ type resumeWaitProbe struct {
 	// Restores already run when the exec happened, so a restore that moved
 	// below the hand-off is visible as a zero reading.
 	restoredAtExec int
+
+	// order names each seam in the sequence it was reached, so an answer whose
+	// steps ran out of order fails on the sequence rather than on three
+	// independent call counts.
+	order      []string
+	clearErr   error
+	clearCalls int
+	lookup     func(hookKey string) (hooks.OnResume, error)
+	lookupKeys []string
+}
+
+// orderedWriter records that the pane was written to before it passes the bytes
+// on, so the leave sequence takes its place in the same sequence as the seams.
+type orderedWriter struct {
+	probe *resumeWaitProbe
+}
+
+func (w orderedWriter) Write(p []byte) (int, error) {
+	w.probe.order = append(w.probe.order, "stdout")
+	return w.probe.stdout.Write(p)
 }
 
 func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPayload, in io.Reader) resumeWaitConfig {
@@ -39,7 +60,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 	p.sink = sink
 	return resumeWaitConfig{
 		resumeChainPayload: payload,
-		Stdout:             &p.stdout,
+		Stdout:             orderedWriter{probe: p},
 		In:                 in,
 		Logger:             logger,
 		IsTerminal:         func() bool { return true },
@@ -47,7 +68,21 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.rawCalls++
 			return func() { p.restores++ }, nil
 		},
+		ClearMarker: func() error {
+			p.order = append(p.order, "clear")
+			p.clearCalls++
+			return p.clearErr
+		},
+		LookupResume: func(hookKey string) (hooks.OnResume, error) {
+			p.order = append(p.order, "lookup")
+			p.lookupKeys = append(p.lookupKeys, hookKey)
+			if p.lookup != nil {
+				return p.lookup(hookKey)
+			}
+			return hooks.OnResume{}, nil
+		},
 		ExecSelf: func(prog string, args []string) {
+			p.order = append(p.order, "exec")
 			p.execProg = prog
 			p.execArgs = args
 			p.execCalls++
@@ -123,18 +158,19 @@ func assertNoHandOff(t *testing.T, p *resumeWaitProbe) {
 }
 
 func TestRunResumeWait_ActingKeys(t *testing.T) {
-	t.Run("it hands the pane over on Enter", func(t *testing.T) {
+	t.Run("it resumes the pane on Enter", func(t *testing.T) {
 		for _, key := range []string{"\r", "\n"} {
 			t.Run(keyName(key), func(t *testing.T) {
 				var probe resumeWaitProbe
 				payload := samplePayload()
 				payload.Report = "could not clear the pending marker"
 				payload.Width, payload.Height = 100, 30
+				probe.lookup = foundHook("make deploy")
 
 				if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, key))); err != nil {
 					t.Fatalf("runResumeWait() error = %v", err)
 				}
-				assertHandOff(t, &probe, payload)
+				assertHookHandOff(t, &probe, "make deploy")
 			})
 		}
 	})
@@ -166,11 +202,16 @@ func TestRunResumeWait_ActingKeys(t *testing.T) {
 					var probe resumeWaitProbe
 					payload := samplePayload()
 					payload.Width, payload.Height = size.w, size.h
+					probe.lookup = foundHook(payload.Command)
 
 					if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, key))); err != nil {
 						t.Fatalf("runResumeWait() error = %v", err)
 					}
-					assertHandOff(t, &probe, payload)
+					if key == "d" {
+						assertHandOff(t, &probe, payload)
+						return
+					}
+					assertHookHandOff(t, &probe, payload.Command)
 				})
 			}
 		}

@@ -82,3 +82,11 @@ func resumeChainExe() (string, error) {
 	}
 	return exe, nil
 }
+
+// hookExecArgs composes the argv a pane's registered command is run as. The
+// command occupies its own argv slot so sh's parser handles any embedded quotes
+// - Portal never interpolates it - and the trailing exec leaves the pane on its
+// own shell, so it closes on the first exit.
+func hookExecArgs(command, shell string) (prog string, args []string) {
+	return "/bin/sh", []string{"sh", "-c", command + "; exec " + shell}
+}

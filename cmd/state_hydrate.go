@@ -169,9 +169,8 @@ func resolveShell() string {
 	return shell
 }
 
-// The hook command occupies its own argv slot so sh's parser handles any
-// embedded quotes - Portal never interpolates it. A lookup failure degrades to a
-// bare shell so the pane stays usable when hooks.json is unreadable.
+// A lookup failure degrades to a bare shell so the pane stays usable when
+// hooks.json is unreadable.
 func execShellOrHookAndExit(cfg hydrateConfig) {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	if cfg.HookStore == nil {
@@ -192,12 +191,10 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 		return
 	}
 	cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "hit")
-	shell := resolveShell()
-	chained := onResume.Command + "; exec " + shell
-	args := []string{"sh", "-c", chained}
+	prog, args := hookExecArgs(onResume.Command, resolveShell())
 	// Must stay the statement immediately before the exec, as in execShellAndExit.
-	cfg.Logger.Info("exec", "target", "/bin/sh", "args", strings.Join(args, " "), "hook_present", true)
-	cfg.ExecShell("/bin/sh", args)
+	cfg.Logger.Info("exec", "target", prog, "args", strings.Join(args, " "), "hook_present", true)
+	cfg.ExecShell(prog, args)
 }
 
 // Clearing the skeleton marker is the recovery: the FIFO is already unlinked, so
