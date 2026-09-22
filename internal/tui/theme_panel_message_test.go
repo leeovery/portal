@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -463,4 +464,67 @@ func TestPanelMessage_Colourless(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A drop-in slug the wrap over-packs: it stands in for the first panel message
+// to carry a slug the copy does not budget for.
+const messageTestOverPackingCopy = flashWarningGlyph + " gruvbox_material_dark-hard"
+
+const (
+	messageTestMinInner = 20
+	messageTestMaxInner = 47
+)
+
+func messageTestRows(message string, inner int, wrap bool) []string {
+	return strings.Split(themePanelMessageText(message, inner, wrap), "\n")
+}
+
+func TestPanelMessage_RowsFitTheInnerWidth(t *testing.T) {
+	t.Run("it renders no panel message row wider than the inner width", func(t *testing.T) {
+		for inner := messageTestMinInner; inner <= messageTestMaxInner; inner++ {
+			rows := messageTestRows(messageTestOverPackingCopy, inner, true)
+			for i, row := range rows {
+				if got := lipgloss.Width(row); got > inner {
+					t.Errorf("at an inner width of %d row %d renders at %d cells: %q", inner, i, got, row)
+				}
+			}
+			want := 1
+			if lipgloss.Width(messageTestOverPackingCopy) > inner {
+				want = themePanelMessageWrapRows
+			}
+			if len(rows) != want {
+				t.Errorf("at an inner width of %d the slot costs %d rows, want %d: %q", inner, len(rows), want, rows)
+			}
+		}
+	})
+
+	t.Run("it leaves today's shipped copy reading the same", func(t *testing.T) {
+		for _, tc := range []struct{ name, message string }{
+			{"the confirm", messageTestConfirmCopy},
+			{"the failed commit", messageTestFailedCopy},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for inner := messageTestMinInner; inner <= messageTestMaxInner; inner++ {
+					want := bareWrapRows(tc.message, inner)
+					if len(want) > themePanelMessageWrapRows {
+						t.Fatalf("fixture: at an inner width of %d the copy wraps to %d rows, past the cap of %d — it no longer stands for copy the cap leaves alone",
+							inner, len(want), themePanelMessageWrapRows)
+					}
+					if got := messageTestRows(tc.message, inner, true); !slices.Equal(got, want) {
+						t.Errorf("at an inner width of %d the copy reads\n got: %q\nwant: %q", inner, got, want)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("it truncates rather than wraps below the wrap threshold", func(t *testing.T) {
+		inner := themePanelInnerWidth(themePanelMinWidth)
+		if got := messageTestRows(messageTestOverPackingCopy, inner, false); len(got) != 1 || !strings.HasSuffix(got[0], themeRowEllipsis) {
+			t.Errorf("with wrap off the slot reads %q, want one row truncated with %q", got, themeRowEllipsis)
+		}
+		if got := themePanelMessageText(messageTestOverPackingCopy, 0, true); got != ansi.Truncate(messageTestOverPackingCopy, 0, themeRowEllipsis) {
+			t.Errorf("at an inner width of 0 the slot reads %q, want the truncation %q", got, ansi.Truncate(messageTestOverPackingCopy, 0, themeRowEllipsis))
+		}
+	})
 }

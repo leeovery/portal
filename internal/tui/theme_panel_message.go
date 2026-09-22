@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -129,13 +128,7 @@ func themePanelMessageText(message string, inner int, wrap bool) string {
 	if !wrap || width == 0 {
 		return ansi.Truncate(message, width, themeRowEllipsis)
 	}
-	lines := strings.Split(ansi.Wrap(message, width, ""), "\n")
-	if len(lines) <= themePanelMessageWrapRows {
-		return strings.Join(lines, "\n")
-	}
-	head := lines[:themePanelMessageWrapRows-1]
-	tail := ansi.Truncate(strings.Join(lines[themePanelMessageWrapRows-1:], " "), width, themeRowEllipsis)
-	return strings.Join(append(slices.Clone(head), tail), "\n")
+	return strings.Join(wrapCapped(message, width, themePanelMessageWrapRows, themeRowEllipsis), "\n")
 }
 
 // Measures the real renderer so budget and render cannot drift.

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
 )
 
@@ -120,7 +119,7 @@ func renderNoticeBand(role noticeBandRole, message string, onBandText theme.Toke
 
 	// A pathologically narrow band degrades to a 1-cell column so the bar still renders.
 	avail := max(w-prefixWidth, 1)
-	wrapped := strings.Split(ansi.Wrap(message, avail, ""), "\n")
+	wrapped := wrappedLines(message, avail)
 
 	barGapWidth := lipgloss.Width(noticeBarGlyph) + 1
 	var contIndent string

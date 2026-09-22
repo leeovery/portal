@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -464,4 +466,135 @@ func TestNoticeBand_WrappedFrameHeightStaysTermH(t *testing.T) {
 	if len(lines) != m.termHeight {
 		t.Errorf("composed frame height = %d, want termHeight %d (wrapped band must not push the frame past termH)", len(lines), m.termHeight)
 	}
+}
+
+// Neither reproduces at today's copy: they stand in for the first band message
+// to quote a path or a bundle id.
+const (
+	bandPathMessage   = "couldn't read /Users/leeovery/Code/portal/internal/tui/testdata/vhs/reference/sessions-multi-select-active.png"
+	bandBundleMessage = "can't open new windows in Warp · dev.warp.Warp-Stable-x86_64 — nothing opened"
+)
+
+func bandShippedCopy() []struct{ name, message string } {
+	named := spawn.Identity{Name: "Warp", BundleID: "dev.warp.Warp-Stable"}
+	return []struct{ name, message string }{
+		{"the by-tag signpost", byTagSignpostText},
+		{"the remote no-op", spawn.UnsupportedNoopMessage(spawn.Identity{})},
+		{"the named no-op", spawn.UnsupportedNoopMessage(named)},
+		{"the remote multi-select refusal", multiSelectBlockedRemoteFlash},
+		{"the named multi-select refusal", multiSelectBlockedNamedFlash},
+	}
+}
+
+func bandRows(t *testing.T, message string, width int) []string {
+	t.Helper()
+	return strings.Split(renderNoticeBand(bandWarning, message, testDarkTheme(t).TextOnAttention, width, testDarkTheme(t), true), "\n")
+}
+
+func TestNoticeBand_RowsFitTheBand(t *testing.T) {
+	t.Run("it renders no band row wider than the band", func(t *testing.T) {
+		for _, tc := range []struct{ name, message string }{
+			{"a path", bandPathMessage},
+			{"a bundle id", bandBundleMessage},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				for width := 10; width <= 120; width++ {
+					for i, row := range bandRows(t, tc.message, width) {
+						if got := lipgloss.Width(row); got != width {
+							t.Errorf("at a band width of %d row %d renders at %d cells: %q", width, i, got, row)
+						}
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("it leaves today's shipped copy reading the same", func(t *testing.T) {
+		for _, tc := range bandShippedCopy() {
+			t.Run(tc.name, func(t *testing.T) {
+				for width := 20; width <= 120; width++ {
+					want := bareWrapRows(tc.message, noticeBandAvail(width))
+					got := make([]string, 0, len(want))
+					for _, row := range bandRows(t, tc.message, width) {
+						got = append(got, bandRowBody(row))
+					}
+					if !slices.Equal(got, want) {
+						t.Errorf("at a band width of %d the copy reads\n got: %q\nwant: %q", width, got, want)
+					}
+				}
+			})
+		}
+	})
+}
+
+// The message text a rendered row carries, with the bar, the status glyph and
+// the continuation indent taken off.
+func bandRowBody(row string) string {
+	body := strings.TrimLeft(strings.TrimPrefix(ansi.Strip(row), noticeBarGlyph), " ")
+	return strings.Trim(strings.TrimPrefix(body, flashWarningGlyph), " ")
+}
+
+// The rows the band rendered before it took the shared wrap.
+func bareWrapRows(message string, avail int) []string {
+	rows := strings.Split(ansi.Wrap(message, avail, ""), "\n")
+	for i, row := range rows {
+		rows[i] = strings.Trim(row, " ")
+	}
+	return rows
+}
+
+func noticeBandAvail(width int) int {
+	return max(width-(lipgloss.Width(noticeBarGlyph)+1+lipgloss.Width(flashWarningGlyph)+1), 1)
+}
+
+func TestNoticeBand_OverPackedMessageCostsAnotherRow(t *testing.T) {
+	// The width the wrap over-packs this message at.
+	const width = 19
+
+	t.Run("it costs one more row for a message that over-packs", func(t *testing.T) {
+		rows := bandRows(t, bandBundleMessage, width)
+		bare := bareWrapRows(bandBundleMessage, noticeBandAvail(width))
+		if want := len(bare) + 1; len(rows) != want {
+			t.Errorf("the band renders %d rows, want %d — the overshoot re-flowed rather than running off the row:\n%q", len(rows), want, rows)
+		}
+		bodies := make([]string, 0, len(rows))
+		for _, row := range rows {
+			bodies = append(bodies, bandRowBody(row))
+		}
+		if got, want := spacelessText(strings.Join(bodies, "")), spacelessText(bandBundleMessage); got != want {
+			t.Errorf("the band reads %q, want the whole message %q", got, want)
+		}
+	})
+
+	t.Run("the page budget counts the row it costs", func(t *testing.T) {
+		m := noticeBandModel("alpha-row")
+		m.termWidth = termWidthForContent(t, m, width)
+		m.termHeight = 24
+		m.applySessionListSize(m.termWidth, m.termHeight)
+		m.setFlash(bandBundleMessage)
+		m.applySessionListSize(m.termWidth, m.termHeight)
+
+		slot := lipgloss.Height(m.renderSessionBandSlot())
+		if want := len(bandRows(t, bandBundleMessage, width)) + 1; slot != want {
+			t.Fatalf("the band slot is %d rows, want the re-flowed band's %d plus its blank", slot, want)
+		}
+		if got := m.pageBandHeight(); got != slot {
+			t.Errorf("pageBandHeight = %d, want the rendered slot's %d rows", got, slot)
+		}
+		if lines := strings.Split(m.View().Content, "\n"); len(lines) != m.termHeight {
+			t.Errorf("the composed frame is %d rows, want termHeight %d", len(lines), m.termHeight)
+		}
+	})
+}
+
+func termWidthForContent(t *testing.T, m Model, content int) int {
+	t.Helper()
+	for w := content; w <= content+16; w++ {
+		m.termWidth = w
+		if m.contentWidth() == content {
+			return w
+		}
+	}
+	t.Fatalf("no terminal width renders a content region of %d cells", content)
+	return 0
 }
