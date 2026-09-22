@@ -156,3 +156,18 @@ func joinStored(dir, stored string) string {
 func dedupKeyOf(stored string) string {
 	return strings.TrimSuffix(filepath.Base(filepath.FromSlash(stored)), ".bin")
 }
+
+// CaptureAndRefile takes a capture and re-files every frozen pane's scrollback
+// in one step, so no caller can commit an index that still names a waiting
+// pane's vacated positional path. A failed capture returns before anything is
+// re-filed, with the empty index, the empty pending set and the error the
+// capture gave. The second return holds the frozen panes, which a caller's own
+// scrollback dump must skip alongside the skipSet it passed.
+func CaptureAndRefile(c CaptureClient, dir string, skipSet map[string]struct{}, prev *Index, hm HashMap, logger *slog.Logger) (Index, map[string]struct{}, error) {
+	idx, pending, err := CaptureStructure(c, skipSet, prev, logger)
+	if err != nil {
+		return idx, pending, err
+	}
+	RefilePendingScrollback(dir, &idx, pending, hm, logger)
+	return idx, pending, nil
+}

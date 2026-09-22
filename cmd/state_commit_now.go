@@ -29,11 +29,11 @@ func IsSilentExitError(err error) bool {
 // back to its production implementation.
 var commitNowDeps *CommitNowDeps
 
-// CaptureStructure is always called with a nil skipSet and Commit with
+// CaptureAndRefile is always called with a nil skipSet and Commit with
 // anyScrollbackChanged=false - commit-now writes no scrollback bytes.
 type CommitNowDeps struct {
 	ReadIndex        func(dir string) (state.Index, bool, error)
-	CaptureStructure func(c state.CaptureClient, skipSet map[string]struct{}, prev *state.Index, logger *slog.Logger) (state.Index, map[string]struct{}, error)
+	CaptureAndRefile func(c state.CaptureClient, dir string, skipSet map[string]struct{}, prev *state.Index, hm state.HashMap, logger *slog.Logger) (state.Index, map[string]struct{}, error)
 	Commit           func(dir string, idx state.Index, anyScrollbackChanged bool, logger *slog.Logger) error
 	NewClient        func() state.CaptureClient
 
@@ -60,8 +60,8 @@ func resolveCommitNowDeps() *CommitNowDeps {
 	if deps.ReadIndex == nil {
 		deps.ReadIndex = state.ReadIndex
 	}
-	if deps.CaptureStructure == nil {
-		deps.CaptureStructure = state.CaptureStructure
+	if deps.CaptureAndRefile == nil {
+		deps.CaptureAndRefile = state.CaptureAndRefile
 	}
 	if deps.Commit == nil {
 		deps.Commit = state.Commit
@@ -118,15 +118,10 @@ var stateCommitNowCmd = &cobra.Command{
 		prev := loadPrevIndex(dir, deps.ReadIndex, logger)
 
 		client := deps.NewClient()
-		idx, pendingSet, err := deps.CaptureStructure(client, nil, &prev, logger)
+		idx, _, err := deps.CaptureAndRefile(client, dir, nil, &prev, nil, logger)
 		if err != nil {
 			return failCommitNow(logger, dir, deps.TouchSaveRequested, "capture structure", err)
 		}
-
-		// An index still naming a waiting pane's vacated positional path would
-		// make this commit's housekeeping pass reclaim the token-named file the
-		// bytes have moved into.
-		state.RefilePendingScrollback(dir, &idx, pendingSet, nil, logger)
 
 		if err := deps.Commit(dir, idx, false, logger); err != nil {
 			return failCommitNow(logger, dir, deps.TouchSaveRequested, "commit sessions.json", err)

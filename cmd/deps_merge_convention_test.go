@@ -114,8 +114,8 @@ func TestResolveCommitNowDepsMergeConvention(t *testing.T) {
 		if deps.ReadIndex == nil {
 			t.Error("ReadIndex = nil; an unset seam must fall through to its production default")
 		}
-		if deps.CaptureStructure == nil {
-			t.Error("CaptureStructure = nil; an unset seam must fall through to its production default")
+		if deps.CaptureAndRefile == nil {
+			t.Error("CaptureAndRefile = nil; an unset seam must fall through to its production default")
 		}
 		if deps.Commit == nil {
 			t.Error("Commit = nil; an unset seam must fall through to its production default")
@@ -272,16 +272,16 @@ func commitNowSeamCases() []seamCase {
 			},
 		},
 		{
-			field: "CaptureStructure",
+			field: "CaptureAndRefile",
 			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{CaptureStructure: func(state.CaptureClient, map[string]struct{}, *state.Index, *slog.Logger) (state.Index, map[string]struct{}, error) {
+				withCommitNowDeps(t, CommitNowDeps{CaptureAndRefile: func(state.CaptureClient, string, map[string]struct{}, *state.Index, state.HashMap, *slog.Logger) (state.Index, map[string]struct{}, error) {
 					return state.Index{Version: 98}, map[string]struct{}{}, nil
 				}})
 			},
 			assert: func(t *testing.T) {
-				idx, _, _ := resolveCommitNowDeps().CaptureStructure(nil, nil, nil, nil)
+				idx, _, _ := resolveCommitNowDeps().CaptureAndRefile(nil, "", nil, nil, nil, nil)
 				if idx.Version != 98 {
-					t.Errorf("CaptureStructure() version = %d; want the injected seam's 98", idx.Version)
+					t.Errorf("CaptureAndRefile() version = %d; want the injected seam's 98", idx.Version)
 				}
 			},
 		},

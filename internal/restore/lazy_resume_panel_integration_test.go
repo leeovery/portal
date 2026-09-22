@@ -367,11 +367,11 @@ type captureRoundResult struct {
 	written map[string]bool
 }
 
-// captureRound takes a capture the way the daemon takes one, in its order:
-// structure, the re-filing of every frozen pane's scrollback onto its own token,
-// the per-pane scrollback dump, then the commit that reclaims whatever the
-// committed index no longer names. A capture landing while a pane waits reaches
-// the state an install reaches only if all four run.
+// captureRound takes a capture the way the daemon takes one, in its order: the
+// composite that reads the structure and re-files every frozen pane's
+// scrollback onto its own token, the per-pane scrollback dump, then the commit
+// that reclaims whatever the committed index no longer names. A capture landing
+// while a pane waits reaches the state an install reaches only if all three run.
 func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 	t.Helper()
 
@@ -380,12 +380,10 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 		t.Fatalf("ListSkeletonMarkers: %v", err)
 	}
 	prev := fx.prev
-	idx, pending, err := state.CaptureStructure(fx.client, skipSet, &prev, nil)
+	idx, pending, err := state.CaptureAndRefile(fx.client, fx.stateDir, skipSet, &prev, fx.hashes, nil)
 	if err != nil {
-		t.Fatalf("CaptureStructure: %v", err)
+		t.Fatalf("CaptureAndRefile: %v", err)
 	}
-
-	state.RefilePendingScrollback(fx.stateDir, &idx, pending, fx.hashes, nil)
 
 	written := map[string]bool{}
 	anyWritten := false

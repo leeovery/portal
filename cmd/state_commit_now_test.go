@@ -74,7 +74,7 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 	t.Helper()
 	deps := &CommitNowDeps{
 		NewClient: func() state.CaptureClient { return f.client },
-		CaptureStructure: func(c state.CaptureClient, skipSet map[string]struct{}, p *state.Index, logger *slog.Logger) (state.Index, map[string]struct{}, error) {
+		CaptureAndRefile: func(c state.CaptureClient, dir string, skipSet map[string]struct{}, p *state.Index, hm state.HashMap, logger *slog.Logger) (state.Index, map[string]struct{}, error) {
 			f.captureCalls++
 			f.capturePrevs = append(f.capturePrevs, p)
 			f.captureSkipSets = append(f.captureSkipSets, skipSet)
@@ -261,7 +261,7 @@ func TestStateCommitNow_WritesMultiWindowMultiPaneSession(t *testing.T) {
 	}
 }
 
-func TestStateCommitNow_PassesPrevIndexFromDiskToCaptureStructure(t *testing.T) {
+func TestStateCommitNow_PassesPrevIndexFromDiskToCaptureAndRefile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
@@ -301,10 +301,10 @@ func TestStateCommitNow_PassesPrevIndexFromDiskToCaptureStructure(t *testing.T) 
 	}
 
 	if f.captureCalls != 1 {
-		t.Fatalf("CaptureStructure called %d times, want 1", f.captureCalls)
+		t.Fatalf("CaptureAndRefile called %d times, want 1", f.captureCalls)
 	}
 	if got := f.capturePrevs[0]; got == nil {
-		t.Fatal("prev passed to CaptureStructure was nil; want pointer to decoded prior Index")
+		t.Fatal("prev passed to CaptureAndRefile was nil; want pointer to decoded prior Index")
 	} else if len(got.Sessions) != 1 || got.Sessions[0].Name != "work" {
 		t.Errorf("prev.Sessions = %v, want [{Name: work, ...}]", got.Sessions)
 	}
@@ -323,7 +323,7 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
-	// The real CaptureStructure runs here, against a fake client that lists
+	// The real CaptureAndRefile runs here, against a fake client that lists
 	// both sessions; the pane rows omit the underscore session because the
 	// parser filters them by the keep set.
 	client := &fakeCaptureClient{
@@ -336,7 +336,7 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 
 	withCommitNowDeps(t, CommitNowDeps{
 		NewClient:        func() state.CaptureClient { return client },
-		CaptureStructure: state.CaptureStructure,
+		CaptureAndRefile: state.CaptureAndRefile,
 		Commit:           state.Commit,
 		// Must be injected: a nil IsRestoring falls through to a live query
 		// against whatever server the ambient TMUX names.
@@ -378,7 +378,7 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnWhenSessionsJSONMissing(t 
 	}
 
 	if f.captureCalls != 1 {
-		t.Fatalf("CaptureStructure calls = %d, want 1", f.captureCalls)
+		t.Fatalf("CaptureAndRefile calls = %d, want 1", f.captureCalls)
 	}
 	if got := f.capturePrevs[0]; got == nil || len(got.Sessions) != 0 || got.Version != 0 {
 		t.Errorf("prev should be zero-value Index, got: %+v", got)
@@ -521,7 +521,7 @@ func TestStateCommitNow_ShortCircuits_DoesNotWriteSessionsJSONWhenRestoring(t *t
 	}
 
 	if f.captureCalls != 0 {
-		t.Errorf("CaptureStructure called %d times; want 0", f.captureCalls)
+		t.Errorf("CaptureAndRefile called %d times; want 0", f.captureCalls)
 	}
 	if f.commitCalls != 0 {
 		t.Errorf("Commit called %d times; want 0", f.commitCalls)
@@ -670,7 +670,7 @@ func TestStateCommitNow_TreatsIsRestoringErrorAsMarkerPresumedSet(t *testing.T) 
 	}
 
 	if f.captureCalls != 0 {
-		t.Errorf("CaptureStructure called %d times; want 0", f.captureCalls)
+		t.Errorf("CaptureAndRefile called %d times; want 0", f.captureCalls)
 	}
 	if f.commitCalls != 0 {
 		t.Errorf("Commit called %d times; want 0", f.commitCalls)
@@ -722,7 +722,7 @@ func TestStateCommitNow_ProceedsNormallyWhenRestoringClear(t *testing.T) {
 	}
 
 	if f.captureCalls != 1 {
-		t.Errorf("CaptureStructure calls = %d, want 1", f.captureCalls)
+		t.Errorf("CaptureAndRefile calls = %d, want 1", f.captureCalls)
 	}
 	if f.commitCalls != 1 {
 		t.Errorf("Commit calls = %d, want 1", f.commitCalls)
@@ -735,7 +735,7 @@ func TestStateCommitNow_ProceedsNormallyWhenRestoringClear(t *testing.T) {
 	}
 }
 
-func TestStateCommitNow_ExitsNonZeroWhenCaptureStructureFails(t *testing.T) {
+func TestStateCommitNow_ExitsNonZeroWhenCaptureAndRefileFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
@@ -747,14 +747,14 @@ func TestStateCommitNow_ExitsNonZeroWhenCaptureStructureFails(t *testing.T) {
 
 	_, _, err := runRootCmd(t, "state", "commit-now")
 	if err == nil {
-		t.Fatal("expected non-zero exit (non-nil Execute error) when CaptureStructure fails")
+		t.Fatal("expected non-zero exit (non-nil Execute error) when CaptureAndRefile fails")
 	}
 	if f.commitCalls != 0 {
-		t.Errorf("Commit must not be called when CaptureStructure fails; calls = %d", f.commitCalls)
+		t.Errorf("Commit must not be called when CaptureAndRefile fails; calls = %d", f.commitCalls)
 	}
 }
 
-func TestStateCommitNow_TouchesSaveRequestedWhenCaptureStructureFails(t *testing.T) {
+func TestStateCommitNow_TouchesSaveRequestedWhenCaptureAndRefileFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
@@ -772,11 +772,11 @@ func TestStateCommitNow_TouchesSaveRequestedWhenCaptureStructureFails(t *testing
 		t.Errorf("TouchSaveRequested calls = %d, want 1", f.touchCalls)
 	}
 	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
-		t.Errorf("save.requested must exist after CaptureStructure failure; stat err = %v", err)
+		t.Errorf("save.requested must exist after CaptureAndRefile failure; stat err = %v", err)
 	}
 }
 
-func TestStateCommitNow_LogsErrorWhenCaptureStructureFails(t *testing.T) {
+func TestStateCommitNow_LogsErrorWhenCaptureAndRefileFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "error")
@@ -993,7 +993,7 @@ func TestStateCommitNow_DoesNotPanicOnAnyFailurePath(t *testing.T) {
 		f    *commitNowFixture
 	}{
 		{
-			name: "CaptureStructure failure",
+			name: "CaptureAndRefile failure",
 			f: &commitNowFixture{
 				client:     &fakeCaptureClient{sessions: nil},
 				captureErr: errors.New("tmux gone"),
@@ -1023,7 +1023,7 @@ func TestStateCommitNow_DoesNotPanicOnAnyFailurePath(t *testing.T) {
 			},
 		},
 		{
-			name: "CaptureStructure + touch failure",
+			name: "CaptureAndRefile + touch failure",
 			f: &commitNowFixture{
 				client:     &fakeCaptureClient{sessions: nil},
 				captureErr: errors.New("tmux gone"),
@@ -1167,10 +1167,10 @@ func TestStateCommitNow_DiscardsThePendingSet(t *testing.T) {
 	}
 
 	if f.captureCalls != 1 {
-		t.Fatalf("CaptureStructure calls = %d, want 1", f.captureCalls)
+		t.Fatalf("CaptureAndRefile calls = %d, want 1", f.captureCalls)
 	}
 	if got := f.captureSkipSets[0]; got != nil {
-		t.Errorf("skipSet passed to CaptureStructure = %v, want nil", got)
+		t.Errorf("skipSet passed to CaptureAndRefile = %v, want nil", got)
 	}
 	if f.commitCalls != 1 {
 		t.Fatalf("Commit calls = %d, want 1", f.commitCalls)
@@ -1194,38 +1194,39 @@ func TestStateCommitNow_RefilesResumePendingScrollback(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(state.ScrollbackDir(dir), "work__0.1.bin"), []byte("frozen-body"), 0o600); err != nil {
 			t.Fatalf("seed positional scrollback: %v", err)
 		}
-
-		idx := state.Index{
-			Version: state.SchemaVersion,
-			Sessions: []state.Session{{
-				Name:        "work",
-				Environment: map[string]string{},
-				Windows: []state.Window{{
-					Index: 0, Name: "main", Layout: "tiled", Active: true,
-					Panes: []state.Pane{{
-						Index:          1,
-						CWD:            "/tmp",
-						CurrentCommand: "zsh",
-						ScrollbackFile: "scrollback/work__0.1.bin",
-						PortalPaneID:   waitingToken,
-					}},
-				}},
-			}},
+		if err := state.Commit(dir, waitingPaneIndex(), false, nil); err != nil {
+			t.Fatalf("seed sessions.json: %v", err)
 		}
 
-		f := &commitNowFixture{
-			client:         &fakeCaptureClient{sessions: []string{"work"}},
-			captureReturn:  idx,
-			capturePending: map[string]struct{}{state.SanitizePaneKey("work", 0, 1): {}},
-		}
-		installCommitNowDeps(t, f)
+		// The real CaptureAndRefile runs here, against a fake client whose pane
+		// row carries the waiting pane's token and its pending marker: a fake
+		// composite would assert a re-file the fake itself performed.
+		var committed []commitInvocation
+		withCommitNowDeps(t, CommitNowDeps{
+			NewClient: func() state.CaptureClient {
+				return &fakeCaptureClient{
+					sessions: []string{"work"},
+					rows:     "work|||0|||main|||tiled|||0|||1|||1|||/tmp|||1|||zsh|||" + waitingToken + "|||1",
+					env:      map[string]string{"work": ""},
+				}
+			},
+			CaptureAndRefile: state.CaptureAndRefile,
+			Commit: func(dir string, idx state.Index, any bool, logger *slog.Logger) error {
+				committed = append(committed, commitInvocation{Dir: dir, Idx: idx, AnyScrollbackChanged: any})
+				return state.Commit(dir, idx, any, logger)
+			},
+			IsRestoring: func() (bool, error) { return false, nil },
+		})
 
 		if _, _, err := runRootCmd(t, "state", "commit-now"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
+		if len(committed) != 1 {
+			t.Fatalf("Commit calls = %d, want 1", len(committed))
+		}
 		want := "scrollback/" + waitingRefiled
-		if got := f.commitArgs[0].Idx.Sessions[0].Windows[0].Panes[0].ScrollbackFile; got != want {
+		if got := committed[0].Idx.Sessions[0].Windows[0].Panes[0].ScrollbackFile; got != want {
 			t.Errorf("committed ScrollbackFile = %q, want %q", got, want)
 		}
 		if got := readSessionsJSON(t, dir).Sessions[0].Windows[0].Panes[0].ScrollbackFile; got != want {
@@ -1242,4 +1243,26 @@ func TestStateCommitNow_RefilesResumePendingScrollback(t *testing.T) {
 			t.Errorf("positional file stat err = %v, want not-exist", err)
 		}
 	})
+}
+
+// waitingPaneIndex is the prior commit the waiting pane's record is merged back
+// from: the capture keeps its ScrollbackFile, which is what the re-file moves.
+func waitingPaneIndex() state.Index {
+	return state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:        "work",
+			Environment: map[string]string{},
+			Windows: []state.Window{{
+				Index: 0, Name: "main", Layout: "tiled", Active: true,
+				Panes: []state.Pane{{
+					Index:          1,
+					CWD:            "/tmp",
+					CurrentCommand: "zsh",
+					ScrollbackFile: "scrollback/work__0.1.bin",
+					PortalPaneID:   waitingToken,
+				}},
+			}},
+		}},
+	}
 }
