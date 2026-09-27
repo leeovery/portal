@@ -17,6 +17,10 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/skills/workflow-engine/scripts/engine.cjs\" presence cleanup"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/skills/workflow-engine/scripts/engine.cjs\" conversation end"
           }
         ]
       }
@@ -32,5 +36,8 @@
         ]
       }
     ]
+  },
+  "env": {
+    "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1"
   }
 }
