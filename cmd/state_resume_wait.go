@@ -22,6 +22,19 @@ const (
 	resumeKeyEnterCR = '\r'
 	resumeKeyEnterLF = '\n'
 	resumeKeyDiscard = 'd'
+	resumeKeyConfirm = 'y'
+	resumeKeyEscape  = 0x1b
+)
+
+// The bytes that shape an escape sequence: an OSC opens with ']' and ends at
+// BEL or ST (ESC '\\'); every other sequence ends at a byte in the CSI final
+// range.
+const (
+	resumeOSCIntroducer = ']'
+	resumeOSCBell       = 0x07
+	resumeSTFinal       = '\\'
+	resumeCSIFinalFirst = 0x40
+	resumeCSIFinalLast  = 0x7e
 )
 
 // resumeResizeSettle is how long a size change waits for the next one before
@@ -29,6 +42,15 @@ const (
 // so the window closes when the drag stops rather than during it, and a single
 // deliberate resize redraws with no perceptible pause.
 const resumeResizeSettle = 150 * time.Millisecond
+
+// resumeEscapeFollow is how long an ESC waits for a following byte before it
+// counts as the Escape key. The caps bound how many bytes, ESC included, one
+// sequence may consume before the loop dispatches again.
+const (
+	resumeEscapeFollow      = 50 * time.Millisecond
+	resumeEscapeSequenceCap = 16
+	resumeOSCSequenceCap    = 64
+)
 
 type resumeWaitConfig struct {
 	resumeChainPayload
@@ -64,12 +86,12 @@ func (cfg resumeWaitConfig) restore() {
 	}
 }
 
-// runResumeWait holds the pane on whatever the draw painted until Enter or d
-// answers it. Every other byte is discarded, so nothing the user did not send —
-// a paste, a send-keys, a key aimed at another window — can answer the panel,
-// and the three keys that would kill a foreground process are bytes like any
-// other under raw mode. No signal is declined: tmux tearing the pane down ends
-// the waiter.
+// runResumeWait holds the pane on whatever the draw painted until a key that
+// screen offers answers it. Every other byte is discarded, so nothing the user
+// did not send — a paste, a send-keys, a key aimed at another window — can
+// answer the panel, and the three keys that would kill a foreground process are
+// bytes like any other under raw mode. No signal is declined: tmux tearing the
+// pane down ends the waiter.
 func runResumeWait(cfg resumeWaitConfig) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 
@@ -88,9 +110,35 @@ func runResumeWait(cfg resumeWaitConfig) error {
 	return resumeWaitLoop(cfg)
 }
 
+// resumeKeys is what one screen answers to. A key absent from bytes is
+// swallowed, and a nil escape leaves the Escape key inert.
+type resumeKeys struct {
+	bytes  map[byte]func(resumeWaitConfig) error
+	escape func(resumeWaitConfig) error
+}
+
+// resumeKeysFor scopes the keys to the screen in front of the user: Enter
+// resumes on the panel and must mean nothing on the confirmation one keystroke
+// later, and Escape backs out of the confirmation but has nothing to back out
+// of on the panel.
+func resumeKeysFor(screen string) resumeKeys {
+	if screen == resumeScreenDiscard {
+		return resumeKeys{
+			bytes:  map[byte]func(resumeWaitConfig) error{resumeKeyConfirm: resumeAnswerDiscard},
+			escape: resumeCancelDiscardConfirm,
+		}
+	}
+	return resumeKeys{bytes: map[byte]func(resumeWaitConfig) error{
+		resumeKeyEnterCR: resumeAnswerEnter,
+		resumeKeyEnterLF: resumeAnswerEnter,
+		resumeKeyDiscard: resumeOpenDiscardConfirm,
+	}}
+}
+
 // The pending redraw dies with the process image a dispatched key execs, so a
 // key answered inside a settle window cancels nothing.
 func resumeWaitLoop(cfg resumeWaitConfig) error {
+	keys := resumeKeysFor(cfg.Screen)
 	reader := startResumeReader(cfg.In)
 	defer close(reader.requests)
 
@@ -105,12 +153,20 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 		select {
 		case read := <-reader.results:
 			outstanding = false
+			if read.n > 0 && read.err == nil && read.b == resumeKeyEscape {
+				alone, pending, err := resolveResumeEscape(cfg, reader)
+				outstanding = pending
+				if err != nil {
+					return fmt.Errorf("resume wait: read: %w", err)
+				}
+				if alone && keys.escape != nil {
+					return keys.escape(cfg)
+				}
+				continue
+			}
 			if read.n > 0 {
-				switch read.b {
-				case resumeKeyEnterCR, resumeKeyEnterLF:
-					return resumeAnswerEnter(cfg)
-				case resumeKeyDiscard:
-					return resumeAnswerDiscard(cfg)
+				if answer := keys.bytes[read.b]; answer != nil {
+					return answer(cfg)
 				}
 			}
 			if read.err != nil {
@@ -127,6 +183,65 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 			}
 			return resumeRedraw(cfg)
 		}
+	}
+}
+
+// resolveResumeEscape decides whether an ESC just read stood alone, and if it
+// opened a sequence consumes it to its end or its cap, so no byte inside that
+// bound can reach a key the screen acts on. A window that elapses leaves its
+// read outstanding, which pending reports so the loop does not request a second.
+func resolveResumeEscape(cfg resumeWaitConfig, reader resumeReader) (alone, pending bool, err error) {
+	window := cfg.Settle(resumeEscapeFollow)
+	for {
+		reader.requests <- struct{}{}
+		select {
+		case read := <-reader.results:
+			if read.n > 0 {
+				return false, false, consumeResumeSequence(reader, read.b)
+			}
+			if read.err != nil {
+				return false, false, read.err
+			}
+		case <-window:
+			return true, true, nil
+		}
+	}
+}
+
+// consumeResumeSequence reads to the end of the sequence introducer opened,
+// taking the introducer itself as never its end: the '[' and 'O' that open a
+// CSI or SS3 sit inside the final range.
+func consumeResumeSequence(reader resumeReader, introducer byte) error {
+	limit, ended := resumeEscapeSequenceCap, isCSIFinal
+	if introducer == resumeOSCIntroducer {
+		limit, ended = resumeOSCSequenceCap, oscTerminator()
+	}
+	for consumed := 2; consumed < limit; consumed++ {
+		b, err := reader.next()
+		if err != nil {
+			return err
+		}
+		if ended(b) {
+			return nil
+		}
+	}
+	return nil
+}
+
+func isCSIFinal(b byte) bool {
+	return b >= resumeCSIFinalFirst && b <= resumeCSIFinalLast
+}
+
+// An OSC payload is printable text, so it ends only at its own terminator; the
+// CSI rule would stop at the first letter of the payload.
+func oscTerminator() func(byte) bool {
+	afterEscape := false
+	return func(b byte) bool {
+		if b == resumeOSCBell || (afterEscape && b == resumeSTFinal) {
+			return true
+		}
+		afterEscape = b == resumeKeyEscape
+		return false
 	}
 }
 
@@ -147,6 +262,20 @@ type resumeRead struct {
 type resumeReader struct {
 	requests chan struct{}
 	results  chan resumeRead
+}
+
+// next blocks for the next byte, requesting past any empty read.
+func (r resumeReader) next() (byte, error) {
+	for {
+		r.requests <- struct{}{}
+		read := <-r.results
+		if read.n > 0 {
+			return read.b, nil
+		}
+		if read.err != nil {
+			return 0, read.err
+		}
+	}
 }
 
 // startResumeReader reads one byte per request and never ahead: exactly one read
@@ -192,15 +321,34 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 	return nil
 }
 
-func resumeAnswerDiscard(cfg resumeWaitConfig) error {
-	return resumeRedraw(cfg)
+func resumeOpenDiscardConfirm(cfg resumeWaitConfig) error {
+	return resumeShowScreen(cfg, resumeScreenDiscard)
 }
 
-// resumeRedraw hands the pane to a fresh draw of the screen it is already
-// showing, carrying whatever payload its caller hands it. A binary that cannot
-// be resolved ends the wait as a read error does: the pending marker is still
-// set, so the chain's tail recovers the pane to a usable shell rather than
-// leaving one whose keys silently do nothing.
+func resumeCancelDiscardConfirm(cfg resumeWaitConfig) error {
+	return resumeShowScreen(cfg, resumeScreenPanel)
+}
+
+// resumeAnswerDiscard is the confirmation's y. It removes nothing: it hands
+// over to a fresh draw of the confirmation, inert in the safe direction.
+func resumeAnswerDiscard(cfg resumeWaitConfig) error {
+	return resumeShowScreen(cfg, resumeScreenDiscard)
+}
+
+// resumeShowScreen hands the pane to a fresh draw of screen. The key press that
+// moved it there ends any report the waiter was holding.
+func resumeShowScreen(cfg resumeWaitConfig, screen string) error {
+	next := cfg
+	next.Screen = screen
+	next.Report = ""
+	return resumeRedraw(next)
+}
+
+// resumeRedraw hands the pane to a fresh draw of the screen its payload names,
+// carrying that payload whole. A binary that cannot be resolved ends the wait as
+// a read error does: the pending marker is still set, so the chain's tail
+// recovers the pane to a usable shell rather than leaving one whose keys
+// silently do nothing.
 func resumeRedraw(cfg resumeWaitConfig) error {
 	cfg.restore()
 	return resumeHandOff(cfg.Logger, cfg.ExecSelf, resumeDrawSubcommand, cfg.resumeChainPayload)

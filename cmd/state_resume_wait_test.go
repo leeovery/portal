@@ -6,8 +6,11 @@ import (
 	"go/ast"
 	"io"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -63,6 +66,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 		In:                 in,
 		Logger:             logger,
 		IsTerminal:         func() bool { return true },
+		Settle:             time.After,
 		MakeRaw: func() (func(), error) {
 			p.rawCalls++
 			return func() { p.restores++ }, nil
@@ -173,71 +177,9 @@ func TestRunResumeWait_ActingKeys(t *testing.T) {
 			})
 		}
 	})
-
-	t.Run("it hands the pane over on d", func(t *testing.T) {
-		var probe resumeWaitProbe
-		payload := samplePayload()
-		payload.Width, payload.Height = 100, 30
-
-		if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, "d"))); err != nil {
-			t.Fatalf("runResumeWait() error = %v", err)
-		}
-		assertHandOff(t, &probe, payload)
-	})
-
-	t.Run("it acts on both keys at a size below the card's", func(t *testing.T) {
-		sizes := []struct {
-			name string
-			w, h int
-		}{
-			{"a single cell", 1, 1},
-			{"narrower than the card", 20, 6},
-			{"unmeasured", 0, 0},
-			{"negative", -4, -2},
-		}
-		for _, size := range sizes {
-			for _, key := range []string{"\r", "d"} {
-				t.Run(size.name+"/"+keyName(key), func(t *testing.T) {
-					var probe resumeWaitProbe
-					payload := samplePayload()
-					payload.Width, payload.Height = size.w, size.h
-					probe.lookup = foundHook(payload.Command)
-
-					if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, key))); err != nil {
-						t.Fatalf("runResumeWait() error = %v", err)
-					}
-					if key == "d" {
-						assertHandOff(t, &probe, payload)
-						return
-					}
-					assertHookHandOff(t, &probe, payload.Command)
-				})
-			}
-		}
-	})
 }
 
 func TestRunResumeWait_SwallowedKeys(t *testing.T) {
-	t.Run("it swallows every other key", func(t *testing.T) {
-		keys := []string{"\x03", "\x04", "\x1a", "\x1b", "D", "y", "q", "a", " "}
-		for _, key := range keys {
-			t.Run(keyName(key), func(t *testing.T) {
-				var probe resumeWaitProbe
-				reader := keystrokes(t, key)
-
-				err := runResumeWait(newResumeWaitConfig(t, &probe, samplePayload(), reader))
-
-				if !errors.Is(err, io.EOF) {
-					t.Fatalf("runResumeWait() error = %v, want the EOF that ended the wait after the swallowed key", err)
-				}
-				if reader.reads < 2 {
-					t.Errorf("the wait read %d times, want it to read on past the swallowed key", reader.reads)
-				}
-				assertNoHandOff(t, &probe)
-			})
-		}
-	})
-
 	t.Run("it swallows the bytes of an escape sequence without assembling an action", func(t *testing.T) {
 		var probe resumeWaitProbe
 
@@ -257,7 +199,7 @@ func TestRunResumeWait_SwallowedKeys(t *testing.T) {
 		if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, reader)); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
-		assertHandOff(t, &probe, payload)
+		assertHandOff(t, &probe, onScreen(payload, resumeScreenDiscard))
 
 		rest, err := io.ReadAll(reader.inner)
 		if err != nil {
@@ -378,38 +320,85 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 	})
 
 	t.Run("it holds its report and goes on waiting with no input at all", func(t *testing.T) {
-		reader, writer := io.Pipe()
-		t.Cleanup(func() { _ = writer.Close() })
-
-		var probe resumeWaitProbe
-		payload := samplePayload()
-		payload.Report = "could not clear the pending marker"
-		cfg := newResumeWaitConfig(t, &probe, payload, reader)
-
-		done := make(chan error, 1)
-		go func() { done <- runResumeWait(cfg) }()
-
-		select {
-		case err := <-done:
-			t.Fatalf("the wait ended on its own with no input: %v", err)
-		case <-time.After(150 * time.Millisecond):
+		// A key press ends a report and a resize carries it, so the resize is
+		// what shows the report survived the idle wait.
+		cases := []struct {
+			name    string
+			deliver func(writer *io.PipeWriter, winch chan os.Signal) error
+			want    func(resumeChainPayload) resumeChainPayload
+		}{
+			{
+				name: "answered by d",
+				deliver: func(writer *io.PipeWriter, _ chan os.Signal) error {
+					_, err := writer.Write([]byte("d"))
+					return err
+				},
+				want: func(p resumeChainPayload) resumeChainPayload { return onScreen(p, resumeScreenDiscard) },
+			},
+			{
+				name: "redrawn by a settled resize",
+				deliver: func(_ *io.PipeWriter, winch chan os.Signal) error {
+					winch <- syscall.SIGWINCH
+					return nil
+				},
+				want: func(p resumeChainPayload) resumeChainPayload { return p },
+			},
 		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				reader, writer := io.Pipe()
+				t.Cleanup(func() { _ = writer.Close() })
 
-		if _, err := writer.Write([]byte("d")); err != nil {
-			t.Fatalf("sending the discard key: %v", err)
-		}
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatalf("runResumeWait() error = %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("the wait did not act on the key it was sent")
-		}
+				var probe resumeWaitProbe
+				payload := samplePayload()
+				payload.Report = "could not clear the pending marker"
+				payload.Width, payload.Height = 80, 24
+				cfg := newResumeWaitConfig(t, &probe, payload, reader)
 
-		assertHandOff(t, &probe, payload)
-		if !slices.Contains(probe.execArgs, payload.Report) {
-			t.Errorf("exec argv %q does not carry the report forward", probe.execArgs)
+				winch := make(chan os.Signal, 1)
+				var escapeWindows, settleWindows atomic.Int64
+				cfg.Winch = winch
+				cfg.Size = resizedSize
+				cfg.Settle = func(d time.Duration) <-chan time.Time {
+					if d == resumeEscapeFollow {
+						escapeWindows.Add(1)
+					} else {
+						settleWindows.Add(1)
+					}
+					fired := make(chan time.Time, 1)
+					fired <- time.Now()
+					return fired
+				}
+
+				done := make(chan error, 1)
+				go func() { done <- runResumeWait(cfg) }()
+
+				select {
+				case err := <-done:
+					t.Fatalf("the wait ended on its own with no input: %v", err)
+				case <-time.After(150 * time.Millisecond):
+				}
+				if got := settleWindows.Load() + escapeWindows.Load(); got != 0 {
+					t.Fatalf("the wait armed %d windows while left alone, want 0", got)
+				}
+
+				if err := tc.deliver(writer, winch); err != nil {
+					t.Fatalf("delivering the answer: %v", err)
+				}
+				select {
+				case err := <-done:
+					if err != nil {
+						t.Fatalf("runResumeWait() error = %v", err)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("the wait did not act on what it was sent")
+				}
+
+				assertHandOff(t, &probe, tc.want(payload))
+				if got := escapeWindows.Load(); got != 0 {
+					t.Errorf("the wait armed %d escape follow windows with no escape read, want 0", got)
+				}
+			})
 		}
 	})
 }

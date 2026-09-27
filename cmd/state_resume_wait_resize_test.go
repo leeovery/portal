@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -250,7 +251,7 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		if err := h.wait(); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
-		assertHandOff(t, h.probe, payload)
+		assertHandOff(t, h.probe, onScreen(payload, resumeScreenDiscard))
 	})
 
 	t.Run("it hands over to a redraw when the settled size differs", func(t *testing.T) {
@@ -294,9 +295,10 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		assertHandOff(t, h.probe, payload)
 	})
 
-	t.Run("it redraws the confirmation on a resize while it is up", func(t *testing.T) {
+	t.Run("it redraws the confirmation on a settled resize", func(t *testing.T) {
 		payload := drawnPayload()
 		payload.Screen = resumeScreenDiscard
+		payload.Report = "could not remove the resume command"
 		h := startResumeResize(t, payload, resizedSize)
 
 		h.elapse(h.resize())
@@ -306,6 +308,9 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		}
 		assertHandOff(t, h.probe, payload)
 		args := h.probe.execArgs
+		if !slices.Contains(args, payload.Report) {
+			t.Errorf("redraw argv = %q, want it to carry the report %q", args, payload.Report)
+		}
 		if len(args) < 2 || args[len(args)-2] != flagArg(resumeFlagScreen) || args[len(args)-1] != resumeScreenDiscard {
 			t.Errorf("redraw argv = %q, want it to end with --%s %s", args, resumeFlagScreen, resumeScreenDiscard)
 		}
@@ -321,7 +326,7 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		if err := h.wait(); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
-		assertHandOff(t, h.probe, payload)
+		assertHandOff(t, h.probe, onScreen(payload, resumeScreenDiscard))
 		if got := h.sizes.Load(); got != 0 {
 			t.Errorf("the wait read the pane size %d times, want 0: the key answered before the window elapsed", got)
 		}
