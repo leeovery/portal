@@ -2,14 +2,14 @@
 
 // ---------------------------------------------------------------------------
 // Domain ring: shared selection projection for the continue-* navigation skills — the
-// pick-list DISPLAY and MENU sections every type's gateway appends to its
-// index dump. One composition, five type configs: the clone-family factory
+// pick-list DISPLAY and MENU sections every type's gateway serves at its
+// select step. One composition, five type configs: the clone-family factory
 // for the selection step.
 // ---------------------------------------------------------------------------
 
 const { renderTree } = require('../../kernel/render.cjs');
 const { TREE_WIDTH, titlecase, titlecaseLabel } = require('../conventions.cjs');
-const { section, menuFrame, cmdOption } = require('./surfaces.cjs');
+const { section, menuFrame, cmdOption, emitAs, MENU_INSTRUCTION } = require('./surfaces.cjs');
 
 /**
  * @typedef {object} SelectConfig
@@ -54,10 +54,10 @@ const SELECT_CONFIG = {
 };
 
 /**
- * The selection step's deferred sections: the numbered pick-list display and
- * its menu. Epics sub-row on active phases; every other type on the
- * titlecased phase label. Empty units → empty string (the caller's flow
- * terminates on the zero case before selection).
+ * The select step's sections: the numbered pick-list display and its menu.
+ * Epics sub-row on active phases; every other type on the titlecased phase
+ * label. Empty units → empty string (the caller's flow terminates on the zero
+ * case before selection).
  * @param {string} type
  * @param {{name: string, phase_label?: string, active_phases?: string[], triage_phases?: string[]}[]} units
  * @param {{completed: number, cancelled: number}} counts
@@ -74,12 +74,12 @@ function selectionSections(type, units, counts) {
   // its group owns the only `└─` in it.
   // Concerns queued on a single-topic unit cue its row and its option, as
   // the start menu's row carries it.
-  const cue = (/** @type {{triage_phases?: string[]}} */ u) => ((u.triage_phases || []).length > 0 ? ' · triage waiting' : '');
+  const triageCue = (/** @type {{triage_phases?: string[]}} */ u) => ((u.triage_phases || []).length > 0 ? 'triage waiting' : undefined);
   const rows = units.map((u, i) => ({
     title: `${i + 1}. ${titlecase(u.name)}`,
     body: [type === 'epic'
       ? ((u.active_phases || []).map(titlecase).join(', ') || '(no phases)')
-      : titlecaseLabel(u.phase_label || '') + cue(u)],
+      : titlecaseLabel(u.phase_label || '') + (triageCue(u) ? ` · ${triageCue(u)}` : '')],
   }));
   const disp = [
     `${units.length} ${cfg.plural} in progress`,
@@ -92,14 +92,14 @@ function selectionSections(type, units, counts) {
   units.forEach((u, i) => {
     menuLines.push(cmdOption(String(i + 1), null, type === 'epic'
       ? `Continue "${titlecase(u.name)}"`
-      : `Continue "${titlecase(u.name)}" — *${u.phase_label}*${cue(u)}`));
+      : { head: `Continue "${titlecase(u.name)}"`, tail: u.phase_label, cue: triageCue(u) }));
   });
-  if (closed) menuLines.push(cmdOption(String(units.length + 1), null, cfg.view));
+  if (closed) menuLines.push(cmdOption('v', 'view', cfg.view));
   menuLines.push(cmdOption('m', 'manage', cfg.manage));
 
-  return section('DISPLAY: selection', 'emit verbatim as a code block only at the select step', disp.join('\n'))
+  return section('DISPLAY: selection', emitAs('text'), disp.join('\n'))
     + '\n'
-    + section('MENU: selection', "emit verbatim as markdown only at the select step, then STOP for the user's response", menuFrame(menuLines));
+    + section('MENU: selection', MENU_INSTRUCTION, menuFrame(menuLines));
 }
 
 /** Per-type wording for the invalid-selection terminal display. */
@@ -120,7 +120,7 @@ function selectionNotFound(type, workUnit) {
   const [singular, plural] = NOT_FOUND[type] || [type, `${type}s`];
   return section(
     'DISPLAY: not found',
-    'emit verbatim as a code block, then STOP — terminal condition',
+    emitAs('text', ', then STOP — terminal condition'),
     `No active ${singular} named "${workUnit}" found.\n\nRun /workflow-start to see available ${plural} or begin a new one.`,
   );
 }

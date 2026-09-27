@@ -74,7 +74,7 @@ Auto mode is active — pass through to review. Section F concludes the review o
 
 → Load **[convergence-analysis.md](../../workflow-shared/references/convergence-analysis.md)** with loop_type = `spec-review`, work_unit = `{work_unit}`, topic = `{topic}`, render_when = `always`.
 
-Fetch the gate and emit its section verbatim at its marked instruction:
+Fetch the gate and emit its section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-review-gate {work_unit}.specification.{topic} --variant continue
@@ -123,6 +123,8 @@ Dispatch the `workflow-specification-review-claims` agent via the Task tool:
 - **Cycle number**: the current cycle number
 - **Review tracking format path**: `review-tracking-format.md` (in this references directory)
 
+The dispatch runs in the background (`run_in_background: true`) and ends the turn on exactly `The claims review agent has been dispatched for review cycle {N}.`
+
 > **CHECKPOINT**: Do not proceed until the agent has returned its result.
 
 Hold its STATUS as `phase_1_status` — carried in context for the branch below, never a manifest write.
@@ -150,6 +152,8 @@ Dispatch the `workflow-specification-review-input` agent via the Task tool:
 - **Topic name**: the current topic
 - **Cycle number**: the current cycle number
 - **Review tracking format path**: `review-tracking-format.md` (in this references directory)
+
+The dispatch runs in the background (`run_in_background: true`) and ends the turn on exactly `The input review agent has been dispatched for review cycle {N}.`
 
 > **CHECKPOINT**: Do not proceed until the agent has returned its result.
 
@@ -180,6 +184,8 @@ Dispatch the `workflow-specification-review-gap-analysis` agent via the Task too
 - **Cycle number**: the current cycle number
 - **Review tracking format path**: `review-tracking-format.md` (in this references directory)
 - **Earlier cycles' gap-analysis tracking files**: the paths listed above — the settled directions a finding may not reverse. None at cycle 1.
+
+The dispatch runs in the background (`run_in_background: true`) and ends the turn on exactly `The gap analysis agent has been dispatched for review cycle {N}.`
 
 > **CHECKPOINT**: Do not proceed until the agent has returned its result.
 
@@ -219,9 +225,9 @@ From the second cycle onward the trend decides whether the loop runs again: a ch
 
 **If `review_cycle` is 1, or the analysis classified no `churning` trend:**
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Review cycle {N} complete — findings applied. Running follow-up cycle.
 ```
 
@@ -229,9 +235,9 @@ Review cycle {N} complete — findings applied. Running follow-up cycle.
 
 **If `review_cycle` is 2, 3, or 4 and the analysis classified the trend as `churning`** (its diagnostic rendered above):
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Findings are churning — concluding the review.
 ```
 
@@ -241,9 +247,9 @@ Findings are churning — concluding the review.
 
 → Load **[convergence-analysis.md](../../workflow-shared/references/convergence-analysis.md)** with loop_type = `spec-review`, work_unit = `{work_unit}`, topic = `{topic}`, render_when = `always`.
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Cycle cap reached — concluding the review.
 ```
 
@@ -253,7 +259,7 @@ Cycle cap reached — concluding the review.
 
 → Load **[convergence-analysis.md](../../workflow-shared/references/convergence-analysis.md)** with loop_type = `spec-review`, work_unit = `{work_unit}`, topic = `{topic}`, render_when = `always`.
 
-Fetch the gate and emit its section verbatim at its marked instruction:
+Fetch the gate and emit its section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-review-gate {work_unit}.specification.{topic} --variant reloop
@@ -285,9 +291,9 @@ If any entry is `in-progress`, that file's findings were not fully processed —
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): complete specification review (cycle {N})" --topic specification/{topic}
 ```
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Specification review complete — {N} cycle(s), all tracking files finalised.
 ```
 

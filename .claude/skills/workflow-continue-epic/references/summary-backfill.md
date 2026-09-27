@@ -42,9 +42,9 @@ For each readable file:
 
 Render the proposed summaries as a single batch. Description is drafted silently in the background — paragraphs would bloat the batch view, and downstream phases use whatever the auto-draft produces. The user can edit a description later via a follow-up discovery session.
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Proposed summaries for {N} topic(s):
 
 @foreach(item in items_to_recover)
@@ -103,7 +103,7 @@ New summary for "{item.name:(titlecase)}":
 
 **STOP.** Wait for user response.
 
-Update the in-memory summary for that item with the user's response. Re-render the batch from **B** so the user can see the updated state, then return to the prompt at the top of this section.
+Update the in-memory summary for that item with the user's response, then output the batch display from **B** again with the updated state — its fenced block alone, never the gate call beneath it; the prompt at the top of this section takes the next answer.
 
 → Return to **C. Edit Loop**.
 
@@ -119,7 +119,7 @@ Emit the call's MENU section verbatim per its marker.
 
 **STOP.** Wait for user response.
 
-**If `provide`:** set each item's derived field from the user's text and include it in the writes below.
+**If `provide`:** when the reply carries no text — the choice alone — ask for each item's summary and **STOP.** Wait for user response. Set each item's null field(s) from the user's text — the summary as given, a description drawn from it — and include them in the writes below.
 
 **If `dismiss`:** for each such item, set the null field(s) to a minimal value derived from the topic name and routing, ending `(source artifact missing)`, and include them in the writes below.
 

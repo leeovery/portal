@@ -4,8 +4,7 @@
 // Domain ring: task gate sections — the implementation loop's state-derived
 // gates, served by the `engine render` surfaces (render.cjs) at the exact
 // prose point that displays them. The `engine task` verbs answer with their
-// one-line JSON only; a gate's section is fetched by its own render call, so
-// the section always sits in the tool result directly above its emission.
+// one-line JSON only; a gate's section is fetched by its own render call.
 // Deterministic: same state, same string. Conversational content (reviewer
 // findings, executor summaries, the blocked-task list) never renders here —
 // it stays with the session.
@@ -36,9 +35,7 @@
 // the action that follows in the same turn.
 // ---------------------------------------------------------------------------
 
-const { section, CONTINUE_INSTRUCTION, AUTO_GATE_INSTRUCTION, menu, cmdOption, promptOption } = require('./surfaces.cjs');
-
-const MENU_INSTRUCTION = "emit verbatim as markdown, then STOP for the user's response";
+const { section, CONTINUE_INSTRUCTION, timedInstruction, menu, cmdOption, promptOption, MENU_INSTRUCTION, AUTO_GATE_CLAUSE } = require('./surfaces.cjs');
 
 /** The blocked-tasks stop menu. Static by design. @returns {string} */
 function blockedTasksMenu() {
@@ -64,7 +61,7 @@ function taskGateSection(gateMode) {
   if (gateMode !== 'gated') {
     return section(
       'DISPLAY: task gate auto-approved',
-      `after the result summary: ${AUTO_GATE_INSTRUCTION}`,
+      timedInstruction('text', 'after the result summary', AUTO_GATE_CLAUSE),
       'Task approved [auto]. Committing and moving to the next task.',
     );
   }
@@ -95,7 +92,7 @@ function fixGateSection(gateMode, thresholdReached) {
   if (!thresholdReached && gateMode !== 'gated') {
     return section(
       'DISPLAY: fix gate auto-accepted',
-      `after the findings summary: ${AUTO_GATE_INSTRUCTION}`,
+      timedInstruction('text', 'after the findings summary', AUTO_GATE_CLAUSE),
       'Fix analysis accepted [auto]. Passing the findings to the executor.',
     );
   }

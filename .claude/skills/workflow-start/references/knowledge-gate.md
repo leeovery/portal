@@ -27,7 +27,7 @@ Read the boot response's `system_config` object: `status` (`valid`, `absent`, or
 > The knowledge base powers recall across work units and within them — later phases draw on earlier work. It is required infrastructure: no workflow runs until it is initialised. Your machine already has a system configuration this project can reuse.
 ```
 
-Fetch the gate and emit its `MENU: knowledge reuse gate` section verbatim as markdown (not a code block). When `system_config` names a provider, pass it — and its model when one is named:
+Fetch the gate and emit its `MENU: knowledge reuse gate` section verbatim per its marker. When `system_config` names a provider, pass it — and its model when one is named:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render knowledge-gate --variant reuse --provider {system_config.provider} --model {system_config.model}
@@ -55,7 +55,7 @@ node .claude/skills/workflow-knowledge/scripts/knowledge.cjs setup --from-system
 
 A per-project deviation never touches the system-wide configuration. Keyword-only is the per-project mode; a different *provider* is a system-wide decision — the wizard's job.
 
-Fetch the gate and emit its `MENU: knowledge deviate gate` section verbatim as markdown (not a code block):
+Fetch the gate and emit its `MENU: knowledge deviate gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render knowledge-gate --variant deviate
@@ -83,7 +83,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render knowledge-gate --v
 > Pick how this project's knowledge base should search. OpenAI needs an API key — stored in your terminal, never pasted here. Keyword-only needs no key and can be upgraded anytime.
 ```
 
-Fetch the gate and emit its `MENU: knowledge mode gate` section verbatim as markdown (not a code block):
+Fetch the gate and emit its `MENU: knowledge mode gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render knowledge-gate --variant mode
@@ -93,9 +93,9 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render knowledge-gate --v
 
 #### If `openai`
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Which OpenAI embedding model?
 
 - Reply with a model name, or "default" for text-embedding-3-small.
@@ -113,9 +113,9 @@ node .claude/skills/workflow-knowledge/scripts/knowledge.cjs setup --provider op
 
 #### If `compatible`
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Where is the embeddings endpoint?
 
 - Base URL (e.g. http://localhost:1234/v1)
@@ -153,9 +153,9 @@ node .claude/skills/workflow-knowledge/scripts/knowledge.cjs setup --keyword-onl
 
 The setup command refused or was rejected because no working API key is available for the provider it targeted. The key goes straight from the user's terminal into a private store — it never touches this chat.
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 @if(provider is openai)
 No OpenAI API key was found. Store one without it touching this
 chat — run ONE of these in your terminal, then come back:
@@ -182,7 +182,7 @@ this chat — run this in your terminal, then come back:
 > Do not paste the API key into this chat — not even partially. Store it in your terminal with one of the commands above, then come back here.
 ```
 
-Fetch the gate and emit its `MENU: knowledge retry gate` section verbatim as markdown (not a code block):
+Fetch the gate and emit its `MENU: knowledge retry gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render knowledge-gate --variant retry
@@ -218,21 +218,13 @@ node .claude/skills/workflow-knowledge/scripts/knowledge.cjs setup --keyword-onl
 
 ## E. Confirm and Continue
 
-The fresh store is uncommitted. Commit it:
+Fetch the confirmation — it names the configuration this checkout's store was built with — and emit its `DISPLAY: knowledge ready` section verbatim per its marker:
 
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs commit --workflows -m "chore(knowledge): initialise store"
+node .claude/skills/workflow-engine/scripts/engine.cjs render knowledge-ready
 ```
 
-Then confirm, filling the placeholders from the mode just initialised:
-
-> *Output the next fenced block as a code block:*
-
-```
-Knowledge base ready — @if(provider) {provider} · {model} @else keyword-only @endif.
-```
-
-→ Return to **[the skill](../SKILL.md)** for **Step 0.5**.
+→ Return to **[the skill](../SKILL.md)** for **Step 0.6**.
 
 ## F. Terminal Wizard
 
@@ -248,16 +240,10 @@ Knowledge base ready — @if(provider) {provider} · {model} @else keyword-only 
 > The interactive wizard runs in your terminal. It walks provider choice, key entry (input hidden), and project store setup.
 ```
 
-> *Output the next fenced block as a code block:*
+Fetch the gate and emit its `DISPLAY: knowledge wizard` and `MENU: knowledge wizard gate` sections verbatim per their markers:
 
-```
-Run the wizard in your terminal:
-
-  node .claude/skills/workflow-knowledge/scripts/knowledge.cjs setup
-
-It configures system defaults, initialises the project store, and
-runs the initial indexing pass. Say `y/yes` here when it
-completes.
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render knowledge-gate --variant wizard
 ```
 
 **STOP.** Wait for user response.
@@ -272,15 +258,9 @@ node .claude/skills/workflow-engine/scripts/engine.cjs boot
 
 **If `knowledge` is `ready`:**
 
-Boot committed any store dirt the wizard left. Confirm with the active settings from the wizard's summary:
+If the response carries `warnings`, surface them.
 
-> *Output the next fenced block as a code block:*
-
-```
-Knowledge base ready — {provider} · {model}.
-```
-
-→ Return to **[the skill](../SKILL.md)** for **Step 0.5**.
+→ Return to **E. Confirm and Continue**.
 
 **If `knowledge` is still `not-ready`:**
 
@@ -293,6 +273,8 @@ The wizard did not complete. Surface the boot response's detail.
 The setup command just ran. Branch on its result. `origin` names the branch that ran it — the authentication path routes back through **D** to that origin's command.
 
 #### If the command succeeded
+
+When its output reports artifacts that failed to index (`N artifact(s) failed to index`) or an initial indexing error, surface it in one sentence — the next start retries them.
 
 → Return to **E. Confirm and Continue**.
 

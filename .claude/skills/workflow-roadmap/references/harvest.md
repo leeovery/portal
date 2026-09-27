@@ -14,7 +14,7 @@ Three sources of truth, cross-referenced:
 
 1. **The Exploration section** of the active session log at `.workflows/.roadmap/sessions/session-{session_number}.md`. Read it now, every time, whatever is already in context.
 2. **In-context memory of the conversation** — richer but volatile.
-3. **The existing roadmap** from the home snapshot (re-run `gateway.cjs view` and read its DATA when it is not current in context).
+3. **The existing roadmap** — read it with `engine roadmap state` when it is not current in context.
 
 → Proceed to **B. Identify Items and Horizons**.
 
@@ -59,7 +59,7 @@ Read `=== DATA` to reason from (never display it) — a per-name flag row for ea
 - `legal_horizon=false` — the release word itself carries a dot or slash ("v1.5"). Respell it with the user's blessing at the gate ("v1-5", "v15") and re-run — the persist refuses it as written.
 - `new_horizon=true` — informational: the horizon will be created at persist, in the file's order.
 
-Emit the `=== DISPLAY` section verbatim **as a code block** — the proposed items over the existing roadmap, so the full picture is visible.
+Emit the `=== DISPLAY` section verbatim per its marker — the proposed items over the existing roadmap, so the full picture is visible.
 
 Then fetch the gate and emit its section verbatim per its marker:
 

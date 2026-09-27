@@ -6,7 +6,8 @@
 // plus the skill's state-derived sub-views: the empty state, the inbox pickup
 // and archived lists, the working set, the manage flow, and the completed &
 // cancelled view. Sub-view projections return `{data, display, menu}` bodies
-// (the adapter wraps them in section markers); flows with later gates also
+// — a pick view carries its menu, or its display when there is nothing to
+// pick (the adapter wraps them in section markers); flows with later gates also
 // return labelled `sections` emitted at the same call (the mixed-type blocker).
 //
 // Deterministic: same detail, same string. The overview is a flat list (one
@@ -18,7 +19,7 @@
 const { box, renderTree } = require('../../kernel/render.cjs');
 const { TREE_WIDTH, titlecase } = require('../conventions.cjs');
 const { combinedInbox } = require('../inbox-set.cjs');
-const { menuFrame: dotMenu, menu, cmdOption, bareOption, promptOption, rangeOption, section: labelled } = require('./surfaces.cjs');
+const { menuFrame: dotMenu, menu, cmdOption, bareOption, promptOption, rangeOption, actionsTable, section: labelled, emitAs, MENU_INSTRUCTION } = require('./surfaces.cjs');
 const { escapeMarkdown } = require('./worklist.cjs');
 
 /** @typedef {import('../start.cjs').StartDetail} StartDetail */
@@ -27,6 +28,7 @@ const { escapeMarkdown } = require('./worklist.cjs');
 /** @typedef {import('../inbox-set.cjs').PickupItem} PickupItem */
 /** @typedef {import('../inbox-set.cjs').WorkingSetDetail} WorkingSetDetail */
 /** @typedef {import('../workunit-manage.cjs').ManageDetail} ManageDetail */
+/** @typedef {import('./surfaces.cjs').LabelParts} LabelParts */
 
 
 /**
@@ -38,7 +40,7 @@ const { escapeMarkdown } = require('./worklist.cjs');
  * @property {string} [work_unit]     continue entries
  * @property {string} [pre_seed]      start_new entries: `none` | a work type
  * @property {string|null} route      skill invocation, or null for internal flows
- * @property {string} label
+ * @property {import('./surfaces.cjs').OptionLabel} label
  */
 
 /**
@@ -109,7 +111,7 @@ function roadmapRows(roadmap) {
 function roadmapMenuRow(detail) {
   if (!detail.roadmap.exists) return null;
   const label = detail.roadmap.active_session !== null
-    ? 'Resume the product session — *roadmap, in progress*'
+    ? { head: 'Resume the product session', tail: 'roadmap, in progress' }
     : 'Open the product roadmap';
   return { key: 'r', word: 'roadmap', action: 'open_roadmap', route: '/workflow-roadmap open', label };
 }
@@ -166,22 +168,24 @@ function startOverview(detail) {
 
 // The resume row for an in-progress baseline interview — unfinished
 // assessment reads as unfinished work.
-/** @param {StartDetail} detail */
+/** @param {StartDetail} detail @returns {LabelParts} */
 function baselineResumeLabel(detail) {
   const n = detail.baseline.remaining;
-  return `Resume the baseline interview — *${n} area${n === 1 ? '' : 's'} remaining*`;
+  return { head: 'Resume the baseline interview', tail: `${n} area${n === 1 ? '' : 's'} remaining` };
 }
 
 // A finalising unit's entry reads `Finalise …` — the continue skill it routes
-// to presents the completion gate. Concerns queued on the unit's topic append
-// the `· triage waiting` cue after the tail, as the epic rows carry it.
-/** @param {WorkUnitEntry} unit @param {TypeSection['type']} type */
+// to presents the completion gate. Concerns queued on the unit's topic cue
+// `triage waiting` after the tail, as the epic rows carry it.
+/** @param {WorkUnitEntry} unit @param {TypeSection['type']} type @returns {LabelParts} */
 function continueLabel(unit, type) {
   const t = titlecase(unit.name);
-  if (type === 'epic') return `Continue "${t}" — *epic*`;
-  const cue = (unit.triage_phases || []).length > 0 ? ' · triage waiting' : '';
-  if (unit.finalising) return `Finalise "${t}" — *${type}, ${unit.phase_label}*${cue}`;
-  return `Continue "${t}" — *${type}, ${unit.phase_label}*${cue}`;
+  if (type === 'epic') return { head: `Continue "${t}"`, tail: 'epic' };
+  return {
+    head: `${unit.finalising ? 'Finalise' : 'Continue'} "${t}"`,
+    tail: `${type}, ${unit.phase_label}`,
+    cue: (unit.triage_phases || []).length > 0 ? 'triage waiting' : undefined,
+  };
 }
 
 /**
@@ -330,11 +334,11 @@ function emptyMenu(detail) {
 // Inbox pickup + archived store
 // ---------------------------------------------------------------------------
 
-/** The `n  type  date  slug  → path` table under a header line. @param {string} header @param {PickupItem[]} items */
+/** The `n  type  date  slug  → path  — title` table under a header line. @param {string} header @param {PickupItem[]} items */
 function itemTable(header, items) {
-  const lines = [`${header} (n  type  date  slug  → path):`];
+  const lines = [`${header} (n  type  date  slug  → path  — title):`];
   for (const item of items) {
-    lines.push(`  ${item.n}  ${item.type}  ${item.date}  ${item.slug}  → ${item.path}`);
+    lines.push(`  ${item.n}  ${item.type}  ${item.date}  ${item.slug}  → ${item.path}  — ${item.title}`);
   }
   return lines;
 }
@@ -367,13 +371,22 @@ function groupedPickup(items) {
   return { ordered, display: lines.join('\n') + '\n' };
 }
 
+// A pickup item as a pick-menu row's label — the title the head, escaped
+// because the person wrote it, its metadata the tail.
+/** @param {PickupItem} item @param {string} meta @returns {import('./surfaces.cjs').LabelParts} */
+function itemLabel(item, meta) {
+  return { head: escapeMarkdown(item.title), tail: meta };
+}
+
 /**
  * The inbox pickup snapshot: the type-grouped item tree, the
  * select/archived/back menu. Selection numbers resolve through the DATA
  * `ITEMS` table, which carries the same group-major numbering as the tree.
+ * An empty inbox is the display that says so and no menu — the flow returns
+ * to its caller without a pick to take.
  * @param {PickupItem[]} items      combined live inbox, pickup order
  * @param {boolean} hasArchived
- * @returns {{data: string, display: string, menu: string}}
+ * @returns {{data: string, display: string, menu?: string}}
  */
 function inboxPickupView(items, hasArchived) {
   const grouped = groupedPickup(items);
@@ -383,40 +396,40 @@ function inboxPickupView(items, hasArchived) {
     ...itemTable('ITEMS', grouped.ordered),
   ].join('\n');
 
-  const display = items.length > 0 ? grouped.display : 'No inbox items.\n';
+  if (items.length === 0) return { data, display: 'No inbox items.\n' };
 
-  const options = [];
-  if (items.length === 1) {
-    options.push(cmdOption('1', null, 'Select the item to work on'));
-  } else if (items.length > 1) {
-    options.push(rangeOption(1, items.length, 'Select item(s) to work on (comma-separated for several)'));
-  }
+  const options = [items.length === 1
+    ? cmdOption('1', null, 'Select the item to work on')
+    : rangeOption(1, items.length, 'Select item(s) to work on (comma-separated for several)')];
   if (hasArchived) options.push(cmdOption('a', 'archived', 'View archived items (restore or delete)'));
   options.push(cmdOption('b', 'back', 'Return'));
 
-  return { data, display, menu: dotMenu(['What would you like to do?', '', ...options]) };
+  return { data, display: grouped.display, menu: dotMenu(['What would you like to do?', '', ...options]) };
 }
 
 /**
- * The archived-store snapshot: numbered archived items and the select prompt
- * (empty menu when nothing is archived).
+ * The archived-store snapshot: the archived items as a numbered pick menu,
+ * group-major like the pickup — or, with nothing archived, the empty display
+ * and no menu.
  * @param {PickupItem[]} items  combined archived items, pickup order
- * @returns {{data: string, display: string, menu: string}}
+ * @returns {{data: string, display?: string, menu?: string}}
  */
 function archivedView(items) {
-  const grouped = groupedPickup(items);
+  const { ordered } = groupedPickup(items);
   const data = [
     `archived_count: ${items.length}`,
-    ...itemTable('ITEMS', grouped.ordered),
+    ...itemTable('ITEMS', ordered),
   ].join('\n');
 
-  const display = items.length > 0 ? grouped.display : 'No archived items.\n';
+  if (items.length === 0) return { data, display: 'No archived items.\n' };
 
-  const menu = items.length > 0
-    ? dotMenu(['Select an item (enter number, or **`b/back`** to return):'])
-    : '';
-
-  return { data, display, menu };
+  return {
+    data,
+    menu: menu('Which item?', [
+      ...ordered.map((item) => cmdOption(String(item.n), null, itemLabel(item, `${item.type}, ${item.date}`))),
+      cmdOption('b', 'back', 'Return to the inbox'),
+    ]),
+  };
 }
 
 /**
@@ -428,7 +441,7 @@ function archivedView(items) {
 function archivedActions(item) {
   return labelled(
     'MENU: archived actions',
-    "emit verbatim as markdown, then STOP for the user's response",
+    MENU_INSTRUCTION,
     menu(`Selected: **${escapeMarkdown(item.title)}** (${item.type}, archived)`, [
       cmdOption('v', 'view', 'View full content'),
       cmdOption('u', 'unarchive', 'Restore to the inbox'),
@@ -447,7 +460,7 @@ function archivedActions(item) {
 function archivedDeleteGate(item) {
   return labelled(
     'MENU: archived delete gate',
-    "emit verbatim as markdown, then STOP for the user's response",
+    MENU_INSTRUCTION,
     menu(`Permanently deleting "${escapeMarkdown(item.title)}" removes the file from the repo and cannot be undone.`, [
       cmdOption('y', 'yes', 'Delete permanently'),
       cmdOption('n', 'no', 'Return'),
@@ -513,12 +526,22 @@ function workingSetView(ws, summaries = {}) {
   if (!ws.uniform) {
     sections.push(labelled(
       'DISPLAY: blocker',
-      'emit verbatim as a properties code block (```properties fence — it renders the blocker red) directly after the display',
+      emitAs('properties', ', directly after the display — it renders the blocker red'),
       '⚑ Work is unavailable while the set mixes types — drop to a single type to enable it.',
     ));
   }
 
   return { data, title, display, menu, sections: sections.join('\n') };
+}
+
+// The add and drop gates' pick: one row per candidate, several picks
+// comma-separated.
+/** @param {string} question @param {PickupItem[]} items @param {(item: PickupItem) => string} meta */
+function workingSetPick(question, items, meta) {
+  return menu('Pick one, or several comma-separated.', [
+    ...items.map((item) => cmdOption(String(item.n), null, itemLabel(item, meta(item)))),
+    cmdOption('b', 'back', 'Return to the working set'),
+  ], { question });
 }
 
 /**
@@ -531,18 +554,11 @@ function workingSetAddGate(ws) {
   if (ws.addable.length === 0) {
     throw new Error('working-set-add-gate: nothing addable — the whole inbox is already in the set');
   }
-  return [
-    labelled(
-      'DISPLAY: add candidates',
-      'emit verbatim as a code block',
-      ws.addable.map((item) => `  ${item.n}. ${item.title} [${item.type}] — ${item.date}`).join('\n'),
-    ),
-    labelled(
-      'MENU: add gate',
-      "emit verbatim as markdown, then STOP for the user's response",
-      dotMenu(['Add which? (enter number(s), comma-separated, or **`b/back`**)']),
-    ),
-  ].join('\n');
+  return labelled(
+    'MENU: add gate',
+    MENU_INSTRUCTION,
+    workingSetPick('Add which?', ws.addable, (item) => `${item.type}, ${item.date}`),
+  );
 }
 
 /**
@@ -552,18 +568,11 @@ function workingSetAddGate(ws) {
  * @returns {string}
  */
 function workingSetDropGate(ws) {
-  return [
-    labelled(
-      'DISPLAY: drop candidates',
-      'emit verbatim as a code block',
-      ws.items.map((item) => `  ${item.n}. ${item.title} [${item.type}]`).join('\n'),
-    ),
-    labelled(
-      'MENU: drop gate',
-      "emit verbatim as markdown, then STOP for the user's response",
-      dotMenu(['Drop which? (enter number(s), comma-separated, or **`b/back`**)']),
-    ),
-  ].join('\n');
+  return labelled(
+    'MENU: drop gate',
+    MENU_INSTRUCTION,
+    workingSetPick('Drop which?', ws.items, (item) => item.type),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -578,25 +587,16 @@ function workingSetDropGate(ws) {
  */
 
 /**
- * The manage selection snapshot: every active work unit by type, numbering
- * continuous across sections — the same order and numbers as the overview.
+ * The manage selection snapshot: every active work unit as a numbered pick
+ * row, numbering continuous across the type sections — the same order and
+ * numbers as the overview.
  * @param {StartDetail} detail
- * @returns {{data: string, display: string, menu: string, rows: ManageRow[]}}
+ * @returns {{data: string, menu: string, rows: ManageRow[]}}
  */
 function manageListView(detail) {
   /** @type {ManageRow[]} */
-  const rows = [];
-  const displayLines = [];
-  for (const s of SECTIONS) {
-    const units = detail[s.group].work_units;
-    if (units.length === 0) continue;
-    displayLines.push(s.label.replace(/:$/, ''));
-    units.forEach((u, i) => {
-      rows.push({ n: rows.length + 1, work_type: s.type, work_unit: u.name });
-      displayLines.push(`  ${i === units.length - 1 ? '└─' : '├─'} ${rows.length}. ${titlecase(u.name)}`);
-    });
-    displayLines.push('');
-  }
+  const rows = SECTIONS.flatMap((s) => detail[s.group].work_units.map((u) => ({ work_type: s.type, work_unit: u.name })))
+    .map((r, i) => ({ n: i + 1, ...r }));
 
   const data = [
     `unit_count: ${rows.length}`,
@@ -604,9 +604,6 @@ function manageListView(detail) {
     'UNITS (n  work_type  work_unit):',
     ...rows.map((r) => `  ${r.n}  ${r.work_type}  ${r.work_unit}`),
   ].join('\n');
-
-  const display = ''
-    + (rows.length > 0 ? displayLines.join('\n') : 'No active work units.\n');
 
   // The project baseline manages from here too — it is not a work unit, so
   // it rides as a command option rather than a numbered row. Label follows
@@ -618,17 +615,16 @@ function manageListView(detail) {
     native: 'Start the project baseline assessment',
     none: 'Start the project baseline assessment',
   }[detail.baseline.status];
-  const menuLines = [
-    cmdOption('a', 'baseline', baselineOption),
-    '',
-    'Select a work unit (enter number, or **`b/back`** to return):',
-  ];
 
-  const menu = rows.length > 0
-    ? dotMenu(menuLines)
-    : '';
-
-  return { data, display, menu, rows };
+  return {
+    data,
+    menu: menu('Which work unit?', [
+      ...rows.map((r) => cmdOption(String(r.n), null, { head: titlecase(r.work_unit), tail: r.work_type })),
+      cmdOption('a', 'baseline', baselineOption),
+      cmdOption('b', 'back', 'Return'),
+    ]),
+    rows,
+  };
 }
 
 /**
@@ -639,31 +635,20 @@ function manageListView(detail) {
  * @returns {{data: string, menu: string}}
  */
 function manageUnitView(md) {
-  /** @type {[string, string][]} */
-  const actions = [];
-  const options = [];
-  if (md.implementation_completed) {
-    actions.push(['d', 'mark_completed']);
-    options.push(cmdOption('d', 'done', 'Mark as completed'));
-  }
-  if (md.work_type === 'feature') {
-    actions.push(['p', 'pivot']);
-    options.push(cmdOption('p', 'pivot', 'Convert to epic (enables multiple topics)'));
-  }
-  if (md.absorb_available) {
-    actions.push(['a', 'absorb']);
-    options.push(cmdOption('a', 'absorb', 'Merge into an existing epic'));
-  }
-  if (md.has_plan) {
-    actions.push(['v', 'view_plan']);
-    options.push(cmdOption('v', 'view-plan', 'View the implementation plan'));
-  }
-  actions.push(['c', 'cancel'], ['b', 'back']);
-  options.push(
-    cmdOption('c', 'cancel', 'Mark as cancelled'),
-    cmdOption('b', 'back', 'Return'),
-    promptOption('Ask', 'Ask a question about this work unit'),
+  /** @type {{key: string, word: string, action: string, label: string}[]} */
+  const keys = [];
+  if (md.implementation_completed) keys.push({ key: 'd', word: 'done', action: 'mark_completed', label: 'Mark as completed' });
+  if (md.work_type === 'feature') keys.push({ key: 'p', word: 'pivot', action: 'pivot', label: 'Convert to epic (enables multiple topics)' });
+  if (md.absorb_available) keys.push({ key: 'a', word: 'absorb', action: 'absorb', label: 'Merge into an existing epic' });
+  if (md.has_plan) keys.push({ key: 'v', word: 'view-plan', action: 'view_plan', label: 'View the implementation plan' });
+  keys.push(
+    { key: 'c', word: 'cancel', action: 'cancel', label: 'Mark as cancelled' },
+    { key: 'b', word: 'back', action: 'back', label: 'Return' },
   );
+  const options = [
+    ...keys.map((k) => cmdOption(k.key, k.word, k.label)),
+    promptOption('Ask', 'Ask a question about this work unit'),
+  ];
 
   const data = [
     `work_unit: ${md.work_unit}`,
@@ -676,17 +661,10 @@ function manageUnitView(md) {
     `absorb_available: ${md.absorb_available}`,
     `available_epics: ${md.available_epics.join(', ') || '(none)'}`,
     `planning_topics: ${md.planning_topics.map((t) => `${t.name} [${t.status}]`).join(', ') || '(none)'}`,
-    'ACTIONS (key  action):',
-    ...actions.map(([k, a]) => `  ${k}  ${a}`),
+    ...actionsTable(['action'], keys, (k) => [k.action]),
   ].join('\n');
 
-  const menu = dotMenu([
-    `**${titlecase(md.work_unit)}** (${md.work_type})`,
-    '',
-    ...options,
-  ]);
-
-  return { data, menu };
+  return { data, menu: menu(`**${titlecase(md.work_unit)}** (${md.work_type})`, options, { question: 'What would you like to do?' }) };
 }
 
 /**
@@ -698,9 +676,9 @@ function manageUnitView(md) {
 function absorbTargetMenu(md) {
   return labelled(
     'MENU: absorb target',
-    "emit verbatim as markdown, then STOP for the user's response",
+    MENU_INSTRUCTION,
     dotMenu([
-      'Select a target epic:',
+      'Which epic should absorb it?',
       '',
       ...md.available_epics.map((name, i) => cmdOption(String(i + 1), null, titlecase(name))),
       '',
@@ -717,7 +695,7 @@ function absorbTargetMenu(md) {
 function absorbConfirmGate() {
   return labelled(
     'MENU: absorb confirm gate',
-    "emit verbatim as markdown, then STOP for the user's response",
+    MENU_INSTRUCTION,
     menu('', [bareOption('y', 'yes'), bareOption('n', 'no')], { question: 'Proceed?' }),
   );
 }
@@ -731,11 +709,11 @@ function absorbConfirmGate() {
 function planTopicsMenu(md) {
   return labelled(
     'MENU: plan topics',
-    "emit verbatim as markdown, then STOP for the user's response",
+    MENU_INSTRUCTION,
     dotMenu([
       'Which plan would you like to view?',
       '',
-      ...md.planning_topics.map((t, i) => cmdOption(String(i + 1), null, `${titlecase(t.name)} — *${t.status}*`)),
+      ...md.planning_topics.map((t, i) => cmdOption(String(i + 1), null, { head: titlecase(t.name), tail: t.status })),
     ]),
   );
 }
@@ -763,21 +741,18 @@ const FILTER_LABELS = {
   epic: 'Epics',
 };
 
-/** One closed-set tree: numbered rows, the closing phase as each row's body. @param {ClosedRow[]} rows @param {string} label */
-function closedTree(rows, label) {
-  return renderTree(
-    rows.map((r) => ({ title: `${r.n}. ${titlecase(r.work_unit)}`, body: [`${label}: ${r.last_phase}`] })),
-    { width: TREE_WIDTH, bodyIndent: 1 },
-  ).replace(/\n$/, '');
-}
+// A closed row's tail: how it closed, and in which phase.
+/** @type {Record<string, string>} */
+const CLOSED_TAIL = { completed: 'completed after', cancelled: 'cancelled during' };
 
 /**
  * The completed & cancelled snapshot, optionally filtered to one work type
- * (the per-type navigation skills pass their own). Numbering is continuous
- * across the two lists; numbers resolve through the DATA `UNITS` table.
+ * (the per-type navigation skills pass their own): completed then cancelled
+ * as one numbered pick menu, numbers resolving through the DATA `UNITS`
+ * table — or, with nothing closed, the empty display and no menu.
  * @param {StartDetail} detail
  * @param {string} [filter]  a work type, or undefined for all
- * @returns {{data: string, display: string, menu: string, rows: ClosedRow[]}}
+ * @returns {{data: string, display?: string, menu?: string, rows: ClosedRow[]}}
  */
 function completedView(detail, filter) {
   if (filter !== undefined && !FILTER_LABELS[filter]) {
@@ -785,53 +760,49 @@ function completedView(detail, filter) {
   }
   const match = (/** @type {import('../start.cjs').ClosedEntry} */ e) => filter === undefined || e.work_type === filter;
   /** @type {ClosedRow[]} */
-  const rows = [];
-  for (const e of [...detail.completed.filter(match), ...detail.cancelled.filter(match)]) {
-    rows.push({ n: rows.length + 1, status: e.status, work_type: e.work_type, work_unit: e.name, last_phase: e.last_phase || 'none' });
-  }
-  const completedRows = rows.filter((r) => r.status === 'completed');
-  const cancelledRows = rows.filter((r) => r.status === 'cancelled');
+  const rows = [...detail.completed.filter(match), ...detail.cancelled.filter(match)]
+    .map((e, i) => ({ n: i + 1, status: e.status, work_type: e.work_type, work_unit: e.name, last_phase: e.last_phase || 'none' }));
 
   const data = [
     `filter: ${filter || '(none)'}`,
-    `completed_count: ${completedRows.length}`,
-    `cancelled_count: ${cancelledRows.length}`,
+    `completed_count: ${rows.filter((r) => r.status === 'completed').length}`,
+    `cancelled_count: ${rows.filter((r) => r.status === 'cancelled').length}`,
     'UNITS (n  status  work_type  work_unit  last_phase):',
     ...rows.map((r) => `  ${r.n}  ${r.status}  ${r.work_type}  ${r.work_unit}  ${r.last_phase}`),
   ].join('\n');
 
-  let display = '';
-  if (rows.length === 0) {
-    display += 'No completed or cancelled work units found.\n';
-  } else {
-    const lines = [];
-    if (filter !== undefined) {
-      lines.push(`Showing: ${FILTER_LABELS[filter]}`);
-      lines.push('');
-    }
-    // Each list is one tree off its header: the closing phase is the row's
-    // body, so the branch glyphs stay positional (`└─` marks the last row of
-    // the group, never every row's sub-line).
-    if (completedRows.length > 0) {
-      lines.push('Completed');
-      lines.push(closedTree(completedRows, 'Completed after'));
-      lines.push('');
-    }
-    if (cancelledRows.length > 0) {
-      lines.push('Cancelled');
-      lines.push(closedTree(cancelledRows, 'Cancelled during'));
-      lines.push('');
-    }
-    display += lines.join('\n').replace(/\n+$/, '\n');
-  }
+  if (rows.length === 0) return { data, display: 'No completed or cancelled work units found.\n', rows };
 
-  const menu = rows.length > 0
-    ? dotMenu([
-      'Select a work unit (enter number) for details, or **`b/back`** to return.',
-    ])
-    : '';
+  const options = [
+    ...rows.map((r) => cmdOption(String(r.n), null, { head: titlecase(r.work_unit), tail: `${CLOSED_TAIL[r.status]} ${r.last_phase}` })),
+    cmdOption('b', 'back', 'Return'),
+  ];
+  return {
+    data,
+    menu: filter === undefined
+      ? menu('Which work unit?', options)
+      : menu(`Showing: ${FILTER_LABELS[filter]}`, options, { question: 'Which work unit?' }),
+    rows,
+  };
+}
 
-  return { data, display, menu, rows };
+/**
+ * The selected unit's action menu, served by `render completed-actions` once
+ * the list's number resolves to a row: reactivate, back, ask.
+ * @param {string} workUnit
+ * @param {string} status  `completed` or `cancelled`
+ * @returns {string}
+ */
+function completedActions(workUnit, status) {
+  return labelled(
+    'MENU: completed actions',
+    MENU_INSTRUCTION,
+    menu(`**${titlecase(workUnit)}** (${status})`, [
+      cmdOption('r', 'reactivate', 'Set status back to in-progress'),
+      cmdOption('b', 'back', 'Return to the list'),
+      promptOption('Ask', 'Ask a question about this work unit'),
+    ], { question: 'What would you like to do?' }),
+  );
 }
 
 module.exports = {
@@ -852,4 +823,5 @@ module.exports = {
   absorbConfirmGate,
   planTopicsMenu,
   completedView,
+  completedActions,
 };

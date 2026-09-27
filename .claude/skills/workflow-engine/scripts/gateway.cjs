@@ -13,7 +13,9 @@
 //
 // Output sections are demarcated so the two surfaces can't be confused:
 // DATA is for reasoning (never displayed); DISPLAY and MENU are emitted to
-// the user verbatim (never parsed for decisions).
+// the user verbatim (never parsed for decisions). A MENU is a live gate at the
+// call that returns it, so the head-of-skill insert — fetched before any step
+// shows anything — never carries one.
 // ---------------------------------------------------------------------------
 
 /**
@@ -24,14 +26,18 @@
  *   `gateway.cjs {work_unit}`).
  */
 
+const { TITLE_INSTRUCTION, titleSection, DATA_INSTRUCTION, emitAs, openGate, gateBlock } = require('./domain/projections/surfaces.cjs');
+const { markConversation } = require('./domain/conversation.cjs');
+
 const SECTION = {
-  title:   '=== TITLE (emit verbatim as markdown — the view\'s chrome heading) ===',
-  data:    '=== DATA (reason from this — never display or parse the sections below) ===',
-  // Plain fence, no language: any grammar eventually colours a stray word in
-  // uncontrolled prose (makefile's `private`/`include` did). Displays stay
-  // quiet; colour lives in the markdown chrome and menus.
-  display: '=== DISPLAY (emit verbatim as a code block) ===',
-  menu:    '=== MENU (emit verbatim as markdown) ===',
+  title:   `=== TITLE (${TITLE_INSTRUCTION}) ===`,
+  data:    `=== DATA (${DATA_INSTRUCTION}) ===`,
+  // A `text` fence: any other grammar eventually colours a stray word in
+  // uncontrolled prose (makefile's `private`/`include` did), and a fence with
+  // no language draws in the menus' colour. Displays stay quiet; colour lives
+  // in the markdown chrome and menus.
+  display: `=== DISPLAY (${emitAs('text')}) ===`,
+  menu:    `=== MENU (${emitAs('markdown')}) ===`,
 };
 
 /** Render a DATA section. Objects become stable `key: value` lines. @param {object|string} body */
@@ -41,7 +47,7 @@ function dataBlock(body) {
 
 /** The chrome heading for a view — markdown, above the fenced display. @param {string} title */
 function titleBlock(title) {
-  return SECTION.title + '\n# **\`■ ' + title + '\`**\n';
+  return titleSection(title);
 }
 
 /** @param {string} body display block, pre-rendered */
@@ -49,9 +55,10 @@ function displayBlock(body) {
   return SECTION.display + '\n' + String(body).replace(/\n+$/, '') + '\n';
 }
 
-/** @param {string} body menu block, pre-rendered */
+/** @param {string} body menu block, pre-rendered — empty renders no section: no gate, no marker */
 function menuBlock(body) {
-  return SECTION.menu + '\n' + String(body).replace(/\n+$/, '') + '\n';
+  const menu = String(body).replace(/\n+$/, '');
+  return menu === '' ? '' : gateBlock('menu') + SECTION.menu + '\n' + menu + '\n';
 }
 
 // `key: value` lines for flat values; nested objects/arrays render as compact
@@ -65,12 +72,15 @@ function dataLines(obj) {
 
 /**
  * Dispatch argv against the registered handlers and write the result to
- * stdout. Exits non-zero with a usage line on an unknown verb.
+ * stdout, the calling conversation marked as one that runs the workflows.
+ * Exits non-zero with a usage line on an unknown verb.
  * @param {GatewayHandlers} handlers
  * @param {string[]} [argv] defaults to process.argv.slice(2)
  */
 function runGateway(handlers, argv = process.argv.slice(2)) {
   const [first, ...rest] = argv;
+  openGate();
+  markConversation(process.cwd());
 
   let out;
   if (first === undefined) {

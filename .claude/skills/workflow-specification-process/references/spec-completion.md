@@ -22,9 +22,9 @@ Before asking for sign-off, assess whether this specification defines cross-cutt
 
 Present your assessment to the user:
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Cross-Cutting Assessment
 
 @if(cross_cutting)
@@ -38,7 +38,7 @@ multiple features handle data retrieval, rather than being a standalone piece
 of functionality to build."}
 ```
 
-Fetch the gate and emit its section verbatim at its marked instruction:
+Fetch the gate and emit its section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-completion-gate {work_unit}.specification.{topic} --variant assessment
@@ -48,7 +48,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render spec-completion-ga
 
 **If comment:**
 
-Discuss the user's suggested classification and re-assess.
+Discuss the user's suggested classification and re-assess. The comment sets the gate aside until the person is ready to move on; to put it back:
 
 → Return to **A. Cross-Cutting Assessment**.
 
@@ -102,7 +102,7 @@ If any show `status: pending`, work them now per **[spec-construction.md](spec-c
 
 ## C. Sign-Off
 
-Fetch the gate and emit its section verbatim at its marked instruction:
+Fetch the gate and emit its section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-completion-gate {work_unit}.specification.{topic} --variant signoff
@@ -112,7 +112,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render spec-completion-ga
 
 #### If comment
 
-Discuss the user's context and apply any changes.
+Discuss the user's context, and apply a change it leads to once the person confirms it. The comment sets the gate aside until the person is ready to move on; to put it back:
 
 → Return to **C. Sign-Off**.
 
@@ -143,10 +143,10 @@ Specification is complete when:
 Commit:
 
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): conclude specification" --topic specification/{topic} --kb
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): conclude specification" --topic specification/{topic}
 ```
 
-When the `complete` response's `warnings` is non-empty, fetch and emit the `DISPLAY: kb warning` advisory — the warning never blocks:
+When the `complete` response's `warnings` is non-empty, fetch and emit the `DISPLAY: kb warning` section verbatim per its marker — the warning never blocks:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render topic-receipt {work_unit}.specification.{topic} --verb complete --warn
@@ -169,18 +169,18 @@ Only supersede sources whose status is **not** `proposed`. A proposed source is 
 
    If the JSON response's `warnings` is non-empty, display them but do not block — the supersession is already recorded:
 
-   > *Output the next fenced block as a code block:*
+   > *Output the next fenced block as a text code block (```text fence):*
 
-   ```
+   ```text
    ⚑ Knowledge removal warning
      {warning}
-     The spec is superseded. The removal has been queued and will retry automatically on the next `knowledge remove` or `knowledge compact` call.
+     The spec is superseded. The next start removes its chunks from the knowledge base.
    ```
 
 2. Inform the user which topics were updated
 3. Commit:
    ```bash
-   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): mark source specifications as superseded" --topic specification/{topic} --kb
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "spec({work_unit}): mark source specifications as superseded" --topic specification/{topic}
    ```
 
 → Proceed to **F. Pipeline Continuation**.

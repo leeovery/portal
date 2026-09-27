@@ -8,7 +8,7 @@ Eight screens, one at a time, each ending on its own menu. `screen` starts at 1.
 
 **Parameters** (provided by caller via Load directive):
 
-- `origin` — `first-run` (workflow-start's Step 0.2: screen 1 is the offer, and its answer is recorded) or `help` (the help home: a re-read, nothing recorded)
+- `origin` — `first-run` (workflow-start's Step 0.3: screen 1 is the offer, and its answer is recorded) or `help` (the help home: a re-read, nothing recorded)
 
 ## A. Render the Screen
 
@@ -16,7 +16,7 @@ Eight screens, one at a time, each ending on its own menu. `screen` starts at 1.
 node .claude/skills/workflow-engine/scripts/engine.cjs render walkthrough-screen --screen {screen} --from {origin}
 ```
 
-Emit the response's sections in the order they arrive, each per its own marker: the `TITLE` verbatim as markdown, each `DISPLAY: walkthrough prose` section verbatim as markdown (not a code block), each `DISPLAY: walkthrough diagram` section verbatim as a code block, then the `MENU: walkthrough screen` section verbatim as markdown (not a code block). Prose and diagram sections alternate and repeat — emit each where it arrives, in the form its own marker names.
+Emit the response's sections in the order they arrive — the `TITLE`, the `DISPLAY: walkthrough prose` and `DISPLAY: walkthrough diagram` sections, which alternate and repeat, then the `MENU: walkthrough screen` section — each verbatim per its marker.
 
 **STOP.** Wait for user response.
 
@@ -82,26 +82,12 @@ node .claude/skills/workflow-engine/scripts/engine.cjs walkthrough record skippe
 
 #### If the user asks a question
 
-Answer it per **[answering-how-it-works.md](../../workflow-shared/references/answering-how-it-works.md)**. A question about ground a later screen covers gets a short answer that says which screen it belongs to.
+Answer it per **[answering-how-it-works.md](../../workflow-shared/references/answering-how-it-works.md)** — the menu it puts back is this screen's alone, never the whole screen again: the call at **A. Render the Screen** with `--menu-only` added. A question about ground a later screen covers gets a short answer that says which screen it belongs to.
 
-→ Proceed to **C. Put the Menu Back**.
+→ Return to **B. Route the Answer**.
 
 #### If tell me
 
-Screen 8's closing prompt: the user has said what they are likely to start with. Answer it per **[answering-how-it-works.md](../../workflow-shared/references/answering-how-it-works.md)**, in a few ordinary sentences — the kind of work it sounds like, the phases it will visit, and where their own attention will go — in the words the screens have already used, never an engine term.
-
-→ Proceed to **C. Put the Menu Back**.
-
-## C. Put the Menu Back
-
-The menu alone — never the whole screen again:
-
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs render walkthrough-screen --screen {screen} --from {origin} --menu-only
-```
-
-Emit the `MENU: walkthrough screen` section verbatim as markdown (not a code block).
-
-**STOP.** Wait for user response.
+Screen 8's closing prompt: the user has said what they are likely to start with. Answer it per **[answering-how-it-works.md](../../workflow-shared/references/answering-how-it-works.md)**, in a few ordinary sentences — the kind of work it sounds like, the phases it will visit, and where their own attention will go — in the words the screens have already used, never an engine term. The menu it puts back is this screen's alone, as for a question.
 
 → Return to **B. Route the Answer**.

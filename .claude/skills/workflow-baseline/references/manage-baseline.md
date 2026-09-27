@@ -8,19 +8,21 @@ The assessment is complete. Show what exists and offer the ways back in.
 
 ## A. Display and Menu
 
-Fetch the doc list and emit its `DISPLAY: baseline progress` section verbatim as a code block:
+Fetch the doc list and emit its `DISPLAY: baseline progress` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render baseline-progress
 ```
 
-Fetch the gate and emit its `MENU: baseline manage gate` section verbatim as markdown (not a code block):
+Fetch the gate and emit its `MENU: baseline manage gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render baseline-manage-gate
 ```
 
 **STOP.** Wait for user response.
+
+→ Proceed to **B. Handle Selection**.
 
 ## B. Handle Selection
 
@@ -32,11 +34,13 @@ Ask what ground to add or deepen if the user hasn't already said. Set mode = `ex
 
 #### If `view`
 
-Fetch the picker and emit its `MENU: baseline doc pick` section verbatim as markdown (not a code block):
+Fetch the picker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render baseline-doc-pick
 ```
+
+Read the `DATA` section to reason from — its `DOCS` table gives one `key  area` row per doc. Never display that section. Then emit the `MENU: baseline doc pick` section verbatim per its marker.
 
 **STOP.** Wait for user response.
 
@@ -44,9 +48,9 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render baseline-doc-pick
 
 → Return to **A. Display and Menu**.
 
-**If the user names an area:**
+**If the user picked a doc:**
 
-Render the chosen `.workflows/.baseline/{area}.md` verbatim as markdown.
+Set `area` from that key's `DOCS` row, and render `.workflows/.baseline/{area}.md` verbatim as markdown (not a code block).
 
 → Return to **A. Display and Menu**.
 

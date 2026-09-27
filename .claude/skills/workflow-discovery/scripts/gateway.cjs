@@ -78,7 +78,7 @@ function format(result) {
   lines.push(`description: ${result.description === null ? '(none)' : result.description}`);
 
   const s = result.map_summary;
-  lines.push(`map_summary: ${s.total} topics — ${s.decided} decided, ${s.in_flight} in-flight, ${s.ready} ready, ${s.fresh} fresh, ${s.handled} handled, ${s.cancelled} cancelled`);
+  lines.push(`map_summary: ${s.total} topics — ${s.decided} decided, ${s.in_flight} in-flight, ${s.ready} ready, ${s.fresh} fresh, ${s.handled} handled, ${s.cancelled} cancelled, ${s.postponed} postponed`);
 
   lines.push(`discovery_map (${result.discovery_map.length}):`);
   if (result.discovery_map.length === 0) {
@@ -146,7 +146,8 @@ function format(result) {
 // ---------------------------------------------------------------------------
 // map-view — the Discovery Map snapshot: DATA (counts, rows, and — with a
 // proposed set — the per-name flags the persist step routes on) + DISPLAY
-// (the projection). No MENU: the confirm gate is static prose in the skill.
+// (the projection). No MENU: the harvest's confirm gate is its own render
+// (`render synthesis-gate`), fetched where it is shown.
 // ---------------------------------------------------------------------------
 
 /**
@@ -198,7 +199,7 @@ function mapView(workUnit, ...rest) {
 
   const dataLines = [`work_unit: ${workUnit}`, `mode: ${proposedFile ? 'synthesis' : 'map'}`];
   const s = result.map_summary;
-  dataLines.push(`map: ${s.total} topics — ${s.decided} decided, ${s.in_flight} in-flight, ${s.ready} ready, ${s.fresh} fresh, ${s.handled} handled, ${s.cancelled} cancelled`);
+  dataLines.push(`map: ${s.total} topics — ${s.decided} decided, ${s.in_flight} in-flight, ${s.ready} ready, ${s.fresh} fresh, ${s.handled} handled, ${s.cancelled} cancelled, ${s.postponed} postponed`);
 
   let display;
   if (proposedFile) {

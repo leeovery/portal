@@ -41,8 +41,8 @@ When you detect a context refresh has occurred — the conversation feels abrupt
    ```
    Check `task_gate_mode`, `fix_gate_mode`, `analysis_gate_mode`, `consolidation_gate_mode`, `fix_attempts`, and `analysis_cycle_total` — a gate reading `auto` or `bounded` was opted into earlier this session; preserve it. If `fix_attempts` > 0, you're mid-fix-loop for the current task. If `analysis_cycle_total` > 0, you've completed analysis cycles — check for findings files on disk (`analysis-*-c{cycle-number}.md` in the implementation directory) to determine mid-analysis state; findings files for the latest cycle that each record no findings mean that cycle came back clean and the session had moved on to the conclude gate — resume at **Step 9**, never in the loop. If `staging` holds an `ad-hoc-{n}` subtree with `pending` rows, an ad hoc addition died mid-gate — resume its walk at **[ad-hoc-plan-changes.md](references/ad-hoc-plan-changes.md)** section F; `approved` rows with no matching plan tasks mean the task writer never ran — re-invoke it (idempotent) per section G. A `staging.p{N}` subtree, or a phase whose tasks are all complete while `completed_phases` lacks it, is a consolidation boundary in flight — the task loop's guard routes it to stage J, whose resume guards (**[consolidation-pass.md](references/consolidation-pass.md)**) discriminate the exact seam. A `staging.p{N}` whose rows are all decided, with the phase in both `consolidated_phases` and `completed_phases`, is history, not a signal. `do_banking` is answered by `task start` and never stored — re-run `task start` for `current_task` (idempotent for the in-flight task) before resuming any stage that branches on it.
 4. **Check git state.** Run `git status` and `git log --oneline -10` to see recent commits. Commit messages follow a conventional pattern that reveals what was completed.
-5. **Re-fetch lost sections.** Every gate menu and header is served by its own render surface, fetched at the stage that displays it — the task verbs answer with JSON only, and re-running one re-emits nothing. Fetch the section for the moment you are resuming at: `engine render task-gate {work_unit}.implementation.{topic}` for a pending task gate, `engine render fix-gate` at the same address for a pending fix gate, `engine render conclude-gate` at the same address for a pending conclude gate; a presentation moment re-runs its display reference (**[display-task-brief.md](references/display-task-brief.md)**, **[display-task-result.md](references/display-task-result.md)**), which rebuilds its payload before rendering. Never run `fix-attempt` or `analysis-cycle` to reconstruct position — each records a new attempt or cycle.
-6. **Announce your position** to the user before continuing: what step you believe you're at, what's been completed, and what comes next. Wait for confirmation.
+5. **Announce your position** to the user before continuing: what step you believe you're at, what's been completed, and what comes next. Wait for confirmation.
+6. **Resume at the stage that shows the moment.** Every gate menu and header is served by its own render surface, fetched by the stage that displays it — the task verbs answer with JSON only, and re-running one re-emits nothing. Once the position is confirmed, re-enter that stage and let it fetch its sections: a pending fix gate at the gate fetch in **F. Fix Approval Gate** and a pending task gate at the gated fetch in **G. Task Gate** (**[task-loop.md](references/task-loop.md)**), a pending conclude gate at **Step 9**; a presentation moment re-runs its display reference (**[display-task-brief.md](references/display-task-brief.md)**, **[display-task-result.md](references/display-task-result.md)**), which rebuilds its payload before rendering. Never run `fix-attempt` or `analysis-cycle` to reconstruct position — each records a new attempt or cycle.
 
 Do not guess at progress or continue from memory. The files on disk and git history are authoritative — your recollection is not.
 
@@ -59,23 +59,31 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 Unplanned work the user raises mid-implementation — a bug they hit while testing, a gap they name, a decision they change. When they do, load **[ad-hoc-plan-changes.md](references/ad-hoc-plan-changes.md)** and follow its instructions as written, from any point in the phase. Never fold unplanned work into the plan by hand.
 
-→ On return, resume the interrupted flow, re-presenting any gate that was pending — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
 
 ---
 
 ## Backlogging
 
-The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
+The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. An idea, not a topic: a topic takes the postponing door. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
 
-→ On return, resume the interrupted flow, re-presenting any gate that was pending — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+
+---
+
+## Postponing the Topic
+
+The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. Load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
+
+→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
 
 ---
 
 ## Cancelling the Topic
 
-The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
+The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
 
-→ On return, resume the interrupted flow, re-presenting any gate that was pending — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
 
 ---
 
@@ -104,9 +112,9 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "im
 
 #### If the response's `mode` is `resumed`
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Found existing implementation for "{topic:(titlecase)}". Resuming from previous session.
 ```
 

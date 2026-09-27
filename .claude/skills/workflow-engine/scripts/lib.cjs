@@ -48,6 +48,7 @@ const startProjections = require('./domain/projections/start.cjs');
 const workunitProjections = require('./domain/projections/workunit.cjs');
 const specificationProjections = require('./domain/projections/specification.cjs');
 const selectionProjections = require('./domain/projections/selection.cjs');
+const surfaces = require('./domain/projections/surfaces.cjs');
 
 module.exports = {
   render,
@@ -81,8 +82,8 @@ module.exports = {
     computeNeedsSequencing: derivations.computeNeedsSequencing,
     buildDiscoveryMap: derivations.buildDiscoveryMap,
     sourceRows: derivations.sourceRows,
-    specIsStarted: derivations.specIsStarted,
     specGroupsSources: derivations.specGroupsSources,
+    lockingSpecs: derivations.lockingSpecs,
     inputMoved: derivations.inputMoved,
     movedFrom: derivations.movedFrom,
   },
@@ -124,9 +125,11 @@ module.exports = {
     unitsOf: workunit.unitsOf,
     WORK_UNIT_TYPES: workunit.WORK_UNIT_TYPES,
     specificationDetail: specification.specificationDetail,
+    discoverySpec: specification.discoverySpec,
   },
   project: {
     titlecase: conventions.titlecase,
+    actionsTable: surfaces.actionsTable,
     workUnitTitle: workunitProjections.workUnitTitle,
     discoveryTitle: discoveryProjections.discoveryTitle,
     SPEC_TITLE: specificationProjections.SPEC_TITLE,
@@ -135,10 +138,13 @@ module.exports = {
     epicDashboard: epicProjections.epicDashboard,
     epicKey: epicProjections.epicKey,
     epicMenu: epicProjections.epicMenu,
+    epicMenuKeys: epicProjections.epicMenuKeys,
     epicInSessionGate: epicProjections.epicInSessionGate,
     epicCompletedMenu: epicProjections.epicCompletedMenu,
     epicCancelMenu: epicProjections.epicCancelMenu,
     epicReactivateMenu: epicProjections.epicReactivateMenu,
+    epicPostponeMenu: epicProjections.epicPostponeMenu,
+    epicPullForwardMenu: epicProjections.epicPullForwardMenu,
     epicUnblockMenu: epicProjections.epicUnblockMenu,
     discoveryMapView: discoveryProjections.discoveryMapView,
     discoverySynthesisView: discoveryProjections.discoverySynthesisView,
@@ -148,7 +154,6 @@ module.exports = {
     roadmapPullSetView: roadmapProjections.roadmapPullSetView,
     roadmapHomeMenu: roadmapProjections.roadmapHomeMenu,
     discussionMap: discussionProjections.discussionMap,
-    discussionDeferGate: discussionProjections.discussionDeferGate,
     startOverview: startProjections.startOverview,
     startMenu: startProjections.startMenu,
     emptyOverview: startProjections.emptyOverview,

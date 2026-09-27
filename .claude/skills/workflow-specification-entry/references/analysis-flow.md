@@ -14,7 +14,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs presence scan {work_unit}
 
 #### If the response has `held_sources` greater than `0`
 
-Hold off — the analysis reads the settled record, so it waits for those sessions and runs at the next entry. Emit the response's `DISPLAY: presence deferral` section verbatim at this moment.
+Hold off — the analysis reads the settled record, so it waits for those sessions and runs at the next entry. Emit the response's `DISPLAY: presence deferral` section now, verbatim per its marker.
 
 The stop is the whole answer wherever this fires.
 
@@ -34,9 +34,9 @@ A prior pass's cache is about to be superseded by this one. Clear it — only wh
 rm .workflows/{work_unit}/.state/discussion-consolidation-analysis.md
 ```
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Before analyzing, is there anything about how these discussions relate
 that would help me group them appropriately?
 
@@ -219,4 +219,20 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} --stat
 
 When a grouping resembles a cancelled specification (**C**), tell the user in one line: it resembles the cancelled specification {name} — reactivate it from the epic menu if you want it back.
 
+The reconcile moved the scenario — read it afresh:
+
+```bash
+node .claude/skills/workflow-specification-entry/scripts/gateway.cjs {work_unit}
+```
+
+Route on its `scenario`.
+
+#### If `scenario` is `groupings`
+
 → Load **[display-groupings.md](display-groupings.md)** and follow its instructions as written.
+
+#### If `scenario` is `specs-menu`
+
+Every grouping mapped to an existing specification — no proposed items remain.
+
+→ Load **[display-specs-menu.md](display-specs-menu.md)** and follow its instructions as written.

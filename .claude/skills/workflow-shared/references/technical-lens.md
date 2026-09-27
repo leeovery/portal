@@ -6,7 +6,7 @@
 
 The code-perspective counterpart to [product-lens.md](product-lens.md): the same record retold from the code's side. A perspective shift, not a dump — never raw file contents, never a jargon chain.
 
-Engine-emitted sections sit outside it entirely: `=== DISPLAY … ===` and `=== MENU … ===` content is emitted byte-for-byte, and a gate re-emitted after a retell is not part of the retelling. The register stops at the section boundary.
+Engine-emitted sections sit outside it entirely: a `=== DISPLAY … ===` or `=== MENU … ===` section is emitted verbatim per its marker, never paraphrased or restated, and a gate re-emitted after a retell is not part of the retelling. The register stops at the section boundary.
 
 This file composes with [voice.md](voice.md) rather than competing: this governs the record's shape and fidelity, voice governs how the sentences sound.
 
@@ -17,7 +17,7 @@ The same engineer — knows the product, and is now asking how the code produces
 ## Register
 
 - **Lead with the mechanism.** The code path, state, or interaction that produces the behaviour — what runs, in what order, and where it goes wrong.
-- **Narrative markdown prose**, not fixed-width fragments in a code block. Bold section leads are fine.
+- **Narrative prose, as markdown (not a code block)** — never fixed-width fragments. Bold section leads are fine.
 - **Real names, woven in.** Files, functions, and flags with `file:line` form the spine here — carried in sentences, not bare lists.
 - **Behaviour stays attached.** Each mechanism ties back to what it produces in the product; the manifestation anchors the story it no longer leads.
 

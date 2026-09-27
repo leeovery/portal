@@ -18,7 +18,7 @@ Pull current values from the investigation file — the file is authoritative, n
 > This is the sign-off on the investigation record — everything below is read from the investigation file. Fix exploration comes next.
 ```
 
-Retell the investigation file's findings as a markdown narrative (not a code block, no structured template) in four beats:
+Retell the investigation file's findings as markdown (not a code block) — a narrative, no structured template — in four beats:
 
 1. **What you'd see happen** — the bug as it manifests: what goes wrong, where in the product, when. Open here, before any code.
 2. **Why it happens** — the Root Cause and Contributing Factors as behaviour: what the code does versus what it should do.
@@ -27,25 +27,19 @@ Retell the investigation file's findings as a markdown narrative (not a code blo
 
 Each beat lands in a paragraph the user takes in at a glance — complete in coverage, compact in telling. The code-perspective retelling is one `t` away; the record file itself one `v` away.
 
-→ On return, proceed to **B. Sign-off Gate**.
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render findings-signoff-gate {work_unit}.investigation.{topic}
+```
+
+Emit the call's MENU section verbatim per its marker.
+
+**STOP.** Wait for user response.
+
+→ Proceed to **B. Handle Response**.
 
 ---
 
-## B. Sign-off Gate
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-· · · · · · · · · · · ·
-**`◆ Do these findings match your understanding?`**
-
-**`y/yes`**            → Findings are correct, move to fix exploration
-**`t/technical`**      → Retell the findings from the code's perspective
-**`v/view`**           → Show the full investigation file
-**Provide feedback** → Tell me what's off or unclear
-```
-
-**STOP.** Wait for user response.
+## B. Handle Response
 
 #### If `yes`
 
@@ -53,38 +47,36 @@ Each beat lands in a paragraph the user takes in at a glance — complete in cov
 
 #### If `technical`
 
-→ Proceed to **C. Technical Perspective**.
+→ Load **[technical-lens.md](../../workflow-shared/references/technical-lens.md)** and follow its instructions as written.
+
+Retell the same findings through the technical lens — the same four sections from the investigation file, mechanism-first — a narrative, as markdown (not a code block). Then put the gate back beneath it:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render findings-signoff-gate {work_unit}.investigation.{topic}
+```
+
+Emit the call's MENU section verbatim per its marker.
+
+**STOP.** Wait for user response.
+
+→ Return to **B. Handle Response**.
 
 #### If `view`
 
-→ Proceed to **D. View the Record**.
+Render the full content of `.workflows/{work_unit}/investigation/{topic}.md` as markdown (not a code block). Then put the gate back beneath it:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render findings-signoff-gate {work_unit}.investigation.{topic}
+```
+
+Emit the call's MENU section verbatim per its marker.
+
+**STOP.** Wait for user response.
+
+→ Return to **B. Handle Response**.
 
 #### If the user provides feedback
 
-→ Proceed to **E. Address Feedback**.
-
----
-
-## C. Technical Perspective
-
-→ Load **[technical-lens.md](../../workflow-shared/references/technical-lens.md)** and follow its instructions as written.
-
-Retell the same findings through the technical lens — the same four sections from the investigation file, mechanism-first, as a markdown narrative (not a code block).
-
-→ Return to **B. Sign-off Gate**.
-
----
-
-## D. View the Record
-
-Render the full content of `.workflows/{work_unit}/investigation/{topic}.md` as markdown (not a code block).
-
-→ Return to **B. Sign-off Gate**.
-
----
-
-## E. Address Feedback
-
-Address the user's concerns directly. Re-trace code paths if needed. Provide supporting evidence from the code trace. Update the investigation file with corrections or new information, and commit.
+Address the user's concerns directly. Re-trace code paths if needed. Provide supporting evidence from the code trace. Update the investigation file with corrections or new information, and commit. The feedback sets the gate aside until the person is ready to move on; to put it back:
 
 → Return to **A. Present & Confirm**.

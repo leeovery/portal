@@ -137,7 +137,7 @@ Write nothing and render nothing — `trend` is in context for the caller's bran
 
 #### Otherwise
 
-Open with one markdown sentence above the block — what the cycles show, in plain terms: what is resolving and what keeps coming back.
+Open with one sentence above the block, written as markdown (not a code block) — what the cycles show, in plain terms: what is resolving and what keeps coming back.
 
 Write the payload to `.workflows/.cache/{work_unit}/{phase}/{topic}/convergence-diagnostic.json` with the Write tool — classification is yours, arithmetic and flags are the surface's. `{phase}` is the loop's own: `implementation` for `fix` and `analysis`, `planning` for `planning-review`, `specification` for `spec-review`.
 
@@ -150,7 +150,7 @@ Write the payload to `.workflows/.cache/{work_unit}/{phase}/{topic}/convergence-
 - `stream_counts` — multi-stream loop types only (`spec-review`, `planning-review`): one `{"label": "…", "count": N}` per tracking stream, in stream order. Stream labels: `spec-review` → `claims` / `input review` / `gap analysis`; `planning-review` → `traceability` / `integrity`.
 - `review_baseline_words` and `live_words` — `spec-review` and `planning-review`, when the baseline exists; omit both otherwise.
 
-Fetch the diagnostic and emit its section verbatim at its marked instruction:
+Fetch the diagnostic and emit its section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render convergence-diagnostic {work_unit}.{phase}.{topic} --file .workflows/.cache/{work_unit}/{phase}/{topic}/convergence-diagnostic.json

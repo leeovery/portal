@@ -16,13 +16,13 @@ node .claude/skills/workflow-engine/scripts/engine.cjs agent dispatch {work_unit
 
 **Agent path**: `../../../agents/workflow-investigation-fix-validation.md`
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Pressure-testing fix direction... (validation agent running)
 ```
 
-Dispatch **one agent** via the Task tool (**synchronous** — do not use `run_in_background`).
+Dispatch **one agent** via the Task tool (**synchronous** — pass `run_in_background: false`).
 
 The validation agent receives:
 
@@ -65,7 +65,7 @@ Do not dump the full output; the analysis path carries the reader there.
 
 `{"status": "{STATUS:[validated|risks_found]}", "confidence": "{CONFIDENCE:[high|medium|low]}", "direction": "{chosen approach}", "checks": [["{label}", "{outcome}"]], "summary": "{SUMMARY}", "items": ["{risk}"], "analysis_path": "{the row's content file path}"}`
 
-Fetch the report, emitting each section verbatim at its marked instruction:
+Fetch the report, emitting each section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render validation-report {work_unit}.investigation.{topic} --file .workflows/.cache/{work_unit}/investigation/{topic}/validation.json --variant fix

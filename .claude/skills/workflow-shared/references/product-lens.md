@@ -6,7 +6,7 @@
 
 The register for presenting a **report about the work** — findings, review summaries, validation gaps and risks, diagnostics, item summaries. Never for artifact content the user approves verbatim — spec prose, plan phases, diffs — which renders as the thing itself.
 
-Engine-emitted sections sit outside it entirely: `=== DISPLAY … ===` and `=== MENU … ===` content is emitted byte-for-byte, and a gate that follows a report is not part of the report. The register stops at the section boundary. The boundary governs emission, not authorship: judgment content written into an engine payload for a section to render — a summary, a watch line — takes the register at authoring time, at the depth the authoring site prescribes.
+Engine-emitted sections sit outside it entirely: a `=== DISPLAY … ===` or `=== MENU … ===` section is emitted verbatim per its marker, never paraphrased or restated, and a gate that follows a report is not part of the report. The register stops at the section boundary. The boundary governs emission, not authorship: judgment content written into an engine payload for a section to render — a summary, a watch line — takes the register at authoring time, at the depth the authoring site prescribes.
 
 This file composes with [altitude.md](altitude.md) and [voice.md](voice.md), both in context via the framework: altitude governs the level the report is told at, voice how the sentences sound, and this file the report's shape and depth.
 
@@ -17,7 +17,7 @@ An engineer who knows the product but not this codebase. Full engineering fluenc
 ## Register
 
 - **The manifestation leads** — altitude's rule, applied to a report: what you'd see happen and where — the page, command, or flow — then the cause as behaviour ("it asks X when it should ask Y"), the mechanism after it, never in its place.
-- **Narrative markdown prose**, not fixed-width fragments in a code block. Bold section leads are fine.
+- **Narrative prose, as markdown (not a code block)** — never fixed-width fragments. Bold section leads are fine.
 - **`file:line` refs as anchors.** Keep them — subordinate to the story, never its spine.
 
 ## Depth

@@ -34,12 +34,6 @@ Mid-authoring resume — the text and its decisions already stand; re-invoking w
 
 **Amendment runs** — when `staging.author-p{N}` carries `rejected` rows (arrival from **F. Revision Check**, or a mismatch retry from **C** during an amendment), the invocation is an amendment: name those ids via input item 8. All other arrivals are full runs — omit item 8.
 
-> *Output the next fenced block as a code block:*
-
-```
-Authoring {count} tasks for Phase {N}: {Phase Name}...
-```
-
 Invoke `workflow-planning-task-author` with these file paths:
 
 1. **read-specification.md**: `read-specification.md`
@@ -52,6 +46,14 @@ Invoke `workflow-planning-task-author` with these file paths:
 8. **Amendment context** (amendment runs only): the rejected internal ids being rewritten — any surviving feedback blockquotes sit under their headings in the detail file
 
 The agent writes all tasks to the task detail file and returns.
+
+> *Output the next fenced block as a text code block (```text fence):*
+
+```text
+Authoring {count} tasks for Phase {N}: {Phase Name}...
+```
+
+The dispatch runs in the background (`run_in_background: true`) and ends the turn on exactly `The task author agent has been dispatched for phase {N}.`
 
 → Proceed to **C. Validate Task Detail File**.
 
@@ -71,7 +73,7 @@ For each `## Spec Defects` entry in the agent's return, once per entry:
 
 → Load **[resolve-spec-gap.md](resolve-spec-gap.md)** with lane = `construction`, gap = `{the entry, and the task it surfaced in}`.
 
-When at least one corrigendum landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim as a code block:
+When at least one corrigendum landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-corrections --count {count}
@@ -99,9 +101,9 @@ A defect the author still reports after one re-run is left to the review walk, w
 
 #### If `mismatch` after 2 agent invocations
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Task count mismatch persists after 2 authoring attempts.
 
 Planning file task table: {N} tasks — {internal IDs from the table}
@@ -122,7 +124,7 @@ Emit the call's MENU section verbatim per its marker.
 
 **If adjust:**
 
-Apply the user's correction.
+Confirm your reading of the correction with the person before anything acts on it, then apply it.
 
 → Return to **C. Validate Task Detail File**.
 
@@ -145,9 +147,9 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.
 
 Approve every `pending` row in one batched write — skip the call entirely when none are `pending` (an all-approved crash resume): `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} staging.author-p{N}.tasks.{internal_id}=approved …`.
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Phase {N}: {count} tasks authored. Auto-approved. Writing to plan.
 ```
 
@@ -185,7 +187,7 @@ Present the full task content:
 {task detail from task detail file}
 ```
 
-Render the gate and emit the section verbatim:
+Render the gate and emit the section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render author-task-gate {work_unit}.planning.{topic} --m {M} --total {total} --title "{Task Name}"
@@ -245,9 +247,9 @@ Read the manifest's `staging.author-p{N}.tasks` for `rejected` rows.
 
 #### If rejected tasks exist
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 {count} tasks need revision. Re-invoking author agent...
 ```
 
@@ -276,9 +278,9 @@ For each approved task in the task detail file, in order (crash-resume guard: a 
    node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "planning({work_unit}): author task {internal_id} ({task name})" --plan {topic}
    ```
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Task {M} of {total}: {Task Name} — authored.
 ```
 

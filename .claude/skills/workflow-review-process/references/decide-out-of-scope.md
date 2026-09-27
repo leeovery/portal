@@ -20,11 +20,15 @@ Findings from an earlier cycle were judged against code that remediation has sin
 
 - **Agent path**: `../../../agents/workflow-review-finding-assessor.md`
 
-Write the set to `.workflows/.cache/{work_unit}/review/{topic}/oos-recheck.txt` (one block per finding, opening with its id) and pass it as the findings path, with the code standard path and an output path of `…/oos-recheck.jsonl`. Anything the verdicts return as `already-done`, `stale` or `wrong` is dropped from the offer, with its reason noted.
+Write the set to `.workflows/.cache/{work_unit}/review/{topic}/oos-recheck.txt` (one block per finding, opening with its id) and pass it as the findings path, with the code standard path and an output path of `…/oos-recheck.jsonl`.
+
+The dispatch runs in the background (`run_in_background: true`) and ends the turn on exactly `The assessor agent has been dispatched for the out-of-scope findings.`
+
+Anything the verdicts return as `already-done`, `stale` or `wrong` is dropped from the offer, with its reason noted.
 
 #### If nothing survives
 
-State in one markdown sentence that the accumulated findings no longer hold against the code, and why.
+State in one sentence, written as markdown (not a code block), that the accumulated findings no longer hold against the code, and why.
 
 Delete the field — the set is decided:
 
@@ -42,7 +46,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_uni
 
 ## B. Offer
 
-Present each surviving finding as markdown — its summary, its kind (a feature, a bug worth investigating, or a standalone quick-fix), the failure or gap it names, and what taking it up would cost (a full pass through the pipeline as its own piece of work). Then ask, conversationally, which to keep, stating that anything not kept is dropped for good — the review closes after this, and nothing carries the set forward. The user may take all, some, or none, and may answer in prose.
+Present each surviving finding as markdown (not a code block) — its summary, its kind (a feature, a bug worth investigating, or a standalone quick-fix), the failure or gap it names, and what taking it up would cost (a full pass through the pipeline as its own piece of work). Then ask, conversationally, which to keep, stating that anything not kept is dropped for good — the review closes after this, and nothing carries the set forward. The user may take all, some, or none, and may answer in prose.
 
 **STOP.** Wait for user response.
 
@@ -60,6 +64,6 @@ Delete the field — decided, whichever way each finding went:
 node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.review.{topic} out_of_scope
 ```
 
-State in one markdown sentence what was filed and what was dropped.
+State in one sentence, written as markdown (not a code block), what was filed and what was dropped.
 
 → Return to caller.

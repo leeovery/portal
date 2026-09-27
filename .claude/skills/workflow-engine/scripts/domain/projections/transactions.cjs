@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 const { titlecase } = require('../conventions.cjs');
-const { section, CONTINUE_INSTRUCTION, callout, menu, cmdOption, promptOption, bulletRow, indentedBody } = require('./surfaces.cjs');
+const { section, CONTINUE_INSTRUCTION, callout, menu, cmdOption, promptOption, bulletRow, indentedBody, emitAs, timedInstruction, MENU_INSTRUCTION } = require('./surfaces.cjs');
 
 /**
  * The ⚑ advisory block: label line and reassurance tail. The instruction
@@ -19,13 +19,13 @@ const { section, CONTINUE_INSTRUCTION, callout, menu, cmdOption, promptOption, b
  * @param {string} label @param {string} tail @param {string} [instruction]
  * @returns {string}
  */
-function warningBlock(label, tail, instruction = 'emit verbatim as a code block, above the confirmation') {
+function warningBlock(label, tail, instruction = emitAs('text', ', above the confirmation')) {
   return section('DISPLAY: kb warning', instruction, callout([label, tail]));
 }
 
 /** @param {string} body */
 function confirmation(body) {
-  return section('DISPLAY: confirmation', 'emit verbatim as a code block after the response', body);
+  return section('DISPLAY: confirmation', timedInstruction('text', 'after the response'), body);
 }
 
 /** @param {(string | null)[]} parts */
@@ -67,52 +67,58 @@ function workunitReceipt(verb, workUnit, workType, { pipeline = false, skippedRe
   }
   if (verb === 'cancel') {
     return joined([
-      warn ? warningBlock('Knowledge removal warning',
-        'The work unit is cancelled. The removal has been queued and will retry automatically on the next `knowledge remove` or `knowledge compact` call.') : null,
+      warn ? warningBlock('Knowledge removal warning', 'The work unit is cancelled. The next start removes its chunks from the knowledge base.') : null,
       confirmation(`"${name}" marked as cancelled.`),
     ]);
   }
   if (verb === 'reactivate') {
     return joined([
-      warn ? warningBlock('Knowledge indexing warning', 'Indexing can be retried later.') : null,
+      warn ? warningBlock('Knowledge indexing warning', 'The work unit is reactivated. The next start retries the indexing.') : null,
       confirmation(`"${name}" reactivated.`),
     ]);
   }
   return warn
-    ? warningBlock('Knowledge indexing warning', 'The pivot is complete. Indexing can be retried later.', CONTINUE_INSTRUCTION)
+    ? warningBlock('Knowledge indexing warning', 'The pivot is complete. The next start retries the indexing.', CONTINUE_INSTRUCTION)
     : '';
 }
 
 /**
- * topic complete / cancel / reactivate receipts. `complete` carries no
- * confirmation line — the calling flow owns its own conclusion display; it
- * renders the indexing advisory alone, empty without `--warn`. `cancel` and
- * `reactivate` confirm the unit by name, the reactivate naming the statuses
- * its items returned to (none for a never-started topic).
- * @param {'complete'|'cancel'|'reactivate'} verb
+ * topic complete / cancel / reactivate / postpone / restore receipts.
+ * `complete` carries no confirmation line — the calling flow owns its own
+ * conclusion display; it renders the indexing advisory alone, empty without
+ * `--warn`. The rest confirm the unit by name: the postpone names the
+ * horizon it waits under, and the reactivate and the pull forward's restore
+ * the statuses their items returned to (none for a never-started topic).
+ * @param {'complete'|'cancel'|'reactivate'|'postpone'|'restore'} verb
  * @param {string} topic
- * @param {{warn?: boolean, restored?: {phase: string, status: string}[]}} [opts]
+ * @param {{warn?: boolean, restored?: {phase: string, status: string}[], horizon?: string|null}} [opts]
  * @returns {string}
  */
-function topicReceipt(verb, topic, { warn = false, restored = [] } = {}) {
+function topicReceipt(verb, topic, { warn = false, restored = [], horizon = null } = {}) {
   const name = titlecase(topic);
   if (verb === 'complete') {
     return warn
-      ? warningBlock('Knowledge indexing warning', 'The artifact is saved. Indexing can be retried later.', CONTINUE_INSTRUCTION)
+      ? warningBlock('Knowledge indexing warning', 'The artifact is saved. The next start retries the indexing.', CONTINUE_INSTRUCTION)
       : '';
   }
   if (verb === 'cancel') {
     return joined([
-      warn ? warningBlock('Knowledge removal warning', 'The topic is cancelled. You can run knowledge remove manually later.') : null,
+      warn ? warningBlock('Knowledge removal warning', 'The topic is cancelled. The next start removes its chunks from the knowledge base.') : null,
       confirmation(`Cancelled "${name}".`),
+    ]);
+  }
+  if (verb === 'postpone') {
+    return joined([
+      warn ? warningBlock('Knowledge removal warning', 'The topic is postponed. The next start removes its chunks from the knowledge base.') : null,
+      confirmation(`Postponed "${name}"${horizon ? ` → ${horizon}` : ''}.`),
     ]);
   }
   const returned = restored.length > 0
     ? ` Restored ${restored.map((r) => `${r.phase} [${r.status}]`).join(' · ')}.`
     : '';
   return joined([
-    warn ? warningBlock('Knowledge indexing warning', 'The artifact is saved. Indexing can be retried later.') : null,
-    confirmation(`Reactivated "${name}".${returned}`),
+    warn ? warningBlock('Knowledge indexing warning', `The topic is ${verb === 'restore' ? 'pulled forward' : 'reactivated'}. The next start retries the indexing.`) : null,
+    confirmation(verb === 'restore' ? `Pulled "${name}" forward.${returned}` : `Reactivated "${name}".${returned}`),
   ]);
 }
 
@@ -176,7 +182,7 @@ function absorbReceipt(epic, topic, moved, { warn = false, experiments = 0, rena
   }
   lines.push('  • Feature: removed');
   return joined([
-    warn ? warningBlock('Knowledge sync warning', 'The feature is absorbed. Indexing can be retried later.') : null,
+    warn ? warningBlock('Knowledge warning', 'The feature is absorbed. The next start brings the knowledge base up to date.') : null,
     confirmation(lines.join('\n')),
   ]);
 }
@@ -203,7 +209,7 @@ function promoteReceipt(workUnit, topic, ccWorkUnit, { warn = false, imports = 0
     '  • Epic status: promoted',
   ];
   return joined([
-    warn ? warningBlock('Knowledge warning', 'The promotion is committed. The knowledge base will catch up on the next sync.') : null,
+    warn ? warningBlock('Knowledge warning', 'The promotion is committed. The next start brings the knowledge base up to date.') : null,
     confirmation(lines.join('\n')),
   ]);
 }
@@ -223,7 +229,7 @@ function importReprompt(missing) {
   ];
   return [
     section('DISPLAY: missing imports', CONTINUE_INSTRUCTION, body.join('\n')),
-    section('MENU: import reprompt', "emit verbatim as markdown, then STOP for the user's response",
+    section('MENU: import reprompt', MENU_INSTRUCTION,
       menu('', [
         cmdOption('s', 'skip', 'Land nothing for these paths'),
         promptOption('Provide file paths', 'one or more, space or newline separated'),
@@ -240,11 +246,11 @@ function pivotContinuationMenu(workUnit) {
   const name = titlecase(workUnit);
   return section(
     'MENU: pivot continuation',
-    "emit verbatim as markdown, then STOP for the user's response",
+    MENU_INSTRUCTION,
     menu(`**${name}** converted from feature to epic.`, [
       cmdOption('c', 'continue', `Continue ${name} as epic`),
       cmdOption('b', 'back', 'Return to previous view'),
-    ]),
+    ], { question: 'What next?' }),
   );
 }
 
@@ -257,11 +263,11 @@ function absorbContinuationMenu(feature, epic) {
   const name = titlecase(epic);
   return section(
     'MENU: absorb continuation',
-    "emit verbatim as markdown, then STOP for the user's response",
+    MENU_INSTRUCTION,
     menu(`**${titlecase(feature)}** absorbed into **${name}**.`, [
       cmdOption('c', 'continue', `Continue ${name} as epic`),
       cmdOption('b', 'back', 'Return to previous view'),
-    ]),
+    ], { question: 'What next?' }),
   );
 }
 
@@ -273,7 +279,7 @@ function absorbContinuationMenu(feature, epic) {
  */
 function sessionReceipt({ warn = false } = {}) {
   return warn
-    ? warningBlock('Knowledge indexing warning', 'The session is closed. Indexing can be retried later.', CONTINUE_INSTRUCTION)
+    ? warningBlock('Knowledge indexing warning', 'The session is closed. The next start retries the indexing.', CONTINUE_INSTRUCTION)
     : '';
 }
 

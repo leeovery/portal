@@ -22,13 +22,13 @@ node .claude/skills/workflow-start/scripts/gateway.cjs working-set {path} [{path
 
 The response carries demarcated sections:
 
-- **DATA** — reasoning surface: `set_uniform` / `set_type`, `addable_count`, and the `SET` and `ADDABLE` tables — one line per item, `n  type  date  slug  → path`. Reason from it; never display or restate it.
-- **TITLE** — the view's chrome heading. Emit verbatim as markdown, directly above the display.
-- **DISPLAY** — the set tree, summaries rendered beneath each item. Emit verbatim as a code block. Never redraw, reflow, or trim it.
-- **MENU** — the set menu. Emit verbatim as markdown (not a code block). The `w/work` option renders only for a type-uniform set.
+- **DATA** — reasoning surface: `set_uniform` / `set_type`, `addable_count`, and the `SET` and `ADDABLE` tables — one line per item, `n  type  date  slug  → path  — title`. Reason from it; never display or restate it.
+- **TITLE** — the view's chrome heading. Emit verbatim per its marker, directly above the display.
+- **DISPLAY** — the set tree, summaries rendered beneath each item. Emit verbatim per its marker. Never redraw, reflow, or trim it.
+- **MENU** — the set menu. Emit verbatim per its marker. The `w/work` option renders only for a type-uniform set.
 - **`DISPLAY: blocker`** — present only on a mixed-type set. Emit directly after the display, verbatim per its marker.
 
-Emit the TITLE section (markdown), then the DISPLAY section, then the `DISPLAY: blocker` section when present, then the MENU section.
+Emit the TITLE section, then the DISPLAY section, then the `DISPLAY: blocker` section when present, then the MENU section, each verbatim per its marker.
 
 **STOP.** Wait for user response.
 
@@ -60,7 +60,7 @@ The user types a shorthand (`w`/`a`/`d`/`r`/`v`/`b`) **or** describes the action
 
 #### If user asked a question
 
-Answer from the set items' content. Keep it short. Do not act on the set — the menu is always the next thing shown.
+Answer from the set items' content. Keep it short, and do not act on the set. The question sets the gate aside until the person is ready to move on; to put it back:
 
 → Return to **A. Render the Working Set**.
 
@@ -70,9 +70,9 @@ The `ADDABLE` table in the working-set DATA lists the inbox items not already in
 
 #### If `addable_count` is 0
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
   Every inbox item is already in the set.
 ```
 
@@ -86,7 +86,7 @@ Match each named item against the `ADDABLE` table — by title, or by the number
 
 #### Otherwise
 
-Fetch the add gate over the current set and emit its `DISPLAY: add candidates` section verbatim as a code block, then its `MENU: add gate` section verbatim as markdown (not a code block):
+Fetch the add gate over the current set and emit its `MENU: add gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-start/scripts/gateway.cjs working-set-add-gate {path} [{path} …]
@@ -120,7 +120,7 @@ Resolve each named item against the working set by title or description. If any 
 
 #### Otherwise
 
-Fetch the drop gate over the current set and emit its `DISPLAY: drop candidates` section verbatim as a code block, then its `MENU: drop gate` section verbatim as markdown (not a code block):
+Fetch the drop gate over the current set and emit its `MENU: drop gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-start/scripts/gateway.cjs working-set-drop-gate {path} [{path} …]
@@ -144,9 +144,9 @@ Archive every item in the working set out of the inbox — one command moves eac
 node .claude/skills/workflow-engine/scripts/engine.cjs inbox archive {path} [{path} …]
 ```
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Archived {count} item{s} from the inbox.
 ```
 
@@ -156,7 +156,7 @@ The working set is now empty.
 
 ## E. View Full Content
 
-Read each item in the set and render its full content — as markdown, not a code block, so the items' own headings and formatting render properly.
+Read each item in the set and render its full content as markdown (not a code block), so the items' own headings and formatting render properly.
 
 > *Output the next fenced block as markdown (not a code block):*
 
@@ -169,7 +169,7 @@ Read each item in the set and render its full content — as markdown, not a cod
 @endforeach
 ```
 
-- Emit each item's file content as-is — it is markdown and renders as such; its own `#` heading is the item's visible title. Skip a frontmatter block when one exists.
+- Emit each item's file content as-is — its own `#` heading is the item's visible title. Skip a frontmatter block when one exists.
 - The italic type line above each item's content is its divider — nothing else separates items.
 
 → Return to **A. Render the Working Set**.

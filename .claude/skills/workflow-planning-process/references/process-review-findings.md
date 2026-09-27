@@ -12,9 +12,9 @@ Process findings from a review agent interactively with the user. The agent writ
 
 #### If `STATUS` is `clean`
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 {Review type} review complete — no findings.
 ```
 
@@ -39,7 +39,7 @@ Write the summary payload to `.workflows/.cache/{work_unit}/planning/{topic}/fin
 - `tag` — one short term: the Severity for an integrity finding; for a traceability finding, the Type's token — `missing` (Missing from plan), `hallucinated` (Hallucinated content), `incomplete` (Incomplete coverage). The tracking file keeps the full phrase.
 - `status` — the finding's Resolution: `Fixed` or `Routed` → `approved`; `Declined` (older files write `Skipped` — read it as `Declined`) → `skipped`; `Pending` or unset → `pending`.
 
-Render and emit the section verbatim at its marked instruction:
+Render and emit the section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render findings-summary {work_unit}.planning.{topic} --file .workflows/.cache/{work_unit}/planning/{topic}/findings-summary.json
@@ -109,7 +109,7 @@ Write the finding payload to `.workflows/.cache/{work_unit}/planning/{topic}/fin
 - `diff` and `content` — `settled` only; a `choice` proposes nothing and carries neither. Change Type `update-task`, `add-to-task`, or `remove-from-task`: `diff` — `{"context_above": […], "current": […], "proposed": […], "context_below": […]}` with only the changed lines and 2 context lines each side. Change Type `add-task` or `add-phase`: `content` — `{"label": "Proposed Text", "lines": […]}` with the full content the tracking file carries. Change Type `remove-task` or `remove-phase`: `content` — `{"label": "Current", "lines": […]}` with the content being removed. Either `content` is held for `v/view`, never rendered at the gate.
 - `apply_label`: `"Apply to the plan verbatim"` · `applied_label`: `"approved. Applied to plan."`
 
-Render, then emit each returned section verbatim at its marked instruction — the diff body as a ` ```diff ` fence:
+Render, then emit each returned section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render finding {work_unit}.planning.{topic} --file .workflows/.cache/{work_unit}/planning/{topic}/finding-current.json
@@ -129,7 +129,7 @@ The response carries the finding presentation plus the surface for its move and 
    ```
 3. Update the tracking file: set resolution to "Fixed"
 4. Commit the tracking file and plan changes
-5. Emit the `DISPLAY: finding auto-approved` section now, per its marker.
+5. Emit the `DISPLAY: finding auto-approved` section now, verbatim per its marker.
 
 **If pending findings remain:**
 
@@ -145,7 +145,7 @@ The response carries the finding presentation plus the surface for its move and 
 
 #### If `view`
 
-Re-render with `--view full` and emit both returned sections verbatim at their marked instructions:
+Re-render with `--view full` and emit both returned sections verbatim per their markers:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render finding {work_unit}.planning.{topic} --file .workflows/.cache/{work_unit}/planning/{topic}/finding-current.json --view full
@@ -160,9 +160,9 @@ The numbered options render recommended-first, so the number the user typed inde
 1. Apply the chosen option to the plan — the fix follows from the choice, so it lands without a second gate — with the `task_map` upkeep of the auto flow above.
 2. Update the tracking file: set resolution to "Fixed", record which option was chosen in Notes.
 3. Commit the tracking file and any plan changes.
-4. > *Output the next fenced block as a code block:*
+4. > *Output the next fenced block as a text code block (```text fence):*
 
-   ```
+   ```text
    Finding {N} of {total}: {Brief Title} — {chosen option, one clause}.
    ```
 
@@ -176,16 +176,17 @@ The numbered options render recommended-first, so the number the user typed inde
 
 #### If comment (the choice menu's prompt option)
 
-Work the point through in conversation. Where it settles on an option, land it as the numbered-pick branch does — the plan write, the `task_map` upkeep, the tracking file, the commit — and continue. Where it concludes the finding should not land at all, set Resolution `Declined` with the reason in Notes, announce it in a line, and commit.
+Work the point through in conversation — the comment sets the gate aside. Where it settles on an option, confirm it with the person, then land it as the numbered-pick branch does — the plan write, the `task_map` upkeep, the tracking file, the commit — and continue. Where it concludes the finding should not land at all, set Resolution `Declined` with the reason in Notes, announce it in a line, and commit. Where the choice stands, **B** re-presents it once the person is ready to move on.
 
 → Return to **B. Process One Item at a Time**.
 
 #### If discuss (the settled gate's prompt option)
 
-Work the point through in conversation — a challenge, an adjustment, or a decline all start here.
+Work the point through in conversation — a challenge, an adjustment, or a decline all start here, and the comment sets the gate aside.
 
 - **The exchange revises the content**: update the tracking file with the revised content — **B** re-presents the finding from the updated file, once.
 - **The exchange ends in agreement to apply**: land it as the `yes` branch does.
+- **The finding stands as presented**: **B** re-presents it once the person is ready to move on.
 - **The exchange concludes the finding should not land** — it is wrong, or real but not worth the ink: set Resolution `Declined` with the reason in Notes, announce it in a line, and commit. Declined is never offered as a menu row — it lands as the outcome of an exchange, this one or the choice menu's Comment, or at **B**'s dispose over a finding whose whole substance is the builder's.
 
 → Return to **B. Process One Item at a Time**.
@@ -196,9 +197,9 @@ Work the point through in conversation — a challenge, an adjustment, or a decl
 2. Keep `task_map` current in ONE call for the whole finding (same commands as the auto flow above).
 3. Update the tracking file: set resolution to "Fixed", add any discussion notes.
 4. Commit the tracking file and any plan changes — ensures progress survives context refresh.
-5. > *Output the next fenced block as a code block:*
+5. > *Output the next fenced block as a text code block (```text fence):*
 
-   ```
+   ```text
    Finding {N} of {total}: {Brief Title} — fixed.
    ```
 
@@ -229,9 +230,9 @@ Work the point through in conversation — a challenge, an adjustment, or a decl
 
 1. **Mark the tracking file complete** — `node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} tracking.{file stem} complete`.
 2. **Commit** the tracking file and any plan changes.
-3. > *Output the next fenced block as a code block:*
+3. > *Output the next fenced block as a text code block (```text fence):*
 
-   ```
+   ```text
    {Review type} review complete — {N} findings processed.
    ```
 

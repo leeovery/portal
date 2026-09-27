@@ -3,7 +3,8 @@
 // ---------------------------------------------------------------------------
 // Domain ring: specification-entry projections — the scenario overview
 // (DISPLAY), the grouping/spec menus (MENU), and the concluded-specs
-// sub-view, over one SpecificationDetail (see ../specification.cjs).
+// sub-view, over one SpecificationDetail (see ../specification.cjs); and the
+// confirmation above the handoff gate, over one SpecConfirmation.
 //
 // Deterministic: same detail, same string. The menu carries machine action
 // keys so the entry skill routes on keys, never on labels. Tree layout goes
@@ -13,11 +14,12 @@
 
 const { box, renderTree, wrap, wrapWithPrefix } = require('../../kernel/render.cjs');
 const { TREE_WIDTH, titlecase, title, SPEC_LEGEND } = require('../conventions.cjs');
-const { menuFrame, cmdOption } = require('./surfaces.cjs');
+const { menuFrame, cmdOption, bulletRow, optionDetail } = require('./surfaces.cjs');
 
 /** @typedef {import('../specification.cjs').SpecificationDetail} SpecificationDetail */
 /** @typedef {import('../specification.cjs').SpecRow} SpecRow */
 /** @typedef {import('../../kernel/render.cjs').TreeNode} TreeNode */
+/** @typedef {import('./surfaces.cjs').LabelParts} LabelParts */
 
 /**
  * @typedef {object} SpecMenuKey
@@ -26,13 +28,12 @@ const { menuFrame, cmdOption } = require('./surfaces.cjs');
  * @property {string} action          machine action key — the skill routes on this, never the label
  * @property {string|null} topic      the spec/grouping name, or null for meta and command options
  * @property {string|null} verb       Creating | Continuing | Refining — the confirmation verb
- * @property {string} label
+ * @property {import('./surfaces.cjs').OptionLabel} label
  * @property {string[]} [desc]        meta-option description lines (already backtick-wrapped)
  */
 
 const TITLE = 'Specification Overview';
 
-// Meta-option description wrap budget — matches the shipped menu examples.
 // Meta-option description wrap budget: the tree width less the 3-space
 // indent (and a column of margin).
 const DESC_WIDTH = TREE_WIDTH - 4;
@@ -266,12 +267,12 @@ function specificationDisplay(detail) {
 // Menu
 // ---------------------------------------------------------------------------
 
-/** Meta-option description lines: 3-space indent, italic — the menu metadata register. @param {string} text */
+/** A meta option's description at the menu's description width. @param {string} text */
 function descLines(text) {
-  return wrap(text, DESC_WIDTH).map((seg) => `   *${seg}*`);
+  return optionDetail(text, DESC_WIDTH);
 }
 
-/** @param {SpecRow} row @param {'groupings'|'specs-menu'} scenario */
+/** @param {SpecRow} row @param {'groupings'|'specs-menu'} scenario @returns {LabelParts} */
 function rowLabel(row, scenario) {
   const t = titlecase(row.name);
   let verb = 'Continue';
@@ -290,8 +291,7 @@ function rowLabel(row, scenario) {
       : 'all sources extracted');
   }
   if (row.consult_pending > 0) parts.push(`${row.consult_pending} consult ref(s) pending`);
-  const tail = parts.join(', ');
-  return tail ? `${verb} "${t}" — *${tail}*` : `${verb} "${t}"`;
+  return { head: `${verb} "${t}"`, tail: parts.join(', ') };
 }
 
 const UNIFY_BASE = 'All discussions are combined into one specification.';
@@ -324,7 +324,7 @@ function specificationMenu(detail) {
   if (detail.scenario === 'specs-menu' && !recordOpen) {
     numbered.push({
       key: '', action: 'analyze', topic: null, verb: null,
-      label: 'Analyze for groupings (recommended)', desc: descLines(ANALYZE_DESC),
+      label: { head: 'Analyze for groupings', recommended: true }, desc: descLines(ANALYZE_DESC),
     });
   }
   for (const row of detail.actionable) {
@@ -365,11 +365,11 @@ function specificationMenu(detail) {
   if (detail.concluded.length > 0) {
     options.push({
       key: 'c', word: 'completed', action: 'completed_menu', topic: null, verb: null,
-      label: `Manage completed specifications — *${detail.concluded.length} completed*`,
+      label: { head: 'Manage completed specifications', tail: `${detail.concluded.length} completed` },
     });
   }
 
-  const lines = [];
+  const lines = ['What would you like to do?', ''];
   for (const e of numbered) {
     lines.push(cmdOption(e.key, null, e.label));
     if (e.desc) lines.push(...e.desc);
@@ -377,7 +377,6 @@ function specificationMenu(detail) {
   for (const o of options) {
     lines.push(cmdOption(o.key, o.word, o.label));
   }
-  lines.push('', 'Select an option:');
 
   return { keys: [...numbered, ...options], rendered: menuFrame(lines) };
 }
@@ -396,7 +395,7 @@ function specificationCompletedMenu(detail) {
   /** @type {SpecMenuKey[]} */
   const keys = detail.concluded.map((row, i) => ({
     key: String(i + 1), action: 'refine_spec', topic: row.name, verb: 'Refining',
-    label: `Refine "${titlecase(row.name)}" — *completed*`,
+    label: { head: `Refine "${titlecase(row.name)}"`, tail: 'completed' },
   }));
   keys.push({ key: 'b', word: 'back', action: 'back', topic: null, verb: null, label: 'Return to the specifications menu' });
 
@@ -414,5 +413,80 @@ function specificationCompletedMenu(detail) {
   return { keys, title: 'Completed Specifications', display, rendered };
 }
 
+// ---------------------------------------------------------------------------
+// Confirmation
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {object} SpecConfirmation
+ * @property {'create'|'continue'|'refine'|'unify'} variant  the route the entry took
+ * @property {string} verb                Creating | Continuing | Refining
+ * @property {string} work_unit
+ * @property {string} name
+ * @property {string} status              the item's status — proposed before its first session
+ * @property {{name: string, status: string, individual: boolean}[]} sources  status: pending | stale | incorporated; individual: a started specification already covers it
+ * @property {string[]} supersedes        the started specifications the handoff supersedes
+ * @property {{name: string, hint: string}[]} consult
+ */
+
+/** A heading over its rows, or '' when there are none. @param {string} heading @param {string[]} rows */
+function listBlock(heading, rows) {
+  return rows.length === 0 ? '' : [heading, ...rows].join('\n');
+}
+
+/** @param {string[]} texts */
+function bulletRows(texts) {
+  return texts.flatMap((text) => bulletRow(text));
+}
+
+/**
+ * What the handoff is about to do, drawn above its consent gate: the verb
+ * and name, the sources by extraction state, the consult references, and
+ * the paths it writes and supersedes.
+ * @param {SpecConfirmation} c
+ * @returns {string}
+ */
+function specificationConfirmation(c) {
+  const specPath = (name) => `.workflows/${c.work_unit}/specification/${name}/specification.md`;
+  const named = (status) => c.sources.filter((s) => s.status === status).map((s) => s.name);
+  const head = `${c.verb} specification: ${titlecase(c.name)}`;
+  const output = `Output: ${specPath(c.name)}`;
+  const consult = listBlock('Consult references (read narrowly — do not extract):',
+    bulletRows(c.consult.map((r) => (r.hint ? `${r.name} — ${r.hint}` : r.name))));
+
+  if (c.variant === 'unify') {
+    return compose([
+      head,
+      listBlock('Sources:', bulletRows(c.sources.map((s) => s.name))),
+      listBlock('Existing specifications to incorporate:', bulletRows(c.supersedes.map((n) => `${specPath(n)} → will be superseded`))),
+      output,
+    ]);
+  }
+  if (c.variant === 'create') {
+    return compose([
+      head,
+      listBlock('Sources:', bulletRows(c.sources.map((s) => (s.individual ? `${s.name} (has individual spec — will be incorporated)` : s.name)))),
+      consult,
+      output,
+      listBlock('After completion:', c.supersedes.map((n) => `  ${specPath(n)} → marked as superseded`)),
+    ]);
+  }
+
+  const existing = `Existing: ${specPath(c.name)} [${c.status}]`;
+  const pending = named('pending');
+  const stale = named('stale');
+  if (pending.length === 0 && stale.length === 0) {
+    return compose([head, existing, listBlock('All sources extracted:', bulletRows(c.sources.map((s) => s.name))), consult]);
+  }
+  return compose([
+    head,
+    existing,
+    listBlock(c.status === 'completed' ? 'New sources to extract:' : 'Sources to extract:', bulletRows(pending.map((n) => `${n} [pending]`))),
+    listBlock('Sources re-decided since extraction (reconcile):', bulletRows(stale.map((n) => `${n} [stale]`))),
+    listBlock('Previously extracted (for reference):', bulletRows(named('incorporated'))),
+    consult,
+  ]);
+}
+
 module.exports = {
-  SPEC_TITLE: TITLE, specificationDisplay, specificationMenu, specificationCompletedMenu };
+  SPEC_TITLE: TITLE, specificationDisplay, specificationMenu, specificationCompletedMenu, specificationConfirmation };

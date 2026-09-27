@@ -82,7 +82,7 @@ The scoped discovery derives `all_done` — true only when at least one non-canc
 
 #### If `all_done` is `true`
 
-Render and emit the section verbatim:
+Render and emit the section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render epic-all-done-gate {work_unit}
@@ -98,7 +98,7 @@ Complete the work unit — one command sets `status: completed`, stamps `complet
 node .claude/skills/workflow-engine/scripts/engine.cjs workunit complete {work_unit} -m "workflow({work_unit}): complete epic pipeline"
 ```
 
-Fetch and emit the receipt's `DISPLAY: confirmation` section:
+Fetch and emit the receipt's `DISPLAY: confirmation` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render workunit-receipt {work_unit} --verb complete --pipeline
@@ -118,7 +118,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render workunit-receipt {
 
 #### If `outcome` is `paused`
 
-The phase left on a wait — the banner names what the paused item awaits, never a completion. Render and emit the section verbatim:
+The phase left on a wait — the banner names what the paused item awaits, never a completion. Render and emit the section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render phase-paused {work_unit} --phase {completed_phase}
@@ -132,9 +132,15 @@ The topic was cancelled inside its session, which rendered the receipt — no ba
 
 → Proceed to **G. Display and Menu**.
 
+#### If `outcome` is `postponed`
+
+The topic left for the roadmap inside its session, which rendered the receipt — no banner.
+
+→ Proceed to **G. Display and Menu**.
+
 #### Otherwise
 
-Render and emit the section verbatim:
+Render and emit the section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render phase-completed {work_unit} --phase {completed_phase}

@@ -10,12 +10,6 @@ This step uses the `workflow-planning-task-designer` agent (`../../../agents/wor
 
 ## A. Design Task List
 
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-Taking Phase {N}: {Phase Name} and breaking it into tasks. I'll delegate this to a specialist agent that will read the full specification and propose a task list.
-```
-
 ### Invoke the Agent
 
 Read `work_type` from the manifest:
@@ -33,6 +27,14 @@ Invoke `workflow-planning-task-designer` with these file paths:
 6. **All approved phases**: the complete phase structure from the planning file
 7. **Target phase number**: the phase being broken into tasks
 
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+Taking Phase {N}: {Phase Name} and breaking it into tasks. I'll delegate this to a specialist agent that will read the full specification and propose a task list.
+```
+
+This dispatch and every re-invocation of the designer below run in the background (`run_in_background: true`) and end the turn on exactly `The task designer agent has been dispatched for phase {N}.`
+
 ### Present the Output
 
 The agent returns a task overview and task table.
@@ -43,7 +45,7 @@ The agent returns a task overview and task table.
 
 → Load **[resolve-spec-gap.md](resolve-spec-gap.md)** with lane = `construction`, gap = `{the entry, and the task it surfaced in}`.
 
-Where a landing changed the specification, or the reference returned work the plan must carry — the tree owing what the specification decides — re-invoke `workflow-planning-task-designer` through its amendment path with the corrections and that work as the feedback, and take the revised task list forward. Settle that return's `## Spec Defects` the same way, once: a defect the designer still reports after one re-run is left to the review walk, which meets the plan against the specification at the end of the phase. When at least one corrigendum landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim as a code block:
+Where a landing changed the specification, or the reference returned work the plan must carry — the tree owing what the specification decides — re-invoke `workflow-planning-task-designer` through its amendment path with the corrections and that work as the feedback, and take the revised task list forward. Settle that return's `## Spec Defects` the same way, once: a defect the designer still reports after one re-run is left to the review walk, which meets the plan against the specification at the end of the phase. When at least one corrigendum landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-corrections --count {count}
@@ -83,7 +85,7 @@ Use the Write tool for the payload — never a shell heredoc.
 node .claude/skills/workflow-engine/scripts/engine.cjs render task-list {work_unit}.planning.{topic} --file .workflows/.cache/{work_unit}/planning/{topic}/task-list-phase-{N}.json
 ```
 
-The response carries the task-list display plus the surface for the current gate mode. Emit each section verbatim at its marked instruction.
+The response carries the task-list display plus the surface for the current gate mode. Emit each section verbatim per its marker.
 
 #### If the response carried `DISPLAY: task list auto-approved`
 

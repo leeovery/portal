@@ -35,7 +35,7 @@ Load **[framework.md](../workflow-shared/references/framework.md)** and follow i
 Context refresh (compaction) summarizes the conversation, losing procedural detail. When you detect a context refresh has occurred — the conversation feels abruptly shorter, you lack memory of recent steps, or a summary precedes this message — follow this recovery protocol:
 
 1. **Re-read this skill file completely, then re-load [framework.md](../workflow-shared/references/framework.md).** Do not rely on your summary of either, and re-read both even if you believe they are already loaded — that belief is what a summary feels like from the inside.
-2. **Read the state.** Run `node .claude/skills/workflow-roadmap/scripts/gateway.cjs view` and reason from its DATA: an `active_session` means a session is live — read its log (`.workflows/.roadmap/sessions/session-{active_session}.md`) in full to recover the exploration; no marker means the session had not started or already closed.
+2. **Read the state.** Run `node .claude/skills/workflow-engine/scripts/engine.cjs roadmap state` and reason from its response: an `active_session` means a session is live — read its log (`.workflows/.roadmap/sessions/session-{active_session}.md`) in full to recover the exploration; no marker means the session had not started or already closed.
 3. **Check git state.** Run `git status` and `git log --oneline -10`. Commit messages reveal what has been completed.
 4. **Announce your position** to the user before continuing: state what step you believe you're at and what comes next. Wait for confirmation.
 
@@ -140,11 +140,11 @@ Render the roadmap home snapshot (its TITLE section is the phase title):
 node .claude/skills/workflow-roadmap/scripts/gateway.cjs view
 ```
 
-The output arrives in demarcated sections: read `=== DATA` to reason from (state, `ITEMS`, `SESSIONS`, the `ACTIONS` key table — never display it); emit the TITLE section (markdown), then the DISPLAY section verbatim as a code block, then the MENU section verbatim as markdown.
+The output arrives in demarcated sections: read `=== DATA` to reason from (state, `ITEMS`, `SESSIONS`, the `ACTIONS` key table — never display it); emit the TITLE section, then the DISPLAY section, then the MENU section, each verbatim per its marker.
 
 **STOP.** Wait for user response.
 
-Match the input to its `ACTIONS` entry by `key` and route on the entry's `action`:
+Match the input to its `ACTIONS` entry by `key` or `word` and route on the entry's `action`:
 
 #### If `action` is `converse`
 
@@ -164,7 +164,7 @@ Load **[start-menu.md](../workflow-start/references/start-menu.md)** and follow 
 
 #### If the user asks a question
 
-Answer from the DATA and the map.
+Answer from the DATA and the map. The question sets the gate aside until the person is ready to move on; to put it back:
 
 → Return to **Step 3**.
 

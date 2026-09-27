@@ -7,8 +7,8 @@
 // piece of file IO the engine stays blind to), and sections the output.
 //
 //   gateway.cjs                        → minimal state line, all work units
-//   gateway.cjs {work_unit}            → minimal state line, one work unit
-//   gateway.cjs view {work_unit}       → DATA (+ DISPLAY + MENU) snapshot
+//   gateway.cjs {work_unit}            → DATA only, one work unit — the entry's routing read
+//   gateway.cjs view {work_unit}       → DATA (+ TITLE + DISPLAY + MENU) snapshot
 //   gateway.cjs completed-menu {work_unit} → concluded-specs sub-view
 // ---------------------------------------------------------------------------
 
@@ -16,7 +16,8 @@ const fs = require('fs');
 const path = require('path');
 const engine = require('../../workflow-engine/scripts/lib.cjs');
 const { loadActiveManifests, listFiles, filesChecksum, fileExists } = engine.reads;
-const { phaseItems, phaseData, sourceRows, specIsStarted, specGroupsSources } = engine.derivations;
+const { phaseItems, phaseData, sourceRows, specGroupsSources, lockingSpecs } = engine.derivations;
+const { discoverySpec } = engine.detail;
 
 // Actionable-first ordering rank for the spec menu. Lower sorts earlier:
 // proposed → in-progress → completed-with-pending → concluded → other/promoted.
@@ -43,33 +44,23 @@ function discover(cwd, workUnit) {
     const specItemsList = phaseItems(m, 'specification');
 
     for (const item of discItemsList) {
-      // Cancelled is closed; triaged is pre-live (a stub of parked rerouted
-      // concerns, never discussed) — neither is a discussion to count.
-      if (item.status === 'cancelled' || item.status === 'triaged') continue;
+      // Cancelled is closed and postponed has left for the roadmap; triaged
+      // is pre-live (a stub of parked rerouted concerns, never discussed) —
+      // none of the three is a discussion to count.
+      if (item.status === 'cancelled' || item.status === 'postponed' || item.status === 'triaged') continue;
       discCount++;
       if (item.status === 'completed') completedCount++;
       else if (item.status === 'in-progress') inProgressCount++;
 
-      // An individual spec is a started specification sourcing the
-      // discussion — the one a unify incorporates. A proposed grouping is
-      // not one (so the single-discussion path and the grouping "matching
-      // spec" logic stay correct), and a cancelled or superseded
-      // specification holds nothing: its sources are free to be regrouped.
-      let hasIndividualSpec = false;
-      let specStatus = '';
-      for (const si of specItemsList) {
-        if (!specIsStarted(si)) continue;
-        if (si.sources && si.sources[item.name]) {
-          hasIndividualSpec = true;
-          specStatus = si.status || '';
-          break;
-        }
-      }
+      // The discussion's individual spec — the first started specification
+      // sourcing it; a proposed grouping is never one.
+      const [covering] = lockingSpecs(m, item.name);
+      const individual = covering && specItemsList.find(s => s.name === covering);
 
       discussions.push({
         name: item.name, work_unit: m.name, status: item.status || 'unknown',
-        work_type: m.work_type, has_individual_spec: hasIndividualSpec,
-        ...(hasIndividualSpec && { spec_status: specStatus }),
+        work_type: m.work_type, has_individual_spec: Boolean(individual),
+        ...(individual && { spec_status: individual.status }),
       });
     }
   }
@@ -87,18 +78,14 @@ function discover(cwd, workUnit) {
   let proposedCount = 0;
 
   for (const m of manifests) {
-    const specItemsList = phaseItems(m, 'specification');
-    const discItemsList = phaseItems(m, 'discussion');
-
-    for (const item of specItemsList) {
+    for (const item of phaseItems(m, 'specification')) {
       if (item.status === 'cancelled') {
         cancelledSpecifications.push({ name: item.name, work_unit: m.name, sources: sourceRows(item.sources).map(([name]) => name) });
       }
       if (!specGroupsSources(item)) continue;
-      const status = item.status || 'in-progress';
+      const spec = { ...discoverySpec(m, item.name, item), work_unit: m.name, work_type: m.work_type };
 
-      const isProposed = status === 'proposed';
-      if (isProposed) {
+      if (spec.status === 'proposed') {
         proposedCount++;
       } else {
         const specFile = path.join(workflowsDir, m.name, 'specification', item.name, 'specification.md');
@@ -106,35 +93,8 @@ function discover(cwd, workUnit) {
         specCount++;
       }
 
-      const spec = {
-        name: item.name, work_unit: m.name, status,
-        work_type: m.work_type,
-      };
       if (Number.isInteger(item.order)) spec.order = item.order;
-
       if (item.superseded_by) spec.superseded_by = item.superseded_by;
-
-      if (item.sources && typeof item.sources === 'object') {
-        spec.sources = Object.entries(item.sources).map(([srcName, srcData]) => {
-          // A status-less source row defaults to `pending`, not `incorporated` — deliberate fail-safe so an unmarked source never reads as already done.
-          const srcStatus = (typeof srcData === 'object') ? (srcData.status || 'pending') : 'pending';
-          const match = discItemsList.find(i => i.name === srcName);
-          const discStatus = match ? (match.status || 'unknown') : 'unknown';
-          return { name: srcName, status: srcStatus, discussion_status: discStatus };
-        });
-      }
-
-      if (item.consult_references && typeof item.consult_references === 'object') {
-        spec.consult_references = Object.entries(item.consult_references).map(([refName, refData]) => {
-          const refStatus = (typeof refData === 'object') ? (refData.status || 'pending') : 'pending';
-          return { name: refName, status: refStatus };
-        });
-      }
-
-      // Stale counts as pending work: an extraction the source moved out from
-      // under still blocks conclusion, so the actionable/concluded split, the
-      // sort rank, and the Continuing/Refining verb all treat it as open.
-      spec.has_pending_sources = (spec.sources || []).some(s => s.status === 'pending' || s.status === 'stale');
 
       specifications.push(spec);
     }
@@ -215,9 +175,8 @@ function discover(cwd, workUnit) {
   };
 }
 
-// The labelled dump has no prose consumers — every flow reads the `view`
-// snapshot. A bare invocation answers with the one decision-ready counts line,
-// in the view DATA's vocabulary.
+// The bare invocation has no prose consumer: it answers with the one
+// decision-ready counts line, in the view DATA's vocabulary.
 function format(result) {
   const cs = result.current_state;
   return [
@@ -254,9 +213,8 @@ function consultHints(cwd, workUnit) {
   return hints;
 }
 
-function buildDetail(workUnit) {
-  if (!workUnit) throw new Error('Usage: gateway.cjs <view|completed-menu> {work_unit}');
-  const cwd = process.cwd();
+function buildDetail(cwd, workUnit) {
+  if (!workUnit) throw new Error('Usage: gateway.cjs [view|completed-menu] {work_unit}');
   const result = discover(cwd, workUnit);
   return { result, detail: engine.detail.specificationDetail(workUnit, result, { consultHints: consultHints(cwd, workUnit) }) };
 }
@@ -303,19 +261,32 @@ function viewData(result, detail, keys) {
   }
   lines.push(`unassigned_discussions: ${detail.unassigned.join(', ') || '(none)'}`);
   lines.push(`in_progress_discussions: ${detail.in_progress_discussions.join(', ') || '(none)'}`);
-  if (keys.length > 0) {
-    lines.push('ACTIONS (key  action  topic  verb):');
-    for (const k of keys) {
-      lines.push(`  ${k.key}  ${k.action}  ${k.topic || '—'}  ${k.verb || '—'}`);
-    }
-  }
+  if (keys.length > 0) lines.push(...specActions(keys));
   return lines.join('\n');
+}
+
+// The ACTIONS key table over a spec menu's keys — the entry's topic and the
+// verb its confirmation carries.
+function specActions(keys) {
+  return engine.project.actionsTable(['action', 'topic', 'verb'], keys, (k) => [k.action, k.topic || '—', k.verb || '—']);
+}
+
+// The entry's routing read: the scenario and the detail the confirmations
+// reason from, with no menu — a display a scenario routes to fetches its own
+// snapshot where it shows it. A name with no active work unit behind it is
+// refused, never read as a unit with nothing in it.
+function scoped(cwd, workUnit) {
+  if (!loadActiveManifests(cwd).some((m) => m.name === workUnit)) {
+    throw new Error(`no active work unit "${workUnit}"`);
+  }
+  const { result, detail } = buildDetail(cwd, workUnit);
+  return engine.gateway.dataBlock(viewData(result, detail, []));
 }
 
 // One snapshot: reasoning DATA always; DISPLAY and MENU when the scenario
 // renders them (analysis-rerun routes without either).
 function view(workUnit) {
-  const { result, detail } = buildDetail(workUnit);
+  const { result, detail } = buildDetail(process.cwd(), workUnit);
   const menu = engine.project.specificationMenu(detail);
   const display = engine.project.specificationDisplay(detail);
   const parts = [engine.gateway.dataBlock(viewData(result, detail, menu.keys))];
@@ -330,12 +301,9 @@ function view(workUnit) {
 // The concluded-specs sub-view: keys table as DATA, the view's heading as
 // TITLE, the spec list as DISPLAY, the Refine pick menu as MENU.
 function completedMenu(workUnit) {
-  const { detail } = buildDetail(workUnit);
+  const { detail } = buildDetail(process.cwd(), workUnit);
   const sub = engine.project.specificationCompletedMenu(detail);
-  const dataLines = [`work_unit: ${detail.work_unit}`, 'ACTIONS (key  action  topic  verb):'];
-  for (const k of sub.keys) {
-    dataLines.push(`  ${k.key}  ${k.action}  ${k.topic || '—'}  ${k.verb || '—'}`);
-  }
+  const dataLines = [`work_unit: ${detail.work_unit}`, ...specActions(sub.keys)];
   return [
     engine.gateway.dataBlock(dataLines.join('\n')),
     engine.gateway.titleBlock(sub.title),
@@ -344,13 +312,32 @@ function completedMenu(workUnit) {
   ].join('\n');
 }
 
+const USAGE = 'Usage: gateway.cjs | gateway.cjs {work_unit} | gateway.cjs view {work_unit} | gateway.cjs completed-menu {work_unit}';
+
+/** Reject the call: the reason to stderr, exit 1. @param {string} message @returns {string} */
+function reject(message) {
+  process.stderr.write(`gateway: ${message}\n`);
+  process.exit(1);
+  return ''; // unreachable; keeps the handler's return type uniform
+}
+
+/** The routing read, refused loudly on excess arguments or an unknown unit. @param {string} workUnit @param {...string} rest @returns {string} */
+function routingRead(workUnit, ...rest) {
+  if (rest.length > 0) return reject(`unknown verb "${workUnit}"\n${USAGE}`);
+  try {
+    return scoped(process.cwd(), workUnit);
+  } catch (err) {
+    return reject(err instanceof Error ? err.message : String(err));
+  }
+}
+
 if (require.main === module) {
   engine.gateway.runGateway({
     index: () => format(discover(process.cwd())),
     view,
     'completed-menu': completedMenu,
-    fallback: (workUnit) => format(discover(process.cwd(), workUnit)),
+    fallback: routingRead,
   });
 }
 
-module.exports = { discover, format };
+module.exports = { discover, format, scoped };

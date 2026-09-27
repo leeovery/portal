@@ -14,53 +14,46 @@ Render the completed & cancelled snapshot — append the work-type filter when t
 node .claude/skills/workflow-start/scripts/gateway.cjs completed [{work_type_filter}]
 ```
 
-The output is one snapshot in three demarcated sections:
+The output is one snapshot in demarcated sections:
 
-- **DATA** — reasoning surface: the filter, counts, and the `UNITS` table — one line per work unit, `n  status  work_type  work_unit  last_phase`, numbering continuous across the completed and cancelled lists. Reason from it; never display or restate it.
-- **TITLE** — the view's chrome heading. Emit verbatim as markdown, directly above the display.
-- **DISPLAY** — the completed & cancelled list. Emit verbatim as a code block. Never redraw, reflow, or trim it.
-- **MENU** — the selection prompt. Emit verbatim as markdown (not a code block). Empty when nothing matches.
+- **DATA** — reasoning surface: the filter, counts, and the `UNITS` table — one line per work unit, `n  status  work_type  work_unit  last_phase`, numbering continuous across the completed and cancelled units. Reason from it; never display or restate it.
+- **TITLE** — the view's chrome heading. Emit verbatim per its marker.
+- **MENU** — the completed and cancelled units as a numbered pick list. Emit verbatim per its marker. Absent when nothing matches.
+- **DISPLAY** — only when nothing matches: the empty line. Emit verbatim per its marker.
 
-Emit the TITLE section (markdown), then the DISPLAY section. A section is everything beneath its `===` marker up to the next marker — the marker lines themselves are never emitted.
+Emit the TITLE section verbatim per its marker.
 
 #### If `completed_count` and `cancelled_count` are both 0
+
+Emit the DISPLAY section verbatim per its marker.
 
 → Return to caller.
 
 #### Otherwise
 
-→ Proceed to **B. Select**.
-
-## B. Select
-
-Emit the MENU section.
+Emit the MENU section verbatim per its marker.
 
 **STOP.** Wait for user response.
 
-#### If user chose `b/back`
+**If user chose `b/back`:**
 
 → Return to caller.
 
-#### If user chose a number
+**If user chose a number:**
 
-Store the selected work unit's `UNITS` row — its name and status.
+Store the selected work unit's name from its `UNITS` row.
 
-→ Proceed to **C. Action Menu**.
+→ Proceed to **B. Action Menu**.
 
-## C. Action Menu
+## B. Action Menu
 
-> *Output the next fenced block as markdown (not a code block):*
+Fetch the action menu over the selected unit:
 
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render completed-actions {selected.name}
 ```
-· · · · · · · · · · · ·
-**{selected.name:(titlecase)}** ({selected.status})
 
-**`◆ What would you like to do?`**
-
-**`r/reactivate`** → Set status back to in-progress
-**`b/back`**       → Return to the list
-**Ask**          → Ask a question about this work unit
-```
+Emit the call's MENU section verbatim per its marker.
 
 **STOP.** Wait for user response.
 
@@ -72,7 +65,7 @@ Run the reactivate transaction — one command restores `status: in-progress`, c
 node .claude/skills/workflow-engine/scripts/engine.cjs workunit reactivate {selected.name}
 ```
 
-Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section — adding `--warn` when the response's `warnings` is non-empty:
+Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section, each verbatim per its marker — adding `--warn` when the response's `warnings` is non-empty:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render workunit-receipt {selected.name} --verb reactivate [--warn]
@@ -86,6 +79,6 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render workunit-receipt {
 
 #### If user asked a question
 
-Answer the question.
+Answer the question. The question sets the gate aside until the person is ready to move on; to put it back:
 
-→ Return to **C. Action Menu**.
+→ Return to **B. Action Menu**.

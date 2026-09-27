@@ -45,7 +45,7 @@ Rules:
 
 Summarise the doc in two or three sentences of prose — the verdict, and what it holds (how many observed claims, captured decisions, open questions). The full text stays on disk behind `v/view`; never dump it unasked.
 
-Fetch the gate and emit its `MENU: baseline doc gate` section verbatim as markdown (not a code block):
+Fetch the gate and emit its `MENU: baseline doc gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render baseline-doc-gate
@@ -55,7 +55,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render baseline-doc-gate
 
 **If `view`:**
 
-Render the doc file verbatim as markdown, then re-fetch and emit the gate.
+Render the doc file verbatim as markdown (not a code block). Then re-fetch the gate and emit its `MENU: baseline doc gate` section verbatim per its marker.
 
 **STOP.** Wait for user response.
 
@@ -71,14 +71,12 @@ Apply the changes to the doc, restate the summary, then re-fetch and emit the ga
 
 ## C. Land
 
-Index the doc, mark the area, and commit:
+Index the doc, mark the area, and commit. A failed `index` never blocks — note it to the user in one line (the next start retries it) and continue; the doc and commit still land:
 
 ```bash
 node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index .workflows/.baseline/{area}.md
 node .claude/skills/workflow-engine/scripts/engine.cjs manifest set project.baseline.areas.{area} completed
 node .claude/skills/workflow-engine/scripts/engine.cjs commit --workflows -m "baseline({area}): document the {area} baseline"
 ```
-
-A failed `index` is queued by the CLI for retry on its next call — note it to the user in one line and continue; the doc and commit still land.
 
 → Return to caller.

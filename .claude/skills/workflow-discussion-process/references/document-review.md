@@ -126,7 +126,7 @@ On return: if `result` is `landed`, the note is handled — replace the stranded
 
 **If the user asks about a number:**
 
-Answer it — what the note says, where it sits, why that target. A note the user says belongs here is handled: the prose stands as written, by their choice. Adjust a target, landing phase, or concern content they correct. The screen re-renders for the notes still unsent.
+Answer it — what the note says, where it sits, why that target. A note the user says belongs here is handled: the prose stands as written, by their choice. Adjust a target, landing phase, or concern content they correct. A kept note or a correction changed the screen, which re-renders now for the notes still unsent; a question that changed nothing sets the gate aside until the person is ready to move on. To put it back:
 
 → Return to **C. Route Misdirected Knowledge**.
 
@@ -152,9 +152,9 @@ Summarise conversationally — do not dump a diff. One short paragraph or a hand
 
 #### If the document is complete and accurate
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 Document review — discussion file reflects the session. No changes needed.
 ```
 

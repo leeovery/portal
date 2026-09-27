@@ -14,7 +14,7 @@ Rerouted concerns are parked on this topic, but no session has ever run — this
 
 #### If status is `in-progress`
 
-Render and emit the section verbatim:
+Render and emit the section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render phase-note {work_unit}.discussion.{topic} --verb Resuming
@@ -34,7 +34,7 @@ Reopen it:
 node .claude/skills/workflow-engine/scripts/engine.cjs topic reopen {work_unit} discussion {topic}
 ```
 
-Render and emit the section verbatim:
+Render and emit the section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render phase-note {work_unit}.discussion.{topic} --verb Reopening
@@ -45,6 +45,12 @@ Set source="continue".
 → Load **[reconcile-advisory.md](../../workflow-shared/references/reconcile-advisory.md)** with downstream_phase = `discussion`.
 
 → Return to caller.
+
+#### If status is `postponed`
+
+The topic waits on the roadmap — it returns through the epic menu's `f/forward` row, never through entry. Tell the user in one line.
+
+**STOP.** Do not proceed — terminal condition.
 
 #### Otherwise
 

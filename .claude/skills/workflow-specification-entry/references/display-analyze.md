@@ -8,13 +8,13 @@ Prompted when multiple completed discussions exist and none are in progress, no 
 
 ## A. Display
 
-Re-run the scoped snapshot — the emission draws from this response, never a carried one:
+Render the scoped snapshot:
 
 ```bash
 node .claude/skills/workflow-specification-entry/scripts/gateway.cjs view {work_unit}
 ```
 
-Emit the TITLE section (markdown), then the DISPLAY section verbatim as a code block.
+Emit the TITLE section, then the DISPLAY section, each verbatim per its marker.
 
 **Cache-Aware Message**
 

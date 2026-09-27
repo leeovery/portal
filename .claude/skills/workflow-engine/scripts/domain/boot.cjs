@@ -2,38 +2,46 @@
 
 // ---------------------------------------------------------------------------
 // Domain ring: the boot pipeline — the sequential entry checks Step 0 needs,
-// collapsed into one call: run migrations, probe the knowledge base, compact
-// when ready.
+// collapsed into one call: run migrations, probe the knowledge base, and when
+// it is ready run the bulk index — the store brought in line with the
+// files — then compact it.
 //
 // Migrations are the durability-critical leg: a failing migrate.cjs is a hard
 // error — migrations must never half-run silently. A run that recorded
 // migrations without changing a document leaves the tracking ledger as the
 // only dirt, and no reviewed commit follows a report of no changes, so boot
-// commits that line itself — this run's, or one an earlier boot stranded. The
-// knowledge base is a derived index: a failing `check` reports "not-ready"
-// (the caller's gate — boot never initialises anything itself; a not-ready
-// response additionally carries the system-config report so the gate can offer
-// setup without extra probes). A failing `compact` is a warning, never a
-// block. Store dirt found when ready is committed (the post-setup first boot,
-// compact churn, or leftovers).
+// commits that line itself — this run's, or one an earlier boot stranded.
+//
+// The knowledge directory — the store, its metadata, the knowledge config —
+// is local to each checkout and never in git: boot keeps git from tracking
+// anything under it, and keeps its files listed in `.worktreeinclude` so a
+// worktree Claude Code creates starts with a copy. A checkout set up (its
+// local config) with no store gets one built by the bulk index when this
+// machine's config says how — `check` answers `buildable`. Anything else
+// not-ready is the caller's gate: boot never sets a checkout up itself, and
+// a not-ready response carries the system-config report so the gate can
+// offer setup without extra probes. A failing bulk index or compact is a
+// warning, never a block.
+//
+// Boot is also where the conversation folders are tidied, whichever project
+// the conversations ran in: one goes once its transcript is gone.
 // ---------------------------------------------------------------------------
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { git } = require('../kernel/git.cjs');
 const { withProjectLock } = require('../kernel/manifest.cjs');
-const { commitPathspecScoped, KB_DIR } = require('./commit.cjs');
-const { spawnKnowledge } = require('./kb.cjs');
-const { labelConfigStatus, repairSessionLabels, resolveEnabled, syncSessionHooks, SETTINGS_SPEC } = require('./session-label.cjs');
+const { systemConfigDir } = require('../kernel/system-config.cjs');
+const { commitPathspecScoped, commitUntrackScoped } = require('./commit.cjs');
+const { knowledge: runKnowledge, spawnKnowledge, KNOWLEDGE_DIR } = require('./kb.cjs');
+const { labelConfigStatus, repairSessionLabels, resolveEnabled, syncSessionHooks } = require('./session-label.cjs');
+const { syncGateSurface } = require('./gate-surface.cjs');
+const { tidyConversations } = require('./conversation.cjs');
+const { SETTINGS_SPEC } = require('./settings.cjs');
+const { syncWorktreeInclude, WORKTREE_INCLUDE } = require('./worktree-include.cjs');
 const { baselineState, baselineSignal } = require('./baseline.cjs');
 const { walkthroughState } = require('./walkthrough.cjs');
-
-/** The system config directory — `WORKFLOWS_CONFIG_DIR` overrides for tests. */
-function configDir() {
-  return process.env.WORKFLOWS_CONFIG_DIR || path.join(os.homedir(), '.config', 'workflows');
-}
 
 // Resolved against this file so it works wherever the skill tree is installed.
 const MIGRATE_CJS = path.join(path.resolve(__dirname, '..', '..', '..'), 'workflow-migrate', 'scripts', 'migrate.cjs');
@@ -80,13 +88,15 @@ const MIGRATIONS_RUN_MARKER = '---MIGRATIONS_RUN---';
  * @typedef {object} BootResult
  * @property {{changed: boolean, ran: number, output: string, verify: VerifyAddendum[]}} migrations `changed` counts files, `ran` counts migrations executed — a migration can run and change nothing
  * @property {'ready'|'not-ready'} knowledge
+ * @property {boolean} indexed the bulk `knowledge index` ran clean — no artifact left failing
  * @property {boolean} compacted
- * @property {string|null} kb_committed short sha of the knowledge-store commit, or null when the store was clean
  * @property {string|null} migrations_committed short sha of the tracking-ledger commit, or null when nothing was committed — set only where no reviewed migration commit follows, whatever boot left the ledger dirty
- * @property {string[]} warnings non-blocking failures (knowledge init/compaction, store commit, ledger commit, an unreadable report block)
+ * @property {string[]} warnings non-blocking failures (knowledge index, compaction, the store's untracking, ledger commit, the worktree include, an unreadable report block)
  * @property {'no-tmux'|'on'|'off'|'prompt'} tmux_labels session-label opt-in state — `prompt` means in tmux and never asked, workflow-start's one-time prompt
  * @property {boolean} label_repaired a session label on this terminal — this session's own, arriving at the start menu, or a stranded one whose owner is gone — was put back to the original name
- * @property {boolean} session_hooks_installed this boot wrote the session hooks into `.claude/settings.json` — SessionEnd's `presence cleanup` for every project, `session cleanup` and SessionStart's `session resume` (matcher `resume`) while labels are on; false when the file already carried exactly those
+ * @property {boolean} session_hooks_installed this boot wrote the session hooks into `.claude/settings.json` — SessionEnd's `presence cleanup` and `conversation end` for every project, `session cleanup` and SessionStart's `session resume` (matcher `resume`) while labels are on; false when the file already carried exactly those
+ * @property {boolean} worktree_include_installed this boot wrote the knowledge files into `.worktreeinclude`; false when it already listed them
+ * @property {import('./gate-surface.cjs').GateSurface} gate_surface the gate mod — `unavailable` where it cannot run here (Claude Code on the web, another entrypoint than the terminal app, a version before 2.1.282, the mod not installed) and boot wrote nothing; where it can: `on` where it is running, its announcement in boot's own environment; `restart` where this boot wrote the function-hooks flag into `.claude/settings.json` and the mod is not running; `not-running` where the flag was already there and the mod is not running — workflow-start stops on both
  * @property {'none'|'native'|'in-progress'|'completed'|'skipped'} baseline project baseline status from the project manifest — `none` means nothing recorded yet (workflow-start's one-time judgment: native, or the offer)
  * @property {'none'|'walked'|'skipped'} walkthrough the answer to the walkthrough offer from the project manifest — `none` means nothing recorded yet, the state workflow-start's one-time offer keys on
  * @property {import('./baseline.cjs').BaselineSignal|null} [baseline_signal] present only while baseline is `none` — the repository facts the judgment is made from; null when there is no git history to read
@@ -105,7 +115,7 @@ const MIGRATIONS_RUN_MARKER = '---MIGRATIONS_RUN---';
  * @returns {SystemConfigReport}
  */
 function detectSystemConfig() {
-  const p = path.join(configDir(), 'config.json');
+  const p = path.join(systemConfigDir(), 'config.json');
   if (!fs.existsSync(p)) return { status: 'absent', provider: null, model: null };
   try {
     const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -200,6 +210,18 @@ function trimReport(stdout) {
 }
 
 /**
+ * What this boot's syncs wrote into the project's settings, as a commit
+ * subject — the session hooks and the function-hooks flag share the file,
+ * so one commit carries whichever of them moved.
+ * @param {boolean} hooks @param {boolean} gate
+ * @returns {string}
+ */
+function settingsCommitMessage(hooks, gate) {
+  if (hooks && gate) return 'chore: sync workflow project settings';
+  return hooks ? 'chore: install workflow session hooks' : 'chore: sync workflow gate surface';
+}
+
+/**
  * Run the boot pipeline against the project at `cwd`.
  * @param {string} cwd project root
  * @returns {BootResult}
@@ -269,83 +291,121 @@ function boot(cwd) {
     }
   }
 
-  const check = spawnKnowledge(cwd, ['check']);
-  const ready = !check.error && check.status === 0 && (check.stdout || '').trim() === 'ready';
-
-  const knowledge = ready ? 'ready' : 'not-ready';
-
-  let compacted = false;
-  if (ready) {
-    const compact = spawnKnowledge(cwd, ['compact']);
-    if (compact.error || compact.status !== 0) {
-      const detail = compact.error
-        ? compact.error.message
-        : (compact.stderr || compact.stdout || `exit ${compact.status}`).trim();
-      warnings.push(`knowledge compact failed: ${detail}`);
-    } else {
-      compacted = true;
-    }
-  }
-
-  // Commit the knowledge-store dirt this boot found (a fresh store from the
-  // user's `knowledge setup` run — the restart's first boot — compact churn,
-  // or leftovers from an interrupted session). The store is a derived index
-  // and boot must stay usable, so a commit failure is a warning, never a
-  // block.
-  /** @type {string|null} */
-  let kbCommitted = null;
-  if (ready) {
-    try {
-      const status = fs.existsSync(path.join(cwd, KB_DIR))
-        ? git(cwd, ['status', '--porcelain', '--', KB_DIR])
-        : '';
-      if (status.trim() !== '') {
-        // Untracked store files mean this is their first commit — the boot
-        // right after `knowledge setup` created them.
-        const message = status.split('\n').some((l) => l.startsWith('??'))
-          ? 'chore(knowledge): initialise store'
-          : 'chore(knowledge): compact store';
-        kbCommitted = commitPathspecScoped(cwd, KB_DIR, message);
-      }
-    } catch (err) {
-      warnings.push(`knowledge store commit failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
+  untrackStore(cwd, warnings);
+  const { knowledge, indexed, compacted } = syncKnowledge(cwd, warnings);
 
   // The session hooks live in the project's settings, so every boot
   // re-syncs them: SessionEnd's `presence cleanup` for every project — a
   // /clear'd session's heartbeats otherwise read held until its process
-  // exits — with `session cleanup` and SessionStart's `session resume`
-  // while labels are on. A checkout that predates the hooks, or lost them
-  // to a hand edit, gets them back here. The file is written either way,
-  // and the commit failing is a warning, never a block.
-  let sessionHooksInstalled = false;
-  // The opt-in read and the sync share one hold: a `label-config` landing
+  // exits — and its `conversation end`, with `session cleanup` and
+  // SessionStart's `session resume` while labels are on. The function-hooks
+  // flag the gate mod loads under lives in the same file and is put back the
+  // same way wherever the mod can run: it is part of the workflows. A checkout that predates either,
+  // or lost it to a hand edit, gets it back here. The file is written
+  // either way, and the commit failing is a warning, never a block.
+  //
+  // The opt-in read and the writes share one hold: a `label-config` landing
   // between them would have this boot strip the hook it just installed.
   // The commit stays outside the lock.
-  const sync = withProjectLock(cwd, () => syncSessionHooks(cwd, { session: resolveEnabled(cwd) === true, presence: true }));
-  if (sync.error) {
-    warnings.push(`session hooks not installed: ${sync.error}`);
-  } else if (sync.changed) {
-    sessionHooksInstalled = true;
+  const synced = withProjectLock(cwd, () => ({
+    hooks: syncSessionHooks(cwd, { session: resolveEnabled(cwd) === true, workflows: true }),
+    gate: syncGateSurface(cwd),
+  }));
+  if (synced.hooks.error) warnings.push(`session hooks not installed: ${synced.hooks.error}`);
+  if (synced.gate.error) warnings.push(`gate surface not synced: ${synced.gate.error}`);
+  const sessionHooksInstalled = synced.hooks.changed;
+  if (synced.hooks.changed || synced.gate.changed) {
     try {
-      commitPathspecScoped(cwd, SETTINGS_SPEC, 'chore: install workflow session hooks');
+      commitPathspecScoped(cwd, SETTINGS_SPEC, settingsCommitMessage(synced.hooks.changed, synced.gate.changed));
     } catch (err) {
-      warnings.push(`session hooks commit failed: ${err instanceof Error ? err.message : String(err)}`);
+      warnings.push(`project settings commit failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
+  const worktreeIncludeInstalled = installWorktreeInclude(cwd, warnings);
+  tidyConversations();
+
   const baseline = baselineState(cwd).status;
   /** @type {BootResult} */
-  const result = { migrations, knowledge: /** @type {BootResult['knowledge']} */ (knowledge), compacted, kb_committed: kbCommitted, migrations_committed: migrationsCommitted, warnings, tmux_labels: labelConfigStatus(cwd), label_repaired: repairSessionLabels(cwd).repaired, session_hooks_installed: sessionHooksInstalled, baseline, walkthrough: walkthroughState(cwd).status };
+  const result = { migrations, knowledge, indexed, compacted, migrations_committed: migrationsCommitted, warnings, tmux_labels: labelConfigStatus(cwd), label_repaired: repairSessionLabels(cwd).repaired, session_hooks_installed: sessionHooksInstalled, worktree_include_installed: worktreeIncludeInstalled, gate_surface: synced.gate.status, baseline, walkthrough: walkthroughState(cwd).status };
   // The signal travels only while nothing is recorded: the calling skill
   // judges once, then the verdict is on the manifest.
   if (baseline === 'none') result.baseline_signal = baselineSignal(cwd);
   // Not-ready responses carry the system-config report so the calling
   // skill's knowledge gate can branch (reuse the system config, offer a
   // mode choice, or fall back to the terminal wizard) without extra probes.
-  if (!ready) result.system_config = detectSystemConfig();
+  if (knowledge === 'not-ready') result.system_config = detectSystemConfig();
   return result;
+}
+
+/**
+ * Stop git tracking anything under the knowledge directory: one confined
+ * commit records the removal and the files stay on disk. It runs before the
+ * migration commit that lands the directory's ignore rule, and holds without
+ * it — the rule is live in the working tree from the moment the migration
+ * writes it. Nothing tracked, nothing done; a failure — a merge or rebase in
+ * progress among them — is a warning, and the next boot tries again.
+ * @param {string} cwd @param {string[]} warnings
+ */
+function untrackStore(cwd, warnings) {
+  try {
+    commitUntrackScoped(cwd, [KNOWLEDGE_DIR], 'chore(knowledge): stop tracking the store');
+  } catch (err) {
+    warnings.push(`knowledge store untracking failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * `knowledge check`'s answer; a check that cannot run reads not-ready.
+ * @param {string} cwd
+ * @returns {'ready'|'buildable'|'not-ready'}
+ */
+function knowledgeState(cwd) {
+  const check = spawnKnowledge(cwd, ['check']);
+  if (check.error || check.status !== 0) return 'not-ready';
+  const answer = (check.stdout || '').trim();
+  return answer === 'ready' || answer === 'buildable' ? answer : 'not-ready';
+}
+
+/**
+ * The knowledge legs: the bulk index brings the store in line with the
+ * files — building it where the checkout has none and `check` found the
+ * config says how, then asking `check` again whether the build stood —
+ * and compact runs over a ready store. Each failing step is a warning.
+ * @param {string} cwd @param {string[]} warnings
+ * @returns {{knowledge: BootResult['knowledge'], indexed: boolean, compacted: boolean}}
+ */
+function syncKnowledge(cwd, warnings) {
+  const state = knowledgeState(cwd);
+  if (state === 'not-ready') return { knowledge: 'not-ready', indexed: false, compacted: false };
+  const indexed = runKnowledge(cwd, ['index'], 'knowledge index', warnings);
+  const knowledge = state === 'ready' || knowledgeState(cwd) === 'ready' ? 'ready' : 'not-ready';
+  const compacted = knowledge === 'ready' && runKnowledge(cwd, ['compact'], 'knowledge compact', warnings);
+  return { knowledge, indexed, compacted };
+}
+
+/**
+ * Keep the knowledge files listed in `.worktreeinclude` so a worktree Claude
+ * Code creates starts with a copy, committed confined when this boot wrote
+ * it. The read and the append share the project lock, so concurrent boots
+ * never append twice. A file that cannot be written or committed is a
+ * warning, never a block.
+ * @param {string} cwd @param {string[]} warnings
+ * @returns {boolean} this boot wrote the file
+ */
+function installWorktreeInclude(cwd, warnings) {
+  const include = withProjectLock(cwd, () => syncWorktreeInclude(cwd));
+  if (include.error) {
+    warnings.push(`worktree include not written: ${include.error}`);
+    return false;
+  }
+  if (!include.changed) return false;
+  try {
+    commitPathspecScoped(cwd, WORKTREE_INCLUDE, 'chore: copy the knowledge store into new worktrees');
+  } catch (err) {
+    warnings.push(`worktree include commit failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return true;
 }
 
 module.exports = { boot, detectSystemConfig };

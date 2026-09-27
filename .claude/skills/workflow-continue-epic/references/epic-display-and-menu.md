@@ -28,12 +28,12 @@ node .claude/skills/workflow-continue-epic/scripts/gateway.cjs view {work_unit} 
 
 The output is one snapshot in four demarcated sections:
 
-- **DATA** — reasoning surface: state flags, `phase_counts` (in-progress / proposed / total per phase), and the `ACTIONS` table — one line per menu key, `key  action  topic  → route`, with `(recommended)` / `(in session: …)` / `(code session: …)` markers. Reason from it; never display or restate it.
-- **TITLE** — the view's chrome heading. Emit verbatim as markdown, directly above the display.
-- **DISPLAY** — the dashboard and key. Emit verbatim as a code block. Never redraw, reflow, or trim it.
-- **MENU** — the selection menu. Emit verbatim as markdown (not a code block).
+- **DATA** — reasoning surface: state flags, `phase_counts` (in-progress / proposed / total per phase), and the `ACTIONS` table — one line per menu key, `key  word  action  topic  → route`, with `(recommended)` / `(in session: …)` / `(code session: …)` markers. Reason from it; never display or restate it.
+- **TITLE** — the view's chrome heading. Emit verbatim per its marker, directly above the display.
+- **DISPLAY** — the dashboard and key. Emit verbatim per its marker. Never redraw, reflow, or trim it.
+- **MENU** — the selection menu. Emit verbatim per its marker.
 
-Emit the TITLE section (markdown), then the DISPLAY section, then the MENU section. A section is everything beneath its `===` marker up to the next marker — the marker lines themselves are never emitted.
+Emit the TITLE section, then the DISPLAY section, then the MENU section, each verbatim per its marker.
 
 **STOP.** Wait for user response.
 
@@ -43,7 +43,7 @@ Emit the TITLE section (markdown), then the DISPLAY section, then the MENU secti
 
 ## B. Handle Selection
 
-Match the user's input to its `ACTIONS` entry by `key` — a number, or a command option's letter / long form. Every decision below reads the entry's `action` value, never its label text.
+Match the user's input to its `ACTIONS` entry — a number or a command option's letter by `key`, its long form by `word`. Every decision below reads the entry's `action` value, never its label text.
 
 #### If `action` is `unblock_plan`
 
@@ -79,13 +79,21 @@ Match the user's input to its `ACTIONS` entry by `key` — a number, or a comman
 
 → Proceed to **F. Reactivate Topic**.
 
+#### If `action` is `postpone_topic`
+
+→ Proceed to **H. Postpone Topic**.
+
+#### If `action` is `pull_forward_topic`
+
+→ Proceed to **I. Pull Forward Topic**.
+
 #### Otherwise
 
 A `(code session: …)` marker needs no gate here — implementation and review are gated at their entry skill, which reads the whole checkout's code slot; the marked row routes like any other.
 
 **If the selected entry carries an `(in session: …)` marker:**
 
-Another session holds this topic open. Fetch and emit the `MENU: in-session gate — {key}` section for the selected entry:
+Another session holds this topic open. Fetch the in-session gate for the selected entry and emit its `MENU: in-session gate — {key}` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-continue-epic/scripts/gateway.cjs in-session-gate {work_unit} {key}
@@ -123,7 +131,7 @@ The selection raises no concern.
 
 **If a `MENU: epic soft gate` section is returned:**
 
-Emit the section verbatim.
+Emit the section verbatim per its marker.
 
 **STOP.** Wait for user response.
 
@@ -153,7 +161,7 @@ Render the completed-topics list and pick menu:
 node .claude/skills/workflow-continue-epic/scripts/gateway.cjs completed-menu {work_unit}
 ```
 
-Emit the TITLE section (markdown), then the DISPLAY section, then the MENU section. Match the user's input to its `ACTIONS` entry by `key`.
+Emit the TITLE section, then the DISPLAY section, then the MENU section, each verbatim per its marker. Match the user's input to its `ACTIONS` entry by `key` or `word`.
 
 **STOP.** Wait for user response.
 
@@ -177,7 +185,7 @@ Render the cancellable-topics list and pick menu — one row per unit, a topic (
 node .claude/skills/workflow-continue-epic/scripts/gateway.cjs cancel-menu {work_unit}
 ```
 
-Emit the TITLE section (markdown), then the DISPLAY section, then the MENU section. Match the user's input to its `ACTIONS` entry by `key`.
+Emit the TITLE section, then the DISPLAY section, then the MENU section, each verbatim per its marker. Match the user's input to its `ACTIONS` entry by `key` or `word`.
 
 **STOP.** Wait for user response.
 
@@ -185,7 +193,7 @@ Emit the TITLE section (markdown), then the DISPLAY section, then the MENU secti
 
 → Return to **A. State Display and Menu**.
 
-#### If the input matches no key
+#### If the input matches no entry
 
 A locked row's name is the usual case — the row carries its reason. Tell the user in one line: the reason from the row for a locked unit, or that the input matched no option; then re-present the sub-view.
 
@@ -193,7 +201,7 @@ A locked row's name is the usual case — the row carries its reason. Tell the u
 
 #### If user chose a numbered topic
 
-Store the selected entry's `phase` — the unit's stage, `discovery` or `specification` — and `topic`. Fetch and emit the confirm's `MENU: cancel gate` section; its statement names exactly what the cancel takes:
+Store the selected entry's `phase` — the unit's stage, `discovery` or `specification` — and `topic`. Fetch and emit the confirm's `MENU: cancel gate` section verbatim per its marker; its statement names exactly what the cancel takes:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render cancel-gate {work_unit}.{phase}.{topic}
@@ -221,7 +229,7 @@ Surface the engine's error verbatim in one line — nothing was written.
 
 **Otherwise:**
 
-Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section — adding `--warn` when the response's `warnings` is non-empty. When the response's `discarded` is non-empty, tell the user in one line which proposed grouping(s) went with the topic; when `abandoned` is non-empty, name the experiment records the cancel closed; when `released_waits` is non-empty, say where the ball sits — each waiting point reverts to open, surfaced when the topic is reactivated and that conversation next runs:
+Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section, each verbatim per its marker — adding `--warn` when the response's `warnings` is non-empty. When the response's `discarded` is non-empty, tell the user in one line which proposed grouping(s) went with the topic; when `abandoned` is non-empty, name the experiment records the cancel closed; when `released_waits` is non-empty, say where the ball sits — each waiting point reverts to open, surfaced when the topic is reactivated and that conversation next runs:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render topic-receipt {work_unit}.{phase}.{topic} --verb cancel [--warn]
@@ -239,7 +247,7 @@ Render the cancelled-topics list and pick menu — one row per cancelled unit, e
 node .claude/skills/workflow-continue-epic/scripts/gateway.cjs reactivate-menu {work_unit}
 ```
 
-Emit the TITLE section (markdown), then the DISPLAY section, then the MENU section. Match the user's input to its `ACTIONS` entry by `key`.
+Emit the TITLE section, then the DISPLAY section, then the MENU section, each verbatim per its marker. Match the user's input to its `ACTIONS` entry by `key` or `word`.
 
 **STOP.** Wait for user response.
 
@@ -247,7 +255,7 @@ Emit the TITLE section (markdown), then the DISPLAY section, then the MENU secti
 
 → Return to **A. State Display and Menu**.
 
-#### If the input matches no key
+#### If the input matches no entry
 
 A locked row's name is the usual case — the row carries its reason. Tell the user in one line: the reason from the row for a locked unit, or that the input matched no option; then re-present the sub-view.
 
@@ -269,7 +277,7 @@ Surface the engine's error verbatim in one line — nothing was written.
 
 **Otherwise:**
 
-Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section, which names the statuses the unit's items returned to — adding `--warn` when the response's `warnings` is non-empty. The receipt lists only items that came back with a status: for each `restored` row whose `status` is `null`, tell the user in one line that its phase returned to never started; when the response's `discarded` is non-empty, tell the user in one line which proposed grouping(s) went with the reactivate:
+Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section naming the statuses the unit's items returned to, each verbatim per its marker — adding `--warn` when the response's `warnings` is non-empty. The receipt lists only items that came back with a status: for each `restored` row whose `status` is `null`, tell the user in one line that its phase returned to never started; when the response's `discarded` is non-empty, tell the user in one line which proposed grouping(s) went with the reactivate:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render topic-receipt {work_unit}.{phase}.{topic} --verb reactivate [--warn]
@@ -287,7 +295,7 @@ A dep-blocked plan carries no implementation row — this is its escape hatch. R
 node .claude/skills/workflow-continue-epic/scripts/gateway.cjs unblock-menu {work_unit}
 ```
 
-Emit the TITLE section (markdown), then the DISPLAY section, then the MENU section. Match the user's input to its `ACTIONS` entry by `key`.
+Emit the TITLE section, then the DISPLAY section, then the MENU section, each verbatim per its marker. Match the user's input to its `ACTIONS` entry by `key` or `word`.
 
 **STOP.** Wait for user response.
 
@@ -307,6 +315,86 @@ The record belongs to the plan, and the menu is not the session working it — `
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} --topic planning/{topic} --sweep -m "impl({work_unit}): mark {dep} dependency as satisfied externally"
+```
+
+→ Return to **A. State Display and Menu**.
+
+---
+
+## H. Postpone Topic
+
+Render the postponable-topics list and pick menu — one row per Discovery unit, the topic with its research, discussion, and experiments together. Every unit is listed: a locked one carries its reason and no key, a unit a live session holds carries its in-session age (a cue, not a lock); when every row is locked the menu opens on a statement over `b/back` alone:
+
+```bash
+node .claude/skills/workflow-continue-epic/scripts/gateway.cjs postpone-menu {work_unit}
+```
+
+Emit the TITLE section, then the DISPLAY section, then the MENU section, each verbatim per its marker. Match the user's input to its `ACTIONS` entry by `key` or `word`.
+
+**STOP.** Wait for user response.
+
+#### If user chose `back`
+
+→ Return to **A. State Display and Menu**.
+
+#### If the input matches no key
+
+A locked row's name is the usual case — the row carries its reason. Tell the user in one line: the reason from the row for a locked unit, or that the input matched no option; then re-present the sub-view.
+
+→ Return to **H. Postpone Topic**.
+
+#### If user chose a numbered topic
+
+Store the selected entry's `topic` as `{name}`. The horizon, the confirm, and the transaction are the shared door's.
+
+→ Load **[postponing-the-topic.md](../../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, phase = `none`, topic = `none`.
+
+→ On return, return to **A. State Display and Menu**.
+
+---
+
+## I. Pull Forward Topic
+
+The postpone's return leg: this menu let the topic go, so this menu takes it back. Render the postponed-topics list and pick menu — one row per topic this epic postponed that still waits on the roadmap, the horizon it waits under on the row. A topic whose item another epic has since taken is not among them:
+
+```bash
+node .claude/skills/workflow-continue-epic/scripts/gateway.cjs pull-forward-menu {work_unit}
+```
+
+Emit the TITLE section, then the DISPLAY section, then the MENU section, each verbatim per its marker. Match the user's input to its `ACTIONS` entry by `key` or `word`.
+
+**STOP.** Wait for user response.
+
+#### If user chose `back`
+
+→ Return to **A. State Display and Menu**.
+
+#### If the input matches no key
+
+Tell the user in one line that the input matched no option, then re-present the sub-view.
+
+→ Return to **I. Pull Forward Topic**.
+
+#### If user chose a numbered topic
+
+Store the selected entry's `topic` and its `(item: …)` value — the roadmap item the topic waits as, which the pull addresses. Run the return — one command restores the unit (the marker cleared, every stashed status returned, the map order back unless a live row took the number, each restored `completed` artifact re-indexed), re-records the join, and commits both manifests:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs roadmap pull-forward {item} --into {work_unit}
+```
+
+**If the response is `ok: false`:**
+
+Surface the engine's error verbatim in one line — nothing was written.
+
+→ Return to **A. State Display and Menu**.
+
+**Otherwise:**
+
+Fetch and emit the receipt — the `DISPLAY: kb warning` advisory (when carried) then the `DISPLAY: confirmation` section naming the statuses the unit's items returned to, each verbatim per its marker — adding `--warn` when the response's `warnings` is non-empty. The receipt lists only items that came back with a status; a topic that had never been started comes back with none named:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render topic-receipt {work_unit}.discovery.{topic} --verb restore [--warn]
 ```
 
 → Return to **A. State Display and Menu**.

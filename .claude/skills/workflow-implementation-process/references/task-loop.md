@@ -22,7 +22,7 @@ J. Consolidation pass (phase boundary) → consolidation-pass.md
 → loop back to A until done
 ```
 
-**Engine sections**: the loop's state-derived sections — the task brief, the result header, and the gates — render via `engine render` calls — each stage below fetches its own section at the moment it displays it and emits what returns, so the section always sits in the tool result directly above its emission. Each section is emitted verbatim as the form its marker names. A section is everything beneath its `===` marker up to the end of the response — the marker lines themselves are never emitted. Section content is emitted byte-for-byte — never redrawn, reflowed, or re-derived.
+**Engine sections**: the loop's state-derived sections — the task brief, the result header, and the gates — render via `engine render` calls. Each stage below fetches its own section at the moment it displays it and emits it verbatim per its marker; its content is never redrawn, reflowed, or re-derived.
 
 **Agent lifecycle**: every review dispatches a fresh reviewer agent, and every task's first attempt dispatches a fresh executor agent; the only continuation is re-invoking the current task's executor for a fix round, a retry, or a gate comment round. Warm context never justifies crossing these lines — **[invoke-executor.md](invoke-executor.md)** and **[invoke-reviewer.md](invoke-reviewer.md)** carry the dispatch mechanics.
 
@@ -59,9 +59,9 @@ Follow the format's **reading.md** instructions to determine the next available 
 
 **If open or in-progress tasks remain (blocked):**
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 No ready tasks remain, but {N} task(s) are still open — blocked:
 
   {internal_id}: {Task Name}
@@ -70,7 +70,7 @@ No ready tasks remain, but {N} task(s) are still open — blocked:
   ...
 ```
 
-Fetch the blocked-tasks menu and emit its `MENU: blocked tasks` section:
+Fetch the blocked-tasks menu and emit its `MENU: blocked tasks` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render blocked-tasks
@@ -115,13 +115,7 @@ The `start` response's `mode` says whether this task is being taken up or resume
 
 **If `mode` is `resumed`** — a previous session left the task mid-fix-round, its recorded findings unanswered:
 
-→ Load **[display-task-result.md](display-task-result.md)** with result = `needs-changes`.
-
-Present the findings as the register's findings summary (**[report-register.md](report-register.md)** → Findings Summary), reading the last `## Attempt` section of `.workflows/{work_unit}/implementation/{topic}/fix-tracking-{internal_id}.md` — the session that wrote them is gone, and the record is what the user answers the gate on.
-
-The turn does not end here — the gate menu follows in the same turn.
-
-→ On return, proceed to **F. Fix Approval Gate**.
+→ Proceed to **F. Fix Approval Gate**.
 
 **If `mode` is `started`:**
 
@@ -225,7 +219,7 @@ Land what the user named the same way, and say the same line.
 
 **If the comment is a question back or feedback:**
 
-Answer it. Where the feedback moves the Options, revise them, re-emit the revised Options, and rewrite the payload. Then re-fetch the gate and emit its MENU section verbatim per its marker — the reply takes these branches again.
+Answer it. Where the feedback moves the Options, revise them, re-emit the revised Options, and rewrite the payload. The exchange sets the gate aside until the person is ready to move on; to put it back, re-fetch the gate and emit its MENU section verbatim per its marker — the reply takes these branches again.
 
 **STOP.** Wait for user response.
 
@@ -253,7 +247,7 @@ Carry the block's **Next attempt** and anything the user added into the re-invoc
 
 **If the comment is a question or steers the attempt:**
 
-Answer it. Where it moves the **Next attempt** — a cause you read wrong, an environment the user has just fixed — revise it and re-emit that line. Then re-fetch the gate and emit its MENU section verbatim per its marker — the reply takes these branches again.
+Answer it. Where it moves the **Next attempt** — a cause you read wrong, an environment the user has just fixed — revise it and re-emit that line. The exchange sets the gate aside until the person is ready to move on; to put it back, re-fetch the gate and emit its MENU section verbatim per its marker — the reply takes these branches again.
 
 **STOP.** Wait for user response.
 
@@ -313,27 +307,21 @@ Record the attempt via the engine (increments `fix_attempts` and appends the fin
 node .claude/skills/workflow-engine/scripts/engine.cjs task fix-attempt {work_unit} {topic} {internal_id} --findings-file .workflows/.cache/{work_unit}/implementation/{topic}/attempt-findings.md
 ```
 
-→ Load **[display-task-result.md](display-task-result.md)** with result = `needs-changes`.
-
 #### If the response's `threshold_reached` is `true`
 
-→ Load **[convergence-analysis.md](../../workflow-shared/references/convergence-analysis.md)** with loop_type = `fix`, work_unit = `{work_unit}`, topic = `{topic}`, internal_id = `{internal_id}`, render_when = `always`.
-
-Present the reviewer's findings as the register's findings summary (**[report-register.md](report-register.md)** → Findings Summary).
-
-The turn does not end here — the gate menu follows in the same turn.
-
-→ On return, proceed to **F. Fix Approval Gate**.
+→ Proceed to **F. Fix Approval Gate**.
 
 #### If the response's `threshold_reached` is `false`
-
-Present the reviewer's findings as the register's findings summary (**[report-register.md](report-register.md)** → Findings Summary).
 
 Branch on the response's `fix_gate_mode`.
 
 **If `fix_gate_mode` is `auto` or `bounded`:**
 
-After the findings summary, fetch the fix gate and emit its `DISPLAY: fix gate auto-accepted` section:
+→ Load **[display-task-result.md](display-task-result.md)** with result = `needs-changes`.
+
+Present the reviewer's findings as the register's findings summary (**[report-register.md](report-register.md)** → Findings Summary).
+
+After the findings summary, fetch the fix gate and emit its `DISPLAY: fix gate auto-accepted` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render fix-gate {work_unit}.implementation.{topic}
@@ -345,17 +333,21 @@ The turn does not end here — the executor dispatch follows in the same turn.
 
 **If `fix_gate_mode` is `gated`:**
 
-The turn does not end here — the gate menu follows in the same turn.
-
 → Proceed to **F. Fix Approval Gate**.
 
 ---
 
 ## F. Fix Approval Gate
 
-Every arrival emits the menu in the turn it arrives — from **E**, and back from a lens, the page, an answer, or a standing challenge alike.
+Any arrival but the first re-runs the gate fetch below alone — the presentation belongs to the gate's first arrival, from **E** or **A**'s resumed arm.
 
-Fetch the fix gate and emit its `MENU: fix gate` section (the `a/auto` and `b/bounded` options render only while the fix gate is `gated` — a threshold-forced gate in an auto mode omits them):
+→ Load **[display-task-result.md](display-task-result.md)** with result = `needs-changes`.
+
+When **E**'s fix attempt reached its threshold, load **[convergence-analysis.md](../../workflow-shared/references/convergence-analysis.md)** beneath the header with loop_type = `fix`, work_unit = `{work_unit}`, topic = `{topic}`, internal_id = `{internal_id}`, render_when = `always`.
+
+Present the findings as the register's findings summary (**[report-register.md](report-register.md)** → Findings Summary) — the reviewer's, or, for a task resumed at **A**, the last `## Attempt` section of `.workflows/{work_unit}/implementation/{topic}/fix-tracking-{internal_id}.md`: the session that wrote them is gone, and the record is what the user answers the gate on.
+
+Fetch the fix gate and emit its `MENU: fix gate` section verbatim per its marker (the `a/auto` and `b/bounded` options render only while the fix gate is `gated` — a threshold-forced gate in an auto mode omits them):
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render fix-gate {work_unit}.implementation.{topic}
@@ -403,7 +395,7 @@ Render the show-me explanation as an interactive browser page with the publishin
 
 #### If ask
 
-Answer the user's questions about the review.
+Answer the user's questions about the review. The question sets the gate aside until the person is ready to move on; to put it back:
 
 → Return to **F. Fix Approval Gate**.
 
@@ -437,7 +429,7 @@ Summarise what stands and why, per the confirmation.
 
 #### If the comment directs the fix
 
-Include the reviewer's notes and the user's commentary when re-invoking.
+Confirm your reading of the comment with the person before anything acts on it, then include the reviewer's notes and the user's commentary when re-invoking.
 
 → Return to **B. Execute Task**.
 
@@ -445,7 +437,7 @@ Include the reviewer's notes and the user's commentary when re-invoking.
 
 ## G. Task Gate
 
-A return from a lens, the page, or an answer re-emits the menu alone — re-run the gated fetch below; the presentation belongs to the gate's first arrival.
+Any arrival but the first re-runs the gated fetch below alone — the presentation belongs to the gate's first arrival, from **D** or from **F** when a challenge withdraws every finding.
 
 After the reviewer approves a task, present the result:
 
@@ -457,7 +449,7 @@ Branch on the `task_gate_mode` carried by this task's `start` response.
 
 #### If `task_gate_mode` is `auto` or `bounded`
 
-After the result summary, fetch the task gate and emit its `DISPLAY: task gate auto-approved` section:
+After the result summary, fetch the task gate and emit its `DISPLAY: task gate auto-approved` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render task-gate {work_unit}.implementation.{topic}
@@ -469,7 +461,7 @@ The turn does not end here — the commit follows in the same turn.
 
 #### If `task_gate_mode` is `gated`
 
-Fetch the task gate and emit its `MENU: task gate` section:
+Fetch the task gate and emit its `MENU: task gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render task-gate {work_unit}.implementation.{topic}
@@ -517,13 +509,13 @@ Render the show-me explanation as an interactive browser page with the publishin
 
 **If ask:**
 
-Answer the user's questions about the implementation.
+Answer the user's questions about the implementation. The question sets the gate aside until the person is ready to move on; to put it back:
 
 → Return to **G. Task Gate**.
 
 **If comment:**
 
-Include the user's feedback when re-invoking.
+Confirm your reading of the comment with the person before anything acts on it, then include the user's feedback when re-invoking.
 
 → Return to **B. Execute Task**.
 
@@ -586,9 +578,9 @@ node .claude/skills/workflow-engine/scripts/engine.cjs task complete {work_unit}
 
 ## I. All Tasks Complete
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 All tasks complete. {M} tasks implemented.
 ```
 

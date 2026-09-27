@@ -19,7 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { section, titleSection, menu, cmdOption, promptOption } = require('./surfaces.cjs');
+const { section, titleSection, dataSection, menu, cmdOption, promptOption, emitAs, MENU_INSTRUCTION } = require('./surfaces.cjs');
 const { displayWidth } = require('../../kernel/terminal.cjs');
 const { DIAGRAM_KINDS, isDiagramKind, renderDiagram } = require('./walkthrough-diagrams.cjs');
 
@@ -29,10 +29,8 @@ const CONTENT_DIR = path.join(__dirname, '..', '..', '..', 'content', 'walkthrou
 const SCREENS_DIR = path.join(CONTENT_DIR, 'screens');
 const TOPICS_DIR = path.join(CONTENT_DIR, 'topics');
 
-const PROSE_INSTRUCTION = 'emit verbatim as markdown (not a code block)';
-const DIAGRAM_INSTRUCTION = 'emit verbatim as a code block';
-const MENU_INSTRUCTION = "emit verbatim as markdown, then STOP for the user's response";
-const DATA_INSTRUCTION = 'reason from this — never display or parse the sections below';
+const PROSE_INSTRUCTION = emitAs('markdown');
+const DIAGRAM_INSTRUCTION = emitAs('text');
 
 const ORIGINS = ['first-run', 'help'];
 
@@ -269,10 +267,10 @@ function walkthroughTopics() {
   const all = cards();
   return [
     titleSection('Help · Topics'),
-    section('DATA', DATA_INSTRUCTION, [
+    dataSection([
       'CARDS (key  name):',
       ...all.map((c, i) => `  ${i + 1}  ${c.slug}`),
-    ].join('\n')),
+    ]),
     section('MENU: walkthrough topics', MENU_INSTRUCTION, menu('Which area?', [
       ...all.map((c, i) => cmdOption(String(i + 1), null, c.title)),
       cmdOption('b', 'back', 'Back to help'),
@@ -282,8 +280,9 @@ function walkthroughTopics() {
 }
 
 /**
- * One reference card: its heading, its content in file order, its menu.
- * `menuOnly` serves the return from a question, as a screen's does.
+ * One reference card: its heading and its content in file order — or, with
+ * `menuOnly`, the card's menu alone. A card is also shown mid-conversation,
+ * where it carries no gate, so its menu is fetched apart.
  * @param {Card} card @param {boolean} menuOnly
  * @returns {string}
  */
@@ -292,7 +291,6 @@ function walkthroughTopic(card, menuOnly) {
   return [
     titleSection(`Help · ${card.title}`),
     ...chunkSections(card.chunks),
-    cardMenu(),
   ].join('\n');
 }
 

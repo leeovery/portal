@@ -18,13 +18,13 @@ Load **[framework.md](../workflow-shared/references/framework.md)** and follow i
 
 ## Step 0: Initialisation
 
-> *Output the next fenced block as a properties code block (```properties fence — it colours the art; the space between the two words is the token break that splits the colours, so emit every line byte-for-byte, the version stamp included):*
+> *Output the next fenced block as a properties code block (```properties fence) — it colours the art; the space between the two words is the token break that splits the colours, so emit every line byte-for-byte, the version stamp included:*
 
-```
+```properties
 █▀█░█▀▀░█▀▀░█▀█░▀█▀░▀█▀░█▀▀ █░█░█▀█░█▀▄░█░█░█▀▀░█░░░█▀█░█░█░█▀▀
 █▀█░█░█░█▀▀░█░█░░█░░░█░░█░░ █▄█░█░█░█▀▄░█▀▄░█▀▀░█░░░█░█░█▄█░▀▀█
 ▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀ ▀░▀░▀▀▀░▀░▀░▀░▀░▀░░░▀▀▀░▀▀▀░▀░▀░▀▀▀
-                                                        v0.7.77
+                                                        v0.8.0
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
@@ -42,7 +42,7 @@ Load **[framework.md](../workflow-shared/references/framework.md)** and follow i
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Checking the workflow system — applying any pending migrations, confirming the knowledge base, and scanning your active work.
+> Checking the workflow system — applying any pending migrations, making sure Claude Code is set up for the workflows, confirming the knowledge base, and scanning your active work.
 ```
 
 ### Step 0.1: Boot
@@ -73,9 +73,9 @@ Files were updated, or a migration handed over checks its code could not perform
 
    **If nothing changed** (the migrations skipped everything and verification found nothing to fix):
 
-   > *Output the next fenced block as a code block:*
+   > *Output the next fenced block as a text code block (```text fence):*
 
-   ```
+   ```text
    All documents up to date.
    ```
 
@@ -86,17 +86,17 @@ Files were updated, or a migration handed over checks its code could not perform
 3. Write a brief natural language summary of what the migrations did — verification fixes included (e.g., "Restructured workflow directories, created manifest files, recovered a rerouted concern the converter missed"). Focus on the nature of the changes, not individual file paths — these are internal workflow state files.
 4. Display the summary (`{N}`/`{M}` come from `migrations.output`; when it reports no changes — verification fixes only — omit the counts line):
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as markdown (not a code block):*
 
 ```
-Migrations Applied
+**Migrations Applied**
 
 {your natural language summary}
 
 {N} migration(s), {M} file(s) updated.
 ```
 
-5. Fetch the confirm gate and emit its `MENU: migration gate` section verbatim as markdown (not a code block):
+5. Fetch the confirm gate and emit its `MENU: migration gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render migration-gate
@@ -116,15 +116,15 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit --workflows -m "ch
 
 **If ask:**
 
-Answer the user's question, then fetch the confirm gate again and emit it as above.
+Answer the user's question. The question sets the gate aside until the person is ready to move on; to put it back, fetch the confirm gate again and emit it as above.
 
 **STOP.** Wait for user response.
 
 #### Otherwise
 
-> *Output the next fenced block as a code block:*
+> *Output the next fenced block as a text code block (```text fence):*
 
-```
+```text
 All documents up to date.
 ```
 
@@ -132,7 +132,69 @@ All documents up to date.
 
 → Proceed to **Step 0.2**.
 
-### Step 0.2: Walkthrough
+### Step 0.2: Claude Code Setup
+
+Branch on the boot response's `gate_surface` — `restart` means this boot switched the workflows' mod on in the project's settings, and loading it takes a restart; `not-running` means it was already switched on and this session did not load it; `on` and `unavailable` render nothing.
+
+#### If `gate_surface` is `restart`
+
+If the boot response carries `warnings`, surface them first.
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+**`▪ Claude Code Setup`**
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> The workflows have set up Claude Code in this project to show their menus as buttons above the prompt — click a row to pick it, click again to send. Typing your answer still works.
+```
+
+> *Output the next fenced block as a properties code block (```properties fence):*
+
+```properties
+⚑ Restart Claude Code to finish setting up
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Claude Code reads its settings only when it starts. Exit Claude Code, start it again in this project, then run `/workflow-start`.
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+#### If `gate_surface` is `not-running`
+
+If the boot response carries `warnings`, surface them first.
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+**`▪ Claude Code Setup`**
+```
+
+> *Output the next fenced block as a properties code block (```properties fence):*
+
+```properties
+⚑ Claude Code hasn't picked up the workflows' setup
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Usually Claude Code was already running when the workflows set it up — exit Claude Code, start it again in this project, then run `/workflow-start`. If that doesn't help, a setting of your own is switching Claude Code's function hooks off (`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`).
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+#### Otherwise
+
+→ Proceed to **Step 0.3**.
+
+### Step 0.3: Walkthrough
 
 Branch on the boot response's `walkthrough` — the one-time offer of a short walk through how the workflows work. A recorded answer (`walked` or `skipped`) never re-offers, and the walk stays reachable from the `h/help` row on the start menu either way.
 
@@ -140,13 +202,13 @@ Branch on the boot response's `walkthrough` — the one-time offer of a short wa
 
 The offer is the walk's first screen, which records the answer. Load **[walk.md](../workflow-help/references/walk.md)** with origin = `first-run`.
 
-→ On return, proceed to **Step 0.3**.
+→ On return, proceed to **Step 0.4**.
 
 #### Otherwise
 
-→ Proceed to **Step 0.3**.
+→ Proceed to **Step 0.4**.
 
-### Step 0.3: Session Labels
+### Step 0.4: Session Labels
 
 Branch on the boot response's `tmux_labels` — `prompt` means the session runs inside tmux and the choice was never recorded. A recorded choice (`on`/`off`) never re-prompts; `no-tmux` records nothing, so a later session inside tmux still asks.
 
@@ -155,10 +217,16 @@ Branch on the boot response's `tmux_labels` — `prompt` means the session runs 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
+**`▪ Session Labels`**
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
 > You're running inside tmux. The workflows can rename your tmux session to show where you're working — `myproject · payments · discussion · auth-flow` inside a phase, `myproject · payments` at its menu — putting the original name back at the start menu and when the session ends, and bringing the label back when you resume the session. You're asked once per project.
 ```
 
-Fetch the opt-in and emit its `MENU: label gate` section verbatim as markdown (not a code block):
+Fetch the opt-in and emit its `MENU: label gate` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render label-gate
@@ -174,7 +242,7 @@ Record the choice. If the command fails (`ok: false`), surface its error and con
 node .claude/skills/workflow-engine/scripts/engine.cjs session label-config true
 ```
 
-→ Proceed to **Step 0.4**.
+→ Proceed to **Step 0.5**.
 
 **If `no`:**
 
@@ -184,15 +252,15 @@ Record the choice. If the command fails (`ok: false`), surface its error and con
 node .claude/skills/workflow-engine/scripts/engine.cjs session label-config false
 ```
 
-→ Proceed to **Step 0.4**.
+→ Proceed to **Step 0.5**.
 
 #### Otherwise
 
-→ Proceed to **Step 0.4**.
+→ Proceed to **Step 0.5**.
 
-### Step 0.4: Knowledge Gate
+### Step 0.5: Knowledge Gate
 
-Branch on the boot response — run no further commands (`compact` already ran inside boot when the knowledge base was ready).
+Branch on the boot response — run no further commands (the bulk `knowledge index` and `compact` already ran inside boot when the knowledge base was ready, the index building the store first where this checkout had none). If it carries `warnings`, surface them and continue — boot is complete.
 
 #### If `knowledge` is `not-ready`
 
@@ -200,9 +268,9 @@ The response's `system_config` object carries what the gate needs to branch. Loa
 
 #### If `knowledge` is `ready`
 
-→ Proceed to **Step 0.5**.
+→ Proceed to **Step 0.6**.
 
-### Step 0.5: Baseline Judgment
+### Step 0.6: Baseline Judgment
 
 Branch on the boot response's `baseline` — the one-time judgment on whether the project carries a codebase that predates the workflows. A recorded status (`native`/`in-progress`/`completed`/`skipped`) never re-judges and never re-offers: manage carries the way into the assessment for every recorded status, and the start menus carry an interview in progress or a declined offer.
 
@@ -223,10 +291,16 @@ node .claude/skills/workflow-engine/scripts/engine.cjs baseline record native
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
+**`▪ Baseline Assessment`**
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
 > This project has an existing codebase the workflows know nothing about. A baseline assessment researches it, then interviews you to capture the intent the code can't show — landing docs the knowledge base surfaces in every later phase. Pausable any time; also available later from the workflow-start menus.
 ```
 
-Fetch the offer and emit its `MENU: baseline offer` section verbatim as markdown (not a code block):
+Fetch the offer and emit its `MENU: baseline offer` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render baseline-offer-gate

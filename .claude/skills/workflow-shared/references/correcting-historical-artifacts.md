@@ -74,16 +74,16 @@ Present the full correction list — each wrong claim, its evidence, and its pro
    > **Corrigendum {YYYY-MM-DD}** (from `{correcting_work_unit}`): {original claim, quoted} — corrected: {what is true}.
    ```
 
-3. **Re-index.** Replaces the file's existing chunks in one idempotent call:
+3. **Re-index.** Replaces the file's existing chunks in one idempotent call. A failed index never blocks: tell the user in one line that the next start retries it, and continue:
 
    ```bash
    node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index {specification path}
    ```
 
-4. **Commit.** Scoped to the corrected topic in the owning unit — one specification file and the store the re-index dirtied, nothing else of a unit this session is not working in. `--kb` carries the store; `--sweep` says the topic is somebody else's:
+4. **Commit.** Scoped to the corrected topic in the owning unit — one specification file, nothing else of a unit this session is not working in. `--sweep` says the topic is somebody else's:
 
    ```bash
-   node .claude/skills/workflow-engine/scripts/engine.cjs commit {owning_work_unit} -m "specification({owning_work_unit}): corrigendum from {correcting_work_unit}" --topic specification/{topic} --kb --sweep
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {owning_work_unit} -m "specification({owning_work_unit}): corrigendum from {correcting_work_unit}" --topic specification/{topic} --sweep
    ```
 
 The owning unit's manifest is never touched — no reopen, no status change; the unit stays completed.
@@ -129,16 +129,16 @@ Apply it silently — no gate, no raise. This is the one place a downstream phas
    > **Corrigendum {YYYY-MM-DD}** (from `{correcting_phase}`): {original claim, quoted} — corrected: {what is true}.
    ```
 
-3. **Re-index.** Replaces the file's existing chunks in one idempotent call:
+3. **Re-index.** Replaces the file's existing chunks in one idempotent call. A failed index never blocks — continue, and the next start retries it:
 
    ```bash
    node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index {specification path}
    ```
 
-4. **Commit.** Scoped to the corrected topic — one specification file and the store the re-index dirtied. `--kb` carries the store; `--sweep` always rides here — the session's working topic sits under its own downstream phase, never under this specification:
+4. **Commit.** Scoped to the corrected topic — one specification file. `--sweep` always rides here — the session's working topic sits under its own downstream phase, never under this specification:
 
    ```bash
-   node .claude/skills/workflow-engine/scripts/engine.cjs commit {owning_work_unit} -m "specification({owning_work_unit}): corrigendum from {correcting_phase}" --topic specification/{topic} --kb --sweep
+   node .claude/skills/workflow-engine/scripts/engine.cjs commit {owning_work_unit} -m "specification({owning_work_unit}): corrigendum from {correcting_phase}" --topic specification/{topic} --sweep
    ```
 
 The specification item is never touched — no reopen, no status change.

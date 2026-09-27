@@ -9,11 +9,10 @@
 
 const { wrapWithPrefix } = require('../../kernel/render.cjs');
 const { displayWidth } = require('../../kernel/terminal.cjs');
-const { section, menu, menuFrame, cmdOption, promptOption, CONTINUE_INSTRUCTION } = require('./surfaces.cjs');
+const { section, dataSection, menu, cmdOption, promptOption, CONTINUE_INSTRUCTION, emitAs, MENU_INSTRUCTION, STOP_CLAUSE } = require('./surfaces.cjs');
 const { titlecase } = require('../conventions.cjs');
 
-const MENU_INSTRUCTION = "emit verbatim as markdown, then STOP for the user's response";
-const ASK_INSTRUCTION = "emit verbatim as a code block, then STOP for the user's response";
+const ASK_INSTRUCTION = emitAs('text', STOP_CLAUSE);
 
 /** @typedef {import('../baseline.cjs').BaselineState} BaselineState */
 
@@ -117,7 +116,7 @@ function baselineScopeGate(payload) {
     { question: 'Assess these areas?' },
   );
   return [
-    section('DISPLAY: baseline scope', 'emit verbatim as markdown (not a code block)', list),
+    section('DISPLAY: baseline scope', emitAs('markdown'), list),
     section('MENU: baseline scope gate', MENU_INSTRUCTION, body),
   ].join('\n');
 }
@@ -188,16 +187,24 @@ function baselineManageGate() {
 }
 
 /**
- * The doc picker under manage's view.
+ * The doc picker under manage's view — one numbered row per area doc, each
+ * number's area on the DATA row the flow resolves the pick through.
+ * @param {BaselineState} d
  * @returns {string}
  */
-function baselineDocPick() {
-  const body = menuFrame(['Which doc? (enter the area name, or **`b/back`**)']);
-  return section('MENU: baseline doc pick', MENU_INSTRUCTION, body);
+function baselineDocPick(d) {
+  const body = menu('Which doc?', [
+    ...d.areas.map((a, i) => cmdOption(String(i + 1), null, `${a.name}.md`)),
+    cmdOption('b', 'back', 'Return to the baseline menu'),
+  ]);
+  return [
+    dataSection(['DOCS (key  area):', ...d.areas.map((a, i) => `  ${i + 1}  ${a.name}`)]),
+    section('MENU: baseline doc pick', MENU_INSTRUCTION, body),
+  ].join('\n');
 }
 
 /**
- * The one-time boot offer — workflow-start's Step 0.5 gate.
+ * The one-time boot offer — workflow-start's Step 0.6 gate.
  * @returns {string}
  */
 function baselineOfferGate() {

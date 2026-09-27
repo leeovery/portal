@@ -90,12 +90,16 @@ engine.detail.workUnitDetail(cwd, type)           // → WorkUnitDetail (single-
 engine.detail.workUnitIndex(type, detail)         // → labelled dump for the head-of-skill insert (thin DATA index)
 engine.detail.WORK_UNIT_TYPES                     // { [type]: config } — single-topic pipeline configs
 engine.detail.specificationDetail(wu, result, { consultHints }) // → SpecificationDetail (entry scenario + grouping rows over one discover() result)
+engine.project.actionsTable(columns, keys, cells) // → the DATA `ACTIONS` table's lines — each key's `key` and `word` (`—` for none), then `cells(key)` under `columns`
 engine.project.epicDashboard(wu, detail, { newArrivals }) // → dashboard display block
 engine.project.epicKey(detail)                    // → Key block ('' when nothing on screen earns a legend)
 engine.project.epicMenu(wu, detail)               // → { keys, rendered } — keys carry action + route
+engine.project.epicMenuKeys(wu, detail)           // → the same keys, the menu never drawn (a gate over one entry)
 engine.project.epicCompletedMenu(wu, detail)      // → { keys, title, display, rendered } — Completed Topics resume sub-view
 engine.project.epicCancelMenu(detail, { presence }) // → { keys, title, display, rendered } — Cancellable Topics pick menu over the stage units (Topics / Specifications); a locked unit renders keyless with its reason, a held one carries its in-session age
 engine.project.epicReactivateMenu(detail, { presence }) // → { keys, title, display, rendered } — Cancelled Topics reactivate menu over the cancelled units, each row naming what returns; a specification whose sources are unavailable renders keyless with its reason, a held unit carries its in-session age; both unit menus open on a statement over b/back alone when every row is locked
+engine.project.epicPostponeMenu(detail, { presence }) // → { keys, title, display, rendered } — Postponable Topics pick menu over the Discovery units; a locked unit renders keyless with its reason, a held one carries its in-session age
+engine.project.epicPullForwardMenu(detail)        // → { keys, title, display, rendered } — Postponed Topics pick menu over the topics this epic postponed that still wait, each row naming its horizon; the key carries the roadmap item's own name
 engine.project.epicUnblockMenu(detail)            // → { keys, title, display, rendered } — Blocked Plans unblock menu, one row per blocking dependency (`dep` on the key)
 engine.project.discoveryMapView(wu, map)          // → Discovery Map display block (box + tier header + rows)
 engine.project.discoverySynthesisView(wu, map, proposed) // → harvest proposal block (proposed set over the existing map)
@@ -104,16 +108,16 @@ engine.project.startOverview(detail)              // → Workflow Overview displ
 engine.project.startMenu(detail)                  // → { keys, rendered } — continue entries + start/lifecycle options
 engine.project.emptyOverview(detail)              // → empty-state overview block
 engine.project.emptyMenu(detail)                  // → { keys, rendered } — empty-state start menu
-engine.project.inboxPickupView(items, hasArchived)// → { data, display, menu } — inbox pickup snapshot bodies
-engine.project.archivedView(items)                // → { data, display, menu } — archived store snapshot bodies
+engine.project.inboxPickupView(items, hasArchived)// → { data, display, menu } — inbox pickup snapshot bodies; { data, display } when the inbox is empty
+engine.project.archivedView(items)                // → { data, menu } — the archived pick menu; { data, display } when nothing is archived
 engine.project.workingSetView(ws)                 // → { data, title, display, menu, sections } — set tree, menu, mixed-type blocker
-engine.project.workingSetAddGate(ws)              // → add-candidates display + add-gate menu — the gateway working-set-add-gate verb
-engine.project.workingSetDropGate(ws)             // → drop-candidates display + drop-gate menu — the gateway working-set-drop-gate verb
-engine.project.manageListView(detail)             // → { data, display, menu, rows } — manage selection snapshot
+engine.project.workingSetAddGate(ws)              // → MENU: add gate, the addable items as its rows — the gateway working-set-add-gate verb
+engine.project.workingSetDropGate(ws)             // → MENU: drop gate, the set's items as its rows — the gateway working-set-drop-gate verb
+engine.project.manageListView(detail)             // → { data, menu, rows } — manage selection snapshot, the units as the menu's rows
 engine.project.manageUnitView(md)                 // → { data, menu } — the action menu
 engine.project.absorbTargetMenu(md)               // → MENU: absorb target — the render absorb-target surface
 engine.project.planTopicsMenu(md)                 // → MENU: plan topics — the render plan-topics surface
-engine.project.completedView(detail, filter)      // → { data, display, menu, rows } — completed & cancelled snapshot
+engine.project.completedView(detail, filter)      // → { data, menu, rows } — completed & cancelled pick menu; { data, display, rows } when nothing matches
 engine.project.workUnitStatus(type, unit)         // → status display block (box + pipeline tree)
 engine.project.workUnitMenu(type, unit)           // → { keys, rendered } — proceed/revisit gate; '' rendered when nothing to revisit
 engine.project.workUnitData(type, unit, menu)     // → DATA body (flow flags + ACTIONS key table)
@@ -127,7 +131,7 @@ engine.project.specificationCompletedMenu(detail) // → { keys, title, display,
 engine.gateway.runGateway(handlers)               // argv verb dispatch → stdout
 engine.gateway.dataBlock(obj | string)            // → demarcated DATA section
 engine.gateway.displayBlock(text)                 // → demarcated DISPLAY section
-engine.gateway.menuBlock(text)                    // → demarcated MENU section
+engine.gateway.menuBlock(text)                    // → demarcated MENU section, the GATE block directly ahead of it under WORKFLOWS_GATE_SURFACE=1 ('' for an empty menu — no gate, no section)
 ```
 
 `wrapWithPrefix` throws if the prefix leaves no room within the width — a misconfigured gutter fails loudly rather than silently overflowing.
@@ -138,10 +142,10 @@ Each skill's adapter script registers handlers and calls `runGateway`:
 
 ```js
 engine.gateway.runGateway({
-  index: () => ...,          // no-args call — the head-of-skill `!` insert
+  index: () => ...,          // no-args call — the head-of-skill `!` insert; never a gate
   view:  (wu) => ...,        // one snapshot: DATA + DISPLAY + MENU
   // skill-specific sub-views by verb; `fallback` catches unmatched argv
 });
 ```
 
-The .md's prescribed call names the verb (`gateway.cjs view {work_unit}`) — the adapter never infers what a call is for.
+The .md's prescribed call names the verb (`gateway.cjs view {work_unit}`) — the adapter never infers what a call is for. A MENU in a response is a live gate at that call, so a verb returns one only where the prose shows that gate at that call: the head insert runs before any step shows anything and carries none, and a gate a later step shows is that step's own verb (the continue skills' `select`).

@@ -14,7 +14,7 @@
 const { box, renderTree } = require('../../kernel/render.cjs');
 const { DERIVED_PHASES } = require('../../kernel/manifest-schema.cjs');
 const { TREE_WIDTH, titlecase, title, materialBlock } = require('../conventions.cjs');
-const { menuFrame, cmdOption } = require('./surfaces.cjs');
+const { menu, menuFrame, cmdOption, actionsTable, section, MENU_INSTRUCTION } = require('./surfaces.cjs');
 const { typeConfig } = require('../workunit-detail.cjs');
 
 /** @typedef {import('../workunit-detail.cjs').WorkUnitEntry} WorkUnitEntry */
@@ -151,15 +151,11 @@ function workUnitMenu(type, unit) {
   if (unit.finalising || revisitable.length > 0) {
     const options = [cmdOption('y', 'yes', keys[0].label)];
     if (revisitable.length > 0) options.push(cmdOption('r', 'revisit', 'Revisit an earlier phase'));
-    // The statement is context above an explicit question — suppress the
-    // frame's label glyph or a short work-unit name earns a second diamond.
-    rendered = menuFrame([
+    rendered = menu(
       `${unit.finalising ? 'Finalising' : 'Continuing'} "${titlecase(unit.name)}" — *${unit.phase_label}*${(unit.triage_phases || []).length > 0 ? ' · triage waiting' : ''}.`,
-      '',
-      '**`◆ Proceed?`**',
-      '',
-      ...options,
-    ], { glyphLabel: false });
+      options,
+      { question: 'Proceed?' },
+    );
   }
 
   return { keys, rendered };
@@ -167,7 +163,7 @@ function workUnitMenu(type, unit) {
 
 /**
  * The DATA body for the view snapshot: flow flags plus the ACTIONS key table
- * (`key  action  topic  → route` lines). Reasoning surface — never displayed.
+ * (`key  word  action  topic  → route` lines). Reasoning surface — never displayed.
  * @param {string} type  a WORK_UNIT_TYPES key
  * @param {WorkUnitEntry} unit
  * @param {{keys: WorkUnitMenuKey[]}} menu  the workUnitMenu result for the same unit
@@ -189,10 +185,7 @@ function workUnitData(type, unit, menu) {
     lines.push(`seeds_count: ${unit.seeds_count || 0}`);
     lines.push(`imports_count: ${unit.imports_count || 0}`);
   }
-  lines.push('ACTIONS (key  action  topic  → route):');
-  for (const k of menu.keys) {
-    lines.push(`  ${k.key}  ${k.action}  ${k.topic}  → ${k.route || '(internal)'}`);
-  }
+  lines.push(...actionsTable(['action', 'topic', '→ route'], menu.keys, (k) => [k.action, k.topic, `→ ${k.route || '(internal)'}`]));
   return lines.join('\n');
 }
 
@@ -218,14 +211,16 @@ function revisitablePhases(type, unit) {
  */
 function revisitPhasesSection(phases) {
   if (phases.length === 0) return '';
-  const body = menuFrame([
-    'Which phase would you like to revisit?',
-    '',
-    ...phases.map((phase, i) => cmdOption(String(i + 1), null, `${titlecase(phase)} — *completed*`)),
-    cmdOption('b', 'back', 'Return to the previous menu'),
-  ]);
-  const marker = "=== MENU: revisit phases (emit verbatim as markdown, then STOP for the user's response) ===";
-  return `${marker}\n${body}\n`;
+  return section(
+    'MENU: revisit phases',
+    MENU_INSTRUCTION,
+    menuFrame([
+      'Which phase would you like to revisit?',
+      '',
+      ...phases.map((phase, i) => cmdOption(String(i + 1), null, { head: titlecase(phase), tail: 'completed' })),
+      cmdOption('b', 'back', 'Return to the previous menu'),
+    ]),
+  );
 }
 
 /** The view's chrome heading. @param {WorkUnitEntry} unit */

@@ -18,7 +18,7 @@ The caller provides these via context before loading:
 
 ## A. Read Artifacts
 
-Read `.workflows/{work_unit}/research/{name}.md` for each `completed_research` name and `.workflows/{work_unit}/discussion/{name}.md` for each `completed_discussion` name. Skip files missing on disk. Items with `triaged`, `in-progress`, `superseded`, or `cancelled` status are not in the input set.
+Read `.workflows/{work_unit}/research/{name}.md` for each `completed_research` name and `.workflows/{work_unit}/discussion/{name}.md` for each `completed_discussion` name. Skip files missing on disk. Items with `triaged`, `in-progress`, `superseded`, `cancelled`, or `postponed` status are not in the input set.
 
 For each discussion, note:
 - The subtopic map — final states live in the work unit manifest under `phases.discussion.items.{name}.subtopics` (`decided` / `deferred` for completed discussions; legacy files may instead carry a Discussion Map section inline)
@@ -132,9 +132,11 @@ description: |
   {paragraphs}
 routing: {routing-from-C}
 source: gap-analysis
+source_artifacts: {filename1}.md, {filename2}.md
+gap_type: {cross-artifact|emergent|integration|uncovered}
 ```
 
-`routing` is the value decided per-candidate in **C** (`discussion` or `research`). The bare `gap-analysis` source carries the provenance — the analysis synthesises across artifacts, so no single parent exists to name. `description` is a paragraph or two extracted from the gap analysis for this topic — richer context than the one-line summary, read as opening context at the next phase's initialisation when the user later picks the topic up. Do not write to the discovery map and do not append to any tracker here — the approval gate writes approved candidates and tracks them.
+`routing` is the value decided per-candidate in **C** (`discussion` or `research`). The bare `gap-analysis` source carries the provenance — the analysis synthesises across artifacts, so no single parent exists to name. `description` is a paragraph or two extracted from the gap analysis for this topic — richer context than the one-line summary, read as opening context at the next phase's initialisation when the user later picks the topic up. `source_artifacts` and `gap_type` are this candidate's values from **B** — the artifacts the gap was read out of and its category — carried per-candidate because the gate writes the topic's discovery brief from the block. Do not write to the discovery map and do not append to any tracker here — the approval gate writes approved candidates and tracks them.
 
 ---
 
@@ -184,6 +186,6 @@ Stamp the manifest's gap_analysis_cache — one command checksums the completed 
 node .claude/skills/workflow-engine/scripts/engine.cjs cache stamp {work_unit} gap-analysis
 ```
 
-If the response carries `warnings`, surface them to the user but do not abort — the cache file is already on disk and the manifest is updated; indexing retries on the next analysis re-run.
+If the response carries `warnings`, surface them to the user but do not abort — the cache file is already on disk and the manifest is updated; the next start retries the indexing.
 
 → Return to caller.
