@@ -43,6 +43,11 @@ type resumeWaitProbe struct {
 	clearCalls int
 	lookup     func(hookKey string) (hooks.OnResume, error)
 	lookupKeys []string
+
+	// A discard removes an entry unless the probe is told the store held none.
+	discardErr  error
+	discardMiss bool
+	discardKeys []string
 }
 
 // orderedWriter records that the pane was written to before it passes the bytes
@@ -83,6 +88,14 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 				return p.lookup(hookKey)
 			}
 			return hooks.OnResume{}, nil
+		},
+		DiscardRegistration: func(hookKey string) (bool, error) {
+			p.order = append(p.order, "discard")
+			p.discardKeys = append(p.discardKeys, hookKey)
+			if p.discardErr != nil {
+				return false, p.discardErr
+			}
+			return !p.discardMiss, nil
 		},
 		ExecSelf: func(prog string, args []string) {
 			p.order = append(p.order, "exec")

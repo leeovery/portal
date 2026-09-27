@@ -75,6 +75,10 @@ type resumeWaitConfig struct {
 	ClearMarker  func() error
 	LookupResume func(hookKey string) (hooks.OnResume, error)
 
+	// DiscardRegistration removes the pane's registration, reporting whether
+	// the store held one.
+	DiscardRegistration func(hookKey string) (bool, error)
+
 	// Set by runResumeWait from MakeRaw, so an answer hands the pane on in a
 	// cooked tty. An answer reached without a wait restores nothing.
 	restoreTerminal func()
@@ -294,18 +298,10 @@ func startResumeReader(in io.Reader) resumeReader {
 }
 
 // resumeAnswerEnter hands the pane back to its own transcript and starts what
-// the store holds now over it. The order is the protection: the pane leaves the
-// panel's screen first, so a saver tick landing mid-answer captures what is
-// really in the pane, and nothing runs while the marker stands, since a pane
-// handed over frozen stays frozen for the rest of its life with nothing left to
-// report it.
+// the store holds now over it, once the freeze has lifted.
 func resumeAnswerEnter(cfg resumeWaitConfig) error {
-	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
-
-	if err := cfg.ClearMarker(); err != nil {
-		reported := cfg
-		reported.Report = err.Error()
-		return resumeRedraw(reported)
+	if cleared, err := resumeUnfreeze(cfg); !cleared {
+		return err
 	}
 
 	command := resumeRegistrationOrLog(cfg.Logger, cfg.LookupResume, cfg.HookKey).Command
@@ -332,10 +328,48 @@ func resumeCancelDiscardConfirm(cfg resumeWaitConfig) error {
 	return resumeShowScreen(cfg, resumeScreenPanel)
 }
 
-// resumeAnswerDiscard is the confirmation's y. It removes nothing: it hands
-// over to a fresh draw of the confirmation, inert in the safe direction.
+// resumeAnswerDiscard is the confirmation's y. The removal runs while the
+// confirmation is still on screen, so a refused write is reported there rather
+// than closing the confirmation as a cancel would. A discard that found nothing
+// to remove still proceeds: the store is already as the user asked for it.
 func resumeAnswerDiscard(cfg resumeWaitConfig) error {
-	return resumeShowScreen(cfg, resumeScreenDiscard)
+	if _, err := cfg.DiscardRegistration(cfg.HookKey); err != nil {
+		return resumeReport(cfg, resumeScreenDiscard, err)
+	}
+
+	if cleared, err := resumeUnfreeze(cfg); !cleared {
+		return err
+	}
+	cfg.restore()
+
+	shell := resolveShell()
+	execHandOff(cfg.Logger, cfg.ExecSelf, shell, []string{shell}, false)
+	return nil
+}
+
+// resumeUnfreeze hands the pane back to its own transcript and then lifts the
+// freeze, in that order, so a saver tick landing between the two captures what
+// is really in the pane. A clear that is refused brings the waiting panel back
+// with the reason, since a pane handed on frozen stays frozen for the rest of
+// its life; cleared is false then, and err is the redraw's.
+func resumeUnfreeze(cfg resumeWaitConfig) (cleared bool, err error) {
+	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
+
+	if err := cfg.ClearMarker(); err != nil {
+		return false, resumeReport(cfg, resumeScreenPanel, err)
+	}
+	return true, nil
+}
+
+// resumeReport hands the pane to a fresh draw of screen carrying err as the
+// report. The draw paints what the payload names without consulting the store,
+// so a registration already gone is still shown rather than a blank pane.
+func resumeReport(cfg resumeWaitConfig, screen string, err error) error {
+	next := cfg
+	next.Screen = screen
+	next.Report = err.Error()
+	next.DropInput = false
+	return resumeRedraw(next)
 }
 
 // resumeShowScreen hands the pane to a fresh draw of screen. The key press that
@@ -365,6 +399,17 @@ func lookupResumeRegistration(hookKey string) (hooks.OnResume, error) {
 		return hooks.OnResume{}, nil
 	}
 	return store.LookupOnResume(hookKey, hooks.ViaHydrate)
+}
+
+// discardResumeRegistration removes the pane's registration. Unlike the lookup,
+// a store that cannot be resolved is an error: reading it as a miss would drop
+// the panel while the registration it named survives.
+func discardResumeRegistration(hookKey string) (bool, error) {
+	store, err := loadHookStore()
+	if err != nil {
+		return false, err
+	}
+	return store.Discard(hookKey, hooks.EventOnResume, hooks.ViaPanel)
 }
 
 // The pane's own resizes reach the waiter as a signal, which is the one signal
@@ -430,7 +475,8 @@ var stateResumeWaitCmd = &cobra.Command{
 			ClearMarker: func() error {
 				return state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane))
 			},
-			LookupResume: lookupResumeRegistration,
+			LookupResume:        lookupResumeRegistration,
+			DiscardRegistration: discardResumeRegistration,
 		})
 	},
 }

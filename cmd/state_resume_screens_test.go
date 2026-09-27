@@ -55,6 +55,19 @@ func assertNoStateTouched(t *testing.T, p *resumeWaitProbe) {
 	if len(p.lookupKeys) != 0 {
 		t.Errorf("the store was read for %q, want it never opened", p.lookupKeys)
 	}
+	if len(p.discardKeys) != 0 {
+		t.Errorf("a discard was written for %q, want the store never written", p.discardKeys)
+	}
+}
+
+// assertDiscardAnswered asserts the confirmation's y reached the discard: one
+// removal of the pane's registration and the pane handed to a plain shell.
+func assertDiscardAnswered(t *testing.T, p *resumeWaitProbe, payload resumeChainPayload) {
+	t.Helper()
+	if !slices.Equal(p.discardKeys, []string{payload.HookKey}) {
+		t.Errorf("discard written for %q, want one write for %q", p.discardKeys, payload.HookKey)
+	}
+	assertShellHandOff(t, p)
 }
 
 func answered(t *testing.T, payload resumeChainPayload, input string) *resumeWaitProbe {
@@ -221,8 +234,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 				payload := reportedPayload(resumeScreenDiscard)
 				swallowed(t, payload, seq)
 
-				probe := answered(t, payload, seq+"y")
-				assertHandOff(t, probe, onScreen(payload, resumeScreenDiscard))
+				assertDiscardAnswered(t, answered(t, payload, seq+"y"), payload)
 			})
 		}
 	})
@@ -264,12 +276,11 @@ func TestRunResumeWait_Screens(t *testing.T) {
 						payload := reportedPayload(screen)
 						swallowed(t, payload, reply+term.end)
 
-						key, want := "d", opened(payload)
 						if screen == resumeScreenDiscard {
-							key, want = "y", onScreen(payload, resumeScreenDiscard)
+							assertDiscardAnswered(t, answered(t, payload, reply+term.end+"y"), payload)
+							return
 						}
-						probe := answered(t, payload, reply+term.end+key)
-						assertHandOff(t, probe, want)
+						assertHandOff(t, answered(t, payload, reply+term.end+"d"), opened(payload))
 					})
 				}
 			}
@@ -300,8 +311,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 				payload := reportedPayload(resumeScreenDiscard)
 				swallowed(t, payload, tc.seq)
 
-				probe := answered(t, payload, tc.seq+"y")
-				assertHandOff(t, probe, onScreen(payload, resumeScreenDiscard))
+				assertDiscardAnswered(t, answered(t, payload, tc.seq+"y"), payload)
 			})
 		}
 	})
@@ -436,7 +446,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 			})
 			t.Run(size.name+"/discard/y", func(t *testing.T) {
 				payload := sized(resumeScreenDiscard)
-				assertHandOff(t, answered(t, payload, "y"), onScreen(payload, resumeScreenDiscard))
+				assertDiscardAnswered(t, answered(t, payload, "y"), payload)
 			})
 			t.Run(size.name+"/discard/Escape", func(t *testing.T) {
 				payload := sized(resumeScreenDiscard)
@@ -445,16 +455,10 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		}
 	})
 
-	t.Run("it hands over to a fresh confirmation on y", func(t *testing.T) {
+	t.Run("it answers the confirmation's y with the discard", func(t *testing.T) {
 		payload := reportedPayload(resumeScreenDiscard)
 
-		probe := answered(t, payload, "y")
-
-		assertHandOff(t, probe, onScreen(payload, resumeScreenDiscard))
-		assertNoStateTouched(t, probe)
-		if probe.stdout.Len() != 0 {
-			t.Errorf("the wait wrote %q to stdout, want nothing", probe.stdout.String())
-		}
+		assertDiscardAnswered(t, answered(t, payload, "y"), payload)
 	})
 }
 
