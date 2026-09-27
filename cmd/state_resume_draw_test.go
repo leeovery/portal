@@ -41,10 +41,13 @@ func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPa
 		Stdout:             &p.stdout,
 		Logger:             drawTestLogger(t),
 		Size:               size,
-		ResolveTheme: func(colourless bool) theme.Theme {
+		ResolveTheme: func(colourless bool, dropInput func() error) (theme.Theme, error) {
 			p.colourless = append(p.colourless, colourless)
 			p.paintedAtResolve = p.stdout.Len()
-			return th
+			if dropInput == nil {
+				return th, nil
+			}
+			return th, dropInput()
 		},
 		ExecSelf: func(prog string, args []string) {
 			p.execProg = prog

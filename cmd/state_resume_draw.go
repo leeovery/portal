@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -17,12 +18,16 @@ const resumeCursorHome = "\x1b[H"
 type resumeDrawConfig struct {
 	resumeChainPayload
 
-	Stdout       io.Writer
-	Logger       *slog.Logger
-	Colourless   bool
-	Size         func() (int, int, error)
-	ResolveTheme func(colourless bool) theme.Theme
-	ExecSelf     func(prog string, args []string)
+	Stdout     io.Writer
+	Logger     *slog.Logger
+	Colourless bool
+	Size       func() (int, int, error)
+	ExecSelf   func(prog string, args []string)
+
+	// ResolveTheme runs dropInput, when handed one, after the appearance query
+	// and before it returns, answering the drop's error beside the palette.
+	ResolveTheme   func(colourless bool, dropInput func() error) (theme.Theme, error)
+	DropInputQueue func() error
 }
 
 // runResumeDraw paints one screen of the waiting pane and replaces its own
@@ -37,22 +42,34 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	// pane that drew nothing would read as restored with a dead keyboard.
 	width, height, _ := cfg.Size()
 
-	th := cfg.ResolveTheme(cfg.Colourless)
+	var dropInput func() error
+	if cfg.DropInput {
+		dropInput = cfg.DropInputQueue
+	}
+	th, dropErr := cfg.ResolveTheme(cfg.Colourless, dropInput)
+
+	shown := cfg.resumeChainPayload
+	shown.DropInput = false
+	// Input the drop could not discard may still answer the confirmation, so it
+	// is never put up over that input.
+	if dropErr != nil {
+		shown.Screen = resumeScreenPanel
+		shown.Report = dropErr.Error()
+	}
 
 	_, _ = io.WriteString(cfg.Stdout, hydrateAltScreenEnter)
 	_, _ = io.WriteString(cfg.Stdout, resumeCursorHome)
 	_, _ = io.WriteString(cfg.Stdout, renderResumeScreen(tui.ResumeScreen{
-		Command:    cfg.Command,
-		Report:     cfg.Report,
+		Command:    shown.Command,
+		Report:     shown.Report,
 		Width:      width,
 		Height:     height,
 		Theme:      th,
 		Colourless: cfg.Colourless,
-	}, cfg.Screen))
+	}, shown.Screen))
 
-	next := cfg.resumeChainPayload
-	next.Width, next.Height = width, height
-	return resumeHandOff(cfg.Logger, cfg.ExecSelf, resumeWaitSubcommand, next)
+	shown.Width, shown.Height = width, height
+	return resumeHandOff(cfg.Logger, cfg.ExecSelf, resumeWaitSubcommand, shown)
 }
 
 func renderResumeScreen(s tui.ResumeScreen, screen string) string {
@@ -66,11 +83,9 @@ func renderResumeScreen(s tui.ResumeScreen, screen string) string {
 // non-migrating prefs route: the migrating one performs the one-shot appearance
 // translation and writes, and a boot's worth of panes taking it concurrently is
 // a write storm over one file for a value none of them is setting.
-func paneDrawTheme(colourless bool) theme.Theme {
+func paneDrawTheme(colourless bool, dropInput func() error) (theme.Theme, error) {
 	nomination := paneDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
-	// The error is the input drop's alone and this draw performs no drop.
-	th, _ := tui.ResolvePaneTheme(nomination, colourless, nil)
-	return th
+	return tui.ResolvePaneTheme(nomination, colourless, dropInput)
 }
 
 // Every failure along the route degrades to the shipped pair rather than
@@ -101,6 +116,13 @@ func shippedPaneThemePair() theme.Nomination {
 	return theme.AdaptivePair(light.Theme, dark.Theme)
 }
 
+func dropStdinInputQueue() error {
+	if err := flushTTYInput(int(os.Stdin.Fd())); err != nil {
+		return fmt.Errorf("could not clear pending input: %w", err)
+	}
+	return nil
+}
+
 // The pane's own tty rather than a tmux read, so a boot's worth of panes costs
 // no tmux calls at all.
 func paneSizeFromStdin() (int, int, error) {
@@ -123,22 +145,25 @@ var stateResumeDrawCmd = &cobra.Command{
 		pane, _ := cmd.Flags().GetString(resumeFlagPane)
 		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
+		dropInput, _ := cmd.Flags().GetBool(resumeFlagDropInput)
 
 		return resumeDrawRunFunc(resumeDrawConfig{
 			resumeChainPayload: resumeChainPayload{
-				Command: command,
-				Report:  report,
-				HookKey: hookKey,
-				Pane:    pane,
-				PaneKey: paneKey,
-				Screen:  screen,
+				Command:   command,
+				Report:    report,
+				HookKey:   hookKey,
+				Pane:      pane,
+				PaneKey:   paneKey,
+				Screen:    screen,
+				DropInput: dropInput,
 			},
-			Stdout:       os.Stdout,
-			Logger:       hydrateLogger,
-			Colourless:   noColorEnabled(),
-			Size:         paneSizeFromStdin,
-			ResolveTheme: paneDrawTheme,
-			ExecSelf:     defaultExecShell,
+			Stdout:         os.Stdout,
+			Logger:         hydrateLogger,
+			Colourless:     noColorEnabled(),
+			Size:           paneSizeFromStdin,
+			ResolveTheme:   paneDrawTheme,
+			DropInputQueue: dropStdinInputQueue,
+			ExecSelf:       defaultExecShell,
 		})
 	},
 }
@@ -155,6 +180,7 @@ func init() {
 	stateResumeDrawCmd.Flags().Int(resumeFlagWidth, 0, "Width the previous screen was drawn at")
 	stateResumeDrawCmd.Flags().Int(resumeFlagHeight, 0, "Height the previous screen was drawn at")
 	stateResumeDrawCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen to draw: discard for the confirmation, else the panel")
+	stateResumeDrawCmd.Flags().Bool(resumeFlagDropInput, false, "Discard input already queued on the pane before drawing")
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagCommand)
 
 	stateCmd.AddCommand(stateResumeDrawCmd)

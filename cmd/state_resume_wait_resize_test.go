@@ -251,7 +251,7 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		if err := h.wait(); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
-		assertHandOff(t, h.probe, onScreen(payload, resumeScreenDiscard))
+		assertHandOff(t, h.probe, opened(payload))
 	})
 
 	t.Run("it hands over to a redraw when the settled size differs", func(t *testing.T) {
@@ -326,7 +326,7 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		if err := h.wait(); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
-		assertHandOff(t, h.probe, onScreen(payload, resumeScreenDiscard))
+		assertHandOff(t, h.probe, opened(payload))
 		if got := h.sizes.Load(); got != 0 {
 			t.Errorf("the wait read the pane size %d times, want 0: the key answered before the window elapsed", got)
 		}

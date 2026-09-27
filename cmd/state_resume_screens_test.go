@@ -179,7 +179,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 
 		probe := answered(t, payload, "d")
 
-		assertHandOff(t, probe, onScreen(payload, resumeScreenDiscard))
+		assertHandOff(t, probe, opened(payload))
 		assertArgvLacks(t, probe.execArgs, resumeFlagReport)
 		assertNoStateTouched(t, probe)
 	})
@@ -264,12 +264,12 @@ func TestRunResumeWait_Screens(t *testing.T) {
 						payload := reportedPayload(screen)
 						swallowed(t, payload, reply+term.end)
 
-						key := "d"
+						key, want := "d", opened(payload)
 						if screen == resumeScreenDiscard {
-							key = "y"
+							key, want = "y", onScreen(payload, resumeScreenDiscard)
 						}
 						probe := answered(t, payload, reply+term.end+key)
-						assertHandOff(t, probe, onScreen(payload, resumeScreenDiscard))
+						assertHandOff(t, probe, want)
 					})
 				}
 			}
@@ -339,16 +339,18 @@ func TestRunResumeWait_Screens(t *testing.T) {
 
 	t.Run("it clears the report on both hand-offs", func(t *testing.T) {
 		cases := []struct {
-			name   string
-			run    func(t *testing.T, payload resumeChainPayload) *resumeWaitProbe
-			from   string
-			wantTo string
+			name     string
+			run      func(t *testing.T, payload resumeChainPayload) *resumeWaitProbe
+			from     string
+			wantTo   string
+			wantDrop bool
 		}{
 			{
-				name:   "d from a reported panel",
-				run:    func(t *testing.T, p resumeChainPayload) *resumeWaitProbe { return answered(t, p, "d") },
-				from:   resumeScreenPanel,
-				wantTo: resumeScreenDiscard,
+				name:     "d from a reported panel",
+				run:      func(t *testing.T, p resumeChainPayload) *resumeWaitProbe { return answered(t, p, "d") },
+				from:     resumeScreenPanel,
+				wantTo:   resumeScreenDiscard,
+				wantDrop: true,
 			},
 			{
 				name:   "Escape from a reported confirmation",
@@ -363,7 +365,9 @@ func TestRunResumeWait_Screens(t *testing.T) {
 
 				probe := tc.run(t, payload)
 
-				assertHandOff(t, probe, onScreen(payload, tc.wantTo))
+				want := onScreen(payload, tc.wantTo)
+				want.DropInput = tc.wantDrop
+				assertHandOff(t, probe, want)
 				assertArgvLacks(t, probe.execArgs, resumeFlagReport)
 			})
 		}
@@ -428,7 +432,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 			})
 			t.Run(size.name+"/panel/d", func(t *testing.T) {
 				payload := sized(resumeScreenPanel)
-				assertHandOff(t, answered(t, payload, "d"), onScreen(payload, resumeScreenDiscard))
+				assertHandOff(t, answered(t, payload, "d"), opened(payload))
 			})
 			t.Run(size.name+"/discard/y", func(t *testing.T) {
 				payload := sized(resumeScreenDiscard)

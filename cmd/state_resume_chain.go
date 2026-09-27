@@ -15,14 +15,15 @@ import (
 // twice: --pane is the pane id the marker writes need, --pane-key the positional
 // key every hydrate record already names its pane by.
 const (
-	resumeFlagCommand = "command"
-	resumeFlagReport  = "report"
-	resumeFlagHookKey = "hook-key"
-	resumeFlagPane    = "pane"
-	resumeFlagPaneKey = "pane-key"
-	resumeFlagWidth   = "width"
-	resumeFlagHeight  = "height"
-	resumeFlagScreen  = "screen"
+	resumeFlagCommand   = "command"
+	resumeFlagReport    = "report"
+	resumeFlagHookKey   = "hook-key"
+	resumeFlagPane      = "pane"
+	resumeFlagPaneKey   = "pane-key"
+	resumeFlagWidth     = "width"
+	resumeFlagHeight    = "height"
+	resumeFlagScreen    = "screen"
+	resumeFlagDropInput = "drop-input"
 )
 
 // The screens one draw of the waiting pane can put up. The panel is the chain's
@@ -51,6 +52,11 @@ type resumeChainPayload struct {
 	Width   int
 	Height  int
 	Screen  string
+
+	// DropInput is set by the hand-off that opens the confirmation and
+	// cleared by the draw that honours it, so a later draw of the same screen
+	// never discards a key the user typed while reading it.
+	DropInput bool
 }
 
 // resumeChainArgv composes one chain command's argv, emitting only the flags
@@ -80,6 +86,9 @@ func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	}
 	if p.Screen == resumeScreenDiscard {
 		argv = append(argv, flagArg(resumeFlagScreen), resumeScreenDiscard)
+	}
+	if p.DropInput {
+		argv = append(argv, flagArg(resumeFlagDropInput))
 	}
 	return argv
 }

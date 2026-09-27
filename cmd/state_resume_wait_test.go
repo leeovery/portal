@@ -199,7 +199,7 @@ func TestRunResumeWait_SwallowedKeys(t *testing.T) {
 		if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, reader)); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
-		assertHandOff(t, &probe, onScreen(payload, resumeScreenDiscard))
+		assertHandOff(t, &probe, opened(payload))
 
 		rest, err := io.ReadAll(reader.inner)
 		if err != nil {
@@ -333,7 +333,7 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 					_, err := writer.Write([]byte("d"))
 					return err
 				},
-				want: func(p resumeChainPayload) resumeChainPayload { return onScreen(p, resumeScreenDiscard) },
+				want: opened,
 			},
 			{
 				name: "redrawn by a settled resize",

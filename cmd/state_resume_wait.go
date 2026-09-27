@@ -321,7 +321,10 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 	return nil
 }
 
+// The rest of a burst that carried the d is still queued on the tty, so the
+// draw is told to discard it before the confirmation goes up.
 func resumeOpenDiscardConfirm(cfg resumeWaitConfig) error {
+	cfg.DropInput = true
 	return resumeShowScreen(cfg, resumeScreenDiscard)
 }
 
