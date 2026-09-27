@@ -257,5 +257,8 @@
         ]
       }
     }
+  },
+  "walkthrough": {
+    "status": "skipped"
   }
 }
