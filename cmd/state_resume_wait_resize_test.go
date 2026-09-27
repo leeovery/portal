@@ -294,6 +294,23 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		assertHandOff(t, h.probe, payload)
 	})
 
+	t.Run("it redraws the confirmation on a resize while it is up", func(t *testing.T) {
+		payload := drawnPayload()
+		payload.Screen = resumeScreenDiscard
+		h := startResumeResize(t, payload, resizedSize)
+
+		h.elapse(h.resize())
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+		assertHandOff(t, h.probe, payload)
+		args := h.probe.execArgs
+		if len(args) < 2 || args[len(args)-2] != flagArg(resumeFlagScreen) || args[len(args)-1] != resumeScreenDiscard {
+			t.Errorf("redraw argv = %q, want it to end with --%s %s", args, resumeFlagScreen, resumeScreenDiscard)
+		}
+	})
+
 	t.Run("it dispatches a key pressed while the settle window is open", func(t *testing.T) {
 		payload := drawnPayload()
 		h := startResumeResize(t, payload, resizedSize)

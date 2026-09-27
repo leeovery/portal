@@ -254,6 +254,7 @@ var stateResumeWaitCmd = &cobra.Command{
 		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
 		width, _ := cmd.Flags().GetInt(resumeFlagWidth)
 		height, _ := cmd.Flags().GetInt(resumeFlagHeight)
+		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
 
 		return resumeWaitRunFunc(resumeWaitConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -264,6 +265,7 @@ var stateResumeWaitCmd = &cobra.Command{
 				PaneKey: paneKey,
 				Width:   width,
 				Height:  height,
+				Screen:  screen,
 			},
 			Stdout:     os.Stdout,
 			In:         os.Stdin,
@@ -290,6 +292,7 @@ func init() {
 	stateResumeWaitCmd.Flags().String(resumeFlagPaneKey, "", "The pane key the chain's records name the pane by")
 	stateResumeWaitCmd.Flags().Int(resumeFlagWidth, 0, "Width the screen the pane is showing was drawn at")
 	stateResumeWaitCmd.Flags().Int(resumeFlagHeight, 0, "Height the screen the pane is showing was drawn at")
+	stateResumeWaitCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen the pane is showing: discard for the confirmation, else the panel")
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagCommand)
 
 	stateCmd.AddCommand(stateResumeWaitCmd)

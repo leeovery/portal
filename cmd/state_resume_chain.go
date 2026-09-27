@@ -22,6 +22,15 @@ const (
 	resumeFlagPaneKey = "pane-key"
 	resumeFlagWidth   = "width"
 	resumeFlagHeight  = "height"
+	resumeFlagScreen  = "screen"
+)
+
+// The screens one draw of the waiting pane can put up. The panel is the chain's
+// default and names no flag; any value the selector does not recognise draws
+// the panel.
+const (
+	resumeScreenPanel   = ""
+	resumeScreenDiscard = "discard"
 )
 
 const (
@@ -41,6 +50,7 @@ type resumeChainPayload struct {
 	PaneKey string
 	Width   int
 	Height  int
+	Screen  string
 }
 
 // resumeChainArgv composes one chain command's argv, emitting only the flags
@@ -67,6 +77,9 @@ func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	}
 	if p.Height > 0 {
 		argv = append(argv, flagArg(resumeFlagHeight), strconv.Itoa(p.Height))
+	}
+	if p.Screen == resumeScreenDiscard {
+		argv = append(argv, flagArg(resumeFlagScreen), resumeScreenDiscard)
 	}
 	return argv
 }

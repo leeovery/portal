@@ -41,18 +41,25 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 
 	_, _ = io.WriteString(cfg.Stdout, hydrateAltScreenEnter)
 	_, _ = io.WriteString(cfg.Stdout, resumeCursorHome)
-	_, _ = io.WriteString(cfg.Stdout, tui.RenderResumePanel(tui.ResumeScreen{
+	_, _ = io.WriteString(cfg.Stdout, renderResumeScreen(tui.ResumeScreen{
 		Command:    cfg.Command,
 		Report:     cfg.Report,
 		Width:      width,
 		Height:     height,
 		Theme:      th,
 		Colourless: cfg.Colourless,
-	}))
+	}, cfg.Screen))
 
 	next := cfg.resumeChainPayload
 	next.Width, next.Height = width, height
 	return resumeHandOff(cfg.Logger, cfg.ExecSelf, resumeWaitSubcommand, next)
+}
+
+func renderResumeScreen(s tui.ResumeScreen, screen string) string {
+	if screen == resumeScreenDiscard {
+		return tui.RenderResumeDiscardConfirm(s)
+	}
+	return tui.RenderResumePanel(s)
 }
 
 // paneDrawTheme is the palette one draw paints in, read through the
@@ -115,6 +122,7 @@ var stateResumeDrawCmd = &cobra.Command{
 		hookKey, _ := cmd.Flags().GetString(resumeFlagHookKey)
 		pane, _ := cmd.Flags().GetString(resumeFlagPane)
 		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
+		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
 
 		return resumeDrawRunFunc(resumeDrawConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -123,6 +131,7 @@ var stateResumeDrawCmd = &cobra.Command{
 				HookKey: hookKey,
 				Pane:    pane,
 				PaneKey: paneKey,
+				Screen:  screen,
 			},
 			Stdout:       os.Stdout,
 			Logger:       hydrateLogger,
@@ -140,10 +149,12 @@ func init() {
 	stateResumeDrawCmd.Flags().String(resumeFlagHookKey, "", "Saved pane token identifying the pane's resume hook")
 	stateResumeDrawCmd.Flags().String(resumeFlagPane, "", "The pane id the marker writes address")
 	stateResumeDrawCmd.Flags().String(resumeFlagPaneKey, "", "The pane key the chain's records name the pane by")
-	// Registered but not read: a draw measures the pane itself, and a flag the
-	// waiter hands back that this command did not register would fail its parse.
+	// Width and height are registered but not read: a draw measures the pane
+	// itself, and a flag the waiter hands back that this command did not
+	// register would fail its parse.
 	stateResumeDrawCmd.Flags().Int(resumeFlagWidth, 0, "Width the previous screen was drawn at")
 	stateResumeDrawCmd.Flags().Int(resumeFlagHeight, 0, "Height the previous screen was drawn at")
+	stateResumeDrawCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen to draw: discard for the confirmation, else the panel")
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagCommand)
 
 	stateCmd.AddCommand(stateResumeDrawCmd)
