@@ -188,15 +188,32 @@ func classifySet(h Snapshot, key string, event Event, registration Registration)
 
 // Remove deletes the hook for key and event, dropping the outer key when its last
 // event goes, and reports whether it removed anything. A call that removes
-// nothing — an absent key, an absent event, an absent file — writes no file and
-// emits no breadcrumb, and a failed save reports no removal. The answer comes
-// from the map this call loaded and mutated, never from a separate read.
+// nothing — an empty key, an absent key, an absent event, an absent file —
+// writes no file and emits no breadcrumb, and a failed save reports no removal.
+// The answer comes from the map this call loaded and mutated, never from a
+// separate read.
 func (s *Store) Remove(key string, event Event, via Via) (bool, error) {
+	return s.removeEntry(key, event, via, "rm", false)
+}
+
+// Discard is the resume panel's removal route: it removes exactly what Remove
+// would, under the same contract, but its breadcrumb is filed under
+// op=discard and carries the removed command as value, so the destroyed
+// registration can be copied back out of the log.
+func (s *Store) Discard(key string, event Event, via Via) (bool, error) {
+	return s.removeEntry(key, event, via, "discard", true)
+}
+
+func (s *Store) removeEntry(key string, event Event, via Via, op string, carryValue bool) (bool, error) {
+	if key == "" {
+		return false, nil
+	}
+
 	lock, err := s.acquireMutationLock()
 	if err != nil {
 		// A failed operation, not the silent no-removal below: that one changed
 		// nothing because there was nothing to change, and this one could not look.
-		logger.Warn("rm", "op", "rm", "hook_key", key, "via", via.String(), "error", err)
+		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(), "error", err)
 		return false, err
 	}
 	defer func() { _ = lock.Close() }()
@@ -210,7 +227,8 @@ func (s *Store) Remove(key string, event Event, via Via) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	if _, ok := events[event.String()]; !ok {
+	removed, ok := events[event.String()]
+	if !ok {
 		return false, nil
 	}
 
@@ -220,12 +238,16 @@ func (s *Store) Remove(key string, event Event, via Via) (bool, error) {
 	}
 
 	if err := s.save(h); err != nil {
-		logger.Warn("rm", "op", "rm", "hook_key", key, "via", via.String(),
+		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(),
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return false, err
 	}
 
-	logger.Info("rm", "op", "rm", "hook_key", key, "via", via.String())
+	attrs := []any{"op", op, "hook_key", key, "via", via.String()}
+	if carryValue {
+		attrs = append(attrs, "value", removed.Command)
+	}
+	logger.Info(op, attrs...)
 	return true, nil
 }
 

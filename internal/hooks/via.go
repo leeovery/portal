@@ -17,6 +17,8 @@ const (
 	ViaHydrate
 	// ViaDoctor is a portal doctor diagnosis.
 	ViaDoctor
+	// ViaPanel is a waiting pane's resume panel answering the user's discard.
+	ViaPanel
 )
 
 var viaNames = map[Via]string{
@@ -24,6 +26,7 @@ var viaNames = map[Via]string{
 	ViaInternal: "internal",
 	ViaHydrate:  "hydrate",
 	ViaDoctor:   "doctor",
+	ViaPanel:    "panel",
 }
 
 // String returns the logged value, and the empty string for a Via outside the
