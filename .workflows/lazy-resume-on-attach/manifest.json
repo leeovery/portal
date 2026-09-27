@@ -255,7 +255,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 5,
-          "current_task": "lazy-resume-on-attach-5-6",
+          "current_task": null,
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -298,7 +298,8 @@
             "lazy-resume-on-attach-5-2",
             "lazy-resume-on-attach-5-3",
             "lazy-resume-on-attach-5-4",
-            "lazy-resume-on-attach-5-5"
+            "lazy-resume-on-attach-5-5",
+            "lazy-resume-on-attach-5-6"
           ],
           "staging": {
             "p1": {
