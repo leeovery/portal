@@ -51,6 +51,20 @@ func (f *fakeLister) ListSessions() ([]tmux.Session, error) {
 	return out, nil
 }
 
+type fakePendingReader struct {
+	sessions []string
+}
+
+func (f fakePendingReader) ListPendingResumePanes() (tmux.PendingResumeView, error) {
+	view := tmux.PendingResumeView{Rows: []tmux.PendingResumeRow{}, Sessions: map[string]struct{}{}}
+	for _, name := range f.sessions {
+		view.Rows = append(view.Rows, tmux.PendingResumeRow{Pending: true, Session: name})
+		view.Sessions[name] = struct{}{}
+	}
+	view.Panes = len(view.Rows)
+	return view, nil
+}
+
 type fakeKiller struct{}
 
 func (fakeKiller) KillSession(string) error { return nil }

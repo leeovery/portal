@@ -422,6 +422,37 @@ func TestResolveModel_NoColorWinsOverTheme(t *testing.T) {
 	})
 }
 
+func TestResolveModel_EnvironmentCannotRecolourAColourlessFixture(t *testing.T) {
+	pinned := pathThemeForTest(t, "#1A2B3C")
+	t.Setenv("NO_COLOR", "")
+	if err := os.Unsetenv("NO_COLOR"); err != nil {
+		t.Fatalf("unset NO_COLOR: %v", err)
+	}
+
+	t.Run("the colourless fixture renders colourless without NO_COLOR", func(t *testing.T) {
+		m, err := resolveModel("sessions-pending-resume-colourless", pinned)
+		if err != nil {
+			t.Fatalf("resolveModel(sessions-pending-resume-colourless): %v", err)
+		}
+		if bg := m.View().BackgroundColor; bg != nil {
+			t.Errorf("View().BackgroundColor = %v, want nil — the fixture declares NO_COLOR itself", bg)
+		}
+		if content := m.View().Content; strings.Contains(content, "48;2;") {
+			t.Errorf("the colourless fixture emits a background SGR:\n%q", content)
+		}
+	})
+
+	t.Run("its coloured sibling still paints the pinned theme", func(t *testing.T) {
+		m, err := resolveModel("sessions-pending-resume", pinned)
+		if err != nil {
+			t.Fatalf("resolveModel(sessions-pending-resume): %v", err)
+		}
+		if got, want := m.View().BackgroundColor, pinned.Canvas.Color(); got != want {
+			t.Errorf("canvas = %v, want the pinned theme's %v", got, want)
+		}
+	})
+}
+
 func TestResolveProgram_ThemeDrivesBothBranches(t *testing.T) {
 	path := themetest.WriteWithCanvas(t, t.TempDir(), "mytheme.theme", "#1a2b3c")
 

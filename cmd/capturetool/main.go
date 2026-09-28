@@ -193,7 +193,7 @@ func resolveModel(fixture string, pinned theme.Theme) (tui.Model, error) {
 	// Handed to Deps rather than assigned afterwards: the palette drives both
 	// the nomination and the faked ThemeSource, which must agree.
 	deps := fx.Deps(pinned)
-	deps.NoColor = noColourRequested()
+	deps.NoColor = deps.NoColor || noColourRequested()
 	return tui.Build(deps), nil
 }
 

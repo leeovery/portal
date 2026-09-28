@@ -28,6 +28,8 @@ type Fixture struct {
 	width, height int
 
 	Lister *fakeLister
+	// Session names, never indicator text: the delegate draws the indicator.
+	pendingSessions []string
 
 	projectStore  *fakeProjectStore
 	projectEditor tui.ProjectEditor
@@ -78,6 +80,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		ThemeKeys:     f.themeKeys,
 		ThemeSource:   f.themeSource(th),
 		Lister:        f.Lister,
+		PendingReader: f.pendingReader(),
 		Killer:        fakeKiller{},
 		Renamer:       fakeRenamer{},
 		Creator:       fakeCreator{},
@@ -122,6 +125,14 @@ func (f *Fixture) themeSource(th theme.Theme) tui.ThemeSource {
 	return newFakeThemeSource(th, f.themeEnumeration, f.themeUnion, f.themeSlots)
 }
 
+// Nil rather than an empty reader: Build wires any non-nil one.
+func (f *Fixture) pendingReader() tui.PendingResumeReader {
+	if len(f.pendingSessions) == 0 {
+		return nil
+	}
+	return fakePendingReader{sessions: f.pendingSessions}
+}
+
 func loadingReceiverOrNil(events []tui.BootstrapProgressMsg, fatal tui.BootstrapFatalMsg) tea.Cmd {
 	if fatal.FailedStep > 0 {
 		return loadingFatalReceiver(events, fatal)
@@ -155,6 +166,8 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsBurstOpeningFixture,
 		sessionsNoTagsSignpostFixture,
 		sessionsSearchResultsFixture,
+		sessionsPendingResumeFixture,
+		sessionsPendingResumeColourlessFixture,
 		projectsFixture,
 		projectsCommandPendingFixture,
 		themePanelAdaptivePairFixture,
@@ -506,6 +519,32 @@ func sessionsSearchResultsFixture() *Fixture {
 		initialMode:  prefs.ModeFlat,
 		search:       &tui.SearchForm{Term: "port"},
 	}
+}
+
+// One row per attached × pending combination, so the indicators' packing is
+// seen in one frame rather than inferred from rows showing one each.
+func sessionsPendingResumeFixture() *Fixture {
+	sessions := []tmux.Session{
+		{Name: "agentic-workflows-codify", Windows: 2, Attached: true, Dir: "/home/user/code/agentic-workflows"},
+		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
+		{Name: "fabric-lk26UG", Windows: 1, Attached: false, Dir: "/home/user/code/fabric"},
+		{Name: "folio-Jiz4el", Windows: 3, Attached: true, Dir: "/home/user/code/folio"},
+	}
+
+	return &Fixture{
+		name:            "sessions-pending-resume",
+		Lister:          &fakeLister{sessions: sessions},
+		pendingSessions: []string{"evvi-sync-engine", "folio-Jiz4el"},
+		projectStore:    &fakeProjectStore{projects: nil},
+		initialMode:     prefs.ModeFlat,
+	}
+}
+
+func sessionsPendingResumeColourlessFixture() *Fixture {
+	fx := sessionsPendingResumeFixture()
+	fx.name = "sessions-pending-resume-colourless"
+	fx.noColor = true
+	return fx
 }
 
 // Built-in and drop-in rows are deliberately indistinguishable, so one valid

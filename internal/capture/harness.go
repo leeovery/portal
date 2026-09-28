@@ -31,12 +31,13 @@ func keyLineStart() tea.KeyPressMsg {
 // BootstrapCompleteMsg and LoadingMinElapsedMsg are deliberately never sent:
 // loading fixtures stay parked precisely because neither arrives.
 func (f *Fixture) ModelAt(th theme.Theme, w, h int) tui.Model {
-	var model tea.Model = tui.Build(f.Deps(th))
+	deps := f.Deps(th)
+	var model tea.Model = tui.Build(deps)
 	w, h = f.renderSize(w, h)
 	model, _ = model.Update(tea.WindowSizeMsg{Width: w, Height: h})
 
 	sessions, err := f.Lister.ListSessions()
-	model, _ = model.Update(tui.SessionsMsg{Sessions: sessions, Err: err})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: sessions, Pending: pendingSessionsOf(deps.PendingReader), Err: err})
 
 	projects, err := f.projectStore.List()
 	model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: projects, Err: err})
@@ -51,6 +52,19 @@ func (f *Fixture) ModelAt(th theme.Theme, w, h int) tui.Model {
 		model, _ = model.Update(key)
 	}
 	return model.(tui.Model)
+}
+
+// Read through the reader the model was built with, so the rows' pending state
+// comes off the same seam production's session fetch takes.
+func pendingSessionsOf(r tui.PendingResumeReader) map[string]struct{} {
+	if r == nil {
+		return nil
+	}
+	view, err := r.ListPendingResumePanes()
+	if err != nil {
+		return nil
+	}
+	return view.Sessions
 }
 
 // renderSize substitutes whichever dimension the fixture declares for the
