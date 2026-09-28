@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/leeovery/portal/internal/resumekeys"
 	"github.com/leeovery/portal/internal/theme"
 )
 
@@ -11,7 +12,6 @@ const (
 
 	resumeKeyResume    = "⏎"
 	resumeLabelResume  = "resume"
-	resumeKeyDiscard   = "d"
 	resumeLabelDiscard = "discard"
 )
 
@@ -75,5 +75,5 @@ func appendResumeReportRow(rows []string, s ResumeScreen, width int) []string {
 }
 
 func resumeKeyHintRow(th theme.Theme, colourless bool) string {
-	return renderConfirmCancelFooter(resumeKeyResume, resumeLabelResume, resumeKeyDiscard, resumeLabelDiscard, th, colourless)
+	return renderConfirmCancelFooter(resumeKeyResume, resumeLabelResume, string(resumekeys.Discard), resumeLabelDiscard, th, colourless)
 }

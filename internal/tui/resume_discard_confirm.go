@@ -1,11 +1,12 @@
 package tui
 
+import "github.com/leeovery/portal/internal/resumekeys"
+
 const (
 	discardConfirmTitle = "Discard resume?"
 	// Tool-agnostic: the resume machinery runs whatever command a registration holds.
 	discardConfirmConsequence = "Removes this pane's resume command permanently. The session and its scrollback are untouched."
 
-	discardKeyConfirm   = "y"
 	discardLabelConfirm = "discard"
 )
 
@@ -41,7 +42,7 @@ func discardConfirmSpec(s ResumeScreen, width int) destructiveConfirmSpec {
 		title:        discardConfirmTitle,
 		targetRows:   resumeCommandRows(s.Command, width, s.Theme.StateDestructive, true, s.Theme, s.Colourless),
 		consequence:  discardConfirmConsequence,
-		confirmKey:   discardKeyConfirm,
+		confirmKey:   string(resumekeys.Confirm),
 		confirmLabel: discardLabelConfirm,
 	}
 	if row, ok := resumeReportRow(s.Report, width, s.Theme, s.Colourless); ok {

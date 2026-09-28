@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/resumekeys"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -21,8 +22,6 @@ import (
 const (
 	resumeKeyEnterCR = '\r'
 	resumeKeyEnterLF = '\n'
-	resumeKeyDiscard = 'd'
-	resumeKeyConfirm = 'y'
 	resumeKeyEscape  = 0x1b
 )
 
@@ -136,14 +135,14 @@ type resumeKeys struct {
 func resumeKeysFor(screen string) resumeKeys {
 	if screen == resumeScreenDiscard {
 		return resumeKeys{
-			bytes:  map[byte]func(resumeWaitConfig) error{resumeKeyConfirm: resumeAnswerDiscard},
+			bytes:  map[byte]func(resumeWaitConfig) error{resumekeys.Confirm: resumeAnswerDiscard},
 			escape: resumeCancelDiscardConfirm,
 		}
 	}
 	return resumeKeys{bytes: map[byte]func(resumeWaitConfig) error{
-		resumeKeyEnterCR: resumeAnswerEnter,
-		resumeKeyEnterLF: resumeAnswerEnter,
-		resumeKeyDiscard: resumeOpenDiscardConfirm,
+		resumeKeyEnterCR:   resumeAnswerEnter,
+		resumeKeyEnterLF:   resumeAnswerEnter,
+		resumekeys.Discard: resumeOpenDiscardConfirm,
 	}}
 }
 

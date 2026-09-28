@@ -16,6 +16,7 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/resumekeys"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
@@ -540,4 +541,22 @@ func TestStateResumeWaitCommand(t *testing.T) {
 			t.Error("executing resume-wait with no --command succeeded; the flag is required")
 		}
 	})
+}
+
+func TestResumeKeysFor_AnswersToTheActKeysTheFootersName(t *testing.T) {
+	panel := resumeKeysFor(resumeScreenPanel)
+	if _, ok := panel.bytes[resumekeys.Discard]; !ok {
+		t.Errorf("panel does not answer to its footer's discard key %q", resumekeys.Discard)
+	}
+	if _, ok := panel.bytes[resumekeys.Confirm]; ok {
+		t.Errorf("panel answers to the confirmation's key %q", resumekeys.Confirm)
+	}
+
+	confirm := resumeKeysFor(resumeScreenDiscard)
+	if _, ok := confirm.bytes[resumekeys.Confirm]; !ok {
+		t.Errorf("confirmation does not answer to its footer's confirm key %q", resumekeys.Confirm)
+	}
+	if _, ok := confirm.bytes[resumekeys.Discard]; ok {
+		t.Errorf("confirmation answers to the panel's discard key %q", resumekeys.Discard)
+	}
 }

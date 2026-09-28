@@ -6,12 +6,13 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/leeovery/portal/internal/resumekeys"
 	"github.com/leeovery/portal/internal/theme"
 )
 
 const (
 	discardGoldenTitleRow  = destructiveTitleGlyph + " " + discardConfirmTitle
-	discardGoldenFooterRow = discardKeyConfirm + " " + discardLabelConfirm + modalFooterGap +
+	discardGoldenFooterRow = string(resumekeys.Confirm) + " " + discardLabelConfirm + modalFooterGap +
 		destructiveKeyCancel + " " + destructiveLabelCancel
 	discardStackWidth = 30
 )

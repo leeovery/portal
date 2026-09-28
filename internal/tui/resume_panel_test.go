@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/leeovery/portal/internal/resumekeys"
 	"github.com/leeovery/portal/internal/theme"
 )
 
@@ -66,7 +67,7 @@ func resumeGoldenHeader() string {
 }
 
 func resumeGoldenFooter() string {
-	return resumeKeyResume + " " + resumeLabelResume + modalFooterGap + resumeKeyDiscard + " " + resumeLabelDiscard
+	return resumeKeyResume + " " + resumeLabelResume + modalFooterGap + string(resumekeys.Discard) + " " + resumeLabelDiscard
 }
 
 func assertRowsEqual(t *testing.T, got, want []string) {
@@ -287,7 +288,7 @@ func TestRenderResumePanel_Copy(t *testing.T) {
 					left := ansi.Strip(RenderResumePanel(resumeScreenOf(r, shortCommand, shortReport, size.w, size.h)))
 					for _, own := range []string{
 						resumePanelTitle, resumePausedBadge, resumeCommandLabel,
-						resumeLabelResume, resumeLabelDiscard, resumeKeyResume, resumeKeyDiscard,
+						resumeLabelResume, resumeLabelDiscard, resumeKeyResume, string(resumekeys.Discard),
 						shortCommand, shortReport,
 					} {
 						left = strings.ReplaceAll(left, own, " ")
@@ -341,7 +342,7 @@ func TestRenderResumePanel_Copy(t *testing.T) {
 func resumeStateGlyphsAt(size string) []string {
 	hints := []string{
 		resumeKeyResume + " " + resumeLabelResume,
-		resumeKeyDiscard + " " + resumeLabelDiscard,
+		string(resumekeys.Discard) + " " + resumeLabelDiscard,
 		resumeGoldenReportHead,
 	}
 	if size == "the plain stack" {
