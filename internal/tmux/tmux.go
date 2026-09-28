@@ -718,6 +718,58 @@ func parsePaneHookRows(output string) ([]PaneHookRow, error) {
 	return rows, nil
 }
 
+// PendingResumeRow describes one live pane's resume-pending state and the
+// session holding it.
+type PendingResumeRow struct {
+	Pending bool
+	Session string
+}
+
+// PendingResumeView is one whole-server reading of which panes are waiting on a
+// resume decision. Rows holds every live pane, pending or not; Panes counts the
+// pending ones and Sessions is the set of session names holding at least one,
+// non-nil on every successful read.
+type PendingResumeView struct {
+	Rows     []PendingResumeRow
+	Panes    int
+	Sessions map[string]struct{}
+}
+
+// The marker takes the leading slot because its value can never carry the
+// separator, leaving the trailing unbounded slot to a session name that can.
+const resumePendingRowFormat = "#{" + state.ResumePendingOption + "}" + paneHookRowSeparator + "#{session_name}"
+
+// ListPendingResumePanes reads every live pane's resume-pending marker in one
+// list-panes -a call. A tmux failure returns the zero view and the error, never
+// an empty view: a failed read is not a server with nothing waiting.
+func (c *Client) ListPendingResumePanes() (PendingResumeView, error) {
+	raw, err := c.ListAllPanesWithFormat(resumePendingRowFormat)
+	if err != nil {
+		return PendingResumeView{}, err
+	}
+	return parsePendingResumeRows(raw)
+}
+
+func parsePendingResumeRows(output string) (PendingResumeView, error) {
+	view := PendingResumeView{Rows: []PendingResumeRow{}, Sessions: map[string]struct{}{}}
+	for line := range strings.SplitSeq(output, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		marker, session, ok := strings.Cut(line, paneHookRowSeparator)
+		if !ok {
+			return PendingResumeView{}, fmt.Errorf("failed to parse pending resume row %q: no %q separator", line, paneHookRowSeparator)
+		}
+		row := PendingResumeRow{Pending: state.ResumePendingSet(marker), Session: session}
+		view.Rows = append(view.Rows, row)
+		if row.Pending {
+			view.Panes++
+			view.Sessions[session] = struct{}{}
+		}
+	}
+	return view, nil
+}
+
 // RespawnPane replaces the process running in the pane with command. The -k
 // flag is load-bearing: it kills the existing process atomically, rather than
 // failing because the pane is occupied, so command really is the pane's

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/commandertest"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -2832,4 +2833,145 @@ func TestActivePaneCurrentPath(t *testing.T) {
 			t.Errorf("error %q does not contain session name", err.Error())
 		}
 	})
+}
+
+func TestListPendingResumePanes(t *testing.T) {
+	wantFormat := "#{" + state.ResumePendingOption + "}|#{session_name}"
+
+	read := func(t *testing.T, output string) (tmux.PendingResumeView, *commandertest.Scripted) {
+		t.Helper()
+		mock := commandertest.New(t, commandertest.Returns(output, "list-panes"))
+		view, err := tmux.NewClient(mock).ListPendingResumePanes()
+		if err != nil {
+			t.Fatalf("ListPendingResumePanes: %v", err)
+		}
+		return view, mock
+	}
+
+	t.Run("it issues exactly one list-panes call and no per-session read", func(t *testing.T) {
+		_, mock := read(t, "1|alpha\n|alpha\n|beta\n1|gamma\n|gamma")
+
+		calls := mock.Calls()
+		if len(calls) != 1 {
+			t.Fatalf("recorded %d calls %v, want exactly 1", len(calls), calls)
+		}
+		want := []string{"list-panes", "-a", "-F", wantFormat}
+		if strings.Join(calls[0], "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("argv = %q, want %q", calls[0], want)
+		}
+	})
+
+	t.Run("it reports a marked pane as pending and an unmarked one as not", func(t *testing.T) {
+		view, _ := read(t, "1|alpha\n|beta")
+
+		want := []tmux.PendingResumeRow{
+			{Pending: true, Session: "alpha"},
+			{Pending: false, Session: "beta"},
+		}
+		assertPendingRows(t, view.Rows, want)
+	})
+
+	t.Run("it treats an empty marker field as unmarked", func(t *testing.T) {
+		view, _ := read(t, "|alpha")
+
+		assertPendingRows(t, view.Rows, []tmux.PendingResumeRow{{Pending: false, Session: "alpha"}})
+		if view.Panes != 0 {
+			t.Errorf("Panes = %d, want 0", view.Panes)
+		}
+	})
+
+	t.Run("it counts panes and sets sessions", func(t *testing.T) {
+		view, _ := read(t, "1|alpha\n1|alpha\n|alpha\n|beta")
+
+		if view.Panes != 2 {
+			t.Errorf("Panes = %d, want 2", view.Panes)
+		}
+		assertSessionSet(t, view.Sessions, "alpha")
+	})
+
+	t.Run("it parses a session name carrying the field separator", func(t *testing.T) {
+		view, _ := read(t, "1|pipe|name\n|other|one")
+
+		assertPendingRows(t, view.Rows, []tmux.PendingResumeRow{
+			{Pending: true, Session: "pipe|name"},
+			{Pending: false, Session: "other|one"},
+		})
+		assertSessionSet(t, view.Sessions, "pipe|name")
+	})
+
+	t.Run("it errors on a row with no separator", func(t *testing.T) {
+		mock := commandertest.New(t, commandertest.Returns("1|alpha\nmalformed", "list-panes"))
+
+		view, err := tmux.NewClient(mock).ListPendingResumePanes()
+		if err == nil {
+			t.Fatalf("want an error for a separator-less row, got view %+v", view)
+		}
+		assertZeroPendingView(t, view)
+	})
+
+	t.Run("it returns an error and no view when tmux fails", func(t *testing.T) {
+		cause := errors.New("no server running")
+		mock := commandertest.New(t, commandertest.Fails(cause, "list-panes"))
+
+		view, err := tmux.NewClient(mock).ListPendingResumePanes()
+		if !errors.Is(err, cause) {
+			t.Fatalf("err = %v, want one wrapping %v", err, cause)
+		}
+		assertZeroPendingView(t, view)
+	})
+
+	t.Run("it distinguishes no panes from panes with nothing pending", func(t *testing.T) {
+		empty, _ := read(t, "")
+		if len(empty.Rows) != 0 {
+			t.Errorf("no-panes Rows = %+v, want none", empty.Rows)
+		}
+
+		idle, _ := read(t, "|alpha\n|beta")
+		if len(idle.Rows) != 2 {
+			t.Errorf("nothing-pending Rows = %+v, want 2 rows", idle.Rows)
+		}
+		if idle.Panes != 0 || len(idle.Sessions) != 0 {
+			t.Errorf("nothing-pending Panes = %d, Sessions = %v, want 0 and empty", idle.Panes, idle.Sessions)
+		}
+	})
+
+	t.Run("it returns a non-nil empty session set when nothing is pending", func(t *testing.T) {
+		for _, output := range []string{"", "|alpha"} {
+			view, _ := read(t, output)
+			if view.Sessions == nil {
+				t.Errorf("output %q: Sessions is nil, want a non-nil empty set", output)
+			}
+		}
+	})
+}
+
+func assertPendingRows(t *testing.T, got, want []tmux.PendingResumeRow) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("rows = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("rows[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func assertSessionSet(t *testing.T, got map[string]struct{}, want ...string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("Sessions = %v, want exactly %v", got, want)
+	}
+	for _, name := range want {
+		if _, ok := got[name]; !ok {
+			t.Errorf("Sessions = %v, missing %q", got, name)
+		}
+	}
+}
+
+func assertZeroPendingView(t *testing.T, view tmux.PendingResumeView) {
+	t.Helper()
+	if view.Rows != nil || view.Panes != 0 || view.Sessions != nil {
+		t.Errorf("view = %+v, want the zero view", view)
+	}
 }
