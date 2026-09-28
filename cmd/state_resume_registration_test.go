@@ -33,8 +33,8 @@ func assertLookupDebug(t *testing.T, sink *logtest.Sink, wantResult string) {
 func TestResumeRegistrationOrLog(t *testing.T) {
 	// The production lookup answers a stored value carrying no command with the
 	// zero result, so only a fake can hand this rule a registration found with
-	// an empty command. The branch is kept so no caller can compose
-	// sh -c "; exec $SHELL" if that ever stops being true.
+	// an empty command. The branch is kept so a pane with nothing to run never
+	// waits if that ever stops being true.
 	t.Run("it reads a registration carrying an empty command as no hook", func(t *testing.T) {
 		logger, sink := logtest.NewCaptureLogger(t)
 

@@ -148,8 +148,7 @@ func handOffToHookOrShell(logger *slog.Logger, exec func(prog string, args []str
 }
 
 // resumeRegistrationOrLog answers the zero value for a registration carrying no
-// command as it does for a miss, so no caller can hand hookExecArgs an empty
-// command and compose sh -c "; exec $SHELL".
+// command as it does for a miss, so a pane with nothing to run never waits.
 func resumeRegistrationOrLog(logger *slog.Logger, lookup func(hookKey string) (hooks.OnResume, error), hookKey string) hooks.OnResume {
 	onResume, err := lookup(hookKey)
 	if err != nil {
