@@ -308,8 +308,6 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 
 	cfg.Logger.Info("scrollback missing", "path", cfg.File)
 
-	// Unlike the timeout path: with no scrollback to dump, the save loop should
-	// resume capturing this pane on the next tick rather than skip it forever.
 	markPendingThenUnsetSkeletonMarker(cfg)
 	return nil
 }

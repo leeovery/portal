@@ -421,9 +421,8 @@ func discardResumeRegistration(hookKey string) (bool, error) {
 	return store.Discard(hookKey, hooks.EventOnResume, hooks.ViaPanel)
 }
 
-// The pane's own resizes reach the waiter as a signal, which is the one signal
-// it takes off nothing: every other keeps its default disposition, so tmux
-// tearing the pane down ends the waiter with it.
+// A hangup keeps its default disposition, so tmux tearing the pane down ends
+// the waiter with it.
 func winchSignals() <-chan os.Signal {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGWINCH)

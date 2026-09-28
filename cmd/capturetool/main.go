@@ -197,10 +197,8 @@ func resolveModel(fixture string, pinned theme.Theme) (tui.Model, error) {
 	return tui.Build(deps), nil
 }
 
-// The one read, shared by the surface branch and the fixture one: NO_COLOR wins
-// over --theme (there is no canvas to select), so a capture shows no painted
-// canvas whatever palette was named, and the two routes cannot disagree about
-// when that is.
+// NO_COLOR wins over --theme: there is no canvas to select, so a capture shows
+// no painted canvas whatever palette was named.
 func noColourRequested() bool {
 	v, ok := os.LookupEnv("NO_COLOR")
 	return ok && v != ""

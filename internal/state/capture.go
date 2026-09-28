@@ -116,7 +116,7 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 }
 
 // livePane holds what the enumeration knows about a waiting pane, so the merge
-// reads its token and liveness from the read rather than from the fresh index,
+// reads its token and active flag from the read rather than from the fresh index,
 // which the skeleton merge may already have replaced with a previous record.
 type livePane struct {
 	token  string

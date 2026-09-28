@@ -2,9 +2,7 @@ package tui
 
 const (
 	discardConfirmTitle = "Discard resume?"
-	// Stated verbatim by the specification. It names no tool and is not
-	// paraphrased here: it is the only copy standing between a keypress and the
-	// loss of a user-authored command.
+	// Tool-agnostic: the resume machinery runs whatever command a registration holds.
 	discardConfirmConsequence = "Removes this pane's resume command permanently. The session and its scrollback are untouched."
 
 	discardKeyConfirm   = "y"
