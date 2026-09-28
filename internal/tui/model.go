@@ -109,8 +109,8 @@ const (
 	editModeEdit
 )
 
-// Pending is the pending-resume set read with Sessions; Err is the session
-// read's alone, so a failed pending read never quits the picker.
+// Pending is the pending-resume set read with Sessions. Err never carries the
+// pending read's failure, so a failed pending read never quits the picker.
 type SessionsMsg struct {
 	Sessions []tmux.Session
 	Pending  map[string]struct{}
