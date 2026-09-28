@@ -152,14 +152,9 @@ All 60 plan tasks across eight phases are implemented; no task verifier raised a
 - [x] No scope creep — the section 10 exclusions all hold (no preferences writer, window count retained, no pending list, no bulk path, no `hooks.json` migration, no token unstamp, no old-format key tidy)
 
 **Criteria not measured**
-- [1-8] "`go test ./...` passes and `go vet -tags integration ./...` is clean: the signature is unchanged, so no integration-tagged suite needs an edit." — the vet half was measured clean; the whole-lane `go test ./...` half was measured by no section.
-- [4-8] "`go test ./...` and `go test -tags integration -p 1 ./...` pass" — the planned mutation was measured and reddens the guard; neither whole-lane run was taken by any section.
-- [4-9] "`go test ./...` and `go test -tags integration -p 1 ./...` pass" — the helper-collision half was measured (both lanes compile); neither whole-lane run was taken by any section.
-- [4-11] "`go test ./internal/state/ ./cmd/ -count=1`, `go test ./...` and `go test -tags integration -p 1 ./...` pass" — the two package runs and the lazy-panel integration suite were measured; neither whole-lane run was taken by any section.
-- [4-12] "`go test ./internal/tmux/ ./cmd/ -count=1` and `go test ./...` pass" — the two package runs were measured; the whole-lane `go test ./...` was taken by no section.
 - [4-13] "`go test ./...` and `go test -tags integration -p 1 ./...` pass" — under NOT MEASURED in every section; neither whole-lane run was taken.
 
-The whole-lane runs these six defer to were taken afterwards by the do-now fix verifier over the corrected tree: `go test ./...` and `go test -tags integration -p 1 ./...` both passed.
+Five further criteria — [1-8], [4-8], [4-9], [4-11] and [4-12] — are recorded as measured by the test-surface section for their package-level halves (the vet run, the exec-guard mutation, the both-lane compile, the package and lazy-panel integration runs), with their whole-lane `go test` halves left under NOT MEASURED in every section. Those whole-lane runs, and [4-13]'s, were taken afterwards by the do-now fix verifier over the corrected tree: `go test ./...` and `go test -tags integration -p 1 ./...` both passed.
 
 ### Code Quality
 - `internal/state/scrollback.go:143` — the pending re-file renames whatever the stored positional path holds with no provenance check, so a re-file against a stale index moves a later writer's bytes over `pane-<token>.bin` (A23).
