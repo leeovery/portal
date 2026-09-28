@@ -22,8 +22,8 @@ func placeModalOnClearedCanvas(panel string, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel)
 }
 
-func renderHelpModalOnClearedCanvas(entries []keymapEntry, width, height int, th theme.Theme, colourless bool) string {
-	panel := renderHelpModalContent(entries, th, colourless)
+func renderHelpModalOnClearedCanvas(entries []keymapEntry, legend []helpLegendEntry, width, height int, th theme.Theme, colourless bool) string {
+	panel := renderHelpModalContent(entries, th, colourless, legend)
 	return placeModalOnClearedCanvas(panel, width, height)
 }
 

@@ -417,7 +417,7 @@ func (m previewModel) View() string {
 
 // Unlike the other modals, this overlays rather than blanking the page beneath.
 func overlayHelpOnPreview(preview string, entries []keymapEntry, th theme.Theme, colourless bool) string {
-	panel := renderHelpModalContent(entries, th, colourless)
+	panel := renderHelpModalContent(entries, th, colourless, nil)
 
 	bgW := lipgloss.Width(preview)
 	bgH := lipgloss.Height(preview)

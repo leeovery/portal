@@ -3323,7 +3323,7 @@ func (m Model) viewProjectList() string {
 	case modalHelp:
 		// Filtered through the same slice the footer renders from, so a
 		// blocked key leaves both surfaces in lockstep.
-		return renderHelpModalOnClearedCanvas(m.projectsHelpKeymap(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderHelpModalOnClearedCanvas(m.projectsHelpKeymap(), nil, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	}
 	listView := m.projectList.View()
 	listView = m.applyProjectsSectionHeader(listView)
@@ -3410,7 +3410,7 @@ func (m Model) viewSessionList() string {
 	case modalHelp:
 		// Filtered through the same slice the footer renders from, so a
 		// blocked key leaves both surfaces in lockstep.
-		return renderHelpModalOnClearedCanvas(m.sessionsHelpKeymap(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderHelpModalOnClearedCanvas(m.sessionsHelpKeymap(), sessionsIndicatorLegend(m.themeState.active, m.colourless), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	}
 	listView := m.sessionList.View()
 	listView = m.applySectionHeader(listView)

@@ -15,7 +15,7 @@ func borderFgSeq(t *testing.T, tok theme.Token) string {
 
 func TestHelpModalPanelBorderColour(t *testing.T) {
 	forEachBuiltinTheme(t, func(t *testing.T, th theme.Theme) {
-		panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), 100, 30, th, false)
+		panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), nil, 100, 30, th, false)
 		if seq := borderFgSeq(t, th.Border); !strings.Contains(panel, seq) {
 			t.Errorf("help modal panel border must be the border-token SGR core %q (not white); missing in:\n%s", seq, panel)
 		}
@@ -23,7 +23,7 @@ func TestHelpModalPanelBorderColour(t *testing.T) {
 }
 
 func TestHelpModalDividerToken(t *testing.T) {
-	content := renderHelpModalContent(sessionsKeymap(), testDarkTheme(t), false)
+	content := renderHelpModalContent(sessionsKeymap(), testDarkTheme(t), false, nil)
 	sepSeq := tokenFgSeq(t, testDarkTheme(t).Border)
 	if !strings.Contains(content, sepSeq) {
 		t.Errorf("help frame + divider must be drawn in the border SGR core %q; missing in:\n%s", sepSeq, content)
@@ -39,7 +39,7 @@ func TestHelpModalDividerToken(t *testing.T) {
 }
 
 func TestHelpModalDividerJoined(t *testing.T) {
-	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), 120, 36, testDarkTheme(t), false)
+	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), nil, 120, 36, testDarkTheme(t), false)
 	var dividerRow string
 	for raw := range strings.SplitSeq(panel, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
@@ -58,7 +58,7 @@ func TestHelpModalDividerJoined(t *testing.T) {
 }
 
 func TestHelpModalDividerConnectsToBorders(t *testing.T) {
-	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), 120, 36, testDarkTheme(t), false)
+	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), nil, 120, 36, testDarkTheme(t), false)
 	var dividerRow string
 	for raw := range strings.SplitSeq(panel, "\n") {
 		line := strings.TrimSpace(ansi.Strip(raw))
@@ -94,7 +94,7 @@ func TestHelpModalDividerConnectsToBorders(t *testing.T) {
 }
 
 func TestHelpModalFlushVerticalSpacing(t *testing.T) {
-	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), 120, 40, testDarkTheme(t), false)
+	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), nil, 120, 40, testDarkTheme(t), false)
 	lines := strings.Split(panel, "\n")
 
 	topIdx := -1
@@ -154,7 +154,7 @@ func neighbourhood(lines []string, idx int) []string {
 }
 
 func TestHelpModalBodyContiguousRows(t *testing.T) {
-	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), 120, 40, testDarkTheme(t), false)
+	panel := renderHelpModalOnClearedCanvas(sessionsKeymap(), nil, 120, 40, testDarkTheme(t), false)
 	lines := strings.Split(panel, "\n")
 	moveIdx, nextIdx := -1, -1
 	for i, raw := range lines {
