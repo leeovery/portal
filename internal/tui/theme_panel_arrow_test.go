@@ -436,7 +436,7 @@ func newArrowRebuildProbeModel(t *testing.T, rows []theme.Row, reader *fakeStamp
 	m.setProjects(projects)
 	m.projectList.SetItems(ProjectsToListItems(projects))
 	m.applyProjectListSize(m.contentWidth(), m.contentHeight())
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	_ = m.viewSessionList()
 
 	m.derivedDirs = nil
@@ -621,7 +621,7 @@ func TestPanelArrow_ColourlessStaysColourless(t *testing.T) {
 		deps.NoColor = colourless
 		m := Build(deps)
 		m.termWidth, m.termHeight = arrowTermW, arrowTermH
-		m.applySessions([]tmux.Session{{Name: "alpha", Windows: 1}, {Name: "bravo", Windows: 2}})
+		m.applySessions([]tmux.Session{{Name: "alpha", Windows: 1}, {Name: "bravo", Windows: 2}}, nil)
 		if colourless {
 			m = armPanelUnderNoColorForTest(t, m)
 		} else {

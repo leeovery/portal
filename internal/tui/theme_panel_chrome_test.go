@@ -421,7 +421,7 @@ func newChromeGateModel(t *testing.T, contentH int) Model {
 	rows := arrowValidRows(t, 6)
 	m := Build(newArrowPanelDeps(t, rows, rows[0].Slug))
 	m.termWidth, m.termHeight = geometryTerm(chromeContentW, contentH)
-	m.applySessions([]tmux.Session{{Name: chromeSessionNames()[0], Windows: 1}})
+	m.applySessions([]tmux.Session{{Name: chromeSessionNames()[0], Windows: 1}}, nil)
 	m.applySessionListSize(m.contentWidth(), m.contentHeight())
 	if got := m.contentHeight(); got != contentH {
 		t.Fatalf("fixture: the content region is %d rows tall, want %d", got, contentH)

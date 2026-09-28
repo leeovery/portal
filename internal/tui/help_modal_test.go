@@ -18,7 +18,7 @@ func helpModelSessions(t *testing.T, appearance theme.Member) Model {
 	m.applySessions([]tmux.Session{
 		{Name: "alpha", Windows: 3, Attached: true},
 		{Name: "bravo", Windows: 1, Attached: false},
-	})
+	}, nil)
 	return m
 }
 

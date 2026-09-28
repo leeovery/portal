@@ -25,7 +25,7 @@ func detectModel(t *testing.T, n theme.Nomination) Model {
 	m := Build(Deps{Lister: fakeLister{}, Theme: n})
 	m.termWidth = 90
 	m.termHeight = 24
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	return m
 }
 

@@ -243,7 +243,7 @@ func TestHeaderHeight_SubtractedFromListBudget(t *testing.T) {
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 
 	headerH := lipgloss.Height(renderHeaderBlock(w, testDarkTheme(t), false))
 	if headerH <= 0 {
@@ -268,7 +268,7 @@ func TestHeaderHeight_CountedAtEverySizeApplySite(t *testing.T) {
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m = updated.(Model)
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 
 	if got := lipgloss.Height(m.viewSessionList()); got > h {
 		t.Errorf("after resize+rebuild composed view height = %d, want <= %d", got, h)

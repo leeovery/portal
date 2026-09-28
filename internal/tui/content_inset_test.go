@@ -166,7 +166,7 @@ func TestContentInset_PaginationInvariantPreserved(t *testing.T) {
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 
 	view := m.View().Content
 	if got := lipgloss.Height(view); got != h {
@@ -199,7 +199,7 @@ func TestContentInset_GroupedPaginationInvariant(t *testing.T) {
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark), WithInitialMode(prefs.ModeByProject))
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 
 	view := m.View().Content
 	if got := lipgloss.Height(view); got != h {

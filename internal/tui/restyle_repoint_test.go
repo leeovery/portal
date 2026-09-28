@@ -52,7 +52,7 @@ func populateRestyleProbe(t *testing.T, m Model) Model {
 
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	m.setProjects(projects)
 	m.projectList.SetItems(ProjectsToListItems(projects))
 	m.applyProjectListSize(m.contentWidth(), m.contentHeight())

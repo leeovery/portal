@@ -96,7 +96,7 @@ func TestModalBlankScreen_ColourlessClearsToNativeBg(t *testing.T) {
 	m.applySessions([]tmux.Session{
 		{Name: "alpha", Windows: 3, Attached: true},
 		{Name: "bravo", Windows: 1, Attached: false},
-	})
+	}, nil)
 	openKillModal(&m, "alpha")
 
 	frame := m.View().Content

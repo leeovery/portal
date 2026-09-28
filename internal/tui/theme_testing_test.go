@@ -25,7 +25,7 @@ func openPanelForTestWithSessions(t *testing.T, m Model, contentW, contentH int,
 	t.Helper()
 
 	m.termWidth, m.termHeight = geometryTerm(contentW, contentH)
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	m.applySessionListSize(m.contentWidth(), m.contentHeight())
 	m.applyProjectListSize(m.contentWidth(), m.contentHeight())
 
@@ -109,7 +109,7 @@ func requireCommitDoesNoOtherIO(
 		ThemePersister: persister,
 	})
 	m.termWidth, m.termHeight = arrowTermW, arrowTermH
-	m.applySessions(closePanelSessions())
+	m.applySessions(closePanelSessions(), nil)
 	m = pressThemeKey(t, m)
 	if !m.themePanel.open {
 		t.Fatal("fixture: the panel did not open")

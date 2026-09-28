@@ -33,7 +33,7 @@ func themePanelGuardModel(t *testing.T) (Model, *fakeThemePersister) {
 		t.Fatal("the guard seed must not be colourless — that blocks `t`, and every probe would assert a refusal")
 	}
 	m.termWidth, m.termHeight = arrowTermW, arrowPagingTermH
-	m.applySessions(closePanelSessions())
+	m.applySessions(closePanelSessions(), nil)
 
 	m = pressThemeKey(t, m)
 	if !m.themePanel.open {

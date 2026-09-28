@@ -47,7 +47,7 @@ func newClosePanelStubModel(t *testing.T, rows []theme.Row) (Model, *fakeThemeSo
 	}
 	m := Build(deps)
 	m.termWidth, m.termHeight = arrowTermW, arrowTermH
-	m.applySessions(closePanelSessions())
+	m.applySessions(closePanelSessions(), nil)
 	return m, stub
 }
 

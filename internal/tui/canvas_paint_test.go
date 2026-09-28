@@ -110,7 +110,7 @@ func TestOuterFill_PaginationInvariantPreserved(t *testing.T) {
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 
 	view := m.View().Content
 	if got := lipgloss.Height(view); got != h {
@@ -151,7 +151,7 @@ func newCanvasTestModel(t *testing.T, w, h int, appearance theme.Member) Model {
 	m := New(fakeLister{}, WithThemeNomination(testBuiltinPair(t)), WithCanvasMode(appearance))
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	return m
 }
 

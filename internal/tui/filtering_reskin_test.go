@@ -26,7 +26,7 @@ func filteringTestModel(t *testing.T, th theme.Theme) Model {
 	m := Build(Deps{Lister: fakeLister{}, Theme: theme.ConstantNomination(th)})
 	m.termWidth = filteringReskinWidth
 	m.termHeight = filteringReskinHeight
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	return m
 }
 

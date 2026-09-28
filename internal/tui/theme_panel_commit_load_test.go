@@ -70,7 +70,7 @@ func newLoadPanelModel(t *testing.T, dir string, keys theme.RawKeys, loader them
 		ThemePersister: persister,
 	})
 	m.termWidth, m.termHeight = arrowTermW, arrowTermH
-	m.applySessions(closePanelSessions())
+	m.applySessions(closePanelSessions(), nil)
 	return m, persister
 }
 

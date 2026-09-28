@@ -20,7 +20,7 @@ func newMultiPageSessionModel(t *testing.T, w, h int, appearance theme.Member, c
 	m := Build(Deps{Lister: fakeLister{}, Theme: testConstantFor(t, appearance), NoColor: colourless})
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	if m.sessionList.Paginator.TotalPages < 2 {
 		t.Fatalf("test setup: want a multi-page list, got TotalPages=%d", m.sessionList.Paginator.TotalPages)
 	}
@@ -112,7 +112,7 @@ func TestSessionsPaginationDots_SuppressedOnSinglePage(t *testing.T) {
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	if m.sessionList.Paginator.TotalPages != 1 {
 		t.Fatalf("test setup: want single page, got TotalPages=%d", m.sessionList.Paginator.TotalPages)
 	}

@@ -22,7 +22,7 @@ func newRecomputePanelModel(t *testing.T, dir string, keys theme.RawKeys) (Model
 	persister := &fakeThemePersister{}
 	WithThemePersister(persister)(&m)
 	m.termWidth, m.termHeight = arrowTermW, arrowTermH
-	m.applySessions(closePanelSessions())
+	m.applySessions(closePanelSessions(), nil)
 
 	m = pressThemeKey(t, m)
 	if !m.themePanel.open {

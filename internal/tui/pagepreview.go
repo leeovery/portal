@@ -295,6 +295,7 @@ type previewDismissedMsg struct{}
 // keep the pre-refresh list intact.
 type previewSessionsRefreshedMsg struct {
 	Sessions     []tmux.Session
+	Pending      map[string]struct{}
 	Err          error
 	PreserveName string
 }

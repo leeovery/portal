@@ -103,7 +103,7 @@ func TestNoMatches_DoesNotRenderWhenResultsExist(t *testing.T) {
 
 func TestNoMatches_NotRenderedWithoutActiveQuery(t *testing.T) {
 	m := filteringTestModel(t, testDarkTheme(t))
-	m.applySessions(nil)
+	m.applySessions(nil, nil)
 	if m.sessionList.FilterState() != list.Unfiltered {
 		t.Fatalf("precondition: filter state = %v, want Unfiltered", m.sessionList.FilterState())
 	}
@@ -128,7 +128,7 @@ func TestNoMatches_OnlyRendersWithActiveNonEmptyQueryAndZeroItems(t *testing.T) 
 	}
 
 	empty := filteringTestModel(t, testDarkTheme(t))
-	empty.applySessions(nil)
+	empty.applySessions(nil, nil)
 	if empty.sessionListNoMatches() {
 		t.Errorf("expected sessionListNoMatches()=false without an active query (empty-sessions, not no-matches)")
 	}

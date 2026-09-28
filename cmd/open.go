@@ -497,6 +497,7 @@ type tuiConfig struct {
 	previewAttacher  tui.PreviewAttacher
 	dirReader        session.PaneCurrentPathReader
 	dirRunner        resolver.CommandRunner
+	pendingReader    tui.PendingResumeReader
 	initialMode      prefs.SessionListMode
 	theme            theme.Nomination
 	themeKeys        theme.RawKeys
@@ -570,6 +571,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		PreviewAttacher:  cfg.previewAttacher,
 		DirReader:        cfg.dirReader,
 		DirRunner:        cfg.dirRunner,
+		PendingReader:    cfg.pendingReader,
 		ModePersister:    cfg.modePersister,
 		ThemePersister:   cfg.themePersister,
 		CWD:              cfg.cwd,
@@ -701,6 +703,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		previewAttacher: previewAttacher,
 		dirReader:       client,
 		dirRunner:       &resolver.RealCommandRunner{},
+		pendingReader:   client,
 		initialMode:     initialMode,
 		theme:           resolution.Nomination,
 		themeKeys:       themeKeys,

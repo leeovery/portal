@@ -109,8 +109,11 @@ const (
 	editModeEdit
 )
 
+// Pending is the pending-resume set read with Sessions; Err is the session
+// read's alone, so a failed pending read never quits the picker.
 type SessionsMsg struct {
 	Sessions []tmux.Session
+	Pending  map[string]struct{}
 	Err      error
 }
 
@@ -172,6 +175,7 @@ type Model struct {
 	colourless     bool
 	selected       string
 	sessionLister  SessionLister
+	pendingReader  PendingResumeReader
 	sessionKiller  SessionKiller
 	sessionRenamer SessionRenamer
 	projectStore   ProjectStore
@@ -270,6 +274,10 @@ type Model struct {
 	// a regroup would then make a session findable by a path it was not findable
 	// by a moment earlier. Cleared on every session-list refresh.
 	derivedDirs map[string]string
+
+	// pendingSessions is the pending-resume set read alongside m.sessions and
+	// replaced with it on every load, never merged into.
+	pendingSessions map[string]struct{}
 
 	// flashText empty means no flash. flashGen is bumped on every setFlash so a
 	// stale tick from a replaced flash cannot early-clear the current message.
@@ -938,6 +946,7 @@ func (m *Model) sessionDelegate() SessionDelegate {
 		ShowDir:     m.searchForm,
 		Selected:    m.selectedSessions,
 		GoneFlagged: m.goneFlagged,
+		Pending:     m.pendingSessions,
 	}
 }
 
@@ -1144,10 +1153,12 @@ func (m Model) filteredSessions() []tmux.Session {
 	return PickerSessions(m.sessions, m.currentSession)
 }
 
-func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
+func (m *Model) applySessions(sessions []tmux.Session, pending map[string]struct{}) tea.Cmd {
 	m.sessions = sessions
 	// A guess derived for the previous list must not outlive it.
 	m.derivedDirs = nil
+	m.pendingSessions = pending
+	m.refreshSessionDelegate()
 	// Prune before the rebuild so the refreshed set feeds the delegate's ●.
 	m.pruneSelectionToLiveSessions()
 	return m.rebuildSessionList()
@@ -1366,11 +1377,11 @@ func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
 	if m.sessionLister == nil {
 		return nil
 	}
-	lister := m.sessionLister
 	return func() tea.Msg {
-		sessions, err := lister.ListSessions()
+		sessions, pending, err := m.readSessionList()
 		return previewSessionsRefreshedMsg{
 			Sessions:     sessions,
+			Pending:      pending,
 			Err:          err,
 			PreserveName: preserveName,
 		}
@@ -1473,8 +1484,8 @@ func (m Model) loadProjects() tea.Cmd {
 // A pure read — it never mutates tmux or state.
 func (m Model) fetchSessionsCmd() tea.Cmd {
 	return func() tea.Msg {
-		sessions, err := m.sessionLister.ListSessions()
-		return SessionsMsg{Sessions: sessions, Err: err}
+		sessions, pending, err := m.readSessionList()
+		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err}
 	}
 }
 
@@ -1619,7 +1630,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if msg.Err != nil {
 			return m, tea.Quit
 		}
-		cmd := m.applySessions(msg.Sessions)
+		cmd := m.applySessions(msg.Sessions, msg.Pending)
 
 		// While loading, ingest but leave sessionsLoaded alone —
 		// transitionFromLoading owns the flip.
@@ -1755,7 +1766,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if msg.Err != nil {
 			return m, nil
 		}
-		cmd := m.applySessions(msg.Sessions)
+		cmd := m.applySessions(msg.Sessions, msg.Pending)
 		m.reanchorSessionCursor(msg.PreserveName)
 		return m, cmd
 	case flashTickMsg:
@@ -2801,8 +2812,8 @@ func (m Model) killAndRefresh(name string) tea.Cmd {
 		if err := m.sessionKiller.KillSession(name); err != nil {
 			return SessionsMsg{Err: fmt.Errorf("failed to kill session '%s': %w", name, err)}
 		}
-		sessions, err := m.sessionLister.ListSessions()
-		return SessionsMsg{Sessions: sessions, Err: err}
+		sessions, pending, err := m.readSessionList()
+		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err}
 	}
 }
 
@@ -2864,8 +2875,8 @@ func (m Model) renameAndRefresh(oldName, newName string) tea.Cmd {
 		if err := m.sessionRenamer.RenameSession(oldName, newName); err != nil {
 			return SessionsMsg{Err: fmt.Errorf("failed to rename session '%s': %w", oldName, err)}
 		}
-		sessions, err := m.sessionLister.ListSessions()
-		return SessionsMsg{Sessions: sessions, Err: err}
+		sessions, pending, err := m.readSessionList()
+		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err}
 	}
 }
 

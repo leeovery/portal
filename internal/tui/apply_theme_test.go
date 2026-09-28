@@ -36,7 +36,7 @@ func newSwapProbeModel(t *testing.T, before theme.Theme, mode prefs.SessionListM
 	m.setProjects(projects)
 	m.projectList.SetItems(ProjectsToListItems(projects))
 	m.applyProjectListSize(m.contentWidth(), m.contentHeight())
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 
 	m.activePage = PageSessions
 	_ = m.viewSessionList()
@@ -283,7 +283,7 @@ func newSwapFrameModel(t *testing.T, before theme.Theme, colourless bool) Model 
 	m.setProjects(projects)
 	m.projectList.SetItems(ProjectsToListItems(projects))
 	m.applyProjectListSize(m.contentWidth(), m.contentHeight())
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 
 	frame := m.View().Content
 	if !strings.Contains(frame, nameN(0)) {

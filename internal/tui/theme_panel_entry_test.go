@@ -73,7 +73,7 @@ func newEntryModel(t *testing.T, e ThemeSource, o entryModelOpts) (Model, *fakeT
 	}
 	m := Build(deps)
 	m.termWidth, m.termHeight = geometryTerm(o.contentW, o.contentH)
-	m.applySessions(closePanelSessions())
+	m.applySessions(closePanelSessions(), nil)
 	projects := []project.Project{{Path: "/p/one", Name: "one"}, {Path: "/p/two", Name: "two"}}
 	m.setProjects(projects)
 	m.projectList.SetItems(ProjectsToListItems(projects))

@@ -747,7 +747,7 @@ func TestSlotConfirm_NilPersisterIsInert(t *testing.T) {
 			t.Fatalf("fixture: the model holds persister %#v, want none", m.themeState.persister)
 		}
 		m.termWidth, m.termHeight = arrowTermW, arrowTermH
-		m.applySessions(closePanelSessions())
+		m.applySessions(closePanelSessions(), nil)
 		m = openConversionPanel(t, m)
 		nomination := m.themeState.nomination
 

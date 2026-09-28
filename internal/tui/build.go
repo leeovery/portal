@@ -28,6 +28,7 @@ type Deps struct {
 	PreviewAttacher PreviewAttacher
 	DirReader       session.PaneCurrentPathReader
 	DirRunner       resolver.CommandRunner
+	PendingReader   PendingResumeReader
 	ModePersister   ModePersister
 	ThemePersister  ThemePersister
 	ThemeSource     ThemeSource
@@ -128,6 +129,9 @@ func Build(deps Deps) Model {
 	}
 	if deps.DirReader != nil && deps.DirRunner != nil {
 		opts = append(opts, WithDirResolver(deps.DirReader, deps.DirRunner))
+	}
+	if deps.PendingReader != nil {
+		opts = append(opts, WithPendingResumeReader(deps.PendingReader))
 	}
 	if deps.Search != nil {
 		opts = append(opts, WithSearchForm(deps.Search.Term), WithSearchDecision(deps.Search.Decide))

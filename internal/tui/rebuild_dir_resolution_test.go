@@ -200,13 +200,13 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		m.dirReader = reader
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
-		m.applySessions(sessions)
+		m.applySessions(sessions, nil)
 		if len(reader.reads) != 1 {
 			t.Fatalf("first refresh reads = %d, want 1", len(reader.reads))
 		}
 
 		reader.reads = nil
-		m.applySessions(sessions)
+		m.applySessions(sessions, nil)
 		if len(reader.reads) != 1 {
 			t.Errorf("second refresh performed %d pane reads, want 1 (the refresh discards the derived value)", len(reader.reads))
 		}

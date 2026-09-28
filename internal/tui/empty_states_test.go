@@ -15,7 +15,7 @@ func emptySessionsModel(t *testing.T, th theme.Theme) Model {
 	m := Build(Deps{Lister: fakeLister{}, Theme: theme.ConstantNomination(th)})
 	m.termWidth = filteringReskinWidth
 	m.termHeight = filteringReskinHeight
-	m.applySessions(nil)
+	m.applySessions(nil, nil)
 	if m.sessionList.FilterState() != list.Unfiltered {
 		t.Fatalf("precondition: filter state = %v, want Unfiltered (no active filter)", m.sessionList.FilterState())
 	}
@@ -30,7 +30,7 @@ func emptyProjectsModel(t *testing.T, th theme.Theme) Model {
 	m := Build(Deps{Lister: fakeLister{}, Theme: theme.ConstantNomination(th)})
 	m.termWidth = filteringReskinWidth
 	m.termHeight = filteringReskinHeight
-	m.applySessions(nil)
+	m.applySessions(nil, nil)
 	model, _ := m.Update(ProjectsLoadedMsg{Projects: nil})
 	m = model.(Model)
 	m.activePage = PageProjects

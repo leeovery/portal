@@ -21,7 +21,7 @@ func colourlessTestModel(t *testing.T, w, h int) Model {
 	m := Build(Deps{Lister: fakeLister{}, NoColor: true})
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions(sessions)
+	m.applySessions(sessions, nil)
 	return m
 }
 

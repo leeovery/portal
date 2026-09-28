@@ -99,7 +99,7 @@ func TestMultiSelectFilteredOutSessionStaysMarked(t *testing.T) {
 	m.applySessions([]tmux.Session{
 		{Name: "alpha", Windows: 1},
 		{Name: "bravo", Windows: 2},
-	})
+	}, nil)
 	m.sessionList.Select(1)
 	m = enterMultiSelect(t, m)
 	if !m.IsSessionSelected("bravo") {
