@@ -1317,6 +1317,12 @@ func TestSetLogging(t *testing.T) {
 			Via:       "cli",
 		})
 		logtest.AssertWriteFailure(t, rec, "write-failed-temp-create", fileutil.ErrWriteTempCreate)
+		if got := rec.AttrString(t, "value"); got != "claude --resume abc123" {
+			t.Errorf("value = %q, want %q", got, "claude --resume abc123")
+		}
+		if got := rec.AttrString(t, "hook_key"); got != "my-session:0.0" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		}
 	})
 }
 

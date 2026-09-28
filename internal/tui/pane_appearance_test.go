@@ -383,7 +383,7 @@ func TestResolvePaneTheme(t *testing.T) {
 
 		_, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
 
-		if !errors.Is(err, errSeam) {
+		if err != errSeam {
 			t.Errorf("returned %v, want the drop's own error %v unchanged — nothing here wraps it, retries it or swallows it", err, errSeam)
 		}
 	})

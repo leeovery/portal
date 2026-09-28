@@ -344,6 +344,28 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 				t.Errorf("%s imports %s; the pane between screens carries the wait alone", source.Path, path)
 			}
 		}
+
+		// The draw's theme route lives in this package, so the wait could reach
+		// it with no import. Identifiers rather than calls, because the waiter
+		// wires its seams by reference.
+		samePackageRoute := []string{
+			"paneDrawTheme",
+			"paneDrawNomination",
+			"shippedPaneThemePair",
+			"renderResumeScreen",
+			"runResumeDraw",
+			"resumeDrawRunFunc",
+			"themeResolution",
+			"newThemeLoader",
+			"loadPrefsStore",
+			"loadPrefsStoreNoMigrate",
+		}
+		ast.Inspect(source.File, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && slices.Contains(samePackageRoute, id.Name) {
+				t.Errorf("%s: references %s; the pane between screens carries the wait alone", source.Position(id.Pos()), id.Name)
+			}
+			return true
+		})
 	})
 
 	t.Run("it holds its report and goes on waiting with no input at all", func(t *testing.T) {
@@ -445,7 +467,7 @@ func TestRunResumeWait_InstallsNoHangupTerminateOrInterruptHandler(t *testing.T)
 			t.Errorf("%s: the wait path takes a signal off its default disposition without a Notify; %s",
 				source.Position(call.Pos()), onlyWatchable)
 			return true
-		case "Notify":
+		case "Notify", "NotifyContext":
 		default:
 			return true
 		}

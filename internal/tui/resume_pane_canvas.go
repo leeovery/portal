@@ -29,7 +29,8 @@ func renderPaneScreen(parts paneScreenParts, w, h int, th theme.Theme, colourles
 
 // Drops from the middle: both screens stack their key hints last, and a pane
 // that swallows every key it is not answered with must not hide which keys
-// answer it. Overflowing instead would scroll the transcript underneath.
+// answer it. Overflowing instead would scroll the screen's own first rows off
+// the top of the pane.
 func clampStackToPane(rows []string, w, h int) []string {
 	clamped := make([]string, 0, len(rows))
 	for _, row := range rows {

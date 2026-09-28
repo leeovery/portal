@@ -313,10 +313,15 @@ func TestResumeAnswerDiscard_Breadcrumb(t *testing.T) {
 func TestDiscardResumeRegistration(t *testing.T) {
 	t.Run("it removes the registration the store holds", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{"tok123": {"on-resume": "make deploy"}})
+		sink := logtest.Install(t)
 
 		removed, err := discardResumeRegistration("tok123")
 		if err != nil || !removed {
 			t.Fatalf("discardResumeRegistration() = %v, %v; want a removal", removed, err)
+		}
+		rec := sink.Records().Matching("hooks", "discard").Only(t, "panel discard breadcrumb")
+		if got := rec.AttrOrEmpty("via"); got != hooks.ViaPanel.String() {
+			t.Errorf("discard breadcrumb via = %q, want %q", got, hooks.ViaPanel.String())
 		}
 		if got := lookupRegistrationOrFail(t, "tok123"); got.Found {
 			t.Errorf("registration after discard = %+v, want it gone", got)

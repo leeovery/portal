@@ -352,12 +352,6 @@ func warnMessages(t *testing.T) map[string]int {
 // probe seams so no marker is read from tmux and no process image is replaced.
 func executeResumeRecover(t *testing.T, args []string, probe *resumeRecoverProbe) (resumeRecoverConfig, error) {
 	t.Helper()
-	for _, name := range []string{resumeFlagPane, resumeFlagPaneKey} {
-		if err := stateResumeRecoverCmd.Flags().Set(name, ""); err != nil {
-			t.Fatalf("reset --%s: %v", name, err)
-		}
-	}
-
 	var parsed resumeRecoverConfig
 	withFuncSeam(t, &resumeRecoverRunFunc, func(cfg resumeRecoverConfig) error {
 		parsed = cfg

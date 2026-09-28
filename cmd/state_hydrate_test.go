@@ -1669,7 +1669,7 @@ func TestHydrate_PassesHookCommandAsSingleArgvElementToShDashC(t *testing.T) {
 	}
 }
 
-func TestHydrate_SignalArrived_LookupHappensAfterSleepAndMarkerUnset(t *testing.T) {
+func TestHydrate_SignalArrived_HandOffHappensAfterSleepAndMarkerUnset(t *testing.T) {
 	// Order matters: the marker unset must precede the hand-off, so the test
 	// timestamps the set-option call and the exec and compares.
 	dir := t.TempDir()
@@ -1729,7 +1729,7 @@ func TestHydrate_SignalArrived_LookupHappensAfterSleepAndMarkerUnset(t *testing.
 	}
 }
 
-func TestHydrate_FileMissing_LookupHappensAfterMarkerUnset(t *testing.T) {
+func TestHydrate_FileMissing_HandOffHappensAfterMarkerUnset(t *testing.T) {
 	// Order matters: the marker unset must precede the hand-off. No settle
 	// sleep here — nothing was dumped.
 	dir := t.TempDir()

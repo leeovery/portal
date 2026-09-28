@@ -197,6 +197,12 @@ func TestSetWritesTheRegistrationWhole(t *testing.T) {
 			Via:       "cli",
 		})
 		logtest.AssertWriteFailure(t, rec, "write-failed-temp-create", fileutil.ErrWriteTempCreate)
+		if got := rec.AttrString(t, "value"); got != "npm start" {
+			t.Errorf("value = %q, want %q", got, "npm start")
+		}
+		if got := rec.AttrString(t, "hook_key"); got != hookstest.LiveSeedA {
+			t.Errorf("hook_key = %q, want %q", got, hookstest.LiveSeedA)
+		}
 
 		if got := hookstest.HooksFileBytes(t, path); got != nil {
 			t.Errorf("hooks.json = %s, want no file written", got)

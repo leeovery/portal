@@ -157,7 +157,7 @@ func TestRegistrationPreservationThroughASiblingRewrite(t *testing.T) {
 	}
 
 	t.Run("it preserves an unmodelled attribute on an entry a rewrite did not name", func(t *testing.T) {
-		preserved(t, `{"command":"npm start","nickname":"dev server","resume":"lazy"}`)
+		preserved(t, `{"resume":"lazy","nickname":"dev server","command":"cd /tmp && npm start"}`)
 	})
 
 	t.Run("it preserves an unrecognised resume value on an entry a rewrite did not name", func(t *testing.T) {

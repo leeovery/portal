@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,12 +119,15 @@ func (s *Store) load() (Snapshot, error) {
 // save atomically writes hooks to the JSON file, creating the parent directory
 // if it does not exist. Non-locking, like load: it is called from inside a hold.
 func (s *Store) save(h Snapshot) error {
-	data, err := json.MarshalIndent(h, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(h); err != nil {
 		return fmt.Errorf("failed to marshal hooks: %w", err)
 	}
 
-	return fileutil.AtomicWrite(s.path, data)
+	return fileutil.AtomicWrite(s.path, bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
 }
 
 // Set adds or overwrites the hook for key and event with the whole of

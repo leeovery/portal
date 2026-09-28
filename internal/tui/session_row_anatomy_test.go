@@ -362,8 +362,8 @@ func TestSessionRow_DirColumnKeepsTheRowExactlyTheListWidth(t *testing.T) {
 	}{
 		{"whole directory", home + "/Code/portal", 80},
 		{"no recorded directory", "", 80},
-		{"left-truncated directory", home + "/Code/portal/internal/tui", 50},
-		{"directory dropped below the floor", home + "/Code/portal/internal/tui", 34},
+		{"left-truncated directory", home + "/Code/portal/internal/tui", 41},
+		{"directory dropped below the floor", home + "/Code/portal/internal/tui", 25},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

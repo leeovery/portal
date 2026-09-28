@@ -5,6 +5,7 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/charmbracelet/x/term"
@@ -120,6 +121,47 @@ func TestResumeHandOffs_TerminalModes_RealPTY(t *testing.T) {
 			t.Errorf("input/output modes = %#x/%#x, want untouched %#x/%#x", after.Iflag, after.Oflag, before.Iflag, before.Oflag)
 		}
 	})
+
+	t.Run("a pane about to wait has signal generation alone turned off", func(t *testing.T) {
+		_, slave := openPTY(t)
+		fd := descriptorOf(t, slave)
+		var got hydrateConfig
+		withFuncSeam(t, &hydrateRunFunc, func(cfg hydrateConfig) error {
+			got = cfg
+			return nil
+		})
+		executeHydrateCommand(t)
+		withStdin(t, slave)
+		before := *localModes(t, fd)
+		if before.Lflag&unix.ISIG == 0 {
+			t.Fatalf("local modes = %#x, want signal generation on before the hand-off", before.Lflag)
+		}
+
+		if err := got.DisableTTYSignals(); err != nil {
+			t.Fatalf("DisableTTYSignals() error = %v", err)
+		}
+
+		after := localModes(t, fd)
+		if after.Lflag != before.Lflag&^unix.ISIG {
+			t.Errorf("local modes = %#x, want %#x", after.Lflag, before.Lflag&^unix.ISIG)
+		}
+		if after.Iflag != before.Iflag || after.Oflag != before.Oflag {
+			t.Errorf("input/output modes = %#x/%#x, want untouched %#x/%#x", after.Iflag, after.Oflag, before.Iflag, before.Oflag)
+		}
+	})
+}
+
+func executeHydrateCommand(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	resetRootCmd()
+	rootCmd.SetOut(new(bytes.Buffer))
+	errBuf := new(bytes.Buffer)
+	rootCmd.SetErr(errBuf)
+	rootCmd.SetArgs([]string{"state", "hydrate", "--fifo", filepath.Join(dir, "hydrate.fifo"), "--file", filepath.Join(dir, "scrollback.bin")})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("executing hydrate: %v\nstderr: %s", err, errBuf)
+	}
 }
 
 func executeResumeCommand(t *testing.T, subcommand string) {

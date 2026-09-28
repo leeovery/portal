@@ -35,6 +35,16 @@ func TestInstallResumeModeOf(t *testing.T) {
 	})
 
 	t.Run("it answers the shipped default when the store cannot be read", func(t *testing.T) {
+		store := prefs.NewStore(t.TempDir())
+		if _, err := store.LoadResumeMode(); err == nil {
+			t.Fatal("LoadResumeMode() read the store; the fixture must stage a read that fails")
+		}
+		if got := installResumeModeOf(store); got != resumemode.Default {
+			t.Errorf("installResumeModeOf(unreadable) = %v; want %v", got, resumemode.Default)
+		}
+	})
+
+	t.Run("it answers the shipped default when the store is corrupt", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "prefs.json")
 		if err := os.WriteFile(path, []byte(`{not json`), 0o600); err != nil {
 			t.Fatalf("write prefs.json: %v", err)

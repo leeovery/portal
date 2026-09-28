@@ -133,7 +133,7 @@ func TestAdvisories_HostTerminalStaysInCatalog(t *testing.T) {
 	}
 	host, pending, mode := results[len(results)-3], results[len(results)-2], results[len(results)-1]
 	if host.name != "host terminal" || host.status != checkInfo {
-		t.Fatalf("second-to-last catalog check = %+v; want the informational host-terminal line", host)
+		t.Fatalf("third-to-last catalog check = %+v; want the informational host-terminal line", host)
 	}
 	if pending.name != "pending resumes" || pending.status != checkInfo {
 		t.Fatalf("second-to-last catalog check = %+v; want the informational pending-resumes line", pending)

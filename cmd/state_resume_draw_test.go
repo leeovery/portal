@@ -384,6 +384,41 @@ func TestStateResumeDrawCommand(t *testing.T) {
 		}
 	})
 
+	// The command, not the test, reads NO_COLOR: a draw handed the wrong answer
+	// writes an OSC 11 query into the pane's tty and paints a coloured canvas.
+	for _, tc := range []struct {
+		name    string
+		noColor string
+		want    bool
+	}{
+		{name: "it hands the draw a colourless config when NO_COLOR is set", noColor: "1", want: true},
+		{name: "it hands the draw a coloured config when NO_COLOR is empty", noColor: "", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", tc.noColor)
+
+			var got resumeDrawConfig
+			withFuncSeam(t, &resumeDrawRunFunc, func(cfg resumeDrawConfig) error {
+				got = cfg
+				return nil
+			})
+
+			resetRootCmd()
+			rootCmd.SetOut(new(bytes.Buffer))
+			errBuf := new(bytes.Buffer)
+			rootCmd.SetErr(errBuf)
+			payload := resumeChainPayload{Command: "make deploy", HookKey: "tok123", Pane: "%7", PaneKey: "proj-a1b2:0.1"}
+			rootCmd.SetArgs(resumeChainArgv("portal", resumeDrawSubcommand, payload)[1:])
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("executing the composed argv: %v\nstderr: %s", err, errBuf)
+			}
+
+			if got.Colourless != tc.want {
+				t.Errorf("Colourless = %v with NO_COLOR=%q, want %v", got.Colourless, tc.noColor, tc.want)
+			}
+		})
+	}
+
 	t.Run("it refuses an invocation naming no command", func(t *testing.T) {
 		withFuncSeam(t, &resumeDrawRunFunc, func(resumeDrawConfig) error { return nil })
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -10,11 +11,14 @@ import (
 )
 
 // markerReaderStub answers each read with the next step's marker keys, holding
-// on the last step once the script runs out.
+// on the last step once the script runs out. With err set, the read numbered
+// errStep fails with it instead.
 type markerReaderStub struct {
-	steps [][]string
-	calls int
-	log   *[]string
+	steps   [][]string
+	err     error
+	errStep int
+	calls   int
+	log     *[]string
 }
 
 func (r *markerReaderStub) ListSkeletonMarkers() (map[string]struct{}, error) {
@@ -22,6 +26,9 @@ func (r *markerReaderStub) ListSkeletonMarkers() (map[string]struct{}, error) {
 	r.calls++
 	if r.log != nil {
 		*r.log = append(*r.log, "markers")
+	}
+	if r.err != nil && idx == r.errStep {
+		return nil, r.err
 	}
 	set := map[string]struct{}{}
 	for _, k := range r.steps[min(idx, len(r.steps)-1)] {
@@ -177,6 +184,30 @@ func TestPendingSettle_ColdRoute_SettlesOnEveryDotWhenTheLastMarkerClearsBeforeA
 				t.Errorf("reads = %v, want %v (each marker read ahead of its pending read)", log, want)
 			}
 		})
+	}
+}
+
+func TestPendingSettle_ColdRoute_AFailedMarkerReadCountsAsMarkersRemaining(t *testing.T) {
+	lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+	pending := &pendingReaderStub{steps: [][]string{{}, {}, {"alpha"}}}
+	markers := &markerReaderStub{steps: [][]string{{}}, err: errors.New("show-options: server busy"), errStep: 0}
+	m := coldSettleModel(lister, pending, markers, generousSettleBound)
+
+	m, _ = driveToPostRestoreRefetch(t, m)
+
+	m, next := settleStep(t, m)
+	if next == nil {
+		t.Fatal("a failed marker read ended the settle, want it to schedule a further re-read")
+	}
+	assertDots(t, m, map[string]bool{"alpha": false, "bravo": false, "charlie": false})
+
+	m, next = settleStep(t, m)
+	if next != nil {
+		t.Error("a reading with no marker remaining scheduled a further re-read")
+	}
+	assertDots(t, m, map[string]bool{"alpha": true, "bravo": false, "charlie": false})
+	if markers.calls != 2 || pending.calls != 3 {
+		t.Errorf("reads: markers = %d, pending = %d, want 2 and 3", markers.calls, pending.calls)
 	}
 }
 

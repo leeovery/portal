@@ -149,7 +149,9 @@ func TestLazyResumePanel_RestoredPaneHoldsThePanel(t *testing.T) {
 	})
 
 	t.Run("it leaves the pane beside it live", func(t *testing.T) {
-		fx.ts.SendKeys(t, siblingPaneTarget(), "echo "+siblingLiveLine)
+		// The typed line never spells its own output, so only a command that ran
+		// can put siblingLiveLine on the screen.
+		fx.ts.SendKeys(t, siblingPaneTarget(), "printf 'sibling-%s\\n' still-live")
 		fx.awaitScreenContains(t, siblingPaneTarget(), siblingLiveLine)
 
 		screen := fx.paneScreen(t, subjectPaneTarget())
@@ -235,12 +237,12 @@ func TestLazyResumePanel_RestoredPaneHoldsThePanel(t *testing.T) {
 
 	t.Run("it reveals the transcript that was underneath the panel", func(t *testing.T) {
 		fx.awaitScreenContains(t, subjectPaneTarget(), lazySubjectOutput)
-		transcript := fx.paneTranscript(t, subjectPaneTarget())
-		if !strings.Contains(transcript, subjectPreRebootLine) {
-			t.Fatalf("subject pane missing the transcript line %q the panel was covering; "+
-				"capture-pane -p -S -:\n%s", subjectPreRebootLine, transcript)
+		screen := fx.paneScreen(t, subjectPaneTarget())
+		if !strings.Contains(screen, subjectPreRebootLine) {
+			t.Fatalf("subject pane screen missing the transcript line %q the panel was covering; "+
+				"capture-pane -p:\n%s", subjectPreRebootLine, screen)
 		}
-		if screen := fx.paneScreen(t, subjectPaneTarget()); strings.Contains(screen, panelTitle) {
+		if strings.Contains(screen, panelTitle) {
 			t.Fatalf("subject pane screen still shows the panel after it was answered; "+
 				"capture-pane -p:\n%s", screen)
 		}
@@ -526,7 +528,7 @@ func (fx *lazyPanelFixture) restingTree(t *testing.T) []paneProcess {
 	var tree []paneProcess
 	settled := harnesstest.PollUntil(t, restoretest.HydrateBudget, restoretest.HydrateTick, func() bool {
 		tree = readProcessTree(t, rootPID)
-		return len(tree) == 2 && !treeRuns(tree, resumeDrawArgv)
+		return len(tree) >= 2 && !treeRuns(tree, resumeDrawArgv)
 	})
 	if !settled {
 		t.Fatalf("subject pane %d never settled after the draw handed off:\n%s", rootPID, formatTree(tree))

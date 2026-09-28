@@ -35,8 +35,9 @@ const internalSessionPrefix = "_"
 // Panes whose paneKey is in skipSet keep their prev state, but only where
 // session, window and pane are all still live — a stale marker must not
 // resurrect a killed pane. Independently of skipSet, a pane carrying the resume
-// pending marker keeps its prev record's CWD, CurrentCommand and
-// ScrollbackFile, matched on the pane's durable token rather than its address.
+// pending marker keeps the CWD, CurrentCommand and ScrollbackFile of the
+// previous record carrying its durable token, whatever its address has become —
+// or, for a pane carrying no token, of the previous record at its own address.
 // A tmux enumeration failure yields an empty Index and a wrapped error, never a
 // partial one. A per-session failure is logged and skipped, unless every
 // session failed on something other than vanishing, which errors so the caller
@@ -171,10 +172,11 @@ func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
 }
 
 // mergeFrozenPanes carries a waiting pane's previous record onto its live
-// address, matched on the pane's durable token: the merged record keeps
-// pointing at the scrollback file that already holds the pane's bytes, whatever
-// the pane's address has become. It mutates only panes the live enumeration
-// returned, so a previous record whose pane is gone is never reintroduced.
+// address, matched on the pane's durable token (on its address when it carries
+// none): the merged record keeps pointing at the scrollback file that already
+// holds the pane's bytes, whatever the pane's address has become. It mutates
+// only panes the live enumeration returned, so a previous record whose pane is
+// gone is never reintroduced.
 func mergeFrozenPanes(fresh *Index, prev Index, live map[string]livePane) {
 	byToken, byAddress := indexPrevPanes(prev)
 	for si := range fresh.Sessions {

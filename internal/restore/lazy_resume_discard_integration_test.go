@@ -116,10 +116,6 @@ func TestLazyResumeDiscard_RealPaneDiscardsItsResume(t *testing.T) {
 			t.Fatalf("hooks.json holds %d entries after the discard; want only the bystander's:\n%s",
 				len(entries), fx.readHooks(t))
 		}
-
-		if _, err := os.Stat(filepath.Join(fx.workDir, discardSubjectFired)); err == nil {
-			t.Fatalf("the subject's registered command ran; a discard never runs it")
-		}
 	})
 
 	t.Run("it reveals the transcript that was underneath the confirmation", func(t *testing.T) {
@@ -134,6 +130,14 @@ func TestLazyResumeDiscard_RealPaneDiscardsItsResume(t *testing.T) {
 			}
 			return true
 		})
+
+		// The hand-off that would wrongly run the command follows the marker's
+		// clear; give it every chance to write its sentinel before concluding
+		// it never ran.
+		time.Sleep(restoretest.PaneReactionBudget)
+		if _, err := os.Stat(filepath.Join(fx.workDir, discardSubjectFired)); err == nil {
+			t.Fatalf("the subject's registered command ran; a discard never runs it")
+		}
 	})
 
 	t.Run("it leaves the pane's durable token stamped and its session live", func(t *testing.T) {

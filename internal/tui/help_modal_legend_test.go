@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
@@ -100,8 +101,16 @@ func TestHelpModalIndicatorLegend(t *testing.T) {
 	})
 
 	t.Run("it names no tool in either legend label", func(t *testing.T) {
+		wantLabels := []string{"Session attached", "Resume pending"}
 		forEachThemeAndColourMode(t, func(t *testing.T, th theme.Theme, colourless bool) {
 			legend := sessionsIndicatorLegend(th, colourless)
+			labels := make([]string, 0, len(legend))
+			for _, e := range legend {
+				labels = append(labels, e.label)
+			}
+			if !slices.Equal(labels, wantLabels) {
+				t.Errorf("the legend labels read\n got: %q\nwant: %q", labels, wantLabels)
+			}
 			rows := legendPanelRows(t, sessionsHelpPanel(t, th, colourless))
 			for i, e := range legend {
 				rest := innerText(rows[i])
