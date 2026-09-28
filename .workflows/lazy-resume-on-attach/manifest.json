@@ -172,7 +172,11 @@
             "lazy-resume-on-attach-5-7": "tick-c21161",
             "lazy-resume-on-attach-6-9": "tick-2779da",
             "lazy-resume-on-attach-6-10": "tick-21a011",
-            "lazy-resume-on-attach-6-11": "tick-8ed018"
+            "lazy-resume-on-attach-6-11": "tick-8ed018",
+            "lazy-resume-on-attach-7": "tick-985773",
+            "lazy-resume-on-attach-7-1": "tick-e33f05",
+            "lazy-resume-on-attach-7-2": "tick-fd525c",
+            "lazy-resume-on-attach-7-3": "tick-423583"
           },
           "storage_paths": [
             ".tick/"
@@ -224,7 +228,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
@@ -360,9 +364,9 @@
             },
             "c1": {
               "tasks": {
-                "1": "pending",
-                "2": "pending",
-                "3": "pending"
+                "1": "approved",
+                "2": "approved",
+                "3": "approved"
               }
             }
           },
