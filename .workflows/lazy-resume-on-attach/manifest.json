@@ -476,7 +476,18 @@
             "lazy-resume-on-attach-7-3",
             "lazy-resume-on-attach-7-4",
             "lazy-resume-on-attach-8-1"
-          ]
+          ],
+          "staging": {
+            "c1": {
+              "gate_mode": "gated",
+              "tasks": {
+                "1": "pending",
+                "2": "pending",
+                "3": "pending",
+                "4": "pending"
+              }
+            }
+          }
         }
       }
     }
