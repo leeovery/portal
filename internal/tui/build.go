@@ -2,6 +2,7 @@ package tui
 
 import (
 	"log/slog"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
@@ -29,11 +30,15 @@ type Deps struct {
 	DirReader       session.PaneCurrentPathReader
 	DirRunner       resolver.CommandRunner
 	PendingReader   PendingResumeReader
-	ModePersister   ModePersister
-	ThemePersister  ThemePersister
-	ThemeSource     ThemeSource
-	Detector        TerminalDetector
-	Resolve         spawn.AdapterResolver
+	// SkeletonMarkers keeps the cold route re-reading the pending set until no
+	// restored pane is still hydrating, for at most PendingSettleBound.
+	SkeletonMarkers    SkeletonMarkerReader
+	PendingSettleBound time.Duration
+	ModePersister      ModePersister
+	ThemePersister     ThemePersister
+	ThemeSource        ThemeSource
+	Detector           TerminalDetector
+	Resolve            spawn.AdapterResolver
 
 	// The picker burst reuses Resolve above rather than taking a second resolver.
 	SessionExists func(string) bool
@@ -132,6 +137,9 @@ func Build(deps Deps) Model {
 	}
 	if deps.PendingReader != nil {
 		opts = append(opts, WithPendingResumeReader(deps.PendingReader))
+	}
+	if deps.SkeletonMarkers != nil {
+		opts = append(opts, WithPendingSettle(deps.SkeletonMarkers, deps.PendingSettleBound))
 	}
 	if deps.Search != nil {
 		opts = append(opts, WithSearchForm(deps.Search.Term), WithSearchDecision(deps.Search.Decide))

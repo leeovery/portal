@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/log"
@@ -484,6 +485,19 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 	return resolver.ResolveGitRoot(dir, &resolver.RealCommandRunner{})
 }
 
+// pendingSettleBound outlasts a hydrate helper's signal timeout, so a helper
+// never signalled has reached the tail that marks its pane before the picker
+// stops re-reading.
+const pendingSettleBound = hydrateTimeout + 2*time.Second
+
+type skeletonMarkerReader struct {
+	lister state.ServerOptionLister
+}
+
+func (r skeletonMarkerReader) ListSkeletonMarkers() (map[string]struct{}, error) {
+	return state.ListSkeletonMarkers(r.lister)
+}
+
 type tuiConfig struct {
 	lister           tui.SessionLister
 	killer           tui.SessionKiller
@@ -498,6 +512,7 @@ type tuiConfig struct {
 	dirReader        session.PaneCurrentPathReader
 	dirRunner        resolver.CommandRunner
 	pendingReader    tui.PendingResumeReader
+	skeletonMarkers  tui.SkeletonMarkerReader
 	initialMode      prefs.SessionListMode
 	theme            theme.Nomination
 	themeKeys        theme.RawKeys
@@ -559,39 +574,41 @@ func themeResolution(keys prefs.ThemeKeys, loader theme.Loader) (theme.Resolutio
 
 func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.Model {
 	deps := tui.Deps{
-		Lister:           cfg.lister,
-		Killer:           cfg.killer,
-		Renamer:          cfg.renamer,
-		Creator:          cfg.sessionCreator,
-		ProjectStore:     cfg.projectStore,
-		ProjectEditor:    cfg.projectEditor,
-		AliasEditor:      cfg.aliasEditor,
-		Enumerator:       cfg.enumerator,
-		Reader:           cfg.reader,
-		PreviewAttacher:  cfg.previewAttacher,
-		DirReader:        cfg.dirReader,
-		DirRunner:        cfg.dirRunner,
-		PendingReader:    cfg.pendingReader,
-		ModePersister:    cfg.modePersister,
-		ThemePersister:   cfg.themePersister,
-		CWD:              cfg.cwd,
-		InitialMode:      cfg.initialMode,
-		Theme:            cfg.theme,
-		ThemeKeys:        cfg.themeKeys,
-		ThemeSource:      cfg.themeSource,
-		Command:          command,
-		ServerStarted:    cfg.serverStarted,
-		InsideTmux:       cfg.insideTmux,
-		CurrentSession:   cfg.currentSession,
-		NoColor:          cfg.noColor,
-		ProgressReceiver: cfg.progressReceiver,
-		Detector:         cfg.detector,
-		Resolve:          cfg.resolve,
-		SessionExists:    cfg.sessionExists,
-		AckChannel:       cfg.ackChannel,
-		SpawnExe:         cfg.spawnExe,
-		SpawnGetenv:      cfg.spawnGetenv,
-		SpawnLogger:      cfg.spawnLogger,
+		Lister:             cfg.lister,
+		Killer:             cfg.killer,
+		Renamer:            cfg.renamer,
+		Creator:            cfg.sessionCreator,
+		ProjectStore:       cfg.projectStore,
+		ProjectEditor:      cfg.projectEditor,
+		AliasEditor:        cfg.aliasEditor,
+		Enumerator:         cfg.enumerator,
+		Reader:             cfg.reader,
+		PreviewAttacher:    cfg.previewAttacher,
+		DirReader:          cfg.dirReader,
+		DirRunner:          cfg.dirRunner,
+		PendingReader:      cfg.pendingReader,
+		SkeletonMarkers:    cfg.skeletonMarkers,
+		PendingSettleBound: pendingSettleBound,
+		ModePersister:      cfg.modePersister,
+		ThemePersister:     cfg.themePersister,
+		CWD:                cfg.cwd,
+		InitialMode:        cfg.initialMode,
+		Theme:              cfg.theme,
+		ThemeKeys:          cfg.themeKeys,
+		ThemeSource:        cfg.themeSource,
+		Command:            command,
+		ServerStarted:      cfg.serverStarted,
+		InsideTmux:         cfg.insideTmux,
+		CurrentSession:     cfg.currentSession,
+		NoColor:            cfg.noColor,
+		ProgressReceiver:   cfg.progressReceiver,
+		Detector:           cfg.detector,
+		Resolve:            cfg.resolve,
+		SessionExists:      cfg.sessionExists,
+		AckChannel:         cfg.ackChannel,
+		SpawnExe:           cfg.spawnExe,
+		SpawnGetenv:        cfg.spawnGetenv,
+		SpawnLogger:        cfg.spawnLogger,
 	}
 	if landing.search != nil {
 		deps.Search = landing.search
@@ -704,6 +721,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		dirReader:       client,
 		dirRunner:       &resolver.RealCommandRunner{},
 		pendingReader:   client,
+		skeletonMarkers: skeletonMarkerReader{lister: client},
 		initialMode:     initialMode,
 		theme:           resolution.Nomination,
 		themeKeys:       themeKeys,

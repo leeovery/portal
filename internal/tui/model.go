@@ -115,6 +115,8 @@ type SessionsMsg struct {
 	Sessions []tmux.Session
 	Pending  map[string]struct{}
 	Err      error
+
+	afterRestore bool
 }
 
 // The loading page is padded to this duration when bootstrap is faster, so it
@@ -275,9 +277,9 @@ type Model struct {
 	// by a moment earlier. Cleared on every session-list refresh.
 	derivedDirs map[string]string
 
-	// pendingSessions is the pending-resume set read alongside m.sessions and
-	// replaced with it on every load, never merged into.
+	// pendingSessions is replaced whole on every read, never merged into.
 	pendingSessions map[string]struct{}
+	pendingSettle   pendingSettle
 
 	// flashText empty means no flash. flashGen is bumped on every setFlash so a
 	// stale tick from a replaced flash cannot early-clear the current message.
@@ -1157,11 +1159,16 @@ func (m *Model) applySessions(sessions []tmux.Session, pending map[string]struct
 	m.sessions = sessions
 	// A guess derived for the previous list must not outlive it.
 	m.derivedDirs = nil
-	m.pendingSessions = pending
-	m.refreshSessionDelegate()
+	m.applyPendingSessions(pending)
 	// Prune before the rebuild so the refreshed set feeds the delegate's ●.
 	m.pruneSelectionToLiveSessions()
 	return m.rebuildSessionList()
+}
+
+// Leaves the items alone, so rows, order, cursor and filter stay put.
+func (m *Model) applyPendingSessions(pending map[string]struct{}) {
+	m.pendingSessions = pending
+	m.refreshSessionDelegate()
 }
 
 // A set-difference on the aliased map, so the delegate drops their ● on the next
@@ -1496,7 +1503,10 @@ func (m Model) refetchSessionsAfterRestore() tea.Cmd {
 	if m.progressReceiver == nil {
 		return nil
 	}
-	return m.fetchSessionsCmd()
+	return func() tea.Msg {
+		sessions, pending, err := m.readSessionList()
+		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err, afterRestore: true}
+	}
 }
 
 // On the cold concurrent route it deliberately leaves sessionsLoaded false:
@@ -1641,7 +1651,15 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		m.sessionsLoaded = true
 		m.evaluateDefaultPage()
 		detectCmd := m.maybeDispatchDetectionCmd()
-		return m, tea.Batch(cmd, detectCmd)
+		var settleCmd tea.Cmd
+		if msg.afterRestore {
+			settleCmd = m.startPendingSettle()
+		}
+		return m, tea.Batch(cmd, detectCmd, settleCmd)
+	case pendingSettleTickMsg:
+		return m, m.pendingSettleTick()
+	case pendingSettleReadMsg:
+		return m, m.applyPendingSettleRead(msg)
 	case LoadingMinElapsedMsg:
 		m.minElapsed = true
 		// A fatal parks the model in the error state — never dismiss into the
