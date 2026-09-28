@@ -57,17 +57,18 @@ type advisory struct {
 // production default in resolveDoctorDeps, and nothing left nil aborts
 // diagnosis.
 type DoctorDeps struct {
-	StateDir      string
-	ThemesDir     string
-	ServerRunning func() bool
-	SaverPresent  func() (present bool, err error)
-	HookCounts    func() (map[string]int, error)
-	HookLister    hooksweep.Reader
-	HookStore     *hooks.Store
-	ProjectStore  *project.Store
-	PrefsStore    *prefs.Store
-	Detector      TerminalDetector
-	Resolve       spawn.AdapterResolver
+	StateDir       string
+	ThemesDir      string
+	ServerRunning  func() bool
+	SaverPresent   func() (present bool, err error)
+	HookCounts     func() (map[string]int, error)
+	PendingResumes func() (tmux.PendingResumeView, error)
+	HookLister     hooksweep.Reader
+	HookStore      *hooks.Store
+	ProjectStore   *project.Store
+	PrefsStore     *prefs.Store
+	Detector       TerminalDetector
+	Resolve        spawn.AdapterResolver
 }
 
 var doctorDeps *DoctorDeps
@@ -96,6 +97,9 @@ func resolveDoctorDeps() *DoctorDeps {
 		deps.HookCounts = func() (map[string]int, error) {
 			return tmux.PortalHookCountsByEvent(client)
 		}
+	}
+	if deps.PendingResumes == nil {
+		deps.PendingResumes = client.ListPendingResumePanes
 	}
 	if deps.HookLister == nil {
 		deps.HookLister = client
@@ -332,7 +336,25 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 	if deps.Detector != nil && deps.Resolve != nil {
 		results = append(results, checkHostTerminal(deps.Detector, deps.Resolve))
 	}
+	results = append(results, checkPendingResumes(serverUp, deps.PendingResumes))
 	return results, nil
+}
+
+// A waiting pane is a decision held for the user, not a fault, so no count
+// fails this line. A down runtime is reported rather than probed — doctor
+// starts nothing — and takes checkNotEvaluable, not the checkFail of
+// runtimeDownResult, which would put this line inside the exit code. A failed
+// read is not evaluable rather than zero: the read established no count.
+func checkPendingResumes(serverUp bool, read func() (tmux.PendingResumeView, error)) checkResult {
+	const name = "pending resumes"
+	if !serverUp {
+		return checkResult{name: name, status: checkNotEvaluable, detail: doctorRuntimeNotRunning}
+	}
+	view, err := read()
+	if err != nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read pending panes (transient tmux error)"}
+	}
+	return checkResult{name: name, status: checkInfo, detail: pluralCount(view.Panes, "pane waiting to resume", "panes waiting to resume")}
 }
 
 // An unsupported or remote host is an environmental state, not a Portal-health

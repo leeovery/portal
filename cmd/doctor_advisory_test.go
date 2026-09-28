@@ -128,17 +128,28 @@ func TestAdvisories_HostTerminalStaysInCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
-	last := results[len(results)-1]
-	if last.name != "host terminal" || last.status != checkInfo {
-		t.Fatalf("last catalog check = %+v; want the informational host-terminal line", last)
+	if len(results) < 2 {
+		t.Fatalf("catalog = %+v; want at least the two informational lines", results)
+	}
+	host, pending := results[len(results)-2], results[len(results)-1]
+	if host.name != "host terminal" || host.status != checkInfo {
+		t.Fatalf("second-to-last catalog check = %+v; want the informational host-terminal line", host)
+	}
+	if pending.name != "pending resumes" || pending.status != checkInfo {
+		t.Fatalf("last catalog check = %+v; want the informational pending-resumes line", pending)
 	}
 
 	advisories := themeAdvisories(2)
 	lines := renderedLines(t, results, advisories)
 
-	hostLine := fmt.Sprintf("  %s %s: %s", checkMarker(last.status), last.name, last.detail)
-	if got := lines[len(results)]; got != hostLine {
-		t.Errorf("line[%d] = %q; want the host-terminal line %q at the end of the catalog", len(results), got, hostLine)
+	// Index 0 is the header, so catalog entry i renders at line i+1.
+	hostLine := fmt.Sprintf("  %s %s: %s", checkMarker(host.status), host.name, host.detail)
+	if got := lines[len(results)-1]; got != hostLine {
+		t.Errorf("line[%d] = %q; want the host-terminal line %q inside the catalog", len(results)-1, got, hostLine)
+	}
+	pendingLine := fmt.Sprintf("  %s %s: %s", checkMarker(pending.status), pending.name, pending.detail)
+	if got := lines[len(results)]; got != pendingLine {
+		t.Errorf("line[%d] = %q; want the pending-resumes line %q at the end of the catalog", len(results), got, pendingLine)
 	}
 	if got, want := lines[len(results)+1], "  "+advisories[0].line; got != want {
 		t.Errorf("line[%d] = %q; want the first advisory %q immediately after the catalog", len(results)+1, got, want)

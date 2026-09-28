@@ -17,6 +17,7 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 func doctorUnsupportedResolve(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
@@ -93,6 +94,11 @@ func withHealthyRuntime(deps *DoctorDeps) *DoctorDeps {
 	}
 	if deps.HookCounts == nil {
 		deps.HookCounts = func() (map[string]int, error) { return allHooksHealthy(), nil }
+	}
+	if deps.PendingResumes == nil {
+		deps.PendingResumes = func() (tmux.PendingResumeView, error) {
+			return tmux.PendingResumeView{Rows: []tmux.PendingResumeRow{}, Sessions: map[string]struct{}{}}, nil
+		}
 	}
 	if deps.Detector == nil {
 		deps.Detector = fakeTerminalDetector{}
@@ -487,12 +493,12 @@ func TestDoctorHooksCheck(t *testing.T) {
 	dir := t.TempDir()
 
 	newDeps := func(counts map[string]int) *DoctorDeps {
-		return &DoctorDeps{
+		return withHealthyRuntime(&DoctorDeps{
 			StateDir:      dir,
 			ServerRunning: func() bool { return true },
 			SaverPresent:  func() (bool, error) { return true, nil },
 			HookCounts:    func() (map[string]int, error) { return counts, nil },
-		}
+		})
 	}
 
 	t.Run("one entry per event passes", func(t *testing.T) {
@@ -571,12 +577,12 @@ func TestDoctorHooksCheck(t *testing.T) {
 
 	t.Run("transient read failure is not-evaluable and does not drive exit", func(t *testing.T) {
 		seedHealthyStateDir(t, dir)
-		deps := &DoctorDeps{
+		deps := withHealthyRuntime(&DoctorDeps{
 			StateDir:      dir,
 			ServerRunning: func() bool { return true },
 			SaverPresent:  func() (bool, error) { return true, nil },
 			HookCounts:    func() (map[string]int, error) { return nil, errors.New("tmux transient") },
-		}
+		})
 		results, err := runDoctorDiagnosis(deps)
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
@@ -598,12 +604,12 @@ func TestDoctorSaverCheck(t *testing.T) {
 	dir := t.TempDir()
 
 	newDeps := func(present bool, saverErr error) *DoctorDeps {
-		return &DoctorDeps{
+		return withHealthyRuntime(&DoctorDeps{
 			StateDir:      dir,
 			ServerRunning: func() bool { return true },
 			SaverPresent:  func() (bool, error) { return present, saverErr },
 			HookCounts:    func() (map[string]int, error) { return allHooksHealthy(), nil },
-		}
+		})
 	}
 
 	t.Run("present passes", func(t *testing.T) {
@@ -768,7 +774,7 @@ func TestDoctorCheckOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
-	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json", "stale hooks", "stale projects", "host terminal"}
+	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json", "stale hooks", "stale projects", "host terminal", "pending resumes"}
 	if len(results) != len(want) {
 		t.Fatalf("check count = %d, want %d: %+v", len(results), len(want), results)
 	}

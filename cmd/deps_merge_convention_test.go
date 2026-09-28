@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 // seamCase pins one field of a *Deps struct: what a test injects into it, and
@@ -54,6 +55,9 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 		}
 		if deps.HookLister == nil {
 			t.Error("HookLister = nil; an unset seam must fall through to its production default")
+		}
+		if deps.PendingResumes == nil {
+			t.Error("PendingResumes = nil; an unset seam must fall through to its production default")
 		}
 		if deps.Detector == nil {
 			t.Error("Detector = nil; an unset seam must fall through to its production default")
@@ -191,6 +195,20 @@ func doctorSeamCases() []seamCase {
 				counts, err := resolveDoctorDeps().HookCounts()
 				if err != nil || counts["sentinel"] != 1 {
 					t.Errorf("HookCounts() = (%v, %v); want the injected seam's sentinel count", counts, err)
+				}
+			},
+		},
+		{
+			field: "PendingResumes",
+			inject: func(t *testing.T) {
+				withDoctorDeps(t, DoctorDeps{PendingResumes: func() (tmux.PendingResumeView, error) {
+					return tmux.PendingResumeView{Panes: 7}, nil
+				}})
+			},
+			assert: func(t *testing.T) {
+				view, err := resolveDoctorDeps().PendingResumes()
+				if err != nil || view.Panes != 7 {
+					t.Errorf("PendingResumes() = (%+v, %v); want the injected seam's sentinel count", view, err)
 				}
 			},
 		},
