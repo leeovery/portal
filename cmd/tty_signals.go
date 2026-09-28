@@ -12,14 +12,25 @@ import (
 // and Ctrl-Z reach its reader as bytes instead of signalling its foreground
 // process group. Output processing is left as it is.
 func clearTTYSignals(fd int) error {
-	return updateLocalModes(fd, func(m *unix.Termios) { m.Lflag &^= unix.ISIG })
+	return updateTTYModes(fd, func(m *unix.Termios) { m.Lflag &^= unix.ISIG })
 }
 
 func setTTYSignals(fd int) error {
-	return updateLocalModes(fd, func(m *unix.Termios) { m.Lflag |= unix.ISIG })
+	return updateTTYModes(fd, func(m *unix.Termios) { m.Lflag |= unix.ISIG })
 }
 
-func updateLocalModes(fd int, update func(*unix.Termios)) error {
+// cookTTY turns on the modes a shell reading the terminal needs and a terminal
+// left raw lacks: line editing, echo, signal generation, CR-to-NL input and
+// flow control, and output processing.
+func cookTTY(fd int) error {
+	return updateTTYModes(fd, func(m *unix.Termios) {
+		m.Lflag |= unix.ICANON | unix.ECHO | unix.ECHOE | unix.ECHOK | unix.ISIG | unix.IEXTEN
+		m.Iflag |= unix.ICRNL | unix.IXON
+		m.Oflag |= unix.OPOST | unix.ONLCR
+	})
+}
+
+func updateTTYModes(fd int, update func(*unix.Termios)) error {
 	modes, err := unix.IoctlGetTermios(fd, ioctlReadTermios)
 	if err != nil {
 		return err
@@ -34,4 +45,8 @@ func clearStdinSignals() error {
 
 func setStdinSignals() error {
 	return setTTYSignals(int(os.Stdin.Fd()))
+}
+
+func cookStdin() error {
+	return cookTTY(int(os.Stdin.Fd()))
 }

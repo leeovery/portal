@@ -94,7 +94,7 @@ var stateResumeRecoverCmd = &cobra.Command{
 			ClearMarker: func() error {
 				return state.UnsetResumePendingMarker(tmux.DefaultClient(), target)
 			},
-			EnableTTYSignals: setStdinSignals,
+			EnableTTYSignals: cookStdin,
 			ExecShell:        defaultExecShell,
 		})
 	},

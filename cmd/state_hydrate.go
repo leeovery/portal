@@ -294,18 +294,23 @@ const parkedChainTrap = "trap : INT QUIT; "
 // tail that recovered the pane exec'd the user's shell, whose exit status
 // arrives here, and a second shell after it would make the pane take two exits
 // to close. The executable check tells a tail that never started from a shell
-// that exited 126 or 127 itself. stty restores the terminal the chain left with
-// signal generation off.
-func parkedChainBackstop(exe string) string {
-	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(exe) +
-		` ]; then stty sane 2>/dev/null; exec "${SHELL:-/bin/sh}"; fi;; esac; exit $s`
+// that exited 126 or 127 itself. It then takes the tail's own steps in the
+// tail's order — leave the panel's screen, clear the pending marker, restore the
+// terminal — since no Portal binary is left to take them.
+func parkedChainBackstop(exe string, payload resumeChainPayload) string {
+	reset := `printf '%s' ` + shellquote.Single(hydrateResetPreamble)
+	clearMarker := shellquote.Join([]string{
+		"tmux", "set-option", "-pu", "-t", string(tmux.PaneIDTarget(payload.Pane)), state.ResumePendingOption,
+	}) + ` 2>/dev/null`
+	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(exe) + ` ]; then ` +
+		reset + `; ` + clearMarker + `; stty sane 2>/dev/null; exec "${SHELL:-/bin/sh}"; fi;; esac; exit $s`
 }
 
 func parkedResumeChain(exe string, payload resumeChainPayload) string {
 	return parkedChainTrap +
 		shellquote.Join(resumeChainArgv(exe, resumeDrawSubcommand, payload)) + "; " +
 		shellquote.Join(resumeChainArgv(exe, resumeRecoverSubcommand, payload)) +
-		parkedChainBackstop(exe)
+		parkedChainBackstop(exe, payload)
 }
 
 // Clearing the skeleton marker is the recovery: the FIFO is already unlinked, so
