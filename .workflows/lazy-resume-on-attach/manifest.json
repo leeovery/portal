@@ -263,7 +263,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 7,
-          "current_task": "lazy-resume-on-attach-7-2",
+          "current_task": "lazy-resume-on-attach-7-3",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -320,7 +320,8 @@
             "lazy-resume-on-attach-6-9",
             "lazy-resume-on-attach-6-10",
             "lazy-resume-on-attach-6-11",
-            "lazy-resume-on-attach-7-1"
+            "lazy-resume-on-attach-7-1",
+            "lazy-resume-on-attach-7-2"
           ],
           "staging": {
             "p1": {
@@ -398,6 +399,19 @@
                 "cmd/state_resume_recover.go",
                 "cmd/tty_signals.go",
                 "cmd/state_resume_wait.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-7-2",
+              "source": "reviewer",
+              "summary": "The two routes that hand a pane the user shell after a dead waiter restore different terminal state: the backstop runs stty sane, the Go recovery tail only turns ISIG back on",
+              "failure": "A waiter ended by a signal (pkill portal SIGTERM, an OOM kill, or the group SIGINT/SIGQUIT 7-1 routes into the tail) skips its deferred term.Restore, so the tty stays raw; the Go tail execs the user shell with only ISIG back on, so the recovered pane shows no echo and staircased output until the user runs reset, while the backstop route lands cooked",
+              "detail": "runResumeWait enters raw mode and restores only via defer cfg.restore() (cmd/state_resume_wait.go:115-120, makeStdinRaw :444-450); only SIGWINCH is handled (:435); runResumeRecover calls only enableTTYSignalsOrLog -> setTTYSignals (cmd/state_resume_recover.go:56, cmd/tty_signals.go:19-21); the backstop stty sane is at cmd/state_hydrate.go:297; option: have the tail restore cooked modes (ICANON, ECHO, OPOST, ICRNL, ISIG) through the same helper family",
+              "files": [
+                "cmd/state_resume_recover.go",
+                "cmd/tty_signals.go",
+                "cmd/state_resume_wait.go",
+                "cmd/state_hydrate.go"
               ]
             }
           ]
