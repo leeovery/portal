@@ -35,6 +35,10 @@ type resumeRecoverProbe struct {
 	execProg  string
 	execArgs  []string
 	execCalls int
+
+	signalsOnCalls   int
+	signalsOnErr     error
+	execsAtSignalsOn int
 }
 
 // recoverWriter records that the pane was written to before it passes the bytes
@@ -64,6 +68,11 @@ func newResumeRecoverConfig(t *testing.T, p *resumeRecoverProbe) resumeRecoverCo
 			p.order = append(p.order, "clear")
 			p.clearCalls++
 			return p.clearErr
+		},
+		EnableTTYSignals: func() error {
+			p.signalsOnCalls++
+			p.execsAtSignalsOn = p.execCalls
+			return p.signalsOnErr
 		},
 		ExecShell: func(prog string, args []string) {
 			p.order = append(p.order, "exec")

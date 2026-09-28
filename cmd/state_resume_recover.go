@@ -16,9 +16,10 @@ type resumeRecoverConfig struct {
 	Stdout  io.Writer
 	Logger  *slog.Logger
 
-	ReadMarker  func() (string, error)
-	ClearMarker func() error
-	ExecShell   func(prog string, args []string)
+	ReadMarker       func() (string, error)
+	ClearMarker      func() error
+	EnableTTYSignals func() error
+	ExecShell        func(prog string, args []string)
 }
 
 // runResumeRecover is the tail of the chain a waiting pane parks: it runs when
@@ -52,6 +53,8 @@ func runResumeRecover(cfg resumeRecoverConfig) error {
 		cfg.Logger.Warn("unset resume pending marker failed", "pane_key", cfg.PaneKey, "error", err)
 	}
 
+	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
+
 	shell := resolveShell()
 	args := []string{shell}
 
@@ -84,7 +87,8 @@ var stateResumeRecoverCmd = &cobra.Command{
 			ClearMarker: func() error {
 				return state.UnsetResumePendingMarker(tmux.DefaultClient(), target)
 			},
-			ExecShell: defaultExecShell,
+			EnableTTYSignals: setStdinSignals,
+			ExecShell:        defaultExecShell,
 		})
 	},
 }

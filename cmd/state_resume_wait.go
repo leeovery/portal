@@ -82,6 +82,11 @@ type resumeWaitConfig struct {
 	// the store held one.
 	DiscardRegistration func(hookKey string) (bool, error)
 
+	// EnableTTYSignals gives the kill keys back to a pane being handed to a
+	// hook or a shell. The raw restore cannot: it puts back the tty the waiter
+	// found, which the chain keeps with signal generation off.
+	EnableTTYSignals func() error
+
 	// Set by runResumeWait from MakeRaw, so an answer hands the pane on in a
 	// cooked tty. An answer reached without a wait restores nothing.
 	restoreTerminal func()
@@ -315,6 +320,7 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 
 	command := resumeRegistrationOrLog(cfg.Logger, cfg.LookupResume, cfg.HookKey).Command
 	cfg.restore()
+	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
 
 	shell := resolveShell()
 	prog, args := shell, []string{shell}
@@ -350,6 +356,7 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 		return err
 	}
 	cfg.restore()
+	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
 
 	shell := resolveShell()
 	execHandOff(cfg.Logger, cfg.ExecSelf, shell, []string{shell}, false)
@@ -485,6 +492,7 @@ var stateResumeWaitCmd = &cobra.Command{
 			},
 			LookupResume:        lookupResumeRegistration,
 			DiscardRegistration: discardResumeRegistration,
+			EnableTTYSignals:    setStdinSignals,
 		})
 	},
 }

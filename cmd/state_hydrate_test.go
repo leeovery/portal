@@ -1006,6 +1006,7 @@ type hydrateCfgOpts struct {
 	ExecShell         func(prog string, args []string)
 	LoadPrefsStore    func() (*prefs.Store, error)
 	ResolveExe        func() (string, error)
+	DisableTTYSignals func() error
 	HandleFileMissing func(cfg hydrateConfig, ctx hydrateFileMissingContext) error
 	HandleTimeout     func(cfg hydrateConfig) error
 	AbsentHandler     hydrateAbsentHandler
@@ -1028,6 +1029,9 @@ func hydrateCfg(t *testing.T, opts hydrateCfgOpts) hydrateConfig {
 	if opts.ExecShell == nil {
 		opts.ExecShell = (&stubExecShell{}).fn()
 	}
+	if opts.DisableTTYSignals == nil {
+		opts.DisableTTYSignals = func() error { return nil }
+	}
 	// Assigned aside rather than back into opts, which clearAbsentHandler reads
 	// for what the case itself named.
 	fileMissing := opts.HandleFileMissing
@@ -1049,6 +1053,7 @@ func hydrateCfg(t *testing.T, opts hydrateCfgOpts) hydrateConfig {
 		ExecShell:         opts.ExecShell,
 		LoadPrefsStore:    opts.LoadPrefsStore,
 		ResolveExe:        opts.ResolveExe,
+		DisableTTYSignals: opts.DisableTTYSignals,
 		OpenFIFO:          opts.OpenFIFO,
 		HandleFileMissing: fileMissing,
 		HandleTimeout:     timeout,

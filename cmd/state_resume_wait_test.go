@@ -48,6 +48,13 @@ type resumeWaitProbe struct {
 	discardErr  error
 	discardMiss bool
 	discardKeys []string
+
+	// Signal generation turned back on, with the restores and execs already
+	// run at that moment.
+	signalsOnCalls      int
+	signalsOnErr        error
+	restoresAtSignalsOn int
+	execsAtSignalsOn    int
 }
 
 // orderedWriter records that the pane was written to before it passes the bytes
@@ -96,6 +103,12 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 				return false, p.discardErr
 			}
 			return !p.discardMiss, nil
+		},
+		EnableTTYSignals: func() error {
+			p.signalsOnCalls++
+			p.restoresAtSignalsOn = p.restores
+			p.execsAtSignalsOn = p.execCalls
+			return p.signalsOnErr
 		},
 		ExecSelf: func(prog string, args []string) {
 			p.order = append(p.order, "exec")

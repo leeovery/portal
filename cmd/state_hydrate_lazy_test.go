@@ -116,7 +116,7 @@ func lazyChainArgs(command, paneKey string) []string {
 	}
 	draw := shellquote.Join(resumeChainArgv(lazyExe, resumeDrawSubcommand, payload))
 	recover := shellquote.Join(resumeChainArgv(lazyExe, resumeRecoverSubcommand, payload))
-	return []string{"sh", "-c", draw + "; " + recover}
+	return []string{"sh", "-c", parkedChainTrap + draw + "; " + recover}
 }
 
 func TestHydrateLazy_NoRegistrationRestoresAsToday(t *testing.T) {
@@ -249,7 +249,7 @@ func TestHydrateLazy_SeparatesTheDrawAndTheTailWithASemicolon(t *testing.T) {
 
 	lazyRun(t, lazyTails()[0], opts)
 
-	chained := exec.args[2]
+	chained := strings.TrimPrefix(exec.args[2], parkedChainTrap)
 	if strings.Contains(chained, "&&") {
 		t.Errorf("chain %q joins its halves with &&; the tail must run whatever the draw did", chained)
 	}
@@ -264,7 +264,7 @@ func TestHydrateLazy_ComposesTheTailWithThePaneFlagsAlone(t *testing.T) {
 
 	paneKey := lazyRun(t, lazyTails()[0], opts)
 
-	_, tail, found := strings.Cut(exec.args[2], "; ")
+	_, tail, found := strings.Cut(strings.TrimPrefix(exec.args[2], parkedChainTrap), "; ")
 	if !found {
 		t.Fatalf("chain %q has no tail", exec.args[2])
 	}

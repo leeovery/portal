@@ -53,6 +53,11 @@ type hydrateConfig struct {
 	LoadPrefsStore func() (*prefs.Store, error)
 	ResolveExe     func() (string, error)
 
+	// DisableTTYSignals turns the pane's kill keys into bytes before a waiting
+	// pane's chain is parked; the chain hands them back on whatever path gives
+	// the pane to a hook or a shell.
+	DisableTTYSignals func() error
+
 	// Decision is what the pane's registration resolved to, held by pointer so
 	// a refusal taken inside a by-value handler reaches the exec. A nil one is
 	// a call that resolved nothing, which looks its registration up itself.
@@ -261,6 +266,9 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 // still type into. Both halves are composed from the decision, which resolves
 // nothing further: a resolution failing after the marker is written would leave
 // the pane frozen for life.
+//
+// A pane whose signal generation could not be turned off still parks: the
+// chain's trap turns a kill key that lands into the recovery tail.
 func execResumeChainAndExit(cfg hydrateConfig) {
 	payload := resumeChainPayload{
 		Command: cfg.Decision.Lookup.Command,
@@ -268,10 +276,23 @@ func execResumeChainAndExit(cfg hydrateConfig) {
 		Pane:    cfg.Decision.Pane,
 		PaneKey: state.PaneKeyFromFIFOPath(cfg.FIFO),
 	}
-	chained := shellquote.Join(resumeChainArgv(cfg.Decision.Exe, resumeDrawSubcommand, payload)) + "; " +
-		shellquote.Join(resumeChainArgv(cfg.Decision.Exe, resumeRecoverSubcommand, payload))
-	args := []string{"sh", "-c", chained}
+	if err := cfg.DisableTTYSignals(); err != nil {
+		cfg.Logger.Warn("disable terminal signals failed", "pane_key", payload.PaneKey, "error", err)
+	}
+	args := []string{"sh", "-c", parkedResumeChain(cfg.Decision.Exe, payload)}
 	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", args, true)
+}
+
+// parkedChainTrap keeps the parked shell alive through a group interrupt or
+// quit so its recovery tail still runs. It must stay a caught trap: an ignored
+// signal stays ignored across exec, and the hook and the user's shell would
+// inherit it.
+const parkedChainTrap = "trap : INT QUIT; "
+
+func parkedResumeChain(exe string, payload resumeChainPayload) string {
+	return parkedChainTrap +
+		shellquote.Join(resumeChainArgv(exe, resumeDrawSubcommand, payload)) + "; " +
+		shellquote.Join(resumeChainArgv(exe, resumeRecoverSubcommand, payload))
 }
 
 // Clearing the skeleton marker is the recovery: the FIFO is already unlinked, so
@@ -390,6 +411,7 @@ var stateHydrateCmd = &cobra.Command{
 			Logger:            hydrateLogger,
 			HookStore:         store,
 			ExecShell:         defaultExecShell,
+			DisableTTYSignals: clearStdinSignals,
 			OpenFIFO:          openFIFOWithTimeout,
 			HandleFileMissing: handleHydrateFileMissing,
 			HandleTimeout:     handleHydrateTimeout,

@@ -163,3 +163,11 @@ func resumeRegistrationOrLog(logger *slog.Logger, lookup func(hookKey string) (h
 func hookExecArgs(command, shell string) (prog string, args []string) {
 	return "/bin/sh", []string{"sh", "-c", command + "; exec " + shell}
 }
+
+// A pane whose kill keys could not be given back is still handed on: a hook
+// that ignores Ctrl-C is the lesser failure against a pane left on its panel.
+func enableTTYSignalsOrLog(logger *slog.Logger, enable func() error, paneKey string) {
+	if err := enable(); err != nil {
+		logger.Warn("enable terminal signals failed", "pane_key", paneKey, "error", err)
+	}
+}
