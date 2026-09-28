@@ -244,7 +244,7 @@ func TestSessionDelegate(t *testing.T) {
 		d.Render(&buf, m, 0, items[0])
 
 		output := buf.String()
-		if !strings.HasSuffix(output, "2 windows  ●  ") {
+		if !strings.HasSuffix(output, "2 windows   ●  ") {
 			t.Errorf("render output must end with the bare '●' indicator: %q", output)
 		}
 	})

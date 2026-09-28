@@ -38,6 +38,7 @@ const (
 	rowIndicatorGlyph = "●"
 	// NO_COLOR keeps state glyph-backed: a letter per indicator, same cell.
 	attachedIndicatorLetter = "A"
+	pendingIndicatorLetter  = "P"
 )
 
 // A gone row reserves the badge's width in place of the indicator slot and right margin.
@@ -45,13 +46,14 @@ const goneBadge = "session gone"
 
 type rowIndicators struct {
 	attached bool
+	pending  bool
 }
 
-// Sized to the widest cluster either colour mode renders, so an unattached row
-// pads to the same width as an attached one.
+// Sized to the widest cluster either colour mode renders, so every row pads to
+// the same width whatever indicators it carries.
 var indicatorSlotWidth = max(
-	lipgloss.Width(SessionDelegate{}.indicatorCluster(rowIndicators{attached: true}, false)),
-	lipgloss.Width(SessionDelegate{Colourless: true}.indicatorCluster(rowIndicators{attached: true}, false)),
+	lipgloss.Width(SessionDelegate{}.indicatorCluster(rowIndicators{attached: true, pending: true}, false)),
+	lipgloss.Width(SessionDelegate{Colourless: true}.indicatorCluster(rowIndicators{attached: true, pending: true}, false)),
 )
 
 const groupSeparator = "···"
@@ -136,6 +138,10 @@ type SessionDelegate struct {
 	Selected map[string]struct{}
 	// GoneFlagged is the transient pre-flight abort set, keyed on Session.Name.
 	GoneFlagged map[string]struct{}
+	// Pending holds the sessions with any pane awaiting a resume decision, keyed
+	// on Session.Name so a session carries one dot however many panes wait.
+	// Nil marks nothing.
+	Pending map[string]struct{}
 }
 
 func isSelected(set map[string]struct{}, name string) bool {
@@ -312,7 +318,10 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 		badge := d.rowToken(lipgloss.Style{}, d.Theme.StateDestructive, selected).Render(goneBadge)
 		trailing = badge + bg.Render(padTo("", trailingWidth-lipgloss.Width(goneBadge)))
 	} else {
-		cluster := d.indicatorCluster(rowIndicators{attached: it.Session.Attached}, selected)
+		cluster := d.indicatorCluster(rowIndicators{
+			attached: it.Session.Attached,
+			pending:  isSelected(d.Pending, it.Session.Name),
+		}, selected)
 		trailing = bg.Render(padTo("", indicatorSlotWidth-lipgloss.Width(cluster))) +
 			cluster +
 			bg.Render(padTo("", rowRightMargin))
@@ -330,14 +339,22 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 // indicatorCluster packs the row's indicators for a hard-right placement; a row
 // carrying none renders the empty string.
 func (d SessionDelegate) indicatorCluster(ind rowIndicators, selected bool) string {
-	if !ind.attached {
-		return ""
+	var cluster string
+	if ind.attached {
+		cluster += d.indicator(d.Theme.StatePositive, attachedIndicatorLetter, selected)
 	}
+	if ind.pending {
+		cluster += d.indicator(d.Theme.AccentAttention, pendingIndicatorLetter, selected)
+	}
+	return cluster
+}
+
+func (d SessionDelegate) indicator(tok theme.Token, letter string, selected bool) string {
 	glyph := rowIndicatorGlyph
 	if d.Colourless {
-		glyph = attachedIndicatorLetter
+		glyph = letter
 	}
-	return d.rowToken(lipgloss.Style{}, d.Theme.StatePositive, selected).Render(glyph)
+	return d.rowToken(lipgloss.Style{}, tok, selected).Render(glyph)
 }
 
 func padTo(s string, n int) string {

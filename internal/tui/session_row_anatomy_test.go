@@ -544,8 +544,8 @@ func TestSessionRow_DirColumnNarrowsByAGroupedRowsIndent(t *testing.T) {
 	sess := tmux.Session{Name: "s", Windows: 2, Dir: home + "/Code/portal/internal/tui"}
 	d := SessionDelegate{ShowDir: true}
 
-	flat := renderRow(d, 41, []list.Item{SessionItem{Session: sess}}, 0, 0)
-	grouped := renderRow(d, 41, []list.Item{SessionItem{Session: sess, GroupKey: "k"}}, 0, 0)
+	flat := renderRow(d, 42, []list.Item{SessionItem{Session: sess}}, 0, 0)
+	grouped := renderRow(d, 42, []list.Item{SessionItem{Session: sess, GroupKey: "k"}}, 0, 0)
 
 	if want := "…/portal/internal/tui"; !strings.Contains(ansi.Strip(flat), want) {
 		t.Errorf("flat row directory = %q, want it to carry %q", ansi.Strip(flat), want)
