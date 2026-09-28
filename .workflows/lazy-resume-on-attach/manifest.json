@@ -176,7 +176,8 @@
             "lazy-resume-on-attach-7": "tick-985773",
             "lazy-resume-on-attach-7-1": "tick-e33f05",
             "lazy-resume-on-attach-7-2": "tick-fd525c",
-            "lazy-resume-on-attach-7-3": "tick-423583"
+            "lazy-resume-on-attach-7-3": "tick-423583",
+            "lazy-resume-on-attach-7-4": "tick-7d91e7"
           },
           "storage_paths": [
             ".tick/"
@@ -371,6 +372,11 @@
                 "2": "approved",
                 "3": "approved"
               }
+            },
+            "p7": {
+              "tasks": {
+                "1": "approved"
+              }
             }
           },
           "consolidated_phases": [
@@ -379,7 +385,8 @@
             3,
             4,
             5,
-            6
+            6,
+            7
           ],
           "completed_phases": [
             1,
@@ -388,33 +395,6 @@
             4,
             5,
             6
-          ],
-          "bank": [
-            {
-              "task": "lazy-resume-on-attach-7-1",
-              "source": "reviewer",
-              "summary": "The recovery tail turns only ISIG back on, so a waiter killed while in raw mode hands the user's shell a raw terminal",
-              "failure": "A waiter killed mid-wait (a group SIGINT/SIGQUIT the new trap routes to the recovery tail, or a SIGTERM/SIGKILL from pkill portal) leaves the terminal raw with output processing, line editing and echo off; the user lands at their shell but output staircases and line-reading programs get no echo, noticed as a garbled pane after recovery (reproduced in a disposable ptl-review tmux server)",
-              "detail": "runResumeRecover (cmd/state_resume_recover.go:56) calls only enableTTYSignalsOrLog; a killed waiter never runs its makeStdinRaw restore (cmd/state_resume_wait.go:443-450); the recovery path needs a full cooked restore (ICANON, ECHO, ISIG, OPOST, ONLCR, ICRNL), e.g. a sibling of setTTYSignals in cmd/tty_signals.go; predates this task on the SIGTERM path, now reachable from a kill key group signal",
-              "files": [
-                "cmd/state_resume_recover.go",
-                "cmd/tty_signals.go",
-                "cmd/state_resume_wait.go"
-              ]
-            },
-            {
-              "task": "lazy-resume-on-attach-7-2",
-              "source": "reviewer",
-              "summary": "The two routes that hand a pane the user shell after a dead waiter restore different terminal state: the backstop runs stty sane, the Go recovery tail only turns ISIG back on",
-              "failure": "A waiter ended by a signal (pkill portal SIGTERM, an OOM kill, or the group SIGINT/SIGQUIT 7-1 routes into the tail) skips its deferred term.Restore, so the tty stays raw; the Go tail execs the user shell with only ISIG back on, so the recovered pane shows no echo and staircased output until the user runs reset, while the backstop route lands cooked",
-              "detail": "runResumeWait enters raw mode and restores only via defer cfg.restore() (cmd/state_resume_wait.go:115-120, makeStdinRaw :444-450); only SIGWINCH is handled (:435); runResumeRecover calls only enableTTYSignalsOrLog -> setTTYSignals (cmd/state_resume_recover.go:56, cmd/tty_signals.go:19-21); the backstop stty sane is at cmd/state_hydrate.go:297; option: have the tail restore cooked modes (ICANON, ECHO, OPOST, ICRNL, ISIG) through the same helper family",
-              "files": [
-                "cmd/state_resume_recover.go",
-                "cmd/tty_signals.go",
-                "cmd/state_resume_wait.go",
-                "cmd/state_hydrate.go"
-              ]
-            }
           ]
         }
       }
