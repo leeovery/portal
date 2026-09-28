@@ -321,13 +321,7 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 	cfg.restore()
 	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
 
-	shell := resolveShell()
-	prog, args := shell, []string{shell}
-	if command != "" {
-		prog, args = hookExecArgs(command, shell)
-	}
-
-	execHandOff(cfg.Logger, cfg.ExecSelf, prog, args, command != "")
+	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, command)
 	return nil
 }
 
@@ -357,8 +351,7 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 	cfg.restore()
 	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
 
-	shell := resolveShell()
-	execHandOff(cfg.Logger, cfg.ExecSelf, shell, []string{shell}, false)
+	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, "")
 	return nil
 }
 

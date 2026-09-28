@@ -182,11 +182,6 @@ func runHydrate(cfg hydrateConfig) error {
 	return nil
 }
 
-func execShellAndExit(cfg hydrateConfig) {
-	shell := resolveShell()
-	execHandOff(cfg.Logger, cfg.ExecShell, shell, []string{shell}, false)
-}
-
 func resolveShell() string {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -253,12 +248,7 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 	default:
 		lookup = cfg.Decision.Lookup
 	}
-	if !lookup.Found {
-		execShellAndExit(cfg)
-		return
-	}
-	prog, args := hookExecArgs(lookup.Command, resolveShell())
-	execHandOff(cfg.Logger, cfg.ExecShell, prog, args, true)
+	handOffToHookOrShell(cfg.Logger, cfg.ExecShell, lookup.Command)
 }
 
 // execResumeChainAndExit parks the pane on the draw followed by the chain's

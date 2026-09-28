@@ -55,10 +55,7 @@ func runResumeRecover(cfg resumeRecoverConfig) error {
 
 	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
 
-	shell := resolveShell()
-	args := []string{shell}
-
-	execHandOff(cfg.Logger, cfg.ExecShell, shell, args, false)
+	handOffToHookOrShell(cfg.Logger, cfg.ExecShell, "")
 	return nil
 }
 

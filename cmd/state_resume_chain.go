@@ -134,6 +134,19 @@ func execHandOff(logger *slog.Logger, execShell func(prog string, args []string)
 	execShell(prog, args)
 }
 
+// handOffToHookOrShell gives a pane answered on the panel or recovered by the
+// tail the same invocation as one that never waited. An empty command means no
+// registration.
+func handOffToHookOrShell(logger *slog.Logger, exec func(prog string, args []string), command string) {
+	shell := resolveShell()
+	if command == "" {
+		execHandOff(logger, exec, shell, []string{shell}, false)
+		return
+	}
+	prog, args := hookExecArgs(command, shell)
+	execHandOff(logger, exec, prog, args, true)
+}
+
 // resumeRegistrationOrLog answers the zero value for a registration carrying no
 // command as it does for a miss, so no caller can hand hookExecArgs an empty
 // command and compose sh -c "; exec $SHELL".

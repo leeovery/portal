@@ -132,3 +132,83 @@ func TestExecHandOff(t *testing.T) {
 		}
 	})
 }
+
+func TestHandOffToHookOrShell(t *testing.T) {
+	tests := []struct {
+		name        string
+		shellEnv    string
+		command     string
+		wantProg    string
+		wantArgs    []string
+		wantPresent string
+	}{
+		{
+			name:        "it hands a pane with no command its shell alone",
+			shellEnv:    "/bin/zsh",
+			wantProg:    "/bin/zsh",
+			wantArgs:    []string{"/bin/zsh"},
+			wantPresent: "false",
+		},
+		{
+			name:        "it hands a pane with no command /bin/sh when SHELL is unset",
+			wantProg:    "/bin/sh",
+			wantArgs:    []string{"/bin/sh"},
+			wantPresent: "false",
+		},
+		{
+			name:        "it hands a pane its command under sh followed by its shell",
+			shellEnv:    "/bin/zsh",
+			command:     "claude --resume 'x'",
+			wantProg:    "/bin/sh",
+			wantArgs:    []string{"sh", "-c", "claude --resume 'x'; exec /bin/zsh"},
+			wantPresent: "true",
+		},
+		{
+			name:        "it follows the command with /bin/sh when SHELL is unset",
+			command:     "make dev",
+			wantProg:    "/bin/sh",
+			wantArgs:    []string{"sh", "-c", "make dev; exec /bin/sh"},
+			wantPresent: "true",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SHELL", tt.shellEnv)
+			logger, sink := logtest.NewCaptureLogger(t)
+			var atExec logtest.Records
+			var gotProg string
+			var gotArgs []string
+			execs := 0
+
+			handOffToHookOrShell(logger, func(prog string, args []string) {
+				execs++
+				atExec = sink.Records().WithMessage("exec")
+				gotProg, gotArgs = prog, args
+			}, tt.command)
+
+			if execs != 1 {
+				t.Fatalf("exec called %d times, want exactly 1", execs)
+			}
+			if gotProg != tt.wantProg {
+				t.Errorf("handed-over program = %q, want %q", gotProg, tt.wantProg)
+			}
+			if !slices.Equal(gotArgs, tt.wantArgs) {
+				t.Errorf("handed-over argv = %q, want %q", gotArgs, tt.wantArgs)
+			}
+			if len(atExec) != 1 {
+				t.Fatalf("exec records captured when the hand-off ran = %d, want exactly 1", len(atExec))
+			}
+			rec := atExec[0]
+			if got := rec.AttrString(t, "target"); got != tt.wantProg {
+				t.Errorf("exec marker target = %q, want %q", got, tt.wantProg)
+			}
+			if got := rec.AttrString(t, "args"); got != strings.Join(tt.wantArgs, " ") {
+				t.Errorf("exec marker args = %q, want %q", got, strings.Join(tt.wantArgs, " "))
+			}
+			if got := rec.AttrString(t, "hook_present"); got != tt.wantPresent {
+				t.Errorf("exec marker hook_present = %q, want %q", got, tt.wantPresent)
+			}
+		})
+	}
+}
