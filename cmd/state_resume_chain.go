@@ -59,10 +59,6 @@ type resumeChainPayload struct {
 	DropInput bool
 }
 
-// resumeChainArgv composes one chain command's argv. The recovery tail is
-// handed only the flags it registers: a flag a subcommand does not know fails
-// its parse, and on the tail's path a failed parse closes the pane the tail
-// exists to keep open.
 func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	argv := []string{exe, "state", subcommand}
 	if subcommand == resumeRecoverSubcommand {

@@ -346,3 +346,142 @@ func warnMessages(t *testing.T) map[string]int {
 	}
 	return counts
 }
+
+// executeResumeRecover runs the tail's command line through the real parse and
+// hands back the config the parse produced, with the recovery driven through
+// probe seams so no marker is read from tmux and no process image is replaced.
+func executeResumeRecover(t *testing.T, args []string, probe *resumeRecoverProbe) (resumeRecoverConfig, error) {
+	t.Helper()
+	for _, name := range []string{resumeFlagPane, resumeFlagPaneKey} {
+		if err := stateResumeRecoverCmd.Flags().Set(name, ""); err != nil {
+			t.Fatalf("reset --%s: %v", name, err)
+		}
+	}
+
+	var parsed resumeRecoverConfig
+	withFuncSeam(t, &resumeRecoverRunFunc, func(cfg resumeRecoverConfig) error {
+		parsed = cfg
+		driven := newResumeRecoverConfig(t, probe)
+		driven.Pane = cfg.Pane
+		driven.PaneKey = cfg.PaneKey
+		return runResumeRecover(driven)
+	})
+
+	resetRootCmd()
+	rootCmd.SetOut(new(bytes.Buffer))
+	errBuf := new(bytes.Buffer)
+	rootCmd.SetErr(errBuf)
+	rootCmd.SetArgs(append([]string{"state", resumeRecoverSubcommand}, args...))
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Logf("stderr: %s", errBuf)
+	}
+	return parsed, err
+}
+
+func TestStateResumeRecoverCommand_ForeignArgv(t *testing.T) {
+	full := resumeChainPayload{
+		Command:   "claude --resume abc",
+		Report:    "could not clear the pending marker",
+		HookKey:   "tok123",
+		Pane:      "%7",
+		PaneKey:   "proj-a1b2:0.1",
+		Width:     120,
+		Height:    40,
+		Screen:    resumeScreenDiscard,
+		DropInput: true,
+	}
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "the whole payload an earlier build could have handed it",
+			args: resumeChainArgv("portal", resumeDrawSubcommand, full)[3:],
+		},
+		{
+			name: "a flag a later build added, with its value attached",
+			args: []string{"--pane", "%7", "--resume-attempt=3", "--pane-key", "proj-a1b2:0.1"},
+		},
+		{
+			name: "a flag a later build added, with its value separate",
+			args: []string{"--resume-attempt", "3", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"},
+		},
+		{
+			name: "a switch a later build added, last on the line",
+			args: []string{"--pane", "%7", "--pane-key", "proj-a1b2:0.1", "--quiet"},
+		},
+		{
+			name: "a positional word this build takes none of",
+			args: []string{"attempt-3", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"},
+		},
+		{
+			name: "a shorthand this build does not register",
+			args: []string{"-q", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run("it recovers the pane when handed "+tc.name, func(t *testing.T) {
+			var probe resumeRecoverProbe
+			probe.markerValue = "1"
+			sink := logtest.Install(t)
+
+			parsed, err := executeResumeRecover(t, tc.args, &probe)
+			if err != nil {
+				t.Fatalf("the tail refused its argv %q: %v", tc.args, err)
+			}
+
+			if parsed.Pane != "%7" {
+				t.Errorf("pane = %q, want %q", parsed.Pane, "%7")
+			}
+			if parsed.PaneKey != "proj-a1b2:0.1" {
+				t.Errorf("pane key = %q, want %q", parsed.PaneKey, "proj-a1b2:0.1")
+			}
+			assertRecovered(t, &probe, sink)
+		})
+	}
+}
+
+func TestStateResumeRecoverCommand_PaneFromEnvironment(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		args []string
+		want string
+	}{
+		{name: "it recovers the pane $TMUX_PANE names when handed no --pane", env: "%12", args: []string{"--pane-key", "proj-a1b2:0.1"}, want: "%12"},
+		{name: "it recovers the pane $TMUX_PANE names when handed an empty --pane", env: "%12", args: []string{"--pane", "", "--pane-key", "proj-a1b2:0.1"}, want: "%12"},
+		{name: "it addresses the pane a non-empty --pane names", env: "%12", args: []string{"--pane", "%7", "--pane-key", "proj-a1b2:0.1"}, want: "%7"},
+		{name: "it recovers the pane $TMUX_PANE names when handed no flags at all", env: "%12", args: nil, want: "%12"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TMUX_PANE", tc.env)
+			var probe resumeRecoverProbe
+			probe.markerValue = "1"
+			sink := logtest.Install(t)
+
+			parsed, err := executeResumeRecover(t, tc.args, &probe)
+			if err != nil {
+				t.Fatalf("the tail refused its argv %q: %v", tc.args, err)
+			}
+
+			if parsed.Pane != tc.want {
+				t.Errorf("pane = %q, want %q", parsed.Pane, tc.want)
+			}
+			assertRecovered(t, &probe, sink)
+		})
+	}
+}
+
+func TestStateResumeDrawCommand_RefusesAFlagItDoesNotRegister(t *testing.T) {
+	withFuncSeam(t, &resumeDrawRunFunc, func(resumeDrawConfig) error { return nil })
+
+	resetRootCmd()
+	rootCmd.SetOut(new(bytes.Buffer))
+	rootCmd.SetErr(new(bytes.Buffer))
+	rootCmd.SetArgs(append(resumeChainArgv("portal", resumeDrawSubcommand, samplePayload())[1:], "--resume-attempt=3"))
+	if err := rootCmd.Execute(); err == nil {
+		t.Error("resume-draw accepted a flag it does not register; only the chain's tail tolerates one")
+	}
+}

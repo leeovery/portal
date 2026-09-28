@@ -69,10 +69,17 @@ var resumeRecoverRunFunc = runResumeRecover
 var stateResumeRecoverCmd = &cobra.Command{
 	Use:    resumeRecoverSubcommand,
 	Short:  "Recover a pane whose resume waiter ended without answering (internal)",
-	Args:   cobra.NoArgs,
 	Hidden: true,
+	// Chains parked under another build call this subcommand by name, so it
+	// tolerates flags and arguments it does not register: a parse it refuses
+	// closes the pane it exists to keep open.
+	Args:               cobra.ArbitraryArgs,
+	FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pane, _ := cmd.Flags().GetString(resumeFlagPane)
+		if pane == "" {
+			pane = os.Getenv("TMUX_PANE")
+		}
 		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
 		target := tmux.PaneIDTarget(pane)
 
@@ -94,10 +101,8 @@ var stateResumeRecoverCmd = &cobra.Command{
 }
 
 func init() {
-	stateResumeRecoverCmd.Flags().String(resumeFlagPane, "", "The pane id the marker reads and writes address")
+	stateResumeRecoverCmd.Flags().String(resumeFlagPane, "", "The pane id the marker reads and writes address (default $TMUX_PANE)")
 	stateResumeRecoverCmd.Flags().String(resumeFlagPaneKey, "", "The pane key the chain's records name the pane by")
-	// No flag is required: a parse this command refuses closes the pane it
-	// exists to keep open.
 
 	stateCmd.AddCommand(stateResumeRecoverCmd)
 }

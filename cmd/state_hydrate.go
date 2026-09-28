@@ -289,10 +289,23 @@ func execResumeChainAndExit(cfg hydrateConfig) {
 // inherit it.
 const parkedChainTrap = "trap : INT QUIT; "
 
+// parkedChainBackstop leaves the pane at a shell when the tail could not start
+// at all. It keys on the shell's could-not-run statuses, not on any failure: a
+// tail that recovered the pane exec'd the user's shell, whose exit status
+// arrives here, and a second shell after it would make the pane take two exits
+// to close. The executable check tells a tail that never started from a shell
+// that exited 126 or 127 itself. stty restores the terminal the chain left with
+// signal generation off.
+func parkedChainBackstop(exe string) string {
+	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(exe) +
+		` ]; then stty sane 2>/dev/null; exec "${SHELL:-/bin/sh}"; fi;; esac; exit $s`
+}
+
 func parkedResumeChain(exe string, payload resumeChainPayload) string {
 	return parkedChainTrap +
 		shellquote.Join(resumeChainArgv(exe, resumeDrawSubcommand, payload)) + "; " +
-		shellquote.Join(resumeChainArgv(exe, resumeRecoverSubcommand, payload))
+		shellquote.Join(resumeChainArgv(exe, resumeRecoverSubcommand, payload)) +
+		parkedChainBackstop(exe)
 }
 
 // Clearing the skeleton marker is the recovery: the FIFO is already unlinked, so
