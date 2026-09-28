@@ -774,7 +774,7 @@ func TestDoctorCheckOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
-	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json", "stale hooks", "stale projects", "host terminal", "pending resumes"}
+	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json", "stale hooks", "stale projects", "host terminal", "pending resumes", "resume mode"}
 	if len(results) != len(want) {
 		t.Fatalf("check count = %d, want %d: %+v", len(results), len(want), results)
 	}

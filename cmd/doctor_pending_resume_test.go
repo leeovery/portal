@@ -90,8 +90,8 @@ func TestDoctorPendingResume(t *testing.T) {
 		if host == -1 || host > i {
 			t.Errorf("pending line must trail the pass/fail catalog and the host-terminal line:\n%s", outBuf.String())
 		}
-		if i != len(lines)-2 {
-			t.Errorf("pending line at %d; want the last line before the summary (%d):\n%s", i, len(lines)-2, outBuf.String())
+		if i != len(lines)-3 {
+			t.Errorf("pending line at %d; want it followed only by the resume-mode line and the summary (%d):\n%s", i, len(lines)-3, outBuf.String())
 		}
 	})
 

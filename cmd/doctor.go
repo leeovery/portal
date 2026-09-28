@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -336,7 +337,10 @@ func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
 	if deps.Detector != nil && deps.Resolve != nil {
 		results = append(results, checkHostTerminal(deps.Detector, deps.Resolve))
 	}
-	results = append(results, checkPendingResumes(serverUp, deps.PendingResumes))
+	results = append(results,
+		checkPendingResumes(serverUp, deps.PendingResumes),
+		checkResumeMode(deps.PrefsStore),
+	)
 	return results, nil
 }
 
@@ -355,6 +359,16 @@ func checkPendingResumes(serverUp bool, read func() (tmux.PendingResumeView, err
 		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read pending panes (transient tmux error)"}
 	}
 	return checkResult{name: name, status: checkInfo, detail: pluralCount(view.Panes, "pane waiting to resume", "panes waiting to resume")}
+}
+
+// The error is discarded: LoadResumeMode answers resumemode.Default alongside it.
+func checkResumeMode(store *prefs.Store) checkResult {
+	const name = "resume mode"
+	mode := resumemode.Default
+	if store != nil {
+		mode, _ = store.LoadResumeMode()
+	}
+	return checkResult{name: name, status: checkInfo, detail: mode.String()}
 }
 
 // An unsupported or remote host is an environmental state, not a Portal-health
