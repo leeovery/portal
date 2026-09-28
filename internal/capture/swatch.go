@@ -106,7 +106,7 @@ const (
 	swatchSessionName  = "portal-9fk2"
 	swatchSessionPath  = "~/code/portal"
 	swatchWindowCount  = "3 windows"
-	swatchAttached     = "● attached"
+	swatchIndicatorDot = "●"
 	swatchAttentionMsg = "⚠ state saver is not running — restore may be incomplete"
 )
 
@@ -128,7 +128,7 @@ func renderSwatch(th theme.Theme) string {
 	b.WriteString(selectionBand(th))
 	b.WriteString("\n")
 	// Caption order matches the band's left-to-right order — the order is the mapping.
-	b.WriteString(caption(th, "fg-on-tint: text.on-selection · text.tertiary · text.secondary · state.positive"))
+	b.WriteString(caption(th, "fg-on-tint: text.on-selection · text.tertiary · text.secondary · state.positive · accent.attention"))
 	b.WriteString("\n\n")
 
 	b.WriteString(tintLabel(th, "bg.attention", th.BgAttention))
@@ -184,7 +184,10 @@ func selectionBand(th theme.Theme) string {
 		onTint(th.TextOnSelection, tint).Bold(true).Render(swatchSessionName),
 		onTint(th.TextTertiary, tint).Render(swatchSessionPath),
 		onTint(th.TextSecondary, tint).Render(swatchWindowCount),
-		onTint(th.StatePositive, tint).Render(swatchAttached),
+		// Packed as the picker's indicator cluster packs them: attached, then
+		// pending, adjacent.
+		onTint(th.StatePositive, tint).Render(swatchIndicatorDot) +
+			onTint(th.AccentAttention, tint).Render(swatchIndicatorDot),
 	}, gap)
 	return padBand(content, tint)
 }

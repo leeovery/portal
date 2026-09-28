@@ -70,7 +70,7 @@ one means knowing what the colour signifies.
 | `accent.primary` | The primary accent, and the most used. The cursor, the selector bar, the active dot, the `?` key, a focused field label, the mode bar, the loading bar. |
 | `accent.key` | Key-hint glyphs — the keys named in the footer and in modal hints. |
 | `accent.mode` | Signals a distinct mode. The Sessions header, preview chrome, the tick of the step in progress. |
-| `accent.attention` | The warm one. The `/` filter query, edit mode, the `⚠` warning glyph. |
+| `accent.attention` | The warm one. The `/` filter query, edit mode, the `⚠` warning glyph, the `●` pending dot. The pending dot renders on both the canvas and the selected row, so tune this value against `bg.selection` as well as `canvas`. |
 | `state.positive` | Live, attached, done. The `●` attached dot, the Sessions count, the Projects label, `✓`, a success flash. |
 | `state.destructive` | Kill and delete emphasis, and the `▲` marker. |
 

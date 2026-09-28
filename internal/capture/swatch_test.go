@@ -229,7 +229,11 @@ func TestSwatchCoversForegroundOnTintPairings(t *testing.T) {
 		{"text.secondary", selectionBand(th),
 			wantStyle(th.TextSecondary, th.BgSelection).Render(swatchWindowCount)},
 		{"state.positive", selectionBand(th),
-			wantStyle(th.StatePositive, th.BgSelection).Render(swatchAttached)},
+			wantStyle(th.StatePositive, th.BgSelection).Render(swatchIndicatorDot) +
+				wantStyle(th.AccentAttention, th.BgSelection).Render(swatchIndicatorDot)},
+		{"accent.attention", selectionBand(th),
+			wantStyle(th.StatePositive, th.BgSelection).Render(swatchIndicatorDot) +
+				wantStyle(th.AccentAttention, th.BgSelection).Render(swatchIndicatorDot)},
 		{"text.on-attention", attentionBand(th),
 			wantStyle(th.TextOnAttention, th.BgAttention).Render(swatchAttentionMsg)},
 	}
@@ -241,6 +245,15 @@ func TestSwatchCoversForegroundOnTintPairings(t *testing.T) {
 		if !strings.Contains(out, pairing.label) {
 			t.Errorf("no caption names the %s pairing\n--- swatch ---\n%s", pairing.label, out)
 		}
+	}
+
+	if strings.Contains(out, "attached") {
+		t.Errorf("swatch still carries the retired worded attached marker\n--- swatch ---\n%s", out)
+	}
+
+	selectionCaption := "state.positive · accent.attention"
+	if !strings.Contains(out, selectionCaption) {
+		t.Errorf("the selection-band caption does not name accent.attention after state.positive\n--- swatch ---\n%s", out)
 	}
 
 	for _, glyph := range []string{"●", "⚠"} {

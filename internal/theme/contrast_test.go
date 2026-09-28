@@ -188,24 +188,50 @@ func TestBgSubtlePairRule(t *testing.T) {
 func TestForegroundOnTintPairings(t *testing.T) {
 	themes := embeddedThemes(t)
 	for _, slug := range slices.Sorted(maps.Keys(themes)) {
-		th := themes[slug]
-		pairings := []struct {
-			foreground string
-			tint       string
-			fg, bg     string
-		}{
-			{"text.on-selection", "bg.selection", th.TextOnSelection.Value, th.BgSelection.Value},
-			{"text.secondary", "bg.selection", th.TextSecondary.Value, th.BgSelection.Value},
-			{"text.tertiary", "bg.selection", th.TextTertiary.Value, th.BgSelection.Value},
-			{"state.positive", "bg.selection", th.StatePositive.Value, th.BgSelection.Value},
-			{"text.on-attention", "bg.attention", th.TextOnAttention.Value, th.BgAttention.Value},
-		}
-
-		for _, pair := range pairings {
+		for _, pair := range foregroundOnTintPairings(themes[slug]) {
 			t.Run(slug+"/"+pair.foreground+" on "+pair.tint, func(t *testing.T) {
-				assertAtLeast(t, slug+" "+pair.foreground+" on "+pair.tint, pair.fg, pair.bg, floorNormal)
+				assertAtLeast(t, slug+" "+pair.foreground+" on "+pair.tint, pair.fg, pair.bg, pair.floor)
 			})
 		}
+	}
+}
+
+// accent.attention takes the non-text floor on bg.selection because the
+// session row's pending dot is a graphical indicator, not text.
+func TestForegroundOnTintPairingFloors(t *testing.T) {
+	want := map[string]float64{
+		"text.on-selection on bg.selection": floorNormal,
+		"text.secondary on bg.selection":    floorNormal,
+		"text.tertiary on bg.selection":     floorNormal,
+		"state.positive on bg.selection":    floorNormal,
+		"accent.attention on bg.selection":  floorLargeUI,
+		"text.on-attention on bg.attention": floorNormal,
+	}
+
+	got := make(map[string]float64)
+	for _, pair := range foregroundOnTintPairings(theme.Theme{}) {
+		got[pair.foreground+" on "+pair.tint] = pair.floor
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("foreground-on-tint floors = %v, want %v", got, want)
+	}
+}
+
+type tintPairing struct {
+	foreground string
+	tint       string
+	fg, bg     string
+	floor      float64
+}
+
+func foregroundOnTintPairings(th theme.Theme) []tintPairing {
+	return []tintPairing{
+		{"text.on-selection", "bg.selection", th.TextOnSelection.Value, th.BgSelection.Value, floorNormal},
+		{"text.secondary", "bg.selection", th.TextSecondary.Value, th.BgSelection.Value, floorNormal},
+		{"text.tertiary", "bg.selection", th.TextTertiary.Value, th.BgSelection.Value, floorNormal},
+		{"state.positive", "bg.selection", th.StatePositive.Value, th.BgSelection.Value, floorNormal},
+		{"accent.attention", "bg.selection", th.AccentAttention.Value, th.BgSelection.Value, floorLargeUI},
+		{"text.on-attention", "bg.attention", th.TextOnAttention.Value, th.BgAttention.Value, floorNormal},
 	}
 }
 
