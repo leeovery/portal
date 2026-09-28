@@ -208,10 +208,17 @@ func installResumeMode(cfg hydrateConfig) resumemode.Mode {
 		load = loadPrefsStoreNoMigrate
 	}
 	store, err := load()
-	if err != nil || store == nil {
+	if err != nil {
+		return installResumeModeOf(nil)
+	}
+	return installResumeModeOf(store)
+}
+
+// The read error is discarded: LoadResumeMode answers resumemode.Default beside it.
+func installResumeModeOf(store *prefs.Store) resumemode.Mode {
+	if store == nil {
 		return resumemode.Default
 	}
-	// The error is discarded because the mode beside it is already the default.
 	mode, _ := store.LoadResumeMode()
 	return mode
 }
