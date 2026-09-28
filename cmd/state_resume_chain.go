@@ -109,7 +109,7 @@ func resumeChainExe() (string, error) {
 	return exe, nil
 }
 
-// resumeHandOff replaces the pane's process image with the chain's next
+// resumeHandOff replaces this process's image with the chain's next
 // subcommand. The exec marker must stay the statement immediately before the
 // exec: the writer behind it is unbuffered, so it reaches the kernel before the
 // image is replaced, and a marker emitted after the exec is never written at

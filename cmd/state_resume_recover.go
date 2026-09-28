@@ -22,10 +22,10 @@ type resumeRecoverConfig struct {
 	ExecShell        func(prog string, args []string)
 }
 
-// runResumeRecover is the tail of the chain a waiting pane parks: it runs when
-// the waiter above it has stopped being the pane's process, and gives the pane a
-// shell so tmux does not close it — and with it the session and the whole
-// transcript of a pane that is the only one in it.
+// runResumeRecover is the tail of the chain a waiting pane parks: it runs once
+// the waiter above it has ended, and gives the pane a shell so tmux does not
+// close it — and with it the session and the whole transcript of a pane that is
+// the only one in it.
 //
 // A pane no longer carrying the pending marker was answered and has already
 // exec'd its own shell, so the tail does nothing at all: a second shell there
