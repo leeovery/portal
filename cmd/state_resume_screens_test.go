@@ -3,8 +3,10 @@ package cmd
 import (
 	"errors"
 	"io"
+	"os"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -186,6 +188,92 @@ func inertEscape(t *testing.T, payload resumeChainPayload) *resumeWaitProbe {
 	return h.probe
 }
 
+// pipedKeysHarness feeds keys down a pipe and hands every window the wait arms
+// to the test, so a chord, the key after it and a resize are each ordered
+// against the loop rather than against the clock. A press returns only once the
+// wait has read every byte of it.
+type pipedKeysHarness struct {
+	t       *testing.T
+	probe   *resumeWaitProbe
+	writer  *io.PipeWriter
+	winch   chan os.Signal
+	follows chan chan time.Time
+	settles chan chan time.Time
+	done    chan error
+}
+
+func startPipedKeys(t *testing.T, payload resumeChainPayload) *pipedKeysHarness {
+	t.Helper()
+	pipeReader, pipeWriter := io.Pipe()
+	h := &pipedKeysHarness{
+		t:       t,
+		probe:   new(resumeWaitProbe),
+		writer:  pipeWriter,
+		winch:   make(chan os.Signal, 1),
+		follows: make(chan chan time.Time, 8),
+		settles: make(chan chan time.Time, 8),
+		done:    make(chan error, 1),
+	}
+	t.Cleanup(func() { _ = pipeWriter.Close() })
+
+	cfg := newResumeWaitConfig(t, h.probe, payload, &oneByteReader{t: t, inner: pipeReader})
+	cfg.Winch = h.winch
+	cfg.Size = resizedSize
+	cfg.Settle = func(d time.Duration) <-chan time.Time {
+		timer := make(chan time.Time, 1)
+		switch d {
+		case resumeEscapeFollow:
+			h.follows <- timer
+		case resumeResizeSettle:
+			h.settles <- timer
+		default:
+			t.Errorf("window = %v, want the escape follow or the resize settle", d)
+		}
+		return timer
+	}
+
+	go func() { h.done <- runResumeWait(cfg) }()
+	return h
+}
+
+func (h *pipedKeysHarness) press(keys string) {
+	h.t.Helper()
+	written := make(chan struct{})
+	go func() {
+		_, _ = h.writer.Write([]byte(keys))
+		close(written)
+	}()
+	select {
+	case <-written:
+	case <-time.After(resumeEscapeTestBudget):
+		h.t.Fatalf("the wait never read all of %q", keys)
+	}
+}
+
+// awaitWindow takes the next window of a kind the wait armed, failing when it
+// arms none: a wait still consuming a sequence arms nothing.
+func (h *pipedKeysHarness) awaitWindow(windows chan chan time.Time, what string) chan time.Time {
+	h.t.Helper()
+	select {
+	case timer := <-windows:
+		return timer
+	case <-time.After(resumeEscapeTestBudget):
+		h.t.Fatalf("the wait armed no %s", what)
+	}
+	return nil
+}
+
+func (h *pipedKeysHarness) wait() error {
+	h.t.Helper()
+	select {
+	case err := <-h.done:
+		return err
+	case <-time.After(resumeEscapeTestBudget):
+		h.t.Fatal("the wait never ended")
+	}
+	return nil
+}
+
 func TestRunResumeWait_Screens(t *testing.T) {
 	t.Run("it opens the confirmation on d", func(t *testing.T) {
 		payload := reportedPayload(resumeScreenPanel)
@@ -253,6 +341,25 @@ func TestRunResumeWait_Screens(t *testing.T) {
 				swallowed(t, reportedPayload(tc.screen), tc.seq)
 			})
 		}
+	})
+
+	t.Run("it swallows an SS3 whose final byte is an acting key", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			screen string
+			seq    string
+		}{
+			{"y on the confirmation", resumeScreenDiscard, "\x1bOy"},
+			{"d on the waiting panel", resumeScreenPanel, "\x1bOd"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				swallowed(t, reportedPayload(tc.screen), tc.seq)
+			})
+		}
+
+		payload := reportedPayload(resumeScreenDiscard)
+		assertDiscardAnswered(t, answered(t, payload, "\x1bOy"+"y"), payload)
 	})
 
 	t.Run("it swallows a terminal background-colour reply whole", func(t *testing.T) {
@@ -328,6 +435,101 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				swallowed(t, reportedPayload(tc.screen), tc.seq)
+			})
+		}
+	})
+
+	t.Run("it resumes on the Enter after a two-byte chord on the waiting panel", func(t *testing.T) {
+		payload := reportedPayload(resumeScreenPanel)
+		probe := resumeWaitProbe{lookup: foundHook(payload.Command)}
+
+		if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, "\x1bb\r"))); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+
+		if probe.clearCalls != 1 {
+			t.Errorf("ClearMarker called %d times, want 1", probe.clearCalls)
+		}
+		if !slices.Equal(probe.lookupKeys, []string{payload.HookKey}) {
+			t.Errorf("the store was read for %q, want one read for %q", probe.lookupKeys, payload.HookKey)
+		}
+		assertHookHandOff(t, &probe, payload.Command)
+	})
+
+	t.Run("it confirms on the y after a two-byte chord on the confirmation", func(t *testing.T) {
+		payload := reportedPayload(resumeScreenDiscard)
+
+		assertDiscardAnswered(t, answered(t, payload, "\x1bxy"), payload)
+	})
+
+	t.Run("it backs out on a lone Escape after an Escape pair on the confirmation", func(t *testing.T) {
+		payload := reportedPayload(resumeScreenDiscard)
+		h := startPipedKeys(t, payload)
+
+		h.press("\x1b\x1b")
+		h.awaitWindow(h.follows, "follow window for the pair's Escape")
+		h.press("\x1b")
+		h.awaitWindow(h.follows, "follow window for the lone Escape") <- time.Now()
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+		assertHandOff(t, h.probe, onScreen(payload, resumeScreenPanel))
+		assertNoStateTouched(t, h.probe)
+	})
+
+	t.Run("it swallows a two-byte chord of an acting key", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			screen string
+			seq    string
+		}{
+			{"y on the confirmation", resumeScreenDiscard, "\x1by"},
+			{"d on the waiting panel", resumeScreenPanel, "\x1bd"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				swallowed(t, reportedPayload(tc.screen), tc.seq)
+			})
+		}
+	})
+
+	t.Run("it redraws on a resize that settles after a two-byte chord", func(t *testing.T) {
+		payload := drawnPayload()
+		h := startPipedKeys(t, payload)
+
+		h.press("\x1bb")
+		h.awaitWindow(h.follows, "follow window for the chord's Escape")
+		h.winch <- syscall.SIGWINCH
+		h.awaitWindow(h.settles, "settle window for the resize") <- time.Now()
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+		assertHandOff(t, h.probe, payload)
+		assertNoStateTouched(t, h.probe)
+	})
+
+	t.Run("it ends a chord of a string-introducer key at two bytes", func(t *testing.T) {
+		t.Run("P then Enter on the waiting panel", func(t *testing.T) {
+			payload := reportedPayload(resumeScreenPanel)
+			probe := resumeWaitProbe{lookup: foundHook(payload.Command)}
+
+			if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, "\x1bP\r"))); err != nil {
+				t.Fatalf("runResumeWait() error = %v", err)
+			}
+
+			if probe.clearCalls != 1 {
+				t.Errorf("ClearMarker called %d times, want 1", probe.clearCalls)
+			}
+			assertHookHandOff(t, &probe, payload.Command)
+		})
+
+		for _, seq := range []string{"\x1b_y", "\x1bXy"} {
+			t.Run(seq[1:2]+" then y on the confirmation", func(t *testing.T) {
+				payload := reportedPayload(resumeScreenDiscard)
+
+				assertDiscardAnswered(t, answered(t, payload, seq), payload)
 			})
 		}
 	})

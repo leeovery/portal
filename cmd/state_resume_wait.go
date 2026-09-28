@@ -26,10 +26,13 @@ const (
 	resumeKeyEscape  = 0x1b
 )
 
-// The bytes that shape an escape sequence: an OSC opens with ']' and ends at
-// BEL or ST (ESC '\\'); every other sequence ends at a byte in the CSI final
-// range.
+// The bytes that shape an escape sequence, branched on the byte after the ESC:
+// a CSI ('[') or SS3 ('O') ends at a byte in the CSI final range; an OSC (']')
+// ends at BEL or ST (ESC '\\'); any other byte — an Alt chord, an Option-arrow,
+// a second ESC — completes a two-byte sequence and nothing after it is read.
 const (
+	resumeCSIIntroducer = '['
+	resumeSS3Introducer = 'O'
 	resumeOSCIntroducer = ']'
 	resumeOSCBell       = 0x07
 	resumeSTFinal       = '\\'
@@ -213,12 +216,18 @@ func resolveResumeEscape(cfg resumeWaitConfig, reader resumeReader) (alone, pend
 }
 
 // consumeResumeSequence reads to the end of the sequence introducer opened,
-// taking the introducer itself as never its end: the '[' and 'O' that open a
-// CSI or SS3 sit inside the final range.
+// never taking a CSI or SS3 introducer as its end: '[' and 'O' sit inside the
+// final range.
 func consumeResumeSequence(reader resumeReader, introducer byte) error {
-	limit, ended := resumeEscapeSequenceCap, isCSIFinal
-	if introducer == resumeOSCIntroducer {
+	var limit int
+	var ended func(byte) bool
+	switch introducer {
+	case resumeCSIIntroducer, resumeSS3Introducer:
+		limit, ended = resumeEscapeSequenceCap, isCSIFinal
+	case resumeOSCIntroducer:
 		limit, ended = resumeOSCSequenceCap, oscTerminator()
+	default:
+		return nil
 	}
 	for consumed := 2; consumed < limit; consumed++ {
 		b, err := reader.next()
