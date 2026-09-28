@@ -149,7 +149,7 @@ func TestColourless_StateStaysGlyphDistinct(t *testing.T) {
 	m := colourlessTestModel(t, 90, 24)
 	frame := m.View().Content
 
-	for _, want := range []string{"● attached", "alpha", "bravo", "charlie"} {
+	for _, want := range []string{"3 windows  " + attachedIndicatorLetter, "alpha", "bravo", "charlie"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("colourless frame missing %q (state must stay glyph-distinct without colour)", want)
 		}

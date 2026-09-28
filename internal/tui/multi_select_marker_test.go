@@ -80,7 +80,7 @@ func TestSessionRow_MarkedAlignmentByteUnchanged(t *testing.T) {
 	marked := renderRow(SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, Selected: markedSet("alpha")}, w, items, 0, 1)
 	unmarked := renderRow(SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, Selected: markedSet("bravo")}, w, items, 0, 1)
 
-	for _, sub := range []string{"alpha", "window", "attached"} {
+	for _, sub := range []string{"alpha", "window", "windows  " + rowIndicatorGlyph} {
 		mc, uc := visibleColOf(marked, sub), visibleColOf(unmarked, sub)
 		if mc < 0 || uc < 0 {
 			t.Fatalf("column %q missing: marked=%q unmarked=%q", sub, ansi.Strip(marked), ansi.Strip(unmarked))

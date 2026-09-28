@@ -27,22 +27,32 @@ const (
 	// blank cells, so the name always starts at the same left edge.
 	leftBarColumnWidth = 2
 	nameGap            = 2
-	// Fixed so counts and attached bullets stay column-aligned; sized to fit
+	// Fixed so counts stay column-aligned; sized to fit
 	// "999 windows" without bleeding into the next slot.
 	countSlotWidth = 11
 	// Mirrors the left inset; a wider right margin reads as oversized.
 	rowRightMargin = leftBarColumnWidth
 )
 
-// attachedMarker's width fixes the attached trailing slot: an unattached row
-// renders an empty slot of the same width, keeping the bullets column-aligned.
-const attachedMarker = "● attached"
+const (
+	rowIndicatorGlyph = "●"
+	// NO_COLOR keeps state glyph-backed: a letter per indicator, same cell.
+	attachedIndicatorLetter = "A"
+)
 
-// goneBadge must not exceed attachedSlotWidth + rowRightMargin cells: it fills
-// the trailing region, keeping the row width unchanged.
+// A gone row reserves the badge's width in place of the indicator slot and right margin.
 const goneBadge = "session gone"
 
-var attachedSlotWidth = lipgloss.Width(attachedMarker)
+type rowIndicators struct {
+	attached bool
+}
+
+// Sized to the widest cluster either colour mode renders, so an unattached row
+// pads to the same width as an attached one.
+var indicatorSlotWidth = max(
+	lipgloss.Width(SessionDelegate{}.indicatorCluster(rowIndicators{attached: true}, false)),
+	lipgloss.Width(SessionDelegate{Colourless: true}.indicatorCluster(rowIndicators{attached: true}, false)),
+)
 
 const groupSeparator = "···"
 
@@ -258,7 +268,11 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	// An unsized list (before the first WindowSizeMsg) has no width to flex
 	// against — fall back to a left-to-right flow with no truncation.
 	total := m.Width()
-	used := leftBarColumnWidth + lipgloss.Width(indent) + nameGap + countSlotWidth + attachedSlotWidth + rowRightMargin
+	trailingWidth := indicatorSlotWidth + rowRightMargin
+	if goneRow {
+		trailingWidth = lipgloss.Width(goneBadge)
+	}
+	used := leftBarColumnWidth + lipgloss.Width(indent) + nameGap + countSlotWidth + trailingWidth
 
 	var name, namePad, dirText string
 	if total <= 0 {
@@ -293,20 +307,15 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	count := d.rowToken(lipgloss.Style{}, countTok, selected).Render(countText) +
 		bg.Render(padTo("", countSlotWidth-lipgloss.Width(countText)))
 
-	// On a gone row the badge replaces the attached slot and the right margin,
-	// keeping the row width unchanged.
 	var trailing string
 	if goneRow {
 		badge := d.rowToken(lipgloss.Style{}, d.Theme.StateDestructive, selected).Render(goneBadge)
-		trailing = badge + bg.Render(padTo("", attachedSlotWidth+rowRightMargin-lipgloss.Width(goneBadge)))
+		trailing = badge + bg.Render(padTo("", trailingWidth-lipgloss.Width(goneBadge)))
 	} else {
-		attached := bg.Render(padTo("", attachedSlotWidth))
-		if it.Session.Attached {
-			attached = d.rowToken(lipgloss.Style{}, d.Theme.StatePositive, selected).Render(attachedMarker) +
-				bg.Render(padTo("", attachedSlotWidth-lipgloss.Width(attachedMarker)))
-		}
-		rightMargin := bg.Render(padTo("", rowRightMargin))
-		trailing = attached + rightMargin
+		cluster := d.indicatorCluster(rowIndicators{attached: it.Session.Attached}, selected)
+		trailing = bg.Render(padTo("", indicatorSlotWidth-lipgloss.Width(cluster))) +
+			cluster +
+			bg.Render(padTo("", rowRightMargin))
 	}
 	row := indentCell + bar + name + dirCell + namePad + gap + count + trailing
 
@@ -316,6 +325,19 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 		row = ansi.Truncate(row, total, "…")
 	}
 	return row
+}
+
+// indicatorCluster packs the row's indicators for a hard-right placement; a row
+// carrying none renders the empty string.
+func (d SessionDelegate) indicatorCluster(ind rowIndicators, selected bool) string {
+	if !ind.attached {
+		return ""
+	}
+	glyph := rowIndicatorGlyph
+	if d.Colourless {
+		glyph = attachedIndicatorLetter
+	}
+	return d.rowToken(lipgloss.Style{}, d.Theme.StatePositive, selected).Render(glyph)
 }
 
 func padTo(s string, n int) string {

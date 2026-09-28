@@ -244,8 +244,8 @@ func TestSessionDelegate(t *testing.T) {
 		d.Render(&buf, m, 0, items[0])
 
 		output := buf.String()
-		if !strings.Contains(output, "● attached") {
-			t.Errorf("render output missing '● attached': %q", output)
+		if !strings.HasSuffix(output, "2 windows  ●  ") {
+			t.Errorf("render output must end with the bare '●' indicator: %q", output)
 		}
 	})
 
@@ -260,8 +260,8 @@ func TestSessionDelegate(t *testing.T) {
 		d.Render(&buf, m, 0, items[0])
 
 		output := buf.String()
-		if strings.Contains(output, "attached") {
-			t.Errorf("render output should not contain 'attached' for detached session: %q", output)
+		if strings.Contains(output, "●") {
+			t.Errorf("render output should not contain the '●' indicator for detached session: %q", output)
 		}
 	})
 

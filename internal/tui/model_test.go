@@ -130,11 +130,11 @@ func TestView(t *testing.T) {
 						workLine = line
 					}
 				}
-				if !strings.Contains(devLine, "attached") {
-					t.Errorf("attached session 'dev' line missing 'attached': %q", devLine)
+				if !strings.Contains(devLine, "●") {
+					t.Errorf("attached session 'dev' line missing the '●' indicator: %q", devLine)
 				}
-				if strings.Contains(workLine, "attached") {
-					t.Errorf("detached session 'work' line should not contain 'attached': %q", workLine)
+				if strings.Contains(workLine, "●") {
+					t.Errorf("detached session 'work' line should not contain the '●' indicator: %q", workLine)
 				}
 			},
 		},
@@ -178,8 +178,8 @@ func TestView(t *testing.T) {
 				if !strings.Contains(view, "2 windows") {
 					t.Error("view missing '2 windows'")
 				}
-				if !strings.Contains(view, "attached") {
-					t.Error("view missing 'attached' indicator")
+				if !strings.Contains(view, "●") {
+					t.Error("view missing the '●' attached indicator")
 				}
 				if !strings.Contains(view, "▌") {
 					t.Error("view missing cursor indicator")

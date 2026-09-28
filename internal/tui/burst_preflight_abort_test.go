@@ -182,8 +182,8 @@ func TestSessionRow_GoneFlaggedShowsRedWarningAndBadge(t *testing.T) {
 	if !strings.Contains(strippedGone, goneBadge) {
 		t.Errorf("gone row must render the red %q badge: %q", goneBadge, strippedGone)
 	}
-	if strings.Contains(strippedGone, attachedMarker) {
-		t.Errorf("gone row must NOT render the attached badge: %q", strippedGone)
+	if strings.Contains(strippedGone, rowIndicatorGlyph) {
+		t.Errorf("gone row must NOT render the attached indicator: %q", strippedGone)
 	}
 	if seq := tokenFgSeq(t, testDarkTheme(t).StateDestructive); !strings.Contains(gone, seq) {
 		t.Errorf("gone row missing the state.destructive role sequence %q: %q", seq, escSeq(gone))
@@ -213,14 +213,13 @@ func TestSessionRow_GoneFlaggedWidthByteUnchanged(t *testing.T) {
 	if gw, nw := lipgloss.Width(gone), lipgloss.Width(normal); gw != nw || gw != w {
 		t.Errorf("gone row width changed by the flag: gone=%d normal=%d, want %d", gw, nw, w)
 	}
-	for _, sub := range []string{"fab-flowx-explore", "window"} {
-		gc, nc := visibleColOf(gone, sub), visibleColOf(normal, sub)
-		if gc < 0 || nc < 0 {
-			t.Fatalf("column %q missing: gone=%q normal=%q", sub, ansi.Strip(gone), ansi.Strip(normal))
-		}
-		if gc != nc {
-			t.Errorf("column %q shifted by the gone flag: gone col %d, normal col %d", sub, gc, nc)
-		}
+	const name = "fab-flowx-explore"
+	gc, nc := visibleColOf(gone, name), visibleColOf(normal, name)
+	if gc < 0 || nc < 0 {
+		t.Fatalf("name missing: gone=%q normal=%q", ansi.Strip(gone), ansi.Strip(normal))
+	}
+	if gc != nc {
+		t.Errorf("name shifted by the gone flag: gone col %d, normal col %d", gc, nc)
 	}
 }
 
