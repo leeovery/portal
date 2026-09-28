@@ -169,7 +169,10 @@
             "lazy-resume-on-attach-4-11": "tick-15fa10",
             "lazy-resume-on-attach-4-12": "tick-79884c",
             "lazy-resume-on-attach-4-13": "tick-d425dd",
-            "lazy-resume-on-attach-5-7": "tick-c21161"
+            "lazy-resume-on-attach-5-7": "tick-c21161",
+            "lazy-resume-on-attach-6-9": "tick-2779da",
+            "lazy-resume-on-attach-6-10": "tick-21a011",
+            "lazy-resume-on-attach-6-11": "tick-8ed018"
           },
           "storage_paths": [
             ".tick/"
@@ -344,6 +347,13 @@
               "tasks": {
                 "1": "approved"
               }
+            },
+            "p6": {
+              "tasks": {
+                "1": "approved",
+                "2": "approved",
+                "3": "approved"
+              }
             }
           },
           "consolidated_phases": [
@@ -351,7 +361,8 @@
             2,
             3,
             4,
-            5
+            5,
+            6
           ],
           "completed_phases": [
             1,
