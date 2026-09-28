@@ -138,9 +138,7 @@ func SurfaceByName(name string) (*Surface, bool) {
 }
 
 // StandaloneNames are the enumerated names that FixtureByName does not resolve:
-// the contrast swatch and the resume surfaces. Declared once so a surface added
-// later joins every enumerating guard at this edit rather than fataling each of
-// them on a name it cannot resolve.
+// the contrast swatch and the resume surfaces.
 func StandaloneNames() []string {
 	return append([]string{ContrastValidationFixture}, SurfaceNames()...)
 }

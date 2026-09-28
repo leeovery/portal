@@ -100,7 +100,7 @@ func (cfg resumeWaitConfig) restore() {
 // runResumeWait holds the pane on whatever the draw painted until a key that
 // screen offers answers it. Every other byte is discarded, so nothing the user
 // did not send — a paste, a send-keys, a key aimed at another window — can
-// answer the panel, and the three keys that would kill a foreground process are
+// answer the panel, and the three keys that would signal a foreground process are
 // bytes like any other under raw mode. No signal is declined: tmux tearing the
 // pane down ends the waiter.
 func runResumeWait(cfg resumeWaitConfig) error {
