@@ -39,6 +39,29 @@ Rejected: having the housekeeping pass spare token-named files. A leftover token
 
 **Outcome**: A housekeeping pass deletes a waiting pane's token-named transcript only when its own index was captured after that file was filed. However the daemon's ticks and session-close `commit-now` runs interleave across a pane's restore-to-wait hand-over, the file survives, the picker previews it, and the pane restores with it at the next reboot.
 
+**Acceptance Criteria**:
+In each scenario pane X has a lazy registration and a token, was saved at `scrollback/K.bin` while not waiting, and is restored at its saved address.
+- [ ] A daemon tick captures while X is skeleton-marked. During that tick's dump X is marked pending and its skeleton marker cleared, and a `commit-now` starts before the tick commits. The `commit-now` takes no capture until the tick has committed and finished its housekeeping pass. It then re-files `K.bin` onto `pane-<token>.bin` and commits: `pane-<token>.bin` holds X's transcript and `sessions.json` names it for X.
+- [ ] Continuing that run, the daemon's next tick, whose in-memory previous index still names `K.bin` for X, commits X's record on `pane-<token>.bin`, and the file is on disk after that tick's housekeeping pass.
+- [ ] The mirror order: a tick that is re-filing X onto `pane-<token>.bin` holds the cycle when a `commit-now` starts. The `commit-now` captures only after the tick's housekeeping pass, sees X pending, and leaves `pane-<token>.bin` on disk and named for X.
+- [ ] Two `commit-now` runs started back to back across X's pending mark, as from closing two sessions in quick succession, run one after the other. The second takes as its previous index the `sessions.json` the first committed, and `pane-<token>.bin` survives both housekeeping passes.
+- [ ] While another process holds the lock past the bound, a daemon tick logs its existing `tick failed` WARN having captured nothing, moved no scrollback file, written no `sessions.json` and deleted no `.bin`. `save.requested` stays in place, and a tick after the lock frees runs the cycle. A shutdown flush in the same position logs its existing `final flush failed` WARN and its `shutdown` line reports `flush_completed=false`.
+- [ ] While another process holds the lock past the bound, `commit-now` exits non-zero with stderr silent through its existing failure route, its ERROR in `portal.log` and `save.requested` touched, having captured, moved, written and deleted nothing.
+- [ ] A committer killed while it holds the lock does not hold up the next one: the next tick or `commit-now` takes the lock without waiting out the bound, and commits.
+- [ ] With no other committer running, the tick, the shutdown flush and `commit-now` each commit what they commit today. The no-clobber re-file and the skeleton-stage link are unchanged, and their existing tests stay green.
+
+**Do**:
+- **The lock.** One exclusive `flock` on a sidecar file of its own in the state directory, owned by `internal/state`. It is not `daemon.lock`, which the daemon holds for its whole life (`cmd/state_daemon.go:92-95`). The hold runs from the capture (the skeleton-marker read that opens `CaptureAndRefile`) through the re-file, the caller's dump and `Commit` to the end of `gcOrphanScrollback` (`internal/state/commit.go:39`, `:77-112`).
+- **The entry point.** One locked entry point in `internal/state`, built on `CaptureAndRefile` (`internal/state/scrollback.go:275-288`), whose only variable part is the caller's dump. `commit-now` dumps nothing.
+- **The complete set it replaces.** `rg -n --type go -g '!*_test.go' 'CaptureAndRefile\b|\bCommit\(|state\.Commit\b'` returns 11 lines. Three are in `internal/state`: the two declarations and `CaptureAndRefile`'s doc comment. The other eight are the two committing sites, and both convert:
+  - `cmd/state_daemon.go:244` and `:299`: `captureAndCommit`, reached from both `tick` (`:191`) and `defaultShutdownFlush` (`:359`).
+  - `cmd/state_commit_now.go:36`, `:63`, `:64`, `:67`, `:121` and `:126`: the `CommitNowDeps` capture and commit seams, and the `RunE` that calls them.
+  - Afterwards neither file captures, re-files, dumps or commits outside the entry point.
+- **The fixtures.** The two integration fixtures that reproduce those cycles by hand enter through the entry point too, so they keep taking the route production takes: `captureRound` (`internal/restore/lazy_resume_panel_integration_test.go:377-419`) and `commitNowRound` (`internal/restore/lazy_resume_renumbered_restore_integration_test.go:169-184`).
+- **The previous index.** `commit-now` reads `sessions.json` (`loadPrevIndex`, `cmd/state_commit_now.go:118`) after the lock is taken. The daemon keeps its in-memory `PrevIndex` (`cmd/state_daemon.go:303`).
+- **The bound.** The acquire is bounded, as the hooks store's is (`internal/hooks/lock.go:17-21`, `:62-84`). A timeout leaves through the existing routes: the tick's `tick failed` WARN (`cmd/state_daemon.go:191-194`), which returns before `save.requested` is removed, and `failCommitNow` (`cmd/state_commit_now.go:144-150`), which touches it.
+- **Unchanged.** The no-clobber re-file (`refilePendingPane`, `placeStoredScrollback` and `moveNoClobber`, `internal/state/scrollback.go:120-173`) and the skeleton-stage link (`linkMovedSkeletonScrollback`, `:196-247`). `gcOrphanScrollback` keeps deleting every `.bin` its own index does not name, token-named files included.
+
 ## Task 2: Corrections
 severity: corrections
 sources: standards
@@ -51,3 +74,12 @@ Every agent session loads CLAUDE.md as the description of the capture cycle. The
 
 **Solution**:
 - `CLAUDE.md:61`: replace "A skeleton-marked pane carrying no token still takes the whole previous record at its own address." with "A skeleton-marked or pending pane carrying no token takes the previous record at its own address — the whole record for a skeleton-marked pane, its `CWD`, `CurrentCommand` and `ScrollbackFile` for a pending one — unless a live pane in the same capture carries that record's token: that record belongs to the pane answering to the token, and the tokenless pane keeps the fresh record the capture built, so no commit holds one token on two records."
+
+**Outcome**: The `state` row of `CLAUDE.md` states the address match as `indexPrevPanes` runs it: a tokenless skeleton-marked or pending pane takes the record at its own address unless a live pane in the same capture carries that record's token. An agent reading the row builds from the rule the tree enforces.
+
+**Acceptance Criteria**:
+- [ ] `CLAUDE.md:61` no longer contains "A skeleton-marked pane carrying no token still takes the whole previous record at its own address." It carries the Solution's replacement sentence verbatim in that place, between "…survives the housekeeping pass." and "The saver's per-pane scrollback skip is mid-restore".
+- [ ] No other text in `CLAUDE.md` changes, no source or test file changes, and the existing tests stay green.
+
+**Do**:
+- Apply the one edit the Solution lists, in the `state` row at `CLAUDE.md:61`.
