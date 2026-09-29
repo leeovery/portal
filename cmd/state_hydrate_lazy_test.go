@@ -451,7 +451,73 @@ func TestHydrateLazy_EmptyStoredCommandIsNoRegistration(t *testing.T) {
 	assertNoPendingMarker(t, cmder)
 }
 
-func TestHydrateLazy_NilDecisionFallsBackToItsOwnLookup(t *testing.T) {
+func TestHydrateLazy_MarksAndParksWhateverTheHandlerSeamDoes(t *testing.T) {
+	inert := map[string]func(opts *hydrateCfgOpts){
+		"signal timeout": func(opts *hydrateCfgOpts) {
+			opts.HandleTimeout = func(hydrateConfig) error { return nil }
+		},
+		"scrollback missing": func(opts *hydrateCfgOpts) {
+			opts.HandleFileMissing = func(hydrateConfig, hydrateFileMissingContext) error { return nil }
+		},
+	}
+	for _, tail := range lazyTails() {
+		replace, ok := inert[tail.name]
+		if !ok {
+			continue
+		}
+		t.Run(tail.name, func(t *testing.T) {
+			exec := &stubExecShell{}
+			cmder := commandertest.Quiet()
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			opts.Commander = cmder
+			stage := tail.stage
+			tail.stage = func(t *testing.T, dir string, opts *hydrateCfgOpts) string {
+				t.Helper()
+				paneKey := stage(t, dir, opts)
+				replace(opts)
+				return paneKey
+			}
+
+			paneKey := lazyRun(t, tail, opts)
+
+			pending := cmder.CallsMatching("set-option", "-p", state.ResumePendingOption).FirstIndex()
+			cleared := cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex()
+			if pending < 0 || cleared < 0 || pending > cleared {
+				t.Errorf("pending marker at %d, skeleton clear at %d, want the mark first and both present; calls: %v", pending, cleared, cmder.Calls())
+			}
+			if want := lazyChainArgs("echo hi", paneKey); exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
+				t.Errorf("exec = %q %v, want the parked chain %v", exec.target, exec.args, want)
+			}
+		})
+	}
+}
+
+func TestHydrateLazy_FiresTheHookOnEveryTailWhenThePaneCannotBeMarked(t *testing.T) {
+	for _, tail := range lazyTails() {
+		t.Run(tail.name, func(t *testing.T) {
+			exec := &stubExecShell{}
+			cmder := commandertest.Quiet(
+				commandertest.Fails(errors.New("tmux refused"), "set-option", "-p"),
+			)
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			opts.Commander, opts.Logger = cmder, logger
+
+			paneKey := lazyRun(t, tail, opts)
+
+			want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
+				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
+			}
+			assertOneMarkerRefusalWarn(t, sink, paneKey)
+			if cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex() < 0 {
+				t.Errorf("a refused mark must still clear the skeleton marker; calls: %v", cmder.Calls())
+			}
+		})
+	}
+}
+
+func TestHydrateLazy_ExecWithNoParkedPaneRunsTheHookAndLooksNothingUp(t *testing.T) {
 	t.Setenv("SHELL", "/bin/zsh")
 	exec := &stubExecShell{}
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
@@ -462,18 +528,20 @@ func TestHydrateLazy_NilDecisionFallsBackToItsOwnLookup(t *testing.T) {
 		Logger:    logger,
 		ExecShell: exec.fn(),
 	})
-	if cfg.Decision != nil {
-		t.Fatal("hydrateCfg resolved a decision; this case drives the exec directly with none")
-	}
+	registration := hooks.OnResume{Found: true, Command: "echo hi", Mode: resumemode.Lazy}
 
-	execShellOrHookAndExit(cfg)
+	execShellOrHookAndExit(cfg, registration, nil)
 
 	want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
 	if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-		t.Errorf("exec = %q %v, want the hook %v even for a lazy registration", exec.target, exec.args, want)
+		t.Errorf("exec = %q %v, want the hook %v", exec.target, exec.args, want)
 	}
-	if dbg := execLogLine(t, sink.Body(), "DEBUG", "hook lookup"); !strings.Contains(dbg, "result=hit") {
-		t.Errorf("a nil decision must perform its own lookup: %q", dbg)
+	body := sink.Body()
+	if info := execLogLine(t, body, "INFO", "exec"); !strings.Contains(info, "hook_present=true") {
+		t.Errorf("exec INFO missing hook_present=true: %q", info)
+	}
+	if n := strings.Count(body, "hook lookup"); n != 0 {
+		t.Errorf("the exec looked the registration up itself %d times: %q", n, body)
 	}
 }
 
@@ -492,5 +560,49 @@ func assertOneMarkerRefusalWarn(t *testing.T, sink *logtest.Sink, paneKey string
 	}
 	if !strings.Contains(warn, "error=") {
 		t.Errorf("refusal WARN carries no error: %q", warn)
+	}
+}
+
+func TestHydrateHandlers_ReportWithoutTouchingEitherMarker(t *testing.T) {
+	runs := map[string]func(t *testing.T, cfg hydrateConfig) error{
+		"signal timeout": func(_ *testing.T, cfg hydrateConfig) error { return handleHydrateTimeout(cfg) },
+		"scrollback missing": func(_ *testing.T, cfg hydrateConfig) error {
+			return handleHydrateFileMissing(cfg, hydrateFileMissingContext{Cause: os.ErrNotExist})
+		},
+	}
+	wantLines := map[string][]string{
+		"signal timeout":     {"WARN timeout waiting for hydrate signal", "INFO signal timeout"},
+		"scrollback missing": {"WARN scrollback file not found", "INFO scrollback missing"},
+	}
+	for name, run := range runs {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("TMUX_PANE", lazyPaneID)
+			cmder := commandertest.Quiet()
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			dir := t.TempDir()
+			cfg := hydrateCfg(t, hydrateCfgOpts{
+				FIFO:      filepath.Join(dir, "hydrate-alone__0.0.fifo"),
+				File:      filepath.Join(dir, "sb"),
+				HookKey:   lazyHookKey,
+				HookStore: hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy),
+				OpenFIFO:  unexpectedOpenFIFO(t),
+				Commander: cmder,
+				Logger:    logger,
+			})
+
+			if err := run(t, cfg); err != nil {
+				t.Fatalf("handler: %v", err)
+			}
+
+			if calls := cmder.Calls(); len(calls) != 0 {
+				t.Errorf("handler issued tmux commands %v, want none", calls)
+			}
+			body := sink.Body()
+			for _, line := range wantLines[name] {
+				if n := strings.Count(body, line); n != 1 {
+					t.Errorf("want exactly one %q, got %d: %q", line, n, body)
+				}
+			}
+		})
 	}
 }

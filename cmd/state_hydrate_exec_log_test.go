@@ -26,6 +26,13 @@ func execLogLine(t *testing.T, body, level, msg string) string {
 	return matches[0]
 }
 
+// execLookedUpRegistration drives the exec the way an unwaiting tail does: the
+// registration looked up, and no pane parked.
+func execLookedUpRegistration(cfg hydrateConfig) {
+	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
+	execShellOrHookAndExit(cfg, lookupOnResumeOrLog(cfg), nil)
+}
+
 func TestHydrateExecLog_NilHookStore_MissThenBareShellExec(t *testing.T) {
 	t.Setenv("SHELL", "/bin/zsh")
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
@@ -38,7 +45,7 @@ func TestHydrateExecLog_NilHookStore_MissThenBareShellExec(t *testing.T) {
 		HookStore: nil,
 		ExecShell: exec.fn(),
 	})
-	execShellOrHookAndExit(cfg)
+	execLookedUpRegistration(cfg)
 
 	if exec.target != "/bin/zsh" {
 		t.Errorf("ExecShell target = %q, want /bin/zsh (nil store → bare shell)", exec.target)
@@ -84,7 +91,7 @@ func TestHydrateExecLog_LookupError_ErrorResultWithAttrWarnRetainedBareShell(t *
 		HookStore: store,
 		ExecShell: exec.fn(),
 	})
-	execShellOrHookAndExit(cfg)
+	execLookedUpRegistration(cfg)
 
 	if exec.target != "/bin/zsh" {
 		t.Errorf("ExecShell target = %q, want /bin/zsh (lookup error → bare shell)", exec.target)
@@ -130,7 +137,7 @@ func TestHydrateExecLog_UnregisteredPaneKey_MissThenBareShellExec(t *testing.T) 
 		HookStore: store,
 		ExecShell: exec.fn(),
 	})
-	execShellOrHookAndExit(cfg)
+	execLookedUpRegistration(cfg)
 
 	if exec.target != "/bin/zsh" {
 		t.Errorf("ExecShell target = %q, want /bin/zsh (no hook → bare shell)", exec.target)
@@ -168,7 +175,7 @@ func TestHydrateExecLog_RegisteredHook_HitThenHookChainExec(t *testing.T) {
 		HookStore: store,
 		ExecShell: exec.fn(),
 	})
-	execShellOrHookAndExit(cfg)
+	execLookedUpRegistration(cfg)
 
 	if exec.target != "/bin/sh" {
 		t.Errorf("ExecShell target = %q, want /bin/sh (hook chain)", exec.target)
@@ -210,7 +217,7 @@ func TestHydrateExecLog_HitRendersArgsVerbatimIncludingEmbeddedQuotes(t *testing
 		HookStore: store,
 		ExecShell: exec.fn(),
 	})
-	execShellOrHookAndExit(cfg)
+	execLookedUpRegistration(cfg)
 
 	body := sink.Body()
 	info := execLogLine(t, body, "INFO", "exec")
@@ -237,7 +244,7 @@ func TestHydrateExecLog_ExecInfoUsesTargetAttrNotPath(t *testing.T) {
 		HookStore: store,
 		ExecShell: exec.fn(),
 	})
-	execShellOrHookAndExit(cfg)
+	execLookedUpRegistration(cfg)
 
 	info := execLogLine(t, sink.Body(), "INFO", "exec")
 	if !strings.Contains(info, "target=") {
@@ -296,7 +303,7 @@ func TestHydrateExecLog_ExecInfoEmittedImmediatelyBeforeExecShell(t *testing.T) 
 					bodyAtExec = sink.Body()
 				},
 			})
-			execShellOrHookAndExit(cfg)
+			execLookedUpRegistration(cfg)
 
 			execLogLine(t, bodyAtExec, "INFO", "exec")
 		})

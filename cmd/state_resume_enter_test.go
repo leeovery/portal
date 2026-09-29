@@ -254,7 +254,7 @@ func TestResumeAnswerEnter_HookShapeMatchesTheHelper(t *testing.T) {
 		var helperProg string
 		var helperArgs []string
 		logger, _ := logtest.NewCaptureLogger(t)
-		execShellOrHookAndExit(hydrateConfig{
+		execLookedUpRegistration(hydrateConfig{
 			HookKey:   payload.HookKey,
 			Logger:    logger,
 			HookStore: store,

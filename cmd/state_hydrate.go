@@ -57,21 +57,20 @@ type hydrateConfig struct {
 	// pane's chain is parked; the chain hands them back on whatever path gives
 	// the pane to a hook or a shell.
 	DisableTTYSignals func() error
-
-	// Decision is what the pane's registration resolved to, held by pointer so
-	// a refusal taken inside a by-value handler reaches the exec. A nil one is
-	// a call that resolved nothing, which looks its registration up itself.
-	Decision *resumeDecision
 }
 
 // resumeDecision carries one pane's resolved resume mode from the top of the
-// helper to whichever tail it ends on. Exe and Pane are resolved by the mark
-// step, which is where a refusal to wait has to be taken.
+// helper to whichever tail it ends on.
 type resumeDecision struct {
 	Wait   bool
 	Lookup hooks.OnResume
-	Exe    string
-	Pane   string
+}
+
+// parkedPane is a pane the mark step wrote the pending marker on, with the
+// executable its chain is composed from.
+type parkedPane struct {
+	Pane string
+	Exe  string
 }
 
 func hydrateLoggerOrDefault(logger *slog.Logger) *slog.Logger {
@@ -109,7 +108,7 @@ func openFIFOWithTimeout(path string, timeout time.Duration) (*os.File, error) {
 // process image.
 func runHydrate(cfg hydrateConfig) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
-	cfg.Decision = resolveResumeDecision(cfg)
+	decision := resolveResumeDecision(cfg)
 	f, err := cfg.OpenFIFO(cfg.FIFO, hydrateTimeout)
 	if err != nil {
 		if errors.Is(err, ErrHydrateTimeout) {
@@ -117,8 +116,12 @@ func runHydrate(cfg hydrateConfig) error {
 				if err := cfg.HandleTimeout(cfg); err != nil {
 					return err
 				}
+				// Clearing the skeleton marker is the recovery: the FIFO is
+				// already unlinked, so leaving it set would offer no retry, only
+				// a re-fired ENOENT on the next attach.
+				parked := markPendingThenUnsetSkeletonMarker(cfg, decision)
 				time.Sleep(hydrateSettleSleep)
-				execShellOrHookAndExit(cfg)
+				execShellOrHookAndExit(cfg, decision.Lookup, parked)
 				return nil
 			}
 			return err
@@ -145,11 +148,7 @@ func runHydrate(cfg hydrateConfig) error {
 	sb, err := os.Open(cfg.File)
 	if err != nil {
 		if cfg.HandleFileMissing != nil {
-			if hErr := cfg.HandleFileMissing(cfg, hydrateFileMissingContext{Cause: err}); hErr != nil {
-				return hErr
-			}
-			execShellOrHookAndExit(cfg)
-			return nil
+			return runFileMissingTail(cfg, decision, err)
 		}
 		return fmt.Errorf("open scrollback %s: %w", cfg.File, err)
 	}
@@ -160,11 +159,7 @@ func runHydrate(cfg hydrateConfig) error {
 	took := time.Since(start)
 	if err != nil {
 		if cfg.HandleFileMissing != nil {
-			if hErr := cfg.HandleFileMissing(cfg, hydrateFileMissingContext{Cause: err}); hErr != nil {
-				return hErr
-			}
-			execShellOrHookAndExit(cfg)
-			return nil
+			return runFileMissingTail(cfg, decision, err)
 		}
 		return err
 	}
@@ -174,11 +169,21 @@ func runHydrate(cfg hydrateConfig) error {
 	// Let tmux's PTY parser finish ingesting the dump before the skeleton marker is unset.
 	time.Sleep(hydrateSettleSleep)
 
-	markPendingThenUnsetSkeletonMarker(cfg)
+	parked := markPendingThenUnsetSkeletonMarker(cfg, decision)
 
 	cfg.Logger.Info("scrollback replayed", "bytes", n, "took", took)
 
-	execShellOrHookAndExit(cfg)
+	execShellOrHookAndExit(cfg, decision.Lookup, parked)
+	return nil
+}
+
+// There is no settle sleep: nothing was fully dumped.
+func runFileMissingTail(cfg hydrateConfig, decision resumeDecision, cause error) error {
+	if err := cfg.HandleFileMissing(cfg, hydrateFileMissingContext{Cause: cause}); err != nil {
+		return err
+	}
+	parked := markPendingThenUnsetSkeletonMarker(cfg, decision)
+	execShellOrHookAndExit(cfg, decision.Lookup, parked)
 	return nil
 }
 
@@ -193,10 +198,10 @@ func resolveShell() string {
 // resolveResumeDecision reads the pane's registration and the install-wide
 // default once, at the top of the helper, so every tail it can end on decides
 // the same way and pays for the reads once.
-func resolveResumeDecision(cfg hydrateConfig) *resumeDecision {
+func resolveResumeDecision(cfg hydrateConfig) resumeDecision {
 	lookup := lookupOnResumeOrLog(cfg)
 	wait := lookup.Found && resumemode.Resolve(lookup.Mode, installResumeMode(cfg)) == resumemode.Lazy
-	return &resumeDecision{Wait: wait, Lookup: lookup}
+	return resumeDecision{Wait: wait, Lookup: lookup}
 }
 
 // A prefs store that cannot be built, and a read that fails, both take the
@@ -234,42 +239,36 @@ func lookupOnResumeOrLog(cfg hydrateConfig) hooks.OnResume {
 	}, cfg.HookKey)
 }
 
-// A lookup failure degrades to a bare shell so the pane stays usable when
-// hooks.json is unreadable.
-func execShellOrHookAndExit(cfg hydrateConfig) {
+// Only a pane the mark step returned parks; any other runs the registration's
+// command, whatever mode it resolved to.
+func execShellOrHookAndExit(cfg hydrateConfig, registration hooks.OnResume, parked *parkedPane) {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
-	var lookup hooks.OnResume
-	switch {
-	case cfg.Decision == nil:
-		lookup = lookupOnResumeOrLog(cfg)
-	case cfg.Decision.Wait:
-		execResumeChainAndExit(cfg)
+	if parked != nil {
+		execResumeChainAndExit(cfg, registration.Command, *parked)
 		return
-	default:
-		lookup = cfg.Decision.Lookup
 	}
-	handOffToHookOrShell(cfg.Logger, cfg.ExecShell, lookup.Command)
+	handOffToHookOrShell(cfg.Logger, cfg.ExecShell, registration.Command)
 }
 
 // execResumeChainAndExit parks the pane on the draw followed by the chain's
 // tail, so a waiter that ends without answering leaves a pane its user can
-// still type into. Both halves are composed from the decision, which resolves
-// nothing further: a resolution failing after the marker is written would leave
-// the pane frozen for life.
+// still type into. Both halves are composed from the marked pane, which
+// resolves nothing further: a resolution failing after the marker is written
+// would leave the pane frozen for life.
 //
 // A pane whose signal generation could not be turned off still parks: the
 // chain's trap turns a kill key that lands into the recovery tail.
-func execResumeChainAndExit(cfg hydrateConfig) {
+func execResumeChainAndExit(cfg hydrateConfig, command string, parked parkedPane) {
 	payload := resumeChainPayload{
-		Command: cfg.Decision.Lookup.Command,
+		Command: command,
 		HookKey: cfg.HookKey,
-		Pane:    cfg.Decision.Pane,
+		Pane:    parked.Pane,
 		PaneKey: state.PaneKeyFromFIFOPath(cfg.FIFO),
 	}
 	if err := cfg.DisableTTYSignals(); err != nil {
 		cfg.Logger.Warn("disable terminal signals failed", "pane_key", payload.PaneKey, "error", err)
 	}
-	args := []string{"sh", "-c", parkedResumeChain(cfg.Decision.Exe, payload)}
+	args := []string{"sh", "-c", parkedResumeChain(parked.Exe, payload)}
 	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", args, true)
 }
 
@@ -303,8 +302,6 @@ func parkedResumeChain(exe string, payload resumeChainPayload) string {
 		parkedChainBackstop(exe, payload)
 }
 
-// Clearing the skeleton marker is the recovery: the FIFO is already unlinked, so
-// leaving it set would offer no retry, only a re-fired ENOENT on the next attach.
 func handleHydrateTimeout(cfg hydrateConfig) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
@@ -316,14 +313,11 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 	cfg.Logger.Warn("timeout waiting for hydrate signal", "hook_key", cfg.HookKey, "path", cfg.FIFO)
 
 	cfg.Logger.Info("signal timeout", "took", hydrateTimeout)
-
-	markPendingThenUnsetSkeletonMarker(cfg)
 	return nil
 }
 
-// The preamble is already on stdout and must not be re-emitted, partial bytes
-// already streamed are left in place, and there is no settle sleep because
-// nothing was fully dumped.
+// The preamble is already on stdout and must not be re-emitted, and partial
+// bytes already streamed are left in place.
 func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	switch {
@@ -336,32 +330,35 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	}
 
 	cfg.Logger.Info("scrollback missing", "path", cfg.File)
-
-	markPendingThenUnsetSkeletonMarker(cfg)
 	return nil
 }
 
 // markPendingThenUnsetSkeletonMarker holds the ordering the pane's saved
 // transcript depends on: a pane that is going to wait carries its own marker
 // before the mid-restore one is dropped, so no tick lands on an unprotected
-// pane. A pane that cannot be marked does not wait.
-func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig) {
-	if cfg.Decision != nil && cfg.Decision.Wait {
-		if err := markResumePending(cfg); err != nil {
+// pane. A pane that cannot be marked does not wait: it returns nil, as does one
+// that was never going to.
+func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig, decision resumeDecision) *parkedPane {
+	var parked *parkedPane
+	if decision.Wait {
+		p, err := markResumePending(cfg)
+		if err != nil {
 			cfg.Logger.Warn("set resume pending marker failed", "pane_key", state.PaneKeyFromFIFOPath(cfg.FIFO), "error", err)
-			cfg.Decision.Wait = false
+		} else {
+			parked = &p
 		}
 	}
 	unsetSkeletonMarkerOrLog(cfg)
+	return parked
 }
 
 // The pane and the executable are resolved before the write, so a refusal is
 // taken while the pane is still an eager one: a marked pane whose chain could
 // not be composed would fire its hook and freeze its saved scrollback for life.
-func markResumePending(cfg hydrateConfig) error {
+func markResumePending(cfg hydrateConfig) (parkedPane, error) {
 	pane, err := requireTmuxPane()
 	if err != nil {
-		return err
+		return parkedPane{}, err
 	}
 	resolveExe := cfg.ResolveExe
 	if resolveExe == nil {
@@ -369,10 +366,12 @@ func markResumePending(cfg hydrateConfig) error {
 	}
 	exe, err := resolveExe()
 	if err != nil {
-		return err
+		return parkedPane{}, err
 	}
-	cfg.Decision.Pane, cfg.Decision.Exe = string(pane), exe
-	return state.SetResumePendingMarker(cfg.Client, pane)
+	if err := state.SetResumePendingMarker(cfg.Client, pane); err != nil {
+		return parkedPane{}, err
+	}
+	return parkedPane{Pane: string(pane), Exe: exe}, nil
 }
 
 // Failure is non-fatal: the next bootstrap re-skeletons the pane and clears it.

@@ -1287,19 +1287,6 @@ func TestHydrate_TimeoutHandler_OrderingAndTimingInvariants(t *testing.T) {
 	if _, statErr := os.Stat(fifo); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("FIFO unexpectedly present after handler; stat err = %v", statErr)
 	}
-
-	// The paneKey derives from the FIFO basename: hydrate-ord__0.0.fifo → ord__0.0.
-	want := []string{"set-option", "-su", "@portal-skeleton-ord__0.0"}
-	matched := false
-	for _, c := range cmder.Calls() {
-		if reflect.DeepEqual(c, want) {
-			matched = true
-			break
-		}
-	}
-	if !matched {
-		t.Errorf("expected tmux call %v before handler returned; calls: %v", want, cmder.Calls())
-	}
 }
 
 func TestHydrate_SignalArrived_ExecsHookChainWhenHookRegistered(t *testing.T) {

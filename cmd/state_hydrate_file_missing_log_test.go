@@ -227,18 +227,6 @@ func TestHydrateFileMissingLog_PreservesPerCauseWARNsAndNoSettleSleep(t *testing
 	if elapsed >= 100*time.Millisecond {
 		t.Errorf("handleHydrateFileMissing elapsed %v; expected << 100ms (no settle sleep)", elapsed)
 	}
-
-	wantUnset := "set-option -su @portal-skeleton-fmpre__0.0"
-	found := false
-	for _, c := range cmder.Calls() {
-		if strings.Join(c, " ") == wantUnset {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected marker-unset call %q; calls: %v", wantUnset, cmder.Calls())
-	}
 }
 
 // A missing FIFO makes os.OpenFile return ENOENT immediately, and that branch
