@@ -382,9 +382,9 @@ func unsetSkeletonMarkerOrLog(cfg hydrateConfig) {
 	}
 }
 
-// syscall.Exec returns only on failure. That path must still terminate non-zero
-// so the pane closes, and must do so via log.Close(1) + osExit(1), or the
-// just-emitted exec marker stands as a phantom handoff.
+// syscall.Exec returns only on failure, and that path must end through
+// log.Close(1) + osExit(1), or the just-emitted exec marker stands as a phantom
+// handoff.
 func defaultExecShell(prog string, args []string) {
 	err := syscall.Exec(prog, args, os.Environ())
 	hydrateLogger.Warn("exec handoff failed", "target", prog, "args", strings.Join(args, " "), "error", err)
