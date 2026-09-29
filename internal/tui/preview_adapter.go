@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"path/filepath"
-
-	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -22,11 +19,9 @@ func NewProductionScrollbackReader(stateDir string) ScrollbackReader {
 
 // A waiting pane's transcript is re-filed under its token once its wait is
 // first captured, so the token-named file is read first and the positional one
-// only when that holds nothing. Token shape is checked before it names a path,
-// which also keeps it from reaching outside the scrollback directory.
+// only when that holds nothing.
 func (a scrollbackReaderAdapter) Tail(pane PaneScrollback) ([]byte, error) {
-	if nanoid.IsTokenShaped(pane.PendingToken) {
-		tokenPath := filepath.Join(a.stateDir, filepath.FromSlash(state.PendingScrollbackFile(pane.PendingToken)))
+	if tokenPath, ok := state.PendingScrollbackPath(a.stateDir, pane.PendingToken); ok {
 		bytes, err := state.TailScrollback(tokenPath, a.n)
 		if bytes != nil || err != nil {
 			return bytes, err

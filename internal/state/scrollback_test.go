@@ -10,6 +10,7 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -825,6 +826,50 @@ func TestRefilePendingScrollback(t *testing.T) {
 		}
 		if got := readScrollback(t, dir, "work__0.1.bin"); got != "live-body" {
 			t.Errorf("positional file = %q, want %q", got, "live-body")
+		}
+	})
+}
+
+func TestPendingScrollbackPath(t *testing.T) {
+	t.Run("it names the file under dir that a re-file moves a minted-token pane's bytes into", func(t *testing.T) {
+		token, err := nanoid.NewPaneTokenGenerator()()
+		if err != nil {
+			t.Fatalf("mint pane token: %v", err)
+		}
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
+		idx := waitingIndex(token, "scrollback/work__0.1.bin")
+
+		path, ok := state.PendingScrollbackPath(dir, token)
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), state.HashMap{}, nil)
+
+		if !ok {
+			t.Fatalf("PendingScrollbackPath(%q) ok = false, want true", token)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if string(data) != "frozen-body" {
+			t.Errorf("file at %s = %q, want the re-filed bytes %q", path, data, "frozen-body")
+		}
+	})
+
+	t.Run("it refuses a token the pane-token rule does not accept", func(t *testing.T) {
+		token, err := nanoid.NewPaneTokenGenerator()()
+		if err != nil {
+			t.Fatalf("mint pane token: %v", err)
+		}
+		for name, refused := range map[string]string{
+			"empty":                            "",
+			"one character short":              token[:len(token)-1],
+			"climbs out of the scrollback dir": "/../../" + token,
+		} {
+			t.Run(name, func(t *testing.T) {
+				if path, ok := state.PendingScrollbackPath(t.TempDir(), refused); ok {
+					t.Errorf("PendingScrollbackPath(%q) = (%q, true), want not-ok", refused, path)
+				}
+			})
 		}
 	})
 }

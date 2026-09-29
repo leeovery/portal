@@ -11,7 +11,6 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/leeovery/portal/internal/fileutil"
-	"github.com/leeovery/portal/internal/nanoid"
 )
 
 // HashMap holds the xxhash of the bytes most recently committed for each
@@ -119,7 +118,7 @@ func RefilePendingScrollback(dir string, idx *Index, pending map[string]struct{}
 }
 
 func refilePendingPane(dir, paneKey string, p *Pane, hm HashMap, logger *slog.Logger) {
-	if !nanoid.IsTokenShaped(p.PortalPaneID) {
+	if _, ok := PendingScrollbackPath(dir, p.PortalPaneID); !ok {
 		return
 	}
 	tokenPath := PendingScrollbackFile(p.PortalPaneID)

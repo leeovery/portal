@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/xdg"
 )
 
@@ -93,6 +94,16 @@ func ScrollbackFile(dir, paneKey string) string {
 // re-filed under, in the relative forward-slashed shape a Pane record stores.
 func PendingScrollbackFile(token string) string {
 	return filepath.ToSlash(filepath.Join(scrollbackSubdir, pendingScrollbackPrefix+token+".bin"))
+}
+
+// PendingScrollbackPath is PendingScrollbackFile(token) under dir. ok is false
+// for a token the pane-token rule refuses, which also keeps a token from naming
+// a path outside the scrollback directory.
+func PendingScrollbackPath(dir, token string) (path string, ok bool) {
+	if !nanoid.IsTokenShaped(token) {
+		return "", false
+	}
+	return joinStored(dir, PendingScrollbackFile(token)), true
 }
 
 func FIFOPath(dir, paneKey string) string {

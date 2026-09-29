@@ -20,9 +20,31 @@ func mintPaneToken(t *testing.T) string {
 	return token
 }
 
+// tokenBinPath names a minted token's re-filed transcript by the rule the
+// preview reads it through.
+func tokenBinPath(t *testing.T, stateDir, token string) string {
+	t.Helper()
+	path, ok := state.PendingScrollbackPath(stateDir, token)
+	if !ok {
+		t.Fatalf("setup: token %q is not one the pane-token rule accepts", token)
+	}
+	return path
+}
+
 func writeTokenBinFile(t *testing.T, stateDir, token string, content []byte) {
 	t.Helper()
-	path := filepath.Join(stateDir, filepath.FromSlash(state.PendingScrollbackFile(token)))
+	writeFileAt(t, tokenBinPath(t, stateDir, token), content)
+}
+
+// writeRefusedTokenBinFile stages the file a token the rule refuses would name,
+// which the reader must never reach.
+func writeRefusedTokenBinFile(t *testing.T, stateDir, token string, content []byte) {
+	t.Helper()
+	writeFileAt(t, filepath.Join(stateDir, filepath.FromSlash(state.PendingScrollbackFile(token))), content)
+}
+
+func writeFileAt(t *testing.T, path string, content []byte) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("mkdir scrollback: %v", err)
 	}
@@ -102,14 +124,14 @@ func TestPreviewWaitingPane_PanesOutsideTheTokenRuleShowTheirPositionalFile(t *t
 			name: "a waiting pane whose token is one character short",
 			pane: tmux.WindowPane{Index: 0, Token: short, Pending: true},
 			stage: func(t *testing.T, stateDir string) {
-				writeTokenBinFile(t, stateDir, short, []byte("token transcript\n"))
+				writeRefusedTokenBinFile(t, stateDir, short, []byte("token transcript\n"))
 			},
 		},
 		{
 			name: "a waiting pane whose token climbs out of the scrollback directory",
 			pane: tmux.WindowPane{Index: 0, Token: escape, Pending: true},
 			stage: func(t *testing.T, stateDir string) {
-				writeTokenBinFile(t, stateDir, escape, []byte("token transcript\n"))
+				writeRefusedTokenBinFile(t, stateDir, escape, []byte("token transcript\n"))
 				if want := filepath.Join(stateDir, token+".bin"); !fileExists(t, want) {
 					t.Fatalf("setup: escaping token did not land at %s", want)
 				}
@@ -142,7 +164,7 @@ func TestPreviewWaitingPane_UnreadableTokenFileReportsTheErrorRatherThanTheAddre
 	stateDir := t.TempDir()
 	token := mintPaneToken(t)
 	writeTokenBinFile(t, stateDir, token, []byte("saved transcript\n"))
-	if err := themetest.DenyRead(t, filepath.Join(stateDir, filepath.FromSlash(state.PendingScrollbackFile(token)))); err == nil {
+	if err := themetest.DenyRead(t, tokenBinPath(t, stateDir, token)); err == nil {
 		t.Fatalf("setup: token file is still readable")
 	}
 	writeBinFile(t, stateDir, state.SanitizePaneKey("work", 0, 0), []byte("another pane's capture\n"))
