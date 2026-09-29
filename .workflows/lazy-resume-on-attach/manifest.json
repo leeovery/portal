@@ -188,7 +188,9 @@
             "lazy-resume-on-attach-9-5": "tick-576aff",
             "lazy-resume-on-attach-9-6": "tick-eaf350",
             "lazy-resume-on-attach-10": "tick-f0ec42",
-            "lazy-resume-on-attach-10-1": "tick-b128d7"
+            "lazy-resume-on-attach-10-1": "tick-b128d7",
+            "lazy-resume-on-attach-10-2": "tick-d1af4d",
+            "lazy-resume-on-attach-10-3": "tick-2e8797"
           },
           "storage_paths": [
             ".tick/"
@@ -412,6 +414,12 @@
               "tasks": {
                 "1": "approved"
               }
+            },
+            "p10": {
+              "tasks": {
+                "1": "approved",
+                "2": "approved"
+              }
             }
           },
           "consolidated_phases": [
@@ -423,7 +431,8 @@
             6,
             7,
             8,
-            9
+            9,
+            10
           ],
           "completed_phases": [
             1,
@@ -436,19 +445,7 @@
             8,
             9
           ],
-          "updated": "2026-09-28",
-          "bank": [
-            {
-              "task": "lazy-resume-on-attach-10-1",
-              "source": "reviewer",
-              "summary": "CLAUDE.md's state package row still describes the capture cycle as it was before task 10-1",
-              "failure": "CLAUDE.md is loaded into every agent session as the architecture reference. It says CaptureAndRefile returns the index and the frozen-pane set, that the dump skip reads the second return of CaptureStructure, and that only a pending pane's record is merged by token. An agent changing capture would reason from a contract that no longer exists (callers reading skeleton markers themselves; skeleton-marked tokened panes matched by address); nobody notices until that change misbehaves.",
-              "detail": "CLAUDE.md:61. Three places: the sentence beginning CaptureAndRefile is the entry point should say it reads the skeleton markers and returns a CaptureCycle{Index, Pending, Skeleton}; membership of that second return should become CaptureCycle.Pending; A pending pane's previous record is merged back on that durable token should also cover skeleton-marked tokened panes.",
-              "files": [
-                "CLAUDE.md"
-              ]
-            }
-          ]
+          "updated": "2026-09-28"
         }
       }
     },
