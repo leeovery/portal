@@ -10,3 +10,8 @@ func StubRenameNoReplaceUnsupported(t *testing.T) {
 	renameNoReplace = func(string, string) error { return errNoReplaceUnsupported }
 	t.Cleanup(func() { renameNoReplace = prev })
 }
+
+var (
+	CaptureAndRefile        = captureAndRefile
+	RefilePendingScrollback = refilePendingScrollback
+)

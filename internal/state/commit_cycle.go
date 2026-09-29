@@ -55,7 +55,7 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	}
 	defer func() { _ = lock.Close() }()
 
-	capture, err := CaptureAndRefile(cycle.Client, cycle.Dir, cycle.LoadPrev(), cycle.HashMap, cycle.Logger)
+	capture, err := captureAndRefile(cycle.Client, cycle.Dir, cycle.LoadPrev(), cycle.HashMap, cycle.Logger)
 	if err != nil {
 		return capture, fmt.Errorf("capture: %w", err)
 	}

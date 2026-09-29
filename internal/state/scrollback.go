@@ -85,7 +85,7 @@ func WriteScrollbackIfChanged(dir, paneKey string, data []byte, newHash uint64, 
 	return true, nil
 }
 
-// RefilePendingScrollback moves each waiting pane's scrollback out of the
+// refilePendingScrollback moves each waiting pane's scrollback out of the
 // positional namespace and onto its durable token, rewriting the record in idx
 // and dropping the dedup entry for the name the bytes left — which is what lets
 // the next pane to occupy that address write its own file there. Panes whose
@@ -96,7 +96,7 @@ func WriteScrollbackIfChanged(dir, paneKey string, data []byte, newHash uint64, 
 // source or an existing token-named file leaves that pane's record and dedup
 // entry alone and emits one WARN; the caller commits regardless and the next
 // call retries.
-func RefilePendingScrollback(dir string, idx *Index, pending map[string]struct{}, hm HashMap, logger *slog.Logger) {
+func refilePendingScrollback(dir string, idx *Index, pending map[string]struct{}, hm HashMap, logger *slog.Logger) {
 	if idx == nil || len(pending) == 0 {
 		return
 	}
@@ -264,7 +264,7 @@ type CaptureCycle struct {
 	Skeleton map[string]struct{}
 }
 
-// CaptureAndRefile reads the skeleton markers, takes a capture merged against
+// captureAndRefile reads the skeleton markers, takes a capture merged against
 // them, and re-files every frozen pane's scrollback in one step, so no caller
 // can commit an index that omits a mid-restore pane's record, has two records
 // naming one scrollback file, or still names a waiting pane's vacated
@@ -272,7 +272,7 @@ type CaptureCycle struct {
 // link or re-file failed. A failed marker read returns its wrapped error before
 // any capture is taken. A failed capture returns before anything is re-filed,
 // with the empty index, the empty pending set and the error the capture gave.
-func CaptureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
+func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
 	skeleton, err := ListSkeletonMarkers(c)
 	if err != nil {
 		return CaptureCycle{}, fmt.Errorf("list skeleton markers: %w", err)
@@ -283,6 +283,6 @@ func CaptureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap,
 		return capture, err
 	}
 	linkMovedSkeletonScrollback(dir, &capture.Index, skeleton, logger)
-	RefilePendingScrollback(dir, &capture.Index, pending, hm, logger)
+	refilePendingScrollback(dir, &capture.Index, pending, hm, logger)
 	return capture, nil
 }
