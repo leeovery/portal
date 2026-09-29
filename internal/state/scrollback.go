@@ -92,9 +92,11 @@ func WriteScrollbackIfChanged(dir, paneKey string, data []byte, newHash uint64, 
 // the next pane to occupy that address write its own file there. Panes whose
 // key is absent from pending, whose token the pane-token mint could not have
 // produced, or which are already filed under their token are left untouched. A
-// rename that fails for any reason other than a missing source leaves that
-// pane's record and dedup entry alone and emits one WARN; the caller commits
-// regardless and the next call retries.
+// pane whose token-named file already exists adopts it, leaving the positional
+// file where it is. A rename that fails for any reason other than a missing
+// source or an existing token-named file leaves that pane's record and dedup
+// entry alone and emits one WARN; the caller commits regardless and the next
+// call retries.
 func RefilePendingScrollback(dir string, idx *Index, pending map[string]struct{}, hm HashMap, logger *slog.Logger) {
 	if idx == nil || len(pending) == 0 {
 		return
@@ -135,16 +137,39 @@ func refilePendingPane(dir, paneKey string, p *Pane, hm HashMap, logger *slog.Lo
 
 // A record naming no file is treated as a missing source: the bytes are already
 // wherever they are, and joining an empty path onto dir would name the state
-// directory itself.
+// directory itself. An existing token-named file is adopted rather than
+// replaced: the positional file may by now hold another pane's capture, and the
+// refusal is atomic so a concurrent re-file cannot slip between check and move.
 func renameStoredScrollback(dir, stored, tokenPath string) error {
 	if stored == "" {
 		return nil
 	}
-	err := os.Rename(joinStored(dir, stored), joinStored(dir, tokenPath))
-	if errors.Is(err, fs.ErrNotExist) {
+	err := moveNoClobber(joinStored(dir, stored), joinStored(dir, tokenPath))
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrExist) {
 		return nil
 	}
 	return err
+}
+
+// errNoReplaceUnsupported is what a platform's no-replace rename reports when
+// the filesystem rejects the flag itself.
+var errNoReplaceUnsupported = errors.New("no-replace rename unsupported by filesystem")
+
+var renameNoReplace = platformRenameNoReplace
+
+// Where the filesystem rejects the no-replace flag, link(2) stands in: it too
+// refuses an existing name atomically. Once linked the bytes are safe under
+// dst, so a failed remove of src is ignored.
+func moveNoClobber(src, dst string) error {
+	err := renameNoReplace(src, dst)
+	if !errors.Is(err, errNoReplaceUnsupported) {
+		return err
+	}
+	if err := os.Link(src, dst); err != nil {
+		return err
+	}
+	_ = os.Remove(src)
+	return nil
 }
 
 func joinStored(dir, stored string) string {

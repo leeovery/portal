@@ -320,6 +320,45 @@ func recordedScrollback(t *testing.T, dir string, window, pane int) string {
 	return ""
 }
 
+// commitBeforeWaitThenDisplace commits the waiting pane at work:0.1 while it is
+// still live, then moves it to work:0.2 as a waiting pane with an untokened live
+// pane taking over work:0.1.
+func commitBeforeWaitThenDisplace(t *testing.T, fc *daemonFakeCommander, deps *daemonDeps) {
+	t.Helper()
+	fc.sessionsOut = "work|1|0|"
+	fc.panesOut = daemonPaneRow(0, 1, false, waitingToken)
+	fc.captureByTarget = map[string]string{"work:0.1": "waiting-body"}
+	if err := captureAndCommit(context.Background(), deps); err != nil {
+		t.Fatalf("captureAndCommit before the wait: %v", err)
+	}
+	fc.panesOut = daemonPaneRow(0, 1, false, "") + "\n" + daemonPaneRow(0, 2, true, waitingToken)
+	fc.captureByTarget = map[string]string{
+		"work:0.1": "intruder-body",
+		"work:0.2": "must-not-be-captured",
+	}
+}
+
+// assertDisplacedFilesKept checks each pane's bytes sit in the file its
+// committed record names.
+func assertDisplacedFilesKept(t *testing.T, dir string) {
+	t.Helper()
+	if got, want := scrollbackFiles(t, dir), []string{waitingRefiled, "work__0.1.bin"}; !slices.Equal(got, want) {
+		t.Fatalf("scrollback files = %v, want %v", got, want)
+	}
+	if got := scrollbackBody(t, dir, waitingRefiled); got != "waiting-body" {
+		t.Errorf("token-named file = %q, want %q", got, "waiting-body")
+	}
+	if got := scrollbackBody(t, dir, "work__0.1.bin"); got != "intruder-body" {
+		t.Errorf("positional file = %q, want %q", got, "intruder-body")
+	}
+	if got, want := recordedScrollback(t, dir, 0, 1), "scrollback/work__0.1.bin"; got != want {
+		t.Errorf("live pane record = %q, want %q", got, want)
+	}
+	if got, want := recordedScrollback(t, dir, 0, 2), "scrollback/"+waitingRefiled; got != want {
+		t.Errorf("waiting pane record = %q, want %q", got, want)
+	}
+}
+
 func TestCaptureAndCommit_RefilesResumePendingScrollback(t *testing.T) {
 	t.Run("it re-files a waiting pane's scrollback under its token and points the record at that path", func(t *testing.T) {
 		fc := &daemonFakeCommander{
@@ -387,6 +426,90 @@ func TestCaptureAndCommit_RefilesResumePendingScrollback(t *testing.T) {
 		if got, want := recordedScrollback(t, deps.Dir, 0, 2), "scrollback/"+waitingRefiled; got != want {
 			t.Errorf("waiting record = %q, want %q", got, want)
 		}
+	})
+
+	t.Run("it keeps the frozen bytes when a displaced first waiting tick is cancelled before its commit and the shutdown flush follows", func(t *testing.T) {
+		fc := &daemonFakeCommander{}
+		deps, _ := resumePendingFixture(t, fc)
+		commitBeforeWaitThenDisplace(t, fc, deps)
+		committedBefore := deps.PrevIndex
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		fc.dispatchHook = func(args []string) {
+			if args[0] == "capture-pane" {
+				cancel()
+			}
+		}
+		if err := captureAndCommit(ctx, deps); err != nil {
+			t.Fatalf("cancelled captureAndCommit: %v", err)
+		}
+		fc.dispatchHook = nil
+		if deps.PrevIndex != committedBefore {
+			t.Fatal("cancelled tick advanced PrevIndex, want it to stop before the commit")
+		}
+		if got := scrollbackBody(t, deps.Dir, "work__0.1.bin"); got != "intruder-body" {
+			t.Fatalf("positional file after the cancelled tick = %q, want the live pane's capture", got)
+		}
+
+		if err := defaultShutdownFlush(deps); err != nil {
+			t.Fatalf("defaultShutdownFlush: %v", err)
+		}
+
+		assertDisplacedFilesKept(t, deps.Dir)
+	})
+
+	t.Run("it keeps both files as a displaced first waiting tick with a failed commit left them, and commits each record naming its own file", func(t *testing.T) {
+		fc := &daemonFakeCommander{}
+		deps, _ := resumePendingFixture(t, fc)
+		commitBeforeWaitThenDisplace(t, fc, deps)
+
+		if err := os.Remove(state.SessionsJSON(deps.Dir)); err != nil {
+			t.Fatalf("remove sessions.json: %v", err)
+		}
+		breakCommitTarget(t, deps.Dir)
+		if err := captureAndCommit(context.Background(), deps); err == nil {
+			t.Fatal("captureAndCommit with a broken commit target returned nil, want an error")
+		}
+		if err := os.Remove(state.SessionsJSON(deps.Dir)); err != nil {
+			t.Fatalf("repair commit target: %v", err)
+		}
+		if got := scrollbackBody(t, deps.Dir, waitingRefiled); got != "waiting-body" {
+			t.Fatalf("token-named file after the failed tick = %q, want %q", got, "waiting-body")
+		}
+		if got := scrollbackBody(t, deps.Dir, "work__0.1.bin"); got != "intruder-body" {
+			t.Fatalf("positional file after the failed tick = %q, want %q", got, "intruder-body")
+		}
+
+		if err := captureAndCommit(context.Background(), deps); err != nil {
+			t.Fatalf("captureAndCommit after the failed tick: %v", err)
+		}
+
+		assertDisplacedFilesKept(t, deps.Dir)
+	})
+
+	t.Run("it adopts the token-named file on the first tick of a daemon starting from an index that still names the positional path", func(t *testing.T) {
+		fc := &daemonFakeCommander{}
+		deps, _ := resumePendingFixture(t, fc)
+		stageDisplacedOnDisk(t, deps.Dir)
+		prev, skip, err := state.ReadIndex(deps.Dir)
+		if err != nil || skip {
+			t.Fatalf("ReadIndex = (skip %v, err %v), want the staged index", skip, err)
+		}
+		deps.PrevIndex = &prev
+		deps.HashMap = state.SeedHashMap(deps.Dir, nil)
+		fc.sessionsOut = "work|1|0|"
+		fc.panesOut = daemonPaneRow(0, 1, false, "") + "\n" + daemonPaneRow(0, 2, true, waitingToken)
+		fc.captureByTarget = map[string]string{
+			"work:0.1": "intruder-body",
+			"work:0.2": "must-not-be-captured",
+		}
+
+		if err := captureAndCommit(context.Background(), deps); err != nil {
+			t.Fatalf("captureAndCommit: %v", err)
+		}
+
+		assertDisplacedFilesKept(t, deps.Dir)
 	})
 
 	t.Run("it drops the dedup entry for the name the bytes left, so the returning pane's identical capture still writes", func(t *testing.T) {
@@ -522,4 +645,24 @@ func TestCaptureAndCommit_RefilesResumePendingScrollback(t *testing.T) {
 			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
 		}
 	})
+}
+
+// stageDisplacedOnDisk leaves the state a displaced first waiting tick leaves
+// when it re-files and writes but never commits: sessions.json still names the
+// waiting pane at work:0.1's positional path, the token-named file holds its
+// frozen bytes and the positional file holds the live pane's capture.
+func stageDisplacedOnDisk(t *testing.T, dir string) {
+	t.Helper()
+	if err := state.Commit(dir, waitingPaneIndex(), false, nil); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+	sb := state.ScrollbackDir(dir)
+	if err := os.MkdirAll(sb, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for name, body := range map[string]string{waitingRefiled: "waiting-body", "work__0.1.bin": "intruder-body"} {
+		if err := os.WriteFile(filepath.Join(sb, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
 }

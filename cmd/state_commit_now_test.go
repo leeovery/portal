@@ -1245,6 +1245,31 @@ func TestStateCommitNow_RefilesResumePendingScrollback(t *testing.T) {
 	})
 }
 
+func TestStateCommitNow_AdoptsAnExistingTokenNamedFileForADisplacedWaitingPane(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	stageDisplacedOnDisk(t, dir)
+
+	withCommitNowDeps(t, CommitNowDeps{
+		NewClient: func() state.CaptureClient {
+			return &fakeCaptureClient{
+				sessions: []string{"work"},
+				rows: "work|||0|||main|||tiled|||0|||1|||1|||/tmp|||1|||zsh||||||\n" +
+					"work|||0|||main|||tiled|||0|||1|||2|||/tmp|||0|||zsh|||" + waitingToken + "|||1",
+				env: map[string]string{"work": ""},
+			}
+		},
+		CaptureAndRefile: state.CaptureAndRefile,
+		IsRestoring:      func() (bool, error) { return false, nil },
+	})
+
+	if _, _, err := runRootCmd(t, "state", "commit-now"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertDisplacedFilesKept(t, dir)
+}
+
 // waitingPaneIndex is the prior commit the waiting pane's record is merged back
 // from: the capture keeps its ScrollbackFile, which is what the re-file moves.
 func waitingPaneIndex() state.Index {

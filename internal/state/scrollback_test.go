@@ -487,6 +487,18 @@ func seedScrollback(t *testing.T, dir, name, body string) string {
 	return path
 }
 
+// denyScrollbackWrites makes the scrollback directory read-only, so any rename
+// out of or into it fails with a permission error rather than a missing source
+// or an occupied destination.
+func denyScrollbackWrites(t *testing.T, dir string) {
+	t.Helper()
+	sb := state.ScrollbackDir(dir)
+	if err := os.Chmod(sb, 0o500); err != nil {
+		t.Fatalf("chmod scrollback dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sb, 0o700) })
+}
+
 func readScrollback(t *testing.T, dir, name string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(state.ScrollbackDir(dir), name))
@@ -571,6 +583,122 @@ func TestRefilePendingScrollback(t *testing.T) {
 		}
 	})
 
+	t.Run("it adopts an existing token-named file and leaves the positional file where it is", func(t *testing.T) {
+		dir := t.TempDir()
+		tokenName := "pane-" + waitingPaneToken + ".bin"
+		seedScrollback(t, dir, tokenName, "frozen-body")
+		seedScrollback(t, dir, "work__0.1.bin", "displacer-body")
+		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+		hm := state.HashMap{"work__0.1": 42}
+		logger, sink := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), hm, logger)
+
+		if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/"+tokenName; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readScrollback(t, dir, tokenName); got != "frozen-body" {
+			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
+		}
+		if got := readScrollback(t, dir, "work__0.1.bin"); got != "displacer-body" {
+			t.Errorf("positional file = %q, want %q", got, "displacer-body")
+		}
+		if got := sink.Records(); len(got) != 0 {
+			t.Errorf("records = %v, want none", sink.Lines())
+		}
+	})
+
+	t.Run("it overwrites nothing on a second re-file from an index still naming the positional path, in either order", func(t *testing.T) {
+		orders := map[string][2]state.HashMap{
+			"daemon then commit-now": {{"work__0.1": 42}, nil},
+			"commit-now then daemon": {nil, {"work__0.1": 42}},
+		}
+		for name, hms := range orders {
+			t.Run(name, func(t *testing.T) {
+				dir := t.TempDir()
+				tokenName := "pane-" + waitingPaneToken + ".bin"
+				seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
+				first := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+				second := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+				logger, sink := openTempLogger(t)
+
+				state.RefilePendingScrollback(dir, &first, waitingSet(), hms[0], logger)
+				seedScrollback(t, dir, "work__0.1.bin", "displacer-body")
+				state.RefilePendingScrollback(dir, &second, waitingSet(), hms[1], logger)
+
+				want := "scrollback/" + tokenName
+				if got := waitingPaneOf(t, first).ScrollbackFile; got != want {
+					t.Errorf("first ScrollbackFile = %q, want %q", got, want)
+				}
+				if got := waitingPaneOf(t, second).ScrollbackFile; got != want {
+					t.Errorf("second ScrollbackFile = %q, want %q", got, want)
+				}
+				if got := readScrollback(t, dir, tokenName); got != "frozen-body" {
+					t.Errorf("token-named file = %q, want %q", got, "frozen-body")
+				}
+				if got := readScrollback(t, dir, "work__0.1.bin"); got != "displacer-body" {
+					t.Errorf("positional file = %q, want %q", got, "displacer-body")
+				}
+				if got := sink.Records(); len(got) != 0 {
+					t.Errorf("records = %v, want none", sink.Lines())
+				}
+			})
+		}
+	})
+
+	t.Run("it moves the bytes onto the token-named file on a filesystem that rejects the no-replace rename", func(t *testing.T) {
+		state.StubRenameNoReplaceUnsupported(t)
+		dir := t.TempDir()
+		tokenName := "pane-" + waitingPaneToken + ".bin"
+		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
+		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+		hm := state.HashMap{"work__0.1": 42}
+		logger, sink := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), hm, logger)
+
+		if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/"+tokenName; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readScrollback(t, dir, tokenName); got != "frozen-body" {
+			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
+		}
+		if _, err := os.Stat(filepath.Join(state.ScrollbackDir(dir), "work__0.1.bin")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("positional file stat err = %v, want not-exist", err)
+		}
+		if _, held := hm["work__0.1"]; held {
+			t.Errorf("hash map still holds the vacated key: %v", hm)
+		}
+		if got := sink.Records(); len(got) != 0 {
+			t.Errorf("records = %v, want none", sink.Lines())
+		}
+	})
+
+	t.Run("it adopts an existing token-named file without overwriting it on a filesystem that rejects the no-replace rename", func(t *testing.T) {
+		state.StubRenameNoReplaceUnsupported(t)
+		dir := t.TempDir()
+		tokenName := "pane-" + waitingPaneToken + ".bin"
+		seedScrollback(t, dir, tokenName, "frozen-body")
+		seedScrollback(t, dir, "work__0.1.bin", "displacer-body")
+		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
+		logger, sink := openTempLogger(t)
+
+		state.RefilePendingScrollback(dir, &idx, waitingSet(), state.HashMap{}, logger)
+
+		if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/"+tokenName; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		if got := readScrollback(t, dir, tokenName); got != "frozen-body" {
+			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
+		}
+		if got := readScrollback(t, dir, "work__0.1.bin"); got != "displacer-body" {
+			t.Errorf("positional file = %q, want %q", got, "displacer-body")
+		}
+		if got := sink.Records(); len(got) != 0 {
+			t.Errorf("records = %v, want none", sink.Lines())
+		}
+	})
+
 	t.Run("it keeps the positional path for a waiting pane whose token is absent or not token-shaped", func(t *testing.T) {
 		tokens := map[string]string{
 			"absent":           "",
@@ -607,10 +735,7 @@ func TestRefilePendingScrollback(t *testing.T) {
 	t.Run("it warns once and leaves the record and the dedup entry alone when the rename fails", func(t *testing.T) {
 		dir := t.TempDir()
 		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
-		blocked := filepath.Join(state.ScrollbackDir(dir), "pane-"+waitingPaneToken+".bin")
-		if err := os.MkdirAll(filepath.Join(blocked, "occupant"), 0o700); err != nil {
-			t.Fatalf("seed blocking directory: %v", err)
-		}
+		denyScrollbackWrites(t, dir)
 		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
 		hm := state.HashMap{"work__0.1": 42}
 		logger, sink := openTempLogger(t)
