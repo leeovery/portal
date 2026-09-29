@@ -9,10 +9,12 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/portalbintest"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
@@ -57,11 +59,18 @@ func TestCommitNowDaemonMergeStability(t *testing.T) {
 
 	tickCtx, tickCancel := context.WithTimeout(context.Background(), daemonTickBudget)
 	defer tickCancel()
-	if err := waitForSaveRequestedConsumed(tickCtx, fixture.stateDir); err != nil {
+	if err := waitForForcedTickSettled(tickCtx, fixture.stateDir); err != nil {
 		t.Fatalf(
-			"daemon did not consume save.requested within %s "+
+			"daemon's forced tick did not settle within %s "+
 				"(daemon likely not running or wedged): %v\n%s",
 			daemonTickBudget, err, fixture.diagnostic(),
+		)
+	}
+	if strings.Contains(portaltest.ReadPortalLogSafe(fixture.stateDir), "daemon: tick failed") {
+		t.Fatalf(
+			"daemon's forced tick failed rather than committed; the reads below "+
+				"would see commit-now's sessions.json, not the daemon's\n%s\n--- portal.log ---\n%s",
+			fixture.diagnostic(), portaltest.ReadPortalLogSafe(fixture.stateDir),
 		)
 	}
 
@@ -104,9 +113,26 @@ func TestCommitNowDaemonMergeStability(t *testing.T) {
 	})
 }
 
-// waitForSaveRequestedConsumed waits for save.requested to disappear: a
-// successful captureAndCommit cycle removes it as its post-commit step, which is
-// the readiness signal that the daemon's tick completed.
+// waitForForcedTickSettled waits until the tick forced by a touch of
+// save.requested has returned. The tick consumes the flag before its cycle runs,
+// so its disappearance alone says only that the cycle has started. Ticks run
+// one after another, so a second touch consumed means a later tick has started
+// — and therefore that the forced one has returned.
+func waitForForcedTickSettled(ctx context.Context, stateDir string) error {
+	if err := waitForSaveRequestedConsumed(ctx, stateDir); err != nil {
+		return fmt.Errorf("forced tick did not start: %w", err)
+	}
+	if err := state.TouchSaveRequested(stateDir); err != nil {
+		return fmt.Errorf("touch save.requested to order a later tick: %w", err)
+	}
+	if err := waitForSaveRequestedConsumed(ctx, stateDir); err != nil {
+		return fmt.Errorf("no tick started after the forced one: %w", err)
+	}
+	return nil
+}
+
+// waitForSaveRequestedConsumed waits for save.requested to disappear, which a
+// tick does as it starts its cycle.
 func waitForSaveRequestedConsumed(ctx context.Context, stateDir string) error {
 	ticker := time.NewTicker(daemonTickPollInterval)
 	defer ticker.Stop()

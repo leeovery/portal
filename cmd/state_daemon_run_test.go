@@ -364,13 +364,17 @@ func TestDaemonTick_RemovesSaveRequestedAfterSuccess(t *testing.T) {
 	sess, panes := oneSession()
 	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
 	deps := makeDeps(t, dir, fc)
-	deps.LastSaveAt = time.Now()
+	previousLastSave := time.Now().Add(-time.Second)
+	deps.LastSaveAt = previousLastSave
 	touchSaveRequested(t, dir)
 
 	tick(t.Context(), deps)
 
 	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
 		t.Errorf("save.requested should be removed after successful capture; stat=%v", err)
+	}
+	if !deps.LastSaveAt.After(previousLastSave) {
+		t.Errorf("LastSaveAt = %v, want it advanced past %v by the committing tick", deps.LastSaveAt, previousLastSave)
 	}
 }
 

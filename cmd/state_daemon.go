@@ -188,16 +188,24 @@ func tick(ctx context.Context, deps *daemonDeps) {
 		return
 	}
 
+	// The request is consumed before the cycle, not after it: a touch landing
+	// while the cycle runs — a commit-now that timed out on this tick's lock, a
+	// hook set, a notify — asks for a capture taken after it, so it must survive
+	// to the next tick. A cancelled cycle consumes it harmlessly, since the
+	// shutdown flush follows.
+	if err := os.Remove(state.SaveRequested(deps.Dir)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		deps.Logger.Warn("remove save.requested failed", "error", err)
+	}
+
 	if err := captureAndCommit(ctx, deps); err != nil {
 		deps.Logger.Warn("tick failed", "error", err)
+		if err := state.TouchSaveRequested(deps.Dir); err != nil {
+			deps.Logger.Warn("touch save.requested failed", "error", err)
+		}
 		return
 	}
 
 	deps.LastSaveAt = time.Now()
-
-	if err := os.Remove(state.SaveRequested(deps.Dir)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		deps.Logger.Warn("remove save.requested failed", "error", err)
-	}
 }
 
 // The throttle anchor is reset after the cleanup body runs, so a failing prune
