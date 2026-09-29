@@ -452,6 +452,11 @@
                 "1": "approved",
                 "2": "approved"
               }
+            },
+            "c7": {
+              "tasks": {
+                "1": "pending"
+              }
             }
           },
           "consolidated_phases": [
