@@ -370,22 +370,19 @@ type captureRoundResult struct {
 }
 
 // captureRound takes a capture the way the daemon takes one, in its order: the
-// composite that reads the structure and re-files every frozen pane's
-// scrollback onto its own token, the per-pane scrollback dump, then the commit
-// that reclaims whatever the committed index no longer names. A capture landing
+// composite that reads the markers and the structure and re-files every frozen
+// pane's scrollback onto its own token, the per-pane scrollback dump, then the
+// commit that reclaims whatever the committed index no longer names. A capture landing
 // while a pane waits reaches the state an install reaches only if all three run.
 func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 	t.Helper()
 
-	skipSet, err := state.ListSkeletonMarkers(fx.client)
-	if err != nil {
-		t.Fatalf("ListSkeletonMarkers: %v", err)
-	}
 	prev := fx.prev
-	idx, pending, err := state.CaptureAndRefile(fx.client, fx.stateDir, skipSet, &prev, fx.hashes, nil)
+	capture, err := state.CaptureAndRefile(fx.client, fx.stateDir, &prev, fx.hashes, nil)
 	if err != nil {
 		t.Fatalf("CaptureAndRefile: %v", err)
 	}
+	idx := capture.Index
 
 	written := map[string]bool{}
 	anyWritten := false
@@ -393,10 +390,10 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 		for _, win := range sess.Windows {
 			for _, pane := range win.Panes {
 				key := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
-				if _, skipped := skipSet[key]; skipped {
+				if _, skipped := capture.Skeleton[key]; skipped {
 					continue
 				}
-				if _, waiting := pending[key]; waiting {
+				if _, waiting := capture.Pending[key]; waiting {
 					continue
 				}
 				target := tmux.PaneTargetExact(sess.Name, win.Index, pane.Index)
@@ -418,7 +415,7 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 		t.Fatalf("Commit: %v", err)
 	}
 	fx.prev = idx
-	return captureRoundResult{idx: idx, pending: pending, written: written}
+	return captureRoundResult{idx: idx, pending: capture.Pending, written: written}
 }
 
 // rebootRestoreHydrate runs the whole recovery a user's reboot runs: the server
@@ -426,12 +423,16 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 // and every restored pane driven through its hydrate helper.
 func (fx *lazyPanelFixture) rebootRestoreHydrate(t *testing.T) {
 	t.Helper()
+	fx.rebootRestoreHydrateSessions(t, []string{lazySubjectSession, eagerControlSession})
+}
+
+func (fx *lazyPanelFixture) rebootRestoreHydrateSessions(t *testing.T, sessions []string) {
+	t.Helper()
 	restoretest.RebootServer(t, fx.ts, fx.client)
 	if err := restoretest.RestoreFromState(t, fx.client, fx.stateDir, fx.binDir); err != nil {
 		t.Fatalf("RestoreFromState: %v", err)
 	}
-	restoretest.DriveSignalHydrate(t, fx.client, fx.stateDir,
-		[]string{lazySubjectSession, eagerControlSession})
+	restoretest.DriveSignalHydrate(t, fx.client, fx.stateDir, sessions)
 	restoretest.WaitForSkeletonMarkersCleared(t, fx.client, restoretest.HydrateBudget, restoretest.HydrateTick)
 }
 

@@ -241,15 +241,11 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 
 	start := time.Now()
 
-	skipSet, err := state.ListSkeletonMarkers(deps.Client)
+	capture, err := state.CaptureAndRefile(deps.Client, deps.Dir, deps.PrevIndex, deps.HashMap, deps.Logger)
 	if err != nil {
-		return fmt.Errorf("list markers: %w", err)
+		return fmt.Errorf("capture: %w", err)
 	}
-
-	idx, pendingSet, err := state.CaptureAndRefile(deps.Client, deps.Dir, skipSet, deps.PrevIndex, deps.HashMap, deps.Logger)
-	if err != nil {
-		return fmt.Errorf("capture structure: %w", err)
-	}
+	idx := capture.Index
 
 	sessions := len(idx.Sessions)
 	var panes, naturalChurn, anomalous int
@@ -270,7 +266,7 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 				default:
 				}
 				paneKey := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
-				if paneSkipsScrollback(paneKey, skipSet, pendingSet) {
+				if paneSkipsScrollback(paneKey, capture) {
 					continue
 				}
 				panes++
@@ -319,11 +315,11 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 // Capturing a pane held behind a waiting resume panel writes back its
 // transcript minus the screenful that panel covers, and no copy of those lines
 // survives anywhere else.
-func paneSkipsScrollback(paneKey string, skipSet, pendingSet map[string]struct{}) bool {
-	if _, skipped := skipSet[paneKey]; skipped {
+func paneSkipsScrollback(paneKey string, capture state.CaptureCycle) bool {
+	if _, skipped := capture.Skeleton[paneKey]; skipped {
 		return true
 	}
-	_, pending := pendingSet[paneKey]
+	_, pending := capture.Pending[paneKey]
 	return pending
 }
 

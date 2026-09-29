@@ -24,6 +24,8 @@ type captureMock struct {
 	listPanesE    error
 	envBySession  map[string]string
 	envErrs       map[string]error
+	markers       string
+	markersE      error
 	t             *testing.T
 
 	listSessionsCalls int
@@ -39,6 +41,7 @@ func (m *captureMock) commander() *commandertest.Scripted {
 		commandertest.Answering(commandertest.ArgvPrefix("list-sessions"), m.answerListSessions),
 		commandertest.Answering(commandertest.ArgvPrefix("list-panes"), m.answerListPanes),
 		commandertest.Answering(commandertest.ArgvPrefix("show-environment"), m.answerShowEnvironment),
+		commandertest.When(commandertest.ArgvPrefix("show-options"), m.markers, m.markersE),
 	).Strict()
 }
 
@@ -1603,6 +1606,10 @@ func (f *failFastCaptureClient) ShowEnvironment(session string) (string, error) 
 	return "", nil
 }
 
+func (f *failFastCaptureClient) ShowAllServerOptions() (string, error) {
+	return "", nil
+}
+
 func TestCaptureStructurePreLoopFailFatal(t *testing.T) {
 	t.Run("it returns an error when ListSessionNames fails and does not call show-environment", func(t *testing.T) {
 		client := &failFastCaptureClient{
@@ -1919,4 +1926,113 @@ func sortedPaneKeys(set map[string]struct{}) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func TestCaptureStructureMergeSkippedPanesByToken(t *testing.T) {
+	const token = "tk12ab"
+
+	savedAtWindowTwo := func(scrollback string) state.Index {
+		return state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "work",
+				Environment: map[string]string{},
+				Windows: []state.Window{{
+					Index: 2, Name: "main", Layout: "L", Active: true,
+					Panes: []state.Pane{{
+						Index:          0,
+						CWD:            "/saved",
+						Active:         true,
+						CurrentCommand: "vim",
+						ScrollbackFile: scrollback,
+						PortalPaneID:   token,
+					}},
+				}},
+			}},
+		}
+	}
+
+	t.Run("carries a tokened skeleton pane's saved record onto its renumbered address", func(t *testing.T) {
+		prev := savedAtWindowTwo("scrollback/pane-" + token + ".bin")
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLineWithPaneToken("work", 1, "main", "L", false, true, 0, "/fresh", true, "zsh", token),
+			t:            t,
+		}
+		skip := map[string]struct{}{state.SanitizePaneKey("work", 1, 0): {}}
+
+		idx, _, err := state.CaptureStructure(tmux.NewClient(mock.commander()), skip, &prev, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		p := findPane(idx, "work", 1, 0)
+		if p == nil {
+			t.Fatalf("missing pane work:1.0 in result: %+v", idx.Sessions)
+		}
+		want := state.Pane{
+			Index:          0,
+			CWD:            "/saved",
+			Active:         true,
+			CurrentCommand: "vim",
+			ScrollbackFile: "scrollback/pane-" + token + ".bin",
+			PortalPaneID:   token,
+		}
+		if *p != want {
+			t.Errorf("pane = %+v, want %+v", *p, want)
+		}
+		if gone := findPane(idx, "work", 2, 0); gone != nil {
+			t.Errorf("saved address work:2.0 brought back: %+v", gone)
+		}
+	})
+
+	t.Run("does not take the record at its own address for a tokened skeleton pane", func(t *testing.T) {
+		prev := savedAtWindowTwo("scrollback/work__2.0.bin")
+		prev.Sessions[0].Windows[0].Panes[0].PortalPaneID = "other1"
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLineWithPaneToken("work", 2, "main", "L", false, true, 0, "/fresh", true, "zsh", token),
+			t:            t,
+		}
+		skip := map[string]struct{}{state.SanitizePaneKey("work", 2, 0): {}}
+
+		idx, _, err := state.CaptureStructure(tmux.NewClient(mock.commander()), skip, &prev, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		p := findPane(idx, "work", 2, 0)
+		if p == nil {
+			t.Fatalf("missing pane work:2.0 in result")
+		}
+		if p.CWD != "/fresh" || p.CurrentCommand != "zsh" || p.PortalPaneID != token {
+			t.Errorf("pane = %+v, want the fresh /fresh + zsh under its own token", *p)
+		}
+	})
+
+	t.Run("brings no gone pane back for a skeleton marker whose saved record carries a token", func(t *testing.T) {
+		prev := savedAtWindowTwo("scrollback/pane-" + token + ".bin")
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLine("work", 0, "main", "L", false, true, 0, "/fresh", true, "zsh"),
+			t:            t,
+		}
+		skip := map[string]struct{}{state.SanitizePaneKey("work", 2, 0): {}}
+
+		idx, _, err := state.CaptureStructure(tmux.NewClient(mock.commander()), skip, &prev, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if gone := findPane(idx, "work", 2, 0); gone != nil {
+			t.Errorf("gone pane work:2.0 brought back: %+v", gone)
+		}
+		p := findPane(idx, "work", 0, 0)
+		if p == nil || p.CWD != "/fresh" || p.ScrollbackFile == "scrollback/pane-"+token+".bin" {
+			t.Errorf("live pane work:0.0 = %+v, want its own fresh record", p)
+		}
+		if len(idx.Sessions) != 1 || len(idx.Sessions[0].Windows) != 1 || len(idx.Sessions[0].Windows[0].Panes) != 1 {
+			t.Errorf("topology = %+v, want only the live work:0.0", idx.Sessions)
+		}
+	})
 }

@@ -181,17 +181,41 @@ func dedupKeyOf(stored string) string {
 	return strings.TrimSuffix(filepath.Base(filepath.FromSlash(stored)), ".bin")
 }
 
-// CaptureAndRefile takes a capture and re-files every frozen pane's scrollback
-// in one step, so no caller can commit an index that still names a waiting
-// pane's vacated positional path. A failed capture returns before anything is
-// re-filed, with the empty index, the empty pending set and the error the
-// capture gave. The second return holds the frozen panes, which a caller's own
-// scrollback dump must skip alongside the skipSet it passed.
-func CaptureAndRefile(c CaptureClient, dir string, skipSet map[string]struct{}, prev *Index, hm HashMap, logger *slog.Logger) (Index, map[string]struct{}, error) {
-	idx, pending, err := CaptureStructure(c, skipSet, prev, logger)
+// CaptureCycleClient is what one capture cycle reads through: the skeleton
+// markers as well as the structure.
+type CaptureCycleClient interface {
+	CaptureClient
+	ServerOptionLister
+}
+
+// CaptureCycle is what one capture cycle hands its caller: the index to commit
+// and the two sets of pane keys the caller's own scrollback dump must skip.
+type CaptureCycle struct {
+	Index Index
+	// Pending holds every live pane carrying the resume pending marker.
+	Pending map[string]struct{}
+	// Skeleton holds every pane key a skeleton marker named when the capture was
+	// taken.
+	Skeleton map[string]struct{}
+}
+
+// CaptureAndRefile reads the skeleton markers, takes a capture merged against
+// them, and re-files every frozen pane's scrollback in one step, so no caller
+// can commit an index that omits a mid-restore pane's record or still names a
+// waiting pane's vacated positional path. A failed marker read returns its
+// wrapped error before any capture is taken. A failed capture returns before
+// anything is re-filed, with the empty index, the empty pending set and the
+// error the capture gave.
+func CaptureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
+	skeleton, err := ListSkeletonMarkers(c)
 	if err != nil {
-		return idx, pending, err
+		return CaptureCycle{}, fmt.Errorf("list skeleton markers: %w", err)
 	}
-	RefilePendingScrollback(dir, &idx, pending, hm, logger)
-	return idx, pending, nil
+	idx, pending, err := CaptureStructure(c, skeleton, prev, logger)
+	capture := CaptureCycle{Index: idx, Pending: pending, Skeleton: skeleton}
+	if err != nil {
+		return capture, err
+	}
+	RefilePendingScrollback(dir, &capture.Index, pending, hm, logger)
+	return capture, nil
 }

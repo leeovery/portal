@@ -29,13 +29,13 @@ func IsSilentExitError(err error) bool {
 // back to its production implementation.
 var commitNowDeps *CommitNowDeps
 
-// CaptureAndRefile is always called with a nil skipSet and Commit with
-// anyScrollbackChanged=false - commit-now writes no scrollback bytes.
+// Commit is always called with anyScrollbackChanged=false - commit-now writes
+// no scrollback bytes.
 type CommitNowDeps struct {
 	ReadIndex        func(dir string) (state.Index, bool, error)
-	CaptureAndRefile func(c state.CaptureClient, dir string, skipSet map[string]struct{}, prev *state.Index, hm state.HashMap, logger *slog.Logger) (state.Index, map[string]struct{}, error)
+	CaptureAndRefile func(c state.CaptureCycleClient, dir string, prev *state.Index, hm state.HashMap, logger *slog.Logger) (state.CaptureCycle, error)
 	Commit           func(dir string, idx state.Index, anyScrollbackChanged bool, logger *slog.Logger) error
-	NewClient        func() state.CaptureClient
+	NewClient        func() state.CaptureCycleClient
 
 	// When @portal-restoring is set, commit-now short-circuits as a no-op: the
 	// daemon owns sessions.json during restoration.
@@ -67,7 +67,7 @@ func resolveCommitNowDeps() *CommitNowDeps {
 		deps.Commit = state.Commit
 	}
 	if deps.NewClient == nil {
-		deps.NewClient = func() state.CaptureClient { return tmux.DefaultClient() }
+		deps.NewClient = func() state.CaptureCycleClient { return tmux.DefaultClient() }
 	}
 	if deps.IsRestoring == nil {
 		deps.IsRestoring = func() (bool, error) { return state.IsRestoringSet(tmux.DefaultClient()) }
@@ -118,12 +118,12 @@ var stateCommitNowCmd = &cobra.Command{
 		prev := loadPrevIndex(dir, deps.ReadIndex, logger)
 
 		client := deps.NewClient()
-		idx, _, err := deps.CaptureAndRefile(client, dir, nil, &prev, nil, logger)
+		capture, err := deps.CaptureAndRefile(client, dir, &prev, nil, logger)
 		if err != nil {
-			return failCommitNow(logger, dir, deps.TouchSaveRequested, "capture structure", err)
+			return failCommitNow(logger, dir, deps.TouchSaveRequested, "capture", err)
 		}
 
-		if err := deps.Commit(dir, idx, false, logger); err != nil {
+		if err := deps.Commit(dir, capture.Index, false, logger); err != nil {
 			return failCommitNow(logger, dir, deps.TouchSaveRequested, "commit sessions.json", err)
 		}
 

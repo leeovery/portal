@@ -292,14 +292,14 @@ func commitNowSeamCases() []seamCase {
 		{
 			field: "CaptureAndRefile",
 			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{CaptureAndRefile: func(state.CaptureClient, string, map[string]struct{}, *state.Index, state.HashMap, *slog.Logger) (state.Index, map[string]struct{}, error) {
-					return state.Index{Version: 98}, map[string]struct{}{}, nil
+				withCommitNowDeps(t, CommitNowDeps{CaptureAndRefile: func(state.CaptureCycleClient, string, *state.Index, state.HashMap, *slog.Logger) (state.CaptureCycle, error) {
+					return state.CaptureCycle{Index: state.Index{Version: 98}}, nil
 				}})
 			},
 			assert: func(t *testing.T) {
-				idx, _, _ := resolveCommitNowDeps().CaptureAndRefile(nil, "", nil, nil, nil, nil)
-				if idx.Version != 98 {
-					t.Errorf("CaptureAndRefile() version = %d; want the injected seam's 98", idx.Version)
+				capture, _ := resolveCommitNowDeps().CaptureAndRefile(nil, "", nil, nil, nil)
+				if capture.Index.Version != 98 {
+					t.Errorf("CaptureAndRefile() version = %d; want the injected seam's 98", capture.Index.Version)
 				}
 			},
 		},
@@ -327,7 +327,7 @@ func commitNowSeamCases() []seamCase {
 			field: "NewClient",
 			inject: func(t *testing.T) {
 				called := false
-				withCommitNowDeps(t, CommitNowDeps{NewClient: func() state.CaptureClient {
+				withCommitNowDeps(t, CommitNowDeps{NewClient: func() state.CaptureCycleClient {
 					called = true
 					return nil
 				}})

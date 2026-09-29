@@ -17,16 +17,24 @@ import (
 )
 
 type fakeCaptureClient struct {
-	sessions   []string
-	sessionErr error
-	rows       string
-	rowsErr    error
-	env        map[string]string
-	envErr     error
+	sessions     []string
+	sessionErr   error
+	sessionCalls int
+	rows         string
+	rowsErr      error
+	env          map[string]string
+	envErr       error
+	markers      string
+	markersErr   error
 }
 
 func (f *fakeCaptureClient) ListSessionNames() ([]string, error) {
+	f.sessionCalls++
 	return f.sessions, f.sessionErr
+}
+
+func (f *fakeCaptureClient) ShowAllServerOptions() (string, error) {
+	return f.markers, f.markersErr
 }
 
 func (f *fakeCaptureClient) ListAllPanesWithFormat(_ string) (string, error) {
@@ -44,9 +52,9 @@ type commitNowFixture struct {
 	client          *fakeCaptureClient
 	captureCalls    int
 	capturePrevs    []*state.Index
-	captureSkipSets []map[string]struct{}
 	captureReturn   state.Index
 	capturePending  map[string]struct{}
+	captureSkeleton map[string]struct{}
 	captureErr      error
 	commitCalls     int
 	commitArgs      []commitInvocation
@@ -73,15 +81,14 @@ type commitInvocation struct {
 func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 	t.Helper()
 	deps := &CommitNowDeps{
-		NewClient: func() state.CaptureClient { return f.client },
-		CaptureAndRefile: func(c state.CaptureClient, dir string, skipSet map[string]struct{}, p *state.Index, hm state.HashMap, logger *slog.Logger) (state.Index, map[string]struct{}, error) {
+		NewClient: func() state.CaptureCycleClient { return f.client },
+		CaptureAndRefile: func(c state.CaptureCycleClient, dir string, p *state.Index, hm state.HashMap, logger *slog.Logger) (state.CaptureCycle, error) {
 			f.captureCalls++
 			f.capturePrevs = append(f.capturePrevs, p)
-			f.captureSkipSets = append(f.captureSkipSets, skipSet)
 			if f.captureErr != nil {
-				return state.Index{}, map[string]struct{}{}, f.captureErr
+				return state.CaptureCycle{}, f.captureErr
 			}
-			return f.captureReturn, f.capturePending, nil
+			return state.CaptureCycle{Index: f.captureReturn, Pending: f.capturePending, Skeleton: f.captureSkeleton}, nil
 		},
 		Commit: func(dir string, idx state.Index, any bool, _ *slog.Logger) error {
 			f.commitCalls++
@@ -335,7 +342,7 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 	}
 
 	withCommitNowDeps(t, CommitNowDeps{
-		NewClient:        func() state.CaptureClient { return client },
+		NewClient:        func() state.CaptureCycleClient { return client },
 		CaptureAndRefile: state.CaptureAndRefile,
 		Commit:           state.Commit,
 		// Must be injected: a nil IsRestoring falls through to a live query
@@ -1139,7 +1146,7 @@ func TestStateCommitNow_IsRegisteredAsStateSubcommand(t *testing.T) {
 	}
 }
 
-func TestStateCommitNow_DiscardsThePendingSet(t *testing.T) {
+func TestStateCommitNow_DiscardsThePendingAndSkeletonSets(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
@@ -1156,9 +1163,10 @@ func TestStateCommitNow_DiscardsThePendingSet(t *testing.T) {
 		},
 	}
 	f := &commitNowFixture{
-		client:         &fakeCaptureClient{sessions: []string{"work"}},
-		captureReturn:  captured,
-		capturePending: map[string]struct{}{state.SanitizePaneKey("work", 0, 0): {}},
+		client:          &fakeCaptureClient{sessions: []string{"work"}},
+		captureReturn:   captured,
+		capturePending:  map[string]struct{}{state.SanitizePaneKey("work", 0, 0): {}},
+		captureSkeleton: map[string]struct{}{state.SanitizePaneKey("work", 0, 0): {}},
 	}
 	installCommitNowDeps(t, f)
 
@@ -1169,9 +1177,6 @@ func TestStateCommitNow_DiscardsThePendingSet(t *testing.T) {
 	if f.captureCalls != 1 {
 		t.Fatalf("CaptureAndRefile calls = %d, want 1", f.captureCalls)
 	}
-	if got := f.captureSkipSets[0]; got != nil {
-		t.Errorf("skipSet passed to CaptureAndRefile = %v, want nil", got)
-	}
 	if f.commitCalls != 1 {
 		t.Fatalf("Commit calls = %d, want 1", f.commitCalls)
 	}
@@ -1179,7 +1184,7 @@ func TestStateCommitNow_DiscardsThePendingSet(t *testing.T) {
 		t.Error("anyScrollbackChanged passed to Commit = true, want false")
 	}
 	if !reflect.DeepEqual(f.commitArgs[0].Idx, captured) {
-		t.Errorf("committed index = %+v, want the captured index unchanged by the pending set: %+v",
+		t.Errorf("committed index = %+v, want the captured index unchanged by either set: %+v",
 			f.commitArgs[0].Idx, captured)
 	}
 }
@@ -1203,7 +1208,7 @@ func TestStateCommitNow_RefilesResumePendingScrollback(t *testing.T) {
 		// composite would assert a re-file the fake itself performed.
 		var committed []commitInvocation
 		withCommitNowDeps(t, CommitNowDeps{
-			NewClient: func() state.CaptureClient {
+			NewClient: func() state.CaptureCycleClient {
 				return &fakeCaptureClient{
 					sessions: []string{"work"},
 					rows:     "work|||0|||main|||tiled|||0|||1|||1|||/tmp|||1|||zsh|||" + waitingToken + "|||1",
@@ -1251,7 +1256,7 @@ func TestStateCommitNow_AdoptsAnExistingTokenNamedFileForADisplacedWaitingPane(t
 	stageDisplacedOnDisk(t, dir)
 
 	withCommitNowDeps(t, CommitNowDeps{
-		NewClient: func() state.CaptureClient {
+		NewClient: func() state.CaptureCycleClient {
 			return &fakeCaptureClient{
 				sessions: []string{"work"},
 				rows: "work|||0|||main|||tiled|||0|||1|||1|||/tmp|||1|||zsh||||||\n" +
@@ -1268,6 +1273,109 @@ func TestStateCommitNow_AdoptsAnExistingTokenNamedFileForADisplacedWaitingPane(t
 	}
 
 	assertDisplacedFilesKept(t, dir)
+}
+
+func TestStateCommitNow_KeepsASkeletonMarkedWaitingPaneTranscript(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	tokenPath := "scrollback/" + waitingRefiled
+	if err := os.WriteFile(filepath.Join(state.ScrollbackDir(dir), waitingRefiled), []byte("saved-transcript"), 0o600); err != nil {
+		t.Fatalf("seed token-named scrollback: %v", err)
+	}
+	prev := waitingPaneIndex()
+	prev.Sessions[0].Windows[0].Index = 2
+	prev.Sessions[0].Windows[0].Panes[0].ScrollbackFile = tokenPath
+	prev.Sessions = append(prev.Sessions, state.Session{
+		Name:        "closed",
+		Environment: map[string]string{},
+		Windows:     []state.Window{{Index: 0, Name: "main", Panes: []state.Pane{{Index: 0, CWD: "/gone"}}}},
+	})
+	if err := state.Commit(dir, prev, false, nil); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+
+	liveKey := state.SanitizePaneKey("work", 1, 1)
+	withCommitNowDeps(t, CommitNowDeps{
+		NewClient: func() state.CaptureCycleClient {
+			return &fakeCaptureClient{
+				sessions: []string{"work"},
+				rows:     "work|||1|||main|||tiled|||0|||1|||1|||/fresh|||1|||portal|||" + waitingToken + "|||",
+				env:      map[string]string{"work": ""},
+				markers:  state.SkeletonMarkerPrefix + liveKey + ` "1"`,
+			}
+		},
+		IsRestoring: func() (bool, error) { return false, nil },
+	})
+
+	if _, _, err := runRootCmd(t, "state", "commit-now"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	committed := readSessionsJSON(t, dir)
+	if got := sessionNamesSlice(committed); len(got) != 1 || got[0] != "work" {
+		t.Fatalf("committed sessions = %v, want [work] with the closed session dropped", got)
+	}
+	w := committed.Sessions[0].Windows
+	if len(w) != 1 || w[0].Index != 1 || len(w[0].Panes) != 1 {
+		t.Fatalf("committed windows = %+v, want window 1 holding one pane", w)
+	}
+	if got := w[0].Panes[0]; got.ScrollbackFile != tokenPath || got.CWD != "/tmp" || got.CurrentCommand != "zsh" {
+		t.Errorf("committed pane = %+v, want the saved /tmp + zsh naming %q", got, tokenPath)
+	}
+	entries, err := os.ReadDir(state.ScrollbackDir(dir))
+	if err != nil {
+		t.Fatalf("read scrollback dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != waitingRefiled {
+		t.Errorf("scrollback dir = %v, want only %s kept and nothing written", entries, waitingRefiled)
+	}
+}
+
+func TestStateCommitNow_TakesNoCaptureWhenTheSkeletonMarkerReadFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	t.Setenv("PORTAL_LOG_LEVEL", "error")
+	sink := logtest.Install(t)
+
+	client := &fakeCaptureClient{
+		sessions:   []string{"work"},
+		rows:       "work|||0|||main|||tiled|||0|||1|||0|||/tmp|||1|||zsh||||||",
+		env:        map[string]string{"work": ""},
+		markersErr: errors.New("show-options blew up"),
+	}
+	committed := 0
+	withCommitNowDeps(t, CommitNowDeps{
+		NewClient: func() state.CaptureCycleClient { return client },
+		Commit: func(string, state.Index, bool, *slog.Logger) error {
+			committed++
+			return nil
+		},
+		IsRestoring: func() (bool, error) { return false, nil },
+	})
+
+	_, stderr, err := runRootCmd(t, "state", "commit-now")
+	if !errors.Is(err, errCommitNowFailed) {
+		t.Fatalf("error = %v, want the silent commit-now failure", err)
+	}
+	if got := stderr.String(); got != "" {
+		t.Errorf("stderr = %q, want silent", got)
+	}
+	if client.sessionCalls != 0 {
+		t.Errorf("list-sessions calls = %d, want no capture after a failed marker read", client.sessionCalls)
+	}
+	if committed != 0 {
+		t.Errorf("Commit calls = %d, want 0", committed)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested must exist after a failed marker read; stat err = %v", err)
+	}
+	rec := sink.Records().AtExactLevel(slog.LevelError).Only(t, "commit-now failure")
+	if got := rec.ErrorAttr(t, "error"); !strings.Contains(got.Error(), "show-options blew up") {
+		t.Errorf("logged error = %v, want the marker read's", got)
+	}
 }
 
 // waitingPaneIndex is the prior commit the waiting pane's record is merged back

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -456,6 +457,103 @@ func TestDaemonTick_SkipsSkeletonMarkedPanesInScrollback(t *testing.T) {
 		if len(call) >= 7 && call[6] == "work:0.1" {
 			t.Errorf("capture-pane invoked for skeleton-marked target work:0.1: %v", call)
 		}
+	}
+}
+
+func TestDaemonTick_KeepsARenumberedWaitingPaneTranscriptWhileSkeletonMarked(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	const token = "tk12ab"
+	tokenPath := state.PendingScrollbackFile(token)
+	tokenFile := filepath.Join(dir, filepath.FromSlash(tokenPath))
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(tokenFile, []byte("saved-transcript"), 0o600); err != nil {
+		t.Fatalf("seed token-named scrollback: %v", err)
+	}
+	prev := state.Index{Version: state.SchemaVersion, Sessions: []state.Session{{
+		Name: "work",
+		Windows: []state.Window{
+			{Index: 0, Name: "main", Layout: "layout", Panes: []state.Pane{{Index: 0, CWD: "/tmp"}}},
+			{Index: 2, Name: "agent", Layout: "layout", Panes: []state.Pane{{
+				Index: 0, CWD: "/saved", CurrentCommand: "vim", ScrollbackFile: tokenPath, PortalPaneID: token,
+			}}},
+		},
+	}}}
+	if err := state.Commit(dir, prev, false, nil); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+
+	liveKey := state.SanitizePaneKey("work", 1, 0)
+	fc := &daemonFakeCommander{
+		markersOut:  fmt.Sprintf(`%s%s "1"`, state.SkeletonMarkerPrefix, liveKey),
+		sessionsOut: "work|1|0|",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||\n" +
+			"work|||1|||agent|||layout|||0|||0|||0|||/fresh|||1|||portal|||" + token + "|||",
+		captureByTarget: map[string]string{"work:0.0": "captured-pane-0"},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.PrevIndex = &prev
+
+	tick(t.Context(), deps)
+
+	committed := readSessionsJSON(t, dir)
+	if len(committed.Sessions) != 1 || len(committed.Sessions[0].Windows) != 2 {
+		t.Fatalf("committed topology = %+v, want work with windows 0 and 1", committed.Sessions)
+	}
+	w := committed.Sessions[0].Windows[1]
+	if w.Index != 1 || len(w.Panes) != 1 {
+		t.Fatalf("committed window = %+v, want window 1 holding one pane", w)
+	}
+	got := w.Panes[0]
+	if got.ScrollbackFile != tokenPath || got.CWD != "/saved" || got.CurrentCommand != "vim" {
+		t.Errorf("committed pane = %+v, want the saved /saved + vim naming %q", got, tokenPath)
+	}
+	body, err := os.ReadFile(tokenFile)
+	if err != nil {
+		t.Fatalf("token-named scrollback gone after the commit: %v", err)
+	}
+	if string(body) != "saved-transcript" {
+		t.Errorf("token-named scrollback = %q, want %q", body, "saved-transcript")
+	}
+	for _, call := range fc.callsContaining("capture-pane") {
+		if len(call) >= 7 && sessionFromExactTarget(call[6]) == "work:1.0" {
+			t.Errorf("capture-pane invoked for the skeleton-marked pane: %v", call)
+		}
+	}
+	if _, err := os.Stat(state.ScrollbackFile(dir, liveKey)); !os.IsNotExist(err) {
+		t.Errorf("scrollback written for the skeleton-marked pane; stat err = %v", err)
+	}
+}
+
+func TestDaemonTick_CapturesOnALaterTickAfterAMarkerReadFailure(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{markersErr: errors.New("show-options blew up"), sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
+	deps.Logger = logger
+
+	tick(t.Context(), deps)
+
+	sink.Records().Matching("daemon", "tick failed").AtExactLevel(slog.LevelWarn).Only(t, "tick failed WARN")
+	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+		t.Errorf("list-sessions invoked after a failed marker read: %v", got)
+	}
+	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+		t.Fatalf("sessions.json written after a failed marker read; stat err = %v", err)
+	}
+
+	fc.mu.Lock()
+	fc.markersErr = nil
+	fc.mu.Unlock()
+	tick(t.Context(), deps)
+
+	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
+		t.Errorf("sessions.json not committed on the tick after the marker read recovered: %v", err)
 	}
 }
 

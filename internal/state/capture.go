@@ -32,12 +32,12 @@ const internalSessionPrefix = "_"
 // CaptureStructure builds a canonical Index of every non-internal tmux
 // session's structural topology; it captures no scrollback bytes.
 //
-// Panes whose paneKey is in skipSet keep their prev state, but only where
-// session, window and pane are all still live — a stale marker must not
-// resurrect a killed pane. Independently of skipSet, a pane carrying the resume
-// pending marker keeps the CWD, CurrentCommand and ScrollbackFile of the
-// previous record carrying its durable token, whatever its address has become —
-// or, for a pane carrying no token, of the previous record at its own address.
+// A live pane whose paneKey is in skipSet, and independently of skipSet a pane
+// carrying the resume pending marker, keeps the CWD, CurrentCommand and
+// ScrollbackFile of the previous record carrying its durable token, whatever its
+// address has become. A skipped pane carrying no token keeps the whole previous
+// record at its own address, a pending one those three fields of it. A stale
+// marker never resurrects a killed pane.
 // A tmux enumeration failure yields an empty Index and a wrapped error, never a
 // partial one. A per-session failure is logged and skipped, unless every
 // session failed on something other than vanishing, which errors so the caller
@@ -144,31 +144,33 @@ func paneKeySet(live map[string]livePane) map[string]struct{} {
 	return keys
 }
 
+// mergeSkippedPanes matches on the token because restore re-stamps it before
+// arming the pane, so a pane restored away from its saved address still finds
+// its own record. It mutates only panes the live enumeration returned.
 func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
-	live := buildLiveStructure(*fresh)
-	for _, ps := range prev.Sessions {
-		liveWindows, sessionLive := live[ps.Name]
-		if !sessionLive {
-			continue
-		}
-		for _, pw := range ps.Windows {
-			livePanes, windowLive := liveWindows[pw.Index]
-			if !windowLive {
-				continue
-			}
-			for _, pp := range pw.Panes {
-				if _, paneLive := livePanes[pp.Index]; !paneLive {
-					continue
-				}
-				key := SanitizePaneKey(ps.Name, pw.Index, pp.Index)
+	byToken, byAddress := indexPrevPanes(prev)
+	for si := range fresh.Sessions {
+		s := &fresh.Sessions[si]
+		for wi := range s.Windows {
+			w := &s.Windows[wi]
+			for pi := range w.Panes {
+				p := &w.Panes[pi]
+				key := SanitizePaneKey(s.Name, w.Index, p.Index)
 				if _, skipped := skipSet[key]; !skipped {
 					continue
 				}
-				mergePane(fresh, ps, pw, pp)
+				record, found := takePrevRecord(byToken, byAddress, p.PortalPaneID, key)
+				if !found {
+					continue
+				}
+				if p.PortalPaneID == "" {
+					*p = record
+					continue
+				}
+				carryPrevContent(p, record)
 			}
 		}
 	}
-	resortIndex(fresh)
 }
 
 // mergeFrozenPanes carries a waiting pane's previous record onto its live
@@ -196,12 +198,16 @@ func mergeFrozenPanes(fresh *Index, prev Index, live map[string]livePane) {
 				if !found {
 					continue
 				}
-				p.CWD = record.CWD
-				p.CurrentCommand = record.CurrentCommand
-				p.ScrollbackFile = record.ScrollbackFile
+				carryPrevContent(p, record)
 			}
 		}
 	}
+}
+
+func carryPrevContent(p *Pane, record Pane) {
+	p.CWD = record.CWD
+	p.CurrentCommand = record.CurrentCommand
+	p.ScrollbackFile = record.ScrollbackFile
 }
 
 // indexPrevPanes reads prev in canonical order, so a token held by more than
@@ -269,80 +275,6 @@ func takePrevRecord(byToken, byAddress map[string]Pane, token, key string) (Pane
 		delete(byAddress, key)
 	}
 	return record, found
-}
-
-func buildLiveStructure(idx Index) map[string]map[int]map[int]struct{} {
-	live := make(map[string]map[int]map[int]struct{}, len(idx.Sessions))
-	for _, s := range idx.Sessions {
-		windows := make(map[int]map[int]struct{}, len(s.Windows))
-		for _, w := range s.Windows {
-			panes := make(map[int]struct{}, len(w.Panes))
-			for _, p := range w.Panes {
-				panes[p.Index] = struct{}{}
-			}
-			windows[w.Index] = panes
-		}
-		live[s.Name] = windows
-	}
-	return live
-}
-
-func mergePane(fresh *Index, ps Session, pw Window, pp Pane) {
-	si := findOrAppendSession(fresh, ps)
-	wi := findOrAppendWindow(&fresh.Sessions[si], pw)
-	w := &fresh.Sessions[si].Windows[wi]
-	for i := range w.Panes {
-		if w.Panes[i].Index == pp.Index {
-			w.Panes[i] = pp
-			return
-		}
-	}
-	w.Panes = append(w.Panes, pp)
-}
-
-func findOrAppendSession(fresh *Index, ps Session) int {
-	for i := range fresh.Sessions {
-		if fresh.Sessions[i].Name == ps.Name {
-			return i
-		}
-	}
-	fresh.Sessions = append(fresh.Sessions, Session{
-		Name:        ps.Name,
-		Environment: ps.Environment,
-		Windows:     []Window{},
-	})
-	return len(fresh.Sessions) - 1
-}
-
-func findOrAppendWindow(s *Session, pw Window) int {
-	for i := range s.Windows {
-		if s.Windows[i].Index == pw.Index {
-			return i
-		}
-	}
-	s.Windows = append(s.Windows, Window{
-		Index:  pw.Index,
-		Name:   pw.Name,
-		Layout: pw.Layout,
-		Zoomed: pw.Zoomed,
-		Active: pw.Active,
-		Panes:  []Pane{},
-	})
-	return len(s.Windows) - 1
-}
-
-func resortIndex(idx *Index) {
-	sort.Slice(idx.Sessions, func(i, j int) bool {
-		return idx.Sessions[i].Name < idx.Sessions[j].Name
-	})
-	for si := range idx.Sessions {
-		ws := idx.Sessions[si].Windows
-		sort.Slice(ws, func(i, j int) bool { return ws[i].Index < ws[j].Index })
-		for wi := range ws {
-			ps := ws[wi].Panes
-			sort.Slice(ps, func(i, j int) bool { return ps[i].Index < ps[j].Index })
-		}
-	}
 }
 
 func sortedKeys(set map[string]struct{}) []string {
