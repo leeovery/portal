@@ -281,8 +281,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 11,
-          "current_task": null,
+          "current_phase": 12,
+          "current_task": "lazy-resume-on-attach-12-2",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -353,7 +353,8 @@
             "lazy-resume-on-attach-10-1",
             "lazy-resume-on-attach-10-2",
             "lazy-resume-on-attach-10-3",
-            "lazy-resume-on-attach-11-1"
+            "lazy-resume-on-attach-11-1",
+            "lazy-resume-on-attach-12-1"
           ],
           "staging": {
             "p1": {
@@ -468,7 +469,30 @@
             10,
             11
           ],
-          "updated": "2026-09-28"
+          "updated": "2026-09-28",
+          "bank": [
+            {
+              "task": "lazy-resume-on-attach-12-1",
+              "source": "reviewer",
+              "summary": "CLAUDE.md's state row still says capture is entered through CaptureAndRefile and never mentions RunCommitCycle or commit.lock",
+              "failure": "A contributor or agent adding a committer from that text would call CaptureAndRefile then Commit outside the lock, bringing back the silent loss of a waiting pane's token-named transcript, only noticed when the pane restores empty after a reboot.",
+              "detail": "CLAUDE.md:61, the clause the daemon, state commit-now (which discards both sets and dumps nothing) and the lazy-panel integration fixture all enter through it. It should say every committer (the tick, the shutdown flush, state commit-now, and the lazy-panel fixtures) enters through state.RunCommitCycle, which runs the capture, the caller's dump and Commit under an exclusive flock on the state dir's commit.lock, with a bounded acquire returning ErrCommitLockHeld on timeout.",
+              "files": [
+                "CLAUDE.md"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-12-1",
+              "source": "reviewer",
+              "summary": "The tick deletes save.requested after every successful cycle, erasing a touch that arrives during that cycle, including a timed-out commit-now's retry request",
+              "failure": "A session is killed during a tick that holds commit.lock longer than the 5s bound (367 of 30,590 live ticks since Sept 20 took 5s+, max 18.2s). commit-now times out and touches save.requested, but the in-flight tick committed a capture taken before the kill and then deletes the flag. The killed session stays in sessions.json until the next dirty event or the 30s MaxGap tick; a reboot or server loss in that window brings the killed session back at the next bootstrap. Not a regression (before, the long tick's commit overwrote commit-now's result), but the timeout fallback's the daemon's next tick commits the removal does not hold when the daemon's own tick caused the timeout.",
+              "detail": "cmd/state_daemon.go:183 (dirty check), :191 (cycle), :198 (unconditional remove); the touch is at cmd/state_commit_now.go:141-147. Possible fixes: clear the flag at the start of the locked cycle and re-touch on failure, or remove it only if its mtime has not changed since the dirty check.",
+              "files": [
+                "cmd/state_daemon.go",
+                "cmd/state_commit_now.go"
+              ]
+            }
+          ]
         }
       }
     },
