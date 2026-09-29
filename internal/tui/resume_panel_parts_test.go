@@ -627,6 +627,7 @@ var resumePartsCommands = []struct {
 	{"one unbroken token", strings.Repeat("a", 500)},
 	{"double width", strings.Repeat("再開するセッション ", 12)},
 	{"combining marks", strings.Repeat("résumé ", 40)},
+	{"non-ASCII whitespace at a break", "cd '/Users/lee/My\u202fProjects/app' && claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7\u3000--cwd /Users/leeovery/Code/portal/internal/tui --output-format stream-json"},
 }
 
 const resumePartsMaxProbedWidth = 80
@@ -694,6 +695,30 @@ func TestResumeCommandLines_Invariants(t *testing.T) {
 		}
 	})
 
+	t.Run("it shows the source's own text up to the ellipsis on the capped row", func(t *testing.T) {
+		const id = "claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7"
+		got := resumeCommandLines(id+" "+resumePartsLongCommand, resumeCardContentWidth)
+		want := []string{id, id, "--cwd /Users/leeovery/Code/portal/internal/tui --ou…"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("the lines read\n got: %q\nwant: %q", got, want)
+		}
+	})
+
+	t.Run("it keeps the source's spaces on the capped row past a non-ASCII break", func(t *testing.T) {
+		got := resumeCommandLines("cd '/Users/lee/My\u202fProjects/app' && claude --resume 4f2c9a1e --cwd /x", 17)
+		want := []string{"cd '/Users/lee/My", "Projects/app' &&", "claude --resume …"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("the lines read\n got: %q\nwant: %q", got, want)
+		}
+	})
+
+	t.Run("it reads the capped row back as the source from where it starts", func(t *testing.T) {
+		forEachResumePartsCommand(t, func(t *testing.T, command string, width int) {
+			text := sanitiseCommandText(command)
+			assertCappedRowReadsSource(t, resumeCommandLines(command, width), text, width, resumeCommandMaxLines)
+		})
+	})
+
 	t.Run("it renders an empty row for a grapheme wider than the width", func(t *testing.T) {
 		if got := resumeCommandLines("再開するセッション", 1); !reflect.DeepEqual(got, []string{"", "", "…"}) {
 			t.Errorf("a double-width command at a width of 1 reads %q, want %q", got, []string{"", "", "…"})
@@ -737,9 +762,17 @@ func TestWrappedLines_ReadsTheSourceBack(t *testing.T) {
 // where the text has it, with nothing glued to its neighbour.
 func assertRowsReadSource(t *testing.T, rows []string, text string, width int) {
 	t.Helper()
+	rest := restPastRows(t, rows, text, width)
+	if strings.TrimFunc(rest, breaksWrap) != "" {
+		t.Errorf("the rows %q stop short of %q at a width of %d", rows, rest, width)
+	}
+}
+
+func restPastRows(t *testing.T, rows []string, text string, width int) string {
+	t.Helper()
 	rest := text
 	for i, row := range rows {
-		rest = strings.TrimLeft(rest, " ")
+		rest = strings.TrimLeftFunc(rest, breaksWrap)
 		if row == "" {
 			if cluster, w := ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth); cluster != "" && w > width {
 				rest = rest[len(cluster):]
@@ -750,7 +783,26 @@ func assertRowsReadSource(t *testing.T, rows []string, text string, width int) {
 		}
 		rest = rest[len(row):]
 	}
-	if strings.Trim(rest, " ") != "" {
-		t.Errorf("the rows %q stop short of %q at a width of %d", rows, rest, width)
+	return rest
+}
+
+// The rows before the cap read the source as the wrap left them; the capped
+// row, its … removed, is the source verbatim from there, whitespace and all.
+func assertCappedRowReadsSource(t *testing.T, lines []string, text string, width, maxRows int) {
+	t.Helper()
+	if len(wrappedLines(text, width)) <= maxRows {
+		return
+	}
+	if len(lines) != maxRows {
+		t.Fatalf("text past the cap at a width of %d renders %d lines, want %d: %q", width, len(lines), maxRows, lines)
+	}
+	capped := lines[maxRows-1]
+	shown, marked := strings.CutSuffix(capped, "…")
+	if !marked {
+		t.Fatalf("the capped row at a width of %d reads %q, want it marked …", width, capped)
+	}
+	rest := strings.TrimLeftFunc(restPastRows(t, lines[:maxRows-1], text, width), breaksWrap)
+	if !strings.HasPrefix(rest, shown) {
+		t.Errorf("the capped row at a width of %d reads %q, want the opening of %q", width, capped, rest)
 	}
 }
