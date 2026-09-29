@@ -339,7 +339,8 @@
             "lazy-resume-on-attach-9-2",
             "lazy-resume-on-attach-9-3",
             "lazy-resume-on-attach-9-4",
-            "lazy-resume-on-attach-9-5"
+            "lazy-resume-on-attach-9-5",
+            "lazy-resume-on-attach-9-6"
           ],
           "staging": {
             "p1": {
@@ -424,7 +425,8 @@
             5,
             6,
             7,
-            8
+            8,
+            9
           ],
           "updated": "2026-09-28"
         }
