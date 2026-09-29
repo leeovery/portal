@@ -6,7 +6,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -37,7 +36,7 @@ func swallowed(t *testing.T, payload resumeChainPayload, input string) {
 	var probe resumeWaitProbe
 	reader := keystrokes(t, input)
 
-	err := runResumeWait(newResumeWaitConfig(t, &probe, payload, reader))
+	err := runResumeWait(queuedKeysConfig(t, &probe, payload, reader))
 
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("runResumeWait() error = %v, want the EOF that ended the wait after the swallowed input", err)
@@ -75,10 +74,26 @@ func assertDiscardAnswered(t *testing.T, p *resumeWaitProbe, payload resumeChain
 func answered(t *testing.T, payload resumeChainPayload, input string) *resumeWaitProbe {
 	t.Helper()
 	var probe resumeWaitProbe
-	if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, input))); err != nil {
+	if err := runResumeWait(queuedKeysConfig(t, &probe, payload, keystrokes(t, input))); err != nil {
 		t.Fatalf("runResumeWait() error = %v", err)
 	}
 	return &probe
+}
+
+// queuedKeysConfig is for input that is already queued in full, so every byte
+// of it is read before any follow window could elapse. The windows never fire,
+// leaving nothing raced against the clock, and a resize settle is refused: with
+// no size change delivered and the pane at its drawn size, none can start.
+func queuedKeysConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPayload, in io.Reader) resumeWaitConfig {
+	t.Helper()
+	cfg := newResumeWaitConfig(t, p, payload, in)
+	cfg.Settle = func(d time.Duration) <-chan time.Time {
+		if d != resumeEscapeFollow {
+			t.Errorf("window = %v armed over queued keys, want only the escape follow", d)
+		}
+		return nil
+	}
+	return cfg
 }
 
 func assertArgvLacks(t *testing.T, argv []string, flag string) {
@@ -196,6 +211,8 @@ type pipedKeysHarness struct {
 	t       *testing.T
 	probe   *resumeWaitProbe
 	writer  *io.PipeWriter
+	reader  *trackedReader
+	sizes   *paneResize
 	winch   chan os.Signal
 	follows chan chan time.Time
 	settles chan chan time.Time
@@ -209,6 +226,8 @@ func startPipedKeys(t *testing.T, payload resumeChainPayload) *pipedKeysHarness 
 		t:       t,
 		probe:   new(resumeWaitProbe),
 		writer:  pipeWriter,
+		reader:  &trackedReader{t: t, inner: pipeReader, started: make(chan struct{}, 1)},
+		sizes:   &paneResize{drawn: payload, to: resizedSize},
 		winch:   make(chan os.Signal, 1),
 		follows: make(chan chan time.Time, 8),
 		settles: make(chan chan time.Time, 8),
@@ -216,20 +235,25 @@ func startPipedKeys(t *testing.T, payload resumeChainPayload) *pipedKeysHarness 
 	}
 	t.Cleanup(func() { _ = pipeWriter.Close() })
 
-	cfg := newResumeWaitConfig(t, h.probe, payload, &oneByteReader{t: t, inner: pipeReader})
+	cfg := newResumeWaitConfig(t, h.probe, payload, h.reader)
 	cfg.Winch = h.winch
-	cfg.Size = resizedSize
+	cfg.Size = h.sizes.size
 	cfg.Settle = func(d time.Duration) <-chan time.Time {
-		timer := make(chan time.Time, 1)
 		switch d {
 		case resumeEscapeFollow:
+			// Unbuffered, so a fire lands only while the wait is selecting on
+			// it and can never race a key already queued behind it.
+			timer := make(chan time.Time)
 			h.follows <- timer
+			return timer
 		case resumeResizeSettle:
+			timer := make(chan time.Time, 1)
 			h.settles <- timer
+			return timer
 		default:
 			t.Errorf("window = %v, want the escape follow or the resize settle", d)
+			return nil
 		}
-		return timer
 	}
 
 	go func() { h.done <- runResumeWait(cfg) }()
@@ -247,6 +271,20 @@ func (h *pipedKeysHarness) press(keys string) {
 	case <-written:
 	case <-time.After(resumeEscapeTestBudget):
 		h.t.Fatalf("the wait never read all of %q", keys)
+	}
+}
+
+func (h *pipedKeysHarness) resize() {
+	h.sizes.deliver(h.winch)
+}
+
+// elapse fires a follow window once the wait is selecting on it.
+func (h *pipedKeysHarness) elapse(timer chan time.Time) {
+	h.t.Helper()
+	select {
+	case timer <- time.Now():
+	case <-time.After(resumeEscapeTestBudget):
+		h.t.Fatal("the wait stopped waiting on the follow window")
 	}
 }
 
@@ -323,6 +361,24 @@ func TestRunResumeWait_Screens(t *testing.T) {
 				swallowed(t, payload, seq)
 
 				assertDiscardAnswered(t, answered(t, payload, seq+"y"), payload)
+			})
+		}
+	})
+
+	t.Run("it swallows an escape sequence on the waiting panel", func(t *testing.T) {
+		for _, seq := range []string{
+			"\x1b[A",
+			"\x1b[3~",
+			"\x1bOD",
+			"\x1b[" + strings.Repeat("1", resumeEscapeSequenceCap-2),
+			"\x1bO" + strings.Repeat("1", resumeEscapeSequenceCap-2),
+			"\x1b]" + strings.Repeat("a", resumeOSCSequenceCap-2),
+		} {
+			t.Run(strings.TrimPrefix(seq, "\x1b"), func(t *testing.T) {
+				payload := reportedPayload(resumeScreenPanel)
+				swallowed(t, payload, seq)
+
+				assertHandOff(t, answered(t, payload, seq+"d"), opened(payload))
 			})
 		}
 	})
@@ -443,7 +499,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		payload := reportedPayload(resumeScreenPanel)
 		probe := resumeWaitProbe{lookup: foundHook(payload.Command)}
 
-		if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, "\x1bb\r"))); err != nil {
+		if err := runResumeWait(queuedKeysConfig(t, &probe, payload, keystrokes(t, "\x1bb\r"))); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
 
@@ -469,7 +525,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		h.press("\x1b\x1b")
 		h.awaitWindow(h.follows, "follow window for the pair's Escape")
 		h.press("\x1b")
-		h.awaitWindow(h.follows, "follow window for the lone Escape") <- time.Now()
+		h.elapse(h.awaitWindow(h.follows, "follow window for the lone Escape"))
 
 		if err := h.wait(); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
@@ -500,7 +556,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 
 		h.press("\x1bb")
 		h.awaitWindow(h.follows, "follow window for the chord's Escape")
-		h.winch <- syscall.SIGWINCH
+		h.resize()
 		h.awaitWindow(h.settles, "settle window for the resize") <- time.Now()
 
 		if err := h.wait(); err != nil {
@@ -515,7 +571,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 			payload := reportedPayload(resumeScreenPanel)
 			probe := resumeWaitProbe{lookup: foundHook(payload.Command)}
 
-			if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, keystrokes(t, "\x1bP\r"))); err != nil {
+			if err := runResumeWait(queuedKeysConfig(t, &probe, payload, keystrokes(t, "\x1bP\r"))); err != nil {
 				t.Fatalf("runResumeWait() error = %v", err)
 			}
 
@@ -661,6 +717,113 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		payload := reportedPayload(resumeScreenDiscard)
 
 		assertDiscardAnswered(t, answered(t, payload, "y"), payload)
+	})
+}
+
+// introducerChords are the Alt chords whose second byte opens a CSI, SS3 or OSC.
+var introducerChords = []struct {
+	name  string
+	chord string
+}{
+	{"Alt-[", "\x1b["},
+	{"Alt-Shift-O", "\x1bO"},
+	{"Alt-]", "\x1b]"},
+}
+
+// chord presses keys that open a sequence and elapses the window its first
+// byte after the introducer is read under, leaving that read outstanding.
+func (h *pipedKeysHarness) chord(keys string) {
+	h.t.Helper()
+	h.press(keys)
+	h.awaitWindow(h.follows, "follow window for the chord's Escape")
+	h.elapse(h.awaitWindow(h.follows, "follow window for the byte after the introducer"))
+}
+
+func TestRunResumeWait_IntroducerChords(t *testing.T) {
+	t.Run("it resumes on the Enter after an introducer chord on the waiting panel", func(t *testing.T) {
+		for _, tc := range introducerChords {
+			t.Run(tc.name, func(t *testing.T) {
+				payload := reportedPayload(resumeScreenPanel)
+				h := startPipedKeys(t, payload)
+				h.probe.lookup = foundHook(payload.Command)
+
+				h.chord(tc.chord)
+				h.press("\r")
+
+				if err := h.wait(); err != nil {
+					t.Fatalf("runResumeWait() error = %v", err)
+				}
+				if h.probe.clearCalls != 1 {
+					t.Errorf("ClearMarker called %d times, want 1", h.probe.clearCalls)
+				}
+				assertHookHandOff(t, h.probe, payload.Command)
+			})
+		}
+	})
+
+	t.Run("it backs out on a lone Escape after Alt-] on the confirmation", func(t *testing.T) {
+		payload := reportedPayload(resumeScreenDiscard)
+		h := startPipedKeys(t, payload)
+
+		h.chord("\x1b]")
+		h.press("\x1b")
+		h.elapse(h.awaitWindow(h.follows, "follow window for the lone Escape"))
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+		assertHandOff(t, h.probe, onScreen(payload, resumeScreenPanel))
+		assertNoStateTouched(t, h.probe)
+	})
+
+	t.Run("it confirms on the y after Alt-[ on the confirmation", func(t *testing.T) {
+		payload := reportedPayload(resumeScreenDiscard)
+		h := startPipedKeys(t, payload)
+
+		h.chord("\x1b[")
+		h.press("y")
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+		assertDiscardAnswered(t, h.probe, payload)
+	})
+
+	t.Run("it redraws on a resize delivered after Alt-[", func(t *testing.T) {
+		payload := drawnPayload()
+		h := startPipedKeys(t, payload)
+
+		h.press("\x1b[")
+		h.awaitWindow(h.follows, "follow window for the chord's Escape")
+		follow := h.awaitWindow(h.follows, "follow window for the byte after the introducer")
+		h.resize()
+		h.elapse(follow)
+		h.awaitWindow(h.settles, "settle window for the resize") <- time.Now()
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+		assertHandOff(t, h.probe, payload)
+		assertNoStateTouched(t, h.probe)
+	})
+
+	t.Run("it dispatches the key after a cut-short sequence from the read already outstanding", func(t *testing.T) {
+		payload := reportedPayload(resumeScreenPanel)
+		h := startPipedKeys(t, payload)
+
+		h.chord("\x1b[")
+		h.press("d")
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+		assertHandOff(t, h.probe, opened(payload))
+		if got := h.reader.overlaps.Load(); got != 0 {
+			t.Errorf("%d reads overlapped another; input the hand-off should inherit is stranded in a buffer", got)
+		}
+		if got := h.reader.reads.Load(); got != 3 {
+			t.Errorf("the wait read %d times, want 3: the Escape, the introducer, and the read the window left outstanding", got)
+		}
 	})
 }
 

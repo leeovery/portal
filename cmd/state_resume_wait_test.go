@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -80,6 +79,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 		Logger:             logger,
 		IsTerminal:         func() bool { return true },
 		Settle:             time.After,
+		Size:               fixedSize(payload.Width, payload.Height),
 		MakeRaw: func() (func(), error) {
 			p.rawCalls++
 			return func() { p.restores++ }, nil
@@ -373,12 +373,12 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		// what shows the report survived the idle wait.
 		cases := []struct {
 			name    string
-			deliver func(writer *io.PipeWriter, winch chan os.Signal) error
+			deliver func(writer *io.PipeWriter, resize func()) error
 			want    func(resumeChainPayload) resumeChainPayload
 		}{
 			{
 				name: "answered by d",
-				deliver: func(writer *io.PipeWriter, _ chan os.Signal) error {
+				deliver: func(writer *io.PipeWriter, _ func()) error {
 					_, err := writer.Write([]byte("d"))
 					return err
 				},
@@ -386,8 +386,8 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 			},
 			{
 				name: "redrawn by a settled resize",
-				deliver: func(_ *io.PipeWriter, winch chan os.Signal) error {
-					winch <- syscall.SIGWINCH
+				deliver: func(_ *io.PipeWriter, resize func()) error {
+					resize()
 					return nil
 				},
 				want: func(p resumeChainPayload) resumeChainPayload { return p },
@@ -406,8 +406,9 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 
 				winch := make(chan os.Signal, 1)
 				var escapeWindows, settleWindows atomic.Int64
+				resize := &paneResize{drawn: payload, to: resizedSize}
 				cfg.Winch = winch
-				cfg.Size = resizedSize
+				cfg.Size = resize.size
 				cfg.Settle = func(d time.Duration) <-chan time.Time {
 					if d == resumeEscapeFollow {
 						escapeWindows.Add(1)
@@ -431,7 +432,7 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 					t.Fatalf("the wait armed %d windows while left alone, want 0", got)
 				}
 
-				if err := tc.deliver(writer, winch); err != nil {
+				if err := tc.deliver(writer, func() { resize.deliver(winch) }); err != nil {
 					t.Fatalf("delivering the answer: %v", err)
 				}
 				select {

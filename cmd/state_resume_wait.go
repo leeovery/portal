@@ -45,8 +45,9 @@ const (
 // deliberate resize redraws with no perceptible pause.
 const resumeResizeSettle = 150 * time.Millisecond
 
-// resumeEscapeFollow is how long an ESC waits for a following byte before it
-// counts as the Escape key. The caps bound how many bytes, ESC included, one
+// resumeEscapeFollow is how long an ESC, or a sequence it opened, waits for its
+// next byte: an ESC left waiting counts as the Escape key, and a sequence left
+// waiting ends there. The caps bound how many bytes, ESC included, one
 // sequence may consume before the loop dispatches again.
 const (
 	resumeEscapeFollow      = 50 * time.Millisecond
@@ -66,7 +67,8 @@ type resumeWaitConfig struct {
 
 	// Winch and Settle are the resize pair: a change arms the settle window and
 	// each further change restarts it, so a drag of any length costs at most one
-	// redraw. Size reads the pane at the moment the window elapses.
+	// redraw. Size reads the pane at start-up and at the moment a window
+	// elapses.
 	Winch  <-chan os.Signal
 	Settle func(d time.Duration) <-chan time.Time
 	Size   func() (int, int, error)
@@ -153,7 +155,7 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 	reader := startResumeReader(cfg.In)
 	defer close(reader.requests)
 
-	var settled <-chan time.Time
+	settled := resumeStartupSettle(cfg)
 	outstanding := false
 	for {
 		if !outstanding {
@@ -197,32 +199,58 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 	}
 }
 
+// resumeStartupSettle answers a size change delivered before the watch was
+// installed, which no SIGWINCH will announce, by opening the window one would
+// have. A size the waiter cannot read, or a panel drawn at none, arms nothing:
+// a read that keeps failing would otherwise bounce the pane between draws.
+func resumeStartupSettle(cfg resumeWaitConfig) <-chan time.Time {
+	width, height, err := cfg.Size()
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil
+	}
+	if width == cfg.Width && height == cfg.Height {
+		return nil
+	}
+	return cfg.Settle(resumeResizeSettle)
+}
+
 // resolveResumeEscape decides whether an ESC just read stood alone, and if it
-// opened a sequence consumes it to its end or its cap, so no byte inside that
-// bound can reach a key the screen acts on. A window that elapses leaves its
-// read outstanding, which pending reports so the loop does not request a second.
+// opened a sequence consumes it to its end or its cap, so no byte of it that
+// follows within the window can reach a key the screen acts on. A follow window
+// that elapses leaves its read outstanding, which pending reports so the loop
+// does not request a second; the byte it brings is then the screen's to act on.
 func resolveResumeEscape(cfg resumeWaitConfig, reader resumeReader) (alone, pending bool, err error) {
+	b, pending, err := followResumeByte(cfg, reader)
+	if pending || err != nil {
+		return pending, pending, err
+	}
+	pending, err = consumeResumeSequence(cfg, reader, b)
+	return false, pending, err
+}
+
+func followResumeByte(cfg resumeWaitConfig, reader resumeReader) (b byte, pending bool, err error) {
 	window := cfg.Settle(resumeEscapeFollow)
 	for {
 		reader.requests <- struct{}{}
 		select {
 		case read := <-reader.results:
 			if read.n > 0 {
-				return false, false, consumeResumeSequence(reader, read.b)
+				return read.b, false, nil
 			}
 			if read.err != nil {
-				return false, false, read.err
+				return 0, false, read.err
 			}
 		case <-window:
-			return true, true, nil
+			return 0, true, nil
 		}
 	}
 }
 
 // consumeResumeSequence reads to the end of the sequence introducer opened,
 // never taking a CSI or SS3 introducer as its end: '[' and 'O' sit inside the
-// final range.
-func consumeResumeSequence(reader resumeReader, introducer byte) error {
+// final range. Each byte is read under its own follow window, so an Alt chord
+// whose second byte is an introducer costs nothing beyond itself.
+func consumeResumeSequence(cfg resumeWaitConfig, reader resumeReader, introducer byte) (pending bool, err error) {
 	var limit int
 	var ended func(byte) bool
 	switch introducer {
@@ -231,18 +259,18 @@ func consumeResumeSequence(reader resumeReader, introducer byte) error {
 	case resumeOSCIntroducer:
 		limit, ended = resumeOSCSequenceCap, oscTerminator()
 	default:
-		return nil
+		return false, nil
 	}
 	for consumed := 2; consumed < limit; consumed++ {
-		b, err := reader.next()
-		if err != nil {
-			return err
+		b, pending, err := followResumeByte(cfg, reader)
+		if pending || err != nil {
+			return pending, err
 		}
 		if ended(b) {
-			return nil
+			return false, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func isCSIFinal(b byte) bool {
@@ -279,20 +307,6 @@ type resumeRead struct {
 type resumeReader struct {
 	requests chan struct{}
 	results  chan resumeRead
-}
-
-// next blocks for the next byte, requesting past any empty read.
-func (r resumeReader) next() (byte, error) {
-	for {
-		r.requests <- struct{}{}
-		read := <-r.results
-		if read.n > 0 {
-			return read.b, nil
-		}
-		if read.err != nil {
-			return 0, read.err
-		}
-	}
 }
 
 // startResumeReader reads one byte per request and never ahead: exactly one read
