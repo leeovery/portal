@@ -230,6 +230,10 @@ func maybeRunProjectCleanup(deps *daemonDeps) {
 	deps.lastProjectCleanup = time.Now()
 }
 
+// errCycleCancelled ends a cycle whose context was cancelled mid-dump, before
+// its commit.
+var errCycleCancelled = errors.New("capture cycle cancelled")
+
 func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 	// A cancellation returns nil, not an error: tick logs WARN on any non-nil
 	// return, and a cancel must not produce a log line.
@@ -240,76 +244,89 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 	}
 
 	start := time.Now()
+	dump := &scrollbackDump{ctx: ctx, deps: deps}
 
-	capture, err := state.CaptureAndRefile(deps.Client, deps.Dir, deps.PrevIndex, deps.HashMap, deps.Logger)
-	if err != nil {
-		return fmt.Errorf("capture: %w", err)
-	}
-	idx := capture.Index
-
-	sessions := len(idx.Sessions)
-	var panes, naturalChurn, anomalous int
-
-	select {
-	case <-ctx.Done():
+	capture, err := state.RunCommitCycle(state.CommitCycle{
+		Client:   deps.Client,
+		Dir:      deps.Dir,
+		LoadPrev: func() *state.Index { return deps.PrevIndex },
+		HashMap:  deps.HashMap,
+		Dump:     dump.run,
+		Logger:   deps.Logger,
+	})
+	if errors.Is(err, errCycleCancelled) {
 		return nil
-	default:
+	}
+	if err != nil {
+		return err
 	}
 
+	deps.PrevIndex = &capture.Index
+
+	captureLogger.Info("tick complete",
+		"sessions", len(capture.Index.Sessions),
+		"panes", dump.panes,
+		"natural_churn", dump.naturalChurn,
+		"anomalous", dump.anomalous,
+		log.Took(start),
+	)
+	return nil
+}
+
+// scrollbackDump is the daemon's part of a committing cycle, tallied for the
+// cycle summary.
+type scrollbackDump struct {
+	ctx                            context.Context
+	deps                           *daemonDeps
+	panes, naturalChurn, anomalous int
+}
+
+func (d *scrollbackDump) run(capture state.CaptureCycle) (bool, error) {
+	if d.ctx.Err() != nil {
+		return false, errCycleCancelled
+	}
 	anyScrollbackChanged := false
-	for _, sess := range idx.Sessions {
+	for _, sess := range capture.Index.Sessions {
 		for _, win := range sess.Windows {
 			for _, pane := range win.Panes {
-				select {
-				case <-ctx.Done():
-					return nil
-				default:
+				if d.ctx.Err() != nil {
+					return false, errCycleCancelled
 				}
 				paneKey := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
 				if paneSkipsScrollback(paneKey, capture) {
 					continue
 				}
-				panes++
-				captureLogger.Debug("pane captured", "pane_key", paneKey, "session", sess.Name)
-				target := tmux.PaneTargetExact(sess.Name, win.Index, pane.Index)
-				data, hash, err := state.CaptureAndHashPane(deps.Client, target)
-				if err != nil {
-					if isPaneVanishedError(err) {
-						naturalChurn++
-						captureLogger.Debug("pane vanished", "pane_key", paneKey, "error_class", "expected")
-						continue
-					}
-					anomalous++
-					deps.Logger.Warn("capture pane failed", "pane_key", paneKey, "error", err)
-					continue
-				}
-				written, err := state.WriteScrollbackIfChanged(deps.Dir, paneKey, data, hash, deps.HashMap)
-				if err != nil {
-					anomalous++
-					deps.Logger.Warn("write scrollback failed", "pane_key", paneKey, "error", err)
-					continue
-				}
-				if written {
+				if d.dumpPane(sess.Name, win.Index, pane.Index, paneKey) {
 					anyScrollbackChanged = true
 				}
 			}
 		}
 	}
+	return anyScrollbackChanged, nil
+}
 
-	if err := state.Commit(deps.Dir, idx, anyScrollbackChanged, deps.Logger); err != nil {
-		return fmt.Errorf("commit: %w", err)
+func (d *scrollbackDump) dumpPane(session string, windowIdx, paneIdx int, paneKey string) bool {
+	d.panes++
+	captureLogger.Debug("pane captured", "pane_key", paneKey, "session", session)
+	target := tmux.PaneTargetExact(session, windowIdx, paneIdx)
+	data, hash, err := state.CaptureAndHashPane(d.deps.Client, target)
+	if err != nil {
+		if isPaneVanishedError(err) {
+			d.naturalChurn++
+			captureLogger.Debug("pane vanished", "pane_key", paneKey, "error_class", "expected")
+			return false
+		}
+		d.anomalous++
+		d.deps.Logger.Warn("capture pane failed", "pane_key", paneKey, "error", err)
+		return false
 	}
-
-	deps.PrevIndex = &idx
-
-	captureLogger.Info("tick complete",
-		"sessions", sessions,
-		"panes", panes,
-		"natural_churn", naturalChurn,
-		"anomalous", anomalous,
-		log.Took(start),
-	)
-	return nil
+	written, err := state.WriteScrollbackIfChanged(d.deps.Dir, paneKey, data, hash, d.deps.HashMap)
+	if err != nil {
+		d.anomalous++
+		d.deps.Logger.Warn("write scrollback failed", "pane_key", paneKey, "error", err)
+		return false
+	}
+	return written
 }
 
 // Capturing a pane held behind a waiting resume panel writes back its

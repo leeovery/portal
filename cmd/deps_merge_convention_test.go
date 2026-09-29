@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -118,11 +117,8 @@ func TestResolveCommitNowDepsMergeConvention(t *testing.T) {
 		if deps.ReadIndex == nil {
 			t.Error("ReadIndex = nil; an unset seam must fall through to its production default")
 		}
-		if deps.CaptureAndRefile == nil {
-			t.Error("CaptureAndRefile = nil; an unset seam must fall through to its production default")
-		}
-		if deps.Commit == nil {
-			t.Error("Commit = nil; an unset seam must fall through to its production default")
+		if deps.RunCommitCycle == nil {
+			t.Error("RunCommitCycle = nil; an unset seam must fall through to its production default")
 		}
 		if deps.NewClient == nil {
 			t.Error("NewClient = nil; an unset seam must fall through to its production default")
@@ -290,36 +286,16 @@ func commitNowSeamCases() []seamCase {
 			},
 		},
 		{
-			field: "CaptureAndRefile",
+			field: "RunCommitCycle",
 			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{CaptureAndRefile: func(state.CaptureCycleClient, string, *state.Index, state.HashMap, *slog.Logger) (state.CaptureCycle, error) {
+				withCommitNowDeps(t, CommitNowDeps{RunCommitCycle: func(state.CommitCycle) (state.CaptureCycle, error) {
 					return state.CaptureCycle{Index: state.Index{Version: 98}}, nil
 				}})
 			},
 			assert: func(t *testing.T) {
-				capture, _ := resolveCommitNowDeps().CaptureAndRefile(nil, "", nil, nil, nil)
+				capture, _ := resolveCommitNowDeps().RunCommitCycle(state.CommitCycle{})
 				if capture.Index.Version != 98 {
-					t.Errorf("CaptureAndRefile() version = %d; want the injected seam's 98", capture.Index.Version)
-				}
-			},
-		},
-		{
-			field: "Commit",
-			inject: func(t *testing.T) {
-				committed := false
-				withCommitNowDeps(t, CommitNowDeps{Commit: func(string, state.Index, bool, *slog.Logger) error {
-					committed = true
-					return nil
-				}})
-				t.Cleanup(func() {
-					if !committed {
-						t.Error("the injected Commit seam was never called; resolveCommitNowDeps must not overwrite it")
-					}
-				})
-			},
-			assert: func(t *testing.T) {
-				if err := resolveCommitNowDeps().Commit(t.TempDir(), state.Index{}, false, nil); err != nil {
-					t.Errorf("Commit() err = %v; want the injected seam's nil", err)
+					t.Errorf("RunCommitCycle() version = %d; want the injected seam's 98", capture.Index.Version)
 				}
 			},
 		},

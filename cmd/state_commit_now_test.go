@@ -82,21 +82,29 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 	t.Helper()
 	deps := &CommitNowDeps{
 		NewClient: func() state.CaptureCycleClient { return f.client },
-		CaptureAndRefile: func(c state.CaptureCycleClient, dir string, p *state.Index, hm state.HashMap, logger *slog.Logger) (state.CaptureCycle, error) {
+		// Stands in for the committing cycle: the previous index is loaded, the
+		// capture returned, the caller's dump run and the commit made, in the
+		// entry point's order.
+		RunCommitCycle: func(cycle state.CommitCycle) (state.CaptureCycle, error) {
 			f.captureCalls++
-			f.capturePrevs = append(f.capturePrevs, p)
+			f.capturePrevs = append(f.capturePrevs, cycle.LoadPrev())
 			if f.captureErr != nil {
 				return state.CaptureCycle{}, f.captureErr
 			}
-			return state.CaptureCycle{Index: f.captureReturn, Pending: f.capturePending, Skeleton: f.captureSkeleton}, nil
-		},
-		Commit: func(dir string, idx state.Index, any bool, _ *slog.Logger) error {
-			f.commitCalls++
-			f.commitArgs = append(f.commitArgs, commitInvocation{Dir: dir, Idx: idx, AnyScrollbackChanged: any})
-			if f.commitErr != nil {
-				return f.commitErr
+			capture := state.CaptureCycle{Index: f.captureReturn, Pending: f.capturePending, Skeleton: f.captureSkeleton}
+			changed := false
+			if cycle.Dump != nil {
+				var err error
+				if changed, err = cycle.Dump(capture); err != nil {
+					return capture, err
+				}
 			}
-			return state.Commit(dir, idx, any, nil)
+			f.commitCalls++
+			f.commitArgs = append(f.commitArgs, commitInvocation{Dir: cycle.Dir, Idx: capture.Index, AnyScrollbackChanged: changed})
+			if f.commitErr != nil {
+				return capture, f.commitErr
+			}
+			return capture, state.Commit(cycle.Dir, capture.Index, changed, nil)
 		},
 		IsRestoring: func() (bool, error) {
 			f.restoringCalls++
@@ -342,9 +350,7 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 	}
 
 	withCommitNowDeps(t, CommitNowDeps{
-		NewClient:        func() state.CaptureCycleClient { return client },
-		CaptureAndRefile: state.CaptureAndRefile,
-		Commit:           state.Commit,
+		NewClient: func() state.CaptureCycleClient { return client },
 		// Must be injected: a nil IsRestoring falls through to a live query
 		// against whatever server the ambient TMUX names.
 		IsRestoring: func() (bool, error) { return false, nil },
@@ -1215,10 +1221,10 @@ func TestStateCommitNow_RefilesResumePendingScrollback(t *testing.T) {
 					env:      map[string]string{"work": ""},
 				}
 			},
-			CaptureAndRefile: state.CaptureAndRefile,
-			Commit: func(dir string, idx state.Index, any bool, logger *slog.Logger) error {
-				committed = append(committed, commitInvocation{Dir: dir, Idx: idx, AnyScrollbackChanged: any})
-				return state.Commit(dir, idx, any, logger)
+			RunCommitCycle: func(cycle state.CommitCycle) (state.CaptureCycle, error) {
+				capture, err := state.RunCommitCycle(cycle)
+				committed = append(committed, commitInvocation{Dir: cycle.Dir, Idx: capture.Index})
+				return capture, err
 			},
 			IsRestoring: func() (bool, error) { return false, nil },
 		})
@@ -1264,8 +1270,7 @@ func TestStateCommitNow_AdoptsAnExistingTokenNamedFileForADisplacedWaitingPane(t
 				env: map[string]string{"work": ""},
 			}
 		},
-		CaptureAndRefile: state.CaptureAndRefile,
-		IsRestoring:      func() (bool, error) { return false, nil },
+		IsRestoring: func() (bool, error) { return false, nil },
 	})
 
 	if _, _, err := runRootCmd(t, "state", "commit-now"); err != nil {
@@ -1346,13 +1351,8 @@ func TestStateCommitNow_TakesNoCaptureWhenTheSkeletonMarkerReadFails(t *testing.
 		env:        map[string]string{"work": ""},
 		markersErr: errors.New("show-options blew up"),
 	}
-	committed := 0
 	withCommitNowDeps(t, CommitNowDeps{
-		NewClient: func() state.CaptureCycleClient { return client },
-		Commit: func(string, state.Index, bool, *slog.Logger) error {
-			committed++
-			return nil
-		},
+		NewClient:   func() state.CaptureCycleClient { return client },
 		IsRestoring: func() (bool, error) { return false, nil },
 	})
 
@@ -1366,8 +1366,8 @@ func TestStateCommitNow_TakesNoCaptureWhenTheSkeletonMarkerReadFails(t *testing.
 	if client.sessionCalls != 0 {
 		t.Errorf("list-sessions calls = %d, want no capture after a failed marker read", client.sessionCalls)
 	}
-	if committed != 0 {
-		t.Errorf("Commit calls = %d, want 0", committed)
+	if _, err := os.Stat(state.SessionsJSON(dir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("sessions.json stat err = %v, want nothing committed", err)
 	}
 	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
 		t.Errorf("save.requested must exist after a failed marker read; stat err = %v", err)

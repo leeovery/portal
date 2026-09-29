@@ -164,20 +164,22 @@ func (fx *lazyPanelFixture) assertRestoredRenumbered(t *testing.T) {
 }
 
 // commitNowRound takes the capture `portal state commit-now` takes: the
-// previous index read from disk, the composite, and a commit that writes no
-// scrollback.
+// committing cycle with the previous index read from disk and no dump.
 func (fx *lazyPanelFixture) commitNowRound(t *testing.T) state.Index {
 	t.Helper()
-	prev, _, err := state.ReadIndex(fx.stateDir)
+	capture, err := state.RunCommitCycle(state.CommitCycle{
+		Client: fx.client,
+		Dir:    fx.stateDir,
+		LoadPrev: func() *state.Index {
+			prev, _, err := state.ReadIndex(fx.stateDir)
+			if err != nil {
+				t.Fatalf("ReadIndex: %v", err)
+			}
+			return &prev
+		},
+	})
 	if err != nil {
-		t.Fatalf("ReadIndex: %v", err)
-	}
-	capture, err := state.CaptureAndRefile(fx.client, fx.stateDir, &prev, nil, nil)
-	if err != nil {
-		t.Fatalf("CaptureAndRefile: %v", err)
-	}
-	if err := state.Commit(fx.stateDir, capture.Index, false, nil); err != nil {
-		t.Fatalf("Commit: %v", err)
+		t.Fatalf("RunCommitCycle: %v", err)
 	}
 	fx.prev = capture.Index
 	return capture.Index

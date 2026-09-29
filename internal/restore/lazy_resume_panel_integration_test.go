@@ -369,53 +369,58 @@ type captureRoundResult struct {
 	written map[string]bool
 }
 
-// captureRound takes a capture the way the daemon takes one, in its order: the
-// composite that reads the markers and the structure and re-files every frozen
-// pane's scrollback onto its own token, the per-pane scrollback dump, then the
-// commit that reclaims whatever the committed index no longer names. A capture landing
+// captureRound takes a capture the way the daemon takes one, through the
+// committing cycle: the composite that reads the markers and the structure and
+// re-files every frozen pane's scrollback onto its own token, the per-pane
+// scrollback dump, then the commit that reclaims whatever the committed index
+// no longer names. A capture landing
 // while a pane waits reaches the state an install reaches only if all three run.
 func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 	t.Helper()
 
 	prev := fx.prev
-	capture, err := state.CaptureAndRefile(fx.client, fx.stateDir, &prev, fx.hashes, nil)
-	if err != nil {
-		t.Fatalf("CaptureAndRefile: %v", err)
-	}
-	idx := capture.Index
-
 	written := map[string]bool{}
-	anyWritten := false
-	for _, sess := range idx.Sessions {
-		for _, win := range sess.Windows {
-			for _, pane := range win.Panes {
-				key := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
-				if _, skipped := capture.Skeleton[key]; skipped {
-					continue
+	dump := func(capture state.CaptureCycle) (bool, error) {
+		anyWritten := false
+		for _, sess := range capture.Index.Sessions {
+			for _, win := range sess.Windows {
+				for _, pane := range win.Panes {
+					key := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
+					if _, skipped := capture.Skeleton[key]; skipped {
+						continue
+					}
+					if _, waiting := capture.Pending[key]; waiting {
+						continue
+					}
+					target := tmux.PaneTargetExact(sess.Name, win.Index, pane.Index)
+					data, hash, err := state.CaptureAndHashPane(fx.client, target)
+					if err != nil {
+						return false, fmt.Errorf("CaptureAndHashPane %s: %w", target, err)
+					}
+					wrote, err := state.WriteScrollbackIfChanged(fx.stateDir, key, data, hash, fx.hashes)
+					if err != nil {
+						return false, fmt.Errorf("WriteScrollbackIfChanged %s: %w", key, err)
+					}
+					written[key] = wrote
+					anyWritten = anyWritten || wrote
 				}
-				if _, waiting := capture.Pending[key]; waiting {
-					continue
-				}
-				target := tmux.PaneTargetExact(sess.Name, win.Index, pane.Index)
-				data, hash, err := state.CaptureAndHashPane(fx.client, target)
-				if err != nil {
-					t.Fatalf("CaptureAndHashPane %s: %v", target, err)
-				}
-				wrote, err := state.WriteScrollbackIfChanged(fx.stateDir, key, data, hash, fx.hashes)
-				if err != nil {
-					t.Fatalf("WriteScrollbackIfChanged %s: %v", key, err)
-				}
-				written[key] = wrote
-				anyWritten = anyWritten || wrote
 			}
 		}
+		return anyWritten, nil
 	}
 
-	if err := state.Commit(fx.stateDir, idx, anyWritten, nil); err != nil {
-		t.Fatalf("Commit: %v", err)
+	capture, err := state.RunCommitCycle(state.CommitCycle{
+		Client:   fx.client,
+		Dir:      fx.stateDir,
+		LoadPrev: func() *state.Index { return &prev },
+		HashMap:  fx.hashes,
+		Dump:     dump,
+	})
+	if err != nil {
+		t.Fatalf("RunCommitCycle: %v", err)
 	}
-	fx.prev = idx
-	return captureRoundResult{idx: idx, pending: capture.Pending, written: written}
+	fx.prev = capture.Index
+	return captureRoundResult{idx: capture.Index, pending: capture.Pending, written: written}
 }
 
 // rebootRestoreHydrate runs the whole recovery a user's reboot runs: the server
