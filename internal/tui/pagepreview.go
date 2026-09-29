@@ -209,7 +209,7 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 	if err != nil {
 		return previewModel{}, false
 	}
-	if len(groups) == 0 || len(groups[0].PaneIndices) == 0 {
+	if len(groups) == 0 || len(groups[0].Panes) == 0 {
 		return previewModel{}, false
 	}
 
@@ -247,7 +247,7 @@ func (m previewModel) currentGroup() tmux.WindowGroup {
 // pane-base-index 1 these are what compose the daemon's canonical pane key.
 func (m previewModel) currentRawIndices() (windowIndex, paneIndex int) {
 	g := m.currentGroup()
-	return g.WindowIndex, g.PaneIndices[m.paneIdx]
+	return g.WindowIndex, g.Panes[m.paneIdx].Index
 }
 
 // Byte-identical to the key the daemon writer uses, so the tail read addresses
@@ -257,8 +257,17 @@ func (m previewModel) currentPaneKey() string {
 	return state.SanitizePaneKey(m.session, rawWindow, rawPane)
 }
 
+func (m previewModel) currentScrollback() PaneScrollback {
+	pane := m.currentGroup().Panes[m.paneIdx]
+	source := PaneScrollback{PaneKey: m.currentPaneKey()}
+	if pane.Pending {
+		source.PendingToken = pane.Token
+	}
+	return source
+}
+
 func (m previewModel) degenerate() bool {
-	return len(m.groups) == 1 && len(m.groups[0].PaneIndices) == 1
+	return len(m.groups) == 1 && len(m.groups[0].Panes) == 1
 }
 
 func (m previewModel) innerWidth() int {
@@ -273,7 +282,7 @@ func (m previewModel) innerHeight() int {
 // previewModel can stay a value receiver.
 func (m previewModel) readFocusedPaneIntoViewport() viewport.Model {
 	vp := m.viewport
-	bytes, err := m.reader.Tail(m.currentPaneKey())
+	bytes, err := m.reader.Tail(m.currentScrollback())
 	switch {
 	case bytes == nil && err == nil:
 		vp.SetContent(previewPlaceholder)
@@ -377,7 +386,7 @@ func (m previewModel) cycleWindow(delta int) previewModel {
 }
 
 func (m previewModel) cyclePane(delta int) previewModel {
-	paneCount := len(m.currentGroup().PaneIndices)
+	paneCount := len(m.currentGroup().Panes)
 	if paneCount <= 1 {
 		return m
 	}
@@ -394,7 +403,7 @@ func (m previewModel) View() string {
 	header := composePreviewHeaderRow(
 		contentWidth,
 		m.windowIdx, len(m.groups),
-		m.paneIdx, len(m.currentGroup().PaneIndices),
+		m.paneIdx, len(m.currentGroup().Panes),
 		m.session,
 		m.th, m.colourless,
 	)

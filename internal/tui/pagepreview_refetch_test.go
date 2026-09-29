@@ -94,7 +94,7 @@ func TestPreviewEscRefetchesSessionsList(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -126,7 +126,7 @@ func TestExternallyKilledSessionNotInListAfterDismiss(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -152,7 +152,7 @@ func TestPreviewEscPreservesCursorWhenPreviousSessionStillExists(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -181,7 +181,7 @@ func TestPreviewEscCursorFallsBackToNeighbourWhenPreviousSessionGone(t *testing.
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -207,7 +207,7 @@ func TestPreviewEscRefreshIsObservablyNoOpWhenListUnchanged(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -235,7 +235,7 @@ func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -284,7 +284,7 @@ func TestDrainCmdThroughUpdateNilCmdReturnsModelUnchanged(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -313,7 +313,7 @@ func TestDrainCmdThroughUpdateInvokesCmdAndFeedsResultThroughUpdate(t *testing.T
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -338,7 +338,7 @@ func TestPreviewEscRefreshSilentOnListerError(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}

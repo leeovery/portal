@@ -14,7 +14,7 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hello-from-preview\n")}

@@ -22,7 +22,7 @@ func newPreviewModelForHelpers(t *testing.T, session string, groups []tmux.Windo
 }
 
 func chromeLineForTest(m previewModel) string {
-	return composePreviewHeaderRow(200, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.session, m.th, m.colourless)
+	return composePreviewHeaderRow(200, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().Panes), m.session, m.th, m.colourless)
 }
 
 func footerLineForTest(m previewModel) string {
@@ -55,7 +55,7 @@ func footerLine(view string) string {
 }
 
 func chromeLineAtModelWidth(m previewModel) string {
-	return composePreviewHeaderRow(m.innerWidth(), m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.session, m.th, m.colourless)
+	return composePreviewHeaderRow(m.innerWidth(), m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().Panes), m.session, m.th, m.colourless)
 }
 
 func newFramePreviewModel(t *testing.T, windowName string, payload []byte) previewModel {
@@ -67,7 +67,7 @@ func newFramePreviewModelAt(t *testing.T, windowName string, payload []byte, wid
 	t.Helper()
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: windowName, PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: windowName, Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: payload}
@@ -80,9 +80,9 @@ func newFramePreviewModelAt(t *testing.T, windowName string, payload []byte, wid
 
 func TestPreviewModel_currentGroup_ReturnsCachedWindowGroupAtWindowIdx(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "alpha", PaneIndices: []int{0, 1}},
-		{WindowIndex: 2, WindowName: "beta", PaneIndices: []int{0}},
-		{WindowIndex: 5, WindowName: "gamma", PaneIndices: []int{3, 4, 5}},
+		{WindowIndex: 0, WindowName: "alpha", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 2, WindowName: "beta", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 5, WindowName: "gamma", Panes: []tmux.WindowPane{{Index: 3}, {Index: 4}, {Index: 5}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 1, 0)
 
@@ -94,15 +94,15 @@ func TestPreviewModel_currentGroup_ReturnsCachedWindowGroupAtWindowIdx(t *testin
 	if got.WindowName != "beta" {
 		t.Errorf("currentGroup().WindowName = %q; want %q", got.WindowName, "beta")
 	}
-	if len(got.PaneIndices) != 1 || got.PaneIndices[0] != 0 {
-		t.Errorf("currentGroup().PaneIndices = %v; want [0]", got.PaneIndices)
+	if len(got.Panes) != 1 || got.Panes[0].Index != 0 {
+		t.Errorf("currentGroup().Panes = %v; want one pane at index 0", got.Panes)
 	}
 }
 
 func TestPreviewModel_currentRawIndices_ReturnsRawWindowIndexAndPaneIndicesNotOrdinals(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "alpha", PaneIndices: []int{0, 1}},
-		{WindowIndex: 2, WindowName: "beta", PaneIndices: []int{4, 7}},
+		{WindowIndex: 0, WindowName: "alpha", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 2, WindowName: "beta", Panes: []tmux.WindowPane{{Index: 4}, {Index: 7}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 1, 1)
 
@@ -118,9 +118,9 @@ func TestPreviewModel_currentRawIndices_ReturnsRawWindowIndexAndPaneIndicesNotOr
 
 func TestPreviewModel_currentRawIndices_HandlesNonContiguousWindowIndexAndBaseIndex1(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{1, 2}},
-		{WindowIndex: 2, WindowName: "second", PaneIndices: []int{1}},
-		{WindowIndex: 5, WindowName: "third", PaneIndices: []int{1, 2, 3}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 1}, {Index: 2}}},
+		{WindowIndex: 2, WindowName: "second", Panes: []tmux.WindowPane{{Index: 1}}},
+		{WindowIndex: 5, WindowName: "third", Panes: []tmux.WindowPane{{Index: 1}, {Index: 2}, {Index: 3}}},
 	}
 
 	m := newPreviewModelForHelpers(t, "work", groups, 2, 0)
@@ -144,9 +144,9 @@ func TestPreviewModel_currentRawIndices_HandlesNonContiguousWindowIndexAndBaseIn
 
 func TestPreviewModel_currentPaneKey_MatchesSanitizePaneKeyOnRawIndicesForSameSession(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "alpha", PaneIndices: []int{0, 1}},
-		{WindowIndex: 2, WindowName: "beta", PaneIndices: []int{4, 7}},
-		{WindowIndex: 5, WindowName: "gamma", PaneIndices: []int{1, 2, 3}},
+		{WindowIndex: 0, WindowName: "alpha", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 2, WindowName: "beta", Panes: []tmux.WindowPane{{Index: 4}, {Index: 7}}},
+		{WindowIndex: 5, WindowName: "gamma", Panes: []tmux.WindowPane{{Index: 1}, {Index: 2}, {Index: 3}}},
 	}
 
 	cases := []struct {
@@ -166,7 +166,7 @@ func TestPreviewModel_currentPaneKey_MatchesSanitizePaneKeyOnRawIndicesForSameSe
 		t.Run(tc.name, func(t *testing.T) {
 			m := newPreviewModelForHelpers(t, tc.session, groups, tc.windowIdx, tc.paneIdx)
 			rawW := groups[tc.windowIdx].WindowIndex
-			rawP := groups[tc.windowIdx].PaneIndices[tc.paneIdx]
+			rawP := groups[tc.windowIdx].Panes[tc.paneIdx].Index
 			want := state.SanitizePaneKey(tc.session, rawW, rawP)
 
 			got := m.currentPaneKey()
@@ -187,30 +187,30 @@ func TestPreviewModel_degenerate_ReturnsTrueFor1x1AndFalseOtherwise(t *testing.T
 		{
 			name: "1x1 single window single pane",
 			groups: []tmux.WindowGroup{
-				{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+				{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 			},
 			want: true,
 		},
 		{
 			name: "1x2 single window two panes",
 			groups: []tmux.WindowGroup{
-				{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
+				{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 			},
 			want: false,
 		},
 		{
 			name: "2x1 two windows one pane each",
 			groups: []tmux.WindowGroup{
-				{WindowIndex: 0, WindowName: "a", PaneIndices: []int{0}},
-				{WindowIndex: 1, WindowName: "b", PaneIndices: []int{0}},
+				{WindowIndex: 0, WindowName: "a", Panes: []tmux.WindowPane{{Index: 0}}},
+				{WindowIndex: 1, WindowName: "b", Panes: []tmux.WindowPane{{Index: 0}}},
 			},
 			want: false,
 		},
 		{
 			name: "2x2 two windows two panes each",
 			groups: []tmux.WindowGroup{
-				{WindowIndex: 0, WindowName: "a", PaneIndices: []int{0, 1}},
-				{WindowIndex: 1, WindowName: "b", PaneIndices: []int{0, 1}},
+				{WindowIndex: 0, WindowName: "a", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+				{WindowIndex: 1, WindowName: "b", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 			},
 			want: false,
 		},

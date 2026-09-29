@@ -37,7 +37,7 @@ func TestScrollbackReaderAdapter_TailReturnsBytesForValidPaneKey(t *testing.T) {
 	writeBinFile(t, stateDir, paneKey, content)
 
 	adapter := scrollbackReaderAdapter{stateDir: stateDir, n: previewTailLines}
-	got, err := adapter.Tail(paneKey)
+	got, err := adapter.Tail(PaneScrollback{PaneKey: paneKey})
 	if err != nil {
 		t.Fatalf("Tail returned error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestScrollbackReaderAdapter_TailReturnsNilNilForMissingBin(t *testing.T) {
 	stateDir := t.TempDir()
 	adapter := scrollbackReaderAdapter{stateDir: stateDir, n: previewTailLines}
 
-	got, err := adapter.Tail("nonexistent-pane-key")
+	got, err := adapter.Tail(PaneScrollback{PaneKey: "nonexistent-pane-key"})
 
 	if err != nil {
 		t.Errorf("expected nil error for missing file, got %v", err)
@@ -79,7 +79,7 @@ func TestScrollbackReaderAdapter_TailReturnsErrForPermissionDenied(t *testing.T)
 	})
 
 	adapter := scrollbackReaderAdapter{stateDir: stateDir, n: previewTailLines}
-	got, err := adapter.Tail(paneKey)
+	got, err := adapter.Tail(PaneScrollback{PaneKey: paneKey})
 
 	if err == nil {
 		t.Fatalf("expected non-nil error for permission-denied read, got nil (bytes=%q)", got)

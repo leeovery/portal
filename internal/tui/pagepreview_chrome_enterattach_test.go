@@ -11,8 +11,8 @@ import (
 
 func TestPreviewFooter_ByteIdenticalAcrossViewportStates(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "logs", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "logs", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 
 	cases := []struct {

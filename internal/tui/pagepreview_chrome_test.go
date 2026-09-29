@@ -14,8 +14,8 @@ func stripANSI(s string) string {
 
 func TestPreviewChromeLine_Renders1BasedOrdinalsForZeroIndexedGroups(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "alpha", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "beta", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "alpha", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "beta", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 0, 0)
 
@@ -31,9 +31,9 @@ func TestPreviewChromeLine_Renders1BasedOrdinalsForZeroIndexedGroups(t *testing.
 
 func TestPreviewChromeLine_RendersOneToNCountersWhenWindowIndexValuesAreNonContiguous(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 2, WindowName: "second", PaneIndices: []int{0}},
-		{WindowIndex: 5, WindowName: "third", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 2, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 5, WindowName: "third", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 
 	cases := []struct {
@@ -58,7 +58,7 @@ func TestPreviewChromeLine_RendersOneToNCountersWhenWindowIndexValuesAreNonConti
 
 func TestPreviewChromeLine_RendersOneToNCountersWhenPaneIndicesStartAt1(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{1, 2}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 1}, {Index: 2}}},
 	}
 
 	cases := []struct {
@@ -79,7 +79,7 @@ func TestPreviewChromeLine_RendersOneToNCountersWhenPaneIndicesStartAt1(t *testi
 
 func TestPreviewChromeLine_IncludesSessionNameVerbatimIncludingSpaces(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor window", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor window", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPreviewModelForHelpers(t, "evvi webhooks and watchers", groups, 0, 0)
 
@@ -92,7 +92,7 @@ func TestPreviewChromeLine_IncludesSessionNameVerbatimIncludingSpaces(t *testing
 
 func TestPreviewFooter_IncludesWindowPaneAttachBackAsVisibleHints(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 0, 0)
 
@@ -107,7 +107,7 @@ func TestPreviewFooter_IncludesWindowPaneAttachBackAsVisibleHints(t *testing.T) 
 
 func TestPreviewFooter_OrdersWindowPaneAttachBackLeftToRight(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 0, 0)
 
@@ -132,8 +132,8 @@ func TestPreviewFooter_OrdersWindowPaneAttachBackLeftToRight(t *testing.T) {
 
 func TestPreviewChromeLine_FullStringEqualityForCanonicalShape(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "logs", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "logs", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 0, 0)
 
@@ -149,8 +149,8 @@ func TestPreviewChromeLine_FullStringEqualityForCanonicalShape(t *testing.T) {
 
 func TestPreviewChromeLine_DoesNotExposeRawTmuxIndices(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 99, WindowName: "second", PaneIndices: []int{42, 43}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 99, WindowName: "second", Panes: []tmux.WindowPane{{Index: 42}, {Index: 43}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 1, 1)
 
@@ -160,14 +160,14 @@ func TestPreviewChromeLine_DoesNotExposeRawTmuxIndices(t *testing.T) {
 		t.Errorf("chromeLine() = %q; raw WindowIndex 99 leaked into chrome", got)
 	}
 	if strings.Contains(got, "42") || strings.Contains(got, "43") {
-		t.Errorf("chromeLine() = %q; raw PaneIndices (42/43) leaked into chrome", got)
+		t.Errorf("chromeLine() = %q; raw pane indices (42/43) leaked into chrome", got)
 	}
 }
 
 func TestPreviewChromeLine_ProducesNoIOWhenInvoked(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "other", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	enum := &stubEnumerator{
 		groups: groups,
@@ -198,7 +198,7 @@ func TestPreviewChromeLine_ProducesNoIOWhenInvoked(t *testing.T) {
 
 func TestPreviewChromeLine_WordingDoesNotPromiseLiveness(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 0, 0)
 
@@ -213,7 +213,7 @@ func TestPreviewChromeLine_WordingDoesNotPromiseLiveness(t *testing.T) {
 
 func TestPreviewChromeLine_SingleWindowSinglePaneRendersOneOfOne(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPreviewModelForHelpers(t, "work", groups, 0, 0)
 
@@ -229,7 +229,7 @@ func TestPreviewChromeLine_SingleWindowSinglePaneRendersOneOfOne(t *testing.T) {
 
 func TestPreviewChromeLine_SessionNameWithPipeRenderedVerbatim(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPreviewModelForHelpers(t, "weird|name with spaces", groups, 0, 0)
 
@@ -242,8 +242,8 @@ func TestPreviewChromeLine_SessionNameWithPipeRenderedVerbatim(t *testing.T) {
 
 func TestPreviewChromeLine_DoesNotEmbedTmuxFormatCodePrefix(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
-		{WindowIndex: 1, WindowName: "logs", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 1, WindowName: "logs", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	for _, paneIdx := range []int{0} {
 		m := newPreviewModelForHelpers(t, "work", groups, 0, paneIdx)

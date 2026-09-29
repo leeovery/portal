@@ -132,7 +132,7 @@ func TestPreviewView_AtDegenerateWidth2Height4RendersWithoutPanic(t *testing.T) 
 
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "nvim-editor", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "nvim-editor", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hello\n")}
@@ -149,8 +149,8 @@ func TestPreviewView_AtDegenerateWidth2Height4RendersWithoutPanic(t *testing.T) 
 func TestPreviewView_RecomputesChromeEveryTickNoCachedField(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "alpha", PaneIndices: []int{0}},
-			{WindowIndex: 1, WindowName: "beta", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "alpha", Panes: []tmux.WindowPane{{Index: 0}}},
+			{WindowIndex: 1, WindowName: "beta", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("content\n")}

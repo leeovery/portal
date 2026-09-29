@@ -14,7 +14,7 @@ import (
 )
 
 func newSinglePaneEnumerator() *stubEnumerator {
-	return &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	return &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}}}}
 }
 
 type recordedCall struct {

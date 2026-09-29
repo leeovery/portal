@@ -13,7 +13,7 @@ type stubScrollbackReader struct {
 	err   error
 }
 
-func (s stubScrollbackReader) Tail(paneKey string) ([]byte, error) {
+func (s stubScrollbackReader) Tail(tui.PaneScrollback) ([]byte, error) {
 	return s.bytes, s.err
 }
 
@@ -54,7 +54,7 @@ func TestScrollbackReaderSupportsThreeReturnShapes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.reader.Tail("any-pane-key")
+			got, err := tt.reader.Tail(tui.PaneScrollback{PaneKey: "any-pane-key"})
 			if tt.wantBytes && got == nil {
 				t.Errorf("expected non-nil bytes, got nil")
 			}

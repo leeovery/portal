@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -2327,7 +2328,7 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 	const us = "\x1f"
 
 	t.Run("it uses the cmd.Run interface with list-panes -s -t <session> and unit-separator format", func(t *testing.T) {
-		mock := commandertest.New(t, commandertest.Returns("0"+us+"main"+us+"0", "list-panes"))
+		mock := commandertest.New(t, commandertest.Returns("0"+us+"main"+us+"0"+us+us, "list-panes"))
 		client := tmux.NewClient(mock)
 
 		_, err := client.ListWindowsAndPanesInSession("work")
@@ -2340,7 +2341,7 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 		want := []string{
 			"list-panes", "-s", "-t", "=work:",
-			"-F", "#{window_index}\x1f#{window_name}\x1f#{pane_index}",
+			"-F", "#{window_index}\x1f#{window_name}\x1f#{pane_index}\x1f#{@portal-pane-id}\x1f#{@portal-resume-pending}",
 		}
 		got := mock.Calls()[0]
 		if len(got) != len(want) {
@@ -2355,12 +2356,12 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 
 	t.Run("it returns window-grouped panes ordered by window_index then pane_index", func(t *testing.T) {
 		mock := commandertest.New(t, commandertest.Returns(strings.Join([]string{
-			"0" + us + "editor" + us + "0",
-			"0" + us + "editor" + us + "1",
-			"1" + us + "logs" + us + "0",
-			"1" + us + "logs" + us + "1",
-			"2" + us + "repl" + us + "0",
-			"2" + us + "repl" + us + "1",
+			"0" + us + "editor" + us + "0" + us + us,
+			"0" + us + "editor" + us + "1" + us + us,
+			"1" + us + "logs" + us + "0" + us + us,
+			"1" + us + "logs" + us + "1" + us + us,
+			"2" + us + "repl" + us + "0" + us + us,
+			"2" + us + "repl" + us + "1" + us + us,
 		}, "\n"), "list-panes"))
 		client := tmux.NewClient(mock)
 
@@ -2370,18 +2371,18 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 
 		want := []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0, 1}},
-			{WindowIndex: 1, WindowName: "logs", PaneIndices: []int{0, 1}},
-			{WindowIndex: 2, WindowName: "repl", PaneIndices: []int{0, 1}},
+			{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+			{WindowIndex: 1, WindowName: "logs", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+			{WindowIndex: 2, WindowName: "repl", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 		}
 		assertWindowGroups(t, got, want)
 	})
 
 	t.Run("it preserves non-contiguous window_index values verbatim", func(t *testing.T) {
 		mock := commandertest.New(t, commandertest.Returns(strings.Join([]string{
-			"0" + us + "alpha" + us + "0",
-			"2" + us + "beta" + us + "0",
-			"5" + us + "gamma" + us + "0",
+			"0" + us + "alpha" + us + "0" + us + us,
+			"2" + us + "beta" + us + "0" + us + us,
+			"5" + us + "gamma" + us + "0" + us + us,
 		}, "\n"), "list-panes"))
 		client := tmux.NewClient(mock)
 
@@ -2391,18 +2392,18 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 
 		want := []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "alpha", PaneIndices: []int{0}},
-			{WindowIndex: 2, WindowName: "beta", PaneIndices: []int{0}},
-			{WindowIndex: 5, WindowName: "gamma", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "alpha", Panes: []tmux.WindowPane{{Index: 0}}},
+			{WindowIndex: 2, WindowName: "beta", Panes: []tmux.WindowPane{{Index: 0}}},
+			{WindowIndex: 5, WindowName: "gamma", Panes: []tmux.WindowPane{{Index: 0}}},
 		}
 		assertWindowGroups(t, got, want)
 	})
 
 	t.Run("it preserves base-index 1 raw values", func(t *testing.T) {
 		mock := commandertest.New(t, commandertest.Returns(strings.Join([]string{
-			"1" + us + "first" + us + "1",
-			"1" + us + "first" + us + "2",
-			"2" + us + "second" + us + "1",
+			"1" + us + "first" + us + "1" + us + us,
+			"1" + us + "first" + us + "2" + us + us,
+			"2" + us + "second" + us + "1" + us + us,
 		}, "\n"), "list-panes"))
 		client := tmux.NewClient(mock)
 
@@ -2412,14 +2413,14 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 
 		want := []tmux.WindowGroup{
-			{WindowIndex: 1, WindowName: "first", PaneIndices: []int{1, 2}},
-			{WindowIndex: 2, WindowName: "second", PaneIndices: []int{1}},
+			{WindowIndex: 1, WindowName: "first", Panes: []tmux.WindowPane{{Index: 1}, {Index: 2}}},
+			{WindowIndex: 2, WindowName: "second", Panes: []tmux.WindowPane{{Index: 1}}},
 		}
 		assertWindowGroups(t, got, want)
 	})
 
 	t.Run("it preserves window names containing whitespace", func(t *testing.T) {
-		mock := commandertest.New(t, commandertest.Returns("0"+us+"my window name"+us+"0", "list-panes"))
+		mock := commandertest.New(t, commandertest.Returns("0"+us+"my window name"+us+"0"+us+us, "list-panes"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListWindowsAndPanesInSession("work")
@@ -2428,13 +2429,13 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 
 		want := []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "my window name", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "my window name", Panes: []tmux.WindowPane{{Index: 0}}},
 		}
 		assertWindowGroups(t, got, want)
 	})
 
 	t.Run("it preserves window names containing the pipe delimiter", func(t *testing.T) {
-		mock := commandertest.New(t, commandertest.Returns("0"+us+"name|with|pipes"+us+"0", "list-panes"))
+		mock := commandertest.New(t, commandertest.Returns("0"+us+"name|with|pipes"+us+"0"+us+us, "list-panes"))
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListWindowsAndPanesInSession("work")
@@ -2443,16 +2444,16 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 
 		want := []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "name|with|pipes", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "name|with|pipes", Panes: []tmux.WindowPane{{Index: 0}}},
 		}
 		assertWindowGroups(t, got, want)
 	})
 
 	t.Run("it groups multiple panes within the same window correctly", func(t *testing.T) {
 		mock := commandertest.New(t, commandertest.Returns(strings.Join([]string{
-			"0" + us + "main" + us + "2",
-			"0" + us + "main" + us + "0",
-			"0" + us + "main" + us + "1",
+			"0" + us + "main" + us + "2" + us + us,
+			"0" + us + "main" + us + "0" + us + us,
+			"0" + us + "main" + us + "1" + us + us,
 		}, "\n"), "list-panes"))
 		client := tmux.NewClient(mock)
 
@@ -2462,15 +2463,15 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 
 		want := []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
 		}
 		assertWindowGroups(t, got, want)
 	})
 
 	t.Run("it preserves first-seen window name when later rows share the index", func(t *testing.T) {
 		mock := commandertest.New(t, commandertest.Returns(strings.Join([]string{
-			"0" + us + "first-seen" + us + "0",
-			"0" + us + "ignored" + us + "1",
+			"0" + us + "first-seen" + us + "0" + us + us,
+			"0" + us + "ignored" + us + "1" + us + us,
 		}, "\n"), "list-panes"))
 		client := tmux.NewClient(mock)
 
@@ -2480,16 +2481,16 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 
 		want := []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "first-seen", PaneIndices: []int{0, 1}},
+			{WindowIndex: 0, WindowName: "first-seen", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 		}
 		assertWindowGroups(t, got, want)
 	})
 
 	t.Run("it sorts windows ascending even when tmux output is unordered", func(t *testing.T) {
 		mock := commandertest.New(t, commandertest.Returns(strings.Join([]string{
-			"2" + us + "two" + us + "0",
-			"0" + us + "zero" + us + "0",
-			"1" + us + "one" + us + "0",
+			"2" + us + "two" + us + "0" + us + us,
+			"0" + us + "zero" + us + "0" + us + us,
+			"1" + us + "one" + us + "0" + us + us,
 		}, "\n"), "list-panes"))
 		client := tmux.NewClient(mock)
 
@@ -2499,11 +2500,63 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 
 		want := []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "zero", PaneIndices: []int{0}},
-			{WindowIndex: 1, WindowName: "one", PaneIndices: []int{0}},
-			{WindowIndex: 2, WindowName: "two", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "zero", Panes: []tmux.WindowPane{{Index: 0}}},
+			{WindowIndex: 1, WindowName: "one", Panes: []tmux.WindowPane{{Index: 0}}},
+			{WindowIndex: 2, WindowName: "two", Panes: []tmux.WindowPane{{Index: 0}}},
 		}
 		assertWindowGroups(t, got, want)
+	})
+
+	t.Run("it carries each pane's token and waiting state beside its index", func(t *testing.T) {
+		mock := commandertest.New(t, commandertest.Returns(strings.Join([]string{
+			"0" + us + "main" + us + "1" + us + "tok1ABCDEFGHIJKL" + us + "1",
+			"0" + us + "main" + us + "0" + us + "tok0ABCDEFGHIJKL" + us,
+			"1" + us + "logs" + us + "0" + us + us + "1",
+			"1" + us + "logs" + us + "1" + us + us,
+		}, "\n"), "list-panes"))
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListWindowsAndPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []tmux.WindowGroup{
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{
+				{Index: 0, Token: "tok0ABCDEFGHIJKL"},
+				{Index: 1, Token: "tok1ABCDEFGHIJKL", Pending: true},
+			}},
+			{WindowIndex: 1, WindowName: "logs", Panes: []tmux.WindowPane{
+				{Index: 0, Pending: true},
+				{Index: 1},
+			}},
+		}
+		assertWindowGroups(t, got, want)
+	})
+
+	t.Run("it reads any non-empty pending value as waiting", func(t *testing.T) {
+		mock := commandertest.New(t, commandertest.Returns("0"+us+"main"+us+"0"+us+"tok"+us+"yes", "list-panes"))
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListWindowsAndPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []tmux.WindowGroup{
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0, Token: "tok", Pending: true}}},
+		}
+		assertWindowGroups(t, got, want)
+	})
+
+	t.Run("it rejects a row missing the token and pending fields", func(t *testing.T) {
+		mock := commandertest.New(t, commandertest.Returns("0"+us+"main"+us+"0", "list-panes"))
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListWindowsAndPanesInSession("work")
+		if err == nil {
+			t.Fatalf("expected an error for a short row, got %+v", got)
+		}
 	})
 
 	t.Run("it returns an error when tmux exits non-zero", func(t *testing.T) {
@@ -2598,28 +2651,8 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 
 func assertWindowGroups(t *testing.T, got, want []tmux.WindowGroup) {
 	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("got %d groups %+v, want %d groups %+v", len(got), got, len(want), want)
-	}
-	for i := range want {
-		if got[i].WindowIndex != want[i].WindowIndex {
-			t.Errorf("group[%d].WindowIndex = %d, want %d", i, got[i].WindowIndex, want[i].WindowIndex)
-		}
-		if got[i].WindowName != want[i].WindowName {
-			t.Errorf("group[%d].WindowName = %q, want %q", i, got[i].WindowName, want[i].WindowName)
-		}
-		if len(got[i].PaneIndices) != len(want[i].PaneIndices) {
-			t.Errorf("group[%d].PaneIndices length = %d (%v), want %d (%v)",
-				i, len(got[i].PaneIndices), got[i].PaneIndices,
-				len(want[i].PaneIndices), want[i].PaneIndices)
-			continue
-		}
-		for j := range want[i].PaneIndices {
-			if got[i].PaneIndices[j] != want[i].PaneIndices[j] {
-				t.Errorf("group[%d].PaneIndices[%d] = %d, want %d",
-					i, j, got[i].PaneIndices[j], want[i].PaneIndices[j])
-			}
-		}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("groups = %+v, want %+v", got, want)
 	}
 }
 

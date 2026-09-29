@@ -129,7 +129,7 @@ func (c countingStores) exercise() {
 	_, _ = c.aliasEditor.Load()
 	_ = c.modePersister.Save(prefs.ModeFlat)
 	_ = c.themePersister.CommitTheme("nord")
-	_, _ = c.scrollback.Tail("pane")
+	_, _ = c.scrollback.Tail(PaneScrollback{PaneKey: "pane"})
 	_, _ = c.lister.ListSessions()
 }
 
@@ -184,7 +184,7 @@ func (c *countingThemePersister) CommitThemeSlot(string, theme.Member) error {
 
 type countingScrollbackReader struct{ calls int }
 
-func (c *countingScrollbackReader) Tail(string) ([]byte, error) { c.calls++; return nil, nil }
+func (c *countingScrollbackReader) Tail(PaneScrollback) ([]byte, error) { c.calls++; return nil, nil }
 
 type countingLister struct{ calls int }
 

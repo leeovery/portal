@@ -19,8 +19,8 @@ func (e *hermeticEnumerator) ListWindowsAndPanesInSession(session string) ([]tmu
 	e.calls++
 	e.lastArg = session
 	return []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1, Token: "abcdef", Pending: true}}},
 	}, nil
 }
 
@@ -28,7 +28,8 @@ type hermeticReader struct {
 	calls []string
 }
 
-func (r *hermeticReader) Tail(paneKey string) ([]byte, error) {
+func (r *hermeticReader) Tail(pane PaneScrollback) ([]byte, error) {
+	paneKey := pane.PaneKey
 	r.calls = append(r.calls, paneKey)
 	return []byte("content"), nil
 }

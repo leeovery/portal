@@ -26,10 +26,12 @@ type recordingReader struct {
 	bytes []byte
 	err   error
 	calls []string
+	panes []PaneScrollback
 }
 
-func (r *recordingReader) Tail(paneKey string) ([]byte, error) {
-	r.calls = append(r.calls, paneKey)
+func (r *recordingReader) Tail(pane PaneScrollback) ([]byte, error) {
+	r.calls = append(r.calls, pane.PaneKey)
+	r.panes = append(r.panes, pane)
 	return r.bytes, r.err
 }
 
@@ -64,7 +66,7 @@ func TestNewPreviewModel_ReturnsFalseOnEmptyEnumeration(t *testing.T) {
 func TestNewPreviewModel_ReturnsFalseWhenFirstWindowHasZeroPanes(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: nil},
+			{WindowIndex: 0, WindowName: "main", Panes: nil},
 		},
 	}
 	reader := &recordingReader{}
@@ -82,8 +84,8 @@ func TestNewPreviewModel_ReturnsFalseWhenFirstWindowHasZeroPanes(t *testing.T) {
 func TestNewPreviewModel_SetsFocusToZeroZeroOnSuccess(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-			{WindowIndex: 1, WindowName: "other", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+			{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -104,7 +106,7 @@ func TestNewPreviewModel_SetsFocusToZeroZeroOnSuccess(t *testing.T) {
 func TestNewPreviewModel_ReadsTailForZeroZeroPaneSynchronously(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 2, WindowName: "main", PaneIndices: []int{5, 6}},
+			{WindowIndex: 2, WindowName: "main", Panes: []tmux.WindowPane{{Index: 5}, {Index: 6}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hello")}
@@ -127,7 +129,7 @@ func TestNewPreviewModel_PassesRawANSIBytesVerbatimToSetContent(t *testing.T) {
 	raw := []byte("\x1b[31mred\x1b[0m")
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: raw}
@@ -150,7 +152,7 @@ func TestNewPreviewModel_PositionsViewportAtScrollTailOnInitialOpen(t *testing.T
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
@@ -168,7 +170,7 @@ func TestNewPreviewModel_PositionsViewportAtScrollTailOnInitialOpen(t *testing.T
 func TestNewPreviewModel_ReturnsTrueWhenTailReturnsNilNil(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: nil, err: nil}
@@ -183,7 +185,7 @@ func TestNewPreviewModel_ReturnsTrueWhenTailReturnsNilNil(t *testing.T) {
 func TestNewPreviewModel_ReturnsTrueWhenTailReturnsNilError(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: nil, err: errors.New("EACCES")}
@@ -198,7 +200,7 @@ func TestNewPreviewModel_ReturnsTrueWhenTailReturnsNilError(t *testing.T) {
 func TestNewPreviewModel_ConstructsFreshModelPerCallWithNoCarriedState(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("first")}

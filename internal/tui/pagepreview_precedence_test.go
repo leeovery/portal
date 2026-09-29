@@ -16,8 +16,8 @@ func newPreviewModelForPrecedence(t *testing.T) (previewModel, *recordingReader)
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-			{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
+			{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+			{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}

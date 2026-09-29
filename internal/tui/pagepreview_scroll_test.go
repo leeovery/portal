@@ -16,7 +16,7 @@ func newPreviewModelWithLines(t *testing.T, lineCount int) (previewModel, *recor
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
@@ -170,7 +170,7 @@ func TestPreviewPreservesScrollOffsetAcrossResizeWhenAccommodating(t *testing.T)
 func TestPreviewEmptyContentDownIsNoOp(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: nil, err: nil}
@@ -197,7 +197,7 @@ func TestPreviewEmptyContentDownIsNoOp(t *testing.T) {
 func TestPreviewSingleLineContentDownIsNoOp(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("only one line\n")}

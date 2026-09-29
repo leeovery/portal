@@ -18,12 +18,12 @@ func (keymapParityRenamer) RenameSession(string, string) error { return nil }
 type keymapParityEnumerator struct{}
 
 func (keymapParityEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
-	return []tmux.WindowGroup{{WindowIndex: 0, WindowName: "w", PaneIndices: []int{0}}}, nil
+	return []tmux.WindowGroup{{WindowIndex: 0, WindowName: "w", Panes: []tmux.WindowPane{{Index: 0}}}}, nil
 }
 
 type keymapParityReader struct{}
 
-func (keymapParityReader) Tail(string) ([]byte, error) { return nil, nil }
+func (keymapParityReader) Tail(PaneScrollback) ([]byte, error) { return nil, nil }
 
 func sessionsDispatchModel(t *testing.T) Model {
 	t.Helper()

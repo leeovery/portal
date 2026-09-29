@@ -16,9 +16,9 @@ var (
 
 func TestPreviewWindowNav_NextAdvancesWindowIdxByOneAndResetsPaneIdx(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1, 2}},
-		{WindowIndex: 2, WindowName: "third", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
+		{WindowIndex: 2, WindowName: "third", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 1, reader, 80, 24)
@@ -41,9 +41,9 @@ func TestPreviewWindowNav_NextAdvancesWindowIdxByOneAndResetsPaneIdx(t *testing.
 
 func TestPreviewWindowNav_NextWrapsFromLastWindowToZero(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
-		{WindowIndex: 2, WindowName: "third", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 2, WindowName: "third", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 2, 0, reader, 80, 24)
@@ -60,9 +60,9 @@ func TestPreviewWindowNav_NextWrapsFromLastWindowToZero(t *testing.T) {
 
 func TestPreviewWindowNav_PrevRewindsWindowIdxByOneAndResetsPaneIdx(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1, 2}},
-		{WindowIndex: 2, WindowName: "third", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
+		{WindowIndex: 2, WindowName: "third", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 2, 0, reader, 80, 24)
@@ -85,9 +85,9 @@ func TestPreviewWindowNav_PrevRewindsWindowIdxByOneAndResetsPaneIdx(t *testing.T
 
 func TestPreviewWindowNav_PrevFromWindowZeroWrapsToLastWindow(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
-		{WindowIndex: 2, WindowName: "third", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 2, WindowName: "third", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
@@ -104,7 +104,7 @@ func TestPreviewWindowNav_PrevFromWindowZeroWrapsToLastWindow(t *testing.T) {
 
 func TestPreviewWindowNav_NextSingleWindowMultiPaneSessionIsSilentNoOp(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 1, reader, 80, 24)
@@ -127,7 +127,7 @@ func TestPreviewWindowNav_NextSingleWindowMultiPaneSessionIsSilentNoOp(t *testin
 
 func TestPreviewWindowNav_PrevSingleWindowMultiPaneSessionIsSilentNoOp(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 1, reader, 80, 24)
@@ -150,8 +150,8 @@ func TestPreviewWindowNav_PrevSingleWindowMultiPaneSessionIsSilentNoOp(t *testin
 
 func TestPreviewWindowNav_WindowCycleResetsPaneIdxToZeroEvenWhenNonZero(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1, 2}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1, 2, 3}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}, {Index: 3}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 2, reader, 80, 24)
@@ -170,8 +170,8 @@ func TestPreviewWindowNav_WindowCycleResetsPaneIdxToZeroEvenWhenNonZero(t *testi
 
 func TestPreviewWindowNav_WindowCycleTriggersExactlyOneTailCallWithPaneZeroOfNewWindow(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 2, WindowName: "second", PaneIndices: []int{4, 7, 9}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 2, WindowName: "second", Panes: []tmux.WindowPane{{Index: 4}, {Index: 7}, {Index: 9}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 1, reader, 80, 24)
@@ -193,8 +193,8 @@ func TestPreviewWindowNav_WindowCycleResetsViewportScrollPositionToTail(t *testi
 		b.WriteString("line\n")
 	}
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 10)
@@ -213,8 +213,8 @@ func TestPreviewWindowNav_WindowCycleResetsViewportScrollPositionToTail(t *testi
 
 func TestPreviewWindowNav_InterceptedBeforeViewportHorizontalScroll(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)

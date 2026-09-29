@@ -45,7 +45,7 @@ func TestPreviewMarkerExactByteContent(t *testing.T) {
 func TestPreviewBorderResolvesTheModeAccentToken(t *testing.T) {
 	th := testDarkTheme(t)
 	m := newPeekPreviewModel(t, "work", []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}, []byte("hello\n"), 80, 24)
 	m.th = th
 	frame := m.View()

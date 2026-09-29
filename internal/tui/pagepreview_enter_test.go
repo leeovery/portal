@@ -26,8 +26,8 @@ func newPreviewModelForEnter(session string, groups []tmux.WindowGroup, windowId
 
 func TestPreviewEnter_DispatchesWithCapturedRawIndicesWhenNoNavigation(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "other", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	attacher := &fakePreviewAttacher{}
@@ -50,7 +50,7 @@ func TestPreviewEnter_DispatchesWithCapturedRawIndicesWhenNoNavigation(t *testin
 
 func TestPreviewEnter_DispatchesWithWalkedIndicesAfterPaneNav(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	attacher := &fakePreviewAttacher{}
@@ -78,9 +78,9 @@ func TestPreviewEnter_DispatchesWithWalkedIndicesAfterPaneNav(t *testing.T) {
 
 func TestPreviewEnter_DispatchesWithWalkedIndicesAfterWindowNav(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0}},
-		{WindowIndex: 2, WindowName: "third", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 2, WindowName: "third", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	attacher := &fakePreviewAttacher{}
@@ -105,8 +105,8 @@ func TestPreviewEnter_DispatchesWithWalkedIndicesAfterWindowNav(t *testing.T) {
 
 func TestPreviewEnter_DispatchesWithRawTmuxIndicesOnNonContiguousSession(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{1}},
-		{WindowIndex: 5, WindowName: "second", PaneIndices: []int{3}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 1}}},
+		{WindowIndex: 5, WindowName: "second", Panes: []tmux.WindowPane{{Index: 3}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	attacher := &fakePreviewAttacher{}
@@ -126,7 +126,7 @@ func TestPreviewEnter_DispatchesWithRawTmuxIndicesOnNonContiguousSession(t *test
 
 func TestPreviewEnter_NotForwardedToViewport(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	attacher := &fakePreviewAttacher{}
@@ -154,7 +154,7 @@ func TestPreviewEnter_NotForwardedToViewport(t *testing.T) {
 
 func TestPreviewEnter_NoOpWhenAttacherIsNil(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForEnter("work", groups, 0, 0, reader, nil, 80, 24)
@@ -177,7 +177,7 @@ func TestPreviewEnter_NoOpWhenAttacherIsNil(t *testing.T) {
 
 func TestPreviewEnter_DispatchesWhenViewportHasRealBytes(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("real content bytes")}
 	attacher := &fakePreviewAttacher{}
@@ -193,7 +193,7 @@ func TestPreviewEnter_DispatchesWhenViewportHasRealBytes(t *testing.T) {
 
 func TestPreviewEnter_DispatchesWhenViewportRenderedPlaceholder(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: nil, err: nil}
 	attacher := &fakePreviewAttacher{}
@@ -209,7 +209,7 @@ func TestPreviewEnter_DispatchesWhenViewportRenderedPlaceholder(t *testing.T) {
 
 func TestPreviewEnter_DispatchesWhenViewportRenderedReadError(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: nil, err: errors.New("EACCES")}
 	attacher := &fakePreviewAttacher{}

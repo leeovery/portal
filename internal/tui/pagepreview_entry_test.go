@@ -39,7 +39,7 @@ func TestSpaceOnSessionsPageTransitionsToPagePreviewWhenHighlighted(t *testing.T
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -68,7 +68,7 @@ func TestSpaceOnSessionsPageTransitionsToPagePreviewWhenHighlighted(t *testing.T
 func TestSpaceOnSessionsPageNoOpWhenListEmpty(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{}
@@ -97,7 +97,7 @@ func TestSpaceOnSessionsPageNoOpWhenSelectedItemNil(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{}
@@ -179,7 +179,7 @@ func TestSpaceDuringSettingFilterDoesNotCallNewPreviewModel(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{}
@@ -208,7 +208,7 @@ func TestSpaceDuringSettingFilterDoesNotCallNewPreviewModel(t *testing.T) {
 func TestSpaceOnLoadingPageDoesNotCallNewPreviewModel(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{}
@@ -232,7 +232,7 @@ func TestSpaceOnLoadingPageDoesNotCallNewPreviewModel(t *testing.T) {
 func TestSpaceOnProjectsPageDoesNotCallNewPreviewModel(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{}
@@ -259,7 +259,7 @@ func TestPagePreviewRoutesUpdateToPreviewModel(t *testing.T) {
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hello")}

@@ -11,7 +11,8 @@ type nilNilReader struct {
 	calls []string
 }
 
-func (r *nilNilReader) Tail(paneKey string) ([]byte, error) {
+func (r *nilNilReader) Tail(pane PaneScrollback) ([]byte, error) {
+	paneKey := pane.PaneKey
 	r.calls = append(r.calls, paneKey)
 	return nil, nil
 }
@@ -23,7 +24,7 @@ func stripTrailingBlanks(s string) string {
 func TestPreviewPlaceholder_RendersAtInitialOpenWhenTailReturnsNilNil(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &nilNilReader{}
@@ -41,7 +42,7 @@ func TestPreviewPlaceholder_RendersAtInitialOpenWhenTailReturnsNilNil(t *testing
 
 func TestPreviewPlaceholder_RendersAfterPaneNavCycleWhenTailReturnsNilNil(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	reader := &nilNilReader{}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
@@ -59,8 +60,8 @@ func TestPreviewPlaceholder_RendersAfterPaneNavCycleWhenTailReturnsNilNil(t *tes
 
 func TestPreviewPlaceholder_RendersAfterNextWindowCycleWhenTailReturnsNilNil(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &nilNilReader{}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
@@ -78,8 +79,8 @@ func TestPreviewPlaceholder_RendersAfterNextWindowCycleWhenTailReturnsNilNil(t *
 
 func TestPreviewPlaceholder_ChromeCountsRemainCorrectWhenPlaceholderShown(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "other", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	enum := &stubEnumerator{groups: groups}
 	reader := &nilNilReader{}
@@ -114,19 +115,19 @@ func TestPreviewPlaceholder_IsCanonicalWordingNoSavedContent(t *testing.T) {
 
 type enoentReader struct{}
 
-func (enoentReader) Tail(string) ([]byte, error) { return nil, nil }
+func (enoentReader) Tail(PaneScrollback) ([]byte, error) { return nil, nil }
 
 type zeroByteReader struct{}
 
-func (zeroByteReader) Tail(string) ([]byte, error) { return nil, nil }
+func (zeroByteReader) Tail(PaneScrollback) ([]byte, error) { return nil, nil }
 
 type zeroLineReader struct{}
 
-func (zeroLineReader) Tail(string) ([]byte, error) { return nil, nil }
+func (zeroLineReader) Tail(PaneScrollback) ([]byte, error) { return nil, nil }
 
 func TestPreviewPlaceholder_ENOENTZeroByteAndZeroLineProduceIdenticalViewportContent(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 
 	readers := []ScrollbackReader{

@@ -27,7 +27,7 @@ func newPreviewModelForTab(session string, groups []tmux.WindowGroup, windowIdx,
 
 func TestPreviewPaneNav_NextAdvancesPaneIdxByOneWithinMultiPaneWindow(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
@@ -44,7 +44,7 @@ func TestPreviewPaneNav_NextAdvancesPaneIdxByOneWithinMultiPaneWindow(t *testing
 
 func TestPreviewPaneNav_NextAdvancesAcrossSuccessivePanes(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
@@ -59,7 +59,7 @@ func TestPreviewPaneNav_NextAdvancesAcrossSuccessivePanes(t *testing.T) {
 
 func TestPreviewPaneNav_NextWrapsFromLastPaneBackToZeroWithinSameWindow(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1, 2}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 2, reader, 80, 24)
@@ -76,8 +76,8 @@ func TestPreviewPaneNav_NextWrapsFromLastPaneBackToZeroWithinSameWindow(t *testi
 
 func TestPreviewPaneNav_SinglePaneWindowIsSilentNoOpZeroTail(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
@@ -100,7 +100,7 @@ func TestPreviewPaneNav_SinglePaneWindowIsSilentNoOpZeroTail(t *testing.T) {
 
 func TestPreviewPaneNav_SingleWindowSinglePaneSessionIsSilentNoOp(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
@@ -123,7 +123,7 @@ func TestPreviewPaneNav_SingleWindowSinglePaneSessionIsSilentNoOp(t *testing.T) 
 
 func TestPreviewPaneNav_TriggersExactlyOneTailCallWithNewlyFocusedPaneKey(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 2, WindowName: "main", PaneIndices: []int{4, 7, 9}},
+		{WindowIndex: 2, WindowName: "main", Panes: []tmux.WindowPane{{Index: 4}, {Index: 7}, {Index: 9}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 24)
@@ -145,7 +145,7 @@ func TestPreviewPaneNav_ResetsViewportScrollPositionToTail(t *testing.T) {
 		b.WriteString("line\n")
 	}
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 10)
@@ -164,9 +164,9 @@ func TestPreviewPaneNav_ResetsViewportScrollPositionToTail(t *testing.T) {
 
 func TestPreviewPaneNav_DoesNotModifyWindowIdx(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1, 2}},
-		{WindowIndex: 2, WindowName: "third", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
+		{WindowIndex: 2, WindowName: "third", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	reader := &recordingReader{bytes: []byte("content")}
 	m := newPreviewModelForTab("work", groups, 1, 2, reader, 80, 24)
@@ -187,7 +187,7 @@ func TestPreviewPaneNav_InterceptedBeforeViewportSeesIt(t *testing.T) {
 		b.WriteString("line\n")
 	}
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
 	m := newPreviewModelForTab("work", groups, 0, 0, reader, 80, 10)

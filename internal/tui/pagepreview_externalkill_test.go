@@ -12,8 +12,8 @@ import (
 
 func killedSessionFixture() []tmux.WindowGroup {
 	return []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 }
 
@@ -34,7 +34,8 @@ func newProgressivePlaceholderReader(bytesUntil, mixedUntil int, placeholderKeys
 	}
 }
 
-func (r *progressivePlaceholderReader) Tail(paneKey string) ([]byte, error) {
+func (r *progressivePlaceholderReader) Tail(pane PaneScrollback) ([]byte, error) {
+	paneKey := pane.PaneKey
 	r.calls = append(r.calls, paneKey)
 	idx := len(r.calls)
 	switch {
@@ -81,7 +82,7 @@ func progressivePlaceholderFixture(t *testing.T) (*chromeStabilityEnumerator, *p
 	enum := &chromeStabilityEnumerator{
 		first: killedSessionFixture(),
 		second: []tmux.WindowGroup{
-			{WindowIndex: 9, WindowName: "REENUMERATED", PaneIndices: []int{42}},
+			{WindowIndex: 9, WindowName: "REENUMERATED", Panes: []tmux.WindowPane{{Index: 42}}},
 		},
 	}
 	w0p0 := state.SanitizePaneKey("work", 0, 0)

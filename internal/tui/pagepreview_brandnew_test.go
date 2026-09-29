@@ -11,8 +11,8 @@ import (
 
 func brandNewFixtureGroups() []tmux.WindowGroup {
 	return []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 }
 
@@ -220,8 +220,8 @@ func TestPreviewMixed_BytesPaneAndPlaceholderPanesCoexist(t *testing.T) {
 
 func TestPreviewMixed_FocusFromBytesPaneToPlaceholderAndBackIssuesFreshTailCalls(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	w0p0Key := state.SanitizePaneKey("work", 0, 0)
 	w0p1Key := state.SanitizePaneKey("work", 0, 1)

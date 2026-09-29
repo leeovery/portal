@@ -565,11 +565,11 @@ func TestPreviewScreenFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Enumerator: %v", err)
 	}
-	if len(groups) != 1 || len(groups[0].PaneIndices) != 1 {
+	if len(groups) != 1 || len(groups[0].Panes) != 1 {
 		t.Errorf("enumerator groups = %+v, want a single window with a single pane (Window 1/1 · Pane 1/1)", groups)
 	}
 
-	body, err := fx.Deps(darkBuiltinTheme(t)).Reader.Tail("any-pane-key")
+	body, err := fx.Deps(darkBuiltinTheme(t)).Reader.Tail(tui.PaneScrollback{PaneKey: "any-pane-key"})
 	if err != nil {
 		t.Fatalf("Reader.Tail: %v", err)
 	}
@@ -909,7 +909,7 @@ func TestFakeSeamsAreInert(t *testing.T) {
 	if len(groups) == 0 {
 		t.Error("Enumerator returned no window groups, want canned data")
 	}
-	if _, err := d.Reader.Tail("any-pane-key"); err != nil {
+	if _, err := d.Reader.Tail(tui.PaneScrollback{PaneKey: "any-pane-key"}); err != nil {
 		t.Errorf("Reader.Tail returned %v, want nil", err)
 	}
 }

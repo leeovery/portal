@@ -23,8 +23,8 @@ func newPeekPreviewModel(t *testing.T, session string, groups []tmux.WindowGroup
 
 func TestPreviewPeekChrome_HeaderAndFooterRenderMarkerSessionCountersAndHints(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "server", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "server", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "aviva-proxy-qNyfEO", groups, []byte("hello\n"), 120, 24)
 
@@ -44,9 +44,9 @@ func TestPreviewPeekChrome_HeaderAndFooterRenderMarkerSessionCountersAndHints(t 
 
 func TestPreviewPeekChrome_OrdinalsAreOneBasedSlashTotals(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 2, WindowName: "second", PaneIndices: []int{4, 7}},
-		{WindowIndex: 5, WindowName: "third", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 2, WindowName: "second", Panes: []tmux.WindowPane{{Index: 4}, {Index: 7}}},
+		{WindowIndex: 5, WindowName: "third", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "work", groups, []byte("x\n"), 120, 24)
 	m.windowIdx = 1
@@ -66,7 +66,7 @@ func TestPreviewPeekChrome_OrdinalsAreOneBasedSlashTotals(t *testing.T) {
 
 func TestPreviewPeekChrome_MarkerStyledAccentCyan(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "work", groups, []byte("x\n"), 120, 24)
 
@@ -78,7 +78,7 @@ func TestPreviewPeekChrome_MarkerStyledAccentCyan(t *testing.T) {
 
 func TestPreviewPeekChrome_SessionStyledTextPrimary(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "aviva-proxy", groups, []byte("x\n"), 120, 24)
 
@@ -90,7 +90,7 @@ func TestPreviewPeekChrome_SessionStyledTextPrimary(t *testing.T) {
 
 func TestPreviewPeekChrome_CountersStyledTextDetail(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "work", groups, []byte("x\n"), 120, 24)
 
@@ -102,7 +102,7 @@ func TestPreviewPeekChrome_CountersStyledTextDetail(t *testing.T) {
 
 func TestPreviewPeekChrome_FooterGlyphsAccentBlueLabelsTextDetail(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "work", groups, []byte("x\n"), 120, 24)
 
@@ -128,7 +128,7 @@ func segmentCarriesForeground(row, segment string, c color.Color) bool {
 
 func TestPreviewPeekChrome_ContentFramedByAccentCyanBorder(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "work", groups, []byte("hello\nworld\n"), 80, 24)
 
@@ -153,7 +153,7 @@ func TestPreviewPeekChrome_ContentFramedByAccentCyanBorder(t *testing.T) {
 
 func TestPreviewPeekChrome_CapturedContentLeftUntouched(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "work", groups, []byte("\x1b[41mRAWLINE\x1b[0m\n"), 80, 24)
 
@@ -165,7 +165,7 @@ func TestPreviewPeekChrome_CapturedContentLeftUntouched(t *testing.T) {
 
 func TestPreviewPeekChrome_NavHintsInFooterCompartment(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "work", groups, []byte("x\n"), 120, 24)
 
@@ -181,7 +181,7 @@ func TestPreviewPeekChrome_NavHintsInFooterCompartment(t *testing.T) {
 
 func TestPreviewPeekChrome_FullScreenOverlayNotBlankScreenModal(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	m := newPeekPreviewModel(t, "work", groups, []byte("hello\n"), 80, 24)
 
@@ -193,7 +193,7 @@ func TestPreviewPeekChrome_FullScreenOverlayNotBlankScreenModal(t *testing.T) {
 
 func TestPreviewPeekChrome_NarrowWidthDegradesGracefully(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "a-very-long-window-name-that-will-not-fit", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "a-very-long-window-name-that-will-not-fit", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	for _, w := range []int{120, 80, 60, 40, 25, 15, 8, 7} {
 		m := newPeekPreviewModel(t, "a-long-session-name-here", groups, []byte("x\n"), w, 24)
@@ -209,7 +209,7 @@ func TestPreviewPeekChrome_NarrowWidthDegradesGracefully(t *testing.T) {
 
 func TestPreviewPeekChrome_ColourlessKeepsStructureDropsHue(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	enum := &stubEnumerator{groups: groups}
 	reader := &recordingReader{bytes: []byte("hello\n")}

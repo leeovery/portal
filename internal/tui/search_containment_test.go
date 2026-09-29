@@ -274,7 +274,7 @@ func TestSearchContainmentSurvivesReRenders(t *testing.T) {
 		m := containmentPicker(t, tui.Deps{
 			InitialMode: prefs.ModeFlat,
 			Search:      &tui.SearchForm{Term: "port"},
-			Enumerator:  containmentEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}},
+			Enumerator:  containmentEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}}}},
 			Reader:      stubScrollbackReader{bytes: []byte("hi")},
 		}, sessions, projects)
 

@@ -122,8 +122,8 @@ func (e fakeEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup
 		return e.groups, nil
 	}
 	return []tmux.WindowGroup{
-		{WindowIndex: 1, WindowName: "editor", PaneIndices: []int{1, 2}},
-		{WindowIndex: 2, WindowName: "server", PaneIndices: []int{1}},
+		{WindowIndex: 1, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 1}, {Index: 2}}},
+		{WindowIndex: 2, WindowName: "server", Panes: []tmux.WindowPane{{Index: 1}}},
 	}, nil
 }
 
@@ -133,7 +133,7 @@ type fakeScrollbackReader struct {
 	content string
 }
 
-func (r fakeScrollbackReader) Tail(string) ([]byte, error) {
+func (r fakeScrollbackReader) Tail(tui.PaneScrollback) ([]byte, error) {
 	if r.content != "" {
 		return []byte(r.content), nil
 	}

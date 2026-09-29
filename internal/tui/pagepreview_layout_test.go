@@ -11,8 +11,8 @@ import (
 func TestPreviewView_JoinedPanelLayoutHeaderBodyFooter(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-			{WindowIndex: 1, WindowName: "other", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+			{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("alpha\nbeta\ngamma\n")}
@@ -58,7 +58,7 @@ func TestPreviewView_FillsFullTerminalHeight(t *testing.T) {
 	const termH = 24
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("only-one-line\n")}
@@ -91,8 +91,8 @@ func TestPreviewWindowSizeMsg_SetsViewportHeightToMsgHeightMinusChrome(t *testin
 func TestPreviewView_ChromeRowCountConstantAcrossWindowAndPaneCycles(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-			{WindowIndex: 1, WindowName: "other", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+			{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("content\n")}
@@ -142,7 +142,7 @@ func TestNewPreviewModel_SizesViewportWithChromeSubtracted(t *testing.T) {
 	const initialHeight = 24
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &recordingReader{bytes: []byte("x\n")}

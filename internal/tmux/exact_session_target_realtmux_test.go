@@ -3,6 +3,7 @@ package tmux_test
 import (
 	"errors"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -230,7 +231,7 @@ var liveSessionRouteCases = map[string]func(*testing.T){
 			t.Fatalf("ListWindowsAndPanesInSession(%q) returned %d windows, want 2: %+v", prefixSibling, len(groups), groups)
 		}
 		for i, group := range groups {
-			if group.WindowIndex != i || !slices.Equal(group.PaneIndices, []int{0, 1}) {
+			if group.WindowIndex != i || !reflect.DeepEqual(group.Panes, []tmux.WindowPane{{Index: 0}, {Index: 1}}) {
 				t.Errorf("window %d = %+v, want index %d holding panes [0 1]", i, group, i)
 			}
 		}

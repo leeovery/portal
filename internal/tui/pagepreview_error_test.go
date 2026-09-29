@@ -16,7 +16,8 @@ type nilErrReader struct {
 	calls []string
 }
 
-func (r *nilErrReader) Tail(paneKey string) ([]byte, error) {
+func (r *nilErrReader) Tail(pane PaneScrollback) ([]byte, error) {
+	paneKey := pane.PaneKey
 	r.calls = append(r.calls, paneKey)
 	return nil, r.err
 }
@@ -29,7 +30,8 @@ type keyedReader struct {
 	calls []string
 }
 
-func (r *keyedReader) Tail(paneKey string) ([]byte, error) {
+func (r *keyedReader) Tail(pane PaneScrollback) ([]byte, error) {
+	paneKey := pane.PaneKey
 	r.calls = append(r.calls, paneKey)
 	o := r.outcomes[paneKey]
 	return o.bytes, o.err
@@ -44,7 +46,8 @@ type sequenceReader struct {
 	idx   int
 }
 
-func (r *sequenceReader) Tail(paneKey string) ([]byte, error) {
+func (r *sequenceReader) Tail(pane PaneScrollback) ([]byte, error) {
+	paneKey := pane.PaneKey
 	r.calls = append(r.calls, paneKey)
 	o := r.outcomes[r.idx]
 	if r.idx < len(r.outcomes)-1 {
@@ -56,7 +59,7 @@ func (r *sequenceReader) Tail(paneKey string) ([]byte, error) {
 func TestPreviewError_RendersAtInitialOpenWhenTailReturnsNilErr(t *testing.T) {
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 		},
 	}
 	reader := &nilErrReader{err: errors.New("EACCES")}
@@ -74,7 +77,7 @@ func TestPreviewError_RendersAtInitialOpenWhenTailReturnsNilErr(t *testing.T) {
 
 func TestPreviewError_StringIsUniformAcrossErrnoTypes(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 
 	errs := []error{
@@ -115,7 +118,7 @@ func TestPreviewError_StringIsCanonicalWordingUnableToReadScrollback(t *testing.
 
 func TestPreviewError_RefocusAfterErrorIssuesFreshTailViaTab(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	pane0Key := state.SanitizePaneKey("work", 0, 0)
 	pane1Key := state.SanitizePaneKey("work", 0, 1)
@@ -157,8 +160,8 @@ func TestPreviewError_RefocusAfterErrorIssuesFreshTailViaTab(t *testing.T) {
 
 func TestPreviewError_RefocusAfterErrorIssuesFreshTailViaBracket(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", PaneIndices: []int{0}},
-		{WindowIndex: 1, WindowName: "second", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}}},
+		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	w0Key := state.SanitizePaneKey("work", 0, 0)
 	w1Key := state.SanitizePaneKey("work", 1, 0)
@@ -200,7 +203,7 @@ func TestPreviewError_RefocusAfterErrorIssuesFreshTailViaBracket(t *testing.T) {
 
 func TestPreviewError_SecondTailCallAfterErrorSeesNewOutcome(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
 	}
 	pane0Key := state.SanitizePaneKey("work", 0, 0)
 
@@ -267,8 +270,8 @@ func TestPreviewError_NoPerPaneErrorStateOnPreviewModel(t *testing.T) {
 
 func TestPreviewError_ChromeCountsUnaffectedByErrorBranch(t *testing.T) {
 	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
-		{WindowIndex: 1, WindowName: "other", PaneIndices: []int{0}},
+		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
+		{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
 	}
 	enum := &stubEnumerator{groups: groups}
 	reader := &nilErrReader{err: syscall.EACCES}

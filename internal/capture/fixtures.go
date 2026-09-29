@@ -851,7 +851,7 @@ func previewScreenFixture() *Fixture {
 		projectStore:     &fakeProjectStore{projects: nil},
 		initialMode:      prefs.ModeFlat,
 		scrollback:       scrollback,
-		enumeratorGroups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}},
+		enumeratorGroups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}}},
 		captureKeys:      []tea.KeyPressMsg{{Code: tea.KeySpace}},
 	}
 }

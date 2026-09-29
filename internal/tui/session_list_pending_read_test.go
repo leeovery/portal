@@ -192,7 +192,7 @@ func TestSessionListLoad_ReReadsBothAfterAKillARenameAndOnPreviewDismissal(t *te
 		{
 			name: "preview dismissal",
 			run: func(t *testing.T, m Model) Model {
-				m.enumerator = &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+				m.enumerator = &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}}}}
 				m.reader = &recordingReader{bytes: []byte("hi")}
 				m.sessionList.Select(0)
 				return pressSpaceThenEscWithRefresh(t, m)

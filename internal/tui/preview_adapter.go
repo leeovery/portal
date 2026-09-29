@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"path/filepath"
+
+	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -17,11 +20,19 @@ func NewProductionScrollbackReader(stateDir string) ScrollbackReader {
 	return scrollbackReaderAdapter{stateDir: stateDir, n: previewTailLines}
 }
 
-// The return shapes documented on ScrollbackReader.Tail flow through unchanged —
-// this adapter adds no policy of its own.
-func (a scrollbackReaderAdapter) Tail(paneKey string) ([]byte, error) {
-	path := state.ScrollbackFile(a.stateDir, paneKey)
-	return state.TailScrollback(path, a.n)
+// A waiting pane's transcript is re-filed under its token once its wait is
+// first captured, so the token-named file is read first and the positional one
+// only when that holds nothing. Token shape is checked before it names a path,
+// which also keeps it from reaching outside the scrollback directory.
+func (a scrollbackReaderAdapter) Tail(pane PaneScrollback) ([]byte, error) {
+	if nanoid.IsTokenShaped(pane.PendingToken) {
+		tokenPath := filepath.Join(a.stateDir, filepath.FromSlash(state.PendingScrollbackFile(pane.PendingToken)))
+		bytes, err := state.TailScrollback(tokenPath, a.n)
+		if bytes != nil || err != nil {
+			return bytes, err
+		}
+	}
+	return state.TailScrollback(state.ScrollbackFile(a.stateDir, pane.PaneKey), a.n)
 }
 
 // In a non-test file so a seam regression breaks the production build.

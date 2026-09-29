@@ -34,11 +34,11 @@ func (e *chromeStabilityEnumerator) ListWindowsAndPanesInSession(session string)
 func newChromeStabilityFixture() *chromeStabilityEnumerator {
 	return &chromeStabilityEnumerator{
 		first: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "first-window", PaneIndices: []int{0, 1, 2}},
-			{WindowIndex: 1, WindowName: "second-window", PaneIndices: []int{0, 1, 2}},
+			{WindowIndex: 0, WindowName: "first-window", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
+			{WindowIndex: 1, WindowName: "second-window", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}, {Index: 2}}},
 		},
 		second: []tmux.WindowGroup{
-			{WindowIndex: 9, WindowName: "REENUMERATED", PaneIndices: []int{42}},
+			{WindowIndex: 9, WindowName: "REENUMERATED", Panes: []tmux.WindowPane{{Index: 42}}},
 		},
 	}
 }
