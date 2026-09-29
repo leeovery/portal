@@ -322,7 +322,7 @@ func TestRunCommitCycleSerialisesOverlappingCommitters(t *testing.T) {
 		firstClient := &worldClient{world: world, afterStructure: make(chan struct{})}
 		var firstPrevs, secondPrevs []state.Index
 		firstDone := runCycleAsync(commitNowCycle(t, firstClient, dir, &firstPrevs))
-		waitForCalls(t, firstClient, 3)
+		waitForCalls(t, firstClient, 4)
 
 		world.markPending()
 		secondClient := &worldClient{world: world}
@@ -534,27 +534,48 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 		dir := t.TempDir()
 		seed := handOverSeed(t, dir)
 		world := newHandOverWorld()
-		world.sessions = []string{"work", closedSession}
-		before, err := os.ReadFile(state.SessionsJSON(dir))
-		if err != nil {
-			t.Fatalf("read sessions.json: %v", err)
+		readSessions := func() []byte {
+			t.Helper()
+			data, err := os.ReadFile(state.SessionsJSON(dir))
+			if err != nil {
+				t.Fatalf("read sessions.json: %v", err)
+			}
+			return data
 		}
 
-		_, err = state.RunCommitCycle(state.CommitCycle{
+		if _, err := state.RunCommitCycle(state.CommitCycle{
 			Client:   &worldClient{world: world},
 			Dir:      dir,
 			LoadPrev: func() *state.Index { return &seed },
+		}); err != nil {
+			t.Fatalf("first RunCommitCycle: %v", err)
+		}
+
+		controlBefore := readSessions()
+		if _, err := state.RunCommitCycle(state.CommitCycle{
+			Client:   &worldClient{world: world},
+			Dir:      dir,
+			LoadPrev: func() *state.Index { prev := onDiskIndex(t, dir); return &prev },
+			HashMap:  state.HashMap{},
+			Dump:     func(state.CaptureCycle) (bool, error) { return false, nil },
+		}); err != nil {
+			t.Fatalf("control RunCommitCycle: %v", err)
+		}
+		if !bytes.Equal(controlBefore, readSessions()) {
+			t.Fatal("sessions.json rewritten by a cycle whose dump reported no change; the structure is not unchanged")
+		}
+
+		before := readSessions()
+		if _, err := state.RunCommitCycle(state.CommitCycle{
+			Client:   &worldClient{world: world},
+			Dir:      dir,
+			LoadPrev: func() *state.Index { prev := onDiskIndex(t, dir); return &prev },
 			HashMap:  state.HashMap{},
 			Dump:     func(state.CaptureCycle) (bool, error) { return true, nil },
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatalf("RunCommitCycle: %v", err)
 		}
-		after, err := os.ReadFile(state.SessionsJSON(dir))
-		if err != nil {
-			t.Fatalf("read sessions.json: %v", err)
-		}
-		if bytes.Equal(before, after) {
+		if bytes.Equal(before, readSessions()) {
 			t.Error("sessions.json unchanged; a dump reporting a change must force the write")
 		}
 	})

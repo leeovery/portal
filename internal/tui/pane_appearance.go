@@ -141,8 +141,9 @@ func backgroundPayload(buf []byte) (string, bool) {
 }
 
 // armStdinRead bounds reads of stdin with select rather than a read deadline:
-// os.Stdin is a blocking descriptor outside the runtime poller, and macOS
-// refuses to poll a terminal through kqueue, so neither takes a deadline there.
+// os.Stdin is a blocking descriptor outside the runtime poller, so it takes no
+// deadline, and a fresh /dev/tty open takes none on macOS either, since kqueue
+// cannot poll that device.
 func armStdinRead(bound time.Duration) (io.Reader, error) {
 	fd := int(os.Stdin.Fd())
 	if fd < 0 || fd >= unix.FD_SETSIZE {

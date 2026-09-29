@@ -288,8 +288,6 @@ func (h *pipedKeysHarness) elapse(timer chan time.Time) {
 	}
 }
 
-// awaitWindow takes the next window of a kind the wait armed, failing when it
-// arms none: a wait still consuming a sequence arms nothing.
 func (h *pipedKeysHarness) awaitWindow(windows chan chan time.Time, what string) chan time.Time {
 	h.t.Helper()
 	select {
