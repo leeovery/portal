@@ -27,8 +27,8 @@ type ResumeScreen struct {
 }
 
 // RenderResumePanel draws the waiting panel as a string of exactly Width by
-// Height cells, as the card when the pane holds it and as the plain stack below
-// that size.
+// Height cells, or a fallback size where either is not positive, as the card
+// when the pane holds it and as the plain stack below that size.
 func RenderResumePanel(s ResumeScreen) string {
 	parts := paneScreenParts{
 		card:  func() string { return resumeCard(s) },

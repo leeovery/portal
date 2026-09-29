@@ -11,9 +11,10 @@ const (
 )
 
 // RenderResumeDiscardConfirm draws the discard confirmation as a string of
-// exactly Width by Height cells. It is the picker's kill modal retitled, built
-// through the same destructive-confirm builder, and it degrades with the pane
-// exactly as the waiting panel does.
+// exactly Width by Height cells, or a fallback size where either is not
+// positive. It is the picker's kill modal retitled, built through the same
+// destructive-confirm builder, and it degrades with the pane exactly as the
+// waiting panel does.
 func RenderResumeDiscardConfirm(s ResumeScreen) string {
 	parts := paneScreenParts{
 		card:  func() string { return discardConfirmCard(s) },
