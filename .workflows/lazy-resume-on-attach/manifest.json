@@ -197,7 +197,9 @@
             "lazy-resume-on-attach-12-1": "tick-31beed",
             "lazy-resume-on-attach-12-2": "tick-0262ab",
             "lazy-resume-on-attach-12-3": "tick-5a1a81",
-            "lazy-resume-on-attach-12-4": "tick-0937ee"
+            "lazy-resume-on-attach-12-4": "tick-0937ee",
+            "lazy-resume-on-attach-13": "tick-04095d",
+            "lazy-resume-on-attach-13-1": "tick-e4633a"
           },
           "storage_paths": [
             ".tick/"
@@ -455,7 +457,7 @@
             },
             "c7": {
               "tasks": {
-                "1": "pending"
+                "1": "approved"
               }
             }
           },
