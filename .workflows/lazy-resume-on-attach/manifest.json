@@ -274,7 +274,7 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 9,
+          "current_phase": 10,
           "current_task": null,
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
@@ -342,7 +342,8 @@
             "lazy-resume-on-attach-9-3",
             "lazy-resume-on-attach-9-4",
             "lazy-resume-on-attach-9-5",
-            "lazy-resume-on-attach-9-6"
+            "lazy-resume-on-attach-9-6",
+            "lazy-resume-on-attach-10-1"
           ],
           "staging": {
             "p1": {
@@ -435,7 +436,19 @@
             8,
             9
           ],
-          "updated": "2026-09-28"
+          "updated": "2026-09-28",
+          "bank": [
+            {
+              "task": "lazy-resume-on-attach-10-1",
+              "source": "reviewer",
+              "summary": "CLAUDE.md's state package row still describes the capture cycle as it was before task 10-1",
+              "failure": "CLAUDE.md is loaded into every agent session as the architecture reference. It says CaptureAndRefile returns the index and the frozen-pane set, that the dump skip reads the second return of CaptureStructure, and that only a pending pane's record is merged by token. An agent changing capture would reason from a contract that no longer exists (callers reading skeleton markers themselves; skeleton-marked tokened panes matched by address); nobody notices until that change misbehaves.",
+              "detail": "CLAUDE.md:61. Three places: the sentence beginning CaptureAndRefile is the entry point should say it reads the skeleton markers and returns a CaptureCycle{Index, Pending, Skeleton}; membership of that second return should become CaptureCycle.Pending; A pending pane's previous record is merged back on that durable token should also cover skeleton-marked tokened panes.",
+              "files": [
+                "CLAUDE.md"
+              ]
+            }
+          ]
         }
       }
     },
