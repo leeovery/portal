@@ -2036,3 +2036,103 @@ func TestCaptureStructureMergeSkippedPanesByToken(t *testing.T) {
 		}
 	})
 }
+
+func TestCaptureStructureAddressMatchNeverTakesALiveTokensRecord(t *testing.T) {
+	const tokenY = "ab12cd"
+
+	// Saved windows 1, 3 and 4 of work, restored as 1, 2 and 3: Y (tokenY) moved
+	// from window 3 to 2, X (no token) from window 4 to 3.
+	savedRenumbered := func(xToken string) state.Index {
+		return prevIndexOf(
+			prevPane{"work", 1, prevRecord(0, "/z", "less", "scrollback/work__1.0.bin", "")},
+			prevPane{"work", 3, prevRecord(0, "/y", "vim", "scrollback/work__3.0.bin", tokenY)},
+			prevPane{"work", 4, prevRecord(0, "/x", "htop", "scrollback/work__4.0.bin", xToken)},
+		)
+	}
+	restoredLive := []string{
+		paneLine("work", 1, "main", "L", false, true, 0, "/live-z", true, "zsh"),
+		paneLineWithPaneToken("work", 2, "main", "L", false, false, 0, "/live-y", true, "zsh", tokenY),
+		paneLine("work", 3, "main", "L", false, false, 0, "/live-x", true, "zsh"),
+	}
+	skipYAndX := map[string]struct{}{
+		state.SanitizePaneKey("work", 2, 0): {},
+		state.SanitizePaneKey("work", 3, 0): {},
+	}
+
+	t.Run("it leaves a tokenless pane off the record of the live pane carrying that record's token", func(t *testing.T) {
+		idx := captureAgainst(t, savedRenumbered(""), skipYAndX, []string{"work"}, restoredLive...)
+
+		if got := countPanesCarrying(idx, tokenY); got != 1 {
+			t.Fatalf("records carrying %q = %d, want 1: %+v", tokenY, got, idx.Sessions)
+		}
+		y := findPane(idx, "work", 2, 0)
+		if y == nil {
+			t.Fatalf("missing pane work:2.0: %+v", idx.Sessions)
+		}
+		if y.PortalPaneID != tokenY || y.CWD != "/y" || y.CurrentCommand != "vim" {
+			t.Errorf("Y = %+v, want token %q with /y + vim", *y, tokenY)
+		}
+		x := findPane(idx, "work", 3, 0)
+		if x == nil {
+			t.Fatalf("missing pane work:3.0: %+v", idx.Sessions)
+		}
+		if x.PortalPaneID != "" {
+			t.Errorf("X PortalPaneID = %q, want none", x.PortalPaneID)
+		}
+		if x.CWD == "/y" || x.CurrentCommand == "vim" {
+			t.Errorf("X = %+v carries Y's record", *x)
+		}
+		if x.CWD != "/live-x" || x.CurrentCommand != "zsh" {
+			t.Errorf("X = %+v, want its fresh /live-x + zsh", *x)
+		}
+	})
+
+	t.Run("it still takes a record whose token no live pane carries by address, token included", func(t *testing.T) {
+		const unstamped = "gone12"
+		prev := prevIndexOf(prevPane{"work", 3, prevRecord(0, "/x", "htop", "scrollback/work__3.0.bin", unstamped)})
+		skip := map[string]struct{}{state.SanitizePaneKey("work", 3, 0): {}}
+
+		idx := captureAgainst(t, prev, skip, []string{"work"},
+			paneLine("work", 3, "main", "L", false, true, 0, "/live-x", true, "zsh"))
+
+		x := findPane(idx, "work", 3, 0)
+		if x == nil {
+			t.Fatalf("missing pane work:3.0: %+v", idx.Sessions)
+		}
+		want := prevRecord(0, "/x", "htop", "scrollback/work__3.0.bin", unstamped)
+		if *x != want {
+			t.Errorf("X = %+v, want %+v", *x, want)
+		}
+	})
+
+	t.Run("it still takes a tokenless record by address whole", func(t *testing.T) {
+		prev := prevIndexOf(prevPane{"work", 3, prevRecord(0, "/x", "htop", "scrollback/work__3.0.bin", "")})
+		skip := map[string]struct{}{state.SanitizePaneKey("work", 3, 0): {}}
+
+		idx := captureAgainst(t, prev, skip, []string{"work"},
+			paneLine("work", 3, "main", "L", false, true, 0, "/live-x", true, "zsh"))
+
+		x := findPane(idx, "work", 3, 0)
+		if x == nil {
+			t.Fatalf("missing pane work:3.0: %+v", idx.Sessions)
+		}
+		want := prevRecord(0, "/x", "htop", "scrollback/work__3.0.bin", "")
+		if *x != want {
+			t.Errorf("X = %+v, want %+v", *x, want)
+		}
+	})
+}
+
+func countPanesCarrying(idx state.Index, token string) int {
+	n := 0
+	for _, s := range idx.Sessions {
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				if p.PortalPaneID == token {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}

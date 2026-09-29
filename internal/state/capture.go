@@ -35,8 +35,9 @@ const internalSessionPrefix = "_"
 // carrying the resume pending marker, keeps the CWD, CurrentCommand and
 // ScrollbackFile of the previous record carrying its durable token, whatever its
 // address has become. A skipped pane carrying no token keeps the whole previous
-// record at its own address, a pending one those three fields of it. A stale
-// marker never resurrects a killed pane.
+// record at its own address, a pending one those three fields of it, unless a
+// live pane carries that record's token. A stale marker never resurrects a
+// killed pane.
 // A tmux enumeration failure yields an empty Index and a wrapped error, never a
 // partial one. A per-session failure is logged and skipped, unless every
 // session failed on something other than vanishing, which errors so the caller
@@ -102,13 +103,14 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	}
 
 	idx := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: sessions}
+	liveTokens := liveTokenSet(idx)
 
 	if len(skipSet) > 0 && prev != nil {
-		mergeSkippedPanes(&idx, *prev, skipSet)
+		mergeSkippedPanes(&idx, *prev, skipSet, liveTokens)
 	}
 
 	if len(live) > 0 && prev != nil {
-		mergeFrozenPanes(&idx, *prev, live)
+		mergeFrozenPanes(&idx, *prev, live, liveTokens)
 	}
 
 	idx.Canonicalize()
@@ -146,8 +148,8 @@ func paneKeySet(live map[string]livePane) map[string]struct{} {
 // mergeSkippedPanes matches on the token because restore re-stamps it before
 // arming the pane, so a pane restored away from its saved address still finds
 // its own record. It mutates only panes the live enumeration returned.
-func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
-	byToken, byAddress := indexPrevPanes(prev)
+func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}, liveTokens map[string]struct{}) {
+	byToken, byAddress := indexPrevPanes(prev, liveTokens)
 	for si := range fresh.Sessions {
 		s := &fresh.Sessions[si]
 		for wi := range s.Windows {
@@ -178,8 +180,8 @@ func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
 // holds the pane's bytes, whatever the pane's address has become. It mutates
 // only panes the live enumeration returned, so a previous record whose pane is
 // gone is never reintroduced.
-func mergeFrozenPanes(fresh *Index, prev Index, live map[string]livePane) {
-	byToken, byAddress := indexPrevPanes(prev)
+func mergeFrozenPanes(fresh *Index, prev Index, live map[string]livePane, liveTokens map[string]struct{}) {
+	byToken, byAddress := indexPrevPanes(prev, liveTokens)
 	for si := range fresh.Sessions {
 		s := &fresh.Sessions[si]
 		for wi := range s.Windows {
@@ -209,15 +211,37 @@ func carryPrevContent(p *Pane, record Pane) {
 	p.ScrollbackFile = record.ScrollbackFile
 }
 
+// liveTokenSet holds the token of every live pane in fresh, read before any
+// merge replaces a pane with a previous record.
+func liveTokenSet(fresh Index) map[string]struct{} {
+	tokens := map[string]struct{}{}
+	for _, s := range fresh.Sessions {
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				if p.PortalPaneID != "" {
+					tokens[p.PortalPaneID] = struct{}{}
+				}
+			}
+		}
+	}
+	return tokens
+}
+
 // indexPrevPanes reads prev in canonical order, so a token held by more than
-// one record resolves to the first of them.
-func indexPrevPanes(prev Index) (byToken, byAddress map[string]Pane) {
+// one record resolves to the first of them. A record whose token a live pane
+// carries is left out of byAddress: it belongs to the pane answering to that
+// token, so a pane at its old address must never take it — which would commit
+// one token on two records and hand one pane another's history.
+func indexPrevPanes(prev Index, liveTokens map[string]struct{}) (byToken, byAddress map[string]Pane) {
 	byToken = map[string]Pane{}
 	byAddress = map[string]Pane{}
 	for _, e := range canonicalPrevPanes(prev) {
 		if e.pane.PortalPaneID != "" {
 			if _, taken := byToken[e.pane.PortalPaneID]; !taken {
 				byToken[e.pane.PortalPaneID] = e.pane
+			}
+			if _, owned := liveTokens[e.pane.PortalPaneID]; owned {
+				continue
 			}
 		}
 		byAddress[e.key] = e.pane

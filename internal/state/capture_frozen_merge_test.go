@@ -312,3 +312,36 @@ func TestCaptureStructureFrozenMerge(t *testing.T) {
 		}
 	})
 }
+
+func TestCaptureStructureFrozenMergeAddressMatchNeverTakesALiveTokensRecord(t *testing.T) {
+	const tokenY = "ab12cd"
+	prev := prevIndexOf(
+		prevPane{"work", 1, prevRecord(0, "/z", "less", "scrollback/work__1.0.bin", "")},
+		prevPane{"work", 3, prevRecord(0, "/y", "vim", "scrollback/work__3.0.bin", tokenY)},
+		prevPane{"work", 4, prevRecord(0, "/x", "htop", "scrollback/work__4.0.bin", "")},
+	)
+
+	idx := captureAgainst(t, prev, nil, []string{"work"},
+		paneLine("work", 1, "main", "L", false, true, 0, "/live-z", true, "zsh"),
+		paneLineWithPending("work", 2, "main", "L", false, false, 0, "/live-y", true, "zsh", tokenY, "1"),
+		paneLineWithPending("work", 3, "main", "L", false, false, 0, "/live-x", true, "zsh", "", "1"),
+	)
+
+	if got := countPanesCarrying(idx, tokenY); got != 1 {
+		t.Fatalf("records carrying %q = %d, want 1: %+v", tokenY, got, idx.Sessions)
+	}
+	y := findPane(idx, "work", 2, 0)
+	if y == nil {
+		t.Fatalf("missing pane work:2.0: %+v", idx.Sessions)
+	}
+	if y.PortalPaneID != tokenY || y.CWD != "/y" || y.CurrentCommand != "vim" || y.ScrollbackFile != "scrollback/work__3.0.bin" {
+		t.Errorf("Y = %+v, want token %q with Y's saved record", *y, tokenY)
+	}
+	x := findPane(idx, "work", 3, 0)
+	if x == nil {
+		t.Fatalf("missing pane work:3.0: %+v", idx.Sessions)
+	}
+	if x.PortalPaneID != "" || x.CWD == "/y" || x.CurrentCommand == "vim" {
+		t.Errorf("X = %+v carries Y's record", *x)
+	}
+}
