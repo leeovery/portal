@@ -272,7 +272,7 @@
             ".claude/skills/golang-dependency-management"
           ],
           "current_phase": 9,
-          "current_task": "lazy-resume-on-attach-9-5",
+          "current_task": null,
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -337,7 +337,8 @@
             "lazy-resume-on-attach-9-1",
             "lazy-resume-on-attach-9-2",
             "lazy-resume-on-attach-9-3",
-            "lazy-resume-on-attach-9-4"
+            "lazy-resume-on-attach-9-4",
+            "lazy-resume-on-attach-9-5"
           ],
           "staging": {
             "p1": {
@@ -418,7 +419,46 @@
             7,
             8
           ],
-          "updated": "2026-09-28"
+          "updated": "2026-09-28",
+          "bank": [
+            {
+              "task": "lazy-resume-on-attach-9-5",
+              "source": "executor",
+              "summary": "Export a helper from internal/state giving the absolute path of a waiting pane's token-named scrollback file, so the preview no longer rebuilds it",
+              "failure": "If the re-file's on-disk location changes (e.g. how the stored relative path is joined onto the state dir), the preview's copy would not follow; every waiting pane would silently preview blank or stale content again, and no test would catch it because the preview's own test helper builds the path the same duplicated way",
+              "detail": "The preview adapter repeats unexported joinStored, filepath.Join(dir, filepath.FromSlash(stored)) (internal/state/scrollback.go:175), at internal/tui/preview_adapter.go (the Tail token branch). A helper like state.PendingScrollbackPath(dir, token) beside PendingScrollbackFile in internal/state/paths.go would give both the re-file and the preview one declaration.",
+              "files": [
+                "internal/state/scrollback.go",
+                "internal/state/paths.go",
+                "internal/tui/preview_adapter.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-9-5",
+              "source": "reviewer",
+              "summary": "Let internal/state own the whole where-a-waiting-pane's-scrollback-lives rule (token-shape check plus stored-path join), so the preview stops copying it",
+              "failure": "The preview adapter copies both halves of the saver's re-file rule; if either changes (which tokens get a token file, or where it lands), the preview does not follow and every affected waiting pane shows (no saved content) again. Nothing would fail: the preview tests build their fixture path with the same copied composition. The user only notices by pressing Space.",
+              "detail": "internal/tui/preview_adapter.go:28-29 copies the token-shape check that decides which panes are re-filed (refilePendingPane, internal/state/scrollback.go:122) and the stored-path join (joinStored, internal/state/scrollback.go:175-177). A helper such as state.PendingScrollbackPath(dir, token string) (path string, ok bool) next to PendingScrollbackFile in internal/state/paths.go:92-96 could hold both halves, used by refilePendingPane and by the adapter. The join half alone is weak (state-dir-relative stored path is an on-disk schema rule, internal/state/schema.go:35, restore relies on it at internal/restore/session.go:69); the token-shape half is where silent drift is realistic.",
+              "files": [
+                "internal/state/paths.go",
+                "internal/state/scrollback.go",
+                "internal/tui/preview_adapter.go",
+                "internal/tui/pagepreview_waiting_pane_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-9-5",
+              "source": "executor",
+              "summary": "Export a helper from internal/state giving the absolute path of a waiting pane's token-named scrollback file, so the preview no longer rebuilds it",
+              "failure": "If the re-file's on-disk location changes (e.g. how the stored relative path is joined onto the state dir), the preview's copy would not follow; every waiting pane would silently preview blank or stale content again, and no test would catch it because the preview's own test helper builds the path the same duplicated way",
+              "detail": "The preview adapter repeats unexported joinStored, filepath.Join(dir, filepath.FromSlash(stored)) (internal/state/scrollback.go:175), at internal/tui/preview_adapter.go (the Tail token branch). A helper like state.PendingScrollbackPath(dir, token) beside PendingScrollbackFile in internal/state/paths.go would give both the re-file and the preview one declaration.",
+              "files": [
+                "internal/state/scrollback.go",
+                "internal/state/paths.go",
+                "internal/tui/preview_adapter.go"
+              ]
+            }
+          ]
         }
       }
     },
