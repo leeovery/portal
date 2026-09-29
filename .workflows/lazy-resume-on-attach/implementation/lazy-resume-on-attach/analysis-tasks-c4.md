@@ -16,3 +16,23 @@ Either commit's housekeeping pass (`internal/state/commit.go:39`) then deletes `
 - Ground for changing commit-now's nil skip set, which phase 4's composite refactor carried over as unchanged behaviour: the behaviour it carried over is the loss above. The specification forbids that loss: a waiting pane is restored with its original content on every reboot it waits through.
 
 **Outcome**: A pane that waited across a reboot keeps its token-named transcript through every capture taken between its restore and its pending mark. That covers a commit-now fired by a session close and the daemon's first tick over a renumbered restore. The pane restores with that transcript at the next reboot.
+
+**Acceptance Criteria**:
+- [ ] A waiting pane is saved at window 2 with its record naming `scrollback/pane-<token>.bin`. It is restored at window 1 and is still skeleton-marked when the daemon's tick captures it. The committed record at window 1 names `scrollback/pane-<token>.bin` and carries the saved working directory and command. The file is still on disk after the commit, and the daemon writes no scrollback for the pane.
+- [ ] A restored waiting pane is still skeleton-marked when another session closes and fires `portal state commit-now`. The committed record names `scrollback/pane-<token>.bin` and the file is still on disk afterwards. The closed session is gone from `sessions.json`, and commit-now writes no scrollback file.
+- [ ] The helper sets the pending marker before it unsets the skeleton marker, so the hand-over has three stages: skeleton marker only, both markers, pending marker only. A tokened waiting pane captured at each stage has a committed record naming `scrollback/pane-<token>.bin` at every stage, and the file is still on disk after each commit.
+- [ ] A skeleton-marked pane carrying no token still takes the previous record at its own address, as it does today. A skeleton marker whose pane is gone brings no pane back into `sessions.json`, even when a previous record carries a token.
+- [ ] When the skeleton-marker read fails, no capture is taken and nothing is committed. The daemon's tick logs its existing `tick failed` WARN and captures on a later tick. `portal state commit-now` exits non-zero with stderr silent, logs the failure and touches `save.requested`.
+- [ ] A pane waited at shutdown under a lazy registration. It is restored under a renumbered window, and both a commit-now and the daemon's first post-restore tick capture it before its helper marks it pending. At the following reboot it restores with its original transcript above its panel.
+
+**Do**:
+- `internal/state/capture.go`, `mergeSkippedPanes`: a skeleton-marked live pane whose live row carries a token takes its previous record through `takePrevRecord`, the lookup `mergeFrozenPanes` uses, and that record's `CWD`, `CurrentCommand` and `ScrollbackFile` are carried onto the pane's live address. The address match stays for a pane with no token. Only panes the live enumeration returned are touched.
+- `internal/state/scrollback.go`, `CaptureAndRefile`: drop the `skipSet` parameter. Read the skeleton markers (`state.ListSkeletonMarkers`) inside, before the capture, and return them beside the frozen set. A failed marker read returns its error before the capture runs. The dump and its skip stay with the caller. `CaptureStructure`'s structure-only callers are out of scope.
+- Convert every caller. `rg -n 'CaptureAndRefile\(' --glob '*.go'` returns 10 lines: the definition (`internal/state/scrollback.go:190`), two test-function names, one error string, and six calls, all of which change:
+  - `cmd/state_daemon.go:249`: `captureAndCommit` drops its own marker read at `:244`, and its dump skip (`paneSkipsScrollback`) reads the returned skeleton set.
+  - `cmd/state_commit_now.go:121`: commit-now still discards both returned sets, still passes `anyScrollbackChanged=false`, and routes a failed marker read through `failCommitNow`.
+  - `internal/restore/lazy_resume_panel_integration_test.go:385`: `captureRound` drops its own marker read at `:380` and skips its dump on the returned skeleton set.
+  - `internal/state/capture_refile_test.go:26` and `:55`.
+  - `cmd/deps_merge_convention_test.go:300`.
+- Seam types: `rg -n 'CaptureAndRefile:?\s*func' --glob '*.go'` returns 3, all of which change: `CommitNowDeps.CaptureAndRefile` (`cmd/state_commit_now.go:36`), `installCommitNowDeps` (`cmd/state_commit_now_test.go:77`) and `cmd/deps_merge_convention_test.go:295`. commit-now's client (`CommitNowDeps.NewClient`) and its test fake `fakeCaptureClient` must answer the marker read.
+- The commit-now suite's pin of a nil skip set (`captureSkipSets`, asserted at `cmd/state_commit_now_test.go:1172`) is the behaviour this task changes, so it goes.
