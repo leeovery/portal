@@ -231,7 +231,7 @@ func liveTokenSet(fresh Index) map[string]struct{} {
 // one record resolves to the first of them. A record whose token a live pane
 // carries is left out of byAddress: it belongs to the pane answering to that
 // token, so a pane at its old address must never take it — which would commit
-// one token on two records and hand one pane another's history.
+// one token on two records.
 func indexPrevPanes(prev Index, liveTokens map[string]struct{}) (byToken, byAddress map[string]Pane) {
 	byToken = map[string]Pane{}
 	byAddress = map[string]Pane{}
