@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -403,14 +402,12 @@ func buildPanes(session string, windowIdx int, rows []paneRow) []Pane {
 	panes := make([]Pane, 0, len(rows))
 	for _, r := range rows {
 		key := SanitizePaneKey(session, windowIdx, r.paneIdx)
-		// The on-disk schema stores forward slashes on every platform.
-		path := filepath.ToSlash(filepath.Join("scrollback", key+".bin"))
 		panes = append(panes, Pane{
 			Index:          r.paneIdx,
 			CWD:            r.cwd,
 			Active:         r.paneActive,
 			CurrentCommand: r.currentCommand,
-			ScrollbackFile: path,
+			ScrollbackFile: positionalScrollbackFile(key),
 			PortalPaneID:   r.portalPaneID,
 		})
 	}

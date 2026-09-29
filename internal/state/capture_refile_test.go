@@ -2,8 +2,10 @@ package state_test
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
@@ -173,4 +175,210 @@ func TestCaptureAndRefileKeepsARestoredWaitingPaneTranscript(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A skeleton-marked pane restored at work:1.0 whose saved record may name
+// another address's positional file, beside any occupant rows given.
+func skeletonCycle(t *testing.T, dir, token, stored string, logger *slog.Logger, occupants ...string) state.CaptureCycle {
+	t.Helper()
+	prev := waitingIndex(token, stored)
+	prev.Sessions[0].Windows[0].Index = 2
+	prev.Sessions[0].Windows[0].Panes[0].Index = 0
+	liveKey := state.SanitizePaneKey("work", 1, 0)
+	rows := append([]string{paneLineWithPending("work", 1, "main", "tiled", false, true, 0, "/fresh", true, "portal", token, "")}, occupants...)
+	mock := &captureMock{
+		listSessions: listSessionsFor("work"),
+		listPanes:    strings.Join(rows, "\n"),
+		markers:      state.SkeletonMarkerPrefix + liveKey + ` "1"`,
+		t:            t,
+	}
+	capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), dir, &prev, state.HashMap{}, logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return capture
+}
+
+// occupantOfSavedAddress is an unmarked, unregistered pane now sitting at
+// work:2.0, the address the moved pane's record is filed under.
+func occupantOfSavedAddress() string {
+	return paneLine("work", 2, "logs", "tiled", false, false, 0, "/logs", true, "tail")
+}
+
+func assertNoTokenFile(t *testing.T, dir, token string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(state.ScrollbackDir(dir), "pane-"+token+".bin")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("token-named file stat err = %v, want not-exist", err)
+	}
+}
+
+func TestCaptureAndRefileLinksAMovedSkeletonPaneOntoItsToken(t *testing.T) {
+	t.Run("it names the token file and leaves the baked positional path holding the same bytes", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__2.0.bin", "saved-transcript")
+
+		capture := skeletonCycle(t, dir, waitingPaneToken, "scrollback/work__2.0.bin", nil, occupantOfSavedAddress())
+
+		p := findPane(capture.Index, "work", 1, 0)
+		if p == nil {
+			t.Fatalf("index missing work:1.0: %+v", capture.Index.Sessions)
+		}
+		if want := state.PendingScrollbackFile(waitingPaneToken); p.ScrollbackFile != want {
+			t.Errorf("ScrollbackFile = %q, want %q", p.ScrollbackFile, want)
+		}
+		if got := readScrollback(t, dir, "pane-"+waitingPaneToken+".bin"); got != "saved-transcript" {
+			t.Errorf("token-named file = %q, want %q", got, "saved-transcript")
+		}
+		if got := readScrollback(t, dir, "work__2.0.bin"); got != "saved-transcript" {
+			t.Errorf("baked positional file = %q, want %q", got, "saved-transcript")
+		}
+	})
+
+	t.Run("it keeps a pane restored at its saved address on its own positional file", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__1.0.bin", "saved-transcript")
+
+		capture := skeletonCycle(t, dir, waitingPaneToken, "scrollback/work__1.0.bin", nil)
+
+		if got := findPane(capture.Index, "work", 1, 0).ScrollbackFile; got != "scrollback/work__1.0.bin" {
+			t.Errorf("ScrollbackFile = %q, want %q", got, "scrollback/work__1.0.bin")
+		}
+		assertNoTokenFile(t, dir, waitingPaneToken)
+	})
+
+	t.Run("it keeps the positional path while nothing occupies the saved address", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__2.0.bin", "saved-transcript")
+
+		capture := skeletonCycle(t, dir, waitingPaneToken, "scrollback/work__2.0.bin", nil)
+
+		if got, want := findPane(capture.Index, "work", 1, 0).ScrollbackFile, "scrollback/work__2.0.bin"; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		assertNoTokenFile(t, dir, waitingPaneToken)
+		if err := state.Commit(dir, capture.Index, false, nil); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+		if got := readScrollback(t, dir, "work__2.0.bin"); got != "saved-transcript" {
+			t.Errorf("baked positional file after commit = %q, want %q", got, "saved-transcript")
+		}
+	})
+
+	t.Run("it keeps the positional path while the pane at the saved address is itself frozen", func(t *testing.T) {
+		dir := t.TempDir()
+		const occupantToken = "xy78zw"
+		seedScrollback(t, dir, "work__2.0.bin", "saved-transcript")
+		seedScrollback(t, dir, "work__3.0.bin", "occupant-transcript")
+		prev := waitingIndex(waitingPaneToken, "scrollback/work__2.0.bin")
+		prev.Sessions[0].Windows[0].Index = 2
+		prev.Sessions[0].Windows[0].Panes[0].Index = 0
+		prev.Sessions[0].Windows = append(prev.Sessions[0].Windows, state.Window{
+			Index: 3, Name: "logs", Layout: "tiled",
+			Panes: []state.Pane{{Index: 0, CWD: "/logs", CurrentCommand: "tail", ScrollbackFile: "scrollback/work__3.0.bin", PortalPaneID: occupantToken}},
+		})
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes: paneLineWithPending("work", 1, "main", "tiled", false, true, 0, "/fresh", true, "portal", waitingPaneToken, "") + "\n" +
+				paneLineWithPending("work", 2, "logs", "tiled", false, false, 0, "/fresh", true, "portal", occupantToken, "1"),
+			markers: state.SkeletonMarkerPrefix + state.SanitizePaneKey("work", 1, 0) + ` "1"` + "\n" +
+				state.SkeletonMarkerPrefix + state.SanitizePaneKey("work", 2, 0) + ` "1"`,
+			t: t,
+		}
+
+		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), dir, &prev, state.HashMap{}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got, want := findPane(capture.Index, "work", 1, 0).ScrollbackFile, "scrollback/work__2.0.bin"; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		assertNoTokenFile(t, dir, waitingPaneToken)
+		if err := state.Commit(dir, capture.Index, false, nil); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+		if got := readScrollback(t, dir, "work__2.0.bin"); got != "saved-transcript" {
+			t.Errorf("baked positional file after commit = %q, want %q", got, "saved-transcript")
+		}
+	})
+
+	t.Run("it keeps a pane already filed under its token on that file", func(t *testing.T) {
+		dir := t.TempDir()
+		tokenPath := state.PendingScrollbackFile(waitingPaneToken)
+		seedScrollback(t, dir, "pane-"+waitingPaneToken+".bin", "saved-transcript")
+
+		capture := skeletonCycle(t, dir, waitingPaneToken, tokenPath, nil)
+
+		if got := findPane(capture.Index, "work", 1, 0).ScrollbackFile; got != tokenPath {
+			t.Errorf("ScrollbackFile = %q, want %q", got, tokenPath)
+		}
+		if got := readScrollback(t, dir, "pane-"+waitingPaneToken+".bin"); got != "saved-transcript" {
+			t.Errorf("token-named file = %q, want %q", got, "saved-transcript")
+		}
+	})
+
+	t.Run("it keeps the positional path for a token the pane-token rule refuses", func(t *testing.T) {
+		dir := t.TempDir()
+		const refused = "not-a-token"
+		seedScrollback(t, dir, "work__2.0.bin", "saved-transcript")
+
+		capture := skeletonCycle(t, dir, refused, "scrollback/work__2.0.bin", nil, occupantOfSavedAddress())
+
+		if got := findPane(capture.Index, "work", 1, 0).ScrollbackFile; got != "scrollback/work__2.0.bin" {
+			t.Errorf("ScrollbackFile = %q, want %q", got, "scrollback/work__2.0.bin")
+		}
+		entries, err := os.ReadDir(state.ScrollbackDir(dir))
+		if err != nil {
+			t.Fatalf("read scrollback dir: %v", err)
+		}
+		if len(entries) != 1 || entries[0].Name() != "work__2.0.bin" {
+			t.Errorf("scrollback dir = %v, want only work__2.0.bin", entries)
+		}
+	})
+
+	t.Run("it warns once and leaves the record alone when the link fails", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__2.0.bin", "saved-transcript")
+		denyScrollbackWrites(t, dir)
+		logger, sink := openTempLogger(t)
+
+		capture := skeletonCycle(t, dir, waitingPaneToken, "scrollback/work__2.0.bin", logger, occupantOfSavedAddress())
+
+		if got, want := findPane(capture.Index, "work", 1, 0).ScrollbackFile, "scrollback/work__2.0.bin"; got != want {
+			t.Errorf("ScrollbackFile = %q, want %q", got, want)
+		}
+		assertNoTokenFile(t, dir, waitingPaneToken)
+		rec := sink.Records().AtExactLevel(slog.LevelWarn).Only(t, "link failure warning")
+		if got, want := rec.AttrOrEmpty("pane_key"), "work__1.0"; got != want {
+			t.Errorf("pane_key = %q, want %q", got, want)
+		}
+		if got, want := rec.AttrOrEmpty("path"), "scrollback/work__2.0.bin"; got != want {
+			t.Errorf("path = %q, want %q", got, want)
+		}
+		if !rec.HasAttr("error") {
+			t.Errorf("warning carries no error attr: %v", rec.Keys)
+		}
+		for _, key := range rec.Keys {
+			switch key {
+			case "pane_key", "path", "error":
+			default:
+				t.Errorf("warning carries unexpected attr key %q", key)
+			}
+		}
+	})
+
+	t.Run("it adopts a token-named file that already exists", func(t *testing.T) {
+		dir := t.TempDir()
+		seedScrollback(t, dir, "work__2.0.bin", "intruder-capture")
+		seedScrollback(t, dir, "pane-"+waitingPaneToken+".bin", "saved-transcript")
+
+		capture := skeletonCycle(t, dir, waitingPaneToken, "scrollback/work__2.0.bin", nil, occupantOfSavedAddress())
+
+		if want := state.PendingScrollbackFile(waitingPaneToken); findPane(capture.Index, "work", 1, 0).ScrollbackFile != want {
+			t.Errorf("ScrollbackFile = %q, want %q", findPane(capture.Index, "work", 1, 0).ScrollbackFile, want)
+		}
+		if got := readScrollback(t, dir, "pane-"+waitingPaneToken+".bin"); got != "saved-transcript" {
+			t.Errorf("token-named file = %q, want %q", got, "saved-transcript")
+		}
+	})
 }

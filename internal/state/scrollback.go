@@ -126,7 +126,7 @@ func refilePendingPane(dir, paneKey string, p *Pane, hm HashMap, logger *slog.Lo
 	if stored == tokenPath {
 		return
 	}
-	if err := renameStoredScrollback(dir, stored, tokenPath); err != nil {
+	if err := placeStoredScrollback(dir, stored, tokenPath, moveNoClobber); err != nil {
 		logger.Warn("refile pending scrollback failed", "pane_key", paneKey, "path", stored, "error", err)
 		return
 	}
@@ -137,13 +137,14 @@ func refilePendingPane(dir, paneKey string, p *Pane, hm HashMap, logger *slog.Lo
 // A record naming no file is treated as a missing source: the bytes are already
 // wherever they are, and joining an empty path onto dir would name the state
 // directory itself. An existing token-named file is adopted rather than
-// replaced: the positional file may by now hold another pane's capture, and the
-// refusal is atomic so a concurrent re-file cannot slip between check and move.
-func renameStoredScrollback(dir, stored, tokenPath string) error {
+// replaced: the positional file may by now hold another pane's capture, and
+// place must refuse an existing name atomically so a concurrent re-file cannot
+// slip between check and placement.
+func placeStoredScrollback(dir, stored, tokenPath string, place func(src, dst string) error) error {
 	if stored == "" {
 		return nil
 	}
-	err := moveNoClobber(joinStored(dir, stored), joinStored(dir, tokenPath))
+	err := place(joinStored(dir, stored), joinStored(dir, tokenPath))
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrExist) {
 		return nil
 	}
@@ -181,6 +182,70 @@ func dedupKeyOf(stored string) string {
 	return strings.TrimSuffix(filepath.Base(filepath.FromSlash(stored)), ".bin")
 }
 
+// linkMovedSkeletonScrollback gives each mid-restore pane whose token the
+// pane-token rule accepts, and whose record names another address's positional
+// file that another record in idx also names, a second name under that token,
+// and points the record there, so the two records no longer share a file. A
+// record no other record shares is left as it is: moving it off its name would
+// let the housekeeping pass delete that file before the hydrate helper has read
+// it. It links rather than moves for the same reason: the helper may not yet
+// have opened the positional path it was launched with, and the other record's
+// writer replaces that name atomically, leaving the linked inode intact. A link
+// that fails for any reason other than a missing source or an existing
+// token-named file leaves that pane's record alone and emits one WARN.
+func linkMovedSkeletonScrollback(dir string, idx *Index, skeleton map[string]struct{}, logger *slog.Logger) {
+	if len(skeleton) == 0 {
+		return
+	}
+	logger = loggerOrDiscard(logger)
+	naming := recordsPerScrollbackFile(*idx)
+	for si := range idx.Sessions {
+		s := &idx.Sessions[si]
+		for wi := range s.Windows {
+			w := &s.Windows[wi]
+			for pi := range w.Panes {
+				p := &w.Panes[pi]
+				key := SanitizePaneKey(s.Name, w.Index, p.Index)
+				if _, armed := skeleton[key]; !armed {
+					continue
+				}
+				if naming[p.ScrollbackFile] < 2 {
+					continue
+				}
+				linkMovedPane(dir, key, p, logger)
+			}
+		}
+	}
+}
+
+func recordsPerScrollbackFile(idx Index) map[string]int {
+	counts := map[string]int{}
+	for _, s := range idx.Sessions {
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				counts[p.ScrollbackFile]++
+			}
+		}
+	}
+	return counts
+}
+
+func linkMovedPane(dir, paneKey string, p *Pane, logger *slog.Logger) {
+	if _, ok := PendingScrollbackPath(dir, p.PortalPaneID); !ok {
+		return
+	}
+	tokenPath := PendingScrollbackFile(p.PortalPaneID)
+	stored := p.ScrollbackFile
+	if stored == tokenPath || stored == positionalScrollbackFile(paneKey) {
+		return
+	}
+	if err := placeStoredScrollback(dir, stored, tokenPath, os.Link); err != nil {
+		logger.Warn("link moved skeleton scrollback failed", "pane_key", paneKey, "path", stored, "error", err)
+		return
+	}
+	p.ScrollbackFile = tokenPath
+}
+
 // CaptureCycleClient is what one capture cycle reads through: the skeleton
 // markers as well as the structure.
 type CaptureCycleClient interface {
@@ -201,11 +266,12 @@ type CaptureCycle struct {
 
 // CaptureAndRefile reads the skeleton markers, takes a capture merged against
 // them, and re-files every frozen pane's scrollback in one step, so no caller
-// can commit an index that omits a mid-restore pane's record or still names a
-// waiting pane's vacated positional path. A failed marker read returns its
-// wrapped error before any capture is taken. A failed capture returns before
-// anything is re-filed, with the empty index, the empty pending set and the
-// error the capture gave.
+// can commit an index that omits a mid-restore pane's record, has two records
+// naming one scrollback file, or still names a waiting pane's vacated
+// positional path, bar a pane whose token the pane-token rule refuses or whose
+// link or re-file failed. A failed marker read returns its wrapped error before
+// any capture is taken. A failed capture returns before anything is re-filed,
+// with the empty index, the empty pending set and the error the capture gave.
 func CaptureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
 	skeleton, err := ListSkeletonMarkers(c)
 	if err != nil {
@@ -216,6 +282,7 @@ func CaptureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap,
 	if err != nil {
 		return capture, err
 	}
+	linkMovedSkeletonScrollback(dir, &capture.Index, skeleton, logger)
 	RefilePendingScrollback(dir, &capture.Index, pending, hm, logger)
 	return capture, nil
 }

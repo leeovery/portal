@@ -528,6 +528,138 @@ func TestDaemonTick_KeepsARenumberedWaitingPaneTranscriptWhileSkeletonMarked(t *
 	}
 }
 
+const movedPaneToken = "yk34ef"
+
+// stageRenumberedRestore saves windows 0, 2 and 3 of work and returns a fake
+// whose live windows are 0, 1 and 2: the tokened pane saved at window 2 now
+// sits skeleton-marked at window 1, and the unregistered pane saved at window 3
+// sits unmarked at window 2, the address the tokened pane's record is filed
+// under.
+func stageRenumberedRestore(t *testing.T, dir string) (*daemonFakeCommander, *daemonDeps) {
+	t.Helper()
+	sb := state.ScrollbackDir(dir)
+	if err := os.MkdirAll(sb, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for name, body := range map[string]string{"work__2.0.bin": "y-saved", "work__3.0.bin": "x-saved"} {
+		if err := os.WriteFile(filepath.Join(sb, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	prev := state.Index{Version: state.SchemaVersion, Sessions: []state.Session{{
+		Name: "work",
+		Windows: []state.Window{
+			{Index: 0, Name: "main", Layout: "layout", Panes: []state.Pane{{Index: 0, CWD: "/tmp", ScrollbackFile: "scrollback/work__0.0.bin"}}},
+			{Index: 2, Name: "agent", Layout: "layout", Panes: []state.Pane{{
+				Index: 0, CWD: "/saved", CurrentCommand: "vim", ScrollbackFile: "scrollback/work__2.0.bin", PortalPaneID: movedPaneToken,
+			}}},
+			{Index: 3, Name: "logs", Layout: "layout", Panes: []state.Pane{{Index: 0, CWD: "/logs", CurrentCommand: "tail", ScrollbackFile: "scrollback/work__3.0.bin"}}},
+		},
+	}}}
+	if err := state.Commit(dir, prev, false, nil); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+
+	fc := &daemonFakeCommander{
+		markersOut:      fmt.Sprintf(`%s%s "1"`, state.SkeletonMarkerPrefix, state.SanitizePaneKey("work", 1, 0)),
+		sessionsOut:     "work|1|0|",
+		panesOut:        renumberedPanes(""),
+		captureByTarget: map[string]string{"work:0.0": "captured-pane-0", "work:1.0": "y-captured", "work:2.0": "x-captured"},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.HashMap = state.SeedHashMap(dir, nil)
+	deps.PrevIndex = &prev
+	return fc, deps
+}
+
+func renumberedPanes(movedPending string) string {
+	return "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh||||||\n" +
+		"work|||1|||agent|||layout|||0|||0|||0|||/fresh|||1|||portal|||" + movedPaneToken + "|||" + movedPending + "\n" +
+		"work|||2|||logs|||layout|||0|||0|||0|||/logs|||1|||tail||||||"
+}
+
+func setRenumberedStage(fc *daemonFakeCommander, markers, movedPending string) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	fc.markersOut = markers
+	fc.panesOut = renumberedPanes(movedPending)
+}
+
+func assertRenumberedCommit(t *testing.T, dir string, wantMoved string) {
+	t.Helper()
+	committed := readSessionsJSON(t, dir)
+	named := map[string]string{}
+	for _, w := range committed.Sessions[0].Windows {
+		for _, p := range w.Panes {
+			key := state.SanitizePaneKey("work", w.Index, p.Index)
+			if other, taken := named[p.ScrollbackFile]; taken {
+				t.Errorf("%s and %s both name %s", other, key, p.ScrollbackFile)
+			}
+			named[p.ScrollbackFile] = key
+		}
+	}
+	if got := named[wantMoved]; got != state.SanitizePaneKey("work", 1, 0) {
+		t.Errorf("%s named by %q, want the moved pane at work:1.0", wantMoved, got)
+	}
+	if got := named["scrollback/work__2.0.bin"]; got != state.SanitizePaneKey("work", 2, 0) {
+		t.Errorf("scrollback/work__2.0.bin named by %q, want the pane at work:2.0", got)
+	}
+}
+
+func TestDaemonTick_KeepsAMovedPaneTranscriptFromThePaneAtItsSavedAddress(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc, deps := stageRenumberedRestore(t, dir)
+	tokenFile := "pane-" + movedPaneToken + ".bin"
+	tokenPath := state.PendingScrollbackFile(movedPaneToken)
+
+	tick(t.Context(), deps)
+
+	assertRenumberedCommit(t, dir, tokenPath)
+	if got := scrollbackBody(t, dir, tokenFile); got != "y-saved" {
+		t.Errorf("after the skeleton tick %s = %q, want %q", tokenFile, got, "y-saved")
+	}
+	if got := scrollbackBody(t, dir, "work__2.0.bin"); got != "x-captured" {
+		t.Errorf("after the skeleton tick work__2.0.bin = %q, want %q", got, "x-captured")
+	}
+
+	setRenumberedStage(fc, "", "1")
+	touchSaveRequested(t, dir)
+	tick(t.Context(), deps)
+
+	assertRenumberedCommit(t, dir, tokenPath)
+	if got := scrollbackBody(t, dir, tokenFile); got != "y-saved" {
+		t.Errorf("after the pending tick %s = %q, want %q", tokenFile, got, "y-saved")
+	}
+	if got := scrollbackBody(t, dir, "work__2.0.bin"); got != "x-captured" {
+		t.Errorf("after the pending tick work__2.0.bin = %q, want %q", got, "x-captured")
+	}
+}
+
+func TestDaemonTick_ReclaimsAMovedPaneTokenFileOnceItResolvesEager(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc, deps := stageRenumberedRestore(t, dir)
+	tokenFile := "pane-" + movedPaneToken + ".bin"
+
+	tick(t.Context(), deps)
+	if got := scrollbackBody(t, dir, tokenFile); got != "y-saved" {
+		t.Fatalf("after the skeleton tick %s = %q, want %q", tokenFile, got, "y-saved")
+	}
+
+	setRenumberedStage(fc, "", "")
+	touchSaveRequested(t, dir)
+	tick(t.Context(), deps)
+
+	assertRenumberedCommit(t, dir, "scrollback/work__1.0.bin")
+	if got := scrollbackBody(t, dir, "work__1.0.bin"); got != "y-captured" {
+		t.Errorf("work__1.0.bin = %q, want %q", got, "y-captured")
+	}
+	if _, err := os.Stat(filepath.Join(state.ScrollbackDir(dir), tokenFile)); !os.IsNotExist(err) {
+		t.Errorf("%s stat err = %v, want it reclaimed", tokenFile, err)
+	}
+}
+
 func TestDaemonTick_CapturesOnALaterTickAfterAMarkerReadFailure(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)

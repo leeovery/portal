@@ -1399,3 +1399,57 @@ func waitingPaneIndex() state.Index {
 		}},
 	}
 }
+
+func TestStateCommitNow_FilesAMovedSkeletonPaneUnderItsToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(state.ScrollbackDir(dir), "work__2.1.bin"), []byte("saved-transcript"), 0o600); err != nil {
+		t.Fatalf("seed positional scrollback: %v", err)
+	}
+	prev := waitingPaneIndex()
+	prev.Sessions[0].Windows[0].Index = 2
+	prev.Sessions[0].Windows[0].Panes[0].ScrollbackFile = "scrollback/work__2.1.bin"
+	if err := state.Commit(dir, prev, false, nil); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+
+	liveKey := state.SanitizePaneKey("work", 1, 1)
+	withCommitNowDeps(t, CommitNowDeps{
+		NewClient: func() state.CaptureCycleClient {
+			return &fakeCaptureClient{
+				sessions: []string{"work"},
+				rows: "work|||1|||main|||tiled|||0|||1|||1|||/fresh|||1|||portal|||" + waitingToken + "|||\n" +
+					"work|||2|||logs|||tiled|||0|||0|||1|||/logs|||1|||tail||||||",
+				env:     map[string]string{"work": ""},
+				markers: state.SkeletonMarkerPrefix + liveKey + ` "1"`,
+			}
+		},
+		IsRestoring: func() (bool, error) { return false, nil },
+	})
+
+	if _, _, err := runRootCmd(t, "state", "commit-now"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "scrollback/" + waitingRefiled
+	w := readSessionsJSON(t, dir).Sessions[0].Windows
+	if len(w) != 2 || w[0].Index != 1 || w[1].Index != 2 {
+		t.Fatalf("committed windows = %+v, want windows 1 and 2", w)
+	}
+	if got := w[0].Panes[0].ScrollbackFile; got != want {
+		t.Errorf("persisted ScrollbackFile = %q, want %q", got, want)
+	}
+	if got := w[1].Panes[0].ScrollbackFile; got != "scrollback/work__2.1.bin" {
+		t.Errorf("occupant ScrollbackFile = %q, want %q", got, "scrollback/work__2.1.bin")
+	}
+	body, err := os.ReadFile(filepath.Join(state.ScrollbackDir(dir), waitingRefiled))
+	if err != nil {
+		t.Fatalf("read token-named file: %v", err)
+	}
+	if string(body) != "saved-transcript" {
+		t.Errorf("token-named file = %q, want %q", string(body), "saved-transcript")
+	}
+}

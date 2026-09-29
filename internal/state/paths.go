@@ -90,6 +90,12 @@ func ScrollbackFile(dir, paneKey string) string {
 	return filepath.Join(dir, scrollbackSubdir, paneKey+".bin")
 }
 
+// positionalScrollbackFile is ScrollbackFile(dir, paneKey) in the relative
+// forward-slashed shape a Pane record stores.
+func positionalScrollbackFile(paneKey string) string {
+	return filepath.ToSlash(filepath.Join(scrollbackSubdir, paneKey+".bin"))
+}
+
 // PendingScrollbackFile is the token-derived name a frozen pane's scrollback is
 // re-filed under, in the relative forward-slashed shape a Pane record stores.
 func PendingScrollbackFile(token string) string {
