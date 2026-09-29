@@ -3,11 +3,13 @@ package tui
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
 )
@@ -32,19 +34,17 @@ const testProbeTimeout = 60 * time.Millisecond
 var errSeam = errors.New("seam failure")
 
 const (
-	eventWriteQuery  = "write query"
-	eventCloseReader = "close reader"
-	eventDrop        = "drop input"
+	eventArmRead    = "arm read"
+	eventWriteQuery = "write query"
+	eventDrop       = "drop input"
 )
 
+// fakePaneReader reads the pipe the harness writes replies into, under the
+// deadline the harness set on it when the read was armed.
 type fakePaneReader struct {
-	f           *os.File
-	record      func(string)
-	readErr     error
-	deadlineErr error
-	reads       int
-	closes      int
-	deadlines   []time.Time
+	f       *os.File
+	readErr error
+	reads   int
 }
 
 func (r *fakePaneReader) Read(p []byte) (int, error) {
@@ -55,22 +55,8 @@ func (r *fakePaneReader) Read(p []byte) (int, error) {
 	return r.f.Read(p)
 }
 
-func (r *fakePaneReader) SetReadDeadline(t time.Time) error {
-	r.deadlines = append(r.deadlines, t)
-	if r.deadlineErr != nil {
-		return r.deadlineErr
-	}
-	return r.f.SetReadDeadline(t)
-}
-
-func (r *fakePaneReader) Close() error {
-	r.closes++
-	r.record(eventCloseReader)
-	return r.f.Close()
-}
-
-// recordingWriter puts the query write into the same sequence as the reader's
-// close and the drop, so their order is one assertion rather than three.
+// recordingWriter puts the query write into the same sequence as the read's
+// arming and the drop, so their order is one assertion rather than three.
 type recordingWriter struct {
 	buf    *bytes.Buffer
 	record func(string)
@@ -85,10 +71,11 @@ type probeHarness struct {
 	out      *bytes.Buffer
 	reader   *fakePaneReader
 	replies  *os.File
+	timeout  time.Duration
 	terminal bool
-	openErr  error
+	armErr   error
 	rawErr   error
-	opens    int
+	bounds   []time.Duration
 	restores int
 	drops    int
 	events   []string
@@ -104,14 +91,13 @@ func newProbeHarness(t *testing.T) *probeHarness {
 		_ = read.Close()
 		_ = write.Close()
 	})
-	h := &probeHarness{
+	return &probeHarness{
 		out:      &bytes.Buffer{},
 		reader:   &fakePaneReader{f: read},
 		replies:  write,
+		timeout:  testProbeTimeout,
 		terminal: true,
 	}
-	h.reader.record = h.record
-	return h
 }
 
 func (h *probeHarness) record(event string) {
@@ -126,16 +112,24 @@ func (h *probeHarness) dropInput(err error) func() error {
 	}
 }
 
+// armRead records the bound as the read is armed, before anything is read
+// under it, so the bound asserted on is the one the read was given.
+func (h *probeHarness) armRead(bound time.Duration) (io.Reader, error) {
+	h.bounds = append(h.bounds, bound)
+	h.record(eventArmRead)
+	if h.armErr != nil {
+		return nil, h.armErr
+	}
+	if err := h.reader.f.SetReadDeadline(time.Now().Add(bound)); err != nil {
+		return nil, err
+	}
+	return h.reader, nil
+}
+
 func (h *probeHarness) probe() paneAppearanceProbe {
 	return paneAppearanceProbe{
-		out: recordingWriter{buf: h.out, record: h.record},
-		openReader: func() (paneReader, error) {
-			h.opens++
-			if h.openErr != nil {
-				return nil, h.openErr
-			}
-			return h.reader, nil
-		},
+		out:        recordingWriter{buf: h.out, record: h.record},
+		armRead:    h.armRead,
 		isTerminal: func() bool { return h.terminal },
 		makeRaw: func() (func(), error) {
 			if h.rawErr != nil {
@@ -143,7 +137,7 @@ func (h *probeHarness) probe() paneAppearanceProbe {
 			}
 			return func() { h.restores++ }, nil
 		},
-		timeout: testProbeTimeout,
+		timeout: h.timeout,
 	}
 }
 
@@ -165,6 +159,24 @@ func (h *probeHarness) assertWroteNothing(t *testing.T) {
 	t.Helper()
 	if got := h.out.String(); got != "" {
 		t.Errorf("wrote %q to the terminal, want nothing written on this path", got)
+	}
+}
+
+func (h *probeHarness) assertReadNothing(t *testing.T) {
+	t.Helper()
+	if len(h.bounds) != 0 || h.reader.reads != 0 {
+		t.Errorf("armed %d reads and read %d times, want no read of the terminal on this path", len(h.bounds), h.reader.reads)
+	}
+}
+
+func assertArmedWithin(t harnesstest.TestingT, bounds []time.Duration, limit time.Duration) {
+	t.Helper()
+	if len(bounds) != 1 {
+		t.Errorf("armed %d reads, want exactly 1", len(bounds))
+		return
+	}
+	if bounds[0] > limit {
+		t.Errorf("armed the read with a bound of %v, want no more than the probe's timeout %v — a silent terminal would hold the pane that much longer", bounds[0], limit)
 	}
 }
 
@@ -193,9 +205,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		}
 		assertNoDropError(t, err)
 		h.assertWroteNothing(t)
-		if h.opens != 0 {
-			t.Errorf("opened the terminal %d times for a constant nomination, want 0 — the gate is never consulted", h.opens)
-		}
+		h.assertReadNothing(t)
 	})
 
 	t.Run("it returns the zero theme for a zero nomination", func(t *testing.T) {
@@ -208,9 +218,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		}
 		assertNoDropError(t, err)
 		h.assertWroteNothing(t)
-		if h.opens != 0 {
-			t.Errorf("opened the terminal %d times for a zero nomination, want 0", h.opens)
-		}
+		h.assertReadNothing(t)
 	})
 
 	t.Run("it runs no detection and writes nothing under NO_COLOR", func(t *testing.T) {
@@ -237,9 +245,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				}
 				assertNoDropError(t, err)
 				h.assertWroteNothing(t)
-				if h.opens != 0 {
-					t.Errorf("opened the terminal %d times under NO_COLOR, want 0 — no detection runs at all", h.opens)
-				}
+				h.assertReadNothing(t)
 			})
 		}
 	})
@@ -274,7 +280,7 @@ func TestResolvePaneTheme(t *testing.T) {
 
 	t.Run("it runs the drop after the appearance query resolves", func(t *testing.T) {
 		pair, _, _ := adaptivePair(t)
-		probed := []string{eventWriteQuery, eventCloseReader, eventDrop}
+		probed := []string{eventArmRead, eventWriteQuery, eventDrop}
 		cases := []struct {
 			name    string
 			arrange func(h *probeHarness)
@@ -282,7 +288,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		}{
 			{"a reply before the deadline", func(h *probeHarness) { h.reply(t, darkReply) }, probed},
 			{"a reply that never comes", func(*probeHarness) {}, probed},
-			{"a terminal that cannot be opened", func(h *probeHarness) { h.openErr = errSeam }, []string{eventDrop}},
+			{"a read that cannot be armed", func(h *probeHarness) { h.armErr = errSeam }, []string{eventArmRead, eventDrop}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -292,7 +298,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				_, _ = resolvePaneTheme(pair, false, h.dropInput(nil), h.probe())
 
 				if !slices.Equal(h.events, tc.want) {
-					t.Errorf("ran %v with %s, want %v — a drop taken before the query resolves cannot clear the query's own reply", h.events, tc.name, tc.want)
+					t.Errorf("ran %v with %s, want %v — the query waits on a ready read, and a drop taken before the query resolves cannot clear the query's own reply", h.events, tc.name, tc.want)
 				}
 			})
 		}
@@ -325,9 +331,7 @@ func TestResolvePaneTheme(t *testing.T) {
 					return
 				}
 				h.assertWroteNothing(t)
-				if h.opens != 0 {
-					t.Errorf("opened the terminal %d times for a %s resolution, want 0 — the drop does not drag the gate in with it", h.opens, tc.name)
-				}
+				h.assertReadNothing(t)
 			})
 		}
 	})
@@ -435,11 +439,20 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		if elapsed < testProbeTimeout {
 			t.Errorf("returned after %v, want a wait of at least the probe's timeout %v", elapsed, testProbeTimeout)
 		}
-		if len(h.reader.deadlines) == 0 {
-			t.Fatal("set no read deadline; the read would block forever on a silent terminal")
-		}
-		if remaining := time.Until(h.reader.deadlines[0]); remaining > testProbeTimeout {
-			t.Errorf("set a deadline %v out at the time of the check, want no more than the probe's timeout %v", remaining, testProbeTimeout)
+		assertArmedWithin(t, h.bounds, testProbeTimeout)
+	})
+
+	t.Run("it fails a probe that arms a bound ten times its timeout", func(t *testing.T) {
+		h := newProbeHarness(t)
+		h.timeout = testProbeTimeout * 10
+		h.reply(t, darkReply)
+		h.probe().detect()
+
+		var rec harnesstest.Recorder
+		rec.Run(func() { assertArmedWithin(&rec, h.bounds, testProbeTimeout) })
+
+		if !rec.Failed() {
+			t.Errorf("passed a read armed with %v against a timeout of %v, want the bound check to fail it", h.bounds, testProbeTimeout)
 		}
 	})
 
@@ -481,9 +494,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 			t.Errorf("resolved %v off a terminal, want %v", got, theme.MemberDark)
 		}
 		h.assertWroteNothing(t)
-		if h.opens != 0 {
-			t.Errorf("opened the terminal %d times off a terminal, want 0", h.opens)
-		}
+		h.assertReadNothing(t)
 	})
 
 	t.Run("it resolves dark and writes nothing when raw mode cannot be entered", func(t *testing.T) {
@@ -495,45 +506,30 @@ func TestPaneAppearanceProbe(t *testing.T) {
 			t.Errorf("resolved %v with raw mode refused, want %v", got, theme.MemberDark)
 		}
 		h.assertWroteNothing(t)
-		if h.reader.closes != 1 {
-			t.Errorf("closed the opened reader %d times with raw mode refused, want 1", h.reader.closes)
-		}
+		h.assertReadNothing(t)
 	})
 
-	t.Run("it resolves dark and writes nothing when the terminal cannot be opened", func(t *testing.T) {
+	t.Run("it resolves dark without blocking and writes nothing when the read cannot be armed", func(t *testing.T) {
 		h := newProbeHarness(t)
-		h.openErr = errSeam
+		h.armErr = errSeam
+		h.reply(t, lightReply)
 
-		if got := h.probe().detect(); got != theme.MemberDark {
-			t.Errorf("resolved %v with the terminal unopenable, want %v", got, theme.MemberDark)
-		}
-		h.assertWroteNothing(t)
-		if h.restores != 0 {
-			t.Errorf("entered raw mode %d times without a reader, want 0", h.restores)
-		}
-	})
-
-	t.Run("it resolves dark without blocking when the reader refuses a deadline", func(t *testing.T) {
-		h := newProbeHarness(t)
-		h.reader.deadlineErr = errSeam
-
-		// Off the test goroutine: a probe that reads with no deadline in force
-		// blocks forever, and asserting on the answer inline would hang the
-		// package rather than fail this subtest. The pipe's close on cleanup
-		// releases a probe left behind.
+		// Off the test goroutine, so a probe that hangs fails this subtest rather
+		// than hanging the package.
 		answers := make(chan theme.Member, 1)
 		go func() { answers <- h.probe().detect() }()
 
 		select {
 		case got := <-answers:
 			if got != theme.MemberDark {
-				t.Errorf("resolved %v with the deadline refused, want %v", got, theme.MemberDark)
+				t.Errorf("resolved %v with the read unarmed, want %v", got, theme.MemberDark)
 			}
+			h.assertWroteNothing(t)
 			if h.reader.reads != 0 {
-				t.Errorf("read %d times with no deadline in force, want 0 — the read would block forever", h.reader.reads)
+				t.Errorf("read %d times with no bound armed, want 0", h.reader.reads)
 			}
 		case <-time.After(testProbeTimeout * 4):
-			t.Errorf("did not return within %v with the deadline refused; a read with no deadline in force never returns at all", testProbeTimeout*4)
+			t.Errorf("did not return within %v with the read unarmed", testProbeTimeout*4)
 		}
 	})
 
@@ -565,7 +561,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 			{"a truncated reply", func(h *probeHarness) { h.reply(t, truncatedReply) }},
 			{"an unparseable reply", func(h *probeHarness) { h.reply(t, unparseableReply) }},
 			{"a read failure", func(h *probeHarness) { h.reader.readErr = errSeam }},
-			{"a refused deadline", func(h *probeHarness) { h.reader.deadlineErr = errSeam }},
+			{"a read that cannot be armed", func(h *probeHarness) { h.armErr = errSeam }},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -576,9 +572,6 @@ func TestPaneAppearanceProbe(t *testing.T) {
 
 				if h.restores != 1 {
 					t.Errorf("restored the terminal mode %d times after %s, want 1 — raw mode left on breaks the pane's keyboard", h.restores, tc.name)
-				}
-				if h.reader.closes != 1 {
-					t.Errorf("closed the reader %d times after %s, want 1", h.reader.closes, tc.name)
 				}
 			})
 		}
@@ -594,16 +587,10 @@ func TestProductionPaneAppearanceProbe(t *testing.T) {
 		}
 	})
 
-	t.Run("it reads the pane's own terminal rather than stdin", func(t *testing.T) {
-		if paneTTYPath != "/dev/tty" {
-			t.Errorf("the probe opens %q; os.Stdin refuses a read deadline on a terminal, so the reply must come from a fresh /dev/tty open", paneTTYPath)
-		}
-	})
-
 	t.Run("it wires every seam", func(t *testing.T) {
-		if p.out == nil || p.openReader == nil || p.isTerminal == nil || p.makeRaw == nil {
-			t.Errorf("production probe has an unwired seam: out=%v openReader=%v isTerminal=%v makeRaw=%v",
-				p.out != nil, p.openReader != nil, p.isTerminal != nil, p.makeRaw != nil)
+		if p.out == nil || p.armRead == nil || p.isTerminal == nil || p.makeRaw == nil {
+			t.Errorf("production probe has an unwired seam: out=%v armRead=%v isTerminal=%v makeRaw=%v",
+				p.out != nil, p.armRead != nil, p.isTerminal != nil, p.makeRaw != nil)
 		}
 	})
 }

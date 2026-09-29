@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"time"
@@ -10,12 +11,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/theme"
+	"golang.org/x/sys/unix"
 )
-
-// os.Stdin refuses a read deadline on a terminal — os.NewFile over a blocking tty
-// descriptor, which is how the runtime builds it — so the reply is read from a
-// fresh open of the pane's own pty instead.
-const paneTTYPath = "/dev/tty"
 
 const oscBackgroundPrefix = "\x1b]11;"
 
@@ -23,20 +20,16 @@ const oscBackgroundPrefix = "\x1b]11;"
 // something else entirely without ever terminating it.
 const paneReplyCap = 256
 
-// paneReader is the terminal the reply is read from: a deadline-bearing read the
-// probe can abandon.
-type paneReader interface {
-	Read(p []byte) (int, error)
-	SetReadDeadline(t time.Time) error
-	Close() error
-}
+var errUnselectable = errors.New("stdin descriptor is outside the select set")
 
 // paneAppearanceProbe is the non-Bubble-Tea OSC 11 read, for the process that
 // paints a pane and then execs a waiter over itself — it has no program loop for
 // tea.RequestBackgroundColor to resolve into.
 type paneAppearanceProbe struct {
-	out        io.Writer
-	openReader func() (paneReader, error)
+	out io.Writer
+	// armRead readies a read of the terminal that gives up once bound has
+	// elapsed from the moment it was armed.
+	armRead    func(bound time.Duration) (io.Reader, error)
 	isTerminal func() bool
 	makeRaw    func() (restore func(), err error)
 	timeout    time.Duration
@@ -45,7 +38,7 @@ type paneAppearanceProbe struct {
 func newPaneAppearanceProbe() paneAppearanceProbe {
 	return paneAppearanceProbe{
 		out:        os.Stdout,
-		openReader: func() (paneReader, error) { return openTTYPath(paneTTYPath) },
+		armRead:    armStdinRead,
 		isTerminal: func() bool { return term.IsTerminal(os.Stdin.Fd()) },
 		makeRaw:    makeStdinRaw,
 		timeout:    appearanceDetectTimeout,
@@ -88,24 +81,19 @@ func (p paneAppearanceProbe) detect() theme.Member {
 	if !p.isTerminal() {
 		return theme.MemberDark
 	}
-	reader, err := p.openReader()
-	if err != nil {
-		return theme.MemberDark
-	}
-	defer func() { _ = reader.Close() }()
-
 	restore, err := p.makeRaw()
 	if err != nil {
 		return theme.MemberDark
 	}
 	defer restore()
 
-	if _, err := io.WriteString(p.out, ansi.RequestBackgroundColor); err != nil {
+	// Armed before the query is written: a query with no bounded read behind it
+	// leaves the terminal's reply to be echoed across the pane once raw mode ends.
+	reader, err := p.armRead(p.timeout)
+	if err != nil {
 		return theme.MemberDark
 	}
-	// Without a deadline the read blocks forever on a pane nobody is watching,
-	// which is the common case rather than the edge.
-	if err := reader.SetReadDeadline(time.Now().Add(p.timeout)); err != nil {
+	if _, err := io.WriteString(p.out, ansi.RequestBackgroundColor); err != nil {
 		return theme.MemberDark
 	}
 	payload, ok := readBackgroundReply(reader)
@@ -115,7 +103,7 @@ func (p paneAppearanceProbe) detect() theme.Member {
 	return terminalReplyFrom(tea.BackgroundColorMsg{Color: ansi.XParseColor(payload)}).member
 }
 
-func readBackgroundReply(r paneReader) (string, bool) {
+func readBackgroundReply(r io.Reader) (string, bool) {
 	buf := make([]byte, paneReplyCap)
 	filled := 0
 	for filled < len(buf) {
@@ -152,16 +140,58 @@ func backgroundPayload(buf []byte) (string, bool) {
 	return "", false
 }
 
-func openTTYPath(path string) (paneReader, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		return nil, err
+// armStdinRead bounds reads of stdin with select rather than a read deadline:
+// os.Stdin is a blocking descriptor outside the runtime poller, and macOS
+// refuses to poll a terminal through kqueue, so neither takes a deadline there.
+func armStdinRead(bound time.Duration) (io.Reader, error) {
+	fd := int(os.Stdin.Fd())
+	if fd < 0 || fd >= unix.FD_SETSIZE {
+		return nil, errUnselectable
 	}
-	return f, nil
+	return &selectBoundedReader{fd: fd, deadline: time.Now().Add(bound)}, nil
 }
 
-// Raw mode is a property of the terminal rather than of a descriptor onto it, so
-// the freshly opened reader sees it without a second MakeRaw.
+type selectBoundedReader struct {
+	fd       int
+	deadline time.Time
+}
+
+func (r *selectBoundedReader) Read(p []byte) (int, error) {
+	if err := r.awaitReadable(); err != nil {
+		return 0, err
+	}
+	n, err := unix.Read(r.fd, p)
+	switch {
+	case err != nil:
+		return 0, err
+	case n == 0:
+		return 0, io.EOF
+	}
+	return n, nil
+}
+
+func (r *selectBoundedReader) awaitReadable() error {
+	for {
+		remaining := time.Until(r.deadline)
+		if remaining <= 0 {
+			return os.ErrDeadlineExceeded
+		}
+		var readable unix.FdSet
+		readable.Set(r.fd)
+		timeout := unix.NsecToTimeval(remaining.Nanoseconds())
+		n, err := unix.Select(r.fd+1, &readable, nil, nil, &timeout)
+		switch {
+		case errors.Is(err, unix.EINTR):
+			continue
+		case err != nil:
+			return err
+		case n == 0:
+			return os.ErrDeadlineExceeded
+		}
+		return nil
+	}
+}
+
 func makeStdinRaw() (func(), error) {
 	fd := os.Stdin.Fd()
 	state, err := term.MakeRaw(fd)

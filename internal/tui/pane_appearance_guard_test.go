@@ -14,8 +14,6 @@ const (
 	backgroundSetOwner = "restore.go"
 	paneAppearanceFile = "pane_appearance.go"
 	detectTimeoutConst = "appearanceDetectTimeout"
-	terminalPathConst  = "paneTTYPath"
-	terminalOpenerName = "openTTYPath"
 	probeBuilderName   = "newPaneAppearanceProbe"
 )
 
@@ -108,56 +106,29 @@ func TestPaneAppearance_TakesThePickerTimeout(t *testing.T) {
 	})
 }
 
-// The construction guard exempts this file's one os.OpenFile; the exemption is
-// only as narrow as the path that call is allowed to take.
-func TestPaneAppearance_OpensNothingButThePanesTerminal(t *testing.T) {
-	opens, openerParam := 0, terminalOpenerParam(t)
-
+// The pane draw's appearance probe reads the stdin it already holds. A device
+// opened through syscall or x/sys/unix is as much an open as one through os.
+func TestPaneAppearance_OpensNothing(t *testing.T) {
+	openers := []string{"os", "syscall", "unix"}
+	opens := []string{"Open", "OpenFile", "Openat", "OpenInRoot", "Create"}
 	for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
-		name := filepath.Base(source.Path)
 		ast.Inspect(source.File, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) == 0 {
+			if !ok {
 				return true
 			}
-			switch sourceguardtest.CalleeName(call) {
-			case "OpenFile":
-				opens++
-				if arg, ok := call.Args[0].(*ast.Ident); !ok || arg.Name != openerParam {
-					t.Errorf("%s opens a path %s does not carry; a config read would reach the TUI through this file's exemption from the construction guard",
-						name, terminalOpenerName)
-				}
-			case terminalOpenerName:
-				if arg, ok := call.Args[0].(*ast.Ident); !ok || arg.Name != terminalPathConst {
-					t.Errorf("%s calls %s on something other than %s; the probe reads the pane's own terminal and nothing else",
-						name, terminalOpenerName, terminalPathConst)
-				}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if ok && slices.Contains(openers, pkg.Name) && slices.Contains(opens, sel.Sel.Name) {
+				t.Errorf("%s calls %s.%s; internal/tui opens no file or device — the pane's terminal is read through the stdin it already holds",
+					source.Position(call.Pos()), pkg.Name, sel.Sel.Name)
 			}
 			return true
 		})
 	}
-
-	if opens != 1 {
-		t.Errorf("internal/tui makes %d OpenFile calls, want exactly 1 — the pane's own terminal", opens)
-	}
-}
-
-// terminalOpenerParam is the parameter the opener takes its path from, so the
-// assertion above reads the declaration rather than restating it.
-func terminalOpenerParam(t *testing.T) string {
-	t.Helper()
-	file := sourceguardtest.PackageSource(t, ".", paneAppearanceFile).File
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || fn.Name.Name != terminalOpenerName {
-			continue
-		}
-		if params := fn.Type.Params.List; len(params) == 1 && len(params[0].Names) == 1 {
-			return params[0].Names[0].Name
-		}
-	}
-	t.Fatalf("%s declares no single-parameter %s", paneAppearanceFile, terminalOpenerName)
-	return ""
 }
 
 func isAnsiCall(call *ast.CallExpr, name string) bool {
