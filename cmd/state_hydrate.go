@@ -381,6 +381,11 @@ func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig, decision resumeDecisi
 // The pane and the executable are resolved before any write, so a refusal is
 // taken while the pane is still an eager one: a marked pane whose chain could
 // not be composed would fire its hook and freeze its saved scrollback for life.
+// The baked hook key is written as the pane's token first, unconditionally and
+// with no read: restore's re-stamp is best-effort, and a waiting pane carrying
+// no token leaves its registration stale to the hook sweep, which can delete it
+// before Enter runs it. The key is the pane's saved token, so the write never
+// changes a durable identity and a later refusal has nothing to lift.
 // The alternate-screen pin goes before the marker because a pin left behind
 // overrides one display setting on one pane, where a marker left behind freezes
 // that pane's scrollback; a refused marker lifts the pin, since the pane never
@@ -396,6 +401,9 @@ func markResumePending(cfg hydrateConfig) (parkedPane, error) {
 	}
 	exe, err := resolveExe()
 	if err != nil {
+		return parkedPane{}, err
+	}
+	if err := cfg.Client.SetPaneOption(pane, state.PortalPaneIDOption, cfg.HookKey); err != nil {
 		return parkedPane{}, err
 	}
 	if err := cfg.Client.SetPaneOption(pane, altScreenOption, "on"); err != nil {

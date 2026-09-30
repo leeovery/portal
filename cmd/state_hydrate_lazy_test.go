@@ -91,8 +91,8 @@ func lazyPrefs(t *testing.T, mode string) func() (*prefs.Store, error) {
 }
 
 // lazyOpts is the config every lazy case starts from: a pane that can be
-// marked, an executable that resolves and a commander that accepts both option
-// writes.
+// marked, an executable that resolves and a commander that accepts every option
+// write.
 func lazyOpts(t *testing.T, store *hooks.Store, loadPrefs func() (*prefs.Store, error), exec *stubExecShell) hydrateCfgOpts {
 	t.Helper()
 	t.Setenv("TMUX_PANE", lazyPaneID)
@@ -135,6 +135,7 @@ func TestHydrateLazy_NoRegistrationRestoresAsToday(t *testing.T) {
 			}
 			assertNoPendingMarker(t, cmder)
 			assertNoAltScreenPin(t, cmder)
+			assertNoTokenWrite(t, cmder)
 		})
 	}
 }
@@ -164,6 +165,7 @@ func TestHydrateLazy_EagerRegistrationRestoresAsToday(t *testing.T) {
 				}
 				assertNoPendingMarker(t, cmder)
 				assertNoAltScreenPin(t, cmder)
+				assertNoTokenWrite(t, cmder)
 			})
 		}
 	}
@@ -282,9 +284,16 @@ func TestHydrateLazy_FiresTheHookWhenThePaneCannotBeMarked(t *testing.T) {
 		name    string
 		prepare func(t *testing.T, opts *hydrateCfgOpts)
 		// wantNoPin marks a refusal taken before the pin: a pin written ahead
-		// of resolution would outlive the eager hook.
-		wantNoWrite, wantNoPin bool
+		// of resolution would outlive the eager hook. wantNoToken marks one
+		// taken before any write at all.
+		wantNoWrite, wantNoPin, wantNoToken bool
 	}{
+		{name: "the token write fails", wantNoWrite: true, wantNoPin: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
+			t.Helper()
+			opts.Commander = commandertest.Quiet(
+				commandertest.Fails(errors.New("tmux refused"), tokenWriteArgv()...),
+			)
+		}},
 		{name: "the marker write fails", prepare: func(t *testing.T, opts *hydrateCfgOpts) {
 			t.Helper()
 			opts.Commander = commandertest.Quiet(
@@ -297,11 +306,11 @@ func TestHydrateLazy_FiresTheHookWhenThePaneCannotBeMarked(t *testing.T) {
 				commandertest.Fails(errors.New("tmux refused"), pinArgv()...),
 			)
 		}},
-		{name: "TMUX_PANE is absent", wantNoWrite: true, wantNoPin: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
+		{name: "TMUX_PANE is absent", wantNoWrite: true, wantNoPin: true, wantNoToken: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
 			t.Helper()
 			t.Setenv("TMUX_PANE", "")
 		}},
-		{name: "the executable cannot be resolved", wantNoWrite: true, wantNoPin: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
+		{name: "the executable cannot be resolved", wantNoWrite: true, wantNoPin: true, wantNoToken: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
 			t.Helper()
 			opts.ResolveExe = func() (string, error) { return "", errors.New("no executable") }
 		}},
@@ -328,6 +337,9 @@ func TestHydrateLazy_FiresTheHookWhenThePaneCannotBeMarked(t *testing.T) {
 			}
 			if refusal.wantNoPin {
 				assertNoAltScreenPin(t, cmder)
+			}
+			if refusal.wantNoToken {
+				assertNoTokenWrite(t, cmder)
 			}
 		})
 	}
@@ -671,6 +683,28 @@ func assertNoPendingMarker(t *testing.T, cmder *commandertest.Scripted) {
 	}
 }
 
+func assertNoTokenWrite(t *testing.T, cmder *commandertest.Scripted) {
+	t.Helper()
+	if calls := cmder.CallsMatching("set-option", "-p", state.PortalPaneIDOption); len(calls) != 0 {
+		t.Errorf("wrote a token on a pane that must not wait: %v", calls)
+	}
+}
+
+// assertNeverReadsTheToken fails on any call naming the token's option other
+// than the one unconditional write: the firing path is a function of saved
+// state and must not depend on what the pane carries live.
+func assertNeverReadsTheToken(t *testing.T, cmder *commandertest.Scripted) {
+	t.Helper()
+	for i, call := range cmder.Calls() {
+		if reflect.DeepEqual(call, tokenWriteArgv()) {
+			continue
+		}
+		if strings.Contains(strings.Join(call, " "), state.PortalPaneIDOption) {
+			t.Errorf("call %d %v touches the pane's token other than by the one write", i, call)
+		}
+	}
+}
+
 func assertNoAltScreenPin(t *testing.T, cmder *commandertest.Scripted) {
 	t.Helper()
 	if calls := cmder.CallsMatching("set-option", "-p", altScreenOption); len(calls) != 0 {
@@ -682,6 +716,12 @@ func assertNoAltScreenPin(t *testing.T, cmder *commandertest.Scripted) {
 // alternate screen whatever the install sets.
 func pinArgv() []string {
 	return []string{"set-option", "-p", "-t", lazyPaneID, altScreenOption, "on"}
+}
+
+// tokenWriteArgv stamps the baked hook key onto the pane as its durable token,
+// the one a stale-hook sweep reads to keep the registration.
+func tokenWriteArgv() []string {
+	return []string{"set-option", "-p", "-t", lazyPaneID, state.PortalPaneIDOption, lazyHookKey}
 }
 
 func liftArgv() []string {
@@ -709,6 +749,80 @@ func assertOneMarkerRefusalWarn(t *testing.T, sink *logtest.Sink, paneKey string
 	}
 	if !strings.Contains(warn, "error=") {
 		t.Errorf("refusal WARN carries no error: %q", warn)
+	}
+}
+
+func TestHydrateLazy_StampsTheTokenBeforeThePinAndTheMarker(t *testing.T) {
+	for _, tail := range lazyTails() {
+		t.Run(tail.name, func(t *testing.T) {
+			exec := &stubExecShell{}
+			cmder := commandertest.Quiet()
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			opts.Commander = cmder
+
+			paneKey := lazyRun(t, tail, opts)
+
+			token := callIndex(cmder, tokenWriteArgv())
+			pin := callIndex(cmder, pinArgv())
+			marker := callIndex(cmder, markerWriteArgv())
+			cleared := cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex()
+			if token < 0 || pin < 0 || marker < 0 || cleared < 0 || token > pin || pin > marker || marker > cleared {
+				t.Errorf("token at %d, pin at %d, marker at %d, skeleton clear at %d; want them in that order; calls: %v",
+					token, pin, marker, cleared, cmder.Calls())
+			}
+			if n := len(cmder.CallsMatching("set-option", "-p", state.PortalPaneIDOption)); n != 1 {
+				t.Errorf("wrote the token %d times, want exactly one; calls: %v", n, cmder.Calls())
+			}
+			assertNeverReadsTheToken(t, cmder)
+			if want := lazyChainArgs("echo hi", paneKey); exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
+				t.Errorf("exec = %q %v, want the parked chain %v", exec.target, exec.args, want)
+			}
+		})
+	}
+}
+
+func TestHydrateLazy_NamesTheTokenWritesErrorWhenItIsRefused(t *testing.T) {
+	tokenErr := errors.New("token refused")
+	exec := &stubExecShell{}
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+	opts.Logger = logger
+	opts.Commander = commandertest.Quiet(commandertest.Fails(tokenErr, tokenWriteArgv()...))
+
+	lazyRun(t, lazyTails()[0], opts)
+
+	warn := execLogLine(t, sink.Body(), "WARN", "set resume pending marker failed")
+	if !strings.Contains(warn, tokenErr.Error()) {
+		t.Errorf("refusal WARN = %q, want it to name the token write's error %q", warn, tokenErr)
+	}
+	if n := strings.Count(sink.Body(), "WARN"); n != 1 {
+		t.Errorf("got %d WARNs, want the refusal alone: %q", n, sink.Body())
+	}
+}
+
+func TestHydrateLazy_LeavesTheTokenWhenALaterWriteIsRefused(t *testing.T) {
+	refusals := map[string][]string{
+		"the alternate-screen pin": pinArgv(),
+		"the pending marker":       markerWriteArgv(),
+	}
+	for name, refused := range refusals {
+		t.Run(name, func(t *testing.T) {
+			exec := &stubExecShell{}
+			cmder := commandertest.Quiet(commandertest.Fails(errors.New("tmux refused"), refused...))
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			opts.Commander = cmder
+
+			lazyRun(t, lazyTails()[0], opts)
+
+			if callIndex(cmder, tokenWriteArgv()) < 0 {
+				t.Fatalf("no token write ahead of the refusal; calls: %v", cmder.Calls())
+			}
+			assertNeverReadsTheToken(t, cmder)
+			want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
+				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
+			}
+		})
 	}
 }
 
