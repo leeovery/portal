@@ -53,8 +53,9 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	// Input the drop could not discard may still answer the confirmation, so it
 	// is never put up over that input.
 	if dropErr != nil {
+		cfg.Logger.Warn("clear pending input failed", shown.paneRef().logAttrs("error", dropErr)...)
 		shown.Screen = resumeScreenPanel
-		shown.Report = dropErr.Error()
+		shown.Report = resumeDropRefusal(dropErr)
 	}
 
 	_, _ = io.WriteString(cfg.Stdout, hydrateAltScreenEnter)

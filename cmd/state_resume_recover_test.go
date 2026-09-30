@@ -57,6 +57,7 @@ func (w recoverWriter) Write(p []byte) (int, error) {
 func newResumeRecoverConfig(t *testing.T, p *resumeRecoverProbe) resumeRecoverConfig {
 	t.Helper()
 	return resumeRecoverConfig{
+		HookKey: "tok123",
 		Pane:    "%7",
 		PaneKey: "proj-a1b2:0.1",
 		Stdout:  recoverWriter{probe: p},
@@ -266,6 +267,9 @@ func TestRunResumeRecover_FailedClearRecord(t *testing.T) {
 		if got := rec.AttrOrEmpty("pane_key"); got != "proj-a1b2:0.1" {
 			t.Errorf("WARN pane_key = %q, want %q", got, "proj-a1b2:0.1")
 		}
+		if got := rec.AttrOrEmpty("hook_key"); got != "tok123" {
+			t.Errorf("WARN hook_key = %q, want %q", got, "tok123")
+		}
 		if err := rec.ErrorAttr(t, "error"); !errors.Is(err, probe.clearErr) {
 			t.Errorf("WARN error = %v, want %v", err, probe.clearErr)
 		}
@@ -325,6 +329,38 @@ func TestStateResumeRecoverCommand(t *testing.T) {
 		if got.PaneKey != payload.PaneKey {
 			t.Errorf("pane key = %q, want %q", got.PaneKey, payload.PaneKey)
 		}
+		if got.HookKey != payload.HookKey {
+			t.Errorf("hook key = %q, want %q", got.HookKey, payload.HookKey)
+		}
+	})
+
+	t.Run("it recovers a pane parked by a build whose tail carried no hook key", func(t *testing.T) {
+		var probe resumeRecoverProbe
+		probe.markerValue = "1"
+		probe.clearErr = errors.New("no such pane")
+		sink := logtest.Install(t)
+
+		parsed, err := executeResumeRecover(t, []string{"--pane", "%7", "--pane-key", "proj-a1b2:0.1"}, &probe)
+		if err != nil {
+			t.Fatalf("the tail refused an argv with no hook key: %v", err)
+		}
+
+		if parsed.HookKey != "" {
+			t.Errorf("hook key = %q, want empty", parsed.HookKey)
+		}
+		if probe.execCalls != 1 {
+			t.Errorf("ExecShell called %d times, want the pane recovered", probe.execCalls)
+		}
+		rec := sink.Records().WithMessage("unset resume pending marker failed").Only(t, "the failed clear's record")
+		if !rec.HasAttr("hook_key") {
+			t.Error("WARN carries no hook_key attr, want it present and empty")
+		}
+		if got := rec.AttrOrEmpty("hook_key"); got != "" {
+			t.Errorf("WARN hook_key = %q, want empty", got)
+		}
+		if got := rec.AttrOrEmpty("pane_key"); got != "proj-a1b2:0.1" {
+			t.Errorf("WARN pane_key = %q, want %q", got, "proj-a1b2:0.1")
+		}
 	})
 }
 
@@ -362,6 +398,7 @@ func executeResumeRecover(t *testing.T, args []string, probe *resumeRecoverProbe
 	withFuncSeam(t, &resumeRecoverRunFunc, func(cfg resumeRecoverConfig) error {
 		parsed = cfg
 		driven := newResumeRecoverConfig(t, probe)
+		driven.HookKey = cfg.HookKey
 		driven.Pane = cfg.Pane
 		driven.PaneKey = cfg.PaneKey
 		return runResumeRecover(driven)

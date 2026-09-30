@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -34,10 +35,10 @@ func assertOrder(t *testing.T, p *resumeWaitProbe, want ...string) {
 }
 
 // reportedOn is the redraw a refused step hands to: screen, carrying the
-// refusal's own text and no input drop.
-func reportedOn(p resumeChainPayload, screen string, err error) resumeChainPayload {
+// refusal's report row and no input drop.
+func reportedOn(p resumeChainPayload, screen, row string) resumeChainPayload {
 	p.Screen = screen
-	p.Report = err.Error()
+	p.Report = row
 	p.DropInput = false
 	return p
 }
@@ -70,7 +71,8 @@ func TestResumeAnswerDiscard_Removal(t *testing.T) {
 }
 
 func TestResumeAnswerDiscard_RefusedWrite(t *testing.T) {
-	writeErr := errors.New("hooks lock: resource temporarily unavailable")
+	writeErr := fmt.Errorf("%w: /x/hooks.json.lock", hooks.ErrLockHeld)
+	const writeRow = "can't lock hooks.json: another process holds it"
 
 	t.Run("it reports a refused write on the confirmation", func(t *testing.T) {
 		var probe resumeWaitProbe
@@ -78,7 +80,7 @@ func TestResumeAnswerDiscard_RefusedWrite(t *testing.T) {
 		payload := confirmationPayload()
 		answerDiscard(t, &probe, payload)
 
-		assertHandOff(t, &probe, reportedOn(payload, resumeScreenDiscard, writeErr))
+		assertHandOff(t, &probe, reportedOn(payload, resumeScreenDiscard, writeRow))
 		assertArgvCarriesDropInput(t, probe.execArgs, false)
 	})
 
@@ -101,7 +103,7 @@ func TestResumeAnswerDiscard_RefusedWrite(t *testing.T) {
 
 	t.Run("it retries the removal on a second y from the report", func(t *testing.T) {
 		var probe resumeWaitProbe
-		payload := reportedOn(confirmationPayload(), resumeScreenDiscard, writeErr)
+		payload := reportedOn(confirmationPayload(), resumeScreenDiscard, writeRow)
 		answerDiscard(t, &probe, payload)
 
 		if !slices.Equal(probe.discardKeys, []string{payload.HookKey}) {
@@ -136,7 +138,8 @@ func TestResumeAnswerDiscard_Order(t *testing.T) {
 }
 
 func TestResumeAnswerDiscard_FailedClear(t *testing.T) {
-	clearErr := errors.New("can't find pane: %7")
+	clearErr := tmuxRefusal(t)
+	const clearRow = "can't unpause this pane: can't find pane: %7"
 
 	t.Run("it redraws the waiting panel with the reason when the clear fails", func(t *testing.T) {
 		var probe resumeWaitProbe
@@ -144,7 +147,7 @@ func TestResumeAnswerDiscard_FailedClear(t *testing.T) {
 		payload := confirmationPayload()
 		answerDiscard(t, &probe, payload)
 
-		assertHandOff(t, &probe, reportedOn(payload, resumeScreenPanel, clearErr))
+		assertHandOff(t, &probe, reportedOn(payload, resumeScreenPanel, clearRow))
 		assertArgvLacks(t, probe.execArgs, resumeFlagScreen)
 		assertArgvCarriesDropInput(t, probe.execArgs, false)
 	})
@@ -161,13 +164,13 @@ func TestResumeAnswerDiscard_FailedClear(t *testing.T) {
 		}
 
 		var drawProbe resumeDrawProbe
-		drawCfg := newResumeDrawConfig(t, &drawProbe, reportedOn(payload, resumeScreenPanel, clearErr), fixedSize(100, 30))
+		drawCfg := newResumeDrawConfig(t, &drawProbe, reportedOn(payload, resumeScreenPanel, clearRow), fixedSize(100, 30))
 		drawCfg.Colourless = true
 		if err := runResumeDraw(drawCfg); err != nil {
 			t.Fatalf("runResumeDraw() error = %v", err)
 		}
 		painted := drawProbe.stdout.String()
-		for _, want := range []string{payload.Command, clearErr.Error(), "resume", "discard"} {
+		for _, want := range []string{payload.Command, clearRow, "resume", "discard"} {
 			if !strings.Contains(painted, want) {
 				t.Errorf("the redrawn panel does not carry %q:\n%s", want, painted)
 			}
@@ -315,7 +318,7 @@ func TestDiscardResumeRegistration(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{"tok123": {"on-resume": "make deploy"}})
 		sink := logtest.Install(t)
 
-		removed, err := discardResumeRegistration("tok123")
+		removed, err := discardResumeRegistration("tok123", "proj-a1b2:0.1")
 		if err != nil || !removed {
 			t.Fatalf("discardResumeRegistration() = %v, %v; want a removal", removed, err)
 		}
@@ -331,7 +334,7 @@ func TestDiscardResumeRegistration(t *testing.T) {
 	t.Run("it reports nothing removed for a key the store does not hold", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{"other": {"on-resume": "make deploy"}})
 
-		removed, err := discardResumeRegistration("tok123")
+		removed, err := discardResumeRegistration("tok123", "proj-a1b2:0.1")
 		if err != nil || removed {
 			t.Fatalf("discardResumeRegistration() = %v, %v; want no removal and no error", removed, err)
 		}
@@ -347,7 +350,7 @@ func TestDiscardResumeRegistration(t *testing.T) {
 			t.Fatal("loadHookStore() resolved a store; the fixture must leave none")
 		}
 
-		removed, err := discardResumeRegistration("tok123")
+		removed, err := discardResumeRegistration("tok123", "proj-a1b2:0.1")
 		if removed {
 			t.Error("discardResumeRegistration() reported a removal from a store it could not resolve")
 		}

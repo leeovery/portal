@@ -256,8 +256,8 @@ func TestResumeChainArgv_Screen(t *testing.T) {
 	})
 
 	t.Run("it carries no screen to the chain's tail", func(t *testing.T) {
-		got := resumeChainArgv("/p", resumeRecoverSubcommand, resumeChainPayload{Pane: "%7", PaneKey: "s:0.0", Screen: resumeScreenDiscard})
-		want := []string{"/p", "state", "resume-recover", "--pane", "%7", "--pane-key", "s:0.0"}
+		got := resumeChainArgv("/p", resumeRecoverSubcommand, resumeChainPayload{HookKey: "k", Pane: "%7", PaneKey: "s:0.0", Screen: resumeScreenDiscard})
+		want := []string{"/p", "state", "resume-recover", "--hook-key", "k", "--pane", "%7", "--pane-key", "s:0.0"}
 		if !slices.Equal(got, want) {
 			t.Errorf("argv = %q, want %q", got, want)
 		}

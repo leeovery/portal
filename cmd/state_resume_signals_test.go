@@ -204,6 +204,9 @@ func TestResumeWait_SignalGenerationOnHandingThePaneOn(t *testing.T) {
 			if got := warn.AttrOrEmpty("pane_key"); got != a.payload.PaneKey {
 				t.Errorf("WARN pane_key = %q, want %q", got, a.payload.PaneKey)
 			}
+			if got := warn.AttrOrEmpty("hook_key"); got != a.payload.HookKey {
+				t.Errorf("WARN hook_key = %q, want %q", got, a.payload.HookKey)
+			}
 		})
 	}
 }
@@ -337,6 +340,9 @@ func TestRunResumeRecover_SignalGeneration(t *testing.T) {
 		warn := sink.Records().WithMessage("enable terminal signals failed").Only(t, "the failed enable")
 		if got := warn.AttrOrEmpty("pane_key"); got != cfg.PaneKey {
 			t.Errorf("WARN pane_key = %q, want %q", got, cfg.PaneKey)
+		}
+		if got := warn.AttrOrEmpty("hook_key"); got != cfg.HookKey {
+			t.Errorf("WARN hook_key = %q, want %q", got, cfg.HookKey)
 		}
 	})
 

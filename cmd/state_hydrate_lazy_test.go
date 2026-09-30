@@ -260,7 +260,7 @@ func TestHydrateLazy_SeparatesTheDrawAndTheTailWithASemicolon(t *testing.T) {
 	}
 }
 
-func TestHydrateLazy_ComposesTheTailWithThePaneFlagsAlone(t *testing.T) {
+func TestHydrateLazy_ComposesTheTailWithThePaneIdentityAlone(t *testing.T) {
 	exec := &stubExecShell{}
 	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
 
@@ -271,7 +271,7 @@ func TestHydrateLazy_ComposesTheTailWithThePaneFlagsAlone(t *testing.T) {
 		t.Fatalf("chain %q has no tail", exec.args[2])
 	}
 	payload := resumeChainPayload{Command: "echo hi", HookKey: lazyHookKey, Pane: lazyPaneID, PaneKey: paneKey}
-	want := shellquote.Join([]string{lazyExe, "state", resumeRecoverSubcommand, "--pane", lazyPaneID, "--pane-key", paneKey}) + parkedChainBackstop(lazyExe, payload)
+	want := shellquote.Join([]string{lazyExe, "state", resumeRecoverSubcommand, "--hook-key", lazyHookKey, "--pane", lazyPaneID, "--pane-key", paneKey}) + parkedChainBackstop(lazyExe, payload)
 	if tail != want {
 		t.Errorf("tail = %q, want %q", tail, want)
 	}

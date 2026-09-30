@@ -38,6 +38,18 @@ func ClassifyWriteError(err error) string {
 	}
 }
 
+// IsWriteFailure reports whether err carries one of AtomicWrite's write-phase
+// sentinels. Unlike ClassifyWriteError it has no floor: an error from anywhere
+// else reads as false.
+func IsWriteFailure(err error) bool {
+	for _, phase := range []error{ErrWriteTempCreate, ErrWriteWrite, ErrWriteFsync, ErrWriteRename} {
+		if errors.Is(err, phase) {
+			return true
+		}
+	}
+	return false
+}
+
 // AtomicWrite0600 writes data to path and chmods the result to 0600. The temp
 // file is already created 0600; the extra chmod defends against a permissive
 // umask leaking broader bits through.

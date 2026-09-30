@@ -12,8 +12,8 @@ import (
 )
 
 // The flags the resume chain's subcommands are addressed by. A pane is named
-// twice: --pane is the pane id the marker writes need, --pane-key the positional
-// key every hydrate record already names its pane by.
+// three times: --pane is the pane id the marker writes need, --pane-key the
+// positional key restore baked, and --hook-key the pane's durable token.
 const (
 	resumeFlagCommand   = "command"
 	resumeFlagReport    = "report"
@@ -59,10 +59,31 @@ type resumeChainPayload struct {
 	DropInput bool
 }
 
+func (p resumeChainPayload) paneRef() resumePaneRef {
+	return resumePaneRef{HookKey: p.HookKey, PaneKey: p.PaneKey}
+}
+
+// resumePaneRef is how the chain's records name a waiting pane. The pane key is
+// the address restore baked, which a rename, a renumber or a moved pane leaves
+// naming another pane or none over a wait; the hook key is the token the pane
+// keeps through all of those.
+type resumePaneRef struct {
+	HookKey string
+	PaneKey string
+}
+
+func (r resumePaneRef) logAttrs(attrs ...any) []any {
+	return append([]any{"hook_key", r.HookKey, "pane_key", r.PaneKey}, attrs...)
+}
+
 func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	argv := []string{exe, "state", subcommand}
 	if subcommand == resumeRecoverSubcommand {
-		return append(argv, flagArg(resumeFlagPane), p.Pane, flagArg(resumeFlagPaneKey), p.PaneKey)
+		return append(argv,
+			flagArg(resumeFlagHookKey), p.HookKey,
+			flagArg(resumeFlagPane), p.Pane,
+			flagArg(resumeFlagPaneKey), p.PaneKey,
+		)
 	}
 
 	argv = append(argv, flagArg(resumeFlagCommand), p.Command)
@@ -174,8 +195,8 @@ func hookExecArgs(command, shell string) (prog string, args []string) {
 
 // A pane whose kill keys could not be given back is still handed on: a hook
 // that ignores Ctrl-C is the lesser failure against a pane left on its panel.
-func enableTTYSignalsOrLog(logger *slog.Logger, enable func() error, paneKey string) {
+func enableTTYSignalsOrLog(logger *slog.Logger, enable func() error, pane resumePaneRef) {
 	if err := enable(); err != nil {
-		logger.Warn("enable terminal signals failed", "pane_key", paneKey, "error", err)
+		logger.Warn("enable terminal signals failed", pane.logAttrs("error", err)...)
 	}
 }

@@ -36,13 +36,13 @@ type altScreenPin struct {
 // unset tmux processes before the leave bytes makes it ignore the leave,
 // stranding the panel over the transcript, so a leave never confirmed keeps the
 // pin. Neither failure holds back the hand-over.
-func releaseAltScreenPin(logger *slog.Logger, paneKey string, pin altScreenPin) {
+func releaseAltScreenPin(logger *slog.Logger, pane resumePaneRef, pin altScreenPin) {
 	if !awaitPrimaryScreen(pin) {
-		logger.Warn("alternate screen leave unconfirmed", "pane_key", paneKey)
+		logger.Warn("alternate screen leave unconfirmed", pane.logAttrs()...)
 		return
 	}
 	if err := pin.Unpin(); err != nil {
-		logger.Warn("unset alternate-screen pin failed", "pane_key", paneKey, "error", err)
+		logger.Warn("unset alternate-screen pin failed", pane.logAttrs("error", err)...)
 	}
 }
 

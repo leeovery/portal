@@ -224,7 +224,9 @@ func (s *Store) removeEntry(key string, event Event, via Via, op string, carryVa
 
 	h, err := s.load()
 	if err != nil {
-		return false, fmt.Errorf("failed to load hooks: %w", err)
+		err = fmt.Errorf("%w: %w", ErrStoreRead, err)
+		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(), "error", err)
+		return false, err
 	}
 
 	events, ok := h[key]
@@ -322,9 +324,10 @@ func narrowToSnapshot(candidates []string, snapshot Snapshot) []string {
 }
 
 // ErrStoreRead reports that a read of the file failed, whichever of the clean's
-// two reads it was: the pre-read, which leaves the enumeration unrun and
-// nothing judged, or the load the deletion takes under its own hold. A clean
-// that read, judged and then failed to write carries it from neither.
+// two reads it was — the pre-read, which leaves the enumeration unrun and
+// nothing judged, or the load the deletion takes under its own hold — or the
+// load a removal takes under its hold. A clean that read, judged and then
+// failed to write carries it from neither.
 var ErrStoreRead = errors.New("failed to read hooks store")
 
 // ErrMalformed reports a hooks.json that exists but does not parse. A read

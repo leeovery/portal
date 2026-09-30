@@ -335,7 +335,7 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 
 	command := resumeRegistrationOrLog(cfg.Logger, cfg.LookupResume, cfg.HookKey).Command
 	cfg.restore()
-	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
+	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.paneRef())
 
 	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, command)
 	return nil
@@ -358,14 +358,14 @@ func resumeCancelDiscardConfirm(cfg resumeWaitConfig) error {
 // to remove still proceeds: the store is already as the user asked for it.
 func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 	if _, err := cfg.DiscardRegistration(cfg.HookKey); err != nil {
-		return resumeReport(cfg, resumeScreenDiscard, err)
+		return resumeReport(cfg, resumeScreenDiscard, resumeDiscardRefusal(err))
 	}
 
 	if cleared, err := resumeUnfreeze(cfg); !cleared {
 		return err
 	}
 	cfg.restore()
-	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
+	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.paneRef())
 
 	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, "")
 	return nil
@@ -381,19 +381,20 @@ func resumeUnfreeze(cfg resumeWaitConfig) (cleared bool, err error) {
 	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
 
 	if err := cfg.ClearMarker(); err != nil {
-		return false, resumeReport(cfg, resumeScreenPanel, err)
+		warnResumePendingClearFailed(cfg.Logger, cfg.paneRef(), err)
+		return false, resumeReport(cfg, resumeScreenPanel, resumeClearRefusal(err))
 	}
-	releaseAltScreenPin(cfg.Logger, cfg.PaneKey, cfg.AltScreen)
+	releaseAltScreenPin(cfg.Logger, cfg.paneRef(), cfg.AltScreen)
 	return true, nil
 }
 
-// resumeReport hands the pane to a fresh draw of screen carrying err as the
+// resumeReport hands the pane to a fresh draw of screen carrying row as the
 // report. The draw paints what the payload names without consulting the store,
 // so a registration already gone is still shown rather than a blank pane.
-func resumeReport(cfg resumeWaitConfig, screen string, err error) error {
+func resumeReport(cfg resumeWaitConfig, screen, row string) error {
 	next := cfg
 	next.Screen = screen
-	next.Report = err.Error()
+	next.Report = row
 	next.DropInput = false
 	return resumeRedraw(next)
 }
@@ -429,11 +430,14 @@ func lookupResumeRegistration(hookKey string) (hooks.OnResume, error) {
 
 // discardResumeRegistration removes the pane's registration. Unlike the lookup,
 // a store that cannot be resolved is an error: reading it as a miss would drop
-// the panel while the registration it named survives.
-func discardResumeRegistration(hookKey string) (bool, error) {
+// the panel while the registration it named survives. The store records its own
+// refusals; one it was never reached for is recorded here.
+func discardResumeRegistration(hookKey, paneKey string) (bool, error) {
 	store, err := loadHookStore()
 	if err != nil {
-		return false, err
+		pane := resumePaneRef{HookKey: hookKey, PaneKey: paneKey}
+		hydrateLogger.Warn("resolve hook store failed", pane.logAttrs("error", err)...)
+		return false, hookStoreUnlocatedError{err: err}
 	}
 	return store.Discard(hookKey, hooks.EventOnResume, hooks.ViaPanel)
 }
@@ -500,10 +504,12 @@ var stateResumeWaitCmd = &cobra.Command{
 			ClearMarker: func() error {
 				return state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane))
 			},
-			LookupResume:        lookupResumeRegistration,
-			DiscardRegistration: discardResumeRegistration,
-			EnableTTYSignals:    setStdinSignals,
-			AltScreen:           paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),
+			LookupResume: lookupResumeRegistration,
+			DiscardRegistration: func(hookKey string) (bool, error) {
+				return discardResumeRegistration(hookKey, paneKey)
+			},
+			EnableTTYSignals: setStdinSignals,
+			AltScreen:        paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),
 		})
 	},
 }

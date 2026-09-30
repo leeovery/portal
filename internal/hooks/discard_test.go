@@ -312,3 +312,67 @@ func TestDiscard(t *testing.T) {
 		}
 	})
 }
+
+func TestDiscard_Refusals(t *testing.T) {
+	t.Run("it logs a load it could not complete and reports it as a read failure", func(t *testing.T) {
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
+		sink := logtest.Install(t)
+
+		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		if removed {
+			t.Error("removed = true, want false when the load failed")
+		}
+		if !errors.Is(err, hooks.ErrStoreRead) {
+			t.Errorf("err = %v, want errors.Is ErrStoreRead", err)
+		}
+
+		rec := sink.Records().Only(t, "the failed load's record")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{
+			Level:     slog.LevelWarn,
+			Msg:       "discard",
+			Component: "hooks",
+			Op:        "discard",
+			Via:       "panel",
+		})
+		if got := rec.AttrString(t, "hook_key"); got != hookstest.SubjectSeedA {
+			t.Errorf("hook_key = %q, want %q", got, hookstest.SubjectSeedA)
+		}
+		if logged := rec.ErrorAttr(t, "error"); logged.Error() != err.Error() {
+			t.Errorf("WARN error = %v, want the whole returned chain %v", logged, err)
+		}
+		if rec.HasAttr("error_class") {
+			t.Error("WARN carries error_class, want none: no write phase ran")
+		}
+	})
+
+	t.Run("it reports malformed JSON as a read failure the caller can name", func(t *testing.T) {
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: "{not json"})
+		sink := logtest.Install(t)
+
+		_, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		if !errors.Is(err, hooks.ErrMalformed) || !errors.Is(err, hooks.ErrStoreRead) {
+			t.Errorf("err = %v, want errors.Is both ErrMalformed and ErrStoreRead", err)
+		}
+		sink.Records().AtExactLevel(slog.LevelWarn).Matching("hooks", "discard").Only(t, "the malformed load's record")
+	})
+
+	t.Run("it reports a lock it could not take for want of more than time apart from a held one", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{
+			Entries: map[string]string{hookstest.SubjectSeedA: "claude --resume abc123"},
+		})
+		if err := os.Chmod(hookstest.SidecarPath(path), 0o000); err != nil {
+			t.Fatalf("chmod sidecar: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(hookstest.SidecarPath(path), 0o600) })
+		sink := logtest.Install(t)
+
+		_, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		if !errors.Is(err, hooks.ErrLockFailed) {
+			t.Errorf("err = %v, want errors.Is ErrLockFailed", err)
+		}
+		if errors.Is(err, hooks.ErrLockHeld) {
+			t.Errorf("err = %v, want no ErrLockHeld: nothing held the lock", err)
+		}
+		hookstest.AssertLockWarn(t, sink, "discard", hookstest.SubjectSeedA, "panel")
+	})
+}

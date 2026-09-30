@@ -14,6 +14,10 @@ import (
 // open(2)/flock failure, so a caller can tell a timeout from a save failure.
 var ErrLockHeld = errors.New("hooks lock held by another process")
 
+// ErrLockFailed is that genuine failure: the sidecar could not be opened, or
+// flock refused it for a reason other than contention.
+var ErrLockFailed = errors.New("hooks lock could not be taken")
+
 // lockTimeout bounds every mutation and ordinary read. An unbounded acquire
 // would park the daemon's tick loop behind a holder that is alive but stuck, so
 // waiting is bounded well above the sub-millisecond critical section and well
@@ -62,7 +66,7 @@ func (s *Store) lockPath() string {
 func acquireLock(path string, openFlags, flockMode int, bound time.Duration) (*os.File, error) {
 	f, err := os.OpenFile(path, openFlags, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open hooks lock: %w", err)
+		return nil, fmt.Errorf("%w: open: %w", ErrLockFailed, err)
 	}
 
 	deadline := time.Now().Add(bound)
@@ -73,7 +77,7 @@ func acquireLock(path string, openFlags, flockMode int, bound time.Duration) (*o
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) {
 			_ = f.Close()
-			return nil, fmt.Errorf("flock hooks lock %s: %w", path, err)
+			return nil, fmt.Errorf("%w: flock %s: %w", ErrLockFailed, path, err)
 		}
 		if !time.Now().Before(deadline) {
 			_ = f.Close()

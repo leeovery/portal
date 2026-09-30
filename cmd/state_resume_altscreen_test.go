@@ -120,9 +120,7 @@ func TestReleaseAltScreenPin(t *testing.T) {
 			if rec.Msg != "alternate screen leave unconfirmed" {
 				t.Errorf("WARN = %q, want the unconfirmed leave", rec.Msg)
 			}
-			if got := rec.AttrOrEmpty("pane_key"); got != "proj-a1b2:0.1" {
-				t.Errorf("WARN pane_key = %q, want the pane", got)
-			}
+			assertNamesThePane(t, rec)
 			if execs != 1 {
 				t.Errorf("exec calls = %d, want the hand-over to go ahead", execs)
 			}
@@ -147,9 +145,7 @@ func TestReleaseAltScreenPin(t *testing.T) {
 			if rec.Msg != "unset alternate-screen pin failed" {
 				t.Errorf("WARN = %q, want the refused unpin", rec.Msg)
 			}
-			if got := rec.AttrOrEmpty("pane_key"); got != "proj-a1b2:0.1" {
-				t.Errorf("WARN pane_key = %q, want the pane", got)
-			}
+			assertNamesThePane(t, rec)
 			if err := rec.ErrorAttr(t, "error"); !errors.Is(err, unpinErr) {
 				t.Errorf("WARN error = %v, want %v", err, unpinErr)
 			}
@@ -167,4 +163,16 @@ func TestReleaseAltScreenPin(t *testing.T) {
 			}
 		}
 	})
+}
+
+// assertNamesThePane pins the two names every route's records give the pane:
+// the durable hook key and the address restore baked.
+func assertNamesThePane(t *testing.T, rec logtest.Record) {
+	t.Helper()
+	if got := rec.AttrOrEmpty("hook_key"); got != "tok123" {
+		t.Errorf("WARN hook_key = %q, want the pane's token %q", got, "tok123")
+	}
+	if got := rec.AttrOrEmpty("pane_key"); got != "proj-a1b2:0.1" {
+		t.Errorf("WARN pane_key = %q, want the pane", got)
+	}
 }

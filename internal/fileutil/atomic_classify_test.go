@@ -117,6 +117,31 @@ func TestClassifyWriteError(t *testing.T) {
 	}
 }
 
+func TestIsWriteFailure(t *testing.T) {
+	someErr := errors.New("underlying")
+	for _, phase := range []error{fileutil.ErrWriteTempCreate, fileutil.ErrWriteWrite, fileutil.ErrWriteFsync, fileutil.ErrWriteRename} {
+		t.Run("it recognises "+phase.Error(), func(t *testing.T) {
+			if !fileutil.IsWriteFailure(fmt.Errorf("outer: %w", fmt.Errorf("%w: %w", phase, someErr))) {
+				t.Errorf("IsWriteFailure = false for a chain carrying %v", phase)
+			}
+		})
+	}
+
+	t.Run("it recognises what AtomicWrite returns", func(t *testing.T) {
+		if err := fileutil.AtomicWrite(forceTempCreateFailure(t), []byte("x")); !fileutil.IsWriteFailure(err) {
+			t.Errorf("IsWriteFailure(%v) = false, want true", err)
+		}
+	})
+
+	t.Run("it recognises nothing else", func(t *testing.T) {
+		for _, err := range []error{nil, someErr} {
+			if fileutil.IsWriteFailure(err) {
+				t.Errorf("IsWriteFailure(%v) = true, want false", err)
+			}
+		}
+	})
+}
+
 func TestAtomicWrite0600PreservesSentinel(t *testing.T) {
 	err := fileutil.AtomicWrite0600(forceTempCreateFailure(t), []byte("data"))
 	if err == nil {

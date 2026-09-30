@@ -49,10 +49,10 @@ func TestResumeChainArgv(t *testing.T) {
 		}
 	})
 
-	t.Run("it carries the pane and the pane key alone for the chain's tail", func(t *testing.T) {
-		for _, payload := range []resumeChainPayload{full, {Pane: "%7", PaneKey: "proj-a1b2:0.1"}} {
+	t.Run("it carries the hook key, the pane and the pane key alone for the chain's tail", func(t *testing.T) {
+		for _, payload := range []resumeChainPayload{full, {HookKey: "tok123", Pane: "%7", PaneKey: "proj-a1b2:0.1"}} {
 			got := resumeChainArgv("/p", resumeRecoverSubcommand, payload)
-			want := []string{"/p", "state", "resume-recover", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"}
+			want := []string{"/p", "state", "resume-recover", "--hook-key", "tok123", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"}
 			if !slices.Equal(got, want) {
 				t.Errorf("argv = %q, want %q", got, want)
 			}

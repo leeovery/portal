@@ -11,6 +11,7 @@ import (
 )
 
 type resumeRecoverConfig struct {
+	HookKey string
 	Pane    string
 	PaneKey string
 	Stdout  io.Writer
@@ -50,15 +51,23 @@ func runResumeRecover(cfg resumeRecoverConfig) error {
 	// stands still is the lesser failure against one that closed. Nothing is
 	// left to hold the answer back, so the record is what makes a wrongly-frozen
 	// pane findable.
+	pane := resumePaneRef{HookKey: cfg.HookKey, PaneKey: cfg.PaneKey}
 	if err := cfg.ClearMarker(); err != nil {
-		cfg.Logger.Warn("unset resume pending marker failed", "pane_key", cfg.PaneKey, "error", err)
+		warnResumePendingClearFailed(cfg.Logger, pane, err)
 	}
-	releaseAltScreenPin(cfg.Logger, cfg.PaneKey, cfg.AltScreen)
+	releaseAltScreenPin(cfg.Logger, pane, cfg.AltScreen)
 
-	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
+	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, pane)
 
 	handOffToHookOrShell(cfg.Logger, cfg.ExecShell, "")
 	return nil
+}
+
+// warnResumePendingClearFailed records a pending-marker clear that did not land,
+// whichever answer or tail attempted it, under the one wording a search for a
+// wrongly-frozen pane greps for.
+func warnResumePendingClearFailed(logger *slog.Logger, pane resumePaneRef, err error) {
+	logger.Warn("unset resume pending marker failed", pane.logAttrs("error", err)...)
 }
 
 var resumeRecoverRunFunc = runResumeRecover
@@ -80,9 +89,11 @@ var stateResumeRecoverCmd = &cobra.Command{
 			pane = os.Getenv("TMUX_PANE")
 		}
 		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
+		hookKey, _ := cmd.Flags().GetString(resumeFlagHookKey)
 		target := tmux.PaneIDTarget(pane)
 
 		return resumeRecoverRunFunc(resumeRecoverConfig{
+			HookKey: hookKey,
 			Pane:    pane,
 			PaneKey: paneKey,
 			Stdout:  os.Stdout,
@@ -103,6 +114,7 @@ var stateResumeRecoverCmd = &cobra.Command{
 func init() {
 	stateResumeRecoverCmd.Flags().String(resumeFlagPane, "", "The pane id the marker reads and writes address (default $TMUX_PANE)")
 	stateResumeRecoverCmd.Flags().String(resumeFlagPaneKey, "", "The pane key the chain's records name the pane by")
+	stateResumeRecoverCmd.Flags().String(resumeFlagHookKey, "", "Saved pane token the chain's records also name the pane by")
 
 	stateCmd.AddCommand(stateResumeRecoverCmd)
 }

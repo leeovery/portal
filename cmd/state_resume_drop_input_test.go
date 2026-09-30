@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
@@ -43,6 +46,7 @@ type dropDraw struct {
 	execArgs  []string
 	execCalls int
 	stdout    bytes.Buffer
+	sink      *logtest.Sink
 }
 
 type sequencedWriter struct{ d *dropDraw }
@@ -54,12 +58,13 @@ func (w sequencedWriter) Write(p []byte) (int, error) {
 
 func runDropDraw(t *testing.T, payload resumeChainPayload, dropErr error) *dropDraw {
 	t.Helper()
-	d := &dropDraw{dropErr: dropErr}
+	logger, sink := logtest.NewCaptureLogger(t)
+	d := &dropDraw{dropErr: dropErr, sink: sink}
 	th := themetest.DefaultDark(t)
 	cfg := resumeDrawConfig{
 		resumeChainPayload: payload,
 		Stdout:             sequencedWriter{d: d},
-		Logger:             drawTestLogger(t),
+		Logger:             logger,
 		Size:               fixedSize(100, 30),
 		ResolveTheme: func(_ bool, dropInput func() error) (theme.Theme, error) {
 			d.calls = append(d.calls, "appearance-query")
@@ -261,8 +266,8 @@ func TestResumeDropInput_Draw(t *testing.T) {
 	})
 
 	t.Run("it paints the waiting panel with the reason when the drop fails", func(t *testing.T) {
-		const reason = "flush input queue: inappropriate ioctl for device"
-		d := runDropDraw(t, openingPayload(), errors.New(reason))
+		const reason = "can't clear pending input: inappropriate ioctl for device"
+		d := runDropDraw(t, openingPayload(), fmt.Errorf("could not clear pending input: %w", syscall.ENOTTY))
 
 		want := tui.RenderResumePanel(tui.ResumeScreen{
 			Command: samplePayload().Command,
@@ -284,6 +289,33 @@ func TestResumeDropInput_Draw(t *testing.T) {
 		next.Width, next.Height = 100, 30
 		if wantArgv := resumeChainArgv(exe, resumeWaitSubcommand, next); !slices.Equal(d.execArgs, wantArgv) {
 			t.Errorf("exec argv = %q, want a waiter on the panel carrying the report %q", d.execArgs, wantArgv)
+		}
+	})
+
+	t.Run("it records the refused drop once, naming the pane and the whole error", func(t *testing.T) {
+		dropErr := fmt.Errorf("could not clear pending input: %w", syscall.ENOTTY)
+		d := runDropDraw(t, openingPayload(), dropErr)
+
+		rec := d.sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the refused drop's record")
+		if rec.Msg != "clear pending input failed" {
+			t.Errorf("WARN = %q, want the refused drop's record", rec.Msg)
+		}
+		if got := rec.AttrOrEmpty("hook_key"); got != samplePayload().HookKey {
+			t.Errorf("WARN hook_key = %q, want %q", got, samplePayload().HookKey)
+		}
+		if got := rec.AttrOrEmpty("pane_key"); got != samplePayload().PaneKey {
+			t.Errorf("WARN pane_key = %q, want %q", got, samplePayload().PaneKey)
+		}
+		if got := rec.ErrorAttr(t, "error"); got.Error() != dropErr.Error() {
+			t.Errorf("WARN error = %v, want %v", got, dropErr)
+		}
+	})
+
+	t.Run("it records nothing when the drop succeeds", func(t *testing.T) {
+		d := runDropDraw(t, openingPayload(), nil)
+
+		if warned := d.sink.Records().AtOrAboveLevel(slog.LevelWarn); len(warned) != 0 {
+			t.Errorf("records at or above WARN = %v, want none", warned)
 		}
 	})
 

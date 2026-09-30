@@ -119,7 +119,8 @@ func TestResumeAnswerEnter_ReleasesThePin(t *testing.T) {
 }
 
 func TestResumeAnswerEnter_FailedClear(t *testing.T) {
-	clearErr := errors.New("can't find pane: %7")
+	clearErr := tmuxRefusal(t)
+	const clearRow = "can't unpause this pane: can't find pane: %7"
 
 	t.Run("it redraws the panel with the reason when the clear fails", func(t *testing.T) {
 		var probe resumeWaitProbe
@@ -132,7 +133,7 @@ func TestResumeAnswerEnter_FailedClear(t *testing.T) {
 			t.Fatalf("resumeChainExe() error = %v", err)
 		}
 		reported := payload
-		reported.Report = clearErr.Error()
+		reported.Report = clearRow
 		want := resumeChainArgv(exe, resumeDrawSubcommand, reported)
 
 		if probe.execCalls != 1 {
@@ -167,7 +168,7 @@ func TestResumeAnswerEnter_FailedClear(t *testing.T) {
 		answerEnter(t, &probe, payload)
 
 		reported := payload
-		reported.Report = clearErr.Error()
+		reported.Report = clearRow
 
 		var drawProbe resumeDrawProbe
 		drawCfg := newResumeDrawConfig(t, &drawProbe, reported, fixedSize(100, 30))
@@ -177,7 +178,7 @@ func TestResumeAnswerEnter_FailedClear(t *testing.T) {
 		}
 
 		painted := drawProbe.stdout.String()
-		for _, want := range []string{payload.Command, clearErr.Error(), "resume", "discard"} {
+		for _, want := range []string{payload.Command, clearRow, "resume", "discard"} {
 			if !strings.Contains(painted, want) {
 				t.Errorf("the redrawn panel does not carry %q:\n%s", want, painted)
 			}
