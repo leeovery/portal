@@ -310,33 +310,75 @@ func TestResumeClearReport(t *testing.T) {
 }
 
 func TestResumeReportRows_FitTheCard(t *testing.T) {
-	rows := []string{
-		"can't read hooks.json: permission denied",
-		"can't read hooks.json: malformed JSON",
-		"can't lock hooks.json: another process holds it",
-		"can't lock hooks.json: permission denied",
-		"can't write hooks.json: no space left on device",
-		"can't write hooks.json: permission denied",
-		"can't locate hooks.json: $HOME is not defined",
-		"can't unpause this pane: can't find pane: %7",
-		"can't unpause this pane: tmux could not be run",
-		"can't carry out that answer",
+	type prefixed struct{ act, cause string }
+	paint := func(t *testing.T, render func(tui.ResumeScreen) string, row string) string {
+		t.Helper()
+		return render(tui.ResumeScreen{
+			Command:    samplePayload().Command,
+			Report:     row,
+			Width:      100,
+			Height:     30,
+			Theme:      themetest.DefaultDark(t),
+			Colourless: true,
+		})
 	}
-	for _, row := range rows {
+	renders := []func(tui.ResumeScreen) string{tui.RenderResumePanel, tui.RenderResumeDiscardConfirm}
+
+	whole := []string{
+		resumeReportMalformed,
+		resumeReportLockHeld,
+		resumeReportTmuxAbsent,
+		resumeReportFallback,
+	}
+	for _, p := range []prefixed{
+		{resumeReportRead, "permission denied"},
+		{resumeReportLock, "permission denied"},
+		{resumeReportWrite, "no space left on device"},
+		{resumeReportWrite, "permission denied"},
+		{resumeReportLocate, "$HOME is not defined"},
+		{resumeReportUnpause, "can't find pane: %7"},
+	} {
+		whole = append(whole, p.act+p.cause)
+	}
+	for _, row := range whole {
 		t.Run(row, func(t *testing.T) {
-			for _, render := range []func(tui.ResumeScreen) string{tui.RenderResumePanel, tui.RenderResumeDiscardConfirm} {
-				painted := render(tui.ResumeScreen{
-					Command:    samplePayload().Command,
-					Report:     row,
-					Width:      100,
-					Height:     30,
-					Theme:      themetest.DefaultDark(t),
-					Colourless: true,
-				})
-				if !strings.Contains(painted, row) {
+			for _, render := range renders {
+				if painted := paint(t, render, row); !strings.Contains(painted, row) {
 					t.Errorf("the card does not carry the whole row %q:\n%s", row, painted)
 				}
 			}
 		})
 	}
+
+	// A drop's cause is the operating system's, and can run past the card.
+	drop := prefixed{resumeReportDrop, syscall.ENOTTY.Error()}
+	t.Run(drop.act+drop.cause, func(t *testing.T) {
+		for _, render := range renders {
+			painted := paint(t, render, drop.act+drop.cause)
+			_, after, found := strings.Cut(painted, drop.act)
+			if !found {
+				t.Errorf("the card does not carry the whole act %q:\n%s", drop.act, painted)
+				continue
+			}
+			if !cutInsideCause(after, drop.cause) {
+				t.Errorf("after the act the card carries %q, want the cause %q whole or cut inside it:\n%s",
+					strings.SplitN(after, "\n", 2)[0], drop.cause, painted)
+			}
+		}
+	})
+}
+
+// cutInsideCause reports whether rendered, the text following a report row's
+// act, opens with the whole cause or with a non-empty proper prefix of it
+// closed by the truncation's ellipsis.
+func cutInsideCause(rendered, cause string) bool {
+	if strings.HasPrefix(rendered, cause) {
+		return true
+	}
+	for kept := len(cause) - 1; kept > 0; kept-- {
+		if strings.HasPrefix(rendered, cause[:kept]+"…") {
+			return true
+		}
+	}
+	return false
 }
