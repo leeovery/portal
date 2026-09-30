@@ -297,7 +297,7 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 16,
+          "current_phase": 17,
           "current_task": null,
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
@@ -381,7 +381,8 @@
             "lazy-resume-on-attach-16-1",
             "lazy-resume-on-attach-16-2",
             "lazy-resume-on-attach-16-3",
-            "lazy-resume-on-attach-16-4"
+            "lazy-resume-on-attach-16-4",
+            "lazy-resume-on-attach-17-1"
           ],
           "staging": {
             "p1": {
