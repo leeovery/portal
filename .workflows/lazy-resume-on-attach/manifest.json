@@ -252,7 +252,7 @@
     "implementation": {
       "items": {
         "lazy-resume-on-attach": {
-          "status": "completed",
+          "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
@@ -504,7 +504,7 @@
             13,
             14
           ],
-          "updated": "2026-09-28"
+          "updated": "2026-09-30"
         }
       }
     },
