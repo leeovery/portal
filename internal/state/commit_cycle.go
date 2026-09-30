@@ -37,7 +37,8 @@ type CommitCycle struct {
 	LoadPrev func() *Index
 	HashMap  HashMap
 	// Dump writes the caller's scrollback for the capture and reports whether
-	// any file changed. Nil dumps nothing. An error ends the cycle uncommitted.
+	// any file changed, skipping every pane CaptureCycle.SkipsScrollback
+	// answers true for. Nil dumps nothing. An error ends the cycle uncommitted.
 	Dump   func(CaptureCycle) (bool, error)
 	Logger *slog.Logger
 }

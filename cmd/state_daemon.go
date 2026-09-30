@@ -301,7 +301,7 @@ func (d *scrollbackDump) run(capture state.CaptureCycle) (bool, error) {
 					return false, errCycleCancelled
 				}
 				paneKey := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
-				if paneSkipsScrollback(paneKey, capture) {
+				if capture.SkipsScrollback(paneKey) {
 					continue
 				}
 				if d.dumpPane(sess.Name, win.Index, pane.Index, paneKey) {
@@ -335,19 +335,6 @@ func (d *scrollbackDump) dumpPane(session string, windowIdx, paneIdx int, paneKe
 		return false
 	}
 	return written
-}
-
-// Capturing a pane held behind a waiting resume panel writes back its
-// transcript minus the screenful that panel covers, and no copy of those lines
-// survives anywhere else. A carried session's address may now answer to
-// another pane, or to that waiting pane.
-func paneSkipsScrollback(paneKey string, capture state.CaptureCycle) bool {
-	for _, set := range []map[string]struct{}{capture.Skeleton, capture.Pending, capture.Carried} {
-		if _, skipped := set[paneKey]; skipped {
-			return true
-		}
-	}
-	return false
 }
 
 // tmux does not sentinel-wrap a vanished pane, so the "can't find " stderr

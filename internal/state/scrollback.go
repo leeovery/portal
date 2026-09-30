@@ -268,6 +268,20 @@ type CaptureCycle struct {
 	Carried map[string]struct{}
 }
 
+// SkipsScrollback reports whether a scrollback dump over this capture must skip
+// paneKey: a key in Skeleton, Pending or Carried. Capturing a pane held behind a
+// waiting resume panel writes back its transcript minus the screenful that
+// panel covers, and no copy of those lines survives anywhere else. A carried
+// session's address may now answer to another pane, or to that waiting pane.
+func (c CaptureCycle) SkipsScrollback(paneKey string) bool {
+	for _, set := range []map[string]struct{}{c.Skeleton, c.Pending, c.Carried} {
+		if _, skipped := set[paneKey]; skipped {
+			return true
+		}
+	}
+	return false
+}
+
 // captureAndRefile reads the skeleton markers, takes a capture merged against
 // them, and re-files every frozen pane's scrollback in one step, so no caller
 // can commit an index that omits a mid-restore pane's record, has two records

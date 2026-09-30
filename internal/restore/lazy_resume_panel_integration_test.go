@@ -494,10 +494,7 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 			for _, win := range sess.Windows {
 				for _, pane := range win.Panes {
 					key := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
-					if _, skipped := capture.Skeleton[key]; skipped {
-						continue
-					}
-					if _, waiting := capture.Pending[key]; waiting {
+					if capture.SkipsScrollback(key) {
 						continue
 					}
 					target := tmux.PaneTargetExact(sess.Name, win.Index, pane.Index)
