@@ -38,8 +38,8 @@ const internalSessionPrefix = "_"
 // ScrollbackFile of the previous record carrying its durable token, whatever its
 // address has become. A skipped pane carrying no token keeps the whole previous
 // record at its own address, a pending one those three fields of it, unless a
-// live pane carries that record's token. A stale marker never resurrects a
-// killed pane.
+// live pane in a session the capture reached carries that record's token. A
+// stale marker never resurrects a killed pane.
 //
 // A pane the enumeration lists as waiting whose session missed the capture —
 // renamed or killed mid-capture, or failing its environment read — would lose
@@ -340,7 +340,8 @@ func carryPrevContent(p *Pane, record Pane) {
 }
 
 // liveTokenSet holds the token of every record in fresh: before any merge
-// replaces a pane with a previous record, that is every live pane's token.
+// replaces a pane with a previous record, that is the token of every live pane
+// in a session the capture reached.
 func liveTokenSet(fresh Index) map[string]struct{} {
 	tokens := map[string]struct{}{}
 	for _, s := range fresh.Sessions {
