@@ -11,9 +11,9 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 )
 
-// The flags the resume chain's subcommands are addressed by. A pane is named
-// three times: --pane is the pane id the marker writes need, --pane-key the
-// positional key restore baked, and --hook-key the pane's durable token.
+// The flags the resume chain's subcommands are addressed by. --pane is the pane
+// id the marker writes need, --pane-key the positional key restore baked, and
+// --hook-key the pane's durable token.
 const (
 	resumeFlagCommand   = "command"
 	resumeFlagReport    = "report"

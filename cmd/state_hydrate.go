@@ -284,17 +284,12 @@ const parkedChainTrap = "trap : INT QUIT; "
 // tail that recovered the pane exec'd the user's shell, whose exit status
 // arrives here, and a second shell after it would make the pane take two exits
 // to close. The executable check tells a tail that never started from a shell
-// that exited 126 or 127 itself — but not an answered pane from an abandoned
-// one, since the binary can leave the baked path while an answered pane's shell
-// is still running. So the backstop opens with the tail's own gate: a pending
-// marker that reads back clear means the pane was answered and has had its
-// shell, and the chain ends with the could-not-run status. A read that fails
-// counts as still pending, as the tail counts it. A plain format read serves:
-// the one pane it misreads as clear is a gone one, which wants no shell either.
-// Past the gate it takes the tail's own steps in the tail's order — leave the
-// panel's screen, clear the pending marker, lift the alternate-screen pin once
-// tmux reports the leave, restore the terminal — since no Portal binary is left
-// to take them.
+// that exited 126 or 127 itself. The binary can leave the baked path while an
+// answered pane's shell runs, so the tail's own gate comes first: a marker that
+// reads back clear ends the chain, and a read that fails counts as still
+// pending. A plain format read serves: the one pane it misreads as clear is a
+// gone one, which wants no shell either. Past the gate it takes the tail's own
+// steps in the tail's order, since no Portal binary is left to take them.
 func parkedChainBackstop(exe string, payload resumeChainPayload) string {
 	target := string(tmux.PaneIDTarget(payload.Pane))
 	readMarker := shellquote.Join([]string{
