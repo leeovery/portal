@@ -15,7 +15,7 @@ A session renamed inside that window drops out of the capture, whether the renam
 
 The capture still succeeds because other sessions captured. `Commit`'s housekeeping pass (`internal/state/commit.go:39`, `:77-111`) then deletes every `.bin` the index does not name. That includes a waiting pane's `scrollback/pane-<token>.bin`.
 
-On the next capture the session is back under its new name. The previous index is the one just committed, so the token merge (`mergeFrozenPanes`, `internal/state/capture.go:183-206`) finds no record. The re-file treats the missing positional source as adoption (`placeStoredScrollback`, `internal/state/scrollback.go:143-152`) and points the record at the file that was just deleted. The pane is frozen, so nothing re-captures it.
+On the next capture the session is back under its new name. The previous index is the one just committed: the daemon keeps it in memory (`cmd/state_daemon.go:272`), and `commit-now` reads it from `sessions.json` under the commit lock (`cmd/state_commit_now.go:117-120`). So the token merge (`mergeFrozenPanes`, `internal/state/capture.go:183-206`) finds no record. The re-file treats the missing positional source as adoption (`placeStoredScrollback`, `internal/state/scrollback.go:143-152`) and points the record at the file that was just deleted. The pane is frozen, so nothing re-captures it.
 
 Before this feature, a skipped session cost one tick, because every unfrozen pane is re-captured from the live pane on the next tick. A waiting pane has no second source, so the loss is permanent:
 - At the next reboot the pane comes back with its panel over an empty pane, and `scrollback file not found` appears in portal.log.
@@ -37,6 +37,42 @@ Why this direction:
 - Refusing the commit outright whenever a live waiting pane misses the index would turn the per-session skip the tree tolerates into a stalled saver for every session. That skip covers one session failing its environment read.
 
 **Outcome**: After every commit, a waiting pane's token-named transcript is on disk and `sessions.json` names it. That holds even when a capture was taken while the pane's session was being renamed, or while its environment read failed. The pane restores with that transcript at the next reboot.
+
+**Acceptance Criteria**:
+In each scenario, session `foo` holds waiting pane X, which carries token T. The previous index names X's record in `foo` at `scrollback/pane-T.bin`, and that file is on disk.
+- [ ] A committing cycle's capture misses `foo` in one of three ways:
+  - (a) The session-name read returns `foo`, but the pane enumeration lists X, still marked pending, under `bar`. `foo`'s environment read answers no-such-session.
+  - (b) The enumeration lists X under `foo`, and `foo`'s environment read answers no-such-session.
+  - (c) Another session captures normally, and `foo`'s environment read fails with some other error.
+
+  After the commit, `pane-T.bin` is on disk and holds the bytes it held before. `sessions.json` holds `foo` as the previous index had it, with X's record naming `pane-T.bin`. A daemon tick and `portal state commit-now` both leave this state.
+- [ ] Continuing from any of those, the next committing cycle reaches X's session: as `bar` after (a) or (b), as `foo` after (c). It commits X's record at its live address naming `pane-T.bin`, and the file is still on disk holding the same bytes. After (a) or (b), `foo` is no longer in `sessions.json`.
+- [ ] A daemon tick that carries `foo` after (c) captures no scrollback from X and writes no scrollback file for it. The freeze holds for X as it does for any waiting pane.
+- [ ] `foo` is killed after the pane enumeration listed X. That cycle commits `foo` carried forward, as in the first scenario. The next committing cycle, whose enumeration no longer lists X, commits an index without `foo`.
+- [ ] Nothing is carried for a pane that the same enumeration does not list with the pending marker. A session killed before the pane enumeration, and a session missing from the capture that holds no waiting pane, are both left out of the committed index, as they are today.
+- [ ] When a carried session holds a record whose token a pane in the fresh capture also carries, the committed index holds that token on one record only.
+- [ ] A carry can land on the name of a session that reached the capture. For example, within one capture `foo` is renamed to `bar` and another session is renamed to `foo`. In that case the cycle commits nothing, and `sessions.json` and the scrollback directory are unchanged:
+  - The daemon's tick logs its existing `tick failed` WARN and re-touches `save.requested`.
+  - `commit-now` exits non-zero through its existing failure route, touching `save.requested`.
+
+  The next committing cycle in which X's session reaches the capture commits X's record naming `pane-T.bin`.
+- [ ] Where no waiting pane's session misses the capture, every committing cycle commits what it commits today.
+
+**Do**:
+- **Where it lives.** The rule goes in the shared capture in `internal/state` that every committing cycle runs, so the daemon's tick, its shutdown flush and `commit-now` all take it. The path is `RunCommitCycle` (`internal/state/commit_cycle.go:51-72`) → `captureAndRefile` (`internal/state/scrollback.go:275-288`) → `CaptureStructure` (`internal/state/capture.go:49-118`).
+- **Reading waiting panes.** The pending marker and the token come from the capture's one `ListAllPanesWithFormat` enumeration, whose `captureFormat` already carries both columns. Every non-internal row counts:
+  - rows `parsePaneRows` (`:338-358`) drops today because their session name is not in the session-name read;
+  - rows of a session the `ShowEnvironment` loop (`:78-96`) skips.
+
+  There is no second tmux read.
+- **Carrying.** Take each live waiting pane whose token no fresh record carries but a previous record does. The previous index's session that holds that record goes into the returned index whole, under its previous name.
+- **Limits.**
+  - A carried record never puts a token on a second record.
+  - A carry that would land on the name of a session that reached the capture fails the capture. `RunCommitCycle` then commits nothing, and the callers' existing failure routes handle it: the tick's `tick failed` WARN and `save.requested` re-touch (`cmd/state_daemon.go:200-206`), and `failCommitNow` (`cmd/state_commit_now.go:141-147`).
+  - There is no new retry path.
+- **Recovery.** Recovery rides the existing token merge (`mergeFrozenPanes`, `internal/state/capture.go:183-206`) against the previous index: the daemon's in-memory one, or the one `commit-now` reads under the lock. A carried session drops out once no live waiting pane needs it.
+- **Unchanged.** `gcOrphanScrollback` (`internal/state/commit.go:77-112`) keeps deleting every `.bin` its own index does not name, token-named files included.
+- This is a behaviour change, so the executor writes the tests that pin it.
 
 ## Task 2: A Waiting Pane Carries the Token That Protects Its Registration
 severity: low
@@ -64,3 +100,33 @@ Why this direction:
 - Review cycle 2 settled that the mark step's protective writes are unconditional, and that a pane Portal cannot protect falls back to eager.
 - The baked key is the pane's saved token. Where restore's re-stamp landed, the write sets the same value and changes nothing. Where it failed, the write sets the value restore was meant to set. Either way the pane's durable token never changes.
 - The write reads nothing, so the firing path still never reads the live token.
+
+**Outcome**: Every pane the helper parks carries its registration's token for the whole wait, whether or not restore's re-stamp landed. The stale-hook sweep therefore keeps the registration, and Enter on the panel runs the registered command. A pane whose token cannot be written does not wait: its hook fires eagerly, as it does for a pane whose pin or marker is refused.
+
+**Acceptance Criteria**:
+In each scenario, pane X was restored with a registration under its saved token T, and that registration resolves lazy.
+- [ ] Restore's re-stamp of T failed, so X carries no `@portal-pane-id`. When the helper parks X, X carries T as its `@portal-pane-id`.
+- [ ] Continuing, the daemon's stale-hook sweep runs while X waits. X's registration is still in `hooks.json` afterwards, so Enter on X's panel runs the registered command.
+- [ ] Restore's re-stamp landed. Parking X leaves its `@portal-pane-id` reading T.
+- [ ] On each of the helper's three tails (replay, signal timeout, missing scrollback file), the writes run in this order, all before the mid-restore marker is cleared:
+  1. the token
+  2. the alternate-screen pin
+  3. the pending marker
+- [ ] The helper never reads a pane's `@portal-pane-id` on any path. The token is written without a read first.
+- [ ] The token write is refused. X does not wait:
+  - no pin and no pending marker are written;
+  - the registered command runs as an eager hook (`sh -c '<command>; exec $SHELL'`);
+  - exactly one `set resume pending marker failed` WARN names the pane and the token write's error.
+- [ ] The pin or the marker is refused after the token write landed. X fires eagerly, as it does today, and no write removes T from X. A refused marker still lifts the pin, as it does today.
+- [ ] No token is written in these cases:
+  - `$TMUX_PANE` is absent, or the executable cannot be resolved (no pin or marker is written either);
+  - the pane's registration resolves eager;
+  - the pane has no registration.
+
+**Do**:
+- **The write.** In `markResumePending` (`cmd/state_hydrate.go:388-411`), write `cfg.HookKey` onto the resolved pane as `state.PortalPaneIDOption` through `cfg.Client.SetPaneOption`. That is the same unconditional pane-option write the alternate-screen pin uses, with no read of the pane's token first.
+- **Order.** After `requireTmuxPane` and the executable resolve, the writes run token, then pin, then marker.
+- **Refusal.** `markResumePending` returns a refused token write the way it returns a refused pin. `markPendingThenUnsetSkeletonMarker`'s existing `set resume pending marker failed` WARN (`cmd/state_hydrate.go:367-379`) then names its error, and the pane takes the eager hand-off. There is no new log event.
+- **No lift.** A pin or marker refused after the token landed leaves the token on the pane.
+- **Unchanged.** Restore's best-effort re-stamp (`restampPaneToken`, `internal/restore/session.go:157-169`).
+- This is a behaviour change, so the executor writes the tests that pin it. The refused-token case sits beside the existing mark-step refusals in `TestHydrateLazy_FiresTheHookWhenThePaneCannotBeMarked` (`cmd/state_hydrate_lazy_test.go:280-334`).

@@ -213,7 +213,10 @@
             "lazy-resume-on-attach-17": "tick-15d6e7",
             "lazy-resume-on-attach-17-1": "tick-d95ec9",
             "lazy-resume-on-attach-17-2": "tick-219d19",
-            "lazy-resume-on-attach-17-3": "tick-bc4a74"
+            "lazy-resume-on-attach-17-3": "tick-bc4a74",
+            "lazy-resume-on-attach-18": "tick-fa7852",
+            "lazy-resume-on-attach-18-1": "tick-7f8dbc",
+            "lazy-resume-on-attach-18-2": "tick-52e561"
           },
           "storage_paths": [
             ".tick/"
@@ -520,8 +523,8 @@
             },
             "c12": {
               "tasks": {
-                "1": "pending",
-                "2": "pending"
+                "1": "approved",
+                "2": "approved"
               }
             }
           },
