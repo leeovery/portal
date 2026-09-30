@@ -273,7 +273,7 @@
           "analysis_gate_mode": "auto",
           "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle_total": 12,
+          "analysis_cycle_total": 13,
           "linters": [
             {
               "name": "go vet",
