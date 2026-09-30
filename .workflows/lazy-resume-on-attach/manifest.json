@@ -302,8 +302,8 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 17,
-          "current_task": null,
+          "current_phase": 18,
+          "current_task": "lazy-resume-on-attach-18-2",
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -389,7 +389,8 @@
             "lazy-resume-on-attach-16-4",
             "lazy-resume-on-attach-17-1",
             "lazy-resume-on-attach-17-2",
-            "lazy-resume-on-attach-17-3"
+            "lazy-resume-on-attach-17-3",
+            "lazy-resume-on-attach-18-1"
           ],
           "staging": {
             "p1": {
@@ -566,7 +567,31 @@
             16,
             17
           ],
-          "updated": "2026-09-30"
+          "updated": "2026-09-30",
+          "bank": [
+            {
+              "task": "lazy-resume-on-attach-18-1",
+              "source": "reviewer",
+              "summary": "Move the dump-skip rule onto CaptureCycle itself, as a method in internal/state, so there is one declaration of it.",
+              "failure": "The lazy-panel integration fixture says it captures the way the daemon takes one, but restates the skip as Skeleton plus Pending and omits Carried. A future integration scenario with a missed session would capture-pane a carried waiting pane production never touches, or fail on a gone session target, passing or failing on behaviour the daemon does not have; any new Dump implementation would restate the rule the same way.",
+              "detail": "paneSkipsScrollback at cmd/state_daemon.go:344-351, and the fixture inline skip at internal/restore/lazy_resume_panel_integration_test.go:497-502.",
+              "files": [
+                "internal/state/scrollback.go",
+                "cmd/state_daemon.go",
+                "internal/restore/lazy_resume_panel_integration_test.go"
+              ]
+            },
+            {
+              "task": "lazy-resume-on-attach-18-1",
+              "source": "reviewer",
+              "summary": "Bring the CLAUDE.md state row in line with the carry.",
+              "failure": "The row still describes CaptureCycle{Index, Pending, Skeleton} whose two sets the caller dump must skip, and says the saver skip is mid-restore or pending. A contributor or agent writing a new committer from that row would dump carried panes and capture a waiting pane over its transcript, surfacing only as a lost transcript at the next reboot.",
+              "detail": "The state row in CLAUDE.md (the captureAndRefile / CaptureCycle / per-pane scrollback skip sentences). It should also mention the carry, and the refusal when a carry would land on a name a reached session holds.",
+              "files": [
+                "CLAUDE.md"
+              ]
+            }
+          ]
         }
       }
     },
