@@ -1,0 +1,34 @@
+# Consolidation Findings: lazy-resume-on-attach (Phase 15)
+
+## Findings
+
+### F1: CLAUDE.md's resume-chain account omits the alternate-screen pin the chain now writes and lifts
+- **Class**: drift (project documentation against the landed chain)
+- **Failure**: CLAUDE.md is loaded into every agent session as the authoritative account of the resume chain, and its Resume hooks paragraph lists the backstop's steps exhaustively ("takes the same steps in the same order from the shell — the reset bytes, `tmux set-option -pu -t <pane> @portal-resume-pending` …, `stty sane`, then `${SHELL:-/bin/sh}`") and the downgrade causes as a closed list ("an absent `$TMUX_PANE`, an unresolvable executable or a failed marker write"). An agent working from it would see the pane-level `alternate-screen on` write, the `#{alternate_on}` poll and the pin unset as undocumented residue, or as drift from the stated step order, and remove or reorder them. That leaves a pane on an install with `set -g alternate-screen off` painting the card into its transcript, or an unset landing before tmux processes the leave and stranding the panel over the transcript. Only the integration lane catches it (`TestLazyResumePanel_HoldsThePanelOnAnAlternateScreenTheInstallTurnedOff`), and nothing runs that lane automatically.
+- **Evidence**:
+  - CLAUDE.md:190 — the lazy-branch sentence ("a registration resolving **lazy** instead has the pane marked `@portal-resume-pending` — **before** the mid-restore marker is cleared …"), the tail sentence ("it leaves the panel's screen, clears `@portal-resume-pending`, restores a cooked terminal and exec's the user's shell"), the backstop sentence (quoted above) and the refusal sentence ("an absent `$TMUX_PANE`, an unresolvable executable or a failed marker write each downgrade the decision to eager — the refusal taken before the marker is written — and emit one `set resume pending marker failed` WARN …")
+  - cmd/state_hydrate.go:394 — the pin written before the marker; :397-400 — a refused marker lifts the pin (a refused lift logs `lift alternate-screen pin failed`); a refused pin returns into the same `set resume pending marker failed` WARN and eager downgrade
+  - cmd/state_resume_altscreen.go:39-58 — `releaseAltScreenPin` / `awaitPrimaryScreen`: unset only once `#{alternate_on}` reads 0 within `altScreenLeaveAttempts` × `altScreenLeavePoll`; an unconfirmed leave keeps the pin
+  - cmd/state_resume_recover.go:56 — the tail releases the pin after the marker clear, before signals and the shell
+  - cmd/state_resume_wait.go:386 — Enter and a confirmed discard release it after a clear that landed; a refused clear keeps it for the redraw
+  - cmd/state_hydrate.go:291-316 — the backstop now runs `backstopReleasePin` between the marker clear and `stty sane`
+- **Proposed shape**: Amend the four CLAUDE.md:190 sentences in place, leaving the rest of the paragraph alone:
+  1. The lazy branch: the pane is first pinned to a pane-level `alternate-screen on`, so the panel sits on an alternate screen whatever the install sets, and then marked `@portal-resume-pending`, both before the mid-restore marker is cleared. The pin goes first because a pin left behind overrides one display setting on one pane, while a marker left behind freezes that pane's scrollback.
+  2. The tail (and the answers): after the marker clear, the pin is lifted only once tmux reports `#{alternate_on}` 0 within a bounded poll. A leave that is never confirmed keeps the pin, because an unset tmux processes before the leave bytes makes it ignore the leave. Enter and a confirmed discard take the same release after a clear that landed, and a refused clear keeps the pin for the redraw.
+  3. The backstop's step list: insert, after the marker clear and before `stty sane`, the bounded `#{alternate_on}` poll followed by `tmux set-option -pu -t <pane> alternate-screen` only once it reads 0, with errors discarded.
+  4. The refusal list: add a refused alternate-screen pin among the causes that downgrade to eager under the same WARN, and state that a refused marker lifts the pin it follows.
+- **Bank**: reviewer, task 15-1: "The CLAUDE.md Resume hooks paragraph no longer describes the resume chain as it stands (no alternate-screen pin)." Confirmed: CLAUDE.md is unchanged since phase 13, and all three additions it names are still missing at line 190.
+
+## Spec Defects
+
+### S1: The panel's alternate-screen isolation is stated unconditionally, but it holds only because the pane is pinned
+- **Claim**: §5.1 (specification.md:161): "**The panel is painted into the pane's alternate screen, so it never enters the scrollback.** … The alternate screen is exactly that facility: the buffer `vim` and `less` draw on, which is not added to a pane's scrollback ring." Dependent claims:
+  - §4.3 (:137): the tail "takes the pane off the panel's screen, clears the pending marker, and then execs the user's shell".
+  - §7.3 (:331): the backstop "leaves the panel's screen and clears the marker itself before handing the pane its shell".
+  - §8.2 (:361): "If the pending marker cannot be written, the helper does not paint". This names the marker as the one write whose refusal keeps a pane from waiting.
+- **Observed**:
+  - On a pane whose effective `alternate-screen` option is off (an install carrying `set -g alternate-screen off`), tmux ignores the draw's `\x1b[?1049h`, and the card is painted onto the primary screen and into the transcript. The phase exists to close that case.
+  - The landed code makes §5.1 hold by pinning a pane-level `alternate-screen on` before the marker (cmd/state_hydrate.go:394). A refused pin downgrades the pane to eager under the marker-refusal WARN, and a refused marker lifts the pin (:397-400).
+  - Every route that takes the pane off the panel's screen then releases the pin only once tmux reports `#{alternate_on}` 0 (cmd/state_resume_altscreen.go:39-58). Those routes are the answers (cmd/state_resume_wait.go:386), the tail (cmd/state_resume_recover.go:56) and the shell backstop (cmd/state_hydrate.go:303-316).
+  - `TestLazyResumePanel_HoldsThePanelOnAnAlternateScreenTheInstallTurnedOff` (internal/restore/lazy_resume_panel_integration_test.go:275) stages the off install and asserts that the global option reads `off` while the panel waits.
+- **Read**: Spec stale. The §5.1 measurement was taken on an install with `alternate-screen` on. The outcome it states is right and is now delivered, but it is stated as a property of the alternate screen when it depends on a tmux option the user's config can turn off. The spec names neither the pin that makes it hold, nor the pin's release ordering after each leave, nor the pin as a second write whose refusal keeps a pane from waiting. A reader building from the spec alone would reintroduce the defect this phase closed.
