@@ -456,8 +456,8 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 	})
 }
 
-// The waiter is the pane's only process: declining a hangup would outlive the
-// destruction of its own pane, leaving a Portal process per culled session.
+// A waiter declining a hangup would outlive the destruction of its own pane,
+// leaving a Portal process per culled session.
 // SIGWINCH is the one signal the wait path may watch, so a resize seam leaves
 // this green while a declined hangup fails it.
 func TestRunResumeWait_InstallsNoHangupTerminateOrInterruptHandler(t *testing.T) {
