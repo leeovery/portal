@@ -203,7 +203,8 @@
             "lazy-resume-on-attach-14": "tick-44ad5d",
             "lazy-resume-on-attach-14-1": "tick-b281c8",
             "lazy-resume-on-attach-15": "tick-326d39",
-            "lazy-resume-on-attach-15-1": "tick-283867"
+            "lazy-resume-on-attach-15-1": "tick-283867",
+            "lazy-resume-on-attach-15-2": "tick-c30df9"
           },
           "storage_paths": [
             ".tick/"
@@ -256,7 +257,7 @@
           "task_gate_mode": "gated",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
-          "consolidation_gate_mode": "gated",
+          "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 9,
           "linters": [
@@ -471,6 +472,11 @@
               "tasks": {
                 "1": "approved"
               }
+            },
+            "p15": {
+              "tasks": {
+                "1": "approved"
+              }
             }
           },
           "consolidated_phases": [
@@ -487,7 +493,8 @@
             11,
             12,
             13,
-            14
+            14,
+            15
           ],
           "completed_phases": [
             1,
@@ -505,19 +512,7 @@
             13,
             14
           ],
-          "updated": "2026-09-30",
-          "bank": [
-            {
-              "task": "lazy-resume-on-attach-15-1",
-              "source": "reviewer",
-              "summary": "The CLAUDE.md Resume hooks paragraph no longer describes the resume chain as it stands (no alternate-screen pin).",
-              "failure": "CLAUDE.md is loaded into every agent session as the authoritative account of the resume chain; an agent working from it would read a waiting pane's alternate-screen on as unexplained residue, or treat the backstop's poll-and-unset as drift and remove or reorder it, leaving the user a pane that keeps the pin and no longer follows their own alternate-screen off. Only an integration run would catch it, and nothing runs that automatically.",
-              "detail": "CLAUDE.md:190 needs three additions: the pin written before the marker in the mark step; the confirm-then-unset step in the tail and backstop, after the marker clear and before stty sane or the shell; and a refused alternate-screen pin among the eager-downgrade refusal causes (currently listed as absent $TMUX_PANE, unresolvable executable, failed marker write).",
-              "files": [
-                "CLAUDE.md"
-              ]
-            }
-          ]
+          "updated": "2026-09-30"
         }
       }
     },
