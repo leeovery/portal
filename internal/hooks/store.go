@@ -130,26 +130,50 @@ func (s *Store) save(h Snapshot) error {
 	return fileutil.AtomicWrite(s.path, bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
 }
 
+// acquireMutationLockFor takes the mutation hold for a per-key mutation and,
+// when it cannot, writes that mutation's WARN under op. The record carries no
+// error_class — nothing reached the write phases it classifies — and no value,
+// which names what a write carried.
+func (s *Store) acquireMutationLockFor(op, key string, via Via) (*os.File, error) {
+	lock, err := s.acquireMutationLock()
+	if err != nil {
+		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(), "error", err)
+		return nil, err
+	}
+	return lock, nil
+}
+
+// loadForMutation is a per-key mutation's load from inside its hold. A load it
+// cannot complete — an unreadable file or one that does not parse — is
+// reported as ErrStoreRead and written as the mutation's WARN under op, with no
+// error_class and no value for the same reasons as a refused acquire.
+func (s *Store) loadForMutation(op, key string, via Via) (Snapshot, error) {
+	h, err := s.load()
+	if err != nil {
+		err = fmt.Errorf("%w: %w", ErrStoreRead, err)
+		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(), "error", err)
+		return nil, err
+	}
+	return h, nil
+}
+
 // Set adds or overwrites the hook for key and event with the whole of
 // registration: nothing the replaced value held survives a rewrite it was not
 // given. Writing a registration the stored one already matches on command and
 // mode is a no-op: the file is left untouched. via records the mutation origin
 // for the audit breadcrumb.
 func (s *Store) Set(key string, event Event, registration Registration, via Via) error {
-	lock, err := s.acquireMutationLock()
+	// Under the method's own op, not classifySet's verdict: that verdict reads
+	// the loaded file, and a refused acquire or load is what prevented reading it.
+	lock, err := s.acquireMutationLockFor("set", key, via)
 	if err != nil {
-		// Under the method's own op, not classifySet's verdict: that verdict reads
-		// the loaded file, and the acquire is what prevented the load. No
-		// error_class — nothing reached the write phases it classifies — and no
-		// value, which names what a write carried.
-		logger.Warn("set", "op", "set", "hook_key", key, "via", via.String(), "error", err)
 		return err
 	}
 	defer func() { _ = lock.Close() }()
 
-	h, err := s.load()
+	h, err := s.loadForMutation("set", key, via)
 	if err != nil {
-		return fmt.Errorf("failed to load hooks: %w", err)
+		return err
 	}
 
 	op := classifySet(h, key, event, registration)
@@ -213,19 +237,17 @@ func (s *Store) removeEntry(key string, event Event, via Via, op string, carryVa
 		return false, nil
 	}
 
-	lock, err := s.acquireMutationLock()
+	// A refused acquire or load is a failed operation, not the silent no-removal
+	// below: that one changed nothing because there was nothing to change, and
+	// this one could not look.
+	lock, err := s.acquireMutationLockFor(op, key, via)
 	if err != nil {
-		// A failed operation, not the silent no-removal below: that one changed
-		// nothing because there was nothing to change, and this one could not look.
-		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(), "error", err)
 		return false, err
 	}
 	defer func() { _ = lock.Close() }()
 
-	h, err := s.load()
+	h, err := s.loadForMutation(op, key, via)
 	if err != nil {
-		err = fmt.Errorf("%w: %w", ErrStoreRead, err)
-		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(), "error", err)
 		return false, err
 	}
 
@@ -323,11 +345,9 @@ func narrowToSnapshot(candidates []string, snapshot Snapshot) []string {
 	return narrowed
 }
 
-// ErrStoreRead reports that a read of the file failed, whichever of the clean's
-// two reads it was — the pre-read, which leaves the enumeration unrun and
-// nothing judged, or the load the deletion takes under its own hold — or the
-// load a removal takes under its hold. A clean that read, judged and then
-// failed to write carries it from neither.
+// ErrStoreRead reports a read of hooks.json that a mutation or a clean could
+// not complete, so nothing was judged or written on its strength. A failed
+// write never carries it.
 var ErrStoreRead = errors.New("failed to read hooks store")
 
 // ErrMalformed reports a hooks.json that exists but does not parse. A read

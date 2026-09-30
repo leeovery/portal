@@ -116,6 +116,9 @@ func TestHydrateLazy_ParksTheChainWhenSignalGenerationCannotBeCleared(t *testing
 	if !strings.Contains(warn, "pane_key="+paneKey) || !strings.Contains(warn, "inappropriate ioctl") {
 		t.Errorf("WARN = %q, want it to name the pane and the error", warn)
 	}
+	if !strings.Contains(warn, "hook_key="+lazyHookKey) {
+		t.Errorf("WARN = %q, want it to name the pane by its durable token hook_key=%s", warn, lazyHookKey)
+	}
 }
 
 func TestHydrateLazy_LeavesSignalGenerationAloneOnAPaneThatNeverWaits(t *testing.T) {

@@ -232,12 +232,75 @@ func TestSet(t *testing.T) {
 		store, filePath := hookstest.StageStore(t, hookstest.Staging{Seed: "not json"})
 		before := hookstest.HooksFileBytes(t, filePath)
 
+		sink := logtest.Install(t)
+
 		err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI)
 		if !errors.Is(err, hooks.ErrMalformed) {
 			t.Errorf("err = %v, want errors.Is ErrMalformed — a map loaded from nothing and written back is every other entry gone", err)
 		}
+		if !errors.Is(err, hooks.ErrStoreRead) {
+			t.Errorf("err = %v, want errors.Is ErrStoreRead", err)
+		}
 
 		hookstest.AssertHooksFileUnchanged(t, filePath, before, "rewritten while malformed")
+		rec := sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the malformed load's record")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{
+			Level:     slog.LevelWarn,
+			Msg:       "set",
+			Component: "hooks",
+			Op:        "set",
+			Via:       "cli",
+		})
+	})
+
+	t.Run("it logs a load it could not complete and reports it as a read failure", func(t *testing.T) {
+		store, filePath := hookstest.StageStore(t, hookstest.Staging{
+			Entries: map[string]string{hookstest.SubjectSeedB: "echo kept"},
+		})
+		before := hookstest.HooksFileBytes(t, filePath)
+		if err := os.Chmod(filePath, 0o000); err != nil {
+			t.Fatalf("chmod hooks.json: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(filePath, 0o600) })
+		sink := logtest.Install(t)
+
+		err := store.Set(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI)
+		if !errors.Is(err, hooks.ErrStoreRead) {
+			t.Errorf("err = %v, want errors.Is ErrStoreRead", err)
+		}
+		if !errors.Is(err, os.ErrPermission) {
+			t.Errorf("err = %v, want the OS's permission refusal in the chain", err)
+		}
+
+		rec := sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the failed load's record")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{
+			Level:     slog.LevelWarn,
+			Msg:       "set",
+			Component: "hooks",
+			Op:        "set",
+			Via:       "cli",
+		})
+		if got := rec.AttrString(t, "hook_key"); got != hookstest.SubjectSeedA {
+			t.Errorf("hook_key = %q, want %q", got, hookstest.SubjectSeedA)
+		}
+		logged := rec.ErrorAttr(t, "error")
+		if err == nil || logged.Error() != err.Error() {
+			t.Errorf("WARN error = %v, want the whole returned chain %v", logged, err)
+		}
+		if !bytes.Contains([]byte(logged.Error()), []byte(filePath)) {
+			t.Errorf("WARN error = %v, want it to name %s", logged, filePath)
+		}
+		if rec.HasAttr("error_class") {
+			t.Error("WARN carries error_class, want none: no write phase ran")
+		}
+		if rec.HasAttr("value") {
+			t.Error("WARN carries value, want none: nothing was written")
+		}
+
+		if err := os.Chmod(filePath, 0o600); err != nil {
+			t.Fatalf("restore hooks.json mode: %v", err)
+		}
+		hookstest.AssertHooksFileUnchanged(t, filePath, before, "rewritten while unreadable")
 	})
 
 	t.Run("overwrites existing entry for same key and event", func(t *testing.T) {

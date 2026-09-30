@@ -267,7 +267,7 @@ func execResumeChainAndExit(cfg hydrateConfig, command string, parked parkedPane
 		PaneKey: state.PaneKeyFromFIFOPath(cfg.FIFO),
 	}
 	if err := cfg.DisableTTYSignals(); err != nil {
-		cfg.Logger.Warn("disable terminal signals failed", "pane_key", payload.PaneKey, "error", err)
+		cfg.Logger.Warn("disable terminal signals failed", payload.paneRef().logAttrs("error", err)...)
 	}
 	args := []string{"sh", "-c", parkedResumeChain(parked.Exe, payload)}
 	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", args, true)
