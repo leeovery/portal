@@ -61,8 +61,6 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	return captured.index, captured.pending, err
 }
 
-// structureCapture is one structural capture: the index, the pending set
-// CaptureStructure returns, and the pane keys of every carried session.
 type structureCapture struct {
 	index   Index
 	pending map[string]struct{}
