@@ -211,7 +211,9 @@
             "lazy-resume-on-attach-16-3": "tick-3e3e5a",
             "lazy-resume-on-attach-16-4": "tick-e7f3bc",
             "lazy-resume-on-attach-17": "tick-15d6e7",
-            "lazy-resume-on-attach-17-1": "tick-d95ec9"
+            "lazy-resume-on-attach-17-1": "tick-d95ec9",
+            "lazy-resume-on-attach-17-2": "tick-219d19",
+            "lazy-resume-on-attach-17-3": "tick-bc4a74"
           },
           "storage_paths": [
             ".tick/"
@@ -510,8 +512,8 @@
             },
             "p17": {
               "tasks": {
-                "1": "pending",
-                "2": "pending"
+                "1": "approved",
+                "2": "approved"
               }
             }
           },
@@ -531,7 +533,8 @@
             13,
             14,
             15,
-            16
+            16,
+            17
           ],
           "completed_phases": [
             1,
