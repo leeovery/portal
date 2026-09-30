@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,23 +40,51 @@ const internalSessionPrefix = "_"
 // record at its own address, a pending one those three fields of it, unless a
 // live pane carries that record's token. A stale marker never resurrects a
 // killed pane.
+//
+// A pane the enumeration lists as waiting whose session missed the capture —
+// renamed or killed mid-capture, or failing its environment read — would lose
+// its only transcript to the commit's housekeeping pass, so the previous
+// session holding its record is carried into the Index whole, under its
+// previous name, with any token a fresh record carries removed from it. A carry
+// landing on the name of a session the capture reached is an error.
+//
 // A tmux enumeration failure yields an empty Index and a wrapped error, never a
 // partial one. A per-session failure is logged and skipped, unless every
 // session failed on something other than vanishing, which errors so the caller
 // refuses to commit over a broken read.
 //
 // The second return holds the pane keys of every live pane carrying the resume
-// pending marker, at the pane's live address and only for sessions that reached
-// the Index. It is non-nil on every return, and nothing about it is persisted.
+// pending marker, at the pane's live address and only for sessions the capture
+// reached. It is non-nil on every return, and nothing about it is persisted.
 func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index, logger *slog.Logger) (Index, map[string]struct{}, error) {
+	captured, err := captureStructure(c, skipSet, prev, logger)
+	return captured.index, captured.pending, err
+}
+
+// structureCapture is one structural capture: the index, the pending set
+// CaptureStructure returns, and the pane keys of every carried session.
+type structureCapture struct {
+	index   Index
+	pending map[string]struct{}
+	carried map[string]struct{}
+}
+
+// errCarryNameTaken refuses the commit rather than put two sessions under one
+// name or drop the waiting pane's only transcript.
+var errCarryNameTaken = errors.New("a waiting pane's session missed the capture and a captured session holds its previous name")
+
+func captureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index, logger *slog.Logger) (structureCapture, error) {
 	logger = loggerOrDiscard(logger)
 	savedAt := time.Now().UTC()
-	empty := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}}
-	emptyPending := map[string]struct{}{}
+	empty := structureCapture{
+		index:   Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}},
+		pending: map[string]struct{}{},
+		carried: map[string]struct{}{},
+	}
 
 	names, err := c.ListSessionNames()
 	if err != nil {
-		return empty, emptyPending, err
+		return empty, err
 	}
 
 	keep := keepSessionNames(names)
@@ -63,11 +93,11 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	if len(keep) > 0 {
 		raw, err := c.ListAllPanesWithFormat(captureFormat)
 		if err != nil {
-			return empty, emptyPending, err
+			return empty, err
 		}
-		grouped, err = parsePaneRows(raw, keep)
+		grouped, err = parsePaneRows(raw)
 		if err != nil {
-			return empty, emptyPending, err
+			return empty, err
 		}
 	}
 
@@ -96,7 +126,7 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	}
 
 	if len(keep) > 0 && len(sessions) == 0 && len(anomalousErrs) > 0 {
-		return empty, emptyPending, fmt.Errorf(
+		return empty, fmt.Errorf(
 			"capture: all %d sessions failed (%d anomalous, %d natural): %w",
 			len(keep), len(anomalousErrs), naturalChurnCount,
 			errors.Join(anomalousErrs...))
@@ -113,8 +143,108 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 		mergeFrozenPanes(&idx, *prev, live, liveTokens)
 	}
 
+	carried := map[string]struct{}{}
+	if prev != nil {
+		if carried, err = carryMissedWaitingSessions(&idx, *prev, waitingTokens(grouped)); err != nil {
+			return empty, err
+		}
+	}
+
 	idx.Canonicalize()
-	return idx, paneKeySet(live), nil
+	return structureCapture{index: idx, pending: paneKeySet(live), carried: carried}, nil
+}
+
+// waitingTokens holds the token of every enumerated pane carrying the resume
+// pending marker, whichever session it was listed under.
+func waitingTokens(grouped map[string][]paneRow) map[string]struct{} {
+	tokens := map[string]struct{}{}
+	for _, rows := range grouped {
+		for _, r := range rows {
+			if r.resumePending && r.portalPaneID != "" {
+				tokens[r.portalPaneID] = struct{}{}
+			}
+		}
+	}
+	return tokens
+}
+
+// carryMissedWaitingSessions appends to fresh every previous session whose
+// record answers to a waiting token no record of fresh carries, and returns
+// the pane keys of what it appended. A token held by more than one previous
+// record resolves to the first in canonical order, as the merges resolve it.
+func carryMissedWaitingSessions(fresh *Index, prev Index, waiting map[string]struct{}) (map[string]struct{}, error) {
+	placed := liveTokenSet(*fresh)
+	toCarry := map[string]struct{}{}
+	resolved := map[string]struct{}{}
+	for _, e := range canonicalPrevPanes(prev) {
+		token := e.pane.PortalPaneID
+		if _, isWaiting := waiting[token]; !isWaiting {
+			continue
+		}
+		if _, done := resolved[token]; done {
+			continue
+		}
+		resolved[token] = struct{}{}
+		if _, onFresh := placed[token]; onFresh {
+			continue
+		}
+		toCarry[e.session] = struct{}{}
+	}
+	if len(toCarry) == 0 {
+		return map[string]struct{}{}, nil
+	}
+
+	for _, s := range fresh.Sessions {
+		if _, taken := toCarry[s.Name]; taken {
+			return nil, fmt.Errorf("carry session %q: %w", s.Name, errCarryNameTaken)
+		}
+	}
+
+	carried := map[string]struct{}{}
+	for _, name := range sortedKeys(toCarry) {
+		s := carriedSession(prev, name, placed)
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				carried[SanitizePaneKey(s.Name, w.Index, p.Index)] = struct{}{}
+			}
+		}
+		fresh.Sessions = append(fresh.Sessions, s)
+	}
+	sort.SliceStable(fresh.Sessions, func(i, j int) bool {
+		return fresh.Sessions[i].Name < fresh.Sessions[j].Name
+	})
+	return carried, nil
+}
+
+// carriedSession copies the first previous session named name, so nothing
+// done to the carried copy reaches the caller's previous index. A token
+// already in placed is removed from the copy, and every token the copy keeps
+// is added to placed, so no token lands on a second record.
+func carriedSession(prev Index, name string, placed map[string]struct{}) Session {
+	var src Session
+	for _, s := range prev.Sessions {
+		if s.Name == name {
+			src = s
+			break
+		}
+	}
+	out := Session{Name: src.Name, Environment: maps.Clone(src.Environment), Windows: make([]Window, len(src.Windows))}
+	for wi, w := range src.Windows {
+		w.Panes = slices.Clone(w.Panes)
+		for pi := range w.Panes {
+			p := &w.Panes[pi]
+			if p.PortalPaneID == "" {
+				continue
+			}
+			if _, taken := placed[p.PortalPaneID]; taken {
+				p.PortalPaneID = ""
+				continue
+			}
+			placed[p.PortalPaneID] = struct{}{}
+		}
+		out.Windows[wi] = w
+	}
+	return out
 }
 
 // livePane holds what the enumeration knows about a waiting pane, so the merge
@@ -211,8 +341,8 @@ func carryPrevContent(p *Pane, record Pane) {
 	p.ScrollbackFile = record.ScrollbackFile
 }
 
-// liveTokenSet holds the token of every live pane in fresh, read before any
-// merge replaces a pane with a previous record.
+// liveTokenSet holds the token of every record in fresh: before any merge
+// replaces a pane with a previous record, that is every live pane's token.
 func liveTokenSet(fresh Index) map[string]struct{} {
 	tokens := map[string]struct{}{}
 	for _, s := range fresh.Sessions {
@@ -312,12 +442,16 @@ func sortedKeys(set map[string]struct{}) []string {
 func keepSessionNames(names []string) map[string]struct{} {
 	keep := make(map[string]struct{}, len(names))
 	for _, name := range names {
-		if strings.HasPrefix(name, internalSessionPrefix) {
+		if isInternalSession(name) {
 			continue
 		}
 		keep[name] = struct{}{}
 	}
 	return keep
+}
+
+func isInternalSession(name string) bool {
+	return strings.HasPrefix(name, internalSessionPrefix)
 }
 
 type paneRow struct {
@@ -335,8 +469,10 @@ type paneRow struct {
 	resumePending  bool
 }
 
-func parsePaneRows(raw string, keep map[string]struct{}) (map[string][]paneRow, error) {
-	out := make(map[string][]paneRow, len(keep))
+// parsePaneRows groups every non-internal row by the session it was listed
+// under, including sessions the session-name read did not return.
+func parsePaneRows(raw string) (map[string][]paneRow, error) {
+	out := map[string][]paneRow{}
 	if raw == "" {
 		return out, nil
 	}
@@ -349,7 +485,7 @@ func parsePaneRows(raw string, keep map[string]struct{}) (map[string][]paneRow, 
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := keep[row.session]; !ok {
+		if isInternalSession(row.session) {
 			continue
 		}
 		out[row.session] = append(out[row.session], row)

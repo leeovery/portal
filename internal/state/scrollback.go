@@ -254,7 +254,7 @@ type CaptureCycleClient interface {
 }
 
 // CaptureCycle is what one capture cycle hands its caller: the index to commit
-// and the two sets of pane keys the caller's own scrollback dump must skip.
+// and the sets of pane keys the caller's own scrollback dump must skip.
 type CaptureCycle struct {
 	Index Index
 	// Pending holds every live pane carrying the resume pending marker.
@@ -262,14 +262,18 @@ type CaptureCycle struct {
 	// Skeleton holds every pane key a skeleton marker named when the capture was
 	// taken.
 	Skeleton map[string]struct{}
+	// Carried holds every pane key of a session the index carries forward from
+	// the previous index rather than from the capture: none of its panes was
+	// captured, so none may be dumped.
+	Carried map[string]struct{}
 }
 
 // captureAndRefile reads the skeleton markers, takes a capture merged against
 // them, and re-files every frozen pane's scrollback in one step, so no caller
 // can commit an index that omits a mid-restore pane's record, has two records
 // naming one scrollback file, or still names a waiting pane's vacated
-// positional path, bar a pane whose token the pane-token rule refuses or whose
-// link or re-file failed. A failed marker read returns its wrapped error before
+// positional path, bar a pane whose token the pane-token rule refuses, whose
+// link or re-file failed, or whose session the capture carried. A failed marker read returns its wrapped error before
 // any capture is taken. A failed capture returns before anything is re-filed,
 // with the empty index, the empty pending set and the error the capture gave.
 func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
@@ -277,12 +281,12 @@ func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap,
 	if err != nil {
 		return CaptureCycle{}, fmt.Errorf("list skeleton markers: %w", err)
 	}
-	idx, pending, err := CaptureStructure(c, skeleton, prev, logger)
-	capture := CaptureCycle{Index: idx, Pending: pending, Skeleton: skeleton}
+	captured, err := captureStructure(c, skeleton, prev, logger)
+	capture := CaptureCycle{Index: captured.index, Pending: captured.pending, Skeleton: skeleton, Carried: captured.carried}
 	if err != nil {
 		return capture, err
 	}
 	linkMovedSkeletonScrollback(dir, &capture.Index, skeleton, logger)
-	refilePendingScrollback(dir, &capture.Index, pending, hm, logger)
+	refilePendingScrollback(dir, &capture.Index, capture.Pending, hm, logger)
 	return capture, nil
 }

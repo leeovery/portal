@@ -47,7 +47,8 @@ type daemonFakeCommander struct {
 	panesOut string
 	panesErr error
 
-	envBySession map[string]string
+	envBySession    map[string]string
+	envErrBySession map[string]error
 
 	captureByTarget    map[string]string
 	captureErrByTarget map[string]error
@@ -117,6 +118,9 @@ func (c *daemonFakeCommander) dispatch(args []string) (string, error) {
 		return c.panesOut, c.panesErr
 	case "show-environment":
 		if len(args) >= 3 {
+			if err, ok := c.envErrBySession[sessionFromExactTarget(args[2])]; ok {
+				return "", err
+			}
 			if v, ok := c.envBySession[sessionFromExactTarget(args[2])]; ok {
 				return v, nil
 			}

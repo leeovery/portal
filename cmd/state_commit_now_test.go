@@ -24,6 +24,7 @@ type fakeCaptureClient struct {
 	rowsErr      error
 	env          map[string]string
 	envErr       error
+	envErrs      map[string]error
 	markers      string
 	markersErr   error
 }
@@ -44,6 +45,9 @@ func (f *fakeCaptureClient) ListAllPanesWithFormat(_ string) (string, error) {
 func (f *fakeCaptureClient) ShowEnvironment(name string) (string, error) {
 	if f.envErr != nil {
 		return "", f.envErr
+	}
+	if err, ok := f.envErrs[name]; ok {
+		return "", err
 	}
 	return f.env[name], nil
 }
