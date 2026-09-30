@@ -51,11 +51,13 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	shown := cfg.resumeChainPayload
 	shown.DropInput = false
 	// Input the drop could not discard may still answer the confirmation, so it
-	// is never put up over that input.
+	// is never put up over that input, and the waiter is told the input is its
+	// own to swallow.
 	if dropErr != nil {
 		cfg.Logger.Warn("clear pending input failed", shown.paneRef().logAttrs("error", dropErr)...)
 		shown.Screen = resumeScreenPanel
 		shown.Report = resumeDropRefusal(dropErr)
+		shown.InputArriving = true
 	}
 
 	_, _ = io.WriteString(cfg.Stdout, hydrateAltScreenEnter)
@@ -147,16 +149,18 @@ var stateResumeDrawCmd = &cobra.Command{
 		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
 		dropInput, _ := cmd.Flags().GetBool(resumeFlagDropInput)
+		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
 
 		return resumeDrawRunFunc(resumeDrawConfig{
 			resumeChainPayload: resumeChainPayload{
-				Command:   command,
-				Report:    report,
-				HookKey:   hookKey,
-				Pane:      pane,
-				PaneKey:   paneKey,
-				Screen:    screen,
-				DropInput: dropInput,
+				Command:       command,
+				Report:        report,
+				HookKey:       hookKey,
+				Pane:          pane,
+				PaneKey:       paneKey,
+				Screen:        screen,
+				DropInput:     dropInput,
+				InputArriving: inputArriving,
 			},
 			Stdout:         os.Stdout,
 			Logger:         hydrateLogger,
@@ -182,6 +186,7 @@ func init() {
 	stateResumeDrawCmd.Flags().Int(resumeFlagHeight, 0, "Height the previous screen was drawn at")
 	stateResumeDrawCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen to draw: discard for the confirmation, else the panel")
 	stateResumeDrawCmd.Flags().Bool(resumeFlagDropInput, false, "Discard input already queued on the pane before drawing")
+	stateResumeDrawCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the pane when it was handed over")
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagCommand)
 
 	stateCmd.AddCommand(stateResumeDrawCmd)

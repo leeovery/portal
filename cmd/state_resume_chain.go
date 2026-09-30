@@ -15,15 +15,16 @@ import (
 // id the marker writes need, --pane-key the positional key restore baked, and
 // --hook-key the pane's durable token.
 const (
-	resumeFlagCommand   = "command"
-	resumeFlagReport    = "report"
-	resumeFlagHookKey   = "hook-key"
-	resumeFlagPane      = "pane"
-	resumeFlagPaneKey   = "pane-key"
-	resumeFlagWidth     = "width"
-	resumeFlagHeight    = "height"
-	resumeFlagScreen    = "screen"
-	resumeFlagDropInput = "drop-input"
+	resumeFlagCommand       = "command"
+	resumeFlagReport        = "report"
+	resumeFlagHookKey       = "hook-key"
+	resumeFlagPane          = "pane"
+	resumeFlagPaneKey       = "pane-key"
+	resumeFlagWidth         = "width"
+	resumeFlagHeight        = "height"
+	resumeFlagScreen        = "screen"
+	resumeFlagDropInput     = "drop-input"
+	resumeFlagInputArriving = "input-arriving"
 )
 
 // The screens one draw of the waiting pane can put up. The panel is the chain's
@@ -57,6 +58,11 @@ type resumeChainPayload struct {
 	// cleared by the draw that honours it, so a later draw of the same screen
 	// never discards a key the user typed while reading it.
 	DropInput bool
+
+	// InputArriving tells a waiter its pane was handed over while input was
+	// still arriving, so what arrives first belongs to that input and answers
+	// nothing.
+	InputArriving bool
 }
 
 func (p resumeChainPayload) paneRef() resumePaneRef {
@@ -106,6 +112,9 @@ func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	}
 	if p.DropInput {
 		argv = append(argv, flagArg(resumeFlagDropInput))
+	}
+	if p.InputArriving {
+		argv = append(argv, flagArg(resumeFlagInputArriving))
 	}
 	return argv
 }

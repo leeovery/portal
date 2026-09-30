@@ -105,6 +105,7 @@ func startResumeResizeFrom(t *testing.T, payload resumeChainPayload, startup, si
 		h.settles <- timer
 		return timer
 	}
+	cfg.AwaitInput = quietAtOnce
 	cfg.Size = func() (int, int, error) {
 		if !h.startupRead.Swap(true) {
 			defer close(h.startedUp)

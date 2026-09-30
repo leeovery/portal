@@ -287,6 +287,7 @@ func TestResumeDropInput_Draw(t *testing.T) {
 		next := samplePayload()
 		next.Report = reason
 		next.Width, next.Height = 100, 30
+		next.InputArriving = true
 		if wantArgv := resumeChainArgv(exe, resumeWaitSubcommand, next); !slices.Equal(d.execArgs, wantArgv) {
 			t.Errorf("exec argv = %q, want a waiter on the panel carrying the report %q", d.execArgs, wantArgv)
 		}

@@ -249,7 +249,7 @@ func TestResumeWait_SignalGenerationStaysOffAcrossScreens(t *testing.T) {
 	t.Run("Escape on the confirmation redraws with signal generation still off", func(t *testing.T) {
 		var probe resumeWaitProbe
 		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), heldInput(t, "\x1b"))
-		cfg.Settle = elapsedAtOnce
+		cfg.AwaitInput = quietAtOnce
 
 		if err := runResumeWait(cfg); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
@@ -298,6 +298,9 @@ func heldInput(t *testing.T, typed string) io.Reader {
 	go func() { _, _ = w.Write([]byte(typed)) }()
 	return r
 }
+
+// quietAtOnce is a pane on which nothing follows the key just read.
+func quietAtOnce(time.Duration) (bool, error) { return false, nil }
 
 func elapsedAtOnce(time.Duration) <-chan time.Time {
 	c := make(chan time.Time, 1)

@@ -183,8 +183,8 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 		if err := resumeInputDrain.drain(fd); err != nil {
 			t.Fatalf("drain() error = %v", err)
 		}
-		if elapsed := time.Since(start); elapsed < resumeEscapeFollow || elapsed >= resumeInputDrain.bound {
-			t.Errorf("a quiet drain took %v, want at least %v and under %v", elapsed, resumeEscapeFollow, resumeInputDrain.bound)
+		if elapsed := time.Since(start); elapsed < resumeInputQuiet || elapsed >= resumeInputDrain.bound {
+			t.Errorf("a quiet drain took %v, want at least %v and under %v", elapsed, resumeInputQuiet, resumeInputDrain.bound)
 		}
 	})
 
@@ -202,7 +202,7 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 		if err.Error() != "input kept arriving" {
 			t.Errorf("drain() error = %q, want %q", err, "input kept arriving")
 		}
-		if elapsed < time.Second || elapsed > time.Second+resumeEscapeFollow+200*time.Millisecond {
+		if elapsed < time.Second || elapsed > time.Second+resumeInputQuiet+200*time.Millisecond {
 			t.Errorf("the drain gave up after %v, want once one second had elapsed", elapsed)
 		}
 	})

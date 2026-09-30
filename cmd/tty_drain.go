@@ -20,9 +20,10 @@ type ttyDrain struct {
 	settle, bound time.Duration
 }
 
-// resumeInputDrain settles for as long as an escape waits for its next byte:
-// tmux refills a flushed queue within its own event loop, far inside that.
-var resumeInputDrain = ttyDrain{settle: resumeEscapeFollow, bound: time.Second}
+// resumeInputDrain settles for as long as the waiter waits for a pane to fall
+// quiet: tmux refills a flushed queue within its own event loop, far inside
+// that.
+var resumeInputDrain = ttyDrain{settle: resumeInputQuiet, bound: time.Second}
 
 // drain runs with canonical processing off, because a canonical terminal
 // reports nothing readable for a line whose newline has not yet arrived, and

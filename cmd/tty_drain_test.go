@@ -21,9 +21,9 @@ func TestTTYDrain(t *testing.T) {
 		}
 	})
 
-	t.Run("it settles for as long as an escape waits for its next byte and gives up after one second", func(t *testing.T) {
-		if resumeInputDrain.settle != resumeEscapeFollow {
-			t.Errorf("settle = %v, want %v", resumeInputDrain.settle, resumeEscapeFollow)
+	t.Run("it settles for as long as the waiter waits for the pane to fall quiet and gives up after one second", func(t *testing.T) {
+		if resumeInputDrain.settle != resumeInputQuiet {
+			t.Errorf("settle = %v, want %v", resumeInputDrain.settle, resumeInputQuiet)
 		}
 		if resumeInputDrain.bound != time.Second {
 			t.Errorf("bound = %v, want 1s", resumeInputDrain.bound)

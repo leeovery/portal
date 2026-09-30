@@ -83,7 +83,9 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 		Logger:             logger,
 		IsTerminal:         func() bool { return true },
 		Settle:             time.After,
-		Size:               fixedSize(payload.Width, payload.Height),
+		// Input handed in whole is already queued behind whatever is read.
+		AwaitInput: func(time.Duration) (bool, error) { return true, nil },
+		Size:       fixedSize(payload.Width, payload.Height),
 		MakeRaw: func() (func(), error) {
 			p.rawCalls++
 			return func() { p.restores++ }, nil
@@ -224,23 +226,17 @@ func TestRunResumeWait_SwallowedKeys(t *testing.T) {
 		assertNoHandOff(t, &probe)
 	})
 
-	t.Run("it acts on the first acting key in a burst and leaves the rest unread", func(t *testing.T) {
+	t.Run("it answers nothing in a burst, however many acting keys it carries", func(t *testing.T) {
 		var probe resumeWaitProbe
-		payload := samplePayload()
-		reader := keystrokes(t, "dy")
+		reader := keystrokes(t, "dy\r")
 
-		if err := runResumeWait(newResumeWaitConfig(t, &probe, payload, reader)); err != nil {
-			t.Fatalf("runResumeWait() error = %v", err)
-		}
-		assertHandOff(t, &probe, opened(payload))
+		err := runResumeWait(queuedKeysConfig(t, &probe, samplePayload(), reader))
 
-		rest, err := io.ReadAll(reader.inner)
-		if err != nil {
-			t.Fatalf("reading what the wait left behind: %v", err)
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("runResumeWait() error = %v, want EOF", err)
 		}
-		if string(rest) != "y" {
-			t.Errorf("input left for the next process image = %q, want %q", rest, "y")
-		}
+		assertNoHandOff(t, &probe)
+		assertNoStateTouched(t, &probe)
 	})
 }
 
@@ -381,6 +377,8 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 			name    string
 			deliver func(writer *io.PipeWriter, resize func()) error
 			want    func(resumeChainPayload) resumeChainPayload
+			// One per byte read: a key waits for the pane to fall quiet.
+			wantQuiets int64
 		}{
 			{
 				name: "answered by d",
@@ -388,7 +386,8 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 					_, err := writer.Write([]byte("d"))
 					return err
 				},
-				want: opened,
+				want:       opened,
+				wantQuiets: 1,
 			},
 			{
 				name: "redrawn by a settled resize",
@@ -411,19 +410,19 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 				cfg := newResumeWaitConfig(t, &probe, payload, reader)
 
 				winch := make(chan os.Signal, 1)
-				var escapeWindows, settleWindows atomic.Int64
+				var quietListens, settleWindows atomic.Int64
 				resize := &paneResize{drawn: payload, to: resizedSize}
 				cfg.Winch = winch
 				cfg.Size = resize.size
-				cfg.Settle = func(d time.Duration) <-chan time.Time {
-					if d == resumeEscapeFollow {
-						escapeWindows.Add(1)
-					} else {
-						settleWindows.Add(1)
-					}
+				cfg.Settle = func(time.Duration) <-chan time.Time {
+					settleWindows.Add(1)
 					fired := make(chan time.Time, 1)
 					fired <- time.Now()
 					return fired
+				}
+				cfg.AwaitInput = func(time.Duration) (bool, error) {
+					quietListens.Add(1)
+					return false, nil
 				}
 
 				done := make(chan error, 1)
@@ -434,8 +433,8 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 					t.Fatalf("the wait ended on its own with no input: %v", err)
 				case <-time.After(150 * time.Millisecond):
 				}
-				if got := settleWindows.Load() + escapeWindows.Load(); got != 0 {
-					t.Fatalf("the wait armed %d windows while left alone, want 0", got)
+				if got := settleWindows.Load() + quietListens.Load(); got != 0 {
+					t.Fatalf("the wait armed %d windows or listens while left alone, want 0", got)
 				}
 
 				if err := tc.deliver(writer, func() { resize.deliver(winch) }); err != nil {
@@ -451,8 +450,8 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 				}
 
 				assertHandOff(t, &probe, tc.want(payload))
-				if got := escapeWindows.Load(); got != 0 {
-					t.Errorf("the wait armed %d escape follow windows with no escape read, want 0", got)
+				if got := quietListens.Load(); got != tc.wantQuiets {
+					t.Errorf("the wait listened past a byte %d times, want %d", got, tc.wantQuiets)
 				}
 			})
 		}

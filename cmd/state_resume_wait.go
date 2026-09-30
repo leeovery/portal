@@ -25,35 +25,17 @@ const (
 	resumeKeyEscape  = 0x1b
 )
 
-// The bytes that shape an escape sequence, branched on the byte after the ESC:
-// a CSI ('[') or SS3 ('O') ends at a byte in the CSI final range; an OSC (']')
-// ends at BEL or ST (ESC '\\'); any other byte — an Alt chord, an Option-arrow,
-// a second ESC — completes a two-byte sequence and nothing after it is read.
-const (
-	resumeCSIIntroducer = '['
-	resumeSS3Introducer = 'O'
-	resumeOSCIntroducer = ']'
-	resumeOSCBell       = 0x07
-	resumeSTFinal       = '\\'
-	resumeCSIFinalFirst = 0x40
-	resumeCSIFinalLast  = 0x7e
-)
-
 // resumeResizeSettle is how long a size change waits for the next one before
 // the panel is redrawn. A drag delivers changes every few tens of milliseconds,
 // so the window closes when the drag stops rather than during it, and a single
 // deliberate resize redraws with no perceptible pause.
 const resumeResizeSettle = 150 * time.Millisecond
 
-// resumeEscapeFollow is how long an ESC, or a sequence it opened, waits for its
-// next byte: an ESC left waiting counts as the Escape key, and a sequence left
-// waiting ends there. The caps bound how many bytes, ESC included, one
-// sequence may consume before the loop dispatches again.
-const (
-	resumeEscapeFollow      = 50 * time.Millisecond
-	resumeEscapeSequenceCap = 16
-	resumeOSCSequenceCap    = 64
-)
+// resumeInputQuiet is how long a pane's input must stay silent after a byte
+// before the bytes that arrived together are judged. A keystroke arrives alone;
+// a paste, an escape sequence and a burst each arrive as bytes far closer
+// together than this.
+const resumeInputQuiet = 50 * time.Millisecond
 
 type resumeWaitConfig struct {
 	resumeChainPayload
@@ -72,6 +54,10 @@ type resumeWaitConfig struct {
 	Winch  <-chan os.Signal
 	Settle func(d time.Duration) <-chan time.Time
 	Size   func() (int, int, error)
+
+	// AwaitInput reports whether a byte arrived on the pane within window,
+	// reading nothing.
+	AwaitInput func(window time.Duration) (bool, error)
 
 	// ClearMarker lifts the pane's freeze; LookupResume reads the registration
 	// at the moment the key is pressed rather than carrying what the panel was
@@ -102,10 +88,10 @@ func (cfg resumeWaitConfig) restore() {
 }
 
 // runResumeWait holds the pane on whatever the draw painted until a key that
-// screen offers answers it. Every other byte is discarded, so nothing the user
-// did not send — a paste, a send-keys, a key aimed at another window — can
-// answer the panel, and the three keys that would signal a foreground process are
-// bytes like any other under raw mode. No signal is declined: tmux tearing the
+// screen offers answers it. A key answers only when it arrives alone, so a
+// paste or a burst answers nothing whatever it carries, and every other byte is
+// swallowed — the three keys that would signal a foreground process among them,
+// since raw mode delivers them as bytes. No signal is declined: tmux tearing the
 // pane down ends the waiter.
 func runResumeWait(cfg resumeWaitConfig) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
@@ -150,41 +136,85 @@ func resumeKeysFor(screen string) resumeKeys {
 	}}
 }
 
+// answerTo is the answer an arrival gives, nil unless it was one byte alone.
+func (k resumeKeys) answerTo(key byte, alone bool) func(resumeWaitConfig) error {
+	switch {
+	case !alone:
+		return nil
+	case key == resumeKeyEscape:
+		return k.escape
+	}
+	return k.bytes[key]
+}
+
+// resumeArrival is the input that has reached the pane since it was last quiet.
+// A key is only a byte that arrived alone, with nothing behind it before the
+// pane fell quiet.
+type resumeArrival struct {
+	key   byte
+	bytes int
+
+	// carried marks input already arriving when the waiter started, whose
+	// earlier bytes this waiter never read.
+	carried bool
+}
+
+func (a *resumeArrival) add(b byte) {
+	if a.bytes == 0 {
+		a.key = b
+	}
+	a.bytes++
+}
+
+func (a *resumeArrival) open() bool {
+	return a.carried || a.bytes > 0
+}
+
+// end closes the arrival, answering the byte it opened with and whether that
+// byte arrived alone.
+func (a *resumeArrival) end() (key byte, alone bool) {
+	key, alone = a.key, a.bytes == 1 && !a.carried
+	*a = resumeArrival{}
+	return key, alone
+}
+
 // The pending redraw dies with the process image a dispatched key execs, so a
-// key answered inside a settle window cancels nothing.
+// key answered inside a settle window cancels nothing. A redraw inside an
+// arrival hands the arrival to the next waiter, so the rest of it answers
+// nothing there either.
 func resumeWaitLoop(cfg resumeWaitConfig) error {
 	keys := resumeKeysFor(cfg.Screen)
-	reader := startResumeReader(cfg.In)
+	reader := startResumeReader(cfg.In, cfg.AwaitInput)
 	defer close(reader.requests)
 
 	settled := resumeStartupSettle(cfg)
+	arrival := resumeArrival{carried: cfg.InputArriving}
+	cfg.InputArriving = false
 	outstanding := false
 	for {
 		if !outstanding {
-			reader.requests <- struct{}{}
+			reader.requests <- resumeReadRequest{listen: arrival.open()}
 			outstanding = true
 		}
 
 		select {
 		case read := <-reader.results:
 			outstanding = false
-			if read.n > 0 && read.err == nil && read.b == resumeKeyEscape {
-				alone, pending, err := resolveResumeEscape(cfg, reader)
-				outstanding = pending
-				if err != nil {
-					return fmt.Errorf("resume wait: read: %w", err)
-				}
-				if alone && keys.escape != nil {
-					return keys.escape(cfg)
+			if read.quiet {
+				if answer := keys.answerTo(arrival.end()); answer != nil {
+					return answer(cfg)
 				}
 				continue
 			}
 			if read.n > 0 {
-				if answer := keys.bytes[read.b]; answer != nil {
-					return answer(cfg)
-				}
+				arrival.add(read.b)
 			}
 			if read.err != nil {
+				// No byte can follow the end of the input, so what arrived
+				// last is judged as it stands.
+				if answer := keys.answerTo(arrival.end()); answer != nil {
+					return answer(cfg)
+				}
 				return fmt.Errorf("resume wait: read: %w", read.err)
 			}
 
@@ -196,6 +226,7 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 			if resumeSizeUnchanged(cfg) {
 				continue
 			}
+			cfg.InputArriving = arrival.open()
 			return resumeRedraw(cfg)
 		}
 	}
@@ -216,82 +247,6 @@ func resumeStartupSettle(cfg resumeWaitConfig) <-chan time.Time {
 	return cfg.Settle(resumeResizeSettle)
 }
 
-// resolveResumeEscape decides whether an ESC just read stood alone, and if it
-// opened a sequence consumes it to its end or its cap, so no byte of it that
-// follows within the window can reach a key the screen acts on. A follow window
-// that elapses leaves its read outstanding, which pending reports so the loop
-// does not request a second; the byte it brings is then the screen's to act on.
-func resolveResumeEscape(cfg resumeWaitConfig, reader resumeReader) (alone, pending bool, err error) {
-	b, pending, err := followResumeByte(cfg, reader)
-	if pending || err != nil {
-		return pending, pending, err
-	}
-	pending, err = consumeResumeSequence(cfg, reader, b)
-	return false, pending, err
-}
-
-func followResumeByte(cfg resumeWaitConfig, reader resumeReader) (b byte, pending bool, err error) {
-	window := cfg.Settle(resumeEscapeFollow)
-	for {
-		reader.requests <- struct{}{}
-		select {
-		case read := <-reader.results:
-			if read.n > 0 {
-				return read.b, false, nil
-			}
-			if read.err != nil {
-				return 0, false, read.err
-			}
-		case <-window:
-			return 0, true, nil
-		}
-	}
-}
-
-// consumeResumeSequence reads to the end of the sequence introducer opened,
-// never taking a CSI or SS3 introducer as its end: '[' and 'O' sit inside the
-// final range. Each byte is read under its own follow window, so an Alt chord
-// whose second byte is an introducer costs nothing beyond itself.
-func consumeResumeSequence(cfg resumeWaitConfig, reader resumeReader, introducer byte) (pending bool, err error) {
-	var limit int
-	var ended func(byte) bool
-	switch introducer {
-	case resumeCSIIntroducer, resumeSS3Introducer:
-		limit, ended = resumeEscapeSequenceCap, isCSIFinal
-	case resumeOSCIntroducer:
-		limit, ended = resumeOSCSequenceCap, oscTerminator()
-	default:
-		return false, nil
-	}
-	for consumed := 2; consumed < limit; consumed++ {
-		b, pending, err := followResumeByte(cfg, reader)
-		if pending || err != nil {
-			return pending, err
-		}
-		if ended(b) {
-			return false, nil
-		}
-	}
-	return false, nil
-}
-
-func isCSIFinal(b byte) bool {
-	return b >= resumeCSIFinalFirst && b <= resumeCSIFinalLast
-}
-
-// An OSC payload is printable text, so it ends only at its own terminator; the
-// CSI rule would stop at the first letter of the payload.
-func oscTerminator() func(byte) bool {
-	afterEscape := false
-	return func(b byte) bool {
-		if b == resumeOSCBell || (afterEscape && b == resumeSTFinal) {
-			return true
-		}
-		afterEscape = b == resumeKeyEscape
-		return false
-	}
-}
-
 // A size that could not be read is not a size the panel was drawn at: the
 // redraw resolves it to the renderer's own bounded fallback, where ending the
 // wait would drop the panel over a transient failure.
@@ -301,24 +256,40 @@ func resumeSizeUnchanged(cfg resumeWaitConfig) bool {
 }
 
 type resumeRead struct {
-	b   byte
-	n   int
-	err error
+	b     byte
+	n     int
+	err   error
+	quiet bool
+}
+
+// resumeReadRequest asks for the next byte. A listen, made while an arrival is
+// open, waits no longer than the quiet window and reads only a byte that has
+// already arrived; any other request blocks until one does.
+type resumeReadRequest struct {
+	listen bool
 }
 
 type resumeReader struct {
-	requests chan struct{}
+	requests chan resumeReadRequest
 	results  chan resumeRead
 }
 
-// startResumeReader reads one byte per request and never ahead: exactly one read
-// is outstanding at a time, so input still queued when a key is answered is
-// inherited by the process image the hand-off execs.
-func startResumeReader(in io.Reader) resumeReader {
-	reader := resumeReader{requests: make(chan struct{}), results: make(chan resumeRead, 1)}
+// startResumeReader reads one byte per request and never ahead, and a listen
+// that finds the pane quiet reads nothing, so an answer taken on that result
+// runs with no read outstanding and input typed then is inherited by the
+// process image the hand-off execs.
+func startResumeReader(in io.Reader, awaitInput func(time.Duration) (bool, error)) resumeReader {
+	reader := resumeReader{requests: make(chan resumeReadRequest), results: make(chan resumeRead, 1)}
 	go func() {
 		buf := make([]byte, 1)
-		for range reader.requests {
+		for request := range reader.requests {
+			if request.listen {
+				arrived, err := awaitInput(resumeInputQuiet)
+				if err != nil || !arrived {
+					reader.results <- resumeRead{err: err, quiet: err == nil}
+					continue
+				}
+			}
 			n, err := in.Read(buf)
 			reader.results <- resumeRead{b: buf[0], n: n, err: err}
 		}
@@ -450,6 +421,10 @@ func winchSignals() <-chan os.Signal {
 	return ch
 }
 
+func awaitStdinInput(window time.Duration) (bool, error) {
+	return awaitTTYInput(int(os.Stdin.Fd()), window)
+}
+
 func stdinIsTerminal() bool {
 	return term.IsTerminal(os.Stdin.Fd())
 }
@@ -480,6 +455,7 @@ var stateResumeWaitCmd = &cobra.Command{
 		width, _ := cmd.Flags().GetInt(resumeFlagWidth)
 		height, _ := cmd.Flags().GetInt(resumeFlagHeight)
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
+		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
 
 		return resumeWaitRunFunc(resumeWaitConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -491,6 +467,8 @@ var stateResumeWaitCmd = &cobra.Command{
 				Width:   width,
 				Height:  height,
 				Screen:  screen,
+
+				InputArriving: inputArriving,
 			},
 			Stdout:     os.Stdout,
 			In:         os.Stdin,
@@ -501,6 +479,7 @@ var stateResumeWaitCmd = &cobra.Command{
 			Winch:      winchSignals(),
 			Settle:     time.After,
 			Size:       paneSizeFromStdin,
+			AwaitInput: awaitStdinInput,
 			ClearMarker: func() error {
 				return state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane))
 			},
@@ -523,6 +502,7 @@ func init() {
 	stateResumeWaitCmd.Flags().Int(resumeFlagWidth, 0, "Width the screen the pane is showing was drawn at")
 	stateResumeWaitCmd.Flags().Int(resumeFlagHeight, 0, "Height the screen the pane is showing was drawn at")
 	stateResumeWaitCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen the pane is showing: discard for the confirmation, else the panel")
+	stateResumeWaitCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the pane when it was handed over")
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagCommand)
 
 	stateCmd.AddCommand(stateResumeWaitCmd)
