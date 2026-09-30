@@ -350,7 +350,7 @@ func TestResumeReportRows_FitTheCard(t *testing.T) {
 		})
 	}
 
-	// A drop's cause is the operating system's, and can run past the card.
+	// A drop's cause can run past the card.
 	drop := prefixed{resumeReportDrop, syscall.ENOTTY.Error()}
 	t.Run(drop.act+drop.cause, func(t *testing.T) {
 		for _, render := range renders {

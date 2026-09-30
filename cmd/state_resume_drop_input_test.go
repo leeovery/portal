@@ -446,8 +446,8 @@ func TestStateResumeDrawCommand_DropInput(t *testing.T) {
 	})
 }
 
-// Two flushes would eat a keystroke the user meant after the confirmation went
-// up, so the queue is touched from one place in the chain.
+// A second flush site would eat a keystroke the user meant after the
+// confirmation went up, so the queue is touched from one place in the chain.
 func TestFlushTTYInput_TouchesTheInputQueueInExactlyOnePlace(t *testing.T) {
 	t.Run("it touches the input queue in exactly one place", func(t *testing.T) {
 		_, sources := sourceguardtest.RepoSources(t, sourceguardtest.NonTestSources)
