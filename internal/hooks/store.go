@@ -221,18 +221,34 @@ func classifySet(h Snapshot, key string, event Event, registration Registration)
 // The answer comes from the map this call loaded and mutated, never from a
 // separate read.
 func (s *Store) Remove(key string, event Event, via Via) (bool, error) {
-	return s.removeEntry(key, event, via, "rm", false)
+	return s.removeEntry(key, event, via, removal{op: "rm"})
 }
 
-// Discard is the resume panel's removal route: it removes exactly what Remove
-// would, under the same contract, but its breadcrumb is filed under
-// op=discard and carries the removed command as value, so the destroyed
-// registration can be copied back out of the log.
-func (s *Store) Discard(key string, event Event, via Via) (bool, error) {
-	return s.removeEntry(key, event, via, "discard", true)
+// Discard is the resume panel's removal route. It removes the entry for key and
+// event only when its command is exactly shown, the command the panel put in
+// front of the user; an entry holding any other command, whatever its resume
+// mode, is nothing to remove and answers as an absent one does. Otherwise it
+// keeps Remove's contract, but its breadcrumb is filed under op=discard and
+// carries the removed command as value, so the destroyed registration can be
+// copied back out of the log.
+func (s *Store) Discard(key string, event Event, shown string, via Via) (bool, error) {
+	return s.removeEntry(key, event, via, removal{
+		op:         "discard",
+		carryValue: true,
+		matches:    func(r Registration) bool { return r.Command == shown },
+	})
 }
 
-func (s *Store) removeEntry(key string, event Event, via Via, op string, carryValue bool) (bool, error) {
+// removal is how one route removes an entry: the op its breadcrumbs carry,
+// whether they carry the removed command, and which stored registrations it may
+// remove at all — any, when matches is nil.
+type removal struct {
+	op         string
+	carryValue bool
+	matches    func(Registration) bool
+}
+
+func (s *Store) removeEntry(key string, event Event, via Via, r removal) (bool, error) {
 	if key == "" {
 		return false, nil
 	}
@@ -240,13 +256,13 @@ func (s *Store) removeEntry(key string, event Event, via Via, op string, carryVa
 	// A refused acquire or load is a failed operation, not the silent no-removal
 	// below: that one changed nothing because there was nothing to change, and
 	// this one could not look.
-	lock, err := s.acquireMutationLockFor(op, key, via)
+	lock, err := s.acquireMutationLockFor(r.op, key, via)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = lock.Close() }()
 
-	h, err := s.loadForMutation(op, key, via)
+	h, err := s.loadForMutation(r.op, key, via)
 	if err != nil {
 		return false, err
 	}
@@ -256,7 +272,7 @@ func (s *Store) removeEntry(key string, event Event, via Via, op string, carryVa
 		return false, nil
 	}
 	removed, ok := events[event.String()]
-	if !ok {
+	if !ok || (r.matches != nil && !r.matches(removed)) {
 		return false, nil
 	}
 
@@ -266,16 +282,16 @@ func (s *Store) removeEntry(key string, event Event, via Via, op string, carryVa
 	}
 
 	if err := s.save(h); err != nil {
-		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(),
+		logger.Warn(r.op, "op", r.op, "hook_key", key, "via", via.String(),
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return false, err
 	}
 
-	attrs := []any{"op", op, "hook_key", key, "via", via.String()}
-	if carryValue {
+	attrs := []any{"op", r.op, "hook_key", key, "via", via.String()}
+	if r.carryValue {
 		attrs = append(attrs, "value", removed.Command)
 	}
-	logger.Info(op, attrs...)
+	logger.Info(r.op, attrs...)
 	return true, nil
 }
 

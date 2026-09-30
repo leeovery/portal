@@ -79,9 +79,9 @@ type resumeWaitConfig struct {
 	ClearMarker  func() error
 	LookupResume func(hookKey string) (hooks.OnResume, error)
 
-	// DiscardRegistration removes the pane's registration, reporting whether
-	// the store held one.
-	DiscardRegistration func(hookKey string) (bool, error)
+	// DiscardRegistration removes the pane's registration if it still holds
+	// the command shown, reporting whether it removed one.
+	DiscardRegistration func(hookKey, shown string) (bool, error)
 
 	// EnableTTYSignals gives the kill keys back to a pane being handed to a
 	// hook or a shell. The raw restore cannot: it puts back the tty the waiter
@@ -341,8 +341,8 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 	return nil
 }
 
-// The rest of a burst that carried the d is still queued on the tty, so the
-// draw is told to discard it before the confirmation goes up.
+// The rest of a burst that carried the d may still be arriving on the tty, so
+// the draw is told to discard it before the confirmation goes up.
 func resumeOpenDiscardConfirm(cfg resumeWaitConfig) error {
 	cfg.DropInput = true
 	return resumeShowScreen(cfg, resumeScreenDiscard)
@@ -357,7 +357,7 @@ func resumeCancelDiscardConfirm(cfg resumeWaitConfig) error {
 // than closing the confirmation as a cancel would. A discard that found nothing
 // to remove still proceeds: the store is already as the user asked for it.
 func resumeAnswerDiscard(cfg resumeWaitConfig) error {
-	if _, err := cfg.DiscardRegistration(cfg.HookKey); err != nil {
+	if _, err := cfg.DiscardRegistration(cfg.HookKey, cfg.Command); err != nil {
 		return resumeReport(cfg, resumeScreenDiscard, resumeDiscardRefusal(err))
 	}
 
@@ -428,18 +428,18 @@ func lookupResumeRegistration(hookKey string) (hooks.OnResume, error) {
 	return store.LookupOnResume(hookKey, hooks.ViaHydrate)
 }
 
-// discardResumeRegistration removes the pane's registration. Unlike the lookup,
-// a store that cannot be resolved is an error: reading it as a miss would drop
-// the panel while the registration it named survives. The store records its own
-// refusals; one it was never reached for is recorded here.
-func discardResumeRegistration(hookKey, paneKey string) (bool, error) {
+// discardResumeRegistration removes the pane's registration when it still
+// holds the command shown. Unlike the lookup, a store that cannot be resolved
+// is an error: reading it as a miss would drop the panel while the registration
+// it named survives. The store records its own refusals; one it was never
+// reached for is recorded here.
+func discardResumeRegistration(pane resumePaneRef, shown string) (bool, error) {
 	store, err := loadHookStore()
 	if err != nil {
-		pane := resumePaneRef{HookKey: hookKey, PaneKey: paneKey}
 		hydrateLogger.Warn("resolve hook store failed", pane.logAttrs("error", err)...)
 		return false, hookStoreUnlocatedError{err: err}
 	}
-	return store.Discard(hookKey, hooks.EventOnResume, hooks.ViaPanel)
+	return store.Discard(pane.HookKey, hooks.EventOnResume, shown, hooks.ViaPanel)
 }
 
 // A hangup keeps its default disposition, so tmux tearing the pane down ends
@@ -505,8 +505,8 @@ var stateResumeWaitCmd = &cobra.Command{
 				return state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane))
 			},
 			LookupResume: lookupResumeRegistration,
-			DiscardRegistration: func(hookKey string) (bool, error) {
-				return discardResumeRegistration(hookKey, paneKey)
+			DiscardRegistration: func(hookKey, shown string) (bool, error) {
+				return discardResumeRegistration(resumePaneRef{HookKey: hookKey, PaneKey: paneKey}, shown)
 			},
 			EnableTTYSignals: setStdinSignals,
 			AltScreen:        paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),

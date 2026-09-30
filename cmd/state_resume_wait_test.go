@@ -48,6 +48,8 @@ type resumeWaitProbe struct {
 	discardErr  error
 	discardMiss bool
 	discardKeys []string
+	// The command each discard was told the confirmation showed.
+	discardShown []string
 
 	// Signal generation turned back on, with the restores and execs already
 	// run at that moment.
@@ -99,9 +101,10 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			}
 			return hooks.OnResume{}, nil
 		},
-		DiscardRegistration: func(hookKey string) (bool, error) {
+		DiscardRegistration: func(hookKey, shown string) (bool, error) {
 			p.order = append(p.order, "discard")
 			p.discardKeys = append(p.discardKeys, hookKey)
+			p.discardShown = append(p.discardShown, shown)
 			if p.discardErr != nil {
 				return false, p.discardErr
 			}

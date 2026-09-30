@@ -292,6 +292,29 @@ func TestResumeDropInput_Draw(t *testing.T) {
 		}
 	})
 
+	t.Run("it paints the waiting panel with the whole row when input kept arriving", func(t *testing.T) {
+		const reason = "can't clear pending input: input kept arriving"
+		d := runDropDraw(t, openingPayload(), fmt.Errorf("could not clear pending input: %w", errInputKeptArriving))
+
+		want := tui.RenderResumePanel(tui.ResumeScreen{
+			Command: samplePayload().Command,
+			Report:  reason,
+			Width:   100,
+			Height:  30,
+			Theme:   themetest.DefaultDark(t),
+		})
+		if got := d.painted(); got != want {
+			t.Errorf("painted bytes differ from the reported waiting panel\n got: %q\nwant: %q", got, want)
+		}
+		if !strings.Contains(ansi.Strip(d.painted()), reason) {
+			t.Errorf("the painted panel does not carry the whole row %q:\n%s", reason, ansi.Strip(d.painted()))
+		}
+		rec := d.sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the refused drop's record")
+		if rec.Msg != "clear pending input failed" {
+			t.Errorf("WARN = %q, want the refused drop's record", rec.Msg)
+		}
+	})
+
 	t.Run("it records the refused drop once, naming the pane and the whole error", func(t *testing.T) {
 		dropErr := fmt.Errorf("could not clear pending input: %w", syscall.ENOTTY)
 		d := runDropDraw(t, openingPayload(), dropErr)

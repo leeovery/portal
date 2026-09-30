@@ -118,7 +118,7 @@ func shippedPaneThemePair() theme.Nomination {
 }
 
 func dropStdinInputQueue() error {
-	if err := flushTTYInput(int(os.Stdin.Fd())); err != nil {
+	if err := resumeInputDrain.drain(int(os.Stdin.Fd())); err != nil {
 		return fmt.Errorf("could not clear pending input: %w", err)
 	}
 	return nil

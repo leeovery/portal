@@ -71,8 +71,8 @@ func discardAgainstStore(t *testing.T) (*resumeWaitProbe, *logtest.Sink) {
 	payload := confirmationPayload()
 	cfg := newResumeWaitConfig(t, &probe, payload, keystrokes(t, "y"))
 	cfg.Logger = nil
-	cfg.DiscardRegistration = func(hookKey string) (bool, error) {
-		return discardResumeRegistration(hookKey, payload.PaneKey)
+	cfg.DiscardRegistration = func(hookKey, shown string) (bool, error) {
+		return discardResumeRegistration(resumePaneRef{HookKey: hookKey, PaneKey: payload.PaneKey}, shown)
 	}
 	if err := runResumeWait(cfg); err != nil {
 		t.Fatalf("runResumeWait() error = %v", err)

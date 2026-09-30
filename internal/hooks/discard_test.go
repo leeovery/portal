@@ -37,6 +37,10 @@ func compactJSON(t *testing.T, raw json.RawMessage) string {
 	return buf.String()
 }
 
+// seededCommand is the command the fixtures register and the confirmation
+// showed, so a discard handed it is one the user agreed to.
+const seededCommand = "claude --resume abc123"
+
 func assertDiscardRecord(t *testing.T, sink *logtest.Sink, key, command string) {
 	t.Helper()
 	rec := sink.Records().Only(t, "discard record")
@@ -62,7 +66,7 @@ func TestDiscard(t *testing.T) {
 		})
 		sink := logtest.Install(t)
 
-		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 		if err != nil {
 			t.Fatalf("Discard: %v", err)
 		}
@@ -82,7 +86,7 @@ func TestDiscard(t *testing.T) {
 			},
 		})
 
-		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 		if err != nil {
 			t.Fatalf("Discard: %v", err)
 		}
@@ -110,7 +114,7 @@ func TestDiscard(t *testing.T) {
 			},
 		})
 
-		if _, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel); err != nil {
+		if _, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel); err != nil {
 			t.Fatalf("Discard: %v", err)
 		}
 
@@ -137,7 +141,7 @@ func TestDiscard(t *testing.T) {
 				store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: tc.seed})
 				sink := logtest.Install(t)
 
-				removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+				removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, command, hooks.ViaPanel)
 				if err != nil {
 					t.Fatalf("Discard: %v", err)
 				}
@@ -165,7 +169,7 @@ func TestDiscard(t *testing.T) {
 				before := readFileBytes(t, path)
 				sink := logtest.Install(t)
 
-				removed, err := store.Discard(tc.key, hooks.EventOnResume, hooks.ViaPanel)
+				removed, err := store.Discard(tc.key, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 				if err != nil {
 					t.Fatalf("Discard: %v", err)
 				}
@@ -188,7 +192,7 @@ func TestDiscard(t *testing.T) {
 		before := readFileBytes(t, path)
 		sink := logtest.Install(t)
 
-		removed, err := store.Discard("", hooks.EventOnResume, hooks.ViaPanel)
+		removed, err := store.Discard("", hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 		if err != nil {
 			t.Fatalf("Discard: %v", err)
 		}
@@ -212,7 +216,7 @@ func TestDiscard(t *testing.T) {
 		before := readFileBytes(t, path)
 		sink := logtest.Install(t)
 
-		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 		if err == nil {
 			t.Fatal("expected an error when the save fails, got nil")
 		}
@@ -244,7 +248,7 @@ func TestDiscard(t *testing.T) {
 		hookstest.HoldHooksSidecar(t, path)
 		sink := logtest.Install(t)
 
-		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 		if !errors.Is(err, hooks.ErrLockHeld) {
 			t.Errorf("err = %v, want errors.Is ErrLockHeld", err)
 		}
@@ -264,7 +268,7 @@ func TestDiscard(t *testing.T) {
 		})
 		sink := logtest.Install(t)
 
-		if _, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel); err != nil {
+		if _, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel); err != nil {
 			t.Fatalf("Discard: %v", err)
 		}
 		if _, err := store.Remove(hookstest.SubjectSeedB, hooks.EventOnResume, hooks.ViaCLI); err != nil {
@@ -297,7 +301,7 @@ func TestDiscard(t *testing.T) {
 		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
 		before := decodeHooksFile(t, path)
 
-		if _, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel); err != nil {
+		if _, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel); err != nil {
 			t.Fatalf("Discard: %v", err)
 		}
 
@@ -313,12 +317,98 @@ func TestDiscard(t *testing.T) {
 	})
 }
 
+func TestDiscard_OnlyTheShownCommand(t *testing.T) {
+	t.Run("it leaves an entry rewritten to another command in place", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			rewrite func(t *testing.T, store *hooks.Store, path string)
+		}{
+			{"re-registered", func(t *testing.T, store *hooks.Store, _ string) {
+				if err := store.Set(hookstest.SubjectSeedA, hooks.EventOnResume,
+					hooks.Registration{Command: "npm start"}, hooks.ViaCLI); err != nil {
+					t.Fatalf("Set: %v", err)
+				}
+			}},
+			{"hand-edited", func(t *testing.T, _ *hooks.Store, path string) {
+				body := `{"` + hookstest.SubjectSeedA + `":{"on-resume":"npm start"}}`
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatalf("hand-edit hooks.json: %v", err)
+				}
+			}},
+			{"differing only in whitespace", func(t *testing.T, store *hooks.Store, _ string) {
+				if err := store.Set(hookstest.SubjectSeedA, hooks.EventOnResume,
+					hooks.Registration{Command: seededCommand + " "}, hooks.ViaCLI); err != nil {
+					t.Fatalf("Set: %v", err)
+				}
+			}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				store, path := hookstest.StageStore(t, hookstest.Staging{
+					Entries: map[string]string{hookstest.SubjectSeedA: seededCommand},
+				})
+				tc.rewrite(t, store, path)
+				before := readFileBytes(t, path)
+				sink := logtest.Install(t)
+
+				removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
+				if err != nil {
+					t.Fatalf("Discard: %v", err)
+				}
+				if removed {
+					t.Error("removed = true, want false for an entry holding another command")
+				}
+				if recs := sink.Records(); len(recs) != 0 {
+					t.Errorf("a discard that removed nothing emitted %d records, want 0: %+v", len(recs), recs)
+				}
+				hookstest.AssertHooksFileUnchanged(t, path, before, "changed on a discard of a command it no longer holds")
+			})
+		}
+	})
+
+	t.Run("it removes an entry rewritten to the same command under another mode", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{
+			Seed: `{"` + hookstest.SubjectSeedA + `":{"on-resume":{"command":"` + seededCommand + `","resume":"eager"}}}`,
+		})
+		sink := logtest.Install(t)
+
+		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
+		if err != nil {
+			t.Fatalf("Discard: %v", err)
+		}
+		if !removed {
+			t.Error("removed = false, want true: only the command is compared")
+		}
+		if _, ok := decodeHooksFile(t, path)[hookstest.SubjectSeedA]; ok {
+			t.Error("the discarded key is still on disk")
+		}
+		assertDiscardRecord(t, sink, hookstest.SubjectSeedA, seededCommand)
+	})
+
+	t.Run("it leaves Remove removing whatever command the key holds", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{
+			Entries: map[string]string{hookstest.SubjectSeedA: "npm start"},
+		})
+
+		removed, err := store.Remove(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaCLI)
+		if err != nil {
+			t.Fatalf("Remove: %v", err)
+		}
+		if !removed {
+			t.Error("removed = false, want true")
+		}
+		if _, ok := decodeHooksFile(t, path)[hookstest.SubjectSeedA]; ok {
+			t.Error("the removed key is still on disk")
+		}
+	})
+}
+
 func TestDiscard_Refusals(t *testing.T) {
 	t.Run("it logs a load it could not complete and reports it as a read failure", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
 		sink := logtest.Install(t)
 
-		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		removed, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 		if removed {
 			t.Error("removed = true, want false when the load failed")
 		}
@@ -349,7 +439,7 @@ func TestDiscard_Refusals(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: "{not json"})
 		sink := logtest.Install(t)
 
-		_, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		_, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 		if !errors.Is(err, hooks.ErrMalformed) || !errors.Is(err, hooks.ErrStoreRead) {
 			t.Errorf("err = %v, want errors.Is both ErrMalformed and ErrStoreRead", err)
 		}
@@ -366,7 +456,7 @@ func TestDiscard_Refusals(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chmod(hookstest.SidecarPath(path), 0o600) })
 		sink := logtest.Install(t)
 
-		_, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.ViaPanel)
+		_, err := store.Discard(hookstest.SubjectSeedA, hooks.EventOnResume, seededCommand, hooks.ViaPanel)
 		if !errors.Is(err, hooks.ErrLockFailed) {
 			t.Errorf("err = %v, want errors.Is ErrLockFailed", err)
 		}

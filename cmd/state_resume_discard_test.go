@@ -57,6 +57,16 @@ func TestResumeAnswerDiscard_Removal(t *testing.T) {
 		}
 	})
 
+	t.Run("it hands the store the command the confirmation showed", func(t *testing.T) {
+		var probe resumeWaitProbe
+		payload := confirmationPayload()
+		answerDiscard(t, &probe, payload)
+
+		if !slices.Equal(probe.discardShown, []string{payload.Command}) {
+			t.Errorf("discard handed %q, want one discard of the shown %q", probe.discardShown, payload.Command)
+		}
+	})
+
 	t.Run("it treats nothing-to-remove as a discard", func(t *testing.T) {
 		var probe resumeWaitProbe
 		probe.discardMiss = true
@@ -280,6 +290,34 @@ func TestResumeAnswerDiscard_HandOff(t *testing.T) {
 	})
 }
 
+func TestResumeAnswerDiscard_RewrittenEntry(t *testing.T) {
+	t.Run("it leaves a registration rewritten while the pane waited and drops the pane to a shell", func(t *testing.T) {
+		sink := logtest.Install(t)
+		payload := confirmationPayload()
+		store, path := hookstest.StageStore(t, hookstest.Staging{
+			Entries: map[string]string{payload.HookKey: payload.Command + " --replaced"},
+		})
+		before := readFileBytes(t, path)
+
+		var probe resumeWaitProbe
+		cfg := newResumeWaitConfig(t, &probe, payload, keystrokes(t, "y"))
+		cfg.DiscardRegistration = func(hookKey, shown string) (bool, error) {
+			probe.order = append(probe.order, "discard")
+			return store.Discard(hookKey, hooks.EventOnResume, shown, hooks.ViaPanel)
+		}
+		if err := runResumeWait(cfg); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+
+		hookstest.AssertHooksFileUnchanged(t, path, before, "changed by a discard of a command it no longer holds")
+		if got := sink.Records().Matching("hooks", "discard"); len(got) != 0 {
+			t.Errorf("discard records = %+v, want none", got)
+		}
+		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
+		assertShellHandOff(t, &probe)
+	})
+}
+
 func TestResumeAnswerDiscard_Breadcrumb(t *testing.T) {
 	t.Run("it emits no removal breadcrumb of its own", func(t *testing.T) {
 		sink := logtest.Install(t)
@@ -291,8 +329,8 @@ func TestResumeAnswerDiscard_Breadcrumb(t *testing.T) {
 		var probe resumeWaitProbe
 		cfg := newResumeWaitConfig(t, &probe, payload, keystrokes(t, "y"))
 		cfg.Logger = nil
-		cfg.DiscardRegistration = func(hookKey string) (bool, error) {
-			return store.Discard(hookKey, hooks.EventOnResume, hooks.ViaPanel)
+		cfg.DiscardRegistration = func(hookKey, shown string) (bool, error) {
+			return store.Discard(hookKey, hooks.EventOnResume, shown, hooks.ViaPanel)
 		}
 		if err := runResumeWait(cfg); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
@@ -318,7 +356,7 @@ func TestDiscardResumeRegistration(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{"tok123": {"on-resume": "make deploy"}})
 		sink := logtest.Install(t)
 
-		removed, err := discardResumeRegistration("tok123", "proj-a1b2:0.1")
+		removed, err := discardResumeRegistration(sampleDiscardPane, "make deploy")
 		if err != nil || !removed {
 			t.Fatalf("discardResumeRegistration() = %v, %v; want a removal", removed, err)
 		}
@@ -331,10 +369,25 @@ func TestDiscardResumeRegistration(t *testing.T) {
 		}
 	})
 
+	t.Run("it removes nothing from an entry rewritten to another command", func(t *testing.T) {
+		_, path := hooksFileInTempDir(t, map[string]map[string]string{"tok123": {"on-resume": "make test"}})
+		before := readFileBytes(t, path)
+		sink := logtest.Install(t)
+
+		removed, err := discardResumeRegistration(sampleDiscardPane, "make deploy")
+		if err != nil || removed {
+			t.Fatalf("discardResumeRegistration() = %v, %v; want no removal and no error", removed, err)
+		}
+		if got := sink.Records().Matching("hooks", "discard"); len(got) != 0 {
+			t.Errorf("discard records = %+v, want none", got)
+		}
+		hookstest.AssertHooksFileUnchanged(t, path, before, "changed by a discard of a command it no longer holds")
+	})
+
 	t.Run("it reports nothing removed for a key the store does not hold", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{"other": {"on-resume": "make deploy"}})
 
-		removed, err := discardResumeRegistration("tok123", "proj-a1b2:0.1")
+		removed, err := discardResumeRegistration(sampleDiscardPane, "make deploy")
 		if err != nil || removed {
 			t.Fatalf("discardResumeRegistration() = %v, %v; want no removal and no error", removed, err)
 		}
@@ -350,7 +403,7 @@ func TestDiscardResumeRegistration(t *testing.T) {
 			t.Fatal("loadHookStore() resolved a store; the fixture must leave none")
 		}
 
-		removed, err := discardResumeRegistration("tok123", "proj-a1b2:0.1")
+		removed, err := discardResumeRegistration(sampleDiscardPane, "make deploy")
 		if removed {
 			t.Error("discardResumeRegistration() reported a removal from a store it could not resolve")
 		}
@@ -359,6 +412,8 @@ func TestDiscardResumeRegistration(t *testing.T) {
 		}
 	})
 }
+
+var sampleDiscardPane = resumePaneRef{HookKey: "tok123", PaneKey: "proj-a1b2:0.1"}
 
 func lookupRegistrationOrFail(t *testing.T, hookKey string) hooks.OnResume {
 	t.Helper()
