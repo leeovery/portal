@@ -284,17 +284,29 @@ const parkedChainTrap = "trap : INT QUIT; "
 // tail that recovered the pane exec'd the user's shell, whose exit status
 // arrives here, and a second shell after it would make the pane take two exits
 // to close. The executable check tells a tail that never started from a shell
-// that exited 126 or 127 itself. It then takes the tail's own steps in the
-// tail's order — leave the panel's screen, clear the pending marker, lift the
-// alternate-screen pin once tmux reports the leave, restore the terminal — since
-// no Portal binary is left to take them.
+// that exited 126 or 127 itself — but not an answered pane from an abandoned
+// one, since the binary can leave the baked path while an answered pane's shell
+// is still running. So the backstop opens with the tail's own gate: a pending
+// marker that reads back clear means the pane was answered and has had its
+// shell, and the chain ends with the could-not-run status. A read that fails
+// counts as still pending, as the tail counts it. A plain format read serves:
+// the one pane it misreads as clear is a gone one, which wants no shell either.
+// Past the gate it takes the tail's own steps in the tail's order — leave the
+// panel's screen, clear the pending marker, lift the alternate-screen pin once
+// tmux reports the leave, restore the terminal — since no Portal binary is left
+// to take them.
 func parkedChainBackstop(exe string, payload resumeChainPayload) string {
+	target := string(tmux.PaneIDTarget(payload.Pane))
+	readMarker := shellquote.Join([]string{
+		"tmux", "display-message", "-p", "-t", target, "-F", "#{" + state.ResumePendingOption + "}",
+	}) + ` 2>/dev/null`
+	answeredGate := `if m=$(` + readMarker + `); then case $m in '') exit $s;; esac; fi`
 	reset := `printf '%s' ` + shellquote.Single(hydrateResetPreamble)
 	clearMarker := shellquote.Join([]string{
-		"tmux", "set-option", "-pu", "-t", string(tmux.PaneIDTarget(payload.Pane)), state.ResumePendingOption,
+		"tmux", "set-option", "-pu", "-t", target, state.ResumePendingOption,
 	}) + ` 2>/dev/null`
 	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(exe) + ` ]; then ` +
-		reset + `; ` + clearMarker + `; ` + backstopReleasePin(payload.Pane) +
+		answeredGate + `; ` + reset + `; ` + clearMarker + `; ` + backstopReleasePin(payload.Pane) +
 		`; stty sane 2>/dev/null; exec "${SHELL:-/bin/sh}"; fi;; esac; exit $s`
 }
 

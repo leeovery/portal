@@ -15,7 +15,9 @@ import (
 
 // The user's shell, stty and tmux are replaced by stubs appending one line each
 // to the pane's transcript, so the transcript orders the bytes the chain wrote
-// among the programs it ran.
+// among the programs it ran. A tmux stub answers the pending-marker read with
+// $RESUME_PENDING, reading as set when that is unset and as clear when it is
+// set empty.
 const (
 	backstopShell = `#!/bin/sh
 echo shell >> "$PANE_TRANSCRIPT"
@@ -25,19 +27,25 @@ echo "stty $*" >> "$PANE_TRANSCRIPT"
 `
 	backstopTmux = `#!/bin/sh
 echo "tmux $*" >> "$PANE_TRANSCRIPT"
-case "$1" in display-message) echo "${ALTERNATE_ON:-0}" ;; esac
+case "$*" in
+display-message*@portal-resume-pending*) echo "${RESUME_PENDING-1}" ;;
+display-message*) echo "${ALTERNATE_ON:-0}" ;;
+esac
 `
 	// flippingTmux reports the pane on the alternate screen for its first two
-	// reads, as a leave tmux has not yet processed would.
+	// #{alternate_on} reads, as a leave tmux has not yet processed would.
 	flippingTmux = `#!/bin/sh
 echo "tmux $*" >> "$PANE_TRANSCRIPT"
-if [ "$1" = display-message ]; then
+case "$*" in
+display-message*@portal-resume-pending*) echo "${RESUME_PENDING-1}" ;;
+display-message*)
 	n=0
 	while IFS= read -r line; do
-		case $line in *display-message*) n=$((n+1)) ;; esac
+		case $line in *alternate_on*) n=$((n+1)) ;; esac
 	done < "$PANE_TRANSCRIPT"
 	if [ "$n" -ge 3 ]; then echo 0; else echo 1; fi
-fi
+	;;
+esac
 `
 	failingTmux = `#!/bin/sh
 echo "tmux $*" >> "$PANE_TRANSCRIPT"
@@ -53,6 +61,20 @@ case "$2" in
 resume-draw) exit "$DRAW_STATUS" ;;
 resume-recover) exit "$RECOVER_STATUS" ;;
 esac
+`
+
+// answeredThenGoneExe stands in for the portal binary under a pane answered on
+// its panel: its draw hands the pane its shell, which exits, and by the time
+// the tail runs the binary has left the baked path — or, with $KEEP_UNEXECUTABLE
+// set, stays there with its execute bit gone.
+const answeredThenGoneExe = `#!/bin/sh
+case "$2" in
+resume-draw)
+	if [ -n "$KEEP_UNEXECUTABLE" ]; then /bin/chmod a-x "$0"; else /bin/rm -f "$0"; fi
+	exit 0
+	;;
+esac
+exit 99
 `
 
 type parkedRun struct {
@@ -149,10 +171,11 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 		}},
 	}
 	target := string(tmux.PaneIDTarget(samplePayload().Pane))
+	markerLine := "tmux display-message -p -t " + target + " -F #{" + state.ResumePendingOption + "}\n"
 	clearLine := "tmux set-option -pu -t " + target + " " + state.ResumePendingOption + "\n"
 	readLine := "tmux display-message -p -t " + target + " -F #{" + alternateOnFormat + "}\n"
 	unpinLine := "tmux set-option -pu -t " + target + " " + altScreenOption + "\n"
-	recovered := hydrateResetPreamble + clearLine + readLine + unpinLine + "stty sane\n" + "shell\n"
+	recovered := markerLine + hydrateResetPreamble + clearLine + readLine + unpinLine + "stty sane\n" + "shell\n"
 	for _, tc := range unstartable {
 		t.Run("a tail "+tc.name+" resets the pane, clears its marker, lifts its pin and restores the terminal before the user's shell", func(t *testing.T) {
 			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: backstopTmux})
@@ -168,7 +191,7 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 		t.Run("a tail "+tc.name+" polls until the pane is off the alternate screen before it lifts the pin", func(t *testing.T) {
 			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: flippingTmux})
 
-			want := hydrateResetPreamble + clearLine + strings.Repeat(readLine, 3) + unpinLine + "stty sane\nshell\n"
+			want := markerLine + hydrateResetPreamble + clearLine + strings.Repeat(readLine, 3) + unpinLine + "stty sane\nshell\n"
 			if run.transcript != want {
 				t.Errorf("pane transcript = %q, want %q", run.transcript, want)
 			}
@@ -177,7 +200,7 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 		t.Run("a tail "+tc.name+" keeps the pin when the leave is never confirmed", func(t *testing.T) {
 			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: backstopTmux}, "ALTERNATE_ON=1")
 
-			want := hydrateResetPreamble + clearLine + strings.Repeat(readLine, altScreenLeaveAttempts) + "stty sane\nshell\n"
+			want := markerLine + hydrateResetPreamble + clearLine + strings.Repeat(readLine, altScreenLeaveAttempts) + "stty sane\nshell\n"
 			if run.transcript != want {
 				t.Errorf("pane transcript = %q, want %q", run.transcript, want)
 			}
@@ -189,17 +212,32 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 			}
 		})
 
+		t.Run("a tail "+tc.name+" treats any value in the pending marker as still pending", func(t *testing.T) {
+			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: backstopTmux}, "RESUME_PENDING=anything")
+
+			if run.transcript != recovered {
+				t.Errorf("pane transcript = %q, want %q", run.transcript, recovered)
+			}
+			if run.status != 0 {
+				t.Errorf("parked chain status = %d, want the user's shell's 0", run.status)
+			}
+		})
+
 		clearFailures := []struct {
 			name, tmux, tmuxCalls, leak string
 		}{
-			{name: "tmux refusing the clear", tmux: failingTmux, tmuxCalls: clearLine + strings.Repeat(readLine, altScreenLeaveAttempts), leak: "no server running"},
-			{name: "no tmux on PATH", tmux: "", tmuxCalls: "", leak: "tmux:"},
+			{name: "tmux refusing the marker read and the clear", tmux: failingTmux, tmuxCalls: markerLine, leak: "no server running"},
+			{name: "no tmux on PATH", tmux: "", leak: "tmux:"},
 		}
 		for _, cf := range clearFailures {
 			t.Run("a tail "+tc.name+" still reaches the user's shell with "+cf.name, func(t *testing.T) {
 				run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: cf.tmux})
 
-				if want := hydrateResetPreamble + cf.tmuxCalls + "stty sane\nshell\n"; run.transcript != want {
+				steps := ""
+				if cf.tmux != "" {
+					steps = clearLine + strings.Repeat(readLine, altScreenLeaveAttempts)
+				}
+				if want := cf.tmuxCalls + hydrateResetPreamble + steps + "stty sane\nshell\n"; run.transcript != want {
 					t.Errorf("pane transcript = %q, want %q", run.transcript, want)
 				}
 				if strings.Contains(run.stderr, cf.leak) {
@@ -213,6 +251,32 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 				}
 			})
 		}
+	}
+
+	answered := []struct {
+		name       string
+		env        []string
+		wantStatus int
+	}{
+		{name: "gone from the baked path", wantStatus: 127},
+		{name: "no longer executable at the baked path", env: []string{"KEEP_UNEXECUTABLE=1"}, wantStatus: 126},
+	}
+	for _, tc := range answered {
+		t.Run("a pane answered on the panel, its binary "+tc.name+" by its shell's exit, closes on that first exit", func(t *testing.T) {
+			exe := stageExecutable(t, t.TempDir(), "portal", answeredThenGoneExe)
+
+			run := runParkedChain(t, exe, parkedStubs{tmux: backstopTmux}, append([]string{"RESUME_PENDING="}, tc.env...)...)
+
+			if run.transcript != markerLine {
+				t.Errorf("pane transcript = %q, want the marker read alone, %q", run.transcript, markerLine)
+			}
+			if run.backstopStderr != "" {
+				t.Errorf("the backstop wrote %q to the pane's stderr, want nothing", run.backstopStderr)
+			}
+			if run.status != tc.wantStatus {
+				t.Errorf("parked chain status = %d, want the could-not-run %d", run.status, tc.wantStatus)
+			}
+		})
 	}
 
 	started := []struct {
