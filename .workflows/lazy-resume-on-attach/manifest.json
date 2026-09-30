@@ -254,7 +254,7 @@
       "items": {
         "lazy-resume-on-attach": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "consolidation_gate_mode": "auto",
@@ -369,7 +369,8 @@
             "lazy-resume-on-attach-12-4",
             "lazy-resume-on-attach-13-1",
             "lazy-resume-on-attach-14-1",
-            "lazy-resume-on-attach-15-1"
+            "lazy-resume-on-attach-15-1",
+            "lazy-resume-on-attach-15-2"
           ],
           "staging": {
             "p1": {
@@ -510,7 +511,8 @@
             11,
             12,
             13,
-            14
+            14,
+            15
           ],
           "updated": "2026-09-30"
         }
