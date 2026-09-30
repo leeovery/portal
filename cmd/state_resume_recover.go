@@ -20,6 +20,7 @@ type resumeRecoverConfig struct {
 	ClearMarker      func() error
 	EnableTTYSignals func() error
 	ExecShell        func(prog string, args []string)
+	AltScreen        altScreenPin
 }
 
 // runResumeRecover is the tail of the chain a waiting pane parks: it runs once
@@ -52,6 +53,7 @@ func runResumeRecover(cfg resumeRecoverConfig) error {
 	if err := cfg.ClearMarker(); err != nil {
 		cfg.Logger.Warn("unset resume pending marker failed", "pane_key", cfg.PaneKey, "error", err)
 	}
+	releaseAltScreenPin(cfg.Logger, cfg.PaneKey, cfg.AltScreen)
 
 	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.PaneKey)
 
@@ -93,6 +95,7 @@ var stateResumeRecoverCmd = &cobra.Command{
 			},
 			EnableTTYSignals: cookStdin,
 			ExecShell:        defaultExecShell,
+			AltScreen:        paneAltScreenPin(tmux.DefaultClient(), target),
 		})
 	},
 }

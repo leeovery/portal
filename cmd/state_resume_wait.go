@@ -88,6 +88,8 @@ type resumeWaitConfig struct {
 	// found, which the chain keeps with signal generation off.
 	EnableTTYSignals func() error
 
+	AltScreen altScreenPin
+
 	// Set by runResumeWait from MakeRaw, so an answer hands the pane on in a
 	// cooked tty. An answer reached without a wait restores nothing.
 	restoreTerminal func()
@@ -373,13 +375,15 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 // freeze, in that order, so a saver tick landing between the two captures what
 // is really in the pane. A clear that is refused brings the waiting panel back
 // with the reason, since a pane handed on frozen stays frozen for the rest of
-// its life; cleared is false then, and err is the redraw's.
+// its life; cleared is false then, err is the redraw's, and the alternate-screen
+// pin stays for that redraw to paint onto.
 func resumeUnfreeze(cfg resumeWaitConfig) (cleared bool, err error) {
 	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
 
 	if err := cfg.ClearMarker(); err != nil {
 		return false, resumeReport(cfg, resumeScreenPanel, err)
 	}
+	releaseAltScreenPin(cfg.Logger, cfg.PaneKey, cfg.AltScreen)
 	return true, nil
 }
 
@@ -499,6 +503,7 @@ var stateResumeWaitCmd = &cobra.Command{
 			LookupResume:        lookupResumeRegistration,
 			DiscardRegistration: discardResumeRegistration,
 			EnableTTYSignals:    setStdinSignals,
+			AltScreen:           paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),
 		})
 	},
 }

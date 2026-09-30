@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/tmux"
+
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -23,6 +25,19 @@ echo "stty $*" >> "$PANE_TRANSCRIPT"
 `
 	backstopTmux = `#!/bin/sh
 echo "tmux $*" >> "$PANE_TRANSCRIPT"
+case "$1" in display-message) echo "${ALTERNATE_ON:-0}" ;; esac
+`
+	// flippingTmux reports the pane on the alternate screen for its first two
+	// reads, as a leave tmux has not yet processed would.
+	flippingTmux = `#!/bin/sh
+echo "tmux $*" >> "$PANE_TRANSCRIPT"
+if [ "$1" = display-message ]; then
+	n=0
+	while IFS= read -r line; do
+		case $line in *display-message*) n=$((n+1)) ;; esac
+	done < "$PANE_TRANSCRIPT"
+	if [ "$n" -ge 3 ]; then echo 0; else echo 1; fi
+fi
 `
 	failingTmux = `#!/bin/sh
 echo "tmux $*" >> "$PANE_TRANSCRIPT"
@@ -44,6 +59,10 @@ type parkedRun struct {
 	transcript string
 	stderr     string
 	status     int
+
+	// backstopStderr is stderr less the shell's own report of the unstartable
+	// executable: what the backstop's steps wrote.
+	backstopStderr string
 }
 
 type parkedStubs struct {
@@ -84,6 +103,11 @@ func runParkedChain(t *testing.T, exe string, stubs parkedStubs, env ...string) 
 	err = parked.Run()
 
 	run := parkedRun{stderr: stderr.String()}
+	for line := range strings.Lines(run.stderr) {
+		if !strings.Contains(line, exe) {
+			run.backstopStderr += line
+		}
+	}
 	var exitErr *exec.ExitError
 	switch {
 	case errors.As(err, &exitErr):
@@ -124,12 +148,13 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 			return path
 		}},
 	}
-	recovered := hydrateResetPreamble +
-		"tmux set-option -pu -t %7 " + state.ResumePendingOption + "\n" +
-		"stty sane\n" +
-		"shell\n"
+	target := string(tmux.PaneIDTarget(samplePayload().Pane))
+	clearLine := "tmux set-option -pu -t " + target + " " + state.ResumePendingOption + "\n"
+	readLine := "tmux display-message -p -t " + target + " -F #{" + alternateOnFormat + "}\n"
+	unpinLine := "tmux set-option -pu -t " + target + " " + altScreenOption + "\n"
+	recovered := hydrateResetPreamble + clearLine + readLine + unpinLine + "stty sane\n" + "shell\n"
 	for _, tc := range unstartable {
-		t.Run("a tail "+tc.name+" resets the pane, clears its marker and restores the terminal before the user's shell", func(t *testing.T) {
+		t.Run("a tail "+tc.name+" resets the pane, clears its marker, lifts its pin and restores the terminal before the user's shell", func(t *testing.T) {
 			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: backstopTmux})
 
 			if run.transcript != recovered {
@@ -140,21 +165,48 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 			}
 		})
 
+		t.Run("a tail "+tc.name+" polls until the pane is off the alternate screen before it lifts the pin", func(t *testing.T) {
+			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: flippingTmux})
+
+			want := hydrateResetPreamble + clearLine + strings.Repeat(readLine, 3) + unpinLine + "stty sane\nshell\n"
+			if run.transcript != want {
+				t.Errorf("pane transcript = %q, want %q", run.transcript, want)
+			}
+		})
+
+		t.Run("a tail "+tc.name+" keeps the pin when the leave is never confirmed", func(t *testing.T) {
+			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: backstopTmux}, "ALTERNATE_ON=1")
+
+			want := hydrateResetPreamble + clearLine + strings.Repeat(readLine, altScreenLeaveAttempts) + "stty sane\nshell\n"
+			if run.transcript != want {
+				t.Errorf("pane transcript = %q, want %q", run.transcript, want)
+			}
+			if run.backstopStderr != "" {
+				t.Errorf("the backstop wrote %q to the pane's stderr, want nothing", run.backstopStderr)
+			}
+			if run.status != 0 {
+				t.Errorf("parked chain status = %d, want the user's shell's 0", run.status)
+			}
+		})
+
 		clearFailures := []struct {
-			name, tmux, clear, leak string
+			name, tmux, tmuxCalls, leak string
 		}{
-			{name: "tmux refusing the clear", tmux: failingTmux, clear: "tmux set-option -pu -t %7 " + state.ResumePendingOption + "\n", leak: "no server running"},
-			{name: "no tmux on PATH", tmux: "", clear: "", leak: "tmux:"},
+			{name: "tmux refusing the clear", tmux: failingTmux, tmuxCalls: clearLine + strings.Repeat(readLine, altScreenLeaveAttempts), leak: "no server running"},
+			{name: "no tmux on PATH", tmux: "", tmuxCalls: "", leak: "tmux:"},
 		}
 		for _, cf := range clearFailures {
 			t.Run("a tail "+tc.name+" still reaches the user's shell with "+cf.name, func(t *testing.T) {
 				run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: cf.tmux})
 
-				if want := hydrateResetPreamble + cf.clear + "stty sane\nshell\n"; run.transcript != want {
+				if want := hydrateResetPreamble + cf.tmuxCalls + "stty sane\nshell\n"; run.transcript != want {
 					t.Errorf("pane transcript = %q, want %q", run.transcript, want)
 				}
 				if strings.Contains(run.stderr, cf.leak) {
 					t.Errorf("the failed clear reached the pane: stderr %q", run.stderr)
+				}
+				if run.backstopStderr != "" {
+					t.Errorf("the backstop wrote %q to the pane's stderr, want nothing", run.backstopStderr)
 				}
 				if run.status != 0 {
 					t.Errorf("parked chain status = %d, want the user's shell's 0", run.status)

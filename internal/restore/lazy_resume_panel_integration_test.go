@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -263,6 +264,105 @@ func TestLazyResumePanel_RestoredPaneHoldsThePanel(t *testing.T) {
 	})
 }
 
+const altScreenOption = "alternate-screen"
+
+// panelCopy is text from both resume screens, none of which may survive on the
+// pane or in its transcript once the pane is answered.
+var panelCopy = []string{
+	panelTitle, panelResumeHint, panelDiscardHint, panelCommandLabel, discardConfirmTitle, lazySubjectCommand,
+}
+
+func TestLazyResumePanel_HoldsThePanelOnAnAlternateScreenTheInstallTurnedOff(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	fx := setupLazyResumePanelOn(t, &lazyPanelFixture{altScreenOffGlobally: true})
+	subject := subjectPaneTarget()
+
+	// Discard goes last: the other two leave the registration standing, so the
+	// next reboot offers the panel again.
+	answers := []struct {
+		name   string
+		answer func(t *testing.T)
+	}{
+		{name: "Enter", answer: func(t *testing.T) {
+			fx.ts.Run(t, "send-keys", "-t", string(subject), "Enter")
+		}},
+		{name: "a waiter recovered by the chain's tail", answer: func(t *testing.T) {
+			fx.endWaiterUnanswered(t)
+		}},
+		{name: "a confirmed discard", answer: func(t *testing.T) {
+			fx.ts.Run(t, "send-keys", "-t", string(subject), "d")
+			fx.awaitScreenContains(t, subject, discardConfirmTitle)
+			fx.ts.Run(t, "send-keys", "-t", string(subject), "y")
+		}},
+	}
+	for i, tc := range answers {
+		if i > 0 {
+			fx.captureRound(t)
+			fx.rebootRestoreHydrate(t)
+		}
+
+		t.Run(tc.name+": the panel waits with the transcript intact underneath", func(t *testing.T) {
+			fx.awaitScreenContains(t, subject, panelTitle)
+			fx.assertPending(t, subject)
+			if global := strings.TrimSpace(fx.ts.Run(t, "show-options", "-gv", altScreenOption)); global != "off" {
+				t.Fatalf("global %s = %q; the fixture must turn it off to prove anything", altScreenOption, global)
+			}
+			if !fx.carriesPaneAltScreen(t, subject) {
+				t.Fatalf("waiting subject carries no pane-level %s; show-options -p:\n%s",
+					altScreenOption, fx.ts.Run(t, "show-options", "-p", "-t", string(subject)))
+			}
+			history := fx.paneHistory(t, subject)
+			if !strings.Contains(history, subjectPreRebootLine) {
+				t.Fatalf("subject pane missing the pre-reboot line %q underneath the panel; capture-pane -a -p:\n%s",
+					subjectPreRebootLine, history)
+			}
+			for _, piece := range panelCopy[:3] {
+				if strings.Contains(history, piece) {
+					t.Fatalf("the panel's %q reached the pane's own screen; capture-pane -a -p:\n%s", piece, history)
+				}
+			}
+		})
+
+		t.Run(tc.name+": answering reveals the transcript and leaves no trace of the panel", func(t *testing.T) {
+			tc.answer(t)
+
+			cleared := harnesstest.PollUntil(t, restoretest.HydrateBudget, restoretest.HydrateTick, func() bool {
+				value, err := fx.client.ReadPaneOption(subject, state.ResumePendingOption)
+				return err == nil && !state.ResumePendingSet(value)
+			})
+			if !cleared {
+				t.Fatalf("%s still set on the subject pane after it was answered", state.ResumePendingOption)
+			}
+			unpinned := harnesstest.PollUntil(t, restoretest.HydrateBudget, restoretest.HydrateTick, func() bool {
+				return !fx.carriesPaneAltScreen(t, subject)
+			})
+			if !unpinned {
+				t.Fatalf("subject pane still carries a pane-level %s after it was answered; show-options -p:\n%s",
+					altScreenOption, fx.ts.Run(t, "show-options", "-p", "-t", string(subject)))
+			}
+
+			screen := fx.paneScreen(t, subject)
+			if !strings.Contains(screen, subjectPreRebootLine) {
+				t.Fatalf("subject pane screen missing the transcript line %q; capture-pane -p:\n%s",
+					subjectPreRebootLine, screen)
+			}
+			transcript := fx.paneTranscript(t, subject)
+			for _, piece := range panelCopy {
+				if strings.Contains(screen, piece) {
+					t.Fatalf("subject pane screen still shows %q; capture-pane -p:\n%s", piece, screen)
+				}
+				if strings.Contains(transcript, piece) {
+					t.Fatalf("subject pane transcript holds %q; capture-pane -p -S -:\n%s", piece, transcript)
+				}
+			}
+		})
+	}
+}
+
 // lazyPanelFixture is the two-session install the suite reboots: a lazy subject
 // beside the plain pane a user works in, and an eager control proving both modes
 // ship live together.
@@ -276,15 +376,23 @@ type lazyPanelFixture struct {
 	hashes               state.HashMap
 	prev                 state.Index
 	subjectScrollbackRel string
+
+	// altScreenOffGlobally stands in for an install whose tmux.conf carries
+	// `set -g alternate-screen off`: set on every fresh server before restore,
+	// since a server-lifetime option does not survive the reboot.
+	altScreenOffGlobally bool
 }
 
 func setupLazyResumePanel(t *testing.T) *lazyPanelFixture {
 	t.Helper()
+	return setupLazyResumePanelOn(t, &lazyPanelFixture{})
+}
 
-	fx := &lazyPanelFixture{
-		binDir: restoretest.BuildPortalBinaryDir(t),
-		hashes: state.HashMap{},
-	}
+func setupLazyResumePanelOn(t *testing.T, fx *lazyPanelFixture) *lazyPanelFixture {
+	t.Helper()
+
+	fx.binDir = restoretest.BuildPortalBinaryDir(t)
+	fx.hashes = state.HashMap{}
 
 	_, fx.stateDir = portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", fx.stateDir)
@@ -434,11 +542,40 @@ func (fx *lazyPanelFixture) rebootRestoreHydrate(t *testing.T) {
 func (fx *lazyPanelFixture) rebootRestoreHydrateSessions(t *testing.T, sessions []string) {
 	t.Helper()
 	restoretest.RebootServer(t, fx.ts, fx.client)
+	if fx.altScreenOffGlobally {
+		fx.ts.Run(t, "set-option", "-g", altScreenOption, "off")
+	}
 	if err := restoretest.RestoreFromState(t, fx.client, fx.stateDir, fx.binDir); err != nil {
 		t.Fatalf("RestoreFromState: %v", err)
 	}
 	restoretest.DriveSignalHydrate(t, fx.client, fx.stateDir, sessions)
 	restoretest.WaitForSkeletonMarkersCleared(t, fx.client, restoretest.HydrateBudget, restoretest.HydrateTick)
+}
+
+// carriesPaneAltScreen reads the options set on the pane itself, never the
+// ones it inherits.
+func (fx *lazyPanelFixture) carriesPaneAltScreen(t *testing.T, target tmux.Target) bool {
+	t.Helper()
+	out := fx.ts.Run(t, "show-options", "-p", "-t", string(target))
+	for line := range strings.Lines(out) {
+		if name, _, _ := strings.Cut(strings.TrimSpace(line), " "); name == altScreenOption {
+			return true
+		}
+	}
+	return false
+}
+
+// endWaiterUnanswered ends the subject's waiter the way a pane loses it without
+// an answer. The waiter is found by walking from the fixture pane's own process,
+// so nothing outside that pane is ever signalled.
+func (fx *lazyPanelFixture) endWaiterUnanswered(t *testing.T) {
+	t.Helper()
+	tree := fx.restingTree(t)
+	assertRestingTreeShape(t, tree)
+	waiter := tree[1]
+	if err := syscall.Kill(waiter.pid, syscall.SIGTERM); err != nil {
+		t.Fatalf("signal the subject's waiter %d: %v", waiter.pid, err)
+	}
 }
 
 func (fx *lazyPanelFixture) paneScreen(t *testing.T, target tmux.Target) string {

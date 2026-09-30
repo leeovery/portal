@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -284,15 +285,33 @@ const parkedChainTrap = "trap : INT QUIT; "
 // arrives here, and a second shell after it would make the pane take two exits
 // to close. The executable check tells a tail that never started from a shell
 // that exited 126 or 127 itself. It then takes the tail's own steps in the
-// tail's order — leave the panel's screen, clear the pending marker, restore the
-// terminal — since no Portal binary is left to take them.
+// tail's order — leave the panel's screen, clear the pending marker, lift the
+// alternate-screen pin once tmux reports the leave, restore the terminal — since
+// no Portal binary is left to take them.
 func parkedChainBackstop(exe string, payload resumeChainPayload) string {
 	reset := `printf '%s' ` + shellquote.Single(hydrateResetPreamble)
 	clearMarker := shellquote.Join([]string{
 		"tmux", "set-option", "-pu", "-t", string(tmux.PaneIDTarget(payload.Pane)), state.ResumePendingOption,
 	}) + ` 2>/dev/null`
 	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(exe) + ` ]; then ` +
-		reset + `; ` + clearMarker + `; stty sane 2>/dev/null; exec "${SHELL:-/bin/sh}"; fi;; esac; exit $s`
+		reset + `; ` + clearMarker + `; ` + backstopReleasePin(payload.Pane) +
+		`; stty sane 2>/dev/null; exec "${SHELL:-/bin/sh}"; fi;; esac; exit $s`
+}
+
+// backstopReleasePin is releaseAltScreenPin in shell form: the pin is unset only
+// once #{alternate_on} reads 0 within the bound, and nothing reaches stderr.
+func backstopReleasePin(pane string) string {
+	readAlternateOn := shellquote.Join([]string{
+		"tmux", "display-message", "-p", "-t", string(tmux.PaneIDTarget(pane)), "-F", "#{" + alternateOnFormat + "}",
+	}) + ` 2>/dev/null`
+	unpin := shellquote.Join([]string{
+		"tmux", "set-option", "-pu", "-t", string(tmux.PaneIDTarget(pane)), altScreenOption,
+	}) + ` 2>/dev/null`
+	attempts := strconv.Itoa(altScreenLeaveAttempts)
+	pause := strconv.FormatFloat(altScreenLeavePoll.Seconds(), 'f', -1, 64)
+	return `n=1; until [ "$(` + readAlternateOn + `)" = 0 ]; do ` +
+		`if [ $n -ge ` + attempts + ` ]; then n=0; break; fi; n=$((n+1)); sleep ` + pause + ` 2>/dev/null; done; ` +
+		`if [ $n -gt 0 ]; then ` + unpin + `; fi`
 }
 
 func parkedResumeChain(exe string, payload resumeChainPayload) string {
@@ -352,9 +371,13 @@ func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig, decision resumeDecisi
 	return parked
 }
 
-// The pane and the executable are resolved before the write, so a refusal is
+// The pane and the executable are resolved before any write, so a refusal is
 // taken while the pane is still an eager one: a marked pane whose chain could
 // not be composed would fire its hook and freeze its saved scrollback for life.
+// The alternate-screen pin goes before the marker because a pin left behind
+// overrides one display setting on one pane, where a marker left behind freezes
+// that pane's scrollback; a refused marker lifts the pin, since the pane never
+// waits.
 func markResumePending(cfg hydrateConfig) (parkedPane, error) {
 	pane, err := requireTmuxPane()
 	if err != nil {
@@ -368,7 +391,13 @@ func markResumePending(cfg hydrateConfig) (parkedPane, error) {
 	if err != nil {
 		return parkedPane{}, err
 	}
+	if err := cfg.Client.SetPaneOption(pane, altScreenOption, "on"); err != nil {
+		return parkedPane{}, err
+	}
 	if err := state.SetResumePendingMarker(cfg.Client, pane); err != nil {
+		if liftErr := cfg.Client.UnsetPaneOption(pane, altScreenOption); liftErr != nil {
+			cfg.Logger.Warn("lift alternate-screen pin failed", "pane_key", state.PaneKeyFromFIFOPath(cfg.FIFO), "error", liftErr)
+		}
 		return parkedPane{}, err
 	}
 	return parkedPane{Pane: string(pane), Exe: exe}, nil

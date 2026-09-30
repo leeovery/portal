@@ -93,6 +93,31 @@ func TestResumeAnswerEnter_Order(t *testing.T) {
 	})
 }
 
+func TestResumeAnswerEnter_ReleasesThePin(t *testing.T) {
+	t.Run("it confirms the leave and lifts the pin after the clear and before it reads the store", func(t *testing.T) {
+		var probe resumeWaitProbe
+		probe.lookup = foundHook("make deploy")
+		answerEnter(t, &probe, samplePayload())
+
+		want := []string{"stdout", "clear", "confirm", "unpin", "lookup", "exec"}
+		if !slices.Equal(probe.order, want) {
+			t.Errorf("answer sequence = %q, want %q", probe.order, want)
+		}
+		assertHookHandOff(t, &probe, "make deploy")
+	})
+
+	t.Run("it leaves the pin standing when the clear is refused", func(t *testing.T) {
+		var probe resumeWaitProbe
+		probe.clearErr = errors.New("can't find pane: %7")
+		answerEnter(t, &probe, samplePayload())
+
+		want := []string{"stdout", "clear", "exec"}
+		if !slices.Equal(probe.order, want) {
+			t.Errorf("answer sequence = %q, want %q: the redraw needs the pin", probe.order, want)
+		}
+	})
+}
+
 func TestResumeAnswerEnter_FailedClear(t *testing.T) {
 	clearErr := errors.New("can't find pane: %7")
 

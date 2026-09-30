@@ -55,6 +55,8 @@ type resumeWaitProbe struct {
 	signalsOnErr        error
 	restoresAtSignalsOn int
 	execsAtSignalsOn    int
+
+	pin pinProbe
 }
 
 // orderedWriter records that the pane was written to before it passes the bytes
@@ -111,6 +113,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.execsAtSignalsOn = p.execCalls
 			return p.signalsOnErr
 		},
+		AltScreen: p.pin.seams(&p.order),
 		ExecSelf: func(prog string, args []string) {
 			p.order = append(p.order, "exec")
 			p.execProg = prog

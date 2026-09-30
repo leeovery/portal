@@ -39,6 +39,8 @@ type resumeRecoverProbe struct {
 	signalsOnCalls   int
 	signalsOnErr     error
 	execsAtSignalsOn int
+
+	pin pinProbe
 }
 
 // recoverWriter records that the pane was written to before it passes the bytes
@@ -74,6 +76,7 @@ func newResumeRecoverConfig(t *testing.T, p *resumeRecoverProbe) resumeRecoverCo
 			p.execsAtSignalsOn = p.execCalls
 			return p.signalsOnErr
 		},
+		AltScreen: p.pin.seams(&p.order),
 		ExecShell: func(prog string, args []string) {
 			p.order = append(p.order, "exec")
 			p.execProg = prog
@@ -102,6 +105,9 @@ func TestRunResumeRecover(t *testing.T) {
 		}
 		if probe.execCalls != 0 {
 			t.Errorf("ExecShell called %d times, want 0: an answered pane already ran its own shell", probe.execCalls)
+		}
+		if probe.pin.readCalls != 0 || probe.pin.unpinCalls != 0 {
+			t.Errorf("alternate_on reads = %d, unpins = %d; want none on an answered pane", probe.pin.readCalls, probe.pin.unpinCalls)
 		}
 	})
 
@@ -150,7 +156,7 @@ func TestRunResumeRecover(t *testing.T) {
 			t.Fatalf("runResumeRecover() error = %v", err)
 		}
 
-		want := []string{"read", "stdout", "clear", "exec"}
+		want := []string{"read", "stdout", "clear", "confirm", "unpin", "exec"}
 		if !slices.Equal(probe.order, want) {
 			t.Errorf("recovery order = %v, want %v", probe.order, want)
 		}

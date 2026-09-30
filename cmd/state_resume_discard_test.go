@@ -61,7 +61,7 @@ func TestResumeAnswerDiscard_Removal(t *testing.T) {
 		probe.discardMiss = true
 		answerDiscard(t, &probe, confirmationPayload())
 
-		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
 		if got := probe.stdout.String(); got != hydrateResetPreamble {
 			t.Errorf("what the answer wrote to the pane = %q, want the leave sequence %q", got, hydrateResetPreamble)
 		}
@@ -107,7 +107,7 @@ func TestResumeAnswerDiscard_RefusedWrite(t *testing.T) {
 		if !slices.Equal(probe.discardKeys, []string{payload.HookKey}) {
 			t.Fatalf("discard written for %q, want one write for %q", probe.discardKeys, payload.HookKey)
 		}
-		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
 		assertShellHandOff(t, &probe)
 	})
 }
@@ -127,11 +127,11 @@ func TestResumeAnswerDiscard_Order(t *testing.T) {
 		}
 	})
 
-	t.Run("it clears the marker before it runs the shell", func(t *testing.T) {
+	t.Run("it clears the marker and lifts the pin before it runs the shell", func(t *testing.T) {
 		var probe resumeWaitProbe
 		answerDiscard(t, &probe, confirmationPayload())
 
-		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
 	})
 }
 
@@ -174,7 +174,7 @@ func TestResumeAnswerDiscard_FailedClear(t *testing.T) {
 		}
 	})
 
-	t.Run("it runs neither the shell nor anything else when the clear fails", func(t *testing.T) {
+	t.Run("it runs neither the shell nor anything else, and leaves the pin, when the clear fails", func(t *testing.T) {
 		var probe resumeWaitProbe
 		probe.clearErr = clearErr
 		answerDiscard(t, &probe, confirmationPayload())
@@ -214,7 +214,7 @@ func TestResumeAnswerDiscard_HandOff(t *testing.T) {
 		if len(probe.discardKeys) != 1 {
 			t.Errorf("DiscardRegistration called %d times, want exactly 1", len(probe.discardKeys))
 		}
-		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
 	})
 
 	t.Run("it restores the terminal before every exec", func(t *testing.T) {
