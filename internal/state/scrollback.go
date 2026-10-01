@@ -258,7 +258,8 @@ type CaptureCycleClient interface {
 // and the sets of pane keys the caller's own scrollback dump must skip.
 type CaptureCycle struct {
 	Index Index
-	// Pending holds every live pane carrying the resume pending marker.
+	// Pending holds every live pane carrying the resume pending marker in a
+	// session the capture reached.
 	Pending map[string]struct{}
 	// Skeleton holds every pane key a skeleton marker named when the capture was
 	// taken.
