@@ -213,6 +213,35 @@ func TestCommitCycleCarriesAMissedWaitingPanesSession(t *testing.T) {
 	}
 }
 
+// staleCarryPrev is carryPrev as committed before X's re-file landed: X still
+// named at its positional path.
+func staleCarryPrev() state.Index {
+	prev := carryPrev()
+	prev.Sessions[0].Windows[0].Panes[0].ScrollbackFile = "scrollback/foo__0.0.bin"
+	return prev
+}
+
+func TestCommitCycleRefilesACarriedWaitingRecordAStalePrevNamesPositionally(t *testing.T) {
+	for _, c := range committers {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			prev := staleCarryPrev()
+			seedScrollback(t, dir, "foo__0.1.bin", "y-body")
+			seedScrollback(t, dir, "other__0.0.bin", "o-body")
+			if err := state.Commit(dir, prev, false, nil); err != nil {
+				t.Fatalf("seed sessions.json: %v", err)
+			}
+			// X's transcript already sits under its token; the positional file is gone.
+			seedScrollback(t, dir, carryTokenFile(), carryTranscript)
+			missed := carryWorld{names: []string{"foo", "other"}, rows: []string{xRow("foo", true), siblingRow("foo"), otherRow()}, envErrs: noSuchFoo()}
+
+			mustCommit(t, c, dir, missed, prev)
+
+			assertXFiledAt(t, dir, "foo")
+		})
+	}
+}
+
 func TestCommitCycleCarriedSessionIsNotCaptured(t *testing.T) {
 	dir := t.TempDir()
 	prev := carryPrev()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,8 +287,8 @@ func (c CaptureCycle) SkipsScrollback(paneKey string) bool {
 // them, and re-files every frozen pane's scrollback in one step, so no caller
 // can commit an index that omits a mid-restore pane's record, has two records
 // naming one scrollback file, or still names a waiting pane's vacated
-// positional path, bar a pane whose token the pane-token rule refuses, whose
-// link or re-file failed, or whose session the capture carried. A failed marker read returns its wrapped error before
+// positional path, bar a pane whose token the pane-token rule refuses or whose
+// link or re-file failed. A failed marker read returns its wrapped error before
 // any capture is taken. A failed capture returns before anything is re-filed,
 // with the empty index, the empty pending set and the error the capture gave.
 func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
@@ -301,6 +302,9 @@ func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap,
 		return capture, err
 	}
 	linkMovedSkeletonScrollback(dir, &capture.Index, skeleton, logger)
-	refilePendingScrollback(dir, &capture.Index, capture.Pending, hm, logger)
+	waiting := make(map[string]struct{}, len(capture.Pending)+len(captured.carriedWaiting))
+	maps.Copy(waiting, capture.Pending)
+	maps.Copy(waiting, captured.carriedWaiting)
+	refilePendingScrollback(dir, &capture.Index, waiting, hm, logger)
 	return capture, nil
 }

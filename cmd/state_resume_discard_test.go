@@ -214,7 +214,7 @@ func TestResumeAnswerDiscard_HandOff(t *testing.T) {
 		assertShellHandOff(t, &probe)
 	})
 
-	t.Run("it makes no tmux call but the marker unset", func(t *testing.T) {
+	t.Run("it makes no tmux call but the marker unset and the pin's release", func(t *testing.T) {
 		var probe resumeWaitProbe
 		answerDiscard(t, &probe, confirmationPayload())
 

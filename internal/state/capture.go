@@ -65,6 +65,10 @@ type structureCapture struct {
 	index   Index
 	pending map[string]struct{}
 	carried map[string]struct{}
+	// carriedWaiting holds the pane keys of carried records still answering to
+	// a waiting token, which the re-file takes alongside pending: the previous
+	// index may name a positional path the token-named file has since replaced.
+	carriedWaiting map[string]struct{}
 }
 
 // errCarryNameTaken refuses the commit rather than put two sessions under one
@@ -75,9 +79,10 @@ func captureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	logger = loggerOrDiscard(logger)
 	savedAt := time.Now().UTC()
 	empty := structureCapture{
-		index:   Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}},
-		pending: map[string]struct{}{},
-		carried: map[string]struct{}{},
+		index:          Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}},
+		pending:        map[string]struct{}{},
+		carried:        map[string]struct{}{},
+		carriedWaiting: map[string]struct{}{},
 	}
 
 	names, err := c.ListSessionNames()
@@ -142,14 +147,15 @@ func captureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	}
 
 	carried := map[string]struct{}{}
+	carriedWaiting := map[string]struct{}{}
 	if prev != nil {
-		if carried, err = carryMissedWaitingSessions(&idx, *prev, waitingTokens(grouped)); err != nil {
+		if carried, carriedWaiting, err = carryMissedWaitingSessions(&idx, *prev, waitingTokens(grouped)); err != nil {
 			return empty, err
 		}
 	}
 
 	idx.Canonicalize()
-	return structureCapture{index: idx, pending: paneKeySet(live), carried: carried}, nil
+	return structureCapture{index: idx, pending: paneKeySet(live), carried: carried, carriedWaiting: carriedWaiting}, nil
 }
 
 // waitingTokens holds the token of every enumerated pane carrying the resume
@@ -168,9 +174,10 @@ func waitingTokens(grouped map[string][]paneRow) map[string]struct{} {
 
 // carryMissedWaitingSessions appends to fresh every previous session whose
 // record answers to a waiting token no record of fresh carries, and returns
-// the pane keys of what it appended. A token held by more than one previous
+// the pane keys of what it appended, then the keys of those appended records
+// still carrying a waiting token. A token held by more than one previous
 // record resolves to the first in canonical order, as the merges resolve it.
-func carryMissedWaitingSessions(fresh *Index, prev Index, waiting map[string]struct{}) (map[string]struct{}, error) {
+func carryMissedWaitingSessions(fresh *Index, prev Index, waiting map[string]struct{}) (map[string]struct{}, map[string]struct{}, error) {
 	placed := liveTokenSet(*fresh)
 	toCarry := map[string]struct{}{}
 	resolved := map[string]struct{}{}
@@ -189,21 +196,26 @@ func carryMissedWaitingSessions(fresh *Index, prev Index, waiting map[string]str
 		toCarry[e.session] = struct{}{}
 	}
 	if len(toCarry) == 0 {
-		return map[string]struct{}{}, nil
+		return map[string]struct{}{}, map[string]struct{}{}, nil
 	}
 
 	for _, s := range fresh.Sessions {
 		if _, taken := toCarry[s.Name]; taken {
-			return nil, fmt.Errorf("carry session %q: %w", s.Name, errCarryNameTaken)
+			return nil, nil, fmt.Errorf("carry session %q: %w", s.Name, errCarryNameTaken)
 		}
 	}
 
 	carried := map[string]struct{}{}
+	carriedWaiting := map[string]struct{}{}
 	for _, name := range sortedKeys(toCarry) {
 		s := carriedSession(prev, name, placed)
 		for _, w := range s.Windows {
 			for _, p := range w.Panes {
-				carried[SanitizePaneKey(s.Name, w.Index, p.Index)] = struct{}{}
+				key := SanitizePaneKey(s.Name, w.Index, p.Index)
+				carried[key] = struct{}{}
+				if _, isWaiting := waiting[p.PortalPaneID]; isWaiting && p.PortalPaneID != "" {
+					carriedWaiting[key] = struct{}{}
+				}
 			}
 		}
 		fresh.Sessions = append(fresh.Sessions, s)
@@ -211,7 +223,7 @@ func carryMissedWaitingSessions(fresh *Index, prev Index, waiting map[string]str
 	sort.SliceStable(fresh.Sessions, func(i, j int) bool {
 		return fresh.Sessions[i].Name < fresh.Sessions[j].Name
 	})
-	return carried, nil
+	return carried, carriedWaiting, nil
 }
 
 // carriedSession copies the first previous session named name, so nothing
