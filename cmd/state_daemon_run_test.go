@@ -462,9 +462,12 @@ func TestDaemonTick_SkipsSkeletonMarkedPanesInScrollback(t *testing.T) {
 	tick(t.Context(), deps)
 
 	for _, call := range fc.callsContaining("capture-pane") {
-		if len(call) >= 7 && call[6] == "work:0.1" {
+		if len(call) >= 7 && sessionFromExactTarget(call[6]) == "work:0.1" {
 			t.Errorf("capture-pane invoked for skeleton-marked target work:0.1: %v", call)
 		}
+	}
+	if _, err := os.Stat(state.ScrollbackFile(dir, skipKey)); !os.IsNotExist(err) {
+		t.Errorf("scrollback written for the skeleton-marked pane; stat err = %v", err)
 	}
 }
 
