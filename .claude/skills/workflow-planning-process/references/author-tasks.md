@@ -4,7 +4,7 @@
 
 ---
 
-This step uses the `workflow-planning-task-author` agent (`../../../agents/workflow-planning-task-author.md`) to write full detail for all tasks in a phase. One sub-agent authors all tasks, writing to a per-phase task detail file. The orchestrator then handles per-task approval and format-specific writing to the output format.
+This step uses the `workflow-planning-task-author` agent (`.claude/agents/workflow-planning-task-author.md`) to write full detail for all tasks in a phase. One sub-agent authors all tasks, writing to a per-phase task detail file. The orchestrator then handles per-task approval and format-specific writing to the output format.
 
 ---
 
@@ -36,10 +36,10 @@ Mid-authoring resume — the text and its decisions already stand; re-invoking w
 
 Invoke `workflow-planning-task-author` with these file paths:
 
-1. **read-specification.md**: `read-specification.md`
+1. **read-specification.md**: `.claude/skills/workflow-planning-process/references/read-specification.md`
 2. **Specification**: specification path from the manifest or `.workflows/{work_unit}/specification/{topic}/specification.md`
 3. **Cross-cutting specs**: cross-cutting spec paths if any
-4. **task-design.md**: `task-design.md`
+4. **task-design.md**: `.claude/skills/workflow-planning-process/references/task-design.md`
 5. **All approved phases**: the complete phase structure from the planning file body
 6. **Task list for current phase**: the task table for this specific phase from the planning file
 7. **Task detail file path**: `.workflows/{work_unit}/planning/{topic}/phase-{N}-tasks.md`
@@ -73,7 +73,7 @@ For each `## Spec Defects` entry in the agent's return, once per entry:
 
 → Load **[resolve-spec-gap.md](resolve-spec-gap.md)** with lane = `construction`, gap = `{the entry, and the task it surfaced in}`.
 
-When at least one corrigendum landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim per its marker:
+When at least one corrigendum landed — the record's or one the user settled at the exchange; nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-corrections --count {count}

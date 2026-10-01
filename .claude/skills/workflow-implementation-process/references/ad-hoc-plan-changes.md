@@ -6,7 +6,7 @@
 
 Folds conversationally-surfaced unplanned work into the plan through the same infrastructure that authored the plan, never by hand. Always start at **A. Frame the Work** — except an addition to the task in flight, which enters at **C. Deliver to the Executor**: the orchestrator's own, and the answer the block gate took from the user.
 
-The caller is whatever flow the conversation interrupted. On `→ Return to caller.`, resume that flow exactly where it stopped; a gate menu that was pending when the conversation interrupted was set aside until the person is ready to move on, and is re-fetched from its surface when it comes back.
+The caller is whatever flow the conversation interrupted. On `→ Return to caller.`, resume that flow exactly where it stopped; a gate menu that was pending when the conversation interrupted was set aside — once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes re-fetch it from its surface.
 
 Context to hold before acting: `{format}` is the plan's output format, read at Step 2 — if it is not in session context (an early or post-refresh entry), read it now (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} format`).
 
@@ -190,19 +190,19 @@ node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "im
 
 Invoke the task-writer agent.
 
-**Agent path**: `../../../agents/workflow-implementation-task-writer.md`
+**Agent path**: `.claude/agents/workflow-implementation-task-writer.md`
 
 Pass via the orchestrator's prompt:
 
 1. **Work unit** — the work unit name (for path construction)
 2. **Topic name** — the implementation topic (scopes tasks to the correct plan)
-3. **Staging file path** — the `ad-hoc-tasks-{n}.md` file from **E**
+3. **Staging file path** — `.workflows/{work_unit}/implementation/{topic}/ad-hoc-tasks-{n}.md`, the file from **E**
 4. **Planning file path** — `.workflows/{work_unit}/planning/{topic}/planning.md`
-5. **Plan format reading adapter path** — `../../workflow-planning-process/references/output-formats/{format}/reading.md`
-6. **Plan format authoring adapter path** — `../../workflow-planning-process/references/output-formats/{format}/authoring.md`
+5. **Plan format reading adapter path** — `.claude/skills/workflow-planning-process/references/output-formats/{format}/reading.md`
+6. **Plan format authoring adapter path** — `.claude/skills/workflow-planning-process/references/output-formats/{format}/authoring.md`
 7. **Phase placement** — `per-task`
 8. **Approved task numbers** — the task numbers whose staging rows are `approved`
-9. **Plan format graph adapter path** — `../../workflow-planning-process/references/output-formats/{format}/graph.md`, when any approved task carries a `priority:` or `depends_on:` line
+9. **Plan format graph adapter path** — `.claude/skills/workflow-planning-process/references/output-formats/{format}/graph.md`, when any approved task carries a `priority:` or `depends_on:` line
 
 The agent creates exactly the approved tasks; a crash-resume re-invocation is safe (it creates only those not yet present). It returns:
 

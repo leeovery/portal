@@ -4,7 +4,7 @@
 
 ---
 
-This step uses the `workflow-planning-phase-designer` agent (`../../../agents/workflow-planning-phase-designer.md`) to define or review the phase structure. Whether phases are being designed for the first time or reviewed from a previous session, the process converges on the same approval gate.
+This step uses the `workflow-planning-phase-designer` agent (`.claude/agents/workflow-planning-phase-designer.md`) to define or review the phase structure. Whether phases are being designed for the first time or reviewed from a previous session, the process converges on the same approval gate.
 
 ---
 
@@ -31,12 +31,12 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit} 
 
 Invoke `workflow-planning-phase-designer` with these file paths:
 
-1. **read-specification.md**: `read-specification.md`
+1. **read-specification.md**: `.claude/skills/workflow-planning-process/references/read-specification.md`
 2. **Specification**: specification path from the manifest or `.workflows/{work_unit}/specification/{topic}/specification.md`
 3. **Cross-cutting specs**: cross-cutting spec paths if any
-4. **phase-design.md**: `phase-design.md`
-5. **Context guidance**: `phase-design/{work_type}.md` (default to `epic` if `work_type` is empty)
-6. **task-design.md**: `task-design.md` *(for granularity awareness only — helps the agent judge whether a phase is too thin or too thick. The agent must NOT produce task tables or task lists.)*
+4. **phase-design.md**: `.claude/skills/workflow-planning-process/references/phase-design.md`
+5. **Context guidance**: `.claude/skills/workflow-planning-process/references/phase-design/{work_type}.md` (default to `epic` if `work_type` is empty)
+6. **task-design.md**: `.claude/skills/workflow-planning-process/references/task-design.md` *(for granularity awareness only — helps the agent judge whether a phase is too thin or too thick. The agent must NOT produce task tables or task lists.)*
 
 The agent returns phases only — goals, ordering rationale, and acceptance criteria. **Task lists are designed separately in a later step; do not request or include them.**
 
@@ -56,11 +56,13 @@ Write the phase structure directly to the planning file body.
 
 → Load **[resolve-spec-gap.md](resolve-spec-gap.md)** with lane = `construction`, gap = `{the entry, and the phase it surfaced in}`.
 
-Where a landing changed the specification, or the reference returned work the plan must carry — the tree owing what the specification decides — re-invoke `workflow-planning-phase-designer` through its amendment path with the corrections and that work as the feedback, and write the revised structure to the planning file. Settle that return's `## Spec Defects` the same way, once: a defect the designer still reports after one re-run is left to the review walk, which meets the plan against the specification at the end of the phase. When at least one corrigendum landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim per its marker:
+When at least one corrigendum landed — the record's or one the user settled at the exchange; nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-corrections --count {count}
 ```
+
+Where a landing changed the specification, or the reference returned work the plan must carry — the tree owing what the specification decides — re-invoke `workflow-planning-phase-designer` through its amendment path with the corrections and that work as the feedback, and write the revised structure to the planning file. Settle that return's `## Spec Defects` the same way, once: a defect the designer still reports after one re-run is left to the review walk, which meets the plan against the specification at the end of the phase.
 
 **Otherwise:** nothing to settle — continue.
 

@@ -22,7 +22,13 @@ Two ids appear below: `{id}` is the row id the dispatch answers (`deep-dive-{NNN
 
 Offer a dive where the conversation reaches a question neither party can answer from the room and the answer is worth more than a lookup — a substantial thread, independent of what is being discussed right now, that dedicated tools (web search, source code, documentation) would serve. Quick lookups, single searches, and questions that inform the next conversational turn stay in the main thread.
 
-The register is the anchor: the offer names a thread. A question new to the register is added first — origin `user` when the user raised it, `conversation` otherwise; a question that reshapes a thread already on the register is that thread, reframed, never a second row beside it:
+The register is the anchor: the offer names a thread. A question that reshapes a thread already on the register is that thread, reframed first — never a second row beside it:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs research-threads reframe {work_unit} {topic} {slug} --question "{the question, as it now stands}"
+```
+
+A question new to the register is added first — origin `user` when the user raised it, `conversation` otherwise:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs research-threads add {work_unit} {topic} {slug} --question "{the question, as asked}" --origin {user|conversation} [--parent {slug}]
@@ -94,7 +100,7 @@ Mark the thread:
 node .claude/skills/workflow-engine/scripts/engine.cjs research-threads set {work_unit} {topic} {slug} digging
 ```
 
-**Agent path**: `../../../agents/workflow-research-deep-dive.md`
+**Agent path**: `.claude/agents/workflow-research-deep-dive.md`
 
 Dispatch **one agent** via the Task tool with `run_in_background: true`.
 
@@ -190,7 +196,7 @@ Take the lowest-numbered `pending` row and fold it — one transaction of judgme
    node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} --topic research/{topic} -m "research({work_unit}/{topic}): fold {the thread, in a few words} (deep-dive-{NNN})"
    ```
 
-5. **Speak to the user** — prose, as markdown (not a code block), one authored line per paragraph, never a menu. When the brief asked questions, the Answers in full — every answer's substance whole, each condition, threshold, and alternative the report gave included, told at product altitude: what the product does or the user sees before any symbol, path, or snippet the report used to say it. Otherwise a digest: what was asked, what came back, what it opened — as long as the return needs, never the report pasted. A question only the user holds — their environment, their intent for the product — is asked here, once, with your lean beside it; anything wanting a decision or more digging is a thread on the register, never a question in the room.
+5. **Speak to the user** — prose, as markdown (not a code block), one authored line per paragraph, never a menu. When the brief asked questions, the Answers in full — every answer's substance whole, each condition, threshold, and alternative the report gave included and scoped as the report scoped it (what one system does is never told as what all of them do), told at product altitude: what the product does or the user sees before any symbol, path, or snippet the report used to say it. Otherwise a digest: what was asked, what came back, what it opened — as long as the return needs, never the report pasted. A question only the user holds — their environment, their intent for the product — is asked here, once, with your lean beside it; anything wanting a decision or more digging is a thread on the register, never a question in the room.
 
 6. **Render the register:**
 

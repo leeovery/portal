@@ -183,7 +183,7 @@ Intersect the row's `remaining` with each finding's lane, and take the first lan
 
 #### If no lane holds findings
 
-The row is drained — the final surface call incorporated it. Close it out loud in this same turn, never silently: one line that the {agent_type}'s findings are worked through, then hand the conversation back where the announce interrupted it — resume the open thread, or when the session was already winding down, say so and name the next move. A caller with its own continuation (the final-review drain at phase conclusion) resumes it on return instead.
+The row is drained — the final surface call incorporated it. Close it out loud in this same turn, never silently: one line that the {agent_type}'s findings are worked through, then hand the conversation back where the announce interrupted it — resume the open thread, or when the session was already winding down, say so and name the next move. A caller with its own continuation — the final-review menu, when the drain completes inside its own call — resumes it on return instead. A drain whose last raise the conversation settled returns to the session loop, however it began: the loop's check resumes a close already underway.
 
 → Return to caller.
 
@@ -239,7 +239,7 @@ Answer it — the report's full section, the sites it touches, why the fix is th
 
 A user who says a numbered item is not settled has promoted it (core rule 5). Leave it unsurfaced, drop it from this lane, and treat it as walked — the walk raises it once the batches empty. A promotion is held for the length of the engagement, not in the store: abandon the batch before the walk reaches it and the report's own lane is what the next visit reads, which costs a repeat ask, never a silent loss.
 
-The batch is still owed, and nothing has been surfaced — returning to the caller here would re-render the announce menu the user already answered. A promotion changed the screen, which re-renders now; a question that changed nothing sets the gate aside until the person is ready to move on. To put it back:
+The batch is still owed, and nothing has been surfaced — returning to the caller here would re-render the announce menu the user already answered. A promotion changed the screen, which re-renders now; a question that changed nothing sets the gate aside — once the exchange looks settled, ask in conversation whether they are ready to move on, and on yes put it back. To re-render or put it back:
 
 → Return to **E. No Decision Needed**.
 
@@ -307,7 +307,7 @@ The batch is still owed for whatever survives.
 
 Answer it — the report's full section, the derivation in full, what it rests on. Expanding is not objecting; the screen stands.
 
-The batch is still owed, and nothing has been surfaced. The question sets the gate aside until the person is ready to move on; to put it back:
+The batch is still owed, and nothing has been surfaced. The question sets the gate aside; once the exchange looks settled, ask in conversation whether they are ready to move on, and on yes put it back:
 
 → Return to **F. Decided From the Record**.
 
@@ -340,7 +340,7 @@ When this row's `surfaced` list holds no walked finding yet, the raise opens wit
 **`▪ {lane_heading}`**
 ```
 
-After this, control belongs to the conversation. The user will engage (or reject, or redirect) naturally. Handle their response as normal discussion — not as protocol-driven routing. Their reply calibrates what comes next: the depth the opener held back — the report's full case, the derivation, the costs — enters as responses, each piece when the direction on the table calls for it. A reply that shows the problem didn't land is re-grounded simpler — a different analogy, a smaller example — never the same explanation again, louder. An outcome that re-decides previously `decided` ground, or names an entity, field, rule, or classification this topic's artifact didn't define — citation is not definition: a term carried here only by citing a sibling's decision was defined there — requires the sibling consult before it is documented: follow **G. Sibling consult at cross-topic decision points** in **[knowledge-usage.md](../../workflow-knowledge/references/knowledge-usage.md)** — query or cite, and the documented decision carries the `Sibling check:` line either way, its `no overlap found.` form included. An engagement ends resolved or rejected (**Rejecting a raise** below). A resolution is documented and committed, the commit subject carrying `({id} {finding})`, e.g. `(review-003 F2)`; a rejection writes nothing *into the artifact*, so no commit of its own carries it — a dismissal's manifest push rides the session's next topic-scoped commit. Either close is a natural break: re-enter **A. Check for Results** in the same turn, so the next raise follows while the context is warm. When the raise was the row's last — its surface response said nothing remains — there is no re-entry to make: the closing turn closes the drain as **D**'s drained exit prescribes.
+After this, control belongs to the conversation. The user will engage (or reject, or redirect) naturally. Handle their response as normal discussion — not as protocol-driven routing. Their reply calibrates what comes next: the depth the opener held back — the report's full case, the derivation, the costs — enters as responses, each piece when the direction on the table calls for it. A reply that shows the problem didn't land is re-grounded simpler — a different analogy, a smaller example — never the same explanation again, louder. A finding's outcome is an engagement decision point: before it is documented, follow **G. Sibling consult at cross-topic decision points** in **[knowledge-usage.md](../../workflow-shared/references/knowledge-usage.md)** — both its triggers apply here. An engagement ends resolved or rejected (**Rejecting a raise** below). A resolution is documented and committed, the commit subject carrying `({id} {finding})`, e.g. `(review-003 F2)`; a rejection writes nothing *into the artifact*, so no commit of its own carries it — a dismissal's manifest push rides the session's next topic-scoped commit. Either close is a natural break: re-enter **A. Check for Results** in the same turn, so the next raise follows while the context is warm. When the raise was the row's last — its surface response said nothing remains — there is no re-entry to make: the closing turn closes the drain as **D**'s drained exit prescribes.
 
 **Rejecting a raise** — two shapes, and neither writes a word into the artifact: a finding parked in the document as an open note is residue, not an outcome.
 
@@ -413,7 +413,7 @@ Confirm in one line total — `All {N} sent.`, or what actually landed when a de
 
 Answer it. A finding the user says belongs here is theirs to keep: leave it unsurfaced and treat it as walked.
 
-The batch is still owed, and nothing has been surfaced — returning to the caller here would re-render the announce menu the user already answered. A kept finding changed the screen, which re-renders now; a question that changed nothing sets the gate aside until the person is ready to move on. To put it back:
+The batch is still owed, and nothing has been surfaced — returning to the caller here would re-render the announce menu the user already answered. A kept finding changed the screen, which re-renders now; a question that changed nothing sets the gate aside — once the exchange looks settled, ask in conversation whether they are ready to move on, and on yes put it back. To re-render or put it back:
 
 → Return to **H. Belongs Elsewhere**.
 

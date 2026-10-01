@@ -136,10 +136,16 @@ No fixed cadence — follow the conversation, not a checklist. **The loop is the
 2. **Recognise intent.** The user's message may contain:
    - **Exploration content** — answers to your questions, new surfaces, descriptions of how parts work or connect, positions taken on a decision. Continue the conversation: push on the thread the user opened, counter-frame, follow where it leads. See [discovery-guidelines.md](discovery-guidelines.md) → *The Exploration Stance — How* for the register and where to push.
    - **An edit operation on an existing map item** — *"remove X"*, *"rename X to Y"*, *"edit summary of X"*, *"postpone X"*, etc. Only possible when the map is non-empty. Delegate to [map-operations.md](map-operations.md) — it handles the operation, writes to the **Edits** section, commits.
-   - **A staged product capability — the park valve.** The user places a surfaced capability beyond this epic (*"that's a v2 thing"*), or confirms your proposed placement. Park it on the roadmap (born at the first park; the verb validates and self-commits), record it under **Edits** (`Parked: {name} → {horizon}` — the lazy-creation rule applies when no log exists yet, [template.md](template.md)), and continue — capture-weight, never shaping:
+   - **A staged product capability — the park valve.** The user places a surfaced capability beyond this epic (*"that's a v2 thing"*), or confirms your proposed placement. When no log is installed yet, conjure it **before the park** ([template.md](template.md) → *Lazy creation and finalisation*), so the `--source` names the log the open allocated (`session_number` set from its response). Park it on the roadmap — born at the first park; the verb validates and self-commits — capture-weight, never shaping:
 
      ```bash
      node .claude/skills/workflow-engine/scripts/engine.cjs roadmap add {name} --horizon "{horizon}" --summary "{one-liner}" --origin park:{work_unit} --source {work_unit}/discovery/sessions/session-{session_number}.md
+     ```
+
+     Record it under **Edits** (`Parked: {name} → {horizon}`), commit, and continue:
+
+     ```bash
+     node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "discovery({work_unit}): park {name} — session-{session_number:03d}" --discovery
      ```
 
      A thought about an item already **pulled into in-flight work** is that work's business, not a park — when this session materially deepened its ground, flag the join instead (`engine roadmap flag {name}`). An unplaced tangent stays the inbox's (the scope-down in the detection core). A surfaced capability parks; a topic already on the map postpones instead — the edit operation above.
@@ -153,7 +159,7 @@ No fixed cadence — follow the conversation, not a checklist. **The loop is the
    - **Shared files** — paths offered in conversation land as imports with `discovery` as their origin: → Load **[landing-shared-files.md](../../workflow-shared/references/landing-shared-files.md)** with work_unit = `{work_unit}`, origin = `discovery` and enter its **A. Land It**. Record each landing under **Edits** (`Imported: {filename}` — the lazy-creation rule applies when no log exists yet, [template.md](template.md)).
    - **A request to see the map** — *"show map"*, *"what's on the map"*. Re-run `gateway.cjs map-view {work_unit}` and emit its TITLE and DISPLAY sections verbatim per their markers. No STOP gate; just render and continue.
    - **A request to see dismissed items** — *"show dismissed"*, *"what was removed"*. Load [show-dismissed.md](show-dismissed.md).
-   - **A KB query for prior context** — when a conversational thread would benefit from prior work on this or sibling work units, invoke `knowledge query` with a query derived from the thread (see [contextual-query.md](../../workflow-knowledge/references/contextual-query.md) for the pattern).
+   - **A KB query for prior context** — when a conversational thread would benefit from prior work on this or sibling work units, invoke `knowledge query` with a query derived from the thread (see [contextual-query.md](../../workflow-shared/references/contextual-query.md) for the pattern).
    - **A harvest pull** — *"let's pull topics"*, *"that covers it"*, *"good enough to start"*, *"let's wrap"*, *"done"*, *"ready to go"*. Route to **C. Harvest**.
 
 3. **Continue the exploration.** One thread at a time. Follow the conversation. See *The Exploration Stance — How* in the guidelines for the sparring register.
@@ -166,7 +172,7 @@ No fixed cadence — follow the conversation, not a checklist. **The loop is the
 
 5. **Keep the running record.** The **Exploration** section is a constant running record of the conversation — not verbatim, but **not summarised away; nothing of substance is lost.** Write to it at natural pauses (a thread worked through, the conversation about to branch, detail accumulating, context-compaction risk). Capture the journey: the ideas, the objections, the pivots, the route taken, the **false paths and failed designs** (with why they were dropped), the soft decisions reached, and the **answers to any research or investigation done in-session**. Append-forward — add depth by **layering down**, never by editing earlier entries back. Prose, not transcript; the log survives context refresh, in-context memory does not. Lossiness defeats the point: if the detail of the discovery is lost, the session was wasted.
 
-   The lazy-creation rule applies: this may create the session log file if it doesn't exist yet — see [template.md](template.md) → *Lazy creation and finalisation*, which opens the session via `engine discovery-session open` (installing the log and setting the active-session marker). After writing, commit:
+   The lazy-creation rule applies to a fresh session: this may create the session log file if it doesn't exist yet — never on a resume or a just-created epic, whose log is already installed — see [template.md](template.md) → *Lazy creation and finalisation*, which opens the session via `engine discovery-session open` (installing the log and setting the active-session marker). After writing, commit:
 
    ```bash
    node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "discovery({work_unit}): exploration notes — session-{session_number:03d}" --discovery

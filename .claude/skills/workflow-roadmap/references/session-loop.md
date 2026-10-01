@@ -14,12 +14,12 @@ If `.workflows/.baseline/overview.md` exists, read it in full — silent ambient
 
 #### If `genesis_continuation` is set (the shaping conversation just arrived here)
 
-The conversation is already live and its record persisted at Step 2 — don't re-open with a cold prompt. Render a brief transition that moves from "what is this" into laying the product out:
+The conversation is already live and its record persisted at Step 2 — don't re-open with a cold prompt, and don't restate Step 2's signpost. Render a brief transition into laying the product out:
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-This is about the product as a whole — we'll lay it out, then start building the first part when you're ready. Nothing we say here commits you to building anything.
+Let's lay it out — you pick where to start building when you're ready.
 
 Where do you want to dig in?
 ```
@@ -73,14 +73,14 @@ What's on your mind?
 No fixed cadence — follow the conversation, not a checklist. **The loop is the exploration.** Items and horizons are sorted at the harvest in **C**, when the user asks to lay it out.
 
 1. **Listen.** Take in what the user just said.
-2. **Recognise intent.** An **Edits** write below conjures the log first when none exists yet — the lazy rule, [session-template.md](session-template.md). The user's message may contain:
+2. **Recognise intent.** An op recorded under **Edits** below conjures the log **before the op runs** when none exists yet — the lazy rule, [session-template.md](session-template.md) — so a `--source` names the log the open allocated (`session-{session_number}`, set from the open's response). After the op and its **Edits** entry, commit (`engine commit --roadmap -m "roadmap: {op} {name} — session-{session_number}"`). The user's message may contain:
    - **Exploration content** — the product's shape, who it serves, what matters when. Continue the conversation per the guidelines' stance, the staging current running throughout.
    - **A map operation on an existing item or horizon** — *"move X to v2"*, *"rename X"*, *"merge those horizons"*. Run the matching engine verb (`roadmap move|rename|edit|remove`, `roadmap horizon …` — each validates and self-commits; a refusal on a pulled item is the authority split speaking: relay it, offer the epic-side path). Record the op under **Edits**. When the response carries `epic_row_cancelled`, the item was postponed out of an epic and the remove cancelled that epic's topic with it — tell the user in one line which epic and topic went, reversible from that epic's menu with reactivate, and record that under **Edits** too. An add aimed at a horizon with any member in delivery takes the routed confirm first (guidelines **C**).
-   - **A direct add** — a placed capability named mid-conversation with no more shaping owed: `roadmap add {name} --horizon "{h}" --summary "{one-liner}" --source .roadmap/sessions/session-{session_number}.md` (origin defaults to `harvest`; the same guidelines-**C** confirm applies when the horizon has a member in delivery). Most material waits for the harvest instead — add directly only when the user places it themselves.
+   - **A direct add** — a placed capability named mid-conversation with no more shaping owed: `roadmap add {name} --horizon "{h}" --summary "{one-liner}" --source .roadmap/sessions/session-{session_number}.md` (the source path relative to `.workflows/`, never prefixed with it; origin defaults to `harvest`; the same guidelines-**C** confirm applies when the horizon has a member in delivery). Most material waits for the harvest instead — add directly only when the user places it themselves.
    - **Grooming an inbox idea on** — archive first so the pointer is durable, then add with the archived path as the source: `engine inbox archive {path}`, then `roadmap add {name} --horizon "{h}" --summary "{one-liner}" --origin inbox:{slug} --source .inbox/.archived/ideas/{file}`.
    - **Shared files** — paths offered in conversation land via `engine roadmap import '{path}' …`, all of them in one call (each path single-quoted — a shared filename carries spaces and capitals; a `~` path written out in full, since the quotes stop the shell expanding it; a single quote inside a path written `'\''`; self-commits). A refusal carrying `missing_imports` is met by **A refused landing** below. Read what landed for the conversation and record it under **Edits**.
    - **A request to see the map** — *"show roadmap"*. Render it with `engine render roadmap-view` and emit its DISPLAY section verbatim per its marker. No STOP; render and continue.
-   - **A KB query for prior context** — when a thread would benefit from what shipped work recorded, invoke `knowledge query` with a query derived from the thread (see [contextual-query.md](../../workflow-knowledge/references/contextual-query.md) for the pattern).
+   - **A KB query for prior context** — when a thread would benefit from what shipped work recorded, invoke `knowledge query` with a query derived from the thread (see [contextual-query.md](../../workflow-shared/references/contextual-query.md) for the pattern).
    - **A request to lay it out** — *"lay it out"*, *"that covers it"*, *"let's sort it"*, *"done"*. Route to **C. Harvest**.
 3. **Continue the exploration.** One thread at a time.
 4. **Read the arc for convergence.** When the conversation converges (the guidelines' proxies), surface the ambient nudge — a light aside offering the harvest, once, never a gate (see [harvest-nudge.md](../../workflow-discovery/references/harvest-nudge.md), reading "topics" as "the roadmap sort") — then stay in **B**.

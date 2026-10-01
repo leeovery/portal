@@ -99,17 +99,17 @@ Record each as a consult reference on the **receiving** grouping (never as a sou
 
 **Note Cross-Source Tensions**
 
-The full read also surfaces places where two documents' decided ground disagrees, or a term rests on something another document has since moved — tensions construction will meet when it extracts. Record each on the grouping whose sources carry it as a `**Tension**` line in the cache (**E**): the documents, the collision, one line. Advisory only — never a gate, never resolved here; the specification session holds them from its setup and raises each per its Resolve Source Incoherence discipline when the topic that touches it arrives.
+The full read also surfaces places where two documents' decided ground disagrees, or a term rests on something another document has since moved — tensions construction will meet when it extracts. Record each on the grouping whose sources carry it as a `**Tension**` line in the cache (**E**): the documents, the collision, one line. Advisory only — never a gate, never resolved here; the specification session holds them from its setup, and its construction raises each.
 
 **Knowledge-Base Advisory Query**
 
 Before finalizing groupings, run one query per grouping to surface sibling discussions that may owe it corrections you missed:
 
 ```bash
-node .claude/skills/workflow-knowledge/scripts/knowledge.cjs query "<natural-language concern for this grouping>" --work-unit {work_unit} --phase discussion --limit 5
+node .claude/skills/workflow-engine/scripts/engine.cjs knowledge query "<natural-language concern for this grouping>" --work-unit {work_unit} --phase discussion --limit 5
 ```
 
-Phrase the query as a natural-language description of the grouping's concern, not a topic slug (see **[workflow-knowledge SKILL.md](../../workflow-knowledge/SKILL.md)** → Query construction).
+Phrase the query as a natural-language description of the grouping's concern, not a topic slug (see **[knowledge-usage.md](../../workflow-shared/references/knowledge-usage.md)** → **B. How to construct queries**).
 
 Treat hits as **candidate** consult references — a hit from a discussion outside this grouping that names a correction it owes is worth promoting onto the receiving grouping. **Advisory only**: never auto-add, never gate. You decide which candidates to record; the user confirms at the grouping menu.
 
@@ -203,7 +203,7 @@ Write to `.workflows/{work_unit}/.state/discussion-consolidation-analysis.md` (p
 {Note a grouping that resembles a cancelled specification here, with the route back}
 ```
 
-The `**Consult**` line is per-grouping — one line per consult reference, omitted entirely when a grouping owes none. List sources under each grouping as bullets; consult references stay on their own `**Consult**` line so they are never mistaken for sources. `**Tension**` lines follow the same shape — one per noted tension, omitted when a grouping carries none; the specification session reads them back at setup and raises each when the topic that touches it arrives.
+The `**Consult**` line is per-grouping — one line per consult reference, omitted entirely when a grouping owes none. List sources under each grouping as bullets; consult references stay on their own `**Consult**` line so they are never mistaken for sources. `**Tension**` lines follow the same shape — one per noted tension, omitted when a grouping carries none; the specification session reads them back at setup, and its construction raises each.
 
 Write the cache metadata to the manifest last:
 ```bash

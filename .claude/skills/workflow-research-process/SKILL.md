@@ -1,7 +1,7 @@
 ---
 name: workflow-research-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-discovery/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(mkdir -p .workflows/.cache/), Bash(rm .workflows/.cache/), Bash(rm -rf .workflows/.cache/), Bash(git status), Bash(grep), Bash(rg), Bash(ls), Bash(wc), Bash(find)
+allowed-tools: Bash(node .claude/skills/workflow-discovery/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(mkdir -p .workflows/.cache/), Bash(rm .workflows/.cache/), Bash(rm -rf .workflows/.cache/), Bash(git status), Bash(grep), Bash(rg), Bash(ls), Bash(wc), Bash(find)
 ---
 
 # Research Process
@@ -45,23 +45,23 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. An idea, not a topic: a topic takes the postponing door. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `research`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Postponing the Topic
 
-The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. Load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `research`, from any point in the phase.
+The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. The request is taken as said — never argued, and never checked back with a question first: load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `research`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Cancelling the Topic
 
-The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `research`, from any point in the phase.
+The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. The call-off is taken as said — never argued, and never checked back with a question first: load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `research`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
@@ -85,9 +85,13 @@ Then check if the research file exists at `.workflows/{work_unit}/research/{topi
 
 A first start, not a resume — no session has ever run. Parked concerns wait in the topic's triage queue, untouched by initialization — the session loop's triage check surfaces them.
 
+Set `resumed` = `false`.
+
 → Proceed to **Step 1**.
 
 #### If no file exists
+
+Set `resumed` = `false`.
 
 → Proceed to **Step 1**.
 
@@ -114,6 +118,8 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render research-threads {
 Emit the DISPLAY section verbatim per its marker. An empty response means no thread is registered; nothing is shown.
 
 Load **[resume-detection.md](../workflow-shared/references/resume-detection.md)** with artifact = `research`, file = `.workflows/{work_unit}/research/{topic}.md`, continue_step = `Step 2`, restart_targets = `the research file, the manifest's thread register when the item carries one (node .claude/skills/workflow-engine/scripts/engine.cjs manifest exists {work_unit}.research.{topic} threads, then manifest delete on true), and the phase cache directory (rm -rf .workflows/.cache/{work_unit}/research/{topic}/ — content and agent state together) — a landed report would otherwise fold into the restarted session as its own`, commit = `research({work_unit}): restart research`.
+
+Set `resumed` from where the reference returns: `true` for **Step 2**, the earlier session's file still standing; `false` for **Step 1**, its file deleted and rebuilt.
 
 → On return, proceed as the reference directed — `continue` lands on **Step 2**, `restart` on **Step 1**.
 
@@ -145,7 +151,7 @@ Load **[research-guidelines.md](references/research-guidelines.md)** and follow 
 
 ## Step 4: Knowledge Usage
 
-Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
+Load **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)** and follow its instructions as written.
 
 → On return, proceed to **Step 5**.
 
@@ -153,7 +159,7 @@ Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)
 
 ## Step 5: Contextual Query
 
-Load **[contextual-query.md](../workflow-knowledge/references/contextual-query.md)** and follow its instructions as written.
+Load **[contextual-query.md](../workflow-shared/references/contextual-query.md)** and follow its instructions as written.
 
 → On return, proceed to **Step 6**.
 
@@ -170,9 +176,9 @@ Load **[contextual-query.md](../workflow-knowledge/references/contextual-query.m
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Starting the research session. This is open-ended exploration — follow threads, surface options, and document findings; I'll keep a register of what we set out to learn and where each question stands. No decisions needed at this stage.
+> @if(resumed) Picking the research back up where it left off. @else Starting the research session. @endif This is open-ended exploration — follow threads, surface options, and document findings; I'll keep a register of what we set out to learn and where each question stands. No decisions needed at this stage.
 ```
 
 Load **[route-session.md](references/route-session.md)** and follow its instructions as written.
 
-*Knowledge-base nudge — if a thread feels familiar, or you're about to re-tread ground that might have been covered in another work unit, run a quick query before proceeding. See **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)**.*
+*Knowledge-base nudge — if a thread feels familiar, or you're about to re-tread ground that might have been covered in another work unit, run a quick query before proceeding. See **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)**.*

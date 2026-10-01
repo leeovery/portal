@@ -70,7 +70,7 @@ A resolution the exchange settles, confirmed with the person, lands like a picke
 
 → Proceed to **C. Landing a Resolution** with resolution = `{the settled decision}`, doc = `{the yielding document's topic}`.
 
-An exchange that left the choice open has set the gate aside, and re-presents it once the person is ready to move on (rewrite the payload where the ground moved, re-fetch):
+An exchange that left the choice open has set the gate aside; once it looks settled, ask in conversation whether the person is ready to move on, and on yes re-present it (rewrite the payload where the ground moved, re-fetch):
 
 → Return to **A. Classify** (the gate above).
 
@@ -82,7 +82,7 @@ An exchange showing nothing can stand without work the sources never did — nei
 
 The material is unclear, or silent on a point a direct answer fills, and nothing in the record frames alternatives to choose between. An **Unsourced decision** lands here when a direct answer fills it: the specification decided something its sources never did, and the question is what the sources should have said.
 
-Attempt the derivation first — constraints, sibling artifacts, measurement.
+Attempt the derivation first, yourself — the constraints, the sibling artifacts, a measurement — each read, never taken from a review finding's account of its own search.
 
 **If a defensible derivation settles it** — the record yields the answer (a technical parameter the sources never pinned, derived from the rationale they did record), or first principles over the decisions the record made whittle the fork to one answer you stand behind:
 
@@ -92,7 +92,7 @@ Tell the user in one line what was derived and from what — where the record do
 
 **Otherwise** — the derivation runs out; the tie-break is product intent — appetite, or a fact only the user holds — which is never invented here:
 
-**This stop overrides `auto`.** Where `{lane}`'s gate mode holds `auto` — re-read it if it is not current in context (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic} {construction_gate_mode|finding_gate_mode}`) — open with the announcement verbatim — **Auto is on — stopping anyway:** this is one of the calls auto never makes for you. Then put the question to the user in conversation — what the topic needs, what was searched and where the record ran out, what the answer unlocks — and take a stance. No engine surface: this is an exchange, not a gate.
+**This stop overrides `auto`.** Where `{lane}`'s gate mode holds `auto` — re-read it if it is not current in context (`node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.specification.{topic} {construction_gate_mode|finding_gate_mode}`) — open with the announcement verbatim — **Auto is on — stopping anyway:** this is one of the calls auto never makes for you. Then put the question to the user in conversation — what the topic needs, what was searched and where the record ran out, what the answer unlocks — and take a stance at the firmness the record has earned: your lean and the one reason it rests on, or, where the record gives nothing to lean on, that plainly and what an answer would need. What was searched is what you searched; a search a review finding records is credited to the finding, never told as yours. No engine surface: this is an exchange, not a gate.
 
 **STOP.** Wait for user response.
 

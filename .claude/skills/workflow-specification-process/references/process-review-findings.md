@@ -53,7 +53,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render findings-summary {
 
 Every unresolved finding is disposed before anything renders — its Move settled against the bar and recorded in the tracking file. A finding whose Resolution is already `Approved`, `Adjusted`, `Declined`, or `Routed` (or legacy `Skipped`, read as `Declined`) was settled in an earlier sitting; never re-dispose, re-present, or re-apply it.
 
-Take the unresolved findings one at a time. The tracking file proposed; this session decides — against the bar, with the context the reviewer lacked: user rulings this sitting, findings landed earlier in this walk, the specification's own decisions, ground that has moved, and the source document the finding names, read where the row's excerpt does not settle the point. Where a finding names no Move, or a Move outside this vocabulary, classify it from scratch against the same bar. Reclassification runs in both directions, always on a derivation written down.
+Take the unresolved findings one at a time. The tracking file proposed; this session decides — against the bar, with the context the reviewer lacked: user rulings this sitting, findings landed earlier in this walk, the specification's own decisions, ground that has moved, and the source document the finding names, read where the row's excerpt does not settle the point. Where a finding names no Move, or a Move outside this vocabulary, classify it from scratch against the same bar. Reclassification runs in both directions, always on a derivation written down. A staged `settled` whose derivation is an analogy to another decision is never the record's own answer — an analogy is consistency with the record, not determination by it — so the call is this session's, and the bar below decides whether the session makes it or the user does. So is a staged `settled` whose Proposal names the alternatives that also fit: the naming is the provenance a call the record does not itself determine owes, never a sign of a tie — the call is this session's, never the record's own answer, and it stays `settled` unless every prong of `choice` holds.
 
 **`route`** — the answer is owned by a source document rather than by this specification. Every Source defect and Unsourced decision is this move, and so is a point the sources are silent on that a measurement or a sibling artifact pins: the derivation belongs in the owning document, never in the specification alone.
 
@@ -68,12 +68,12 @@ Take the unresolved findings one at a time. The tracking file proposed; this ses
 
 A `choice` names what was searched and where the record ran out. A `settled` call this session cannot itself stand behind is a `choice` and takes the same bar.
 
-**Declined at dispose** — the fork is the builder's: a mechanism, boundary, byte, ordering, or format detail any competent implementer settles the same way, or a preference no side of which costs the user — never a user-facing string, value, or behaviour the record already answers, which is `settled` whatever its size. The specification states no rule for it — Resolution `Declined` with the reason in Notes, the Move left as staged, announced in a line, committed, nothing rendered.
+**Declined at dispose** — the fork is the builder's: a mechanism, boundary, byte, ordering, or format detail any competent implementer settles the same way, or a preference no side of which costs the user — never a user-facing string, value, or behaviour the record already answers, which is `settled` whatever its size. The specification states no rule for it — Resolution `Declined` with the reason in Notes, where the point is one the product's user meets naming what was searched across the ground **Irreducible** lists above and that nothing there answers it; the Move left as staged, announced in a line, committed, nothing rendered.
 
 Three rules govern the evidence:
 
 - The staged `(recommended)` marker is the reviewer's argument, never a ground.
-- A choice that names no search is not a verdict: run the search yourself.
+- A choice that names no search is not a verdict: run the search yourself — the source document it names read, not the row's excerpt of it — before its Move is disposed either way.
 - A finding a gate exchange this sitting revised is disposed as it stands — the exchange was its disposal.
 
 Record the disposal in the tracking file before anything renders. A staged move the bar confirms stands as written; where the disposal moved anything — the move, the derivation, or a search the staged choice never named — rewrite the row. To `settled`: Move rewritten, the Proposal written with the derivation — what determined it, or what leaned and the alternatives that also fit — the Options removed, Proposed Text, and Current where existing content changes, supplied as the format requires. To `choice`: Move rewritten, the Proposal and Proposed Text replaced with Options, the search named. To `route`: Move rewritten, Proposal, Options, and Proposed Text removed.
@@ -130,11 +130,13 @@ Land the screen's findings per **Landing a Settled Finding**, in the order they 
 
 **If `auto`:**
 
-Record the mode, then land the screen as `yes` does — every remaining screen documents itself:
+Record the mode — every remaining screen documents itself:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.specification.{topic} finding_gate_mode auto
 ```
+
+Then land this screen as `yes` does — its findings per **Landing a Settled Finding**, in the order they read — and confirm in one line — `All {N} documented.`
 
 → Return to **C. The Settled Batch**.
 
@@ -155,7 +157,7 @@ Write that finding's payload per **The Finding Payload** with `move` = `settled`
 node .claude/skills/workflow-engine/scripts/engine.cjs render finding {work_unit}.specification.{topic} --file .workflows/.cache/{work_unit}/specification/{topic}/finding-current.json
 ```
 
-A finding carrying whole proposed content returns its wording beneath the report. Expanding is not objecting — nothing resolved, so the screen re-renders unchanged. The ask sets the gate aside until the person is ready to move on; to put it back:
+A finding carrying whole proposed content returns its wording beneath the report. Expanding is not objecting — nothing resolved, so the screen re-renders unchanged. The question sets the gate aside; once the exchange looks settled, ask in conversation whether they are ready to move on, and on yes put it back:
 
 → Return to **C. The Settled Batch**.
 
@@ -245,7 +247,7 @@ Finding {N} of {total}: {brief_title:(titlecase)} — {chosen option, one clause
 Work the point through in conversation — the comment sets the gate aside.
 
 - **The exchange settles on a side**: confirm it with the person, then land it as the numbered pick lands one. → Return to **D. The Choices**.
-- **The choice stands**: once the person is ready to move on, re-present it. → Return to **D. The Choices**.
+- **The choice stands**: once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes re-present it. → Return to **D. The Choices**.
 - **The exchange concludes it should not land**: Resolution `Declined` with the reason in Notes, announced in a line, committed. → Return to **D. The Choices**.
 - **The exchange shows the gap needs work this specification cannot do in place**: → Proceed to **The Gap Door**.
 
@@ -278,7 +280,7 @@ On return, land the outcome by what actually happened there:
 - **The resolution was queued to a session holding the document** (nothing landed): leave the specification's copy alone — the delivery flagged the source's extractions stale, and this specification cannot conclude while its row for `{doc}` is `pending` or `stale`; the reconcile runs when the source re-concludes.
 - **The gap was parked on the roadmap** (nothing landed anywhere and nothing reopened): the ground is beyond this specification's scope. Content the finding indicted as a decision no source made comes out of the specification — the capability is the roadmap's now, and the specification states no rule for it; a finding about an absence removes nothing.
 
-Then update the tracking file — Resolution `Routed` with a note naming what landed or queued where, or `Declined` with the roadmap item the park named — and commit. (The gap exit's other destinations do not return: the specification pauses and the reference routes the session out; the tracking entry stays `in-progress` in the manifest, and its remaining findings re-process at the next entry.)
+Then update the tracking file — Resolution `Routed` with a note naming what landed or queued where, or `Declined` with the roadmap item the park named, announced in a line — and commit. (The gap exit's other destinations do not return: the specification pauses and the reference routes the session out; the tracking entry stays `in-progress` in the manifest, and its remaining findings re-process at the next entry.)
 
 → Return to **E. The Routes**.
 

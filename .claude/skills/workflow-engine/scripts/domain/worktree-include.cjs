@@ -6,13 +6,13 @@
 // in the project-root `.worktreeinclude` (gitignore syntax) matches, so boot
 // keeps the knowledge files listed there — the store, its metadata, the
 // config — and such a worktree starts with the index its checkout already
-// built. The lines are appended when missing; every other line in the file
-// is the user's and stays as it is.
+// built. The lines are appended when missing; every other line in the file is
+// the user's and stays as it is.
 // ---------------------------------------------------------------------------
 
 const fs = require('fs');
 const path = require('path');
-const { STORE_FILES } = require('./kb.cjs');
+const { STORE_FILES } = require('../kernel/knowledge/files.cjs');
 
 const WORKTREE_INCLUDE = '.worktreeinclude';
 
@@ -31,7 +31,7 @@ function syncWorktreeInclude(cwd) {
     const missing = STORE_FILES.filter((p) => !listed.has(p));
     if (missing.length === 0) return { changed: false };
     const separator = content === '' || content.endsWith('\n') ? '' : '\n';
-    fs.appendFileSync(file, `${separator}${missing.join('\n')}\n`);
+    fs.writeFileSync(file, `${content}${separator}${missing.join('\n')}\n`);
     return { changed: true };
   } catch (err) {
     return { changed: false, error: `${WORKTREE_INCLUDE} — ${err instanceof Error ? err.message : String(err)}` };

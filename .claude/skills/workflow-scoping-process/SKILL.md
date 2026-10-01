@@ -1,7 +1,7 @@
 ---
 name: workflow-scoping-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(ls .workflows/), Bash(rm -rf .workflows/), Bash(git log), Bash(git status), Bash(git rev-parse)
+allowed-tools: Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(ls .workflows/), Bash(rm -rf .workflows/), Bash(git log), Bash(git status), Bash(git rev-parse)
 ---
 
 # Scoping Process
@@ -51,23 +51,23 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. An idea, not a topic: a topic takes the postponing door. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `scoping`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Postponing the Topic
 
-The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. Load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `scoping`, from any point in the phase.
+The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. The request is taken as said — never argued, and never checked back with a question first: load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `scoping`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Cancelling the Topic
 
-The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `scoping`, from any point in the phase.
+The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. The call-off is taken as said — never argued, and never checked back with a question first: load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `scoping`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
@@ -220,7 +220,7 @@ Order matters — the plan's cleanup commits while the planning item still exist
 5. Delete the spec and plan files: `rm -rf .workflows/{work_unit}/specification/{topic}/ .workflows/{work_unit}/planning/{topic}/`
 6. Remove the spec's knowledge-base entry. A failed removal never blocks: tell the user in one line that the next start removes it, and continue:
    ```bash
-   node .claude/skills/workflow-knowledge/scripts/knowledge.cjs remove --work-unit {work_unit} --phase specification --topic {topic}
+   node .claude/skills/workflow-engine/scripts/engine.cjs knowledge remove --work-unit {work_unit} --phase specification --topic {topic}
    ```
 7. Commit the plan's cleanup — `--plan` stages the planning topic, both manifests, and the plan's declared storage, so the deleted plan files and the format's own cleanup land together:
    ```bash
@@ -242,7 +242,7 @@ Order matters — the plan's cleanup commits while the planning item still exist
 
 ## Step 1: Knowledge Usage
 
-Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
+Load **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)** and follow its instructions as written.
 
 → On return, proceed to **Step 2**.
 
@@ -264,7 +264,7 @@ Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)
 
 Load **[gather-context.md](references/gather-context.md)** and follow its instructions as written.
 
-*Knowledge-base nudge — if the change touches an area with prior discussions, investigations, or specs, query the knowledge base while gathering context. A "mechanical change" often has a history. See **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)**.*
+*Knowledge-base nudge — if the change touches an area with prior discussions, investigations, or specs, query the knowledge base while gathering context. A "mechanical change" often has a history. See **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)**.*
 
 → On return, proceed to **Step 3**.
 
@@ -272,7 +272,7 @@ Load **[gather-context.md](references/gather-context.md)** and follow its instru
 
 ## Step 3: Contextual Query
 
-Load **[contextual-query.md](../workflow-knowledge/references/contextual-query.md)** and follow its instructions as written.
+Load **[contextual-query.md](../workflow-shared/references/contextual-query.md)** and follow its instructions as written.
 
 → On return, proceed to **Step 4**.
 

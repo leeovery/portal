@@ -1,7 +1,7 @@
 ---
 name: workflow-planning-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-discovery/scripts/gateway.cjs), Bash(ls .workflows/), Bash(rm -rf .workflows/), Bash(git log), Bash(git diff), Bash(git status), Bash(git rev-parse)
+allowed-tools: Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(node .claude/skills/workflow-discovery/scripts/gateway.cjs), Bash(ls .workflows/), Bash(rm -rf .workflows/), Bash(git log), Bash(git diff), Bash(git status), Bash(git rev-parse)
 ---
 
 # Planning Process
@@ -75,23 +75,23 @@ Follow every step in sequence. No steps are optional.
 
 The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. An idea, not a topic: a topic takes the postponing door. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `planning`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Postponing the Topic
 
-The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. Load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `planning`, from any point in the phase.
+The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. The request is taken as said — never argued, and never checked back with a question first: load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `planning`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Cancelling the Topic
 
-The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `planning`, from any point in the phase.
+The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. The call-off is taken as said — never argued, and never checked back with a question first: load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `planning`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
@@ -128,7 +128,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.
 
 The subtree carries the current `phase` and `task` position (for the resume prompt below) and the `spec_commit` baseline (for spec-change detection).
 
-Load **[spec-change-detection.md](references/spec-change-detection.md)** and follow its instructions as written. Then present the informed choice — emit the spec-change summary as markdown (not a code block). Then render the resume menu (the position parenthetical derives from the planning item) and emit its section verbatim per its marker:
+Load **[spec-change-detection.md](references/spec-change-detection.md)** and follow its instructions as written. Then render the resume menu (the position parenthetical derives from the planning item) and emit its section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render resume-gate {work_unit}.planning.{topic} --variant plan
@@ -207,7 +207,7 @@ Load **[planning-principles.md](references/planning-principles.md)** and follow 
 
 ## Step 4: Knowledge Usage
 
-Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
+Load **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)** and follow its instructions as written.
 
 → On return, proceed to **Step 5**.
 

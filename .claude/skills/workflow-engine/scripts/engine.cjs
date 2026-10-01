@@ -16,8 +16,10 @@
 // state-branching renders here.
 //
 // Two doors, one dispatch: `main` binds the process (argv, cwd, the real
-// streams) and `run` binds a caller's (the exported in-process entry, for a
-// test harness that wants the CLI's answers without the CLI's start-up).
+// streams) and the exported in-process entry binds a caller's, for a test
+// harness that wants the CLI's answers without the CLI's start-up — `run`,
+// or `runAsync` for the knowledge verbs that wait on the embedding provider,
+// which `run` refuses before running.
 // Nothing below either door reads process state: the directory, the output
 // streams and the stdin text all arrive on the call.
 // ---------------------------------------------------------------------------
@@ -26,7 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const { signpost, box, wrapWithPrefix, renderTree, WIDTH } = require('./kernel/render.cjs');
 const { resetDisplayWidth } = require('./kernel/terminal.cjs');
-const { commitPathspecScoped, discoveryScope } = require('./domain/commit.cjs');
+const { commitPathspecScoped, commitStagedScoped, discoveryScope, OWNED_PATHS } = require('./domain/commit.cjs');
 const { dirtyPaths, stageableSpecs, hasStagedDeletions } = require('./kernel/git.cjs');
 const { recordSubtopicAdd, recordSubtopicState, recordSubtopicStates, SUBTOPIC_STATES } = require('./domain/discussion-map.cjs');
 const { recordThreadAdd, recordThreadState, recordThreadStates, recordThreadReframe, recordThreadRemove } = require('./domain/research-threads.cjs');
@@ -55,35 +57,10 @@ const roadmap = require('./domain/roadmap.cjs');
 const baseline = require('./domain/baseline.cjs');
 const walkthrough = require('./domain/walkthrough.cjs');
 const roadmapSession = require('./domain/roadmap-session.cjs');
+const { runKnowledge, knowledgeWaits } = require('./domain/knowledge/commands.cjs');
+const { ExitSignal, messageOf } = require('./kernel/call.cjs');
 
-/**
- * One invocation: the directory it acts on, where its two output streams go,
- * and the text it was handed on stdin (read lazily — a command that wants
- * none never asks).
- * @typedef {object} Call
- * @property {string} cwd
- * @property {(text: string) => void} out
- * @property {(text: string) => void} err
- * @property {() => string} stdin
- */
-
-/**
- * A command's exit, thrown rather than taken on the process: `main` turns it
- * into an exit code, `run` answers with one. A handler that stops the command
- * must never stop its caller.
- */
-class ExitSignal extends Error {
-  /** @param {number} code */
-  constructor(code) {
-    super(`engine exited ${code}`);
-    this.code = code;
-  }
-}
-
-/** @param {unknown} err @returns {string} */
-function messageOf(err) {
-  return err instanceof Error ? err.message : String(err);
-}
+/** @typedef {import('./kernel/call.cjs').Call} Call */
 
 /** @param {Call} call @param {string} msg @returns {never} */
 function die(call, msg) {
@@ -159,6 +136,7 @@ const USAGE = `Usage: engine <command> [args]
 
 Commands:
   boot
+  knowledge <index|query|check|status|remove|compact|rebuild|fill|setup> … (engine knowledge --help)
   manifest get    <dotpath> [<field.path>]
   manifest set    <dotpath> <field> <value>
   manifest set    <dotpath> <field>=<value> [<field>=<value> …]
@@ -271,6 +249,7 @@ Commands:
   commit --inbox -m <message>
   commit --roadmap -m <message>
   commit --workflows -m <message>
+  commit --migrations -m <message>
   render resume-gate <wu.phase.topic> [--triage N] [--variant plan|review|scoping|session]  (session: bare <wu>)
   render task-list   <wu.planning.topic> --file <payload.json>
   render findings-summary <wu.phase.topic> --file <payload.json>
@@ -387,7 +366,7 @@ Commands:
   render roadmap-shape-gate
   render shape-gate
   render synthesis-gate
-  render query-failure-gate
+  render query-failure-gate --file <payload.json>
   render baseline-progress
   render baseline-area-gate --area <name>
   render baseline-paused
@@ -398,10 +377,12 @@ Commands:
   render baseline-manage-gate
   render baseline-doc-pick
   render baseline-offer-gate
+  render walkthrough-offer [--menu-only]
   render walkthrough-screen --screen <1..8> --from <first-run|help> [--menu-only]
   render walkthrough-home
   render walkthrough-topics
   render walkthrough-topic --name <slug> [--menu-only]
+  render migrations-applied --file <payload.json>
   render migration-gate
   render label-gate
   render knowledge-gate --variant reuse|deviate|mode|retry|wizard [--provider <name> --model <name>]
@@ -1577,8 +1558,8 @@ function runAgent(call, argv) {
 
 // ---------------------------------------------------------------------------
 // boot — the entry pipeline: migrations (hard error on failure), knowledge
-// check (failure reports not-ready), bulk index then compact when ready
-// (warn-don't-block).
+// check (failure reports not-ready), and when ready the keyword side brought
+// in line, compacted and the vector fill launched (warn-don't-block).
 // ---------------------------------------------------------------------------
 
 function runBoot(call) {
@@ -1724,7 +1705,7 @@ function commitCodePaths(cwd, paths, message, target) {
   return result;
 }
 
-const COMMIT_USAGE = 'Usage: engine commit <work-unit> -m <message> [--plan <topic> | --discovery | --imports | --state | --topic <phase>/<topic> [--sweep]] | engine commit --paths <file> … -m <message> --for <work-unit> <implementation|review>/<topic> | engine commit --state -m <message> | engine commit --inbox -m <message> | engine commit --roadmap -m <message> | engine commit --workflows -m <message>';
+const COMMIT_USAGE = 'Usage: engine commit <work-unit> -m <message> [--plan <topic> | --discovery | --imports | --state | --topic <phase>/<topic> [--sweep]] | engine commit --paths <file> … -m <message> --for <work-unit> <implementation|review>/<topic> | engine commit --state -m <message> | engine commit --inbox -m <message> | engine commit --roadmap -m <message> | engine commit --workflows -m <message> | engine commit --migrations -m <message>';
 
 /** @param {Call} call @param {string[]} argv */
 function runCommit(call, argv) {
@@ -1740,6 +1721,7 @@ function runCommit(call, argv) {
     let stateScope = false;
     let inbox = false;
     let workflows = false;
+    let migrationsScope = false;
     let roadmapScope = false;
     let importsScope = false;
     let sweep = false;
@@ -1758,6 +1740,7 @@ function runCommit(call, argv) {
       else if (a === '--state') stateScope = true;
       else if (a === '--inbox') inbox = true;
       else if (a === '--workflows') workflows = true;
+      else if (a === '--migrations') migrationsScope = true;
       else if (a === '--roadmap') roadmapScope = true;
       else if (paths) files.push(a);
       else if (workUnit === null) workUnit = a;
@@ -1772,7 +1755,7 @@ function runCommit(call, argv) {
       const parts = (forTopicSpec || '').split('/');
       if (!message || files.length === 0 || forSpec.length !== 2 || !forWorkUnit || parts.length !== 2
           || !CODE_PHASES.includes(parts[0]) || !parts[1] || plan !== null || topicSpec !== null
-          || discovery || importsScope || stateScope || inbox || workflows || roadmapScope || sweep || workUnit !== null) {
+          || discovery || importsScope || stateScope || inbox || workflows || migrationsScope || roadmapScope || sweep || workUnit !== null) {
         throw new Error(COMMIT_USAGE);
       }
       respond(call, commitCodePaths(cwd, files, message, { workUnit: forWorkUnit, phase: parts[0], topic: parts[1] }));
@@ -1782,7 +1765,7 @@ function runCommit(call, argv) {
     // `--state` names two scopes by whether a work unit rides with it: the
     // unit's own analysis dir, or the global one.
     const globalState = stateScope && workUnit === null;
-    const scopeCount = [inbox, workflows, roadmapScope, globalState, workUnit !== null].filter(Boolean).length;
+    const scopeCount = [inbox, workflows, migrationsScope, roadmapScope, globalState, workUnit !== null].filter(Boolean).length;
     const workUnitFlags = [plan !== null, topicSpec !== null, discovery, importsScope, stateScope && workUnit !== null].filter(Boolean).length;
     if (!message || scopeCount !== 1 || forSpec.length > 0 || (workUnitFlags > 0 && workUnit === null) ||
         workUnitFlags > 1 || plan === '' || plan === undefined ||
@@ -1797,6 +1780,14 @@ function runCommit(call, argv) {
       scope = '.workflows/.state';
     } else if (workflows) {
       scope = '.workflows';
+    } else if (migrationsScope) {
+      // The reviewed migration commit: every path the workflows own, taken
+      // as the index records it — a migration may stage a removal there
+      // that the working tree cannot show.
+      const committed = commitStagedScoped(cwd, OWNED_PATHS, message);
+      if (committed === null) respond(call, { committed: null, note: 'nothing to commit' });
+      else respond(call, { committed });
+      return;
     } else if (inbox) {
       scope = '.workflows/.inbox';
     } else if (roadmapScope) {
@@ -1984,10 +1975,16 @@ function runRender(call, argv) {
   }
 }
 
-/** @param {Call} call @param {string[]} argv */
+/**
+ * The command argv names — answering later only where the command waits on
+ * the embedding provider.
+ * @param {Call} call @param {string[]} argv @returns {void|Promise<void>}
+ */
 function runCli(call, argv) {
   const [command, ...rest] = argv;
   switch (command) {
+    case 'knowledge':
+      return runKnowledge(call, rest);
     case 'boot':
       runBoot(call);
       break;
@@ -2067,34 +2064,46 @@ function runCli(call, argv) {
 const HOOK_TARGETS = ['presence cleanup', 'session cleanup', 'session resume', 'conversation end'];
 
 /**
- * One command against a bound call, answering its exit code. Every stop a
- * handler takes arrives here as an ExitSignal; anything else that escapes is
- * a handler that threw without answering, and gets the CLI's last word — the
- * message on stderr, exit 1. Whatever the exit, a command the conversation
- * ran marks it as one that runs the workflows — after the command, which
- * may take the folder the mark lives in: boot's tidy-up deletes one whose
- * transcript is gone.
- * @param {Call} call @param {string[]} argv @returns {number}
+ * The exit code a stop answers with. A stop that is no ExitSignal is a
+ * handler that threw without answering, and gets the CLI's last word — the
+ * message on stderr, exit 1.
+ * @param {Call} call @param {unknown} err @returns {number}
  */
-function dispatch(call, argv) {
-  try {
-    runCli(call, argv);
-  } catch (err) {
-    if (err instanceof ExitSignal) return err.code;
-    call.err(messageOf(err) + '\n');
-    return 1;
-  } finally {
-    if (!HOOK_TARGETS.includes(argv.slice(0, 2).join(' '))) markConversation(call.cwd);
-  }
-  return 0;
+function exitCode(call, err) {
+  if (err instanceof ExitSignal) return err.code;
+  call.err(messageOf(err) + '\n');
+  return 1;
 }
 
 /**
- * Environment keys held for the duration of `fn` and restored exactly — a key
- * that was absent is absent again afterwards. `undefined` takes a key away
- * for the call, which is how a caller hands over an environment a spawned
- * process would have had by replacement rather than overlay. Inside a worker
- * thread `process.env` is that thread's own copy, so this is thread-local.
+ * One command against a bound call, answering its exit code — later, for a
+ * command that waits on the embedding provider. Whatever the exit, a command
+ * the conversation ran marks it as one that runs the workflows — after the
+ * command, which may take the folder the mark lives in: boot's tidy-up
+ * deletes one whose transcript is gone.
+ * @param {Call} call @param {string[]} argv @returns {number|Promise<number>}
+ */
+function dispatch(call, argv) {
+  const settle = (/** @type {number} */ code) => {
+    if (!HOOK_TARGETS.includes(argv.slice(0, 2).join(' '))) markConversation(call.cwd);
+    return code;
+  };
+  let answer;
+  try {
+    answer = runCli(call, argv);
+  } catch (err) {
+    return settle(exitCode(call, err));
+  }
+  return answer ? answer.then(() => 0, (err) => exitCode(call, err)).then(settle) : settle(0);
+}
+
+/**
+ * Environment keys held for the duration of `fn` — until its promise
+ * settles, where it answers with one — and restored exactly: a key that was
+ * absent is absent again afterwards. `undefined` takes a key away for the
+ * call, which is how a caller hands over an environment a spawned process
+ * would have had by replacement rather than overlay. Inside a worker thread
+ * `process.env` is that thread's own copy, so this is thread-local.
  *
  * The display width is a memo over the environment, resolved once per process
  * because a CLI process is one command: scoping the environment scopes the
@@ -2115,12 +2124,43 @@ function withEnv(overlay, fn) {
     apply(key, value);
   }
   resetDisplayWidth();
-  try {
-    return fn();
-  } finally {
+  const restore = () => {
     for (const [key, value] of saved) apply(key, value);
     resetDisplayWidth();
+  };
+  let result;
+  try {
+    result = fn();
+  } catch (err) {
+    restore();
+    throw err;
   }
+  if (result instanceof Promise) return /** @type {T} */ (result.finally(restore));
+  restore();
+  return result;
+}
+
+/**
+ * @typedef {object} InProcessOptions
+ * @property {string} [cwd]
+ * @property {Record<string, string|undefined>} [env]
+ * @property {string} [stdin]
+ */
+
+/** @typedef {{stdout: string, stderr: string, code: number}} Answer */
+
+/**
+ * A call bound to buffers, and the answer they hold once the command exits.
+ * @param {string} cwd @param {string} stdin
+ * @returns {{call: Call, answer: (code: number) => Answer}}
+ */
+function bufferedCall(cwd, stdin) {
+  /** @type {string[]} */ const stdout = [];
+  /** @type {string[]} */ const stderr = [];
+  return {
+    call: { cwd, out: (text) => stdout.push(text), err: (text) => stderr.push(text), stdin: () => stdin },
+    answer: (code) => ({ stdout: stdout.join(''), stderr: stderr.join(''), code }),
+  };
 }
 
 /**
@@ -2129,25 +2169,46 @@ function withEnv(overlay, fn) {
  * the same bytes on the same two streams, the same exit code — and never
  * exits, chdirs, or leaves the environment moved. Callers are test harnesses
  * that want the engine's answers without a process per answer; skills' own
- * scripts take the library (lib.cjs).
+ * scripts take the library (lib.cjs). A command that waits on the embedding
+ * provider is runAsync's, refused here before it runs.
  *
  * The cwd is a parameter rather than a chdir because `process.chdir` is
  * refused inside a worker thread, and the prose world builder runs in one.
  *
- * @param {string[]} argv
- * @param {{cwd?: string, env?: Record<string, string|undefined>, stdin?: string}} [options]
- * @returns {{stdout: string, stderr: string, code: number}}
+ * @param {string[]} argv @param {InProcessOptions} [options]
+ * @returns {Answer}
  */
 function run(argv, { cwd = process.cwd(), env = {}, stdin = '' } = {}) {
-  /** @type {string[]} */ const stdout = [];
-  /** @type {string[]} */ const stderr = [];
-  const code = withEnv(env, () => dispatch({
-    cwd,
-    out: (text) => stdout.push(text),
-    err: (text) => stderr.push(text),
-    stdin: () => stdin,
-  }, argv));
-  return { stdout: stdout.join(''), stderr: stderr.join(''), code };
+  if (argv[0] === 'knowledge' && knowledgeWaits(argv.slice(1))) {
+    throw new TypeError(`engine ${argv.slice(0, 2).join(' ')} answers asynchronously — call runAsync`);
+  }
+  const { call, answer } = bufferedCall(cwd, stdin);
+  return answer(/** @type {number} */ (withEnv(env, () => dispatch(call, argv))));
+}
+
+/** @type {Promise<void>|null} the last runAsync call still to settle */
+let held = null;
+
+/**
+ * The in-process entry for any command, awaited — the one a command that
+ * waits on the embedding provider needs. The environment is held until it
+ * answers, so overlapping calls take turns: each starts once the one before
+ * it has answered and put the environment back.
+ * @param {string[]} argv @param {InProcessOptions} [options]
+ * @returns {Promise<Answer>}
+ */
+function runAsync(argv, { cwd = process.cwd(), env = {}, stdin = '' } = {}) {
+  const start = async () => {
+    const { call, answer } = bufferedCall(cwd, stdin);
+    return answer(await withEnv(env, () => dispatch(call, argv)));
+  };
+  const turn = held ? held.then(start) : start();
+  const settled = turn.then(() => {}, () => {});
+  held = settled;
+  settled.then(() => {
+    if (held === settled) held = null;
+  });
+  return turn;
 }
 
 /** The shell door: the process's own argv, directory, streams and stdin. */
@@ -2166,12 +2227,17 @@ function main() {
     // A terminal hands nothing over until someone types; a hook's JSON
     // arrives on a pipe.
     stdin: () => (process.stdin.isTTY ? '' : fs.readFileSync(0, 'utf8')),
+    ...(process.stdin.isTTY ? { terminal: { input: process.stdin, output: process.stdout } } : {}),
   }, process.argv.slice(2));
   // Only a failure exits explicitly: falling off the end lets Node flush a
   // long render to a pipe before the process goes.
-  if (code !== 0) process.exit(code);
+  const exit = (/** @type {number} */ answered) => {
+    if (answered !== 0) process.exit(answered);
+  };
+  if (typeof code === 'number') exit(code);
+  else code.then(exit);
 }
 
 if (require.main === module) main();
 
-module.exports = { parseArgs, run };
+module.exports = { parseArgs, run, runAsync };

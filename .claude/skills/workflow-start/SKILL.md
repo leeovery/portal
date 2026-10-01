@@ -1,7 +1,7 @@
 ---
 name: workflow-start
 disable-model-invocation: true
-allowed-tools: Bash(node .claude/skills/workflow-start/scripts/gateway.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(git diff)
+allowed-tools: Bash(node .claude/skills/workflow-start/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(git status), Bash(git diff)
 ---
 
 Unified workflow entry point. Discovers state, shows all active work, and routes to start or continue skills.
@@ -24,7 +24,7 @@ Load **[framework.md](../workflow-shared/references/framework.md)** and follow i
 █▀█░█▀▀░█▀▀░█▀█░▀█▀░▀█▀░█▀▀ █░█░█▀█░█▀▄░█░█░█▀▀░█░░░█▀█░█░█░█▀▀
 █▀█░█░█░█▀▀░█░█░░█░░░█░░█░░ █▄█░█░█░█▀▄░█▀▄░█▀▀░█░░░█░█░█▄█░▀▀█
 ▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀ ▀░▀░▀▀▀░▀░▀░▀░▀░▀░░░▀▀▀░▀▀▀░▀░▀░▀▀▀
-                                                        v0.8.0
+                                                        v0.8.6
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
@@ -69,7 +69,7 @@ Files were updated, or a migration handed over checks its code could not perform
 
 1. **If `migrations.verify` is non-empty:** each entry is a migration that ran this boot. Its `info` says what the migration does in any project; its `verify` says what to check in this one. Perform each entry's checks with judgment against the actual files — the migration's code is exact-match and may have missed what it could not recognise — and fix what you find. Your fixes are migration changes: they join the diff, the summary, and the commit below.
 
-2. Run `git status --short -- .workflows` and `git diff -- .workflows` to see what changed. Status shows moved and newly-created files that diff cannot (untracked destinations render a move as bare deletions) — read both before summarising.
+2. Run `git status --short -- .workflows .claude/settings.json .worktreeinclude .gitignore` and `git diff HEAD -- .workflows .claude/settings.json .worktreeinclude .gitignore` to see what changed — the paths the commit below takes. Status shows moved and newly-created files that diff cannot (untracked destinations render a move as bare deletions) — read both before summarising.
 
    **If nothing changed** (the migrations skipped everything and verification found nothing to fix):
 
@@ -84,16 +84,10 @@ Files were updated, or a migration handed over checks its code could not perform
    → Proceed to **Step 0.2**.
 
 3. Write a brief natural language summary of what the migrations did — verification fixes included (e.g., "Restructured workflow directories, created manifest files, recovered a rerouted concern the converter missed"). Focus on the nature of the changes, not individual file paths — these are internal workflow state files.
-4. Display the summary (`{N}`/`{M}` come from `migrations.output`; when it reports no changes — verification fixes only — omit the counts line):
+4. Write the summary to `.workflows/.cache/migrations-applied.json` with the Write tool — `{"summary": "{your natural language summary}", "migrations": {N}, "files": {M}}`, `{N}`/`{M}` from `migrations.output`'s `{N} migration(s) applied, {M} file(s) updated.` line; when it reports no changes — verification fixes only — leave both counts out. Fetch the summary and emit its section verbatim per its marker:
 
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-**Migrations Applied**
-
-{your natural language summary}
-
-{N} migration(s), {M} file(s) updated.
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render migrations-applied --file .workflows/.cache/migrations-applied.json
 ```
 
 5. Fetch the confirm gate and emit its `MENU: migration gate` section verbatim per its marker:
@@ -109,14 +103,14 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render migration-gate
 Commit the migration changes:
 
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs commit --workflows -m "chore: apply workflow migrations"
+node .claude/skills/workflow-engine/scripts/engine.cjs commit --migrations -m "chore: apply workflow migrations"
 ```
 
 → Proceed to **Step 0.2**.
 
 **If ask:**
 
-Answer the user's question. The question sets the gate aside until the person is ready to move on; to put it back, fetch the confirm gate again and emit it as above.
+Answer the user's question. The question sets the gate aside; once the exchange looks settled, ask in conversation whether they are ready to move on, and on yes put it back — fetch the confirm gate again and emit it as above.
 
 **STOP.** Wait for user response.
 
@@ -200,9 +194,41 @@ Branch on the boot response's `walkthrough` — the one-time offer of a short wa
 
 #### If `walkthrough` is `none`
 
-The offer is the walk's first screen, which records the answer. Load **[walk.md](../workflow-help/references/walk.md)** with origin = `first-run`.
+Fetch the offer and emit its sections in the order they arrive, each verbatim per its marker:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render walkthrough-offer
+```
+
+**STOP.** Wait for user response.
+
+**If `yes`:**
+
+Record the answer — written and committed in one call. If it fails (`ok: false`), surface the error and continue — the offer returns at the next start:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs walkthrough record walked
+```
+
+Load **[walk.md](../workflow-help/references/walk.md)** with origin = `first-run`.
 
 → On return, proceed to **Step 0.4**.
+
+**If `skip`:**
+
+Record the decline — written and committed in one call. If it fails (`ok: false`), surface the error and continue — the offer returns at the next start:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs walkthrough record skipped
+```
+
+→ Proceed to **Step 0.4**.
+
+**If ask:**
+
+Answer it per **[answering-how-it-works.md](../workflow-shared/references/answering-how-it-works.md)** — the menu it puts back is the offer's alone, never the whole offer again: the call above with `--menu-only` added.
+
+**STOP.** Wait for user response.
 
 #### Otherwise
 
@@ -260,7 +286,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs session label-config fals
 
 ### Step 0.5: Knowledge Gate
 
-Branch on the boot response — run no further commands (the bulk `knowledge index` and `compact` already ran inside boot when the knowledge base was ready, the index building the store first where this checkout had none). If it carries `warnings`, surface them and continue — boot is complete.
+Branch on the boot response — run no further commands (boot already brought the knowledge base in line with the files and compacted it when it was ready, building the store first where this checkout had none). If it carries `warnings`, surface them and continue — boot is complete.
 
 #### If `knowledge` is `not-ready`
 

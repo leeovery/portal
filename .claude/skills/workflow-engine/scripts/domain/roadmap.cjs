@@ -66,7 +66,8 @@ function validateName(kind, name) {
 }
 
 // Source pointers are provenance indexes into session logs — relative paths
-// under `.workflows/`, never absolute, never traversing.
+// under `.workflows/`, never absolute, never traversing, and never carrying
+// the `.workflows/` they are relative to.
 /** @param {*} sources */
 function validateSources(sources) {
   if (!Array.isArray(sources) || sources.some((s) => typeof s !== 'string')) {
@@ -76,7 +77,21 @@ function validateSources(sources) {
     if (s === '' || s.startsWith('/') || s.split('/').includes('..')) {
       throw new Error(`invalid sources entry ${JSON.stringify(s)} — paths are relative under .workflows/, never absolute or traversing`);
     }
+    if (s.startsWith('.workflows/')) {
+      throw new Error(`invalid sources entry ${JSON.stringify(s)} — paths are relative to .workflows/, so drop the leading ".workflows/" (${JSON.stringify(s.slice('.workflows/'.length))})`);
+    }
   }
+}
+
+// Every pointer names a file already on disk: an item never records a
+// session log its session has not opened yet.
+/** @param {string} cwd @param {string[]} sources */
+function requireSourcesOnDisk(cwd, sources) {
+  const missing = [...new Set(sources)].filter((s) => !fs.existsSync(path.join(cwd, '.workflows', s)));
+  if (missing.length === 0) return;
+  const named = missing.map((s) => JSON.stringify(s)).join(', ');
+  const [what, verb] = missing.length === 1 ? ['source', 'does'] : ['sources', 'do'];
+  throw new Error(`${what} ${named} ${verb} not exist under .workflows/ — a source must exist before an item records it; open a session log's session first (roadmap session open, or the session's own open)`);
 }
 
 /** @param {*} summary */
@@ -405,6 +420,7 @@ function addRoadmapItem(cwd, name, { horizon, summary, origin = 'harvest', sourc
   validateSummary(summary);
   validateOrigin(origin);
   validateSources(sources);
+  requireSourcesOnDisk(cwd, sources);
 
   const result = transactProject(cwd, (manifest) => {
     const roadmap = ensureRoadmap(manifest);
@@ -454,6 +470,11 @@ function addRoadmapItemsBatch(cwd, entries) {
   const names = entries.map((e) => e.name);
   const dupe = names.find((n, i) => names.indexOf(n) !== i);
   if (dupe) throw new Error(`add-batch: "${dupe}" appears more than once in the batch`);
+  try {
+    requireSourcesOnDisk(cwd, entries.flatMap((e) => e.sources ?? []));
+  } catch (err) {
+    throw new Error(`add-batch: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   const result = transactProject(cwd, (manifest) => {
     const roadmap = ensureRoadmap(manifest);
@@ -1050,34 +1071,104 @@ function postponeToRoadmap(cwd, workUnit, topic, { horizon, summary, sources }) 
 }
 
 /**
- * Re-aim every join naming `fromUnit` at `{work_unit: into, topic}` —
- * absorb's hop: an absorbed feature's material continues as an epic topic,
- * so its items' delivery follows it there (the un-pull is cancel's move,
- * never absorb's — the work did not stop, it moved). Runs under the project
- * lock, **no commit** — the calling transaction stages the project manifest
- * alongside its own write. Returns the re-aimed names (empty when nothing
- * was joined — a no-op writes nothing).
- * @param {string} cwd @param {string} fromUnit @param {{into: string, topic: string}} opts
- * @returns {string[]}
+ * @typedef {object} CarriedSources
+ * @property {{item: string, from: string, to: string}[]} rewritten  sources that followed a moved file
+ * @property {{item: string, source: string}[]} dropped  sources whose file went with a deleted unit
  */
-function reaimJoins(cwd, fromUnit, { into, topic }) {
+
+/**
+ * Carry the roadmap's sources across a transaction's moves — `relocations`,
+ * `.workflows/`-relative `[from, to]` pairs: a source at a moved path takes
+ * its landing, and one beneath a moved directory keeps its place beneath the
+ * landing; a source under `deleted/` that nothing moved goes with that unit,
+ * the item's `sources` field with the last of them; every other source
+ * stays. Mutates `items` — the caller holds the project lock and writes.
+ * @param {Record<string, unknown>} items
+ * @param {[string, string][]} relocations
+ * @param {{deleted?: string}} [opts]
+ * @returns {CarriedSources}
+ */
+function carrySources(items, relocations, { deleted } = {}) {
+  /** @type {CarriedSources} */
+  const out = { rewritten: [], dropped: [] };
+  const landing = (/** @type {string} */ source) => {
+    for (const [from, to] of relocations) {
+      if (source === from) return to;
+      if (source.startsWith(`${from}/`)) return to + source.slice(from.length);
+    }
+    return null;
+  };
+  for (const [name, raw] of Object.entries(items)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = /** @type {Record<string, any>} */ (raw);
+    if (!Array.isArray(item.sources)) continue;
+    /** @type {unknown[]} */
+    const kept = [];
+    let carried = false;
+    for (const source of item.sources) {
+      const to = typeof source === 'string' ? landing(source) : null;
+      if (to !== null) {
+        kept.push(to);
+        out.rewritten.push({ item: name, from: source, to });
+        carried = true;
+      } else if (deleted !== undefined && typeof source === 'string' && source.startsWith(`${deleted}/`)) {
+        out.dropped.push({ item: name, source });
+        carried = true;
+      } else {
+        kept.push(source);
+      }
+    }
+    if (!carried) continue;
+    if (kept.length > 0) item.sources = kept;
+    else delete item.sources;
+  }
+  return out;
+}
+
+/**
+ * @typedef {object} AbsorbedRoadmap
+ * @property {string[]} reaimed  items whose joins now name the epic topic
+ * @property {{item: string, from: string, to: string}[]} rewritten  sources that followed the material
+ * @property {{item: string, source: string}[]} dropped  sources deleted with the feature
+ */
+
+/**
+ * Absorb's hop: an absorbed feature's material continues as an epic topic,
+ * so the roadmap follows it there. Every join naming `fromUnit` is re-aimed
+ * at `{work_unit: into, topic}` (the un-pull is cancel's move, never
+ * absorb's — the work did not stop, it moved), and every source is carried
+ * across the absorb's `relocations` — one under `fromUnit/` that nothing
+ * moved going with the feature. Runs under the project lock, **no commit** —
+ * the calling transaction stages the project manifest alongside its own
+ * write. A no-op writes nothing.
+ * @param {string} cwd @param {string} fromUnit
+ * @param {{into: string, topic: string, relocations: [string, string][]}} opts
+ * @returns {AbsorbedRoadmap}
+ */
+function reaimAbsorbed(cwd, fromUnit, { into, topic, relocations }) {
   return withProjectLock(cwd, () => {
     const manifest = readProjectManifest(cwd);
     const rm = manifest.roadmap;
     if (!rm || typeof rm !== 'object' || Array.isArray(rm) || !rm.items || typeof rm.items !== 'object') {
-      return [];
+      return { reaimed: [], rewritten: [], dropped: [] };
     }
     /** @type {string[]} */
     const reaimed = [];
-    for (const [name, item] of Object.entries(rm.items)) {
-      if (!item || typeof item !== 'object') continue;
-      const join = itemJoin(/** @type {Record<string, any>} */ (item));
-      if (!join || join.work_unit !== fromUnit) continue;
-      /** @type {Record<string, any>} */ (item).pulled_to = { work_unit: into, topic };
-      reaimed.push(name);
+    for (const [name, raw] of Object.entries(rm.items)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const item = /** @type {Record<string, any>} */ (raw);
+      const join = itemJoin(item);
+      if (join && join.work_unit === fromUnit) {
+        item.pulled_to = { work_unit: into, topic };
+        reaimed.push(name);
+      }
     }
-    if (reaimed.length > 0) writeProjectManifestAtomic(cwd, manifest);
-    return reaimed;
+    /** @type {AbsorbedRoadmap} */
+    const out = { reaimed, ...carrySources(rm.items, relocations, { deleted: fromUnit }) };
+    if (out.reaimed.length + out.rewritten.length + out.dropped.length > 0) {
+      writeProjectManifestAtomic(cwd, manifest);
+    }
+    return out;
   });
 }
 
@@ -1155,6 +1246,7 @@ module.exports = {
   bindItem,
   pullForwardItem,
   revertJoins,
-  reaimJoins,
+  carrySources,
+  reaimAbsorbed,
   flagJoined,
 };

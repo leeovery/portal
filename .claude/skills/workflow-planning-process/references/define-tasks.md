@@ -4,7 +4,7 @@
 
 ---
 
-This step uses the `workflow-planning-task-designer` agent (`../../../agents/workflow-planning-task-designer.md`) to design a task list for a single phase. You invoke the agent, present its output, and handle the approval gate.
+This step uses the `workflow-planning-task-designer` agent (`.claude/agents/workflow-planning-task-designer.md`) to design a task list for a single phase. You invoke the agent, present its output, and handle the approval gate.
 
 ---
 
@@ -19,11 +19,11 @@ node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit} 
 
 Invoke `workflow-planning-task-designer` with these file paths:
 
-1. **read-specification.md**: `read-specification.md`
+1. **read-specification.md**: `.claude/skills/workflow-planning-process/references/read-specification.md`
 2. **Specification**: specification path from the manifest or `.workflows/{work_unit}/specification/{topic}/specification.md`
 3. **Cross-cutting specs**: cross-cutting spec paths if any
-4. **task-design.md**: `task-design.md`
-5. **Context guidance**: `task-design/{work_type}.md` (default to `epic` if `work_type` is empty)
+4. **task-design.md**: `.claude/skills/workflow-planning-process/references/task-design.md`
+5. **Context guidance**: `.claude/skills/workflow-planning-process/references/task-design/{work_type}.md` (default to `epic` if `work_type` is empty)
 6. **All approved phases**: the complete phase structure from the planning file
 7. **Target phase number**: the phase being broken into tasks
 
@@ -45,11 +45,13 @@ The agent returns a task overview and task table.
 
 → Load **[resolve-spec-gap.md](resolve-spec-gap.md)** with lane = `construction`, gap = `{the entry, and the task it surfaced in}`.
 
-Where a landing changed the specification, or the reference returned work the plan must carry — the tree owing what the specification decides — re-invoke `workflow-planning-task-designer` through its amendment path with the corrections and that work as the feedback, and take the revised task list forward. Settle that return's `## Spec Defects` the same way, once: a defect the designer still reports after one re-run is left to the review walk, which meets the plan against the specification at the end of the phase. When at least one corrigendum landed — nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim per its marker:
+When at least one corrigendum landed — the record's or one the user settled at the exchange; nothing when none did, never a per-correction recap — fetch and emit the `DISPLAY: spec corrections` section verbatim per its marker:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render spec-corrections --count {count}
 ```
+
+Where a landing changed the specification, or the reference returned work the plan must carry — the tree owing what the specification decides — re-invoke `workflow-planning-task-designer` through its amendment path with the corrections and that work as the feedback, and take the revised task list forward. Settle that return's `## Spec Defects` the same way, once: a defect the designer still reports after one re-run is left to the review walk, which meets the plan against the specification at the end of the phase.
 
 **Otherwise:** nothing to settle — continue.
 

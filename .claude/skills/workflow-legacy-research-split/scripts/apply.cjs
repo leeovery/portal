@@ -9,7 +9,8 @@ const { validate } = require('./validate.cjs');
 
 const ENGINE_CLI = path.resolve(__dirname, '..', '..', 'workflow-engine', 'scripts', 'engine.cjs');
 const { commitPathspecScoped } = require(path.resolve(__dirname, '..', '..', 'workflow-engine', 'scripts', 'domain', 'commit.cjs'));
-const KNOWLEDGE_CLI = path.resolve(__dirname, '..', '..', 'workflow-knowledge', 'scripts', 'knowledge.cjs');
+const { syncKnowledge } = require(path.resolve(__dirname, '..', '..', 'workflow-engine', 'scripts', 'domain', 'knowledge', 'sync.cjs'));
+const { ENGINE_COMMAND } = require(path.resolve(__dirname, '..', '..', 'workflow-engine', 'scripts', 'kernel', 'call.cjs'));
 
 function die(msg, code = 1) {
   process.stderr.write(`Error: ${msg}\n`);
@@ -155,16 +156,12 @@ function apply(cwd, workUnit, currentSource) {
   }
 
   // Stage 4b: drop the source's chunks from the knowledge base. Best-effort —
-  // KB-not-initialised or other failures are surfaced but don't abort the apply.
+  // a failure is surfaced but never aborts the apply.
   const kbWarnings = [];
-  try {
-    const r = spawnSync('node', [KNOWLEDGE_CLI, 'remove', '--work-unit', workUnit, '--phase', 'research', '--topic', currentSource], { cwd, encoding: 'utf8' });
-    if (r.status !== 0) {
-      kbWarnings.push(`knowledge.cjs remove for source '${currentSource}' returned non-zero: ${(r.stderr || r.stdout || '').trim()}`);
-    }
-  } catch (e) {
-    kbWarnings.push(`knowledge.cjs remove failed: ${e.message}`);
-  }
+  syncKnowledge(cwd, [{
+    remove: { workUnit, phase: 'research', topic: currentSource },
+    label: `knowledge remove (research/${currentSource})`,
+  }], kbWarnings);
 
   // Stage 5: apply themes.
   const dismissed = loadDismissedList(cwd, workUnit);
@@ -229,7 +226,7 @@ function apply(cwd, workUnit, currentSource) {
   // The split writes across several research topics at once, so no --topic
   // scope covers it: the work-unit form is the confined retry, and it takes
   // the commit lock the raw pair never did.
-  const retry = `node .claude/skills/workflow-engine/scripts/engine.cjs commit ${workUnit} `
+  const retry = `${ENGINE_COMMAND} commit ${workUnit} `
     + `-m "discovery(${workUnit}): legacy-split ${currentSource}"`;
   try {
     // Through the commit door: the split runs beside live research and

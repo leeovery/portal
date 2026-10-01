@@ -14,7 +14,7 @@ Not a rigid checklist — a natural cadence for productive research conversation
 
    Then check for landed evidence: follow **Landed Evidence** below. Its landed branch ends the turn on what it read — the dive check below waits for a later iteration.
 
-   Then, at a natural break — a thread's pause, a synthesis moment, the user's done-signal, or the first iteration of a resumed session — check for landed deep dives: follow **C. Land and Fold** in **[deep-dive-agent.md](deep-dive-agent.md)**. Skip only when no dive has been dispatched — the store decides, not the iteration count: a resumed session may hold dives from an earlier sitting. Mid-thread, defer — a landed report keeps.
+   Then, at a natural break — a thread's pause, a synthesis moment, the user's done-signal, or the first iteration of a resumed session — check for landed deep dives: follow **C. Land and Fold** in **[deep-dive-agent.md](deep-dive-agent.md)**. Never skip it on memory of what was dispatched: the store answers that, and a resumed session may hold dives from an earlier sitting. Mid-thread, defer — a landed report keeps.
 
 2. **Explore** — Probe the topic from a relevant angle. Use the funnel technique: broad first, specific later. Choose your probe type deliberately. One question at a time — wait for the answer before asking the next. A number about to bear a decision — or a measurement thread on the register, a dive's Opened line — is the laboratory's cue: offer it through the session wrapper's **F. The Experiment Offer**.
 
@@ -46,7 +46,7 @@ The register is what this topic set out to learn — typed state in the manifest
   node .claude/skills/workflow-engine/scripts/engine.cjs research-threads add {work_unit} {topic} {slug} --question "{the question, as asked}" --origin "{origin}" [--parent {slug}]
   ```
 
-- **A thread reframes** when its answer reshapes the question — the normal case, not a correction: one row goes on under the reshaped question, never a `learned` row for the part answered beside a new thread for the part that remains. The file carries the history; the register carries the question as it now stands:
+- **A thread reframes** when its answer reshapes the question — the normal case, not a correction: one row goes on under the reshaped question, never a `learned` row for the part answered beside a new thread for the part that remains. The file carries the history — why the question changed is written with the move, and the cadence commit carries both; the register carries the question as it now stands:
 
   ```bash
   node .claude/skills/workflow-engine/scripts/engine.cjs research-threads reframe {work_unit} {topic} {slug} --question "{the question, as it now stands}"

@@ -1,7 +1,7 @@
 ---
 name: workflow-roadmap
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-roadmap/scripts/gateway.cjs), Bash(node .claude/skills/workflow-start/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(git log)
+allowed-tools: Bash(node .claude/skills/workflow-roadmap/scripts/gateway.cjs), Bash(node .claude/skills/workflow-start/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(git log)
 ---
 
 # Product Roadmap
@@ -148,7 +148,7 @@ Match the input to its `ACTIONS` entry by `key` or `word` and route on the entry
 
 #### If `action` is `converse`
 
-Set `session_number` from the DATA's `active_session` when one is open (the loop resumes it), else from `next_session_number` (the log is created lazily at the first exploration write).
+Set `session_number` from the DATA's `active_session` when one is open (the loop resumes it). With none open, leave it unset — the log is conjured lazily at the first state change, and the open's response sets it ([session-template.md](references/session-template.md)).
 
 → Proceed to **Step 4**.
 
@@ -164,7 +164,7 @@ Load **[start-menu.md](../workflow-start/references/start-menu.md)** and follow 
 
 #### If the user asks a question
 
-Answer from the DATA and the map. The question sets the gate aside until the person is ready to move on; to put it back:
+Answer from the DATA and the map. The question sets the gate aside; once the exchange looks settled, ask in conversation whether they are ready to move on, and on yes put it back:
 
 → Return to **Step 3**.
 

@@ -1,7 +1,7 @@
 ---
 name: workflow-implementation-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(git log), Bash(git diff), Bash(git status)
+allowed-tools: Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(git log), Bash(git diff), Bash(git status)
 ---
 
 # Implementation Process
@@ -59,7 +59,7 @@ Do not guess at progress or continue from memory. The files on disk and git hist
 
 Unplanned work the user raises mid-implementation — a bug they hit while testing, a gap they name, a decision they change. When they do, load **[ad-hoc-plan-changes.md](references/ad-hoc-plan-changes.md)** and follow its instructions as written, from any point in the phase. Never fold unplanned work into the plan by hand.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
@@ -67,23 +67,23 @@ Unplanned work the user raises mid-implementation — a bug they hit while testi
 
 The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. An idea, not a topic: a topic takes the postponing door. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Postponing the Topic
 
-The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. Load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
+The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. The request is taken as said — never argued, and never checked back with a question first: load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Cancelling the Topic
 
-The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
+The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. The call-off is taken as said — never argued, and never checked back with a question first: load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `implementation`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
@@ -156,7 +156,7 @@ Load **[linter-setup.md](references/linter-setup.md)** and follow its instructio
 
 ## Step 5: Knowledge Usage
 
-Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
+Load **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)** and follow its instructions as written.
 
 → On return, proceed to **Step 6**.
 
@@ -178,7 +178,7 @@ Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)
 
 Load **[task-loop.md](references/task-loop.md)** and follow its instructions as written.
 
-*Knowledge-base nudge — code is the source of truth for *what* exists; read it rather than query. Reach for the KB only when you need the *why* behind an existing pattern (rare). Never to fill spec gaps — those are blockers. See **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)**.*
+*Knowledge-base nudge — code is the source of truth for *what* exists; read it rather than query. Reach for the KB only when you need the *why* behind an existing pattern (rare). Never to fill spec gaps — those are blockers. See **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)**.*
 
 After the loop completes:
 

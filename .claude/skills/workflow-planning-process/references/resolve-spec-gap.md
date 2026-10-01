@@ -44,7 +44,7 @@ Read the verdict it returns.
 
 **If it landed the correction** — its record-settled or derivation arm:
 
-Tell the user in one line what landed and what determined it. Set `verdict = landed`.
+From `implementation`, tell the user in one line what landed and what determined it; the planning lanes say nothing here — their caller reports the pass's corrections as one count. Set `verdict = landed`.
 
 → Return to caller.
 
@@ -112,7 +112,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render executor-block-gat
 
 **If the comment shows it needs real discussion work and the specification has no sources:**
 
-A quick-fix has no discussion behind it and nothing to route to — the work has outgrown its type. Say so in one line. The exchange sets the gate aside until the person is ready to move on; to put it back, re-fetch the gate and emit its MENU section verbatim per its marker — the reply takes these branches again:
+A quick-fix has no discussion behind it and nothing to route to — the work has outgrown its type. Say so in one line. The exchange sets the gate aside; once it looks settled, ask in conversation whether they are ready to move on, and on yes put it back — re-fetch the gate and emit its MENU section verbatim per its marker; the reply takes these branches again:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render executor-block-gate {work_unit}.implementation.{topic} --result blocked --file .workflows/.cache/{work_unit}/implementation/{topic}/block-sides.json
@@ -122,7 +122,7 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render executor-block-gat
 
 **If the comment is a question back or feedback:**
 
-Answer it. Where the feedback moves the Options — a side you missed, a cost you read wrong — revise them, re-emit the revised Options, and rewrite the payload. The exchange sets the gate aside until the person is ready to move on; to put it back, re-fetch the gate and emit its MENU section verbatim per its marker — the reply takes these branches again:
+Answer it. Where the feedback moves the Options — a side you missed, a cost you read wrong — revise them, re-emit the revised Options, and rewrite the payload. The exchange sets the gate aside; once it looks settled, ask in conversation whether they are ready to move on, and on yes put it back — re-fetch the gate and emit its MENU section verbatim per its marker; the reply takes these branches again:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs render executor-block-gate {work_unit}.implementation.{topic} --result blocked --file .workflows/.cache/{work_unit}/implementation/{topic}/block-sides.json
@@ -148,7 +148,7 @@ Compose the fork in product terms: what the work needs and cannot be built witho
 
 The decision's home is `{doc}` — the document that records decisions; the specification records none, and re-aligns to it. A quick-fix is the exception: no document stands behind its specification, which is its own record — the first branch below is its, and it runs no scan.
 
-Another session may hold `{doc}`. Scan presence — read the `sessions` rows only; the response's deferral section is the analysis dispatch's and is not emitted here:
+Another session may hold `{doc}`. Scan presence now — a scan from before the exchange predates the answer. Read the `sessions` rows only; the response's deferral section is the analysis dispatch's and is not emitted here:
 
 ```bash
 node .claude/skills/workflow-engine/scripts/engine.cjs presence scan {work_unit}
@@ -254,9 +254,10 @@ The landing moved the ground beneath the specification, and what is built from i
 
 #### If `{lane}` is `implementation`
 
-Commit the session's work:
+Commit the session's work — the task's record in the plan's storage, then the implementation topic:
 
 ```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): record the paused task" --plan {topic}
 node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "impl({work_unit}): pause — gap routed to {landed_topic}" --topic implementation/{topic}
 ```
 

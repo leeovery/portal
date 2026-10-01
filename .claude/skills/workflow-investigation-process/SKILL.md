@@ -1,7 +1,7 @@
 ---
 name: workflow-investigation-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(ls .workflows/.cache/), Bash(git log), Bash(git blame), Bash(git diff), Bash(git bisect), Bash(grep), Bash(rm .workflows/.cache/), Bash(rm -rf .workflows/.cache/)
+allowed-tools: Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(ls .workflows/.cache/), Bash(git log), Bash(git blame), Bash(git diff), Bash(git bisect), Bash(grep), Bash(rm .workflows/.cache/), Bash(rm -rf .workflows/.cache/)
 ---
 
 # Investigation Process
@@ -72,23 +72,23 @@ The investigation file is your memory. Context compaction is lossy — what's no
 
 The user says to put an idea aside — "roadmap it", "inbox it", "backlog that", "push it back" — and the words take this door whatever else is in flight. An idea, not a topic: a topic takes the postponing door. Load **[backlogging.md](../workflow-shared/references/backlogging.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `investigation`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Postponing the Topic
 
-The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. Load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `investigation`, from any point in the phase.
+The user pushes a topic back to the roadmap — "postpone this", "move the loyalty topic to v2", "take this whole topic back to the roadmap" — this one, or one on the map by name; `{name}` is that topic. The request is taken as said — never argued, and never checked back with a question first: load **[postponing-the-topic.md](../workflow-shared/references/postponing-the-topic.md)** with work_unit = `{work_unit}`, name = `{name}`, topic = `{topic}`, phase = `investigation`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
 ## Cancelling the Topic
 
-The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. Load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `investigation`, from any point in the phase.
+The user calls the topic off — they say to cancel, or the conversation agrees it is not worth pursuing. Never is not yet: a topic wanted later takes the postponing door. The call-off is taken as said — never argued, and never checked back with a question first: load **[cancelling-the-topic.md](../workflow-shared/references/cancelling-the-topic.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `investigation`, from any point in the phase.
 
-→ On return, resume the interrupted flow — a gate that was pending was set aside until the person is ready to move on — never fall through to Step 0.
+→ On return, resume the interrupted flow — a gate that was pending was set aside; once the exchange looks settled, ask in conversation whether the person is ready to move on, and on yes put it back — never fall through to Step 0.
 
 ---
 
@@ -140,7 +140,7 @@ Load **[initialize-investigation.md](references/initialize-investigation.md)** a
 
 ## Step 2: Knowledge Usage
 
-Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
+Load **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)** and follow its instructions as written.
 
 → On return, proceed to **Step 3**.
 
@@ -176,7 +176,7 @@ Read what the Symptoms section already holds — initialisation seeded it from t
 
 Load **[symptom-gathering.md](references/symptom-gathering.md)** and use its questions to gather symptoms from the user.
 
-Document symptoms in the investigation file as you gather them. Commit after each significant addition.
+Document symptoms in the investigation file as you gather them: what an answer gave goes into the file before the next question is asked. Commit after each significant addition. The Symptoms section's fields are prompts, not a form: it holds only what the carrier and the user said. What they don't know goes in as not known, in their words; a Symptoms field the interview never reached is dropped, never filled in. The other sections stay as the template left them.
 
 Then surface the triage queue — an empty queue is a no-op. Load **[rerouted-concerns.md](../workflow-shared/references/rerouted-concerns.md)** with work_unit = `{work_unit}`, topic = `{topic}`, phase = `investigation` — enter **A. Check**.
 
@@ -188,7 +188,7 @@ When symptoms are sufficiently understood to begin code analysis:
 
 ## Step 4: Contextual Query
 
-Load **[contextual-query.md](../workflow-knowledge/references/contextual-query.md)** and follow its instructions as written.
+Load **[contextual-query.md](../workflow-shared/references/contextual-query.md)** and follow its instructions as written.
 
 → On return, proceed to **Step 5**.
 
@@ -263,7 +263,7 @@ Do not draft fix direction here — it is explored with the user after the findi
 
 Document in the investigation file and commit.
 
-*Knowledge-base nudge — if the root cause pattern feels familiar, query the knowledge base before moving on. A matching prior investigation can confirm the diagnosis or surface a related bug. See **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)**.*
+*Knowledge-base nudge — if the root cause pattern feels familiar, query the knowledge base before moving on. A matching prior investigation can confirm the diagnosis or surface a related bug. See **[knowledge-usage.md](../workflow-shared/references/knowledge-usage.md)**.*
 
 → Proceed to **Step 8**.
 
