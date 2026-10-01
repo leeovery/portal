@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-10-01
+
+✨ Added
+- Lazy resume panel — a restored pane with a resume hook now comes back showing a "Resume session" panel with the command; press Enter to run it or `d` to discard it.
+- Resume mode setting — choose `eager` (run the command as the pane is restored) or `lazy` (wait on the panel) install-wide with `resume_mode` in `prefs.json`, with lazy as the default.
+- Per-hook resume mode — pin a hook with `portal hook set --resume-mode eager|lazy`.
+- `portal hook list` gains a fifth column showing each registration's resume mode.
+- Pending-resume indicator — sessions with a pane waiting on the panel show an extra `●` in the picker, explained in the `?` help legend.
+- `portal doctor` reports the number of panes waiting to resume and the install's resume mode.
+- Preview and capture tooling — resume panel screens and the pending-resume picker states are available in the capture tool.
+
+🔧 Changed
+- `hooks.json` entries can now be either a plain command string or an object holding the command plus its resume mode — both forms stay valid.
+- Saving state is serialised under a commit lock, so concurrent saves can no longer overwrite each other or delete a pane's transcript.
+- Scrollback of panes waiting on the panel is protected from being overwritten and stays visible in the preview.
+- A save request made during a save is no longer lost, and a failed save retries on the next tick.
+- Theme guidance notes that the pending dot must be tuned against the selection background as well as the canvas.
+
+🐛 Fixed
+- Lock failures on `hooks.json` are now reported distinctly from contention.
+- Long messages and commands wrap correctly instead of overflowing frames.
+
 ## [0.12.0] - 2026-09-16
 
 ✨ Added
