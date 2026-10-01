@@ -33,3 +33,27 @@ The cooked window is not specific to the drop route. The waiter's raw-mode resto
 - **The narrowed assertion.** The drop-route subtest ("the rest of a paste the drain gave up on answers nothing") goes back to requiring the panel title as well as the report row. `assertPasteAnsweredNothing`'s doc loses the clause saying echoed input can scroll the title away, which the fix makes false.
 
 **Outcome**: A waiting pane's panel stays whole while input streams into it, on every route that draws it, the drop route's report panel included. The hook or shell an answer hands the pane to gets the same terminal modes it gets today.
+
+**Acceptance Criteria**:
+- [ ] A waiting pane where `d` is pressed and input then streams in past the discard drain's one-second bound comes up on the waiting panel with both its `Resume session` title and its `can't clear pending input: …` report row on screen, with no streamed line printed over the card. It stays that way once the stream ends, with no resize or answer needed. The hook has not run, `hooks.json` is byte-identical, `@portal-resume-pending` stands, and the waiter holds the pane.
+- [ ] On every screen the chain draws — the first draw at restore, the discard confirmation, Escape back to the panel, a report, a resize redraw — input reaching the pane after the draw's echo step puts nothing on screen. That holds alike for a stream the drain gave up on, for keys arriving between the paint and the waiter's raw mode, and for a reply to the appearance query landing after the paint.
+- [ ] The draw's echo step turns echo alone off: a terminal reaching it with echo on leaves with ECHO cleared and every other local, input and output mode as it arrived. A terminal reaching it with echo already off, as every redraw does, comes out unchanged.
+- [ ] A draw whose echo step is refused logs one WARN under the `hydrate` component, and still paints its screen and hands the pane to the waiter.
+- [ ] Enter on the waiting panel and `y` on the discard confirmation hand the hook or shell exactly the terminal modes those answers hand on today: the modes the pane's terminal held before its first draw, with signal generation turned back on. The answer's echo step turns echo alone back on, and its signal step still turns signal generation alone back on.
+- [ ] An answer whose echo step is refused logs the refusal and still hands the pane to its hook or shell.
+- [ ] An Enter or `y` whose marker clear is refused brings the panel back with its report and takes no echo step, so the redrawn panel stays whole under further input.
+- [ ] A waiter that ends unanswered — killed while the pane waits — leaves the user's shell a terminal that echoes: through the recovery tail's cooked modes, or, where the tail cannot start, through the backstop's `stty sane`, both as they are today.
+
+**Do**:
+- `cmd/state_resume_draw.go`, `runResumeDraw`: add the echo step ahead of `cfg.ResolveTheme`, inside which both the appearance query and the input drop run. It clears ECHO alone on the pane's tty. A refusal logs a WARN through `cfg.Logger` (the `hydrate` component), and the draw goes on to paint and hand off.
+- `cmd/state_resume_wait.go`: add a `resumeWaitConfig` seam that sets ECHO alone back on, wired in `stateResumeWaitCmd`. `resumeAnswerEnter` and `resumeAnswerDiscard` call it after `cfg.restore()`, beside `enableTTYSignalsOrLog` and before `handOffToHookOrShell`. A refusal is logged and the hand-on proceeds, as `enableTTYSignalsOrLog` treats the signal step. The refused-clear route (`resumeUnfreeze` → `resumeReport`), `resumeRedraw`, `resumeShowScreen` and `resumeOpenDiscardConfirm` take no echo step.
+- `cmd/tty_signals.go`: the new echo-clear and echo-set tty helpers sit here beside `clearTTYSignals`/`setTTYSignals`, since `state_resume_wait.go` names none of the draw's route (`TestRunResumeWait_Waiting`).
+- Leave unchanged:
+  - `ttyDrain.drain` (`cmd/tty_drain.go`, `TestTTYDrain_RealPTY`);
+  - hydrate's ISIG-only `DisableTTYSignals` (`clearStdinSignals`);
+  - the waiter's ISIG-only `EnableTTYSignals` (`setStdinSignals`, pinned by `TestResumeHandOffs_TerminalModes_RealPTY`) — echo comes back through its own seam, never by widening this one;
+  - the recovery tail's `cookTTY` (wired at `cmd/state_resume_recover.go:107`) and the shell backstop's `stty sane` (`cmd/state_hydrate.go:305`).
+- Exec stays behind `resumeHandOff`/`execHandOff` (`TestExecSeamsAreCalledOnlyByTheHandOffHelpers`).
+- No repaint. Nothing is added to `resumeWaitLoop`, the carried-arrival swallow (`cmd/state_resume_wait.go:203-207`) stays as it is, and no new flush or drop is introduced (`TestResumeDropInput_HandOffs`, `TestFlushTTYInput_TouchesTheInputQueueInExactlyOnePlace`).
+- Echo is observable only on a real PTY, and `cmd/tty_modes_pty_test.go` already drives one.
+- `internal/restore/lazy_resume_burst_integration_test.go`: the drop-route subtest "the rest of a paste the drain gave up on answers nothing" (:163-173) requires `panelTitle` as well as `burstDropReport`. `assertPasteAnsweredNothing`'s doc (:238-242) loses the clause saying input the tty echoed can scroll the panel's title away.
