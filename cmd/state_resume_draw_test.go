@@ -31,6 +31,11 @@ type resumeDrawProbe struct {
 	// Bytes already on stdout when the theme resolved, so a resolve that moved
 	// below the paint is visible as a non-zero reading.
 	paintedAtResolve int
+
+	echoOffCalls      int
+	echoOffErr        error
+	echoOffsAtResolve int
+	execsAtEchoOff    int
 }
 
 func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPayload, size func() (int, int, error)) resumeDrawConfig {
@@ -41,9 +46,15 @@ func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPa
 		Stdout:             &p.stdout,
 		Logger:             drawTestLogger(t),
 		Size:               size,
+		DisableEcho: func() error {
+			p.echoOffCalls++
+			p.execsAtEchoOff = p.execCalls
+			return p.echoOffErr
+		},
 		ResolveTheme: func(colourless bool, dropInput func() error) (theme.Theme, error) {
 			p.colourless = append(p.colourless, colourless)
 			p.paintedAtResolve = p.stdout.Len()
+			p.echoOffsAtResolve = p.echoOffCalls
 			if dropInput == nil {
 				return th, nil
 			}

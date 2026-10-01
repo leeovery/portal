@@ -74,6 +74,10 @@ type resumeWaitConfig struct {
 	// found, which the chain keeps with signal generation off.
 	EnableTTYSignals func() error
 
+	// EnableEcho gives echo back to a pane being handed on, which the draw
+	// turned off and the raw restore therefore leaves off.
+	EnableEcho func() error
+
 	AltScreen altScreenPin
 
 	// Set by runResumeWait from MakeRaw, so an answer hands the pane on in a
@@ -307,6 +311,7 @@ func resumeAnswerEnter(cfg resumeWaitConfig) error {
 	command := resumeRegistrationOrLog(cfg.Logger, cfg.LookupResume, cfg.HookKey).Command
 	cfg.restore()
 	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.paneRef())
+	enableTTYEchoOrLog(cfg.Logger, cfg.EnableEcho, cfg.paneRef())
 
 	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, command)
 	return nil
@@ -337,6 +342,7 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 	}
 	cfg.restore()
 	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.paneRef())
+	enableTTYEchoOrLog(cfg.Logger, cfg.EnableEcho, cfg.paneRef())
 
 	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, "")
 	return nil
@@ -488,6 +494,7 @@ var stateResumeWaitCmd = &cobra.Command{
 				return discardResumeRegistration(resumePaneRef{HookKey: hookKey, PaneKey: paneKey}, shown)
 			},
 			EnableTTYSignals: setStdinSignals,
+			EnableEcho:       setStdinEcho,
 			AltScreen:        paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),
 		})
 	},

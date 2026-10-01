@@ -66,6 +66,7 @@ func runDropDraw(t *testing.T, payload resumeChainPayload, dropErr error) *dropD
 		Stdout:             sequencedWriter{d: d},
 		Logger:             logger,
 		Size:               fixedSize(100, 30),
+		DisableEcho:        func() error { return nil },
 		ResolveTheme: func(_ bool, dropInput func() error) (theme.Theme, error) {
 			d.calls = append(d.calls, "appearance-query")
 			d.handed = append(d.handed, dropInput != nil)

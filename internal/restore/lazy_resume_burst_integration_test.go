@@ -169,7 +169,7 @@ func TestLazyResumePaste_NeverAnswersAWaitingPane(t *testing.T) {
 		fx.streamIntoSubject(t, strings.Repeat(burstLine, 4), streamedPasteSpan)
 
 		fx.awaitScreenContains(t, subject, burstDropReport)
-		fx.assertPasteAnsweredNothing(t, burstDropReport)
+		fx.assertPasteAnsweredNothing(t, panelTitle, burstDropReport)
 	})
 
 	t.Run("an Enter typed after the pastes resumes the pane", func(t *testing.T) {
@@ -237,16 +237,20 @@ const streamedPasteSpan = 2500 * time.Millisecond
 
 // assertPasteAnsweredNothing waits out the time a wrongly answered paste would
 // take to act, then requires the subject still on its waiting panel, carrying
-// the row named, with nothing the panel guards having moved. The row is the
-// report where the panel carries one: input the tty echoed before the waiter
-// took the pane can scroll the panel's title away.
-func (fx *lazyDiscardFixture) assertPasteAnsweredNothing(t *testing.T, row string) {
+// every row named and no pasted line, with nothing the panel guards having
+// moved.
+func (fx *lazyDiscardFixture) assertPasteAnsweredNothing(t *testing.T, rows ...string) {
 	t.Helper()
 	time.Sleep(restoretest.PaneReactionBudget)
 
 	screen := fx.paneScreen(t, discardSubjectTarget())
-	if !strings.Contains(screen, row) || strings.Contains(screen, discardConfirmTitle) {
-		t.Fatalf("the pane left the waiting panel after the paste; capture-pane -p:\n%s", screen)
+	for _, row := range rows {
+		if !strings.Contains(screen, row) || strings.Contains(screen, discardConfirmTitle) {
+			t.Fatalf("the pane left the waiting panel after the paste; capture-pane -p:\n%s", screen)
+		}
+	}
+	if strings.Contains(screen, strings.TrimSuffix(burstLine, "\n")) {
+		t.Fatalf("a pasted line was printed over the panel; capture-pane -p:\n%s", screen)
 	}
 	fx.assertUnanswered(t)
 }

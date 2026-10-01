@@ -19,6 +19,16 @@ func setTTYSignals(fd int) error {
 	return updateTTYModes(fd, func(m *unix.Termios) { m.Lflag |= unix.ISIG })
 }
 
+// clearTTYEcho turns off the terminal's echo alone, so input reaching it is
+// not displayed over whatever was painted.
+func clearTTYEcho(fd int) error {
+	return updateTTYModes(fd, func(m *unix.Termios) { m.Lflag &^= unix.ECHO })
+}
+
+func setTTYEcho(fd int) error {
+	return updateTTYModes(fd, func(m *unix.Termios) { m.Lflag |= unix.ECHO })
+}
+
 // cookTTY turns on the modes a shell reading the terminal needs and a terminal
 // left raw lacks: line editing, echo, signal generation, CR-to-NL input and
 // flow control, and output processing.
@@ -49,4 +59,12 @@ func setStdinSignals() error {
 
 func cookStdin() error {
 	return cookTTY(int(os.Stdin.Fd()))
+}
+
+func clearStdinEcho() error {
+	return clearTTYEcho(int(os.Stdin.Fd()))
+}
+
+func setStdinEcho() error {
+	return setTTYEcho(int(os.Stdin.Fd()))
 }

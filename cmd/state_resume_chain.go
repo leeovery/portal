@@ -209,3 +209,9 @@ func enableTTYSignalsOrLog(logger *slog.Logger, enable func() error, pane resume
 		logger.Warn("enable terminal signals failed", pane.logAttrs("error", err)...)
 	}
 }
+
+func enableTTYEchoOrLog(logger *slog.Logger, enable func() error, pane resumePaneRef) {
+	if err := enable(); err != nil {
+		logger.Warn("enable terminal echo failed", pane.logAttrs("error", err)...)
+	}
+}

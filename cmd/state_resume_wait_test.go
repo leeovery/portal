@@ -58,6 +58,13 @@ type resumeWaitProbe struct {
 	restoresAtSignalsOn int
 	execsAtSignalsOn    int
 
+	// Echo turned back on, with the restores and execs already run at that
+	// moment.
+	echoOnCalls      int
+	echoOnErr        error
+	restoresAtEchoOn int
+	execsAtEchoOn    int
+
 	pin pinProbe
 }
 
@@ -117,6 +124,12 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.restoresAtSignalsOn = p.restores
 			p.execsAtSignalsOn = p.execCalls
 			return p.signalsOnErr
+		},
+		EnableEcho: func() error {
+			p.echoOnCalls++
+			p.restoresAtEchoOn = p.restores
+			p.execsAtEchoOn = p.execCalls
+			return p.echoOnErr
 		},
 		AltScreen: p.pin.seams(&p.order),
 		ExecSelf: func(prog string, args []string) {

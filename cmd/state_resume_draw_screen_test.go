@@ -92,6 +92,10 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 				resumeChainPayload: drawScreenPayload(screen),
 				Stdout:             rec,
 				Logger:             drawTestLogger(t),
+				DisableEcho: func() error {
+					calls = append(calls, "echo-off")
+					return nil
+				},
 				Size: func() (int, int, error) {
 					calls = append(calls, "size")
 					return 100, 30, nil
@@ -110,7 +114,7 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 			return calls
 		}
 
-		want := []string{"size", "theme", "write:alt-screen", "write:cursor-home", "write:paint", "exec"}
+		want := []string{"echo-off", "size", "theme", "write:alt-screen", "write:cursor-home", "write:paint", "exec"}
 		panel := sequenceFor(t, resumeScreenPanel)
 		discard := sequenceFor(t, resumeScreenDiscard)
 		if !slices.Equal(panel, want) {

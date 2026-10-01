@@ -24,6 +24,10 @@ type resumeDrawConfig struct {
 	Size       func() (int, int, error)
 	ExecSelf   func(prog string, args []string)
 
+	// DisableEcho runs ahead of the appearance query and the input drop, so the
+	// modes each puts back on its way out have echo off.
+	DisableEcho func() error
+
 	// ResolveTheme runs dropInput, when handed one, after the appearance query
 	// and before it returns, answering the drop's error beside the palette.
 	ResolveTheme   func(colourless bool, dropInput func() error) (theme.Theme, error)
@@ -36,6 +40,11 @@ type resumeDrawConfig struct {
 // belongs to whatever answers the panel.
 func runResumeDraw(cfg resumeDrawConfig) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
+
+	// A refusal still paints: a panel over an echoing tty is better than none.
+	if err := cfg.DisableEcho(); err != nil {
+		cfg.Logger.Warn("disable terminal echo failed", cfg.paneRef().logAttrs("error", err)...)
+	}
 
 	// The read's error is not consulted: a failed or non-positive size reaches
 	// the renderer as it stands and resolves to its own bounded fallback, and a
@@ -166,6 +175,7 @@ var stateResumeDrawCmd = &cobra.Command{
 			Logger:         hydrateLogger,
 			Colourless:     noColorEnabled(),
 			Size:           paneSizeFromStdin,
+			DisableEcho:    clearStdinEcho,
 			ResolveTheme:   paneDrawTheme,
 			DropInputQueue: dropStdinInputQueue,
 			ExecSelf:       defaultExecShell,
