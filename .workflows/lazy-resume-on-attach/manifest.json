@@ -271,9 +271,9 @@
         "lazy-resume-on-attach": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "auto",
-          "analysis_gate_mode": "auto",
-          "consolidation_gate_mode": "auto",
+          "fix_gate_mode": "gated",
+          "analysis_gate_mode": "gated",
+          "consolidation_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 13,
           "linters": [
@@ -306,7 +306,7 @@
             ".claude/skills/golang-spf13-cobra",
             ".claude/skills/golang-dependency-management"
           ],
-          "current_phase": 18,
+          "current_phase": 19,
           "current_task": null,
           "completed_tasks": [
             "lazy-resume-on-attach-1-1",
@@ -397,7 +397,8 @@
             "lazy-resume-on-attach-18-1",
             "lazy-resume-on-attach-18-2",
             "lazy-resume-on-attach-18-3",
-            "lazy-resume-on-attach-18-4"
+            "lazy-resume-on-attach-18-4",
+            "lazy-resume-on-attach-19-1"
           ],
           "staging": {
             "p1": {
