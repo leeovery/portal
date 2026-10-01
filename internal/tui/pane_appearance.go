@@ -88,7 +88,7 @@ func (p paneAppearanceProbe) detect() theme.Member {
 	defer restore()
 
 	// Armed before the query is written: a query with no bounded read behind it
-	// leaves the terminal's reply to be echoed across the pane once raw mode ends.
+	// leaves the terminal's reply on the pane's input for whatever reads it next.
 	reader, err := p.armRead(p.timeout)
 	if err != nil {
 		return theme.MemberDark
