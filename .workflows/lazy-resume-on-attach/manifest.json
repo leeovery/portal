@@ -592,7 +592,7 @@
     "review": {
       "items": {
         "lazy-resume-on-attach": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "lazy-resume-on-attach-1-1",
             "lazy-resume-on-attach-1-2",
@@ -708,18 +708,7 @@
                 "1": "approved"
               }
             }
-          },
-          "out_of_scope": [
-            {
-              "id": "A4",
-              "summary": "Skeleton-skip test compares raw target, never matches",
-              "kind": "quick-fix",
-              "fails": "The test still passes if SkipsScrollback stops checking Skeleton, so the skeleton skip has one real guard instead of two.",
-              "files": [
-                "cmd/state_daemon_run_test.go"
-              ]
-            }
-          ]
+          }
         }
       }
     }
