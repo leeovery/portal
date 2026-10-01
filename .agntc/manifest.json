@@ -1,7 +1,7 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.8.6",
-    "commit": "ff1f1779339d788d8b606c4c01d9216f9c40ab9c",
+    "ref": "v0.8.7",
+    "commit": "aca5c9865fd3f52ed92c6d2f960ae6f9e4109e4b",
     "agents": [
       "claude"
     ],
@@ -478,6 +478,7 @@
       ".claude/skills/workflow-migrate/scripts/migrations/062-clear-unasked-implementation-setup.cjs",
       ".claude/skills/workflow-migrate/scripts/migrations/063-retire-store-msp.cjs",
       ".claude/skills/workflow-migrate/scripts/migrations/064-untrack-knowledge-store.cjs",
+      ".claude/skills/workflow-migrate/scripts/migrations/065-remove-project-function-hooks-flag.cjs",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
@@ -761,7 +762,7 @@
     ],
     "type": "plugin",
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "installedAt": "2026-10-01T08:51:01.760Z",
+    "installedAt": "2026-10-01T11:45:56.168Z",
     "constraint": "^0.8.0"
   },
   "samber/cc-skills-golang": {
