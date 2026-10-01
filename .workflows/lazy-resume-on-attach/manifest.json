@@ -695,6 +695,12 @@
               "tasks": {
                 "1": "approved"
               }
+            },
+            "c3": {
+              "gate_mode": "gated",
+              "tasks": {
+                "1": "pending"
+              }
             }
           },
           "out_of_scope": [
