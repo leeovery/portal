@@ -152,30 +152,46 @@ Real-world logs (`~/.config/portal/state/portal.log.*`, 2026-09-02 → 2026-10-0
 
 ### Root Cause
 
-{Clear, precise statement of what causes the bug}
+Every Portal save treats the session list tmux gives it at that instant as the complete, authoritative truth, and acts on it irreversibly in the same step: whatever sessions the capture does not see are dropped from `sessions.json`, and the housekeeping pass that runs inside every commit (`gcOrphanScrollback`, `internal/state/commit.go:39`) deletes every scrollback file the new index no longer names. Nothing in the pipeline distinguishes "the user closed these sessions" from "tmux or the machine is going away", nothing checks whether a collapse from a populated state to an empty or near-empty one is plausible, and nothing delays the deletion. Three ordinary situations hand a save a view with sessions missing, and each one becomes permanent loss:
+
+1. **The user kills every session while the server stays up** (H1). Portal's own hidden sessions keep the server alive, the session list legitimately contains no user sessions, the empty-list path skips the only emptiness guard (`internal/state/capture.go:96`, `:131`), and the per-kill `commit-now` — or the daemon's 30s save — commits empty.
+2. **The server begins shutting down while a save is mid-capture** (H6, via H3). A failed `list-sessions` is swallowed by `Client.ListSessions` and returned as an empty list (`internal/tmux/tmux.go:130-135`), and tmux itself can answer an in-flight `list-sessions` with exit 0 and no output during shutdown (`client.c` `MSG_SHUTDOWN` handling). The committer's earlier reads have already succeeded, so nothing makes it stand down: it commits an empty index and deletes every scrollback file, including those of sessions that were still alive. At reboot the daemon's SIGTERM-triggered final flush (`cmd/state_daemon.go:360`) is the save most likely to be in flight at that moment.
+3. **At reboot, sessions die before tmux does** (H5). Programs inside panes receive the shutdown SIGTERM independently of the tmux server; a session whose programs exit closes while the server still answers, and the `session-closed` hook's synchronous `commit-now` — built so that a deliberately killed session is never resurrected — removes it and its scrollback, as does the daemon's SIGTERM flush.
 
 **Why this happens:**
-{Explanation of the underlying issue}
+The save pipeline was designed around two premises that hold during interactive use and fail at teardown. First, that a session disappearing from tmux means the user removed it: the killed-session fix made every close commit synchronously on that premise, and the housekeeping pass was designed as "self-healing by construction" on the same one — an unreferenced file can only be an orphan. Second, that a tmux read which cannot be trusted reports itself as an error: the all-sessions-failed guard, the restore marker's fail-closed read and the commit lock all assume a broken read surfaces as `err != nil`. At shutdown neither holds: sessions vanish because the machine is going down, and the session listing — the one read whose emptiness is the destructive signal — reports a dying or unreachable server as a successful empty answer. Because deletion is coupled to the commit, the moment Portal is most wrong is also the moment it destroys the only copy of the scrollback. `kill-server` survives today only because both committers' *first* read (`@portal-restoring`) happens to fail and is read as "a restore is in progress" (`state.RestoreWindowActive`) — an incidental stand-down, not teardown awareness, and one that a server dying a few milliseconds later than that first read walks straight past.
 
 ### Contributing Factors
 
-- {Factor 1 - why it enables the bug}
-- {Factor 2 - why it enables the bug}
+- **The session listing swallows failure as "no sessions".** `Client.ListSessions` returns an empty list on any `list-sessions` error (`internal/tmux/tmux.go:130-135`, "the error is the no-server signal"), a contract the v1 picker specification set so an absent server shows the empty state. Capture reuses it through `ListSessionNames` (`tmux.go:200`), where an unreadable server and an empty one become indistinguishable. A discriminating variant, `ListSessionsProbe` (`tmux.go:143`), already exists and is not used by capture.
+- **tmux reports "no sessions" successfully while shutting down.** An in-flight command client caught by the server's exit is ended with a payload-less `MSG_SHUTDOWN`, leaving its exit status at 0 with no output (E6). Even a non-swallowing listing can read an exiting server as empty.
+- **The emptiness guard covers only "every session errored".** The all-sessions-failed guard (`capture.go:131`) requires `len(keep) > 0`; an empty listing skips the pane enumeration and every per-session read, so no anomalous error can ever accumulate to trip it.
+- **`Commit` has no plausibility check.** A populated → empty change is just a structural change (`commit.go:31`), written like any other.
+- **Irreversible deletion is synchronous with every commit.** `gcOrphanScrollback` runs inside `Commit` immediately after the write (`commit.go:39`), so there is no window in which a wrong commit can be noticed or superseded before the scrollback is gone. `sessions.json` is reconstructable by reopening sessions; the `.bin` files are not.
+- **Every session close commits.** `session-closed` → `commit-now` (`internal/tmux/hooks_register.go:84`) fires for deliberate kills and shutdown-time deaths alike; the hook has no way to tell them apart.
+- **The daemon flushes on SIGTERM.** The shutdown flush runs a full capture-and-commit on SIGTERM as well as SIGHUP (`cmd/state_daemon.go:453`), guarded only by `@portal-restoring`. The resurrection specification reasoned about SIGHUP from `kill-server` as the dominant path and treated the final flush as safe because the write is atomic — atomicity prevents a torn file, not a valid-but-wrong one.
+- **Destructive paths take inconsistent postures on an empty read.** The hook-staleness sweep stands down on an empty pane read and on a failed one (resume-hooks-silently-lost specification, mass-deletion guard); the session commit path, which deletes far more, has no equivalent.
+- **Exposure depends on what runs in each pane.** Interactive shells ignore SIGTERM; plain-command panes and Portal's own restored resume-hook shape (`sh -c '<hook>; exec $SHELL'`) do not, so the sessions most likely to be lost at reboot are the ones carrying resume hooks.
 
 ### Why It Wasn't Caught
 
-- {Testing gap}
-- {Edge case not considered}
-- {Recent change that introduced it}
+- **Two unit-level contracts contradict each other and nothing tests them together.** `TestCaptureStructurePreLoopFailFatal` (`internal/state/capture_test.go:1613`) asserts that a `ListSessionNames` failure makes capture return an error — through a fake client that can return one. `TestListSessions` (`internal/tmux/tmux_test.go:16`) pins the opposite: "returns empty slice when tmux server is not running". The real `*tmux.Client` can never deliver the error the capture test guards against.
+- **The emptiness guard was built for the adjacent case.** It protects "tmux readable, every session errored"; "tmux reports nothing at all" was treated as truth (as the seed notes).
+- **No test exercises a save racing a dying server, or the daemon SIGTERMed while tmux shuts down.** The integration suites cover `kill-server` and saver kills, where the first read fails and everything stands down — so the incidental protection looks like design.
+- **The per-kill commit was validated only for deliberate kills.** The killed-session fix's premise — "every close is a decision to remove" — was never examined against machine shutdown.
+- **The loss is silent.** A wipe leaves `capture: tick complete sessions=0` or bare `process: start … state commit-now` lines at INFO; no WARN marks a collapse, and scrollback deletions are not logged at INFO. Reboots with the runtime live have, by timing, landed favourably, and the documented workaround (`portal uninstall` before a reboot) keeps the user off the dangerous paths.
 
 ### Blast Radius
 
 **Directly affected:**
-- {Component/feature}
-- {Component/feature}
+- `sessions.json` — overwritten with an empty or shrunken index; the next restore brings back nothing, or only the survivors.
+- `scrollback/*.bin` — deleted for every session the wrong view omits; unrecoverable.
+- Resume hooks, as a downstream loss (from the code and the resume-hooks-silently-lost specification, not reproduced): `hooks.json` entries are keyed by pane tokens that only restored panes carry. After a wipe and the next start, the daemon's hook-staleness sweep (every 10s) finds live panes — Portal's own, plus anything the user opens — so it does not stand down, judges every unrestored pane's token stale, and deletes those user-authored `on-resume` commands (each logged at INFO with its command, the only remaining copy).
 
 **Potentially affected:**
-- {Component/feature that shares code/patterns}
+- Any committer that reaches the session listing — the daemon's tick, its shutdown flush, and `commit-now` — whenever tmux is unreachable *after* the restore-marker read succeeds: a server crash mid-save, or the `tmux` client failing for any other reason at that point.
+- `restore.Orchestrator.snapshotLiveSessions` (`internal/restore/restore.go:99`) reads a failed listing as "no live sessions" — non-destructive (restore would try to rebuild sessions that exist and fail on the collision), but the same misreading.
+- `internal/resolver` and the picker read the listing the same way; read-only, and the empty state is their intended behaviour.
 
 ---
 
