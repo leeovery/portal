@@ -1,8 +1,9 @@
 # Themes (`.theme` files)
 
 A Portal theme is one palette: 19 named colour roles in a flat `key = value`
-file. Everything the picker draws resolves through those 19 roles — no part of
-the interface carries a colour of its own — so a new palette restyles all of it.
+file. Everything Portal draws — the picker, and the resume panel a restored pane
+can hold — resolves through those 19 roles. No part of the interface carries a
+colour of its own, so a new palette restyles all of it.
 
 The themes Portal ships with are ordinary `.theme` files, read by the same parser
 as one you write yourself. A built-in has no privileges a drop-in lacks: same
@@ -70,7 +71,7 @@ one means knowing what the colour signifies.
 | `accent.primary` | The primary accent, and the most used. The cursor, the selector bar, the active dot, the `?` key, a focused field label, the mode bar, the loading bar. |
 | `accent.key` | Key-hint glyphs — the keys named in the footer and in modal hints. |
 | `accent.mode` | Signals a distinct mode. The Sessions header, preview chrome, the tick of the step in progress. |
-| `accent.attention` | The warm one. The `/` filter query, edit mode, the `⚠` warning glyph, the `●` pending dot. The pending dot renders on both the canvas and the selected row, so tune this value against `bg.selection` as well as `canvas`. |
+| `accent.attention` | The warm one. The `/` filter query, edit mode, the `⚠` warning glyph, the `●` pending dot, the resume panel's `● PAUSED` badge. The pending dot renders on both the canvas and the selected row, so tune this value against `bg.selection` as well as `canvas`. |
 | `state.positive` | Live, attached, done. The `●` attached dot, the Sessions count, the Projects label, `✓`, a success flash. |
 | `state.destructive` | Kill and delete emphasis, and the `▲` marker. |
 
@@ -450,6 +451,14 @@ nothing to choose, and nothing is waited for.
 The one accepted cost: OSC 11 answers when asked and does not announce a later
 change, so Portal is correct *at launch* rather than live-following. Change your
 terminal's background mid-session and Portal notices at the next launch.
+
+**The resume panel decides the same way, once per draw.** Each time a waiting
+pane draws its panel — at restore, and again on a resize or when it moves between
+the panel and its discard confirmation — it reads the theme setting afresh and,
+under a pair, asks the terminal in front of it. Most panels are first drawn at
+restore with no client attached, so nothing answers and they resolve **dark**; a
+redraw with you attached resolves against your terminal. Under a constant the
+named theme paints every draw, attached or not.
 
 ### Going back to the shipped pair
 

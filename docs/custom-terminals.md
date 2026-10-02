@@ -30,8 +30,9 @@ Each recipe is keyed by your terminal's identity. Two ways to read it:
   `⚠ unsupported terminal — <name> · <bundleID>`. The right-hand value is the raw
   macOS bundle id (e.g. `dev.warp.Warp-Stable`); the left is the friendly `.app`
   name (e.g. `Warp`).
-- **`portal doctor`.** The report includes a `host terminal` line — the last of
-  the check lines — naming the detected terminal and whether Portal can drive it
+- **`portal doctor`.** The report includes a `host terminal` line — after the
+  health checks, ahead of the resume lines — naming the detected terminal and
+  whether Portal can drive it
   — e.g. `Warp (unsupported)`, `Ghostty (supported)`, or
   `unsupported (remote session)`.
 
