@@ -39,4 +39,4 @@ Confirmed as a bugfix: restore across a reboot is meant to work already and sile
 
 ## Conclusion
 
-(none)
+Routed to investigation.
