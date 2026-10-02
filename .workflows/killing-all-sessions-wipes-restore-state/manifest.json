@@ -1,0 +1,15 @@
+{
+  "name": "killing-all-sessions-wipes-restore-state",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-10-02",
+  "description": "Rebooting the Mac, killing the tmux server, or killing every session while Portal is running must not empty the saved restore state or delete saved scrollback — no special Portal shutdown step should be needed first",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-08-16-killing-all-sessions-wipes-restore-state.md",
+      "source": "inbox:bug",
+      "seeded_at": "2026-10-02T13:02:01Z"
+    }
+  ]
+}

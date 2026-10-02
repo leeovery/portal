@@ -188,6 +188,9 @@
     },
     "lazy-resume-on-attach": {
       "work_type": "feature"
+    },
+    "killing-all-sessions-wipes-restore-state": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
