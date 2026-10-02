@@ -71,14 +71,17 @@ The user's normal reboot — the real-world sequence a reproduction has to cover
 
 **Checkpoint depth:** check-ins
 
-- **H1: Killing every user session while the tmux server stays up (held open by Portal's own hidden sessions) makes the next daemon tick save an empty restore state and delete every saved scrollback file** [suspected]
-  Basis: capture's all-sessions-failed guard only runs when at least one user session exists (`internal/state/capture.go:93`); `Commit` has no emptiness check (`internal/state/commit.go:22`) and its housekeeping (`gcOrphanScrollback`) deletes every `.bin` the new index doesn't name.
+- **H1: Killing every user session while the tmux server stays up (held open by Portal's own hidden sessions) makes the next daemon tick save an empty restore state and delete every saved scrollback file** [tracing]
+  Basis: capture's all-sessions-failed guard only runs when at least one user session exists (`internal/state/capture.go:131` — `:93` in the 0.11.0 code the seed read); `Commit` has no emptiness check (`internal/state/commit.go:22`) and its housekeeping (`gcOrphanScrollback`) deletes every `.bin` the new index doesn't name.
+  Code trace (see Code Trace → Route 1): confirmed by reading. The daemon tick is not even needed — every user kill fires `session-closed` → `commit-now`, so the commit that follows the *last* user kill is itself the empty commit, through the identical `RunCommitCycle` path. The daemon tick (dirty flag or the 30s `MaxGap`) is a second committer reaching the same result if the hook is absent. Live sandbox reproduction pending.
 - **H2: On tmux server shutdown (kill-server, or SIGTERM at reboot) tmux destroys every session and then fires the session-closed hooks; any commit-now that still reaches an answering server sees zero sessions, commits empty and deletes the scrollback** [suspected]
   Basis: the seed's second route; `session-closed` runs `portal state commit-now` synchronously (`internal/tmux/hooks_register.go:84`) through the same `RunCommitCycle` → `Commit` → housekeeping.
 - **H3: On server shutdown the daemon's final flush — SIGHUP when its pane closes, or SIGTERM delivered to it directly at reboot — captures a half-torn-down server and commits a partial or empty index** [suspected]
   Basis: `defaultShutdownFlush` (`cmd/state_daemon.go:360`) runs a full `captureAndCommit` guarded only by `@portal-restoring`.
 - **H4: On a real reboot every teardown-time committer finds the server already gone, its tmux read fails and nothing commits — which is why the user's reboots have survived** [suspected]
   Basis: several clean reboots with all sessions detached and the runtime live; a failed `ListSessionNames` returns an error before `Commit` is reached.
+- **H5: At reboot, macOS's shutdown SIGTERM reaches the processes inside panes (and the daemon itself) independently of the tmux server; any session whose panes all die before the server processes its own SIGTERM is destroyed while the server still answers, so its `session-closed` commit-now — and the daemon's SIGTERM-triggered flush — commit a shrunken index and delete that session's scrollback** [suspected]
+  Basis: tmux source shows that once the server begins exiting it refuses every new client (`server.c:392`), so loss at teardown needs sessions to die while the server is *not* exiting (Code Trace → tmux teardown semantics); a pane's process exiting on its own closes the pane, and the last pane closing destroys the session with the server alive. Portal's own restored panes run `sh -c '<hook>; exec $SHELL'`, a non-interactive shell that SIGTERM kills.
 
 Trace lines, in order:
 1. Empty-capture path: daemon tick and commit-now through capture → commit → scrollback housekeeping, then reproduce in a throwaway tmux server (own socket, isolated state dir, test-built binary) by killing every user session with the runtime live.
@@ -90,16 +93,33 @@ Trace lines, in order:
 ### Code Trace
 
 **Entry point:**
-{Where the problematic flow starts}
+Every committer funnels into one cycle, `state.RunCommitCycle` (`internal/state/commit_cycle.go:52`), under the exclusive `commit.lock`. Three callers reach it:
+- the daemon tick — `tick` (`cmd/state_daemon.go:174`) → `captureAndCommit` (`cmd/state_daemon.go:245`), run when `save.requested` is set or 30s (`MaxGap`, `cmd/state_daemon.go:446`) have passed since the last save;
+- the daemon's shutdown flush — `defaultShutdownFlush` (`cmd/state_daemon.go:360`) → `captureAndCommit`, on SIGHUP or SIGTERM (`cmd/state_daemon.go:453`), skipped only while `@portal-restoring` is set;
+- `portal state commit-now` (`cmd/state_commit_now.go`), run synchronously by the `session-closed` global hook (`internal/tmux/hooks_register.go:84`: `run-shell "command -v portal >/dev/null 2>&1 && portal state commit-now"`), skipped only while `@portal-restoring` is set.
 
-**Execution path:**
-1. {file:line - description}
-2. {file:line - description}
-3. {file:line - description}
+**Execution path (Route 1 — sessions gone, server alive):**
+1. `internal/state/scrollback.go:295` `captureAndRefile` — first tmux read is `ListSkeletonMarkers`, then `captureStructure`.
+2. `internal/state/capture.go:88` `ListSessionNames` succeeds, returning only `_portal-saver` / `_portal-bootstrap`.
+3. `internal/state/capture.go:93` `keepSessionNames` (`capture.go:453`) drops every `_`-prefixed name → `keep` empty.
+4. `internal/state/capture.go:96` the pane enumeration is skipped (`len(keep) > 0` false); the per-session loop runs zero times.
+5. `internal/state/capture.go:131` the all-sessions-failed guard requires `len(keep) > 0` → not reached. A zero-session `Index` returns with a nil error. (The waiting-pane carry, `carryMissedWaitingSessions`, carries only sessions holding a pane the live enumeration lists as resume-pending — with no enumeration there are none.)
+6. `internal/state/commit_cycle.go:69` `Commit` — `structuralChange` (populated prior vs empty) is true, so `AtomicWrite0600` overwrites `sessions.json` with the empty index (`commit.go:35`).
+7. `internal/state/commit.go:39` `gcOrphanScrollback` — `ComputeReferencedSet` of an empty index is empty, so every `scrollback/*.bin` is removed (`commit.go:103`).
+
+**tmux 3.7c teardown semantics (source: tag `3.7c`):**
+- `kill-server` is `kill(getpid(), SIGTERM)` on the server itself (`cmd-kill-server.c`).
+- On SIGTERM/SIGINT the server sets `server_exit = 1` and only then calls `server_send_exit` (`server.c:439-440`), which marks every client for exit and destroys every session in one synchronous loop (`server.c:310-326`); `session_destroy` queues a `session-closed` notification per session (`session.c`, `notify_session`), whose hooks run later from the command queue.
+- Once `server_exit` is set, `server_accept` closes every new client connection immediately (`server.c:392-395`). Every `tmux` command a committer runs is a new client connection, so after the server has begun exiting no committer — a hook-spawned `commit-now`, or the daemon's shutdown flush reacting to the SIGHUP its pane's closure delivers — can read it: `ListSkeletonMarkers` fails first and `Commit` is never reached.
+- The server keeps running until no clients remain and no non-`JOB_NOWAIT` job is running (`server.c:264-301`), so the hook jobs do run — against a server that refuses them.
+- Consequence: under `kill-server`, and under any SIGTERM the server processes before its sessions die, no committer can observe a half-torn-down server. A teardown can only commit loss where sessions die *while the server is not exiting* — their panes' processes exiting on their own, or the user killing them.
 
 **Key files involved:**
-- {file} - {role in the bug}
-- {file} - {role in the bug}
+- `internal/state/capture.go` — empty `keep` yields a valid empty index with a nil error; the emptiness guard only covers "every session errored".
+- `internal/state/commit.go` — `Commit` writes any structural change, including populated → empty; `gcOrphanScrollback` deletes every unreferenced `.bin`.
+- `internal/state/commit_cycle.go` — the single cycle every committer runs.
+- `cmd/state_commit_now.go` / `internal/tmux/hooks_register.go` — the per-kill synchronous commit on `session-closed`.
+- `cmd/state_daemon.go` — the tick and the shutdown flush.
 
 ### Root Cause
 
