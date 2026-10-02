@@ -198,6 +198,7 @@ internal/capture/           # in-memory fakes + named fixtures (imported ONLY by
   theme_fake.go             #   the faked theme enumeration a panel fixture declares its rows through
   harness.go                #   builds a fixture's model and replays its captureKeys
   swatch.go                 #   the contrast-validation swatch (a standalone tea.Model; NOT tui.Build)
+  resume_surfaces.go        #   the resume panel's standalone surfaces + StandaloneNames (NOT tui.Build)
 ```
 
 The tool takes `--fixture <name>`, resolves it via `resolveProgram`, and runs the
@@ -209,10 +210,22 @@ Fixtures are deliberately shallow: they do just enough to visualise what is mean
 be visualised. **They are about look, not behaviour**, and need not be functionally
 complete.
 
-**One deliberate exception:** the `contrast-validation` swatch is a standalone
-validation surface — a labelled set of tint bands on the theme's own canvas — that
-does **not** route through `tui.Build`. It is how a new light theme's pinned surface
-tints get settled by eye, so it takes a `--theme` like everything else.
+**The deliberate exceptions are the standalone surfaces**, which do **not** route
+through `tui.Build`. `capture.StandaloneNames()` is the one list of them, and the
+guards that enumerate fixtures consult it by name — a new surface joins them all
+with one edit there:
+
+- the `contrast-validation` swatch — a labelled set of tint bands on the theme's own
+  canvas. It is how a new light theme's pinned surface tints get settled by eye.
+- the resume panel's two screens, drawn through the same exported renderers a
+  waiting pane draws with: `resume-panel-waiting` and `resume-panel-discard`, each
+  with a `-report` variant (the card carrying its report row) and a `-degraded`
+  variant pinned below the card's size, where the frame gives way to a plain stack.
+  Each is pinned to its own size, so a live terminal's window cannot decide which
+  form is captured, and none sets OSC 11 — a pane draw never does.
+
+`FixtureNames()` lists them alongside the picker fixtures; `FixtureByName` does not
+resolve them. All of them take a `--theme` like everything else.
 
 ### Adding (or removing) a fixture
 

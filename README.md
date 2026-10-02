@@ -148,6 +148,8 @@ The term is matched **case-folded, as a contiguous run**, against each live sess
 - **several** — the picker opens pre-filtered by the term, cursor on the first match;
 - **none** — the picker opens on the term with nothing surviving it. That is a filter result, not an error: press `Esc` and your sessions are there.
 
+In a picker a search opened, every row shows its recorded directory beside the session name, so a row that matched on its directory says why it is there; the column stays for that picker's life, however you edit the filter afterwards. A session list tmux cannot read is not a zero match: the search reports tmux's error and exits non-zero rather than opening an empty picker that would suggest your sessions are gone.
+
 `x /` — the slash with no term — opens the picker with the filter empty, focused and ready to type. It is not an error, and it does not mean "mint at root".
 
 The picker's own hand-typed `/` filter stays **fuzzy** (scattered letters anywhere). The search form is deliberately stricter, because it can attach a lone match without ever showing it to you: a fuzzy `/port` could land you in `~/Projects/rust-tools` sight unseen.
@@ -211,7 +213,7 @@ xctl alias list                      # list all aliases
 
 ### `xctl hook`
 
-Register per-pane commands to bring back after a reboot. Under the shipped default a restored pane comes back holding the resume panel, showing the registered command with `⏎ resume` and `d discard`, and the command runs when you answer it; a registration pinned `eager` runs its command as the pane is restored, with no panel. `hook set` must be run from inside a tmux pane; `hook rm` defaults to the current pane's token but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including panes that no longer exist, and the old-format `<session>:<window>.<pane>` keys the stale-entry sweep retains forever rather than guessing at — hand removal through this flag is the sanctioned route for those). `hook rm` exits non-zero when it removes nothing — a missing entry, a pane with no hook of its own, or a pane that is already gone — so a scripted caller can tell a real removal from a no-op.
+Register per-pane commands to bring back after a reboot. Under the shipped default a restored pane comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume` and `d discard`, and the command runs when you answer it; a registration pinned `eager` runs its command as the pane is restored, with no panel. `hook set` must be run from inside a tmux pane; `hook rm` defaults to the current pane's token but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including panes that no longer exist, and the old-format `<session>:<window>.<pane>` keys the stale-entry sweep retains forever rather than guessing at — hand removal through this flag is the sanctioned route for those). `hook rm` exits non-zero when it removes nothing — a missing entry, a pane with no hook of its own, or a pane that is already gone — so a scripted caller can tell a real removal from a no-op.
 
 The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent alias, so existing `xctl hooks …` scripts keep working unchanged.
 
@@ -304,6 +306,8 @@ Navigation is **arrows only** (no vim or page-jump aliases). Press **`?`** on an
 | `q` / `Esc` | Quit (`Esc` clears an active filter first) |
 
 The TUI has three views: session list, project picker, and scrollback preview. It paints its own canvas in the colours of the active theme — press `t` for the theme picker, or name a theme in `prefs.json` (see [Configuration](#configuration) and [docs/theming.md](docs/theming.md)); `NO_COLOR` gives a colourless render.
+
+A session row ends in up to two status dots, packed to the right: the attached dot when a client is attached to the session, and a warm-coloured pending dot when any pane in it is waiting on its [resume panel](#resume-panel). Under `NO_COLOR` they render as `A` and `P` in the same cells. The `?` help on the sessions list carries the legend.
 
 ### Scrollback Preview
 
@@ -409,6 +413,50 @@ Pair restoration with [resume hooks](#xctl-hook) to bring pane commands such as 
 servers and editors back after a reboot — on a panel you answer per pane, or fired
 outright for a registration pinned `eager`.
 
+### Resume panel
+
+A restored pane whose resume hook resolves **lazy** — the shipped default — comes back
+with its scrollback replayed underneath and a panel over it: `Resume session` with a
+`● PAUSED` badge, the registered command under `ON RESUME`, and `⏎ resume` /
+`d discard`. Nothing runs until you answer, so a reboot no longer starts every
+registered command at once — a waiting pane holds a small Portal process in its place,
+and the command's own process starts only for the work you go back to.
+
+| Key | On the panel | On the discard confirmation |
+|---|---|---|
+| `Enter` | Resume: the panel goes, the transcript is revealed, and the command runs in the pane | — |
+| `d` | Open the `▲ Discard resume?` confirmation | — |
+| `y` | — | Discard the resume command |
+| `Esc` | Nothing — there is nowhere to back out to | Back to the panel |
+
+- **Enter runs what is registered when you press it**, not what was registered when
+  the panel was drawn. A hook removed or rewritten while the pane waited is honoured;
+  one that has gone drops the pane to a plain shell.
+- **A discard is permanent.** It removes that pane's resume command from `hooks.json`,
+  so the panel never returns — not on this boot, not after the next reboot. The session,
+  the pane and its scrollback are untouched; the pane drops to a plain shell. Only the
+  command the confirmation showed is removed: if the hook was re-registered with a
+  different command while the pane waited, that one is left in place. The removed
+  command is written to `portal.log` (`grep 'op=discard' portal.log`), so it can be
+  copied back out.
+- **Every other key is swallowed**, including `Ctrl-C`, `Ctrl-\`, `Ctrl-Z` and
+  `Ctrl-D`. A key counts only when it arrives on its own, so a stray paste can't answer
+  the panel, and input already in flight when the confirmation opens can't confirm it.
+- **Ignoring it is fine.** Detaching, closing the window and rebooting are not answers:
+  the panel stays until you press a key that means something, and a reboot draws it
+  again. The panes beside it stay fully live, and while it waits Portal holds that
+  pane's saved scrollback at what it was when the pane was restored.
+- **A failed answer says so.** If an answer can't be carried out — `hooks.json`
+  unreadable or locked on a discard, say — the panel states the reason on its own row
+  and the pane keeps waiting, so the key can be pressed again.
+- A pane too small for the card still shows the title, command and key hints, stacked
+  plainly; the keys act at every size.
+
+Waiting panes show as a pending dot on their session's row in the picker, and
+`xctl doctor` counts them. To go back to commands firing as their panes are restored,
+set `"resume_mode": "eager"` in `prefs.json` (there is no UI for this setting yet), or
+pin a single registration with [`xctl hook set --resume-mode`](#xctl-hook).
+
 ## Configuration
 
 Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if set, otherwise `~/.config/portal/`. Each entry also has an env var override that takes full precedence.
@@ -457,8 +505,9 @@ mode `0600`, directories `0700`.
   diffs of sensitive files), they will be captured.
 - **`portal.log` records config changes verbatim.** It does not contain pane
   scrollback, but config-mutation breadcrumbs and exec handoffs are logged as-is:
-  a `xctl hook set --on-resume "<cmd>"` command string, alias values, and
-  project paths appear in the log. Redact manually if you share it in a bug report.
+  a `xctl hook set --on-resume "<cmd>"` command string, a resume command
+  discarded from the resume panel, alias values, and project paths appear in
+  the log. Redact manually if you share it in a bug report.
 - **Mitigations:** for sensitive panes, run `tmux set-option -w history-limit 0`
   to prevent scrollback from accumulating, or `tmux clear-history` on demand
   (run before the next save, which lands at most ~30s later).
