@@ -16,7 +16,7 @@ From a code read (no live reproduction yet), two routes reach the same loss:
 The irreversible half is the scrollback deletion: `sessions.json` is reconstructable by reopening sessions, the `.bin` files are not once removed. The shape to guard is the collapse from populated to empty (or near-empty in quick succession) with deletion attached, not the empty commit on its own.
 
 **Started:**
-{When it was first noticed, and any change it followed}
+Identified 2026-08-16 from a code read (Portal 0.11.0), not from an incident. It has never cost the user any state. The user has detached all sessions and rebooted the computer several times with no loss; their own guess — explicitly not known — is that the race has always landed in Portal's favour by chance.
 
 ### Manifestation
 
@@ -38,19 +38,24 @@ Route 2 (from the code read, unverified against a real teardown):
 2. Reboot the Mac or `tmux kill-server` such that sessions end in sequence while hooks still fire.
 3. Each `session-closed` commit shrinks the index and deletes that session's scrollback.
 
-**Reproducibility:** {Always / Sometimes / Intermittent}
+The user's normal reboot — the real-world sequence a reproduction has to cover:
+
+1. Close everything down first; often run `brew update` + `brew upgrade`.
+2. Quit Ghostty — the tmux client detaches; the server, every session and the `_portal-saver` daemon stay up.
+3. Reboot through macOS.
+4. After login, reopen things by hand (a small number of apps reopen on login by themselves); `x` re-attaches Portal.
+
+**Reproducibility:** Never observed. The user has rebooted several times with all sessions detached and lost nothing. Neither route has been reproduced live.
 
 ### Environment
 
-- **Affected environments:** {Production, staging, local}
-- **Browser/platform:** {If relevant}
-- **User conditions:** {Specific user states, permissions, data}
+- **Platform:** macOS 26.7.1, Portal 0.12.0, tmux 3.7c.
+- **User conditions:** Portal runtime live — `_portal-saver` daemon running, global hooks (including `session-closed`) registered — with a populated `sessions.json` and scrollback directory. The user's install restores ~38–41 sessions.
 
 ### Impact
 
-- **Severity:** {Critical / High / Medium / Low}
-- **Scope:** {Number of users affected}
-- **Business impact:** {Revenue, trust, compliance}
+- **Severity:** Critical — silent, irreversible data loss (saved scrollback) from an ordinary action, with no warning, should either route fire. Never observed in practice.
+- **Scope:** Anyone who reboots, kills the tmux server, or kills every session while the Portal runtime is live — the obvious thing to do before a reboot, and what someone tidying up would try.
 
 ### References
 
