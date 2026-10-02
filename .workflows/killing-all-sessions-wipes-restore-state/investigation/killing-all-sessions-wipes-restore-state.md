@@ -69,11 +69,23 @@ The user's normal reboot — the real-world sequence a reproduction has to cover
 
 ### Hypotheses
 
-**Checkpoint depth:** {straight-through | check-ins}
+**Checkpoint depth:** check-ins
 
-{Live ledger — ids are permanent, statuses evolve through the analysis:}
-- **{H1}: {hypothesis}** [{suspected | tracing | confirmed | ruled-out}]
-  {basis, then evidence as it accumulates}
+- **H1: Killing every user session while the tmux server stays up (held open by Portal's own hidden sessions) makes the next daemon tick save an empty restore state and delete every saved scrollback file** [suspected]
+  Basis: capture's all-sessions-failed guard only runs when at least one user session exists (`internal/state/capture.go:93`); `Commit` has no emptiness check (`internal/state/commit.go:22`) and its housekeeping (`gcOrphanScrollback`) deletes every `.bin` the new index doesn't name.
+- **H2: On tmux server shutdown (kill-server, or SIGTERM at reboot) tmux destroys every session and then fires the session-closed hooks; any commit-now that still reaches an answering server sees zero sessions, commits empty and deletes the scrollback** [suspected]
+  Basis: the seed's second route; `session-closed` runs `portal state commit-now` synchronously (`internal/tmux/hooks_register.go:84`) through the same `RunCommitCycle` → `Commit` → housekeeping.
+- **H3: On server shutdown the daemon's final flush — SIGHUP when its pane closes, or SIGTERM delivered to it directly at reboot — captures a half-torn-down server and commits a partial or empty index** [suspected]
+  Basis: `defaultShutdownFlush` (`cmd/state_daemon.go:360`) runs a full `captureAndCommit` guarded only by `@portal-restoring`.
+- **H4: On a real reboot every teardown-time committer finds the server already gone, its tmux read fails and nothing commits — which is why the user's reboots have survived** [suspected]
+  Basis: several clean reboots with all sessions detached and the runtime live; a failed `ListSessionNames` returns an error before `Commit` is reached.
+
+Trace lines, in order:
+1. Empty-capture path: daemon tick and commit-now through capture → commit → scrollback housekeeping, then reproduce in a throwaway tmux server (own socket, isolated state dir, test-built binary) by killing every user session with the runtime live.
+2. tmux 3.7c teardown semantics: kill-server / SIGTERM / SIGHUP ordering of session destruction, `session-closed` hook execution, and whether the dying server still answers client commands — from source, then the sandbox.
+3. Daemon shutdown flush against a dying server: what the final capture sees under kill-server and under a direct SIGTERM — sandbox.
+4. Real-world evidence: the user's `portal.log` around past reboots (read-only) — what commit-now and the shutdown flush logged during teardown.
+5. macOS reboot delivery: how launchd's shutdown signals reach the tmux server and the daemon independently, versus kill-server.
 
 ### Code Trace
 
