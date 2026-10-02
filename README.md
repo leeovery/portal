@@ -1,6 +1,6 @@
 <div align="center">
 
-# Portal
+# 🌀 Portal
 
 **Interactive session picker for tmux**
 
@@ -9,8 +9,10 @@ Fast, fuzzy session management from a bare shell, with project memory,
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
+[![tmux](https://img.shields.io/badge/tmux-3.0+-1BB91F.svg)](https://github.com/tmux/tmux)
+[![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#install)
 
-[Getting Started](#getting-started) · [Install](#install) · [Commands](#commands) · [Shell Integration](#shell-integration) · [Configuration](#configuration)
+[Install](#install) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [Shell Integration](#shell-integration) · [Configuration](#configuration)
 
 <br>
 
@@ -24,17 +26,19 @@ Portal runs at a bare shell, before you enter tmux, and gives you an interactive
 
 After [shell setup](#shell-integration) you drive it through two functions: **`x`** (the picker and opener) and **`xctl`** (subcommands like `list`, `kill`, `alias`). Both names are configurable with `--cmd`.
 
-## Getting Started
+## Why Portal?
 
-```bash
-eval "$(portal init zsh)"          # add to ~/.zshrc: defines the x() and xctl() functions
-x                                  # launch the interactive picker
-x ~/Code/myproject                 # mint a new session at a path
-x ~/Code/api -e "make dev"         # mint a new session and run a command
-xctl alias set work ~/Code/work    # alias a path...
-x work                             # ...then open it by name
-xctl list                          # list running sessions
-```
+tmux keeps sessions alive; getting back into the right one is the chore. Finding it means `tmux ls` and a name you half remember. Starting one in the right place means a `cd`, a `new-session` and a name to invent. A reboot takes the lot — and the plugins that bring sessions back bring every command back with them, all at once, whether you still need it or not.
+
+Portal folds that into two shell functions and a picker:
+
+- **One verb to get anywhere.** Jump to a project by path, alias, or zoxide (`x work`), attach an existing session by name or glob (`x api`, `x 'api-*'`), or search your live sessions by name or directory (`x /api`), with git-root resolution and project memory built in.
+- **Reboot-safe sessions.** Portal starts the tmux server and restores structure, layout, working dirs, and ANSI scrollback after a reboot. Replaces tmux-resurrect / tmux-continuum.
+- **Commands come back when you ask.** Per-pane commands return via resume hooks: each pane comes back holding a panel showing its command, which runs when you answer it, so a reboot doesn't start every dev server you ever left open.
+- **A keyboard-driven picker.** A colourful picker that owns its own canvas, with an in-app `?` keymap on every page. Three themes ship — Tokyo Night, Tokyo Night Day, and Nord — switched with `t` and matched to your terminal's background unless you pin one; drop-in `.theme` files restyle every screen, and `NO_COLOR` is honoured.
+- **Session grouping and tags.** Flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
+- **Scrollback preview.** Hit `Space` for a read-only peek at any session's saved scrollback, cycling windows and panes without attaching.
+- **Multi-window open.** Name several targets (`x work api db`) or mark them with `m` in the picker and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
 
 ## Install
 
@@ -61,6 +65,23 @@ curl -fsSL https://raw.githubusercontent.com/leeovery/portal/main/scripts/instal
 go install github.com/leeovery/portal@latest
 ```
 
+## Quick Start
+
+```bash
+eval "$(portal init zsh)"              # in ~/.zshrc — defines x and xctl (bash and fish below)
+
+x                                      # the picker: ↑/↓ move, / filter, Space preview, Enter attach
+x ~/Code/api                           # new session at the repo's git root
+x ~/Code/api -e "make dev"             # ...with a command running in it
+x /api                                 # later: search live sessions by name or directory
+xctl alias set work ~/Code/work        # alias a path...
+x work                                 # ...then open it by name
+xctl hook set --on-resume "make dev"   # in a pane: bring its command back after a reboot
+xctl doctor                            # save daemon running? hooks registered? state sane?
+```
+
+Your sessions are saved as you work. After a reboot the first `x` starts tmux and rebuilds them — see [How It Works](#how-it-works).
+
 ## Screenshots
 
 <div align="center">
@@ -78,14 +99,26 @@ The full tour: grouping, fuzzy filter, scrollback preview, attach. Stills below.
 
 The same screens render in light mode and under `NO_COLOR` (see [Configuration](#configuration)).
 
-## Features
+## How It Works
 
-- **Modern Vivid TUI**: a colourful, keyboard-driven picker that owns its own canvas, with an in-app `?` keymap on every page. Three themes ship — Tokyo Night, Tokyo Night Day, and Nord — switched with `t` and matched to your terminal's background unless you pin one; drop-in `.theme` files restyle every screen, and `NO_COLOR` is honoured.
-- **Session grouping and tags**: flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
-- **Scrollback preview**: hit `Space` for a read-only peek at any session's saved scrollback, cycling windows and panes without attaching.
-- **Reboot-safe sessions**: starts the tmux server and restores structure, layout, working dirs, and ANSI scrollback after a reboot, bringing back per-pane commands via resume hooks — each pane comes back holding a panel showing its command, which runs when you answer it. Replaces tmux-resurrect / tmux-continuum.
-- **Multi-window open**: name several targets (`x work api db`) or mark them with `m` in the picker and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
-- **Fast open**: jump to a project by path, alias, or zoxide (`x work`), or attach an existing session by name or glob (`x api`, `x 'api-*'`), with git-root resolution and project memory built in.
+```
+  OPEN    x                       ──▶  the picker
+          x /term                 ──▶  search: one match attaches, more open the picker
+          x <session | glob>      ──▶  attach, or switch-client inside tmux
+          x <path | alias | zox>  ──▶  new session at the git root
+
+  SAVE    _portal-saver ──▶ save daemon ──▶ state/sessions.json + scrollback/*.bin
+                            every second, whatever changed
+
+  REBOOT  first x ──▶ start tmux ──▶ rebuild sessions ─┬─▶ layout · cwd · scrollback
+                                                       └─▶ resume hooks wait on a panel
+```
+
+- **Opening.** Outside tmux Portal hands its process to `tmux attach-session`, so nothing of Portal stays running; inside tmux it switches your client, so sessions never nest. See [`x` (open)](#x-open).
+- **Saving.** A daemon in a hidden `_portal-saver` session re-reads tmux every second and writes what changed — structure, layout, zoom, working directories, and ANSI scrollback — under `state/` (see [Configuration](#configuration)).
+- **Restoring.** After a reboot, the first command that needs tmux starts the server and rebuilds every saved session that isn't already live. See [Automatic Server Bootstrap & Restoration](#automatic-server-bootstrap--restoration).
+- **Resuming.** A pane with a resume hook comes back holding the [resume panel](#resume-panel); `Enter` runs its command, `d` discards it.
+- **Two sessions you didn't make.** `_portal-saver` hosts the daemon and `_portal-bootstrap` keeps a freshly started server alive. Both show in a raw `tmux ls`; the picker and `xctl list` hide them.
 
 ## Shell Integration
 
