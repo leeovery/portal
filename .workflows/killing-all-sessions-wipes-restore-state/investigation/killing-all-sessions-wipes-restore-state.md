@@ -211,29 +211,50 @@ The save pipeline was designed around two premises that hold during interactive 
 
 ### Chosen Approach
 
-{High-level description of the chosen fix direction}
+**Stop reading a dying tmux as "no sessions", make Portal's own panes outlast the shutdown signal, and log every session a save drops.** Three parts:
 
-**Deciding factor:** {Why this approach was selected over alternatives}
+1. **Read hardening (the save path stops trusting an unconfirmed empty answer).**
+   - A failed session listing is an error to every committer — the daemon's tick, its shutdown flush, and `commit-now` — so the cycle stands down and commits nothing, instead of reading the failure as zero sessions (today `Client.ListSessions` swallows it, `internal/tmux/tmux.go:130-135`). The picker, resolver and completion keep their current "no server means no sessions" reading; only the committing path changes.
+   - Before a commit is written, Portal confirms tmux is still answering after the capture's reads. A server that has begun exiting refuses every new connection (`server.c:392`), so this also catches tmux's own exit-0-with-nothing answers on `list-sessions` and `list-panes` (E6, E8), which no error check can see.
+   - The daemon's scrollback dump never replaces a saved, non-empty transcript with an empty capture it cannot confirm (today `WriteScrollbackIfChanged`, `internal/state/scrollback.go:77-87`, would overwrite it with zero bytes).
+   - `kill-server`'s survival becomes deliberate rather than an accident of the `@portal-restoring` read failing first.
+2. **Portal's own panes outlast the shutdown signal.** The restored resume-hook pane shapes — eager `sh -c '<hook>; exec $SHELL'` (`cmd/state_resume_chain.go:201-203`) and the lazy waiting pane's parked chain `/bin/sh -c 'trap : INT QUIT; …'` (`cmd/state_hydrate.go:272`, `:280`) — survive SIGTERM the way an interactive shell already does (E3–E5), so their sessions stay up until tmux itself exits, by which point no committer can reach the server. The handling must be a caught trap, never an ignored disposition — the parked chain's existing rule, since an ignored signal survives exec and the hook program and the user's shell would inherit it. The specification enumerates every pane shape Portal creates whose top process is a non-interactive shell.
+3. **Dropped sessions are logged by name.** Every commit that drops a session relative to the previous index logs each dropped session at INFO. This closes the silent-loss gap and makes any ordinary reboot after the fix a measurement of how macOS ends tmux and its panes.
+
+Unchanged by design: a kill is final the moment it is made — `session-closed` → `commit-now` stays synchronous and removes the killed session, its scrollback and (via the hook sweep) its resume hooks; killing every session still ends with an empty restore state, and the tests pinning that contract (`internal/state/capture_test.go:1672`, `:759`; `cmd/state_commit_now_test.go:155`) stay as they are.
+
+**Deciding factor:** It fixes every failure mode measured — the total wipe (H6 via H3) and the partial loss for Portal's resume-hook panes (H5) — at low risk, and leaves the kill path untouched, which the user's rule requires: a killed session never comes back. The hold (option B below) remains an additive follow-up rather than a rework if evidence ever shows pane programs hard-killed before tmux.
 
 ### Options Explored
 
-{List whatever approaches were discussed — could be one, could be several. For each unchosen option, note why it wasn't selected.}
+- **A — Read hardening alone.** The first part of the chosen approach on its own. Not chosen: it leaves H5 — sessions whose programs die before tmux at reboot are still forgotten with their scrollback and hooks, and Portal's own resume-hook panes (eager and lazy) are exactly the ones that die on SIGTERM.
+- **B — Read hardening plus hold every removal until tmux outlives it.** A session that disappears is held (record, scrollback, resume hooks) and removed for good only once tmux has kept running for a window after it; if tmux dies inside the window, the held sessions restore. Covers every signal ordering. Not chosen now: the user found it complex; it makes a narrow exception to "a kill is final" (a session killed outside Portal — the user's `M-q`, bound to tmux's own `kill-session` — in the last moments before a reboot or `kill-server` comes back once; kills Portal makes could stay final at once); it changes when the per-kill save takes effect, the mechanism that stopped killed sessions resurrecting; and the window length rests on unmeasured macOS shutdown timing. It stays the follow-up if a post-fix reboot's log shows sessions dropped during shutdown.
+- **Telling an intentional kill from a side effect** (raised by the user; not a viable option on its own). tmux gives no reason with `session-closed`; in 3.7c `kill-session` carries no after-hook (`.flags = 0` — only `kill-pane` has `CMD_AFTERHOOK`); a pane's exit status (normal exit vs signal) is retained only under `remain-on-exit`, which changes what the user sees. Portal can know intent only for kills it makes itself (picker `k`/`y`, `portal kill <name>`); the user's everyday kill, `M-q`, is `bind -n M-q kill-session` in their `tmux.conf`, so Portal never sees it as a kill.
+- **How tmux-resurrect / tmux-continuum handle it** (for comparison). Snapshot model: continuum saves every 15 minutes (or resurrect on demand), nothing watches sessions close, each save is a new timestamped file with `last` repointed only when the content differs. A killed session stays in the latest snapshot until the next save, so a reboot inside that window brings it back — they do not attempt kill-finality. There is no empty-save or session-count guard; protection is incidental (infrequent saves make a teardown-time save unlikely) plus manual rollback from retained snapshots (the 5 newest always kept, older removed after `@resurrect-delete-backup-after`). Pane contents are one archive, `pane_contents.tar.gz`, overwritten on every save. Portal's per-kill finality is stricter by design, which is why it needs the read hardening resurrect never had.
 
 ### Discussion
 
-{Journey notes from the fix discussion — user priorities, concerns raised, edge cases surfaced, what shifted thinking. Brief for simple bugs, detailed for complex.}
+The user's rule, set during root-cause validation: a session the user kills never comes back; a session the user detaches from does, and so do sessions ended by `kill-server` or a reboot. That turned H1 (killing every session empties the state) into intended behaviour and narrowed the defect to sessions ending without the user killing them. The user's priority is to reboot and kill tmux normally with no special Portal step, and they pushed back on the hold as complex, asking whether a kill could be told from a side effect and how other plugins cope — both answered above, and neither offered a cleaner discriminator. Pane hardening surfaced from that exchange: the partial loss only hits sessions whose programs die before tmux, the user's ordinary panes are interactive shells that already survive SIGTERM, and the exposed panes are mostly Portal's own.
+
+The deciding unknown is how macOS ends the detached tmux tree at a real reboot — SIGTERM to everything at once (the chosen approach suffices; E3 showed a simultaneous SIGTERM loses nothing even today) or hard kills in some order (only the hold closes that). The user could not reboot for a measurement. The unified log of the last restart (2026-09-30 09:58, a software-update reboot) shows launchd services receiving SIGTERM (`termination reported by launchd (2, 15, 15)`) and some SIGKILL (`(2, 9, 9)`) within a second, but records nothing about tmux or its shells. The measurement is therefore deferred, not blocking: the dropped-session logging makes the next ordinary reboot after the fix show whether anything was dropped during shutdown, and an instrumented throwaway setup alongside a reboot can settle it whenever convenient. Until the fix ships, the verified safe-reboot procedure (`portal uninstall` first) remains the safe path.
 
 ### Testing Recommendations
 
-- {Test that should be added}
-- {Test that should be added}
-- {Existing test that should be modified}
+- Capture through the production client's listing: a failed `list-sessions` makes the committing cycle error with nothing written and no scrollback deleted — for the daemon tick, the shutdown flush and `commit-now`.
+- A commit whose post-capture liveness read fails writes nothing; a capture whose session or pane listing came back empty from a server that then refuses connections writes nothing.
+- The daemon's dump does not overwrite a non-empty saved transcript with an empty capture it cannot confirm.
+- Kill-path regressions stay green: the three empty-save contract tests (`internal/state/capture_test.go:1672`, `:759`; `cmd/state_commit_now_test.go:155`); killing each session still removes it and its scrollback (E1 shape) and its resume hooks (E9 shape).
+- Integration, real tmux on an isolated socket (integration lane): the daemon SIGTERMed 10–30ms before the server (E5 shape), repeated across many trials, preserves the full state; `kill-server` (E2 shape) preserves it; pane programs plus daemon signalled before the server (E4 shape) preserves every session whose panes are interactive shells or Portal's hardened shapes.
+- Restored eager and lazy resume-hook panes survive a SIGTERM to the pane's top process, while the hook program and the user's shell still receive SIGTERM with default handling (the trap is not inherited as an ignore).
+- A commit that drops sessions logs each by name at INFO; a commit that drops none logs nothing new.
+- Existing tests to revisit: the first subtest of `TestCaptureStructurePreLoopFailFatal` (`internal/state/capture_test.go:1614`) asserts an error the production client never delivers — it should exercise the listing the committing path actually uses; `TestListSessions`' "returns empty slice when tmux server is not running" (`internal/tmux/tmux_test.go:16`) stays for the picker but must no longer describe the save path.
+- Manual: one instrumented reboot whenever convenient — a throwaway tmux + Portal setup on its own socket and state directory alongside the real one, with panes logging the signals they receive.
 
 ### Risk Assessment
 
-- **Fix complexity:** {Low / Medium / High}
-- **Regression risk:** {Low / Medium / High}
-- **Recommended approach:** {Hotfix / Regular release / Feature flag}
+- **Fix complexity:** Medium — the read hardening touches the capture/commit path all three committers share, and the signal handling spans the eager and lazy pane chains.
+- **Regression risk:** Medium — the picker's and resolver's "no server means no sessions" reading must stay as it is; a stand-down on a transient read failure must not starve saves on a healthy server (the existing `save.requested` re-touch covers the retry); the pane trap must not leak into the hook program or the user's shell; the kill path is untouched.
+- **Recommended approach:** Regular release.
 
 ---
 
