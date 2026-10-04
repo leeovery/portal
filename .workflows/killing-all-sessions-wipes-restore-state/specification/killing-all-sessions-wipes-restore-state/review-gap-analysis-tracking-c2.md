@@ -28,8 +28,8 @@ Reword the kill bullet in the unchanged-by-design list so it names the one-tick 
 **Proposed Text**:
 - **A kill is final as soon as a save commits it (§1.1).** The `session-closed` hook still runs `commit-now` synchronously, and it removes the killed session, its scrollback and, through the hook-staleness sweep, its resume hooks. When that `commit-now` stands down (§2.5), the daemon's next tick commits the kill instead. A kill that no save commits before tmux exits is accepted residue (§5.2). Killing every user session still ends with an empty restore state. That empty state is committed when the last user session closes while tmux keeps running for Portal's own `_portal-saver` and `_portal-bootstrap`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Determined by the spec's own decisions (save-path rules apply to the kill's save; the kill-stand-down residue in §5.2). Applied to §5.1 as staged.
 
 ---
 

@@ -172,7 +172,7 @@ A teardown in which everything is hard-killed (SIGKILL) runs no committer and le
 
 #### 5.1 Unchanged by design
 
-- **A kill is final the moment it is made (§1.1).** The `session-closed` hook still runs `commit-now` synchronously, and it removes the killed session, its scrollback and, through the hook-staleness sweep, its resume hooks. Killing every user session still ends with an empty restore state. That empty state is committed when the last user session closes while tmux keeps running for Portal's own `_portal-saver` and `_portal-bootstrap`.
+- **A kill is final as soon as a save commits it (§1.1).** The `session-closed` hook still runs `commit-now` synchronously, and it removes the killed session, its scrollback and, through the hook-staleness sweep, its resume hooks. When that `commit-now` stands down (§2.5), the daemon's next tick commits the kill instead. A kill that no save commits before tmux exits is accepted residue (§5.2). Killing every user session still ends with an empty restore state. That empty state is committed when the last user session closes while tmux keeps running for Portal's own `_portal-saver` and `_portal-bootstrap`.
 - **The daemon's shutdown flush still runs on SIGHUP and SIGTERM.** §2 is what makes it safe.
 - **The picker, the resolver, shell completion and restore keep their reading of a failed session listing (§2.1).**
 - **The tests pinning the empty-save contract stay as they are:**
