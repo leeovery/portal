@@ -32,6 +32,76 @@ The fix has three parts:
 
 The kill path is unchanged, and the accepted leftovers are recorded in §5.
 
+### 2. The Save Path Stops Trusting an Unconfirmed Session List
+
+Three committers all run one shared commit cycle:
+
+- the daemon's tick;
+- the daemon's shutdown flush, on SIGHUP or SIGTERM;
+- `portal state commit-now`, which the `session-closed` hook runs synchronously.
+
+The cycle runs in this order: capture, move waiting panes' transcripts to their token-named paths, the daemon's scrollback dump, then the commit and its housekeeping pass. Everything in this section applies to that cycle, so it applies to all three committers alike.
+
+#### 2.1 A failed session listing stops the cycle
+
+A failed `list-sessions` is an error to the commit cycle. The cycle stands down (§2.5) instead of reading the failure as zero sessions.
+
+Today every reader shares one session listing that swallows the failure and returns an empty list (`rg -n 'Swallowed deliberately' internal/tmux/tmux.go` → 1 hit, in `ListSessions`), and capture reads through it. A variant that returns the failure instead, `ListSessionsProbe`, already exists. Capture does not use it (`rg -c 'ListSessionsProbe' internal/state` → no matches).
+
+The change lands on the committing path only, never in the shared listing method. The picker, the resolver, shell completion and restore keep reading a failed listing as "no server, so no sessions". Restore matters most:
+
+- It reads the same listing as capture (`rg -n 'ListSessionNames\(\)' internal/state/capture.go internal/restore/restore.go` → `capture.go:88`, `restore.go:99`).
+- It already skips every session when that listing returns an error (`rg -n 'list-sessions failed' internal/restore/restore.go` → 1 hit, in `snapshotLiveSessions`).
+
+If the shared listing began returning its failures, one transient failure at bootstrap would make restore bring back nothing. The daemon's next tick would then truthfully commit an empty index over the full saved state. That is the same wipe, reached without anyone killing anything.
+
+#### 2.2 tmux is confirmed still answering before a commit is written
+
+Before the cycle writes a commit, it confirms that tmux is still answering. It does this with a tmux read sent strictly after the last read the captured index is built from. The rule rests on two properties of tmux 3.7c, taken from its source and borne out in the sandbox:
+
+- once the server begins exiting, it refuses every new client connection (`server.c`, `server_accept`);
+- once it has started exiting, it never stops (`server_exit` is set once, in the SIGTERM handler, before any session is destroyed).
+
+So an answered confirmation proves that every capture read before it was answered before the exit began. A refused confirmation stands the cycle down (§2.5).
+
+The confirmation counts as answered when tmux returns exit status 0, whatever the output. Any client tmux accepted at all was accepted before the exit began. So even tmux's own shutdown answer to the confirmation (exit 0, no output) still proves that every earlier read was answered in full.
+
+The confirmation also catches the shutdown answers that no error check can see: a `list-sessions` or `list-panes` that returned exit 0 with no output because tmux began exiting during the read. A read like that was answered after the exit began, so the confirmation sent after it is refused. Without this check, the bad answers do damage in two ways:
+
+- an empty `list-sessions` commits an empty index;
+- an empty `list-panes` next to an environment read that still succeeds records a session with no windows. That deletes the session's scrollback files while its name stays in `sessions.json`.
+
+Under `tmux kill-server`, no committer can pass the confirmation, whichever of its reads the exit lands after. Survival under `kill-server` no longer depends on which read happens to fail first (§1.2).
+
+#### 2.3 A stand-down never leaves the saved state naming a missing file
+
+The capture cycle renames a newly waiting pane's transcript from its positional path to its token-named path (`refilePendingScrollback` in `internal/state/scrollback.go`). It does this expecting the cycle to commit the record that points at the new path. If a cycle backed off after that rename, `sessions.json` would still name the vacated positional path. At shutdown no later cycle runs to repair it, so the next restore would find no transcript at the path the record names.
+
+Either of two orderings is acceptable:
+
+- the confirmation (§2.2) comes before any file is moved; or
+- a stand-down after a move leaves the saved state naming only files that exist.
+
+Whichever is used, no stand-down may leave `sessions.json` naming a scrollback file that is not on disk.
+
+#### 2.4 The scrollback dump never zeroes a saved transcript on an unconfirmed read
+
+The daemon's scrollback dump runs in its tick and its shutdown flush; `commit-now` dumps nothing. The dump writes a pane's scrollback read whenever it differs from the saved file (`WriteScrollbackIfChanged`, called from the dump in `cmd/state_daemon.go`). So an empty read overwrites a saved transcript with zero bytes. That loss involves no housekeeping pass and no change to the session list.
+
+The sandbox never saw tmux's shutdown answer (exit 0, no output) on `capture-pane`. But `capture-pane` goes through the same client path as the listings that did show it.
+
+An empty capture may replace a saved non-empty transcript only once it is confirmed by the rule in §2.2: a tmux read sent strictly after that capture has been answered. An unconfirmed empty capture is not written. The saved transcript stands, and the refused write is logged (§4).
+
+#### 2.5 What a stand-down does
+
+A cycle stands down on a failed session listing (§2.1) or a refused confirmation (§2.2). When it does, it writes no commit and runs no housekeeping pass, so `sessions.json` and every scrollback file stay as they were. The cycle then ends as a failed cycle, through each committer's existing failure route:
+
+- the daemon's tick logs its failure and re-touches `save.requested` (`rg -n 'TouchSaveRequested' cmd/state_daemon.go` → 1 hit, after `tick failed`), so its next tick retries;
+- `commit-now` logs its failure, touches `save.requested` and exits non-zero (`failCommitNow`);
+- the shutdown flush logs its failure and reports `flush_completed=false`.
+
+A transient failure on a healthy server therefore delays a save by one tick, and saves never stall. tmux's `run-shell` can surface `commit-now`'s non-zero exit to an attached client. More WARN and ERROR lines at teardown are expected and accepted.
+
 ---
 
 ## Working Notes
