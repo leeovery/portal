@@ -27,8 +27,8 @@ A session the user kills never comes back. A session that stops any other way do
 **Proposed Text**:
 A session the user kills never comes back. A session that stops any other way does come back. The cases this fix still leaves short of the rule are accepted residue, recorded in §5.2.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Determined by the residue decisions §5.2 already records. Applied to §1.1 as staged.
 
 ---
 

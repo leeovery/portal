@@ -6,7 +6,7 @@
 
 #### 1.1 The rule
 
-A session the user kills never comes back. A session that stops any other way does come back.
+A session the user kills never comes back. A session that stops any other way does come back. The cases this fix still leaves short of the rule are accepted residue, recorded in §5.2.
 
 - **Killing is final.** A kill is intentional and names the session: the picker's kill (`k`, then `y`), `tmux kill-session` (including a key the user binds to it), or the user ending the session themselves by exiting its last program. A kill removes the session's record from `sessions.json`, deletes its scrollback files, and (through the hook-staleness sweep) removes its resume hooks. Killing every session is the same rule applied to each one, and it correctly ends with an empty restore state.
 - **Everything else is restorable.** Detaching, `tmux kill-server` and a reboot of the Mac all leave every session restorable, with `sessions.json`, its scrollback files and its resume hooks intact. No Portal shutdown step is needed first. The user reboots and kills tmux normally and never has to shut Portal down beforehand.
