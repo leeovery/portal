@@ -33,8 +33,8 @@ Source: the investigation carries both statements. One is in Fix Direction → C
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Measurement re-run and confirmed (both trap variants killed by SIGHUP). The pane-stays-waiting conclusion survives; only its mechanism and the test re-land. Corrected in the investigation (Fix Direction item 2, waiting-pane sub-bullet; Testing Recommendations): the parked chain and waiter end on SIGHUP at tmux exit before the recovery tail starts. Specification §3.2 final paragraph and §6.2 fourth bullet re-aligned to it.
 
 ---
 

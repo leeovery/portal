@@ -129,7 +129,7 @@ The session survives, but its scrollback is silently lost.
 
 So every process the waiting pane runs while it waits outlasts SIGTERM: the panel's draw, and the waiter it becomes. The panel stays up and the marker stays set. The pane is saved still waiting, with its transcript. After the reboot it comes back still asking, which is what lazy resume already does for an unanswered pane.
 
-When tmux finally exits and the waiter's pty closes, the recovery tail tries to clear the marker. That cannot reach a server that is refusing connections (§2.2), so the saved record keeps the pane waiting.
+When tmux finally exits, it closes the waiting pane's pty the same way a kill does (§3.3). The SIGHUP ends the parked shell, and the waiter with it, before the recovery tail can start (measured: `sh -c 'trap : INT QUIT TERM; sleep 3; exit 7'` run as a pty's session leader through `python3`'s `pty.fork()`, master closed after 0.5s → killed by signal 1, SIGHUP). No marker clear is attempted, so the saved record keeps the pane waiting.
 
 #### 3.3 A kill still ends the pane
 
@@ -211,7 +211,7 @@ The measurement is not part of this fix. After the fix, the dropped-session logg
 - Restored eager and lazy resume-hook panes survive a SIGTERM to the pane's top process. The hook program and the user's shell still receive SIGTERM with default handling, so the trap is not inherited as an ignore.
 - Lazy waiting pane, SIGTERM during the wait. The whole process tree is signalled alongside the daemon, the server later, and a `commit-now` with no dump lands in between (the `_portal-saver` close). The pane is still waiting with its marker set, and its token-named transcript is still referenced and present at the next restore. That restore brings the pane back still asking.
 - A SIGTERM landing while the panel is still being drawn leaves the pane waiting, the same as one landing on the waiter.
-- A waiting pane whose pty closes because tmux has begun exiting: the recovery tail's marker clear fails against the refusing server, and the saved record keeps the pane waiting.
+- A waiting pane whose pty closes because tmux has begun exiting: the parked chain ends on SIGHUP before its recovery tail starts, no marker clear is attempted, and the saved record keeps the pane waiting.
 - A killed pane, waiting or eager, still dies, because the kill path's SIGHUP is not caught.
 
 #### 6.3 Logging (§4)
