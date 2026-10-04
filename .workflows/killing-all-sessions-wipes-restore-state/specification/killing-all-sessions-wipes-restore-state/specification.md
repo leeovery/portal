@@ -238,6 +238,14 @@ These run in the integration lane, on real tmux with an isolated socket:
 - The "returns an error when ListSessionNames fails and does not call show-environment" subtest of `TestCaptureStructurePreLoopFailFatal` (`internal/state/capture_test.go`) asserts an error the production client never delivers. It gets that error through a fake that can return one. It should exercise the listing the committing path actually uses (§2.1).
 - The "returns empty slice when tmux server is not running" case of `TestListSessions` (`internal/tmux/tmux_test.go`) stays, for the picker, but must no longer describe the save path.
 
+### 7. Prior Specifications This Fix Touches
+
+- **`killed-session-resurrects-within-tick-window`.** It made `session-closed` commit synchronously on every kill path, so a killed session is never resurrected. This fix keeps that rule unchanged (§5.1).
+- **`built-in-session-resurrection`.** It defined the housekeeping pass as self-healing by construction, and the daemon's SIGHUP/SIGTERM final flush, which treated an atomic write as a safe one. §2 removes both assumptions from the save path: an unreferenced scrollback file is no longer proof of an orphan when the session list cannot be confirmed, and the flush now stands down against a server that stops answering.
+- **`resume-hooks-silently-lost`.** Its hook-staleness sweep stands down on an empty or failed pane read. §2 gives the session commit path the matching posture.
+- **`lazy-resume-on-attach`.** It defined the waiting pane's parked chain and waiter. §3 makes both outlast SIGTERM while the pane waits.
+- **`v1` (portal).** It defined "no server running means zero sessions" for the picker's session discovery. The picker, resolver, completion and restore keep that reading (§2.1).
+
 ---
 
 ## Working Notes

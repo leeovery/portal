@@ -18,7 +18,7 @@
           "status": "in-progress",
           "sources": {
             "killing-all-sessions-wipes-restore-state": {
-              "status": "pending"
+              "status": "incorporated"
             }
           },
           "review_cycle": 0,
