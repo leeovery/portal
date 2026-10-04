@@ -27,7 +27,8 @@
           "date": "2026-10-04",
           "review_baseline_words": 3808,
           "tracking": {
-            "review-claims-tracking-c1": "complete"
+            "review-claims-tracking-c1": "complete",
+            "review-input-tracking-c1": "in-progress"
           }
         }
       }
