@@ -28,8 +28,8 @@ Source: the investigation carries the same three-command list in two places: "Cu
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Measurement re-run: no CompletionOptions/DisableDefaultCmd in cmd, and `portal help` lists `completion`, which is outside skipTmuxCheck. The uninstall-first cover survives with the command added. Corrected in the investigation (References workaround; Known residue, accepted), then §5.2's first-reboot bullet re-aligned.
 
 ---
 
