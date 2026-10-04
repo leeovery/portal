@@ -28,7 +28,8 @@
           "review_baseline_words": 3808,
           "tracking": {
             "review-claims-tracking-c1": "complete",
-            "review-input-tracking-c1": "complete"
+            "review-input-tracking-c1": "complete",
+            "review-gap-analysis-tracking-c1": "in-progress"
           }
         }
       }
