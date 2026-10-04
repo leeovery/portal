@@ -153,7 +153,7 @@ A commit that drops nothing logs nothing new. That includes the daemon tick that
 
 A committer that backs off because tmux stopped answering mid-save (§2.1, §2.2) logs a line saying so, through its existing failure route (§2.5). A dump that refuses to write an empty capture over a saved transcript (§2.4) logs a line naming the pane.
 
-Every line in this section is recorded at the production default level, INFO or above. Each uses the existing log component and attribute vocabulary, with no new component or attribute key.
+Every line in this section is recorded at the production default level, INFO or above. Each carries its data in attribute keys Portal's closed log vocabulary already defines: the dropped session's name in `session`, the refused pane in `pane_key`, the cause in `error` (`` rg -n '^\| `(session|pane_key|error)` \|' .workflows/portal-observability-layer/specification/portal-observability-layer/specification.md `` → 3 hits). The logging therefore needs no new log component or attribute key.
 
 #### 4.3 What the lines show after a reboot
 

@@ -48,8 +48,8 @@ The specification says: "Each uses the existing log component and attribute voca
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Derived and landed in the investigation (Fix Direction item 3): measured, the closed attr-key vocabulary already defines `session`, `pane_key` and `error`, which carry every new line's data, so no new component or key is needed. Specification §4.2 re-aligned to it, stating the keys and the measurement rather than a bare ban.
 
 ---
 
