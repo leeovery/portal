@@ -41,8 +41,8 @@ New bullet at the end of §5.2:
 
 > - **The first reboot after installing the fix.** The daemon and Portal's resume-hook panes keep running the version they were started with. The daemon moves to the new version only when Portal next bootstraps, and the resume-hook panes only when the next restore rebuilds them. `commit-now` moves at once, because each `session-closed` hook starts it afresh. A reboot taken straight after upgrading, such as one right after `brew upgrade`, keeps the exposure from before the fix. If no bootstrap has replaced the daemon, its final flush can still wipe the saved state, and Portal's resume-hook panes can still lose their sessions and scrollback. Running `portal uninstall` before that reboot, and not running `portal open` again until after it, covers it. The log of that reboot is not the evidence the hold (§5.3) and the instrumented reboot (§5.4) wait on. That evidence comes from a reboot taken after a restore on the fixed version.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: This session's call (what leaned: the fix lives in processes an upgrade does not replace; the record's uninstall-first procedure; daemon self-replacement set aside as new machinery that still leaves old panes exposed). Landed first in the investigation (Known residue, accepted), then applied to §5.2 as staged.
 
 ---
 
