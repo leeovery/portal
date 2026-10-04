@@ -162,6 +162,38 @@ After the fix, these lines give a reboot's log partial evidence of how macOS end
 
 A teardown in which everything is hard-killed (SIGKILL) runs no committer and leaves no line at all. So a log with no such lines does not, by itself, show which way macOS ended things. The instrumented reboot (§5) remains the definitive measurement.
 
+### 5. Unchanged Behaviour, Accepted Residue and Deferred Work
+
+#### 5.1 Unchanged by design
+
+- **A kill is final the moment it is made (§1.1).** The `session-closed` hook still runs `commit-now` synchronously, and it removes the killed session, its scrollback and, through the hook-staleness sweep, its resume hooks. Killing every user session still ends with an empty restore state. That empty state is committed when the last user session closes while tmux keeps running for Portal's own `_portal-saver` and `_portal-bootstrap`.
+- **The daemon's shutdown flush still runs on SIGHUP and SIGTERM.** §2 is what makes it safe.
+- **The picker, the resolver, shell completion and restore keep their reading of a failed session listing (§2.1).**
+- **The tests pinning the empty-save contract stay as they are:**
+  - the "returns an empty index with nil error when keep is empty after filtering" subtest of `TestCaptureStructurePreLoopFailFatal` (`internal/state/capture_test.go`);
+  - the "proceeds with empty index when every session is natural churn" subtest of `TestCaptureStructurePerSessionLogAndContinue` (`internal/state/capture_test.go`);
+  - `TestStateCommitNow_WritesEmptySessionsJSONWhenZeroLiveSessions` (`cmd/state_commit_now_test.go`).
+
+#### 5.2 Accepted residue
+
+These shutdown losses remain after the fix and are accepted:
+
+- **A pane whose top program was started directly rather than inside a shell.** SIGTERM ends it while tmux still answers. When no pane in its session survives, the session is removed with its scrollback.
+- **A reboot in which macOS hard-kills pane programs before tmux.** Only the hold (§5.3) covers this.
+- **A user whose interactive shell exits on SIGTERM.** Unlike zsh and bash, fish installs a SIGTERM handler that exits. Both hardened panes (§3.1) hand over to `$SHELL`, so once a fish user's hook ends, their pane is exposed again. The user's shell is zsh.
+
+#### 5.3 Deferred: hold removals until tmux outlives them
+
+This is out of scope for this fix. Under the hold, a session that disappears would be kept (its record, scrollback and resume hooks) and removed for good only once tmux has kept running for a window after it. If tmux died inside that window, the held sessions would restore. That would cover every signal ordering, including hard kills.
+
+It becomes the follow-up if a reboot's log after the fix shows sessions dropped during shutdown (§4.3). Adding it later builds on this fix rather than reworking it.
+
+#### 5.4 Deferred: an instrumented reboot
+
+Nobody has measured how macOS ends the detached tmux tree at a real reboot. If it sends SIGTERM to everything at once, this fix covers it. If it hard-kills processes in some order, only the hold (§5.3) does.
+
+The measurement is not part of this fix. After the fix, the dropped-session logging (§4) makes the next ordinary reboot show whether anything was dropped during shutdown. A definitive answer can come whenever convenient, from a throwaway tmux and Portal setup running beside the real one. It would have its own socket and state directory, and its panes would log the signals they receive.
+
 ---
 
 ## Working Notes
