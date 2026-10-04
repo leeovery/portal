@@ -29,8 +29,8 @@ Source: the investigation, Fix Direction → Chosen Approach (line 228): "the ve
 
 **Proposed Text**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Measurement re-run: of the 11 top-level commands, `open`, `list` and `kill` sit outside the bootstrap-exempt set; the uninstall-first conclusion survives with the full command set. Corrected in the investigation (Symptoms → References workaround; Known residue, accepted), then §5.2's first-reboot bullet re-aligned.
 
 ---
 
