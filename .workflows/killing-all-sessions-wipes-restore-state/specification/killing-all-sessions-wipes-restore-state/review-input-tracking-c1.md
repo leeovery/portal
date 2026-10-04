@@ -31,8 +31,8 @@ Apply the source's rule to the draw and the waiter too: they outlast SIGTERM by 
 §6.2, new bullet after the first:
 > - A lazy pane whose waiter caught a SIGTERM, and which the user then answers on its panel, runs its hook program and the user's shell with default SIGTERM handling.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: The investigation states the answer (caught-not-ignored rule, the waiter outlasting SIGTERM like the parked shell, default handling for lazy panes' hook program and shell). Applied to §3.2 and §6.2 as staged.
 
 ---
 
