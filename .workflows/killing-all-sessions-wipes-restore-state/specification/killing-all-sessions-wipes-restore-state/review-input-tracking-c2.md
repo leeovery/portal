@@ -26,8 +26,8 @@ The daemon's own server is the tmux server process its `_portal-saver` pane runs
 §6.1, new bullet after "The confirmation is safe even when its own read returns exit 0 with no output, as long as it is sent strictly after the last capture read.":
 > - The daemon's shutdown flush after `_portal-saver` is killed on a running server, as `portal uninstall` does, still commits and reports `flush_completed=true`. A save whose capture reads or confirmation reach a different server started on the same socket writes nothing.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: Determined by the uninstall SIGHUP flush the investigation's verified safe-reboot procedure relies on, which the fix leaves unchanged. The investigation's own-server wording (Fix Direction item 1, confirmation bullet) repaired in place to the same reading, then §2.2 and §6.1 applied as staged.
 
 ---
 

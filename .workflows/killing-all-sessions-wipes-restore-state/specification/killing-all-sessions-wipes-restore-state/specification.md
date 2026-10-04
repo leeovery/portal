@@ -73,7 +73,7 @@ The confirmation also catches the shutdown answers that no error check can see: 
 
 Under `tmux kill-server`, no committer can pass the confirmation, whichever of its reads the exit lands after. Survival under `kill-server` no longer depends on which read happens to fail first (§1.2).
 
-The confirmation counts only when it is answered by the tmux server the committer belongs to, and only when that same server answered every capture read the commit is built from. For the daemon, that is the server hosting its `_portal-saver` pane. For `commit-now`, it is the server whose `session-closed` hook ran it. After that server exits, a new one can be started on the same socket before its restore has run, and it holds none of the user's sessions. Its answers confirm nothing, and a save that reaches it stands down (§2.5).
+The confirmation counts only when it is answered by the tmux server the committer belongs to, and only when that same server answered every capture read the commit is built from. For the daemon, that is the server its `_portal-saver` pane runs in. It stays the daemon's own server after that pane is destroyed, so the save that runs when `portal uninstall` kills `_portal-saver` on a running server still commits. For `commit-now`, it is the server whose `session-closed` hook ran it. After that server exits, a new one can be started on the same socket before its restore has run, and it holds none of the user's sessions. Its answers confirm nothing, and a save that reaches it stands down (§2.5).
 
 #### 2.3 A stand-down never leaves the saved state naming a missing file
 
@@ -209,6 +209,7 @@ The measurement is not part of this fix. After the fix, the dropped-session logg
 - A commit whose confirmation (§2.2) is refused writes nothing.
 - A capture whose session or pane listing came back empty from a server that then refuses connections writes nothing.
 - The confirmation is safe even when its own read returns exit 0 with no output, as long as it is sent strictly after the last capture read.
+- The daemon's shutdown flush after `_portal-saver` is killed on a running server, as `portal uninstall` does, still commits and reports `flush_completed=true`. A save whose capture reads or confirmation reach a different server started on the same socket writes nothing.
 - A stand-down injected after the capture cycle's renames leaves `sessions.json` naming only files that exist.
 - The daemon's dump does not overwrite a non-empty saved transcript with an empty capture it cannot confirm.
 - Restore with a failed session listing behaves exactly as today: it rebuilds from the saved state, and no empty commit follows it.
