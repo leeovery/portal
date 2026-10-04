@@ -21,8 +21,8 @@ Add the recorded timing caveat to the first shutdown-ordering trial: the trials 
 **Proposed Text**:
 - The daemon SIGTERMed 10–30ms before the server, repeated across many trials, preserves the full state. Before the fix, this window wiped the whole state in the sandbox. The trials run at the production default log level, with nothing wrapping `tmux`, because debug logging and a logging shim both shift the timing. In the sandbox, five 10ms trials with debug logging on all kept the full state, while five at the default level all wiped it.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: The investigation states both facts (H4, E5, E7). Applied to §6.5 as staged.
 
 ---
 
