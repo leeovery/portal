@@ -25,7 +25,10 @@
           "finding_gate_mode": "gated",
           "construction_gate_mode": "auto",
           "date": "2026-10-04",
-          "review_baseline_words": 3808
+          "review_baseline_words": 3808,
+          "tracking": {
+            "review-claims-tracking-c1": "in-progress"
+          }
         }
       }
     }
