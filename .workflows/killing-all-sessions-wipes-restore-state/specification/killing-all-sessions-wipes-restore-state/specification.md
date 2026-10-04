@@ -92,7 +92,7 @@ The daemon's scrollback dump runs in its tick and its shutdown flush; `commit-no
 
 The sandbox never saw tmux's shutdown answer (exit 0, no output) on `capture-pane`. But `capture-pane` goes through the same client path as the listings that did show it.
 
-An empty capture may replace a saved non-empty transcript only once it is confirmed by the rule in §2.2: a tmux read sent strictly after that capture has been answered. An unconfirmed empty capture is not written. The saved transcript stands, and the refused write is logged (§4).
+An empty capture may replace a saved non-empty transcript only once it is confirmed by the rule in §2.2: a tmux read sent strictly after that capture has been answered by the server the committer belongs to, the same server that answered the capture. An unconfirmed empty capture is not written. The saved transcript stands, and the refused write is logged (§4).
 
 #### 2.5 What a stand-down does
 
@@ -188,19 +188,19 @@ These shutdown losses remain after the fix and are accepted:
 - **A reboot in which macOS hard-kills pane programs before tmux.** Only the hold (§5.3) covers this.
 - **A user whose interactive shell exits on SIGTERM.** Unlike zsh and bash, fish installs a SIGTERM handler that exits. Both hardened panes (§3.1) hand over to `$SHELL`, so once a fish user's hook ends, their pane is exposed again. The user's shell is zsh.
 - **A kill whose `commit-now` stands down.** The kill's `commit-now` writes nothing when its session listing fails (§2.1) or tmux begins exiting while it runs (§2.2). The daemon's next tick commits the kill instead (§2.5). If tmux exits before any later save commits the kill, the killed session is still in the saved state, with its scrollback and resume hooks, and it comes back at the next restore.
-- **The first reboot after installing the fix.** The daemon and Portal's resume-hook panes keep running the version they were started with. The daemon moves to the new version only when Portal next bootstraps, and the resume-hook panes only when the next restore rebuilds them. `commit-now` moves at once, because each `session-closed` hook starts it afresh. A reboot taken straight after upgrading, such as one right after `brew upgrade`, keeps the exposure from before the fix. If no bootstrap has replaced the daemon, its final flush can still wipe the saved state, and Portal's resume-hook panes can still lose their sessions and scrollback. Running `portal uninstall` before that reboot, and not running `portal open` again until after it, covers it. The log of that reboot is not the evidence the hold (§5.3) and the instrumented reboot (§5.4) wait on. That evidence comes from a reboot taken after a restore on the fixed version.
+- **The first reboot after installing the fix.** The daemon and Portal's resume-hook panes keep running the version they were started with. The daemon moves to the new version only when Portal next bootstraps, and the resume-hook panes only when the next restore rebuilds them. `commit-now` moves at once, because each `session-closed` hook starts it afresh. A reboot taken straight after upgrading, such as one right after `brew upgrade`, keeps the exposure from before the fix. If no bootstrap has replaced the daemon, its final flush can still wipe the saved state. Until a restore has rebuilt them, Portal's resume-hook panes can still lose their sessions and scrollback, even after a bootstrap has replaced the daemon. Running `portal uninstall` before that reboot, and not running `portal open` again until after it, covers it. The log of that reboot is not the evidence the hold (§5.3) and the instrumented reboot (§5.4) wait on. That evidence comes from a reboot taken after a restore on the fixed version.
 
 #### 5.3 Deferred: hold removals until tmux outlives them
 
 This is out of scope for this fix. Under the hold, a session that disappears would be kept (its record, scrollback and resume hooks) and removed for good only once tmux has kept running for a window after it. If tmux died inside that window, the held sessions would restore. That would cover every signal ordering, including hard kills.
 
-It becomes the follow-up if a reboot's log after the fix shows sessions dropped during shutdown (§4.3). Adding it later builds on this fix rather than reworking it.
+It becomes the follow-up if the log of a reboot taken after a restore on the fixed version (§5.2) shows sessions dropped during shutdown (§4.3). Adding it later builds on this fix rather than reworking it.
 
 #### 5.4 Deferred: an instrumented reboot
 
 Nobody has measured how macOS ends the detached tmux tree at a real reboot. If it sends SIGTERM to everything at once, this fix covers it. If it hard-kills processes in some order, only the hold (§5.3) does.
 
-The measurement is not part of this fix. After the fix, the dropped-session logging (§4) makes the next ordinary reboot show whether anything was dropped during shutdown. A definitive answer can come whenever convenient, from a throwaway tmux and Portal setup running beside the real one. It would have its own socket and state directory, and its panes would log the signals they receive.
+The measurement is not part of this fix. After the fix, the dropped-session logging (§4) makes the next ordinary reboot taken after a restore on the fixed version (§5.2) show whether anything was dropped during shutdown. A definitive answer can come whenever convenient, from a throwaway tmux and Portal setup running beside the real one. It would have its own socket and state directory, and its panes would log the signals they receive.
 
 ### 6. Testing
 

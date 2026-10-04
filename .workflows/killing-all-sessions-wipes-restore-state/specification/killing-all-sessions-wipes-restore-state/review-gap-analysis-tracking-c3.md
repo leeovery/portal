@@ -30,8 +30,8 @@ An empty capture may replace a saved non-empty transcript only once it is confir
 **Proposed Text**:
 An empty capture may replace a saved non-empty transcript only once it is confirmed by the rule in §2.2: a tmux read sent strictly after that capture has been answered by the server the committer belongs to, the same server that answered the capture.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Determined by §2.2's own-server confirmation rule and §2.5's no-file-emptied promise. Applied to §2.4 as staged.
 
 ---
 
@@ -57,8 +57,8 @@ If no bootstrap has replaced the daemon, its final flush can still wipe the save
 **Proposed Text**:
 If no bootstrap has replaced the daemon, its final flush can still wipe the saved state. Until a restore has rebuilt them, Portal's resume-hook panes can still lose their sessions and scrollback, even after a bootstrap has replaced the daemon.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Determined by the first-reboot bullet's own statement that panes move only when a restore rebuilds them. Applied to §5.2 as staged.
 
 ---
 
@@ -91,8 +91,8 @@ Name the qualifying reboot in both deferred sections. The residue note's own sta
 
 §5.4: After the fix, the dropped-session logging (§4) makes the next ordinary reboot taken after a restore on the fixed version (§5.2) show whether anything was dropped during shutdown.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Determined by §5.2's statement of which reboot carries the evidence. Applied to §5.3 and §5.4 as staged.
 
 ---
 
