@@ -73,6 +73,8 @@ The confirmation also catches the shutdown answers that no error check can see: 
 
 Under `tmux kill-server`, no committer can pass the confirmation, whichever of its reads the exit lands after. Survival under `kill-server` no longer depends on which read happens to fail first (§1.2).
 
+The confirmation counts only when it is answered by the tmux server the committer belongs to, and only when that same server answered every capture read the commit is built from. For the daemon, that is the server hosting its `_portal-saver` pane. For `commit-now`, it is the server whose `session-closed` hook ran it. After that server exits, a new one can be started on the same socket before its restore has run, and it holds none of the user's sessions. Its answers confirm nothing, and a save that reaches it stands down (§2.5).
+
 #### 2.3 A stand-down never leaves the saved state naming a missing file
 
 The capture cycle renames a newly waiting pane's transcript from its positional path to its token-named path (`refilePendingScrollback` in `internal/state/scrollback.go`). It does this expecting the cycle to commit the record that points at the new path. If a cycle backed off after that rename, `sessions.json` would still name the vacated positional path. At shutdown no later cycle runs to repair it, so the next restore would find no transcript at the path the record names.
@@ -94,7 +96,7 @@ An empty capture may replace a saved non-empty transcript only once it is confir
 
 #### 2.5 What a stand-down does
 
-A cycle stands down on a failed session listing (§2.1) or a refused confirmation (§2.2). When it does, it writes no commit and runs no housekeeping pass, so `sessions.json` and every scrollback file stay as they were. The cycle then ends as a failed cycle, through each committer's existing failure route:
+A cycle stands down on a failed session listing (§2.1) or a refused confirmation (§2.2). When it does, it writes no commit and runs no housekeeping pass. So `sessions.json` stays as it was, no scrollback file is deleted or emptied, and the saved state names only files that exist (§2.3). The cycle then ends as a failed cycle, through each committer's existing failure route:
 
 - the daemon's tick logs its failure and re-touches `save.requested` (`rg -n 'TouchSaveRequested' cmd/state_daemon.go` → 1 hit, after `tick failed`), so its next tick retries;
 - `commit-now` logs its failure, touches `save.requested` and exits non-zero (`failCommitNow`);
@@ -153,6 +155,8 @@ A commit that drops nothing logs nothing new. That includes the daemon tick that
 
 A committer that backs off because tmux stopped answering mid-save (§2.1, §2.2) logs a line saying so, through its existing failure route (§2.5). A dump that refuses to write an empty capture over a saved transcript (§2.4) logs a line naming the pane.
 
+A save whose first read, of the restore-in-progress marker, fails has backed off too. All three committers already log that at WARN with the cause in `error` (`rg -n 'read @portal-restoring|isRestoring query failed' cmd/state_daemon.go cmd/state_commit_now.go` → 3 hits), and those lines stay. A marker that reads as set means a restore is in progress, which is not a back-off, and logs nothing new.
+
 Every line in this section is recorded at the production default level, INFO or above. Each carries its data in attribute keys Portal's closed log vocabulary already defines: the dropped session's name in `session`, the refused pane in `pane_key`, the cause in `error` (`` rg -n '^\| `(session|pane_key|error)` \|' .workflows/portal-observability-layer/specification/portal-observability-layer/specification.md `` → 3 hits). The logging therefore needs no new log component or attribute key.
 
 #### 4.3 What the lines show after a reboot
@@ -183,6 +187,7 @@ These shutdown losses remain after the fix and are accepted:
 - **A pane whose top program was started directly rather than inside a shell.** SIGTERM ends it while tmux still answers. When no pane in its session survives, the session is removed with its scrollback.
 - **A reboot in which macOS hard-kills pane programs before tmux.** Only the hold (§5.3) covers this.
 - **A user whose interactive shell exits on SIGTERM.** Unlike zsh and bash, fish installs a SIGTERM handler that exits. Both hardened panes (§3.1) hand over to `$SHELL`, so once a fish user's hook ends, their pane is exposed again. The user's shell is zsh.
+- **A kill whose `commit-now` stands down.** The kill's `commit-now` writes nothing when its session listing fails (§2.1) or tmux begins exiting while it runs (§2.2). The daemon's next tick commits the kill instead (§2.5). If tmux exits before any later save commits the kill, the killed session is still in the saved state, with its scrollback and resume hooks, and it comes back at the next restore.
 
 #### 5.3 Deferred: hold removals until tmux outlives them
 

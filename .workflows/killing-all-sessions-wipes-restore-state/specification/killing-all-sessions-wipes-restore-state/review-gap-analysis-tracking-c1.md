@@ -27,8 +27,8 @@ Append to §2.2, after "Survival under `kill-server` no longer depends on which 
 
 The confirmation counts only when it is answered by the tmux server the committer belongs to, and only when that same server answered every capture read the commit is built from. For the daemon, that is the server hosting its `_portal-saver` pane. For `commit-now`, it is the server whose `session-closed` hook ran it. After that server exits, a new one can be started on the same socket before its restore has run, and it holds none of the user's sessions. Its answers confirm nothing, and a save that reaches it stands down (§2.5).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: This session's call (what leaned: the confirmation's single-process proof and kill-server leaving everything restorable; residue alternative set aside). Landed first in the investigation (Fix Direction item 1, confirmation bullet), then applied to §2.2 as staged.
 
 ---
 
@@ -44,15 +44,15 @@ The confirmation counts only when it is answered by the tmux server the committe
 Against an exiting tmux server, a save's very first read, of the restore-in-progress marker, fails. That failure is taken to mean "a restore is in progress, do not commit", so the save backs off at that point. This is the back-off a reboot produces when tmux and the daemon receive SIGTERM together: the daemon's final flush stops at that read. So does a `commit-now` started after the exit began. The logging rule names only back-offs on a failed session listing or a refused confirmation, so a builder has no instruction to log this one. Yet the fix's scope promises that every save that backs off is logged. The reboot log the user reads after the fix would show no back-off line for that flush. It would read as though no save was in flight as tmux went down.
 
 **Proposal**:
-A save that backs off because its restore-in-progress marker read failed logs a line saying so. The line is at INFO or above, with the cause in `error`. What the save writes stays as it is today: nothing. This is settled by the scope's promise that every save that backs off is logged. A marker that reads as set means a real restore is running and stays silent. Another option that fits: also send this back-off down the failed-cycle route (`commit-now` exiting non-zero with `save.requested` touched, the flush reporting `flush_completed=false`). The spec leaves that path's handling unchanged, so this call adds the line and nothing else.
+Settled by measurement: all three committers already log this stand-down at WARN with the cause in `error`, so nothing new is built. The specification records that the lines exist and stay, so the reboot-log reading counts them as back-off lines. A marker that reads as set is a real restore, not a back-off.
 
 **Proposed Text**:
-Add to §4.2, after its first paragraph's first sentence:
+New paragraph in §4.2, after the paragraph naming the back-off and refused-write lines:
 
-A save whose first read, of the restore-in-progress marker, fails has also backed off, and logs a line saying so. A marker that reads as set means a restore is in progress, which is not a back-off, and logs nothing new.
+A save whose first read, of the restore-in-progress marker, fails has backed off too. All three committers already log that at WARN with the cause in `error` (`rg -n 'read @portal-restoring|isRestoring query failed' cmd/state_daemon.go cmd/state_commit_now.go` → 3 hits), and those lines stay. A marker that reads as set means a restore is in progress, which is not a back-off, and logs nothing new.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Record's own answer by measurement: the three committers already log a failed marker read at WARN. Applied to §4.2 as rewritten at disposal.
 
 ---
 
@@ -75,8 +75,8 @@ New bullet in §5.2:
 
 - **A kill whose `commit-now` stands down.** The kill's `commit-now` writes nothing when its session listing fails (§2.1) or tmux begins exiting while it runs (§2.2). The daemon's next tick commits the kill instead (§2.5). If tmux exits before any later save commits the kill, the killed session is still in the saved state, with its scrollback and resume hooks, and it comes back at the next restore.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Routed
+**Notes**: This session's call (what leaned: the kill path stays unchanged; alternative of commit-now removing the session by name on stand-down set aside). Landed first in the investigation (Known residue, accepted), then applied to §5.2 as staged.
 
 ---
 
@@ -104,8 +104,8 @@ A cycle stands down on a failed session listing (§2.1) or a refused confirmatio
 **Proposed Text**:
 A cycle stands down on a failed session listing (§2.1) or a refused confirmation (§2.2). When it does, it writes no commit and runs no housekeeping pass. So `sessions.json` stays as it was, no scrollback file is deleted or emptied, and the saved state names only files that exist (§2.3).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Determined by the spec's own re-file (§2.3) and dump (§2.4) rules. Applied to §2.5 as staged.
 
 ---
 
