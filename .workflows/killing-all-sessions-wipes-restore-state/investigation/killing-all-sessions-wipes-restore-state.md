@@ -270,4 +270,9 @@ The deciding unknown is how macOS ends the detached tmux tree at a real reboot �
 
 ## Notes
 
-{Any additional observations, questions for later, or context}
+Prior specifications whose contracts the fix touches:
+- `killed-session-resurrects-within-tick-window` — made `session-closed` commit synchronously on every kill path so a killed session is never resurrected; the fix preserves that contract unchanged.
+- `built-in-session-resurrection` — the housekeeping pass ("self-healing by construction") and the daemon's SIGHUP/SIGTERM final flush, which treated an atomic write as a safe write.
+- `resume-hooks-silently-lost` — the hook sweep's stand-down on an empty or failed pane read, the posture the session commit path lacks.
+- `lazy-resume-on-attach` — the waiting pane's parked chain and waiter, which the fix makes outlast SIGTERM while waiting.
+- `v1` (portal) — "no server running → zero sessions" for the picker's session discovery, which the picker, resolver, completion and restore keep.
