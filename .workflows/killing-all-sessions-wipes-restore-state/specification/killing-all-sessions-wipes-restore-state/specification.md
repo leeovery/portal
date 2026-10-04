@@ -102,6 +102,39 @@ A cycle stands down on a failed session listing (§2.1) or a refused confirmatio
 
 A transient failure on a healthy server therefore delays a save by one tick, and saves never stall. tmux's `run-shell` can surface `commit-now`'s non-zero exit to an attached client. More WARN and ERROR lines at teardown are expected and accepted.
 
+### 3. Portal's Own Panes Outlast the Shutdown Signal
+
+#### 3.1 The restored resume-hook panes survive SIGTERM
+
+Portal starts two kinds of pane as a non-interactive shell, and today SIGTERM kills both:
+
+- the eager resume pane, `sh -c '<hook>; exec <shell>'` (`hookExecArgs` in `cmd/state_resume_chain.go`);
+- the lazy waiting pane's parked chain, `sh -c 'trap : INT QUIT; <draw>; <recover>; <backstop>'` (`parkedChainTrap` / `execResumeChainAndExit` in `cmd/state_hydrate.go`). Its trap does not cover TERM.
+
+Both now survive SIGTERM, the way an interactive shell already does. Their sessions then stay up until tmux itself exits, and by then no committer can reach the server (§2.2). Lazy is the shipped default resume mode, so after a restore every unanswered pane runs as the parked chain.
+
+The handling must be a caught trap, never an ignored disposition. That is already the parked chain's rule: an ignored signal stays ignored across `exec`, so the hook program and the user's shell would inherit it. The hook program and the user's shell keep default SIGTERM handling.
+
+These two are the only non-interactive-shell panes Portal creates (`rg -n '"sh", "-c"' --type go -g '!*_test.go' cmd internal | wc -l` → 2). Session trees run `$SHELL -ic`, which is interactive (`BuildShellCommand` in `internal/session/create.go`). Every other pane process Portal starts is either not a shell (the hydrate helper, the saver's daemon) or an interactive shell (`_portal-bootstrap`, created with no command by `StartServer` in `internal/tmux/tmux.go`).
+
+#### 3.2 A waiting pane stays waiting through the shutdown signal
+
+Trapping TERM in the parked shell is not enough on its own. While a pane waits, its parked shell runs the panel's draw, which hands off to the waiter (`portal state resume-draw` → `portal state resume-wait`). Today the waiter handles only SIGWINCH (`rg -n 'signal.Notify' cmd/state_resume_wait.go` → 1 hit, `SIGWINCH`), so a reboot SIGTERM would end it. The parked shell would then run its recovery tail, and `resume-recover` would clear `@portal-resume-pending` while tmux is still answering. Three things would follow:
+
+1. A capture builds the pane a fresh record naming its positional scrollback path. That file was renamed away when the pane first went waiting.
+2. A commit with no scrollback dump writes that record. One such commit is the `commit-now` that fires when `_portal-saver` itself closes after the daemon's flush; `commit-now` passes no dump.
+3. The housekeeping pass deletes the token-named transcript.
+
+The session survives, but its scrollback is silently lost.
+
+So every process the waiting pane runs while it waits outlasts SIGTERM: the panel's draw, and the waiter it becomes. The panel stays up and the marker stays set. The pane is saved still waiting, with its transcript. After the reboot it comes back still asking, which is what lazy resume already does for an unanswered pane.
+
+When tmux finally exits and the waiter's pty closes, the recovery tail tries to clear the marker. That cannot reach a server that is refusing connections (§2.2), so the saved record keeps the pane waiting.
+
+#### 3.3 A kill still ends the pane
+
+A kill is unaffected. tmux ends a killed pane by closing its pty, which delivers SIGHUP; tmux 3.7c sends no signal to a pane's process itself. Neither the trap (§3.1) nor the waiting pane's handling (§3.2) catches SIGHUP. So a killed pane, eager or waiting, still dies at once, and the kill path (§1.1) is unchanged.
+
 ---
 
 ## Working Notes
