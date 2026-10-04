@@ -32,8 +32,8 @@ A lazy pane the user has answered runs its hook through that same eager shell, `
 
 - A lazy pane answered on its panel, with its hook program still running, keeps its session when SIGTERM reaches every process in the pane. Its parked chain and the shell running its hook both survive, and the pane goes on to the user's shell.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Record's own: the investigation hardens the eager shell shape, and an answered lazy pane runs that shape (measured: `handOffToHookOrShell` composes it from both `cmd/state_hydrate.go:251` and the waiter's answer path, `cmd/state_resume_wait.go:316`). Applied to §3.1 and §6.2 as staged.
 
 ---
 

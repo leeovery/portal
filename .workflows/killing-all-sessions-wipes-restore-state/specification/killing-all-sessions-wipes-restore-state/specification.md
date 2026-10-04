@@ -115,6 +115,8 @@ Portal starts two kinds of pane as a non-interactive shell, and today SIGTERM ki
 
 Both now survive SIGTERM, the way an interactive shell already does. Their sessions then stay up until tmux itself exits, and by then no committer can reach the server (§2.2). Lazy is the shipped default resume mode, so after a restore every unanswered pane runs as the parked chain.
 
+A lazy pane the user has answered runs its hook through that same eager shell, `sh -c '<hook>; exec <shell>'`, beneath its parked chain. That shell survives SIGTERM there too. So an answered pane whose hook program is still running keeps its session, and the pane goes on to the user's shell when the hook program ends.
+
 The handling must be a caught trap, never an ignored disposition. That is already the parked chain's rule: an ignored signal stays ignored across `exec`, so the hook program and the user's shell would inherit it. The hook program and the user's shell keep default SIGTERM handling.
 
 These two are the only non-interactive-shell panes Portal creates (`rg -n '"sh", "-c"' --type go -g '!*_test.go' cmd internal | wc -l` → 2). Session trees run `$SHELL -ic`, which is interactive (`BuildShellCommand` in `internal/session/create.go`). Every other pane process Portal starts is either not a shell (the hydrate helper, the saver's daemon) or an interactive shell (`_portal-bootstrap`, created with no command by `StartServer` in `internal/tmux/tmux.go`).
@@ -218,6 +220,7 @@ The measurement is not part of this fix. After the fix, the dropped-session logg
 #### 6.2 Panes (§3)
 
 - Restored eager and lazy resume-hook panes survive a SIGTERM to the pane's top process. The hook program and the user's shell still receive SIGTERM with default handling, so the trap is not inherited as an ignore.
+- A lazy pane answered on its panel, with its hook program still running, keeps its session when SIGTERM reaches every process in the pane. Its parked chain and the shell running its hook both survive, and the pane goes on to the user's shell.
 - A lazy pane whose waiter caught a SIGTERM, and which the user then answers on its panel, runs its hook program and the user's shell with default SIGTERM handling.
 - Lazy waiting pane, SIGTERM during the wait. The whole process tree is signalled alongside the daemon, the server later, and a `commit-now` with no dump lands in between (the `_portal-saver` close). The pane is still waiting with its marker set, and its token-named transcript is still referenced and present at the next restore. That restore brings the pane back still asking.
 - A SIGTERM landing while the panel is still being drawn leaves the pane waiting, the same as one landing on the waiter.
