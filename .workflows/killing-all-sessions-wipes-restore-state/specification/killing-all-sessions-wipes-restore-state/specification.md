@@ -194,6 +194,50 @@ Nobody has measured how macOS ends the detached tmux tree at a real reboot. If i
 
 The measurement is not part of this fix. After the fix, the dropped-session logging (§4) makes the next ordinary reboot show whether anything was dropped during shutdown. A definitive answer can come whenever convenient, from a throwaway tmux and Portal setup running beside the real one. It would have its own socket and state directory, and its panes would log the signals they receive.
 
+### 6. Testing
+
+#### 6.1 Save path (§2)
+
+- A failed `list-sessions` through the production client's listing makes the committing cycle error, with nothing written and no scrollback deleted. This holds for the daemon's tick, its shutdown flush and `commit-now`.
+- A commit whose confirmation (§2.2) is refused writes nothing.
+- A capture whose session or pane listing came back empty from a server that then refuses connections writes nothing.
+- The confirmation is safe even when its own read returns exit 0 with no output, as long as it is sent strictly after the last capture read.
+- A stand-down injected after the capture cycle's renames leaves `sessions.json` naming only files that exist.
+- The daemon's dump does not overwrite a non-empty saved transcript with an empty capture it cannot confirm.
+- Restore with a failed session listing behaves exactly as today: it rebuilds from the saved state, and no empty commit follows it.
+
+#### 6.2 Panes (§3)
+
+- Restored eager and lazy resume-hook panes survive a SIGTERM to the pane's top process. The hook program and the user's shell still receive SIGTERM with default handling, so the trap is not inherited as an ignore.
+- Lazy waiting pane, SIGTERM during the wait. The whole process tree is signalled alongside the daemon, the server later, and a `commit-now` with no dump lands in between (the `_portal-saver` close). The pane is still waiting with its marker set, and its token-named transcript is still referenced and present at the next restore. That restore brings the pane back still asking.
+- A SIGTERM landing while the panel is still being drawn leaves the pane waiting, the same as one landing on the waiter.
+- A waiting pane whose pty closes because tmux has begun exiting: the recovery tail's marker clear fails against the refusing server, and the saved record keeps the pane waiting.
+- A killed pane, waiting or eager, still dies, because the kill path's SIGHUP is not caught.
+
+#### 6.3 Logging (§4)
+
+- A commit that drops sessions logs each one by name at INFO.
+- A commit that drops none logs nothing new. That includes the daemon tick that follows a `commit-now` kill (no duplicate drop line) and a rename (no drop line).
+- A back-off on a non-answering tmux and a refused empty scrollback write each log a line.
+
+#### 6.4 Kill-path regressions (§5.1)
+
+- The empty-save contract tests listed in §5.1 stay green.
+- Killing each session in turn still removes it and its scrollback at that kill, the last kill leaving zero sessions and zero scrollback files. The next hook-staleness sweep still reaps the killed sessions' resume hooks.
+
+#### 6.5 Shutdown orderings against real tmux
+
+These run in the integration lane, on real tmux with an isolated socket:
+
+- The daemon SIGTERMed 10–30ms before the server, repeated across many trials, preserves the full state. Before the fix, this window wiped the whole state in the sandbox.
+- `tmux kill-server` on a live runtime preserves the full state.
+- Signal the pane programs and the daemon, then the server. Every session whose panes are interactive shells or Portal's hardened panes (§3.1) is preserved.
+
+#### 6.6 Existing tests to revisit
+
+- The "returns an error when ListSessionNames fails and does not call show-environment" subtest of `TestCaptureStructurePreLoopFailFatal` (`internal/state/capture_test.go`) asserts an error the production client never delivers. It gets that error through a fake that can return one. It should exercise the listing the committing path actually uses (§2.1).
+- The "returns empty slice when tmux server is not running" case of `TestListSessions` (`internal/tmux/tmux_test.go`) stays, for the picker, but must no longer describe the save path.
+
 ---
 
 ## Working Notes
