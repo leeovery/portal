@@ -135,6 +135,33 @@ When tmux finally exits and the waiter's pty closes, the recovery tail tries to 
 
 A kill is unaffected. tmux ends a killed pane by closing its pty, which delivers SIGHUP; tmux 3.7c sends no signal to a pane's process itself. Neither the trap (§3.1) nor the waiting pane's handling (§3.2) catches SIGHUP. So a killed pane, eager or waiting, still dies at once, and the kill path (§1.1) is unchanged.
 
+### 4. Dropped Sessions and Backed-Off Saves Are Logged
+
+Today a wipe is silent at the default log level. The only trace is `capture: tick complete sessions=0` or bare `process: start … state commit-now` lines. `Commit` itself logs nothing below WARN, and only for failed housekeeping (`rg -n 'logger\.(Info|Warn|Debug|Error)' internal/state/commit.go` → 2 hits, both `Warn`). This section closes that gap.
+
+#### 4.1 Every dropped session is logged by name
+
+Every commit that drops a session logs each dropped session by name at INFO.
+
+"Dropped" is measured against the prior on-disk index, which `Commit` already reads to decide whether anything changed (`structuralChange` in `internal/state/commit.go`). It is not measured against the daemon's in-memory previous index. That index does not see `commit-now`'s writes, so it would log a session the user just killed a second time.
+
+A commit that drops nothing logs nothing new. That includes the daemon tick that follows a `commit-now` kill, which logs no second drop line. A renamed session is not a drop and gets no drop line.
+
+#### 4.2 Backed-off saves and refused empty writes are logged
+
+A committer that backs off because tmux stopped answering mid-save (§2.1, §2.2) logs a line saying so, through its existing failure route (§2.5). A dump that refuses to write an empty capture over a saved transcript (§2.4) logs a line naming the pane.
+
+Every line in this section is recorded at the production default level, INFO or above. Each uses the existing log component and attribute vocabulary, with no new component or attribute key.
+
+#### 4.3 What the lines show after a reboot
+
+After the fix, these lines give a reboot's log partial evidence of how macOS ended tmux and its panes:
+
+- drop lines mean sessions closed while tmux was still answering;
+- back-off lines mean a save was in flight as tmux went down.
+
+A teardown in which everything is hard-killed (SIGKILL) runs no committer and leaves no line at all. So a log with no such lines does not, by itself, show which way macOS ended things. The instrumented reboot (§5) remains the definitive measurement.
+
 ---
 
 ## Working Notes
