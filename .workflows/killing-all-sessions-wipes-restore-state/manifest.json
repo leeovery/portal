@@ -73,7 +73,8 @@
             "killing-all-sessions-wipes-restore-state-2-5": "tick-5b39bf",
             "killing-all-sessions-wipes-restore-state-2-6": "tick-971fca",
             "killing-all-sessions-wipes-restore-state-2-7": "tick-357799",
-            "killing-all-sessions-wipes-restore-state-2-8": "tick-f1bea1"
+            "killing-all-sessions-wipes-restore-state-2-8": "tick-f1bea1",
+            "killing-all-sessions-wipes-restore-state-2-9": "tick-9431d8"
           },
           "storage_paths": [
             ".tick/"
