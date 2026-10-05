@@ -136,6 +136,8 @@ So every process the waiting pane runs while it waits outlasts SIGTERM: the pane
 
 The draw and the waiter outlast SIGTERM by catching it, never by ignoring it, under the same rule as the parked chain (§3.1). An ignored signal stays ignored across `exec`, and an answered pane goes on to run its hook program and then the user's shell, which keep default SIGTERM handling.
 
+That holds from the moment each process starts. A catch is not inherited: the parked shell's trap is reset to default in the draw it starts, the draw's catch is reset when it execs into the waiter, and the same happens at every redraw, when the waiter execs back into the draw. A SIGTERM landing before the new process has installed its catch still leaves the pane waiting, with its marker set and no recovery tail run. How that window is closed is the implementer's, within the same rule: caught, never ignored.
+
 When tmux finally exits, it closes the waiting pane's pty the same way a kill does (§3.3). The SIGHUP ends the parked shell, and the waiter with it, before the recovery tail can start (measured: `sh -c 'trap : INT QUIT TERM; sleep 3; exit 7'` run as a pty's session leader through `python3`'s `pty.fork()`, master closed after 0.5s → killed by signal 1, SIGHUP). No marker clear is attempted, so the saved record keeps the pane waiting.
 
 #### 3.3 A kill still ends the pane
@@ -153,6 +155,8 @@ Every commit that drops a session logs each dropped session by name at INFO.
 "Dropped" is measured against the prior on-disk index, which `Commit` already reads to decide whether anything changed (`structuralChange` in `internal/state/commit.go`). It is not measured against the daemon's in-memory previous index. That index does not see `commit-now`'s writes, so it would log a session the user just killed a second time.
 
 A commit that drops nothing logs nothing new. That includes the daemon tick that follows a `commit-now` kill, which logs no second drop line. A renamed session is not a drop and gets no drop line.
+
+The saved index names a session by its name alone, so telling a rename from a drop needs an identity the commit can compare. Which identity is the implementer's. At shutdown no new session appears beside a dropped one, so the drop lines a reboot's log is read for (§4.3) come out the same whichever identity is used.
 
 #### 4.2 Backed-off saves and refused empty writes are logged
 
@@ -224,7 +228,7 @@ The measurement is not part of this fix. After the fix, the dropped-session logg
 - A lazy pane answered on its panel, with its hook program still running, keeps its session when SIGTERM reaches every process in the pane. Its parked chain and the shell running its hook both survive, and the pane goes on to the user's shell.
 - A lazy pane whose waiter caught a SIGTERM, and which the user then answers on its panel, runs its hook program and the user's shell with default SIGTERM handling.
 - Lazy waiting pane, SIGTERM during the wait. The whole process tree is signalled alongside the daemon, the server later, and a `commit-now` with no dump lands in between (the `_portal-saver` close). The pane is still waiting with its marker set, and its token-named transcript is still referenced and present at the next restore. That restore brings the pane back still asking.
-- A SIGTERM landing while the panel is still being drawn leaves the pane waiting, the same as one landing on the waiter.
+- A SIGTERM landing while the panel is still being drawn leaves the pane waiting, the same as one landing on the waiter. So does one landing as the draw or the waiter starts, before it has installed its catch, at restore or at a redraw.
 - A waiting pane whose pty closes because tmux has begun exiting: the parked chain ends on SIGHUP before its recovery tail starts, no marker clear is attempted, and the saved record keeps the pane waiting.
 - A killed pane, waiting or eager, still dies, because the kill path's SIGHUP is not caught.
 
@@ -267,3 +271,7 @@ These run in the integration lane, on real tmux with an isolated socket:
 ## Corrigenda
 
 > **Corrigendum 2026-10-05** (from `planning/killing-all-sessions-wipes-restore-state`): §2.3 left open cycles that end uncommitted after the transcript rename for a reason other than a stand-down — "Either of two orderings is acceptable … Whichever is used, no stand-down may leave `sessions.json` naming a scrollback file that is not on disk." — corrected: the guarantee covers every cycle that ends without committing after the rename (a stand-down, the daemon tick cancelled mid-dump by the shutdown signal, a failed `sessions.json` write), confirming before any move is not enough on its own, and §6.1 tests the cancelled-tick and failed-write cases — settled by: §2.3's own stated purpose (at shutdown no later cycle repairs the record, so the next restore must find the transcript at the path it names) read against the tree — `errCycleCancelled` (`cmd/state_daemon.go`) returns after `captureAndRefile`'s renames and before `Commit`, `Commit` returns before housekeeping when `sessions.json`'s atomic write fails, and the shutdown flush that today repairs the record through the re-file's adoption of the token-named file is itself a cycle that can now stand down.
+
+> **Corrigendum 2026-10-05** (from `planning/killing-all-sessions-wipes-restore-state`): §3.2 required the draw and the waiter to outlast SIGTERM but left open the moment each starts, before it has installed its catch (the parked shell's trap and each process's catch reset to default across fork and exec, including every redraw) — corrected: a SIGTERM landing in that window still leaves the pane waiting, with its marker set and no recovery tail run, closed by the implementer within the caught-never-ignored rule, and §6.2 tests it — settled by: the specification review's recorded observation (`review-gap-analysis-tracking-c1.md`, Observations) that closing this window is the builder's, read with §5.2, which does not list it as accepted residue.
+
+> **Corrigendum 2026-10-05** (from `planning/killing-all-sessions-wipes-restore-state`): §4.1 said "A renamed session is not a drop and gets no drop line" with no identity the commit could compare, since the saved index names a session by its name alone — corrected: which identity tells a rename from a drop is the implementer's, and at shutdown, where no new session appears beside a dropped one, the drop lines come out the same under any identity — settled by: the specification review's recorded observation (`review-gap-analysis-tracking-c1.md`, Observations) that any session identity the builder matches on serves, because drops at shutdown never coincide with new sessions.
