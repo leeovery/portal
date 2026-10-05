@@ -52,7 +52,7 @@
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
-          "review_cycle": 0,
+          "review_cycle": 1,
           "phase": 3,
           "task": null,
           "task_map": {
@@ -87,7 +87,8 @@
             }
           },
           "staging": {},
-          "external_id": "tick-6dd578"
+          "external_id": "tick-6dd578",
+          "review_baseline_words": 12466
         }
       }
     }
