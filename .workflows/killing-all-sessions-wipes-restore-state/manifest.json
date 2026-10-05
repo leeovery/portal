@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "killing-all-sessions-wipes-restore-state": {
-          "status": "in-progress",
+          "status": "completed",
           "sources": {
             "killing-all-sessions-wipes-restore-state": {
               "status": "incorporated"
@@ -24,7 +24,7 @@
           "review_cycle": 5,
           "finding_gate_mode": "auto",
           "construction_gate_mode": "auto",
-          "date": "2026-10-04",
+          "date": "2026-10-05",
           "review_baseline_words": 3808,
           "tracking": {
             "review-claims-tracking-c1": "complete",
