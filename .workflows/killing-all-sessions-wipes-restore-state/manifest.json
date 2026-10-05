@@ -54,7 +54,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "killing-all-sessions-wipes-restore-state-2-2",
+          "task": "killing-all-sessions-wipes-restore-state-2-3",
           "task_map": {
             "killing-all-sessions-wipes-restore-state-1-1": "tick-eb3a09",
             "killing-all-sessions-wipes-restore-state-1": "tick-0f9993",
@@ -66,7 +66,8 @@
             "killing-all-sessions-wipes-restore-state-1-7": "tick-aff4a9",
             "killing-all-sessions-wipes-restore-state-1-8": "tick-3089e7",
             "killing-all-sessions-wipes-restore-state-2-1": "tick-23370c",
-            "killing-all-sessions-wipes-restore-state-2": "tick-2c250e"
+            "killing-all-sessions-wipes-restore-state-2": "tick-2c250e",
+            "killing-all-sessions-wipes-restore-state-2-2": "tick-c4300a"
           },
           "storage_paths": [
             ".tick/"
