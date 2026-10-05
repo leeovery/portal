@@ -231,7 +231,7 @@ func runPortalSubprocess(t *testing.T, binary string, f symptomFixture, args ...
 
 	cmd := exec.Command(binary, args...)
 	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("TMUX=%s,1,0", f.sock.SocketPath()),
+		fmt.Sprintf("TMUX=%s,%d,0", f.sock.SocketPath(), liveServerPID(t, f.sock)),
 		"PORTAL_STATE_DIR="+f.stateDir,
 		"PATH="+f.binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)

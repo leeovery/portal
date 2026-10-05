@@ -31,7 +31,11 @@ func CommitLock(dir string) string { return filepath.Join(dir, commitLockName) }
 // then the commit and its housekeeping pass.
 type CommitCycle struct {
 	Client CaptureCycleClient
-	Dir    string
+	// OwnServer is the pid of the tmux server the committer belongs to. The
+	// cycle commits only on a confirmation that server answered; zero stands
+	// every cycle down.
+	OwnServer int
+	Dir       string
 	// LoadPrev supplies the previous index, and is called only once the commit
 	// lock is held.
 	LoadPrev func() *Index
@@ -56,7 +60,7 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	}
 	defer func() { _ = lock.Close() }()
 
-	capture, err := captureAndRefile(cycle.Client, cycle.Dir, cycle.LoadPrev(), cycle.HashMap, cycle.Logger)
+	capture, err := captureAndRefile(cycle.Client, cycle.OwnServer, cycle.Dir, cycle.LoadPrev(), cycle.HashMap, cycle.Logger)
 	if err != nil {
 		return capture, fmt.Errorf("capture: %w", err)
 	}

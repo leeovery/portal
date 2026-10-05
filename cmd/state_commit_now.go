@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -112,8 +113,9 @@ var stateCommitNowCmd = &cobra.Command{
 		// The previous index is read under the commit lock, so it is the
 		// sessions.json the last committer to hold the lock left behind.
 		_, err = deps.RunCommitCycle(state.CommitCycle{
-			Client: deps.NewClient(),
-			Dir:    dir,
+			Client:    deps.NewClient(),
+			OwnServer: ownTmuxServer(),
+			Dir:       dir,
 			LoadPrev: func() *state.Index {
 				prev := loadPrevIndex(dir, deps.ReadIndex, logger)
 				return &prev
@@ -126,6 +128,14 @@ var stateCommitNowCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// ownTmuxServer is the pid of the tmux server this process runs under: the one
+// whose pane runs the daemon, or whose session-closed hook ran commit-now. Zero
+// outside tmux, which no confirmation can answer.
+func ownTmuxServer() int {
+	pid, _ := tmux.ServerPIDFromEnv(os.Getenv("TMUX"))
+	return pid
 }
 
 // A touch failure is logged and swallowed; the exit-0 status dominates.

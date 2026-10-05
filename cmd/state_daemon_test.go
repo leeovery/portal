@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -272,8 +273,12 @@ func TestStateDaemon_ShutdownFlushRunsWhenRestoringUnset(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	initTestLogToStateDir(t, dir, "test")
 	withDaemonLockFileReset(t)
+	withOwnTmuxServer(t, fakeOwnServerPID)
 
-	fc := commandertest.New(t, commandertest.Fails(tmux.ErrOptionNotFound, "show-option")).AllowingUnmatched("", nil)
+	fc := commandertest.New(t,
+		commandertest.Fails(tmux.ErrOptionNotFound, "show-option"),
+		commandertest.Returns(strconv.Itoa(fakeOwnServerPID), "display-message"),
+	).AllowingUnmatched("", nil)
 	client := tmux.NewClient(fc)
 
 	withFuncSeam(t, &daemonRunFunc, func(_ context.Context, deps *daemonDeps) error {

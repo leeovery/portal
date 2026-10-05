@@ -157,6 +157,7 @@ func TestDaemonTick_ACarryOntoALiveSessionsNameFailsTheTick(t *testing.T) {
 func TestStateCommitNow_CarriesARenamedWaitingSession(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withOwnTmuxServer(t, fakeOwnServerPID)
 	prev := seedCarryState(t, dir)
 	withCommitNowDeps(t, CommitNowDeps{
 		NewClient: func() state.CaptureCycleClient {

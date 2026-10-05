@@ -23,6 +23,17 @@ import (
 
 const daemonAlivePollInterval = 50 * time.Millisecond
 
+// liveServerPID is the pid of the socket's live server: the one tmux names in
+// the TMUX a pane process or a hook's run-shell job inherits.
+func liveServerPID(t *testing.T, sock *tmuxtest.Socket) int {
+	t.Helper()
+	pid, err := strconv.Atoi(strings.TrimSpace(sock.Run(t, "display-message", "-p", "#{pid}")))
+	if err != nil {
+		t.Fatalf("read server pid: %v", err)
+	}
+	return pid
+}
+
 // The daemon becomes alive through observable steps (daemon.pid appearing, then
 // naming a process that answers), so Stall bounds how long the reading may sit
 // unchanged rather than how long the whole start-up takes: a loaded host makes
@@ -116,7 +127,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 
 	daemon := exec.Command(binary, "state", "daemon")
 	daemon.Env = append(os.Environ(),
-		fmt.Sprintf("TMUX=%s,1,0", sock.SocketPath()),
+		fmt.Sprintf("TMUX=%s,%d,0", sock.SocketPath(), liveServerPID(t, sock)),
 		"PORTAL_STATE_DIR="+stateDir,
 		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"PORTAL_LOG_LEVEL=DEBUG",

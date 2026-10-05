@@ -78,8 +78,10 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 	orphanEnv = append(orphanEnv, "PORTAL_STATE_DIR="+stateDir)
 	// Pin the orphan to the TEST server — last-wins over the poisoned TMUX in
 	// envSlice. Without it the orphan attaches to the developer's real server
-	// and captures their live sessions.
-	orphanEnv = append(orphanEnv, "TMUX="+sock.SocketPath()+",0,0")
+	// and captures their live sessions. The pid names that server as the
+	// daemon's own, without which it commits nothing.
+	serverPID := strings.TrimSpace(sock.Run(t, "display-message", "-p", "#{pid}"))
+	orphanEnv = append(orphanEnv, fmt.Sprintf("TMUX=%s,%s,0", sock.SocketPath(), serverPID))
 	scrollbackDir := state.ScrollbackDir(stateDir)
 
 	// The orphan self-ejects after 3 divergent-view ticks (~3s), which under

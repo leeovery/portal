@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
@@ -46,6 +47,7 @@ var committers = []committer{
 		}
 	}},
 	{"commit-now", func(t *testing.T, _ savedStateFixture, fc *daemonFakeCommander) {
+		withOwnTmuxServer(t, fakeOwnServerPID)
 		client := tmux.NewClient(fc)
 		withCommitNowDeps(t, CommitNowDeps{
 			NewClient:   func() state.CaptureCycleClient { return client },
@@ -73,7 +75,9 @@ func TestCommittersStandDownOnARefusedConfirmation(t *testing.T) {
 
 func TestCommitNowFailsOnARefusedConfirmation(t *testing.T) {
 	seedSavedState(t)
-	client := tmux.NewClient(workOnlyCommander(refusedConfirmation()))
+	withOwnTmuxServer(t, fakeOwnServerPID)
+	fc := workOnlyCommander(refusedConfirmation())
+	client := tmux.NewClient(fc)
 	withCommitNowDeps(t, CommitNowDeps{
 		NewClient:   func() state.CaptureCycleClient { return client },
 		IsRestoring: func() (bool, error) { return state.IsRestoringSet(client) },
@@ -83,6 +87,12 @@ func TestCommitNowFailsOnARefusedConfirmation(t *testing.T) {
 
 	if !errors.Is(err, errCommitNowFailed) {
 		t.Errorf("commit-now error = %v, want one wrapping errCommitNowFailed", err)
+	}
+	if len(fc.callsContaining("display-message")) == 0 {
+		t.Fatal("no confirmation read sent")
+	}
+	if err == nil || !strings.Contains(err.Error(), "confirm tmux answering") {
+		t.Errorf("commit-now error = %v, want the refused confirmation to have ended it", err)
 	}
 }
 

@@ -256,11 +256,37 @@ type CaptureCycleClient interface {
 }
 
 // AnsweringConfirmer confirms tmux is still answering. ConfirmAnswering must
-// return nil only for a read tmux answered with exit status 0: an exiting tmux
-// can answer a read already in flight with exit status 0 and no output, and only
-// a refused read sent after it tells that answer apart from an empty server.
+// return a nil error only for a read tmux answered with exit status 0, with the
+// pid of the server that answered it, or 0 for an answer naming none: an exiting
+// tmux can answer a read already in flight with exit status 0 and no output, and
+// only a refused read sent after it tells that answer apart from an empty
+// server.
 type AnsweringConfirmer interface {
-	ConfirmAnswering() error
+	ConfirmAnswering() (int, error)
+}
+
+// ErrNotOwnServer is a confirmation that does not prove the committer's own
+// tmux server answered it: one answered by another server or naming none. A
+// committer that does not know its own server sends none and is refused with it.
+var ErrNotOwnServer = errors.New("confirmation not answered by the committer's own tmux server")
+
+// confirmOwnServer refuses the cycle unless ownServer answers the
+// confirmation. A tmux server that has begun exiting refuses every new
+// connection and never stops exiting, and only a server that has exited lets
+// another start on its socket, so an answer from ownServer proves every read
+// before it reached ownServer too.
+func confirmOwnServer(c AnsweringConfirmer, ownServer int) error {
+	if ownServer <= 0 {
+		return fmt.Errorf("%w: own server unknown", ErrNotOwnServer)
+	}
+	answered, err := c.ConfirmAnswering()
+	if err != nil {
+		return err
+	}
+	if answered != ownServer {
+		return fmt.Errorf("%w: answered by server pid %d, own server pid %d", ErrNotOwnServer, answered, ownServer)
+	}
+	return nil
 }
 
 // CaptureCycle is what one capture cycle hands its caller: the index to commit
@@ -302,8 +328,9 @@ func (c CaptureCycle) SkipsScrollback(paneKey string) bool {
 // any capture is taken. A failed capture returns before anything is re-filed,
 // with the empty index, the empty pending set and the error the capture gave. A
 // refused confirmation, sent after the last capture read, returns its error and
-// an empty cycle before anything is linked or re-filed.
-func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
+// an empty cycle before anything is linked or re-filed; so does one not
+// answered by ownServer, the pid of the committer's own tmux server.
+func captureAndRefile(c CaptureCycleClient, ownServer int, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
 	skeleton, err := ListSkeletonMarkers(c)
 	if err != nil {
 		return CaptureCycle{}, fmt.Errorf("list skeleton markers: %w", err)
@@ -313,7 +340,7 @@ func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap,
 	if err != nil {
 		return capture, err
 	}
-	if err := c.ConfirmAnswering(); err != nil {
+	if err := confirmOwnServer(c, ownServer); err != nil {
 		return CaptureCycle{}, err
 	}
 	linkMovedSkeletonScrollback(dir, &capture.Index, skeleton, logger)

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,16 +19,21 @@ const confirmRead = "display-message"
 
 var captureReads = []string{"show-options", "list-sessions", "list-panes", "show-environment"}
 
+const ownServerPID = 4242
+
 // exitingServer models a tmux server that begins exiting after one chosen
-// read: that read is answered, and every connection after it is refused. A read
+// read: that read is answered, and every connection after it is refused, or
+// answered by successor once one has been started on the same socket. A read
 // named in shutdownAnswers is answered with exit status 0 and no output, the
 // answer tmux gives an in-flight read once it has begun exiting.
 type exitingServer struct {
+	pid      int
 	sessions string
 	panes    string
 
 	exitsAfter      func(args []string) bool
 	shutdownAnswers map[string]bool
+	successor       *exitingServer
 
 	exited bool
 	calls  [][]string
@@ -36,6 +42,9 @@ type exitingServer struct {
 func (s *exitingServer) answer(args ...string) (string, error) {
 	s.calls = append(s.calls, append([]string(nil), args...))
 	if s.exited {
+		if s.successor != nil {
+			return s.successor.answer(args...)
+		}
 		return "", &tmux.CommandError{Args: args, Stderr: "no server running", Err: errors.New("exit status 1")}
 	}
 	if s.exitsAfter != nil && s.exitsAfter(args) {
@@ -49,6 +58,8 @@ func (s *exitingServer) answer(args ...string) (string, error) {
 		return s.sessions, nil
 	case "list-panes":
 		return s.panes, nil
+	case confirmRead:
+		return strconv.Itoa(s.pid), nil
 	}
 	return "", nil
 }
@@ -123,12 +134,14 @@ func (p savedPair) assertUnchanged(t *testing.T) {
 	}
 }
 
+// runCycle runs one cycle whose own server is the one at ownServerPID.
 func (p savedPair) runCycle(server *exitingServer) error {
 	_, err := state.RunCommitCycle(state.CommitCycle{
-		Client:   server.client(),
-		Dir:      p.dir,
-		LoadPrev: func() *state.Index { return &p.index },
-		HashMap:  state.HashMap{},
+		Client:    server.client(),
+		OwnServer: ownServerPID,
+		Dir:       p.dir,
+		LoadPrev:  func() *state.Index { return &p.index },
+		HashMap:   state.HashMap{},
 	})
 	return err
 }
@@ -144,7 +157,17 @@ func panesFor(names ...string) string {
 // onlyWorkLive is a capture in which "notes" has gone: committing it drops
 // that session and deletes its transcript.
 func onlyWorkLive() *exitingServer {
-	return &exitingServer{sessions: listSessionsFor("work"), panes: panesFor("work")}
+	return &exitingServer{pid: ownServerPID, sessions: listSessionsFor("work"), panes: panesFor("work")}
+}
+
+// newServerOnTheSameSocket is a server started after the committer's own one
+// exited and before its restore ran: it holds none of the user's sessions.
+func newServerOnTheSameSocket() *exitingServer {
+	return &exitingServer{
+		pid:      ownServerPID + 1,
+		sessions: listSessionsFor(tmux.PortalBootstrapName),
+		panes:    panesFor(tmux.PortalBootstrapName),
+	}
 }
 
 func assertConfirmedAfterCaptureReads(t *testing.T, calls []string) {
@@ -182,6 +205,7 @@ func TestRunCommitCycleWritesNothingFromAShutdownAnswer(t *testing.T) {
 		{
 			name: "an empty session listing",
 			server: &exitingServer{
+				pid:             ownServerPID,
 				exitsAfter:      exitsAfterRead("list-sessions"),
 				shutdownAnswers: map[string]bool{"list-sessions": true},
 			},
@@ -189,6 +213,7 @@ func TestRunCommitCycleWritesNothingFromAShutdownAnswer(t *testing.T) {
 		{
 			name: "an empty pane listing beside environment reads that still succeed",
 			server: &exitingServer{
+				pid:             ownServerPID,
 				sessions:        listSessionsFor("notes", "work"),
 				exitsAfter:      exitsAfterRead("show-environment", "-t", "=work:"),
 				shutdownAnswers: map[string]bool{"list-panes": true},
@@ -223,6 +248,7 @@ func TestRunCommitCycleWritesNothingWhenTheServerExitsAfterAnyCaptureRead(t *tes
 		t.Run(tt.name, func(t *testing.T) {
 			saved := seedSavedPair(t)
 			server := &exitingServer{
+				pid:        ownServerPID,
 				sessions:   listSessionsFor("notes", "work"),
 				panes:      panesFor("work"),
 				exitsAfter: tt.exitsAfter,
@@ -237,47 +263,120 @@ func TestRunCommitCycleWritesNothingWhenTheServerExitsAfterAnyCaptureRead(t *tes
 	}
 }
 
-func TestRunCommitCycleCommitsOnAnAnsweredConfirmation(t *testing.T) {
-	t.Run("a confirmation answered with exit status 0 and no output", func(t *testing.T) {
-		saved := seedSavedPair(t)
-		server := onlyWorkLive()
-		server.exitsAfter = exitsAfterConfirmation
-		server.shutdownAnswers = map[string]bool{confirmRead: true}
+func TestRunCommitCycleCommitsOnAConfirmationFromItsOwnServer(t *testing.T) {
+	saved := seedSavedPair(t)
+	server := &exitingServer{
+		pid:      ownServerPID,
+		sessions: listSessionsFor(tmux.PortalSaverName, tmux.PortalBootstrapName),
+		panes:    panesFor(tmux.PortalSaverName, tmux.PortalBootstrapName),
+	}
 
-		if err := saved.runCycle(server); err != nil {
-			t.Fatalf("cycle: %v", err)
-		}
+	if err := saved.runCycle(server); err != nil {
+		t.Fatalf("cycle: %v", err)
+	}
 
-		names := sessionNames(onDiskIndex(t, saved.dir))
-		if !slices.Equal(names, []string{"work"}) {
-			t.Errorf("committed sessions = %v, want [work]", names)
-		}
-		want := map[string]string{state.SanitizePaneKey("work", 0, 0) + ".bin": "work-transcript"}
-		if got := scrollbackContents(t, saved.dir); !maps.Equal(got, want) {
-			t.Errorf("scrollback = %v, want %v", got, want)
-		}
-		assertConfirmedAfterCaptureReads(t, server.callNames())
+	if names := sessionNames(onDiskIndex(t, saved.dir)); len(names) != 0 {
+		t.Errorf("committed sessions = %v, want none", names)
+	}
+	if got := scrollbackContents(t, saved.dir); len(got) != 0 {
+		t.Errorf("scrollback = %v, want every transcript removed", got)
+	}
+	assertConfirmedAfterCaptureReads(t, server.callNames())
+}
+
+func TestRunCommitCycleCommitsWhenItsOwnServerDropsASession(t *testing.T) {
+	saved := seedSavedPair(t)
+	server := onlyWorkLive()
+
+	if err := saved.runCycle(server); err != nil {
+		t.Fatalf("cycle: %v", err)
+	}
+
+	names := sessionNames(onDiskIndex(t, saved.dir))
+	if !slices.Equal(names, []string{"work"}) {
+		t.Errorf("committed sessions = %v, want [work]", names)
+	}
+	want := map[string]string{state.SanitizePaneKey("work", 0, 0) + ".bin": "work-transcript"}
+	if got := scrollbackContents(t, saved.dir); !maps.Equal(got, want) {
+		t.Errorf("scrollback = %v, want %v", got, want)
+	}
+}
+
+func TestRunCommitCycleStandsDownOnAConfirmationNamingNoServer(t *testing.T) {
+	saved := seedSavedPair(t)
+	server := onlyWorkLive()
+	server.exitsAfter = exitsAfterConfirmation
+	server.shutdownAnswers = map[string]bool{confirmRead: true}
+
+	err := saved.runCycle(server)
+
+	if !errors.Is(err, state.ErrNotOwnServer) {
+		t.Fatalf("error = %v, want one wrapping ErrNotOwnServer", err)
+	}
+	saved.assertUnchanged(t)
+}
+
+func TestRunCommitCycleStandsDownWithNoOwnServer(t *testing.T) {
+	saved := seedSavedPair(t)
+
+	_, err := state.RunCommitCycle(state.CommitCycle{
+		Client:   onlyWorkLive().client(),
+		Dir:      saved.dir,
+		LoadPrev: func() *state.Index { return &saved.index },
+		HashMap:  state.HashMap{},
 	})
 
-	t.Run("a listing naming only Portal's own sessions", func(t *testing.T) {
+	if !errors.Is(err, state.ErrNotOwnServer) {
+		t.Fatalf("error = %v, want one wrapping ErrNotOwnServer", err)
+	}
+	saved.assertUnchanged(t)
+}
+
+func TestRunCommitCycleStandsDownOnANewServerOnTheSameSocket(t *testing.T) {
+	t.Run("every capture read and the confirmation answered by the new server", func(t *testing.T) {
 		saved := seedSavedPair(t)
-		server := &exitingServer{
-			sessions: listSessionsFor(tmux.PortalSaverName, tmux.PortalBootstrapName),
-			panes:    panesFor(tmux.PortalSaverName, tmux.PortalBootstrapName),
-		}
+		server := newServerOnTheSameSocket()
 
-		if err := saved.runCycle(server); err != nil {
-			t.Fatalf("cycle: %v", err)
-		}
+		err := saved.runCycle(server)
 
-		if names := sessionNames(onDiskIndex(t, saved.dir)); len(names) != 0 {
-			t.Errorf("committed sessions = %v, want none", names)
+		if !errors.Is(err, state.ErrNotOwnServer) {
+			t.Fatalf("error = %v, want one wrapping ErrNotOwnServer", err)
 		}
-		if got := scrollbackContents(t, saved.dir); len(got) != 0 {
-			t.Errorf("scrollback = %v, want every transcript removed", got)
-		}
-		assertConfirmedAfterCaptureReads(t, server.callNames())
+		saved.assertUnchanged(t)
 	})
+
+	splits := []struct {
+		name       string
+		exitsAfter func([]string) bool
+	}{
+		{"the skeleton marker read", exitsAfterRead("show-options")},
+		{"the session listing", exitsAfterRead("list-sessions")},
+		{"the pane listing", exitsAfterRead("list-panes")},
+		{"the first session's environment read", exitsAfterRead("show-environment", "-t", "=notes:")},
+		{"the last capture read, leaving only the confirmation", exitsAfterRead("show-environment", "-t", "=work:")},
+	}
+	for _, tt := range splits {
+		t.Run("its own server exits after "+tt.name+" and a new server answers the rest", func(t *testing.T) {
+			saved := seedSavedPair(t)
+			server := &exitingServer{
+				pid:        ownServerPID,
+				sessions:   listSessionsFor("notes", "work"),
+				panes:      panesFor("notes", "work"),
+				exitsAfter: tt.exitsAfter,
+				successor:  newServerOnTheSameSocket(),
+			}
+
+			err := saved.runCycle(server)
+
+			if !errors.Is(err, state.ErrNotOwnServer) {
+				t.Fatalf("error = %v, want one wrapping ErrNotOwnServer", err)
+			}
+			if len(server.successor.calls) == 0 {
+				t.Fatal("the new server answered nothing; the split never happened")
+			}
+			saved.assertUnchanged(t)
+		})
+	}
 }
 
 func sessionNames(idx state.Index) []string {

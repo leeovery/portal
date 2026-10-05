@@ -83,15 +83,24 @@ func (c *Client) ServerRunning() bool {
 	return err == nil
 }
 
-// ConfirmAnswering sends one read and returns nil when tmux answers it with exit
-// status 0, whatever the output, and the failure otherwise. An exiting tmux
-// refuses every new connection, so an answer from the server that took the
-// earlier reads proves they were answered before its exit began.
-func (c *Client) ConfirmAnswering() error {
-	if _, err := c.cmd.Run("display-message", "-p", "#{pid}"); err != nil {
-		return fmt.Errorf("confirm tmux answering: %w", err)
+// ConfirmAnswering sends one read and returns the pid of the tmux server that
+// answered it with exit status 0, or the failure. An exiting tmux refuses every
+// new connection, so an answer from the server that took the earlier reads
+// proves they were answered before its exit began. An answer carrying no output
+// names no server and returns pid 0.
+func (c *Client) ConfirmAnswering() (int, error) {
+	out, err := c.cmd.Run("display-message", "-p", "#{pid}")
+	if err != nil {
+		return 0, fmt.Errorf("confirm tmux answering: %w", err)
 	}
-	return nil
+	if out == "" {
+		return 0, nil
+	}
+	pid, err := strconv.Atoi(out)
+	if err != nil {
+		return 0, fmt.Errorf("confirm tmux answering: answer %q is not a server pid", out)
+	}
+	return pid, nil
 }
 
 // HasSession is false both for an absent session and for no running server.

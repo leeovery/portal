@@ -25,7 +25,7 @@ func TestCaptureAndRefile(t *testing.T) {
 		}
 		logger, _ := openTempLogger(t)
 
-		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), dir, &prev, hm, logger)
+		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), ownServerPID, dir, &prev, hm, logger)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -54,7 +54,7 @@ func TestCaptureAndRefile(t *testing.T) {
 		client := &failFastCaptureClient{t: t, listSessionNamesErr: captureErr}
 		logger, _ := openTempLogger(t)
 
-		capture, err := state.CaptureAndRefile(client, dir, &prev, state.HashMap{}, logger)
+		capture, err := state.CaptureAndRefile(client, ownServerPID, dir, &prev, state.HashMap{}, logger)
 		if !errors.Is(err, captureErr) {
 			t.Fatalf("error = %v, want %v", err, captureErr)
 		}
@@ -81,7 +81,7 @@ func TestCaptureAndRefile(t *testing.T) {
 			t:            t,
 		}
 
-		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), t.TempDir(), nil, state.HashMap{}, nil)
+		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), ownServerPID, t.TempDir(), nil, state.HashMap{}, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -102,7 +102,7 @@ func TestCaptureAndRefile(t *testing.T) {
 			t:            t,
 		}
 
-		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), dir, &prev, state.HashMap{}, nil)
+		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), ownServerPID, dir, &prev, state.HashMap{}, nil)
 		if !errors.Is(err, markerErr) {
 			t.Fatalf("error = %v, want %v", err, markerErr)
 		}
@@ -151,7 +151,7 @@ func TestCaptureAndRefileKeepsARestoredWaitingPaneTranscript(t *testing.T) {
 				t:            t,
 			}
 
-			capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), dir, &prev, state.HashMap{}, nil)
+			capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), ownServerPID, dir, &prev, state.HashMap{}, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -192,7 +192,7 @@ func skeletonCycle(t *testing.T, dir, token, stored string, logger *slog.Logger,
 		markers:      state.SkeletonMarkerPrefix + liveKey + ` "1"`,
 		t:            t,
 	}
-	capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), dir, &prev, state.HashMap{}, logger)
+	capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), ownServerPID, dir, &prev, state.HashMap{}, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestCaptureAndRefileLinksAMovedSkeletonPaneOntoItsToken(t *testing.T) {
 			t: t,
 		}
 
-		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), dir, &prev, state.HashMap{}, nil)
+		capture, err := state.CaptureAndRefile(tmux.NewClient(mock.commander()), ownServerPID, dir, &prev, state.HashMap{}, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

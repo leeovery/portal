@@ -251,7 +251,7 @@ func TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly(t *testing.T) {
 	daemonEnv := append([]string{}, envSlice...)
 	daemonEnv = append(daemonEnv,
 		"PORTAL_STATE_DIR="+stateDir,
-		fmt.Sprintf("TMUX=%s,1,0", sock.SocketPath()),
+		fmt.Sprintf("TMUX=%s,%d,0", sock.SocketPath(), liveServerPID(t, sock)),
 		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"PORTAL_LOG_LEVEL=INFO",
 	)

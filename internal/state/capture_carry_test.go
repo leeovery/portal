@@ -89,11 +89,12 @@ var committers = []committer{
 		name: "daemon tick",
 		run: func(t *testing.T, dir string, w carryWorld, memPrev state.Index) (state.CaptureCycle, error) {
 			return state.RunCommitCycle(state.CommitCycle{
-				Client:   w.client(t),
-				Dir:      dir,
-				LoadPrev: func() *state.Index { return &memPrev },
-				HashMap:  state.HashMap{},
-				Dump:     func(state.CaptureCycle) (bool, error) { return false, nil },
+				OwnServer: ownServerPID,
+				Client:    w.client(t),
+				Dir:       dir,
+				LoadPrev:  func() *state.Index { return &memPrev },
+				HashMap:   state.HashMap{},
+				Dump:      func(state.CaptureCycle) (bool, error) { return false, nil },
 			})
 		},
 	},
@@ -101,8 +102,9 @@ var committers = []committer{
 		name: "commit-now",
 		run: func(t *testing.T, dir string, w carryWorld, _ state.Index) (state.CaptureCycle, error) {
 			return state.RunCommitCycle(state.CommitCycle{
-				Client: w.client(t),
-				Dir:    dir,
+				OwnServer: ownServerPID,
+				Client:    w.client(t),
+				Dir:       dir,
 				LoadPrev: func() *state.Index {
 					idx, _, err := state.ReadIndex(dir)
 					if err != nil {

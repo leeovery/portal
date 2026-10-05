@@ -38,7 +38,7 @@ func (f *fakeCaptureClient) ShowAllServerOptions() (string, error) {
 	return f.markers, f.markersErr
 }
 
-func (f *fakeCaptureClient) ConfirmAnswering() error { return nil }
+func (f *fakeCaptureClient) ConfirmAnswering() (int, error) { return fakeOwnServerPID, nil }
 
 func (f *fakeCaptureClient) ListAllPanesWithFormat(_ string) (string, error) {
 	return f.rows, f.rowsErr
@@ -343,6 +343,7 @@ func TestStateCommitNow_PassesPrevIndexFromDiskToCaptureAndRefile(t *testing.T) 
 func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withOwnTmuxServer(t, fakeOwnServerPID)
 
 	// The real CaptureAndRefile runs here, against a fake client that lists
 	// both sessions; the pane rows omit the underscore session because the
@@ -1205,6 +1206,7 @@ func TestStateCommitNow_RefilesResumePendingScrollback(t *testing.T) {
 	t.Run("it commits the token path from commit-now and reclaims no token-named file", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("PORTAL_STATE_DIR", dir)
+		withOwnTmuxServer(t, fakeOwnServerPID)
 		if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
 		}
@@ -1265,6 +1267,7 @@ func TestStateCommitNow_RefilesResumePendingScrollback(t *testing.T) {
 func TestStateCommitNow_AdoptsAnExistingTokenNamedFileForADisplacedWaitingPane(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withOwnTmuxServer(t, fakeOwnServerPID)
 	stageDisplacedOnDisk(t, dir)
 
 	withCommitNowDeps(t, CommitNowDeps{
@@ -1289,6 +1292,7 @@ func TestStateCommitNow_AdoptsAnExistingTokenNamedFileForADisplacedWaitingPane(t
 func TestStateCommitNow_KeepsASkeletonMarkedWaitingPaneTranscript(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withOwnTmuxServer(t, fakeOwnServerPID)
 	if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -1409,6 +1413,7 @@ func waitingPaneIndex() state.Index {
 func TestStateCommitNow_FilesAMovedSkeletonPaneUnderItsToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withOwnTmuxServer(t, fakeOwnServerPID)
 	if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}

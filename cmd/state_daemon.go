@@ -27,6 +27,9 @@ type daemonDeps struct {
 	Version string
 	Logger  *slog.Logger
 	Client  *tmux.Client
+	// OwnServer is the pid of the tmux server the daemon's _portal-saver pane
+	// runs in, and stays its own server after that pane is destroyed.
+	OwnServer int
 
 	HookStore   *hooks.Store
 	lastCleanup time.Time
@@ -255,12 +258,13 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 	dump := &scrollbackDump{ctx: ctx, deps: deps}
 
 	capture, err := state.RunCommitCycle(state.CommitCycle{
-		Client:   deps.Client,
-		Dir:      deps.Dir,
-		LoadPrev: func() *state.Index { return deps.PrevIndex },
-		HashMap:  deps.HashMap,
-		Dump:     dump.run,
-		Logger:   deps.Logger,
+		Client:    deps.Client,
+		OwnServer: deps.OwnServer,
+		Dir:       deps.Dir,
+		LoadPrev:  func() *state.Index { return deps.PrevIndex },
+		HashMap:   deps.HashMap,
+		Dump:      dump.run,
+		Logger:    deps.Logger,
 	})
 	if errors.Is(err, errCycleCancelled) {
 		return nil
@@ -430,10 +434,11 @@ var stateDaemonCmd = &cobra.Command{
 		client := tmux.DefaultClient()
 		startedAt := time.Now()
 		deps := &daemonDeps{
-			Dir:     dir,
-			Version: version,
-			Logger:  logger,
-			Client:  client,
+			Dir:       dir,
+			Version:   version,
+			Logger:    logger,
+			Client:    client,
+			OwnServer: ownTmuxServer(),
 			// Anchored to daemon start so each prune first fires one interval
 			// in, not on the first idle tick.
 			HookStore:          hookStore,

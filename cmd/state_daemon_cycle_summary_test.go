@@ -34,6 +34,7 @@ func makeCaptureDeps(t *testing.T, dir string, fc *daemonFakeCommander) *daemonD
 		Dir:          dir,
 		Logger:       daemonLogger,
 		Client:       tmux.NewClient(fc),
+		OwnServer:    fakeOwnServerPID,
 		HashMap:      state.HashMap{},
 		TickerPeriod: 1 * time.Millisecond,
 		MaxGap:       30 * time.Second,

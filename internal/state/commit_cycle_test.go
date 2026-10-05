@@ -83,9 +83,9 @@ func (c *worldClient) ShowAllServerOptions() (string, error) {
 	return state.SkeletonMarkerPrefix + handOverKey + ` "1"`, nil
 }
 
-func (c *worldClient) ConfirmAnswering() error {
+func (c *worldClient) ConfirmAnswering() (int, error) {
 	c.calls.Add(1)
-	return nil
+	return ownServerPID, nil
 }
 
 func (c *worldClient) ListSessionNamesProbe() ([]string, error) {
@@ -213,8 +213,9 @@ func awaitSignal(t *testing.T, ch <-chan struct{}, what string) {
 // read from disk, and no dump. prevs records each index it read.
 func commitNowCycle(t *testing.T, client *worldClient, dir string, prevs *[]state.Index) state.CommitCycle {
 	return state.CommitCycle{
-		Client: client,
-		Dir:    dir,
+		OwnServer: ownServerPID,
+		Client:    client,
+		Dir:       dir,
 		LoadPrev: func() *state.Index {
 			idx, _, err := state.ReadIndex(dir)
 			if err != nil {
@@ -230,10 +231,11 @@ func commitNowCycle(t *testing.T, client *worldClient, dir string, prevs *[]stat
 // be released.
 func heldTick(client *worldClient, dir string, prev state.Index, started, release chan struct{}) state.CommitCycle {
 	return state.CommitCycle{
-		Client:   client,
-		Dir:      dir,
-		LoadPrev: func() *state.Index { return &prev },
-		HashMap:  state.HashMap{},
+		OwnServer: ownServerPID,
+		Client:    client,
+		Dir:       dir,
+		LoadPrev:  func() *state.Index { return &prev },
+		HashMap:   state.HashMap{},
 		Dump: func(state.CaptureCycle) (bool, error) {
 			close(started)
 			<-release
@@ -274,11 +276,12 @@ func TestRunCommitCycleSerialisesOverlappingCommitters(t *testing.T) {
 
 		t.Run("the daemon's next tick, holding the older in-memory index, keeps the file on disk and named for X", func(t *testing.T) {
 			nextTick := state.CommitCycle{
-				Client:   &worldClient{world: world},
-				Dir:      dir,
-				LoadPrev: func() *state.Index { return &tickCapture.Index },
-				HashMap:  state.HashMap{},
-				Dump:     func(state.CaptureCycle) (bool, error) { return false, nil },
+				OwnServer: ownServerPID,
+				Client:    &worldClient{world: world},
+				Dir:       dir,
+				LoadPrev:  func() *state.Index { return &tickCapture.Index },
+				HashMap:   state.HashMap{},
+				Dump:      func(state.CaptureCycle) (bool, error) { return false, nil },
 			}
 			capture, err := state.RunCommitCycle(nextTick)
 			if err != nil {
@@ -417,11 +420,12 @@ func TestRunCommitCycleLockBound(t *testing.T) {
 		client := &worldClient{world: world}
 		loads, dumps := 0, 0
 		_, err = state.RunCommitCycle(state.CommitCycle{
-			Client:   client,
-			Dir:      dir,
-			LoadPrev: func() *state.Index { loads++; return &seed },
-			HashMap:  state.HashMap{},
-			Dump:     func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
+			OwnServer: ownServerPID,
+			Client:    client,
+			Dir:       dir,
+			LoadPrev:  func() *state.Index { loads++; return &seed },
+			HashMap:   state.HashMap{},
+			Dump:      func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
 		})
 
 		if !errors.Is(err, state.ErrCommitLockHeld) {
@@ -458,9 +462,10 @@ func TestRunCommitCycleLockBound(t *testing.T) {
 		time.AfterFunc(50*time.Millisecond, func() { _ = f.Close() })
 
 		_, err = state.RunCommitCycle(state.CommitCycle{
-			Client:   &worldClient{world: newHandOverWorld()},
-			Dir:      dir,
-			LoadPrev: func() *state.Index { return &seed },
+			OwnServer: ownServerPID,
+			Client:    &worldClient{world: newHandOverWorld()},
+			Dir:       dir,
+			LoadPrev:  func() *state.Index { return &seed },
 		})
 		if err != nil {
 			t.Fatalf("RunCommitCycle: %v", err)
@@ -523,9 +528,10 @@ func TestRunCommitCycleAfterAKilledHolder(t *testing.T) {
 	world.markPending()
 	start := time.Now()
 	_, err = state.RunCommitCycle(state.CommitCycle{
-		Client:   &worldClient{world: world},
-		Dir:      dir,
-		LoadPrev: func() *state.Index { return &seed },
+		OwnServer: ownServerPID,
+		Client:    &worldClient{world: world},
+		Dir:       dir,
+		LoadPrev:  func() *state.Index { return &seed },
 	})
 	if err != nil {
 		t.Fatalf("RunCommitCycle after the holder died: %v", err)
@@ -551,20 +557,22 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 		}
 
 		if _, err := state.RunCommitCycle(state.CommitCycle{
-			Client:   &worldClient{world: world},
-			Dir:      dir,
-			LoadPrev: func() *state.Index { return &seed },
+			OwnServer: ownServerPID,
+			Client:    &worldClient{world: world},
+			Dir:       dir,
+			LoadPrev:  func() *state.Index { return &seed },
 		}); err != nil {
 			t.Fatalf("first RunCommitCycle: %v", err)
 		}
 
 		controlBefore := readSessions()
 		if _, err := state.RunCommitCycle(state.CommitCycle{
-			Client:   &worldClient{world: world},
-			Dir:      dir,
-			LoadPrev: func() *state.Index { prev := onDiskIndex(t, dir); return &prev },
-			HashMap:  state.HashMap{},
-			Dump:     func(state.CaptureCycle) (bool, error) { return false, nil },
+			OwnServer: ownServerPID,
+			Client:    &worldClient{world: world},
+			Dir:       dir,
+			LoadPrev:  func() *state.Index { prev := onDiskIndex(t, dir); return &prev },
+			HashMap:   state.HashMap{},
+			Dump:      func(state.CaptureCycle) (bool, error) { return false, nil },
 		}); err != nil {
 			t.Fatalf("control RunCommitCycle: %v", err)
 		}
@@ -574,11 +582,12 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 
 		before := readSessions()
 		if _, err := state.RunCommitCycle(state.CommitCycle{
-			Client:   &worldClient{world: world},
-			Dir:      dir,
-			LoadPrev: func() *state.Index { prev := onDiskIndex(t, dir); return &prev },
-			HashMap:  state.HashMap{},
-			Dump:     func(state.CaptureCycle) (bool, error) { return true, nil },
+			OwnServer: ownServerPID,
+			Client:    &worldClient{world: world},
+			Dir:       dir,
+			LoadPrev:  func() *state.Index { prev := onDiskIndex(t, dir); return &prev },
+			HashMap:   state.HashMap{},
+			Dump:      func(state.CaptureCycle) (bool, error) { return true, nil },
 		}); err != nil {
 			t.Fatalf("RunCommitCycle: %v", err)
 		}
@@ -592,9 +601,10 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 		seed := handOverSeed(t, dir)
 
 		capture, err := state.RunCommitCycle(state.CommitCycle{
-			Client:   &worldClient{world: newHandOverWorld()},
-			Dir:      dir,
-			LoadPrev: func() *state.Index { return &seed },
+			OwnServer: ownServerPID,
+			Client:    &worldClient{world: newHandOverWorld()},
+			Dir:       dir,
+			LoadPrev:  func() *state.Index { return &seed },
 		})
 		if err != nil {
 			t.Fatalf("RunCommitCycle: %v", err)
@@ -617,10 +627,11 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 		dumpErr := errors.New("cancelled")
 
 		_, err := state.RunCommitCycle(state.CommitCycle{
-			Client:   &worldClient{world: newHandOverWorld()},
-			Dir:      dir,
-			LoadPrev: func() *state.Index { return &seed },
-			Dump:     func(state.CaptureCycle) (bool, error) { return true, dumpErr },
+			OwnServer: ownServerPID,
+			Client:    &worldClient{world: newHandOverWorld()},
+			Dir:       dir,
+			LoadPrev:  func() *state.Index { return &seed },
+			Dump:      func(state.CaptureCycle) (bool, error) { return true, dumpErr },
 		})
 		if !errors.Is(err, dumpErr) {
 			t.Fatalf("error = %v, want the dump's", err)
@@ -639,10 +650,11 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 		dumps := 0
 
 		_, err := state.RunCommitCycle(state.CommitCycle{
-			Client:   &failFastCaptureClient{t: t, listSessionNamesErr: captureErr},
-			Dir:      dir,
-			LoadPrev: func() *state.Index { return &seed },
-			Dump:     func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
+			OwnServer: ownServerPID,
+			Client:    &failFastCaptureClient{t: t, listSessionNamesErr: captureErr},
+			Dir:       dir,
+			LoadPrev:  func() *state.Index { return &seed },
+			Dump:      func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
 		})
 		if !errors.Is(err, captureErr) {
 			t.Fatalf("error = %v, want the capture's", err)
@@ -686,11 +698,12 @@ func TestRunCommitCycleStandsDownOnAFailedSessionListing(t *testing.T) {
 	dumps := 0
 
 	_, err = state.RunCommitCycle(state.CommitCycle{
-		Client:   tmux.NewClient(mock.commander()),
-		Dir:      dir,
-		LoadPrev: func() *state.Index { return &seed },
-		HashMap:  state.HashMap{},
-		Dump:     func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
+		OwnServer: ownServerPID,
+		Client:    tmux.NewClient(mock.commander()),
+		Dir:       dir,
+		LoadPrev:  func() *state.Index { return &seed },
+		HashMap:   state.HashMap{},
+		Dump:      func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
 	})
 
 	if !errors.Is(err, listErr) {
@@ -747,12 +760,13 @@ func TestRunCommitCycleHoldsTheLockThroughTheHousekeepingPass(t *testing.T) {
 	probe := &lockProbeHandler{lockPath: state.CommitLock(dir), message: "gc orphan scrollback failed"}
 
 	_, err := state.RunCommitCycle(state.CommitCycle{
-		Client:   &worldClient{world: newHandOverWorld()},
-		Dir:      dir,
-		LoadPrev: func() *state.Index { return &prev },
-		HashMap:  state.HashMap{},
-		Dump:     func(state.CaptureCycle) (bool, error) { return true, nil },
-		Logger:   slog.New(probe),
+		OwnServer: ownServerPID,
+		Client:    &worldClient{world: newHandOverWorld()},
+		Dir:       dir,
+		LoadPrev:  func() *state.Index { return &prev },
+		HashMap:   state.HashMap{},
+		Dump:      func(state.CaptureCycle) (bool, error) { return true, nil },
+		Logger:    slog.New(probe),
 	})
 	if err != nil {
 		t.Fatalf("RunCommitCycle: %v", err)

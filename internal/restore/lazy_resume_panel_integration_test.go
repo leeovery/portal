@@ -363,6 +363,17 @@ func TestLazyResumePanel_HoldsThePanelOnAnAlternateScreenTheInstallTurnedOff(t *
 	}
 }
 
+// serverPID is the pid of the server the fixture's socket answers on now: the
+// own server of a committer running under it.
+func (fx *lazyPanelFixture) serverPID(t *testing.T) int {
+	t.Helper()
+	pid, err := strconv.Atoi(strings.TrimSpace(fx.ts.Run(t, "display-message", "-p", "#{pid}")))
+	if err != nil {
+		t.Fatalf("read server pid: %v", err)
+	}
+	return pid
+}
+
 // lazyPanelFixture is the two-session install the suite reboots: a lazy subject
 // beside the plain pane a user works in, and an eager control proving both modes
 // ship live together.
@@ -515,11 +526,12 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 	}
 
 	capture, err := state.RunCommitCycle(state.CommitCycle{
-		Client:   fx.client,
-		Dir:      fx.stateDir,
-		LoadPrev: func() *state.Index { return &prev },
-		HashMap:  fx.hashes,
-		Dump:     dump,
+		Client:    fx.client,
+		OwnServer: fx.serverPID(t),
+		Dir:       fx.stateDir,
+		LoadPrev:  func() *state.Index { return &prev },
+		HashMap:   fx.hashes,
+		Dump:      dump,
 	})
 	if err != nil {
 		t.Fatalf("RunCommitCycle: %v", err)

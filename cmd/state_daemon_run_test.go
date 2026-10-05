@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,9 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
+// fakeOwnServerPID is the pid of the tmux server a faked committer belongs to.
+const fakeOwnServerPID = 4242
+
 // daemonFakeCommander is kept bespoke rather than retired onto
 // commandertest.Scripted: it is not an argv-pattern script but a model of the
 // daemon's whole tmux surface, and it carries one behaviour a static script
@@ -31,7 +35,8 @@ import (
 // commandertest.Trim/Verbatim, so the trim-versus-verbatim contract keeps its
 // single implementation.
 //
-// Unset commands return ("", nil), so unrelated tmux calls do not fail a test.
+// Unset commands other than the confirmation read return ("", nil), so
+// unrelated tmux calls do not fail a test.
 type daemonFakeCommander struct {
 	mu sync.Mutex
 
@@ -54,6 +59,9 @@ type daemonFakeCommander struct {
 	captureErrByTarget map[string]error
 
 	confirmErr error
+	// answeringPID is the server pid the confirmation names; zero answers as
+	// the committer's own server, fakeOwnServerPID.
+	answeringPID int
 
 	// Invoked after every dispatch resolution, so a cancellation test can fire
 	// cancel() while a tmux subcall is in flight.
@@ -115,7 +123,13 @@ func (c *daemonFakeCommander) dispatch(args []string) (string, error) {
 			Err:    errors.New("exit status 1"),
 		}
 	case "display-message":
-		return "", c.confirmErr
+		if c.confirmErr != nil {
+			return "", c.confirmErr
+		}
+		if c.answeringPID != 0 {
+			return strconv.Itoa(c.answeringPID), nil
+		}
+		return strconv.Itoa(fakeOwnServerPID), nil
 	case "list-sessions":
 		return c.sessionsOut, c.sessionsErr
 	case "list-panes":
@@ -178,6 +192,7 @@ func makeDeps(t *testing.T, dir string, fc *daemonFakeCommander) *daemonDeps {
 		Dir:          dir,
 		Logger:       log.Discard(),
 		Client:       tmux.NewClient(fc),
+		OwnServer:    fakeOwnServerPID,
 		HookStore:    store,
 		lastCleanup:  time.Now(),
 		HashMap:      state.HashMap{},

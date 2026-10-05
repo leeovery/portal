@@ -168,8 +168,9 @@ func (fx *lazyPanelFixture) assertRestoredRenumbered(t *testing.T) {
 func (fx *lazyPanelFixture) commitNowRound(t *testing.T) state.Index {
 	t.Helper()
 	capture, err := state.RunCommitCycle(state.CommitCycle{
-		Client: fx.client,
-		Dir:    fx.stateDir,
+		Client:    fx.client,
+		OwnServer: fx.serverPID(t),
+		Dir:       fx.stateDir,
 		LoadPrev: func() *state.Index {
 			prev, _, err := state.ReadIndex(fx.stateDir)
 			if err != nil {
