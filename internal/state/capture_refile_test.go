@@ -13,7 +13,7 @@ import (
 )
 
 func TestCaptureAndRefile(t *testing.T) {
-	t.Run("it re-files every frozen pane before it returns", func(t *testing.T) {
+	t.Run("it re-files every frozen pane before it returns, leaving each positional name for the commit's housekeeping pass", func(t *testing.T) {
 		dir := t.TempDir()
 		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
 		prev := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
@@ -38,8 +38,8 @@ func TestCaptureAndRefile(t *testing.T) {
 		if got := readScrollback(t, dir, "pane-"+waitingPaneToken+".bin"); got != "frozen-body" {
 			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
 		}
-		if _, err := os.Stat(filepath.Join(state.ScrollbackDir(dir), "work__0.1.bin")); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("positional file stat err = %v, want not-exist", err)
+		if got := readScrollback(t, dir, "work__0.1.bin"); got != "frozen-body" {
+			t.Errorf("positional file = %q, want %q", got, "frozen-body")
 		}
 		if _, held := hm["work__0.1"]; held {
 			t.Errorf("hash map still holds the vacated key: %v", hm)

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/state"
@@ -500,6 +501,15 @@ func denyScrollbackWrites(t *testing.T, dir string) {
 	t.Cleanup(func() { _ = os.Chmod(sb, 0o700) })
 }
 
+// replaceScrollback writes body under name the way the scrollback dump does:
+// replacing the name, never rewriting the file it names in place.
+func replaceScrollback(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := fileutil.AtomicWrite0600(filepath.Join(state.ScrollbackDir(dir), name), []byte(body)); err != nil {
+		t.Fatalf("replace %s: %v", name, err)
+	}
+}
+
 func readScrollback(t *testing.T, dir, name string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(state.ScrollbackDir(dir), name))
@@ -510,7 +520,7 @@ func readScrollback(t *testing.T, dir, name string) string {
 }
 
 func TestRefilePendingScrollback(t *testing.T) {
-	t.Run("it re-files a waiting pane's scrollback under its token and points the record at that path", func(t *testing.T) {
+	t.Run("it re-files a waiting pane's scrollback under its token, points the record at that path and leaves the positional name for the commit's housekeeping pass", func(t *testing.T) {
 		dir := t.TempDir()
 		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
 		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
@@ -526,8 +536,8 @@ func TestRefilePendingScrollback(t *testing.T) {
 		if got := readScrollback(t, dir, "pane-"+waitingPaneToken+".bin"); got != "frozen-body" {
 			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
 		}
-		if _, err := os.Stat(filepath.Join(state.ScrollbackDir(dir), "work__0.1.bin")); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("positional file stat err = %v, want not-exist", err)
+		if got := readScrollback(t, dir, "work__0.1.bin"); got != "frozen-body" {
+			t.Errorf("positional file = %q, want %q", got, "frozen-body")
 		}
 		if _, held := hm["work__0.1"]; held {
 			t.Errorf("hash map still holds the vacated key: %v", hm)
@@ -624,7 +634,7 @@ func TestRefilePendingScrollback(t *testing.T) {
 				logger, sink := openTempLogger(t)
 
 				state.RefilePendingScrollback(dir, &first, waitingSet(), hms[0], logger)
-				seedScrollback(t, dir, "work__0.1.bin", "displacer-body")
+				replaceScrollback(t, dir, "work__0.1.bin", "displacer-body")
 				state.RefilePendingScrollback(dir, &second, waitingSet(), hms[1], logger)
 
 				want := "scrollback/" + tokenName
@@ -644,59 +654,6 @@ func TestRefilePendingScrollback(t *testing.T) {
 					t.Errorf("records = %v, want none", sink.Lines())
 				}
 			})
-		}
-	})
-
-	t.Run("it moves the bytes onto the token-named file on a filesystem that rejects the no-replace rename", func(t *testing.T) {
-		state.StubRenameNoReplaceUnsupported(t)
-		dir := t.TempDir()
-		tokenName := "pane-" + waitingPaneToken + ".bin"
-		seedScrollback(t, dir, "work__0.1.bin", "frozen-body")
-		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
-		hm := state.HashMap{"work__0.1": 42}
-		logger, sink := openTempLogger(t)
-
-		state.RefilePendingScrollback(dir, &idx, waitingSet(), hm, logger)
-
-		if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/"+tokenName; got != want {
-			t.Errorf("ScrollbackFile = %q, want %q", got, want)
-		}
-		if got := readScrollback(t, dir, tokenName); got != "frozen-body" {
-			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
-		}
-		if _, err := os.Stat(filepath.Join(state.ScrollbackDir(dir), "work__0.1.bin")); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("positional file stat err = %v, want not-exist", err)
-		}
-		if _, held := hm["work__0.1"]; held {
-			t.Errorf("hash map still holds the vacated key: %v", hm)
-		}
-		if got := sink.Records(); len(got) != 0 {
-			t.Errorf("records = %v, want none", sink.Lines())
-		}
-	})
-
-	t.Run("it adopts an existing token-named file without overwriting it on a filesystem that rejects the no-replace rename", func(t *testing.T) {
-		state.StubRenameNoReplaceUnsupported(t)
-		dir := t.TempDir()
-		tokenName := "pane-" + waitingPaneToken + ".bin"
-		seedScrollback(t, dir, tokenName, "frozen-body")
-		seedScrollback(t, dir, "work__0.1.bin", "displacer-body")
-		idx := waitingIndex(waitingPaneToken, "scrollback/work__0.1.bin")
-		logger, sink := openTempLogger(t)
-
-		state.RefilePendingScrollback(dir, &idx, waitingSet(), state.HashMap{}, logger)
-
-		if got, want := waitingPaneOf(t, idx).ScrollbackFile, "scrollback/"+tokenName; got != want {
-			t.Errorf("ScrollbackFile = %q, want %q", got, want)
-		}
-		if got := readScrollback(t, dir, tokenName); got != "frozen-body" {
-			t.Errorf("token-named file = %q, want %q", got, "frozen-body")
-		}
-		if got := readScrollback(t, dir, "work__0.1.bin"); got != "displacer-body" {
-			t.Errorf("positional file = %q, want %q", got, "displacer-body")
-		}
-		if got := sink.Records(); len(got) != 0 {
-			t.Errorf("records = %v, want none", sink.Lines())
 		}
 	})
 
