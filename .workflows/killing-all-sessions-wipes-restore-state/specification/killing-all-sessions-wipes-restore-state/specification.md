@@ -75,16 +75,17 @@ Under `tmux kill-server`, no committer can pass the confirmation, whichever of i
 
 The confirmation counts only when it is answered by the tmux server the committer belongs to, and only when that same server answered every capture read the commit is built from. For the daemon, that is the server its `_portal-saver` pane runs in. It stays the daemon's own server after that pane is destroyed, so the save that runs when `portal uninstall` kills `_portal-saver` on a running server still commits. For `commit-now`, it is the server whose `session-closed` hook ran it. After that server exits, a new one can be started on the same socket before its restore has run, and it holds none of the user's sessions. Its answers confirm nothing, and a save that reaches it stands down (§2.5).
 
-#### 2.3 A stand-down never leaves the saved state naming a missing file
+#### 2.3 A cycle that ends uncommitted never leaves the saved state naming a missing file
 
-The capture cycle renames a newly waiting pane's transcript from its positional path to its token-named path (`refilePendingScrollback` in `internal/state/scrollback.go`). It does this expecting the cycle to commit the record that points at the new path. If a cycle backed off after that rename, `sessions.json` would still name the vacated positional path. At shutdown no later cycle runs to repair it, so the next restore would find no transcript at the path the record names.
+The capture cycle renames a newly waiting pane's transcript from its positional path to its token-named path (`refilePendingScrollback` in `internal/state/scrollback.go`). It does this expecting the cycle to commit the record that points at the new path. If the cycle ends without that commit, `sessions.json` still names the vacated positional path. A later committing cycle repairs the record, because its re-file adopts the token-named file once the positional one is gone. At shutdown no later cycle may commit, so the next restore would find no transcript at the path the record names.
 
-Either of two orderings is acceptable:
+A cycle can end without committing after the rename in three ways:
 
-- the confirmation (§2.2) comes before any file is moved; or
-- a stand-down after a move leaves the saved state naming only files that exist.
+- it stands down (§2.5);
+- the daemon's tick is cancelled mid-dump by the shutdown signal (`errCycleCancelled` in `cmd/state_daemon.go`, returned after the renames and before the commit), and the shutdown flush that follows can itself stand down;
+- its `sessions.json` write fails.
 
-Whichever is used, no stand-down may leave `sessions.json` naming a scrollback file that is not on disk.
+However a cycle ends, it never leaves `sessions.json` naming a scrollback file that is not on disk. How that is met is open. Confirming (§2.2) before any file is moved covers a stand-down, but not a cancellation or a failed write that comes after the move, so it is not enough on its own.
 
 #### 2.4 The scrollback dump never zeroes a saved transcript on an unconfirmed read
 
@@ -213,7 +214,7 @@ The measurement is not part of this fix. After the fix, the dropped-session logg
 - A capture whose session or pane listing came back empty from a server that then refuses connections writes nothing.
 - The confirmation is safe even when its own read returns exit 0 with no output, as long as it is sent strictly after the last capture read.
 - The daemon's shutdown flush after `_portal-saver` is killed on a running server, as `portal uninstall` does, still commits and reports `flush_completed=true`. A save whose capture reads or confirmation reach a different server started on the same socket writes nothing.
-- A stand-down injected after the capture cycle's renames leaves `sessions.json` naming only files that exist.
+- A stand-down injected after the capture cycle's renames leaves `sessions.json` naming only files that exist. So does a daemon tick cancelled after the renames and followed by a shutdown flush that stands down, and a cycle whose `sessions.json` write fails after them.
 - The daemon's dump does not overwrite a non-empty saved transcript with an empty capture it cannot confirm.
 - Restore with a failed session listing behaves exactly as today: it rebuilds from the saved state, and no empty commit follows it.
 
@@ -262,3 +263,7 @@ These run in the integration lane, on real tmux with an isolated socket:
 ---
 
 ## Working Notes
+
+## Corrigenda
+
+> **Corrigendum 2026-10-05** (from `planning/killing-all-sessions-wipes-restore-state`): §2.3 left open cycles that end uncommitted after the transcript rename for a reason other than a stand-down — "Either of two orderings is acceptable … Whichever is used, no stand-down may leave `sessions.json` naming a scrollback file that is not on disk." — corrected: the guarantee covers every cycle that ends without committing after the rename (a stand-down, the daemon tick cancelled mid-dump by the shutdown signal, a failed `sessions.json` write), confirming before any move is not enough on its own, and §6.1 tests the cancelled-tick and failed-write cases — settled by: §2.3's own stated purpose (at shutdown no later cycle repairs the record, so the next restore must find the transcript at the path it names) read against the tree — `errCycleCancelled` (`cmd/state_daemon.go`) returns after `captureAndRefile`'s renames and before `Commit`, `Commit` returns before housekeeping when `sessions.json`'s atomic write fails, and the shutdown flush that today repairs the record through the re-file's adoption of the token-named file is itself a cycle that can now stand down.
