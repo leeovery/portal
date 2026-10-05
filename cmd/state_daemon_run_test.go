@@ -385,12 +385,7 @@ func TestDaemonTick_RemovesSaveRequestedAfterSuccess(t *testing.T) {
 func TestDaemonTick_PreservesSaveRequestedOnError(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
-	// The seeded list-sessions error is deliberately cleared: ListSessionNames
-	// swallows it, so list-panes is the only way to fail CaptureStructure.
-	fc := &daemonFakeCommander{sessionsErr: errors.New("tmux down")}
-	fc.sessionsErr = nil
-	fc.sessionsOut = "work|1|0|"
-	fc.panesErr = errors.New("list-panes failed")
+	fc := &daemonFakeCommander{sessionsOut: "work|1|0|", panesErr: errors.New("list-panes failed")}
 
 	deps := makeDeps(t, dir, fc)
 	deps.LastSaveAt = time.Now()

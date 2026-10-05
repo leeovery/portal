@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 // handOverKey is pane X's address: saved there while not waiting, and restored
@@ -81,7 +83,7 @@ func (c *worldClient) ShowAllServerOptions() (string, error) {
 	return state.SkeletonMarkerPrefix + handOverKey + ` "1"`, nil
 }
 
-func (c *worldClient) ListSessionNames() ([]string, error) {
+func (c *worldClient) ListSessionNamesProbe() ([]string, error) {
 	c.calls.Add(1)
 	_, _, sessions := c.world.snapshot()
 	return sessions, nil
@@ -648,6 +650,60 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 			t.Error("sessions.json written after a failed capture")
 		}
 	})
+}
+
+func scrollbackContents(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	contents := map[string]string{}
+	for _, name := range scrollbackNames(t, dir) {
+		data, err := os.ReadFile(filepath.Join(state.ScrollbackDir(dir), name))
+		if err != nil {
+			t.Fatalf("read scrollback %s: %v", name, err)
+		}
+		contents[name] = string(data)
+	}
+	return contents
+}
+
+func TestRunCommitCycleStandsDownOnAFailedSessionListing(t *testing.T) {
+	dir := t.TempDir()
+	seed := handOverSeed(t, dir)
+	sessionsBefore, err := os.ReadFile(state.SessionsJSON(dir))
+	if err != nil {
+		t.Fatalf("read seeded sessions.json: %v", err)
+	}
+	scrollbackBefore := scrollbackContents(t, dir)
+	if len(scrollbackBefore) != 2 {
+		t.Fatalf("seeded scrollback = %v, want two transcripts", scrollbackBefore)
+	}
+	listErr := &tmux.CommandError{Stderr: "server exited unexpectedly", Err: errors.New("exit status 1")}
+	mock := &captureMock{listSessionsE: listErr, t: t}
+	dumps := 0
+
+	_, err = state.RunCommitCycle(state.CommitCycle{
+		Client:   tmux.NewClient(mock.commander()),
+		Dir:      dir,
+		LoadPrev: func() *state.Index { return &seed },
+		HashMap:  state.HashMap{},
+		Dump:     func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
+	})
+
+	if !errors.Is(err, listErr) {
+		t.Fatalf("error = %v, want one wrapping the failed list-sessions", err)
+	}
+	if dumps != 0 {
+		t.Errorf("dumps = %d, want 0", dumps)
+	}
+	sessionsAfter, err := os.ReadFile(state.SessionsJSON(dir))
+	if err != nil {
+		t.Fatalf("read sessions.json: %v", err)
+	}
+	if !bytes.Equal(sessionsBefore, sessionsAfter) {
+		t.Errorf("sessions.json rewritten by a cycle whose session listing failed:\nbefore %s\nafter  %s", sessionsBefore, sessionsAfter)
+	}
+	if got := scrollbackContents(t, dir); !maps.Equal(got, scrollbackBefore) {
+		t.Errorf("scrollback = %v, want unchanged %v", got, scrollbackBefore)
+	}
 }
 
 // lockProbeHandler probes the commit lock at the moment a named message is

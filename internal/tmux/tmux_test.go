@@ -38,7 +38,7 @@ func TestListSessions(t *testing.T) {
 			},
 		},
 		{
-			name:   "returns empty slice when tmux server is not running",
+			name:   "returns empty slice when list-sessions fails, which the picker reads as no server",
 			output: "",
 			err:    fmt.Errorf("exit status 1"),
 			want:   []tmux.Session{},

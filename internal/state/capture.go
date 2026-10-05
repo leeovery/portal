@@ -16,8 +16,12 @@ import (
 
 // CaptureClient is declared here, over primitive types only, so internal/state
 // need not import internal/tmux — which imports it back and would cycle.
+//
+// ListSessionNamesProbe must return a failed list-sessions as an error: a
+// committer reading it as zero sessions would commit an empty index and its
+// housekeeping pass would delete every saved transcript.
 type CaptureClient interface {
-	ListSessionNames() ([]string, error)
+	ListSessionNamesProbe() ([]string, error)
 	ListAllPanesWithFormat(format string) (string, error)
 	ShowEnvironment(session string) (string, error)
 }
@@ -85,7 +89,7 @@ func captureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 		carriedWaiting: map[string]struct{}{},
 	}
 
-	names, err := c.ListSessionNames()
+	names, err := c.ListSessionNamesProbe()
 	if err != nil {
 		return empty, err
 	}

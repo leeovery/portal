@@ -145,3 +145,62 @@ func TestListSessionsProbe_IssuesTheSameFormatAsListSessions(t *testing.T) {
 		t.Errorf("ListSessionsProbe argv = %v, want ListSessions' %v", probeMock.Calls(), listMock.Calls())
 	}
 }
+
+func TestListSessionNamesProbe(t *testing.T) {
+	t.Run("it returns the user-visible session names", func(t *testing.T) {
+		mock := commandertest.New(t, commandertest.Returns("_portal-saver|1|0|\ndev|3|1|\nwork|5|0|", "list-sessions"))
+
+		got, err := tmux.NewClient(mock).ListSessionNamesProbe()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if want := []string{"dev", "work"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("names = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("it returns an empty slice and no error when only Portal's own sessions are listed", func(t *testing.T) {
+		mock := commandertest.New(t, commandertest.Returns("_portal-saver|1|0|\n_portal-bootstrap|1|0|", "list-sessions"))
+
+		got, err := tmux.NewClient(mock).ListSessionNamesProbe()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil || len(got) != 0 {
+			t.Errorf("names = %#v, want a non-nil empty slice", got)
+		}
+	})
+
+	t.Run("it returns tmux's error when the session list cannot be read", func(t *testing.T) {
+		const stderr = "no server running on /tmp/tmux-501/default"
+		client := tmux.NewClient(failingListSessions(t, stderr))
+
+		got, err := client.ListSessionNamesProbe()
+
+		if got != nil {
+			t.Errorf("names = %v, want nil for a failed read", got)
+		}
+		var cmdErr *tmux.CommandError
+		if !errors.As(err, &cmdErr) {
+			t.Fatalf("errors.As did not recover *tmux.CommandError from %v (%T)", err, err)
+		}
+		if cmdErr.Stderr != stderr {
+			t.Errorf("CommandError.Stderr = %q, want %q", cmdErr.Stderr, stderr)
+		}
+	})
+
+	t.Run("it leaves ListSessionNames reading a failed list as no sessions", func(t *testing.T) {
+		client := tmux.NewClient(failingListSessions(t, "no server running on /tmp/tmux-501/default"))
+
+		got, err := client.ListSessionNames()
+
+		if err != nil {
+			t.Fatalf("ListSessionNames must swallow a failed read: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("names = %v, want an empty slice", got)
+		}
+	})
+}

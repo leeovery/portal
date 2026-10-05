@@ -62,6 +62,19 @@ func TestCompleteSessionNames(t *testing.T) {
 		}
 	})
 
+	t.Run("offers no names when the production listing fails", func(t *testing.T) {
+		t.Setenv("TMUX", filepath.Join(t.TempDir(), "no-server")+",0,0")
+
+		names, directive := completeSessionNames("")
+
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("directive = %v, want ShellCompDirectiveNoFileComp", directive)
+		}
+		if len(names) != 0 {
+			t.Errorf("names = %v, want none", names)
+		}
+	})
+
 	t.Run("empty and no panic when seam returns nil (server down)", func(t *testing.T) {
 		withCompletionSessions(t, func() []tmux.Session { return nil })
 

@@ -787,3 +787,53 @@ func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *
 			newSessionAt, armListPanesAt, layoutAt, setOptAt)
 	}
 }
+
+func TestOrchestrator_RebuildsEverySavedSessionWhenListSessionsFails(t *testing.T) {
+	dir := t.TempDir()
+	saved := []state.Session{
+		newSession("work", nil, state.Window{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/w", ScrollbackFile: "scrollback/work__0.0.bin", Active: true}}}),
+		newSession("notes", nil, state.Window{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/n", ScrollbackFile: "scrollback/notes__0.0.bin", Active: true}}}),
+	}
+	writeValidIndex(t, dir, saved)
+	sessionsBefore, err := os.ReadFile(state.SessionsJSON(dir))
+	if err != nil {
+		t.Fatalf("read seeded sessions.json: %v", err)
+	}
+	listErr := &tmux.CommandError{Args: []string{"list-sessions"}, Stderr: "server exited unexpectedly", Err: errors.New("exit status 1")}
+	rf := &orchestratorRunFunc{listSessionsErr: listErr, listPanesOut: "0:0"}
+	mock := commandertest.FromFunc(rf.run)
+	logger, _ := logtest.NewCaptureLogger(t)
+	client := tmux.NewClient(mock)
+
+	if _, err := restoretest.NewFakeExeOrchestrator(t, client, dir, logger).Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	var created []string
+	for _, i := range findAllCalls(mock.Calls(), "new-session") {
+		call := mock.Calls()[i]
+		for j := 0; j+1 < len(call); j++ {
+			if call[j] == "-s" {
+				created = append(created, call[j+1])
+			}
+		}
+	}
+	if strings.Join(created, ",") != "work,notes" {
+		t.Errorf("sessions created = %v, want every saved session [work notes]", created)
+	}
+
+	if _, err := state.RunCommitCycle(state.CommitCycle{
+		Client:   client,
+		Dir:      dir,
+		LoadPrev: func() *state.Index { return &state.Index{} },
+	}); !errors.Is(err, listErr) {
+		t.Errorf("commit cycle after restore: error = %v, want one wrapping the failed list-sessions", err)
+	}
+	sessionsAfter, err := os.ReadFile(state.SessionsJSON(dir))
+	if err != nil {
+		t.Fatalf("read sessions.json: %v", err)
+	}
+	if string(sessionsAfter) != string(sessionsBefore) {
+		t.Errorf("sessions.json rewritten after restore:\nbefore %s\nafter  %s", sessionsBefore, sessionsAfter)
+	}
+}

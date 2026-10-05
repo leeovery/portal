@@ -29,7 +29,7 @@ type fakeCaptureClient struct {
 	markersErr   error
 }
 
-func (f *fakeCaptureClient) ListSessionNames() ([]string, error) {
+func (f *fakeCaptureClient) ListSessionNamesProbe() ([]string, error) {
 	f.sessionCalls++
 	return f.sessions, f.sessionErr
 }

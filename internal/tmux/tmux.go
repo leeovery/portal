@@ -198,7 +198,16 @@ func parseSessionList(output string) ([]Session, error) {
 }
 
 func (c *Client) ListSessionNames() ([]string, error) {
-	sessions, err := c.ListSessions()
+	return sessionNames(c.ListSessions())
+}
+
+// ListSessionNamesProbe is ListSessionNames over ListSessionsProbe: a failed
+// list-sessions is an error rather than an empty list.
+func (c *Client) ListSessionNamesProbe() ([]string, error) {
+	return sessionNames(c.ListSessionsProbe())
+}
+
+func sessionNames(sessions []Session, err error) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}

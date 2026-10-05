@@ -1584,15 +1584,15 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 	})
 }
 
-// *tmux.Client swallows list-sessions exec errors, so only a bespoke fake can
-// drive a ListSessionNames failure. The other two methods fail the test.
+// failFastCaptureClient answers the session listing as scripted; a pane or
+// environment read fails the test.
 type failFastCaptureClient struct {
 	t                   *testing.T
 	listSessionNames    []string
 	listSessionNamesErr error
 }
 
-func (f *failFastCaptureClient) ListSessionNames() ([]string, error) {
+func (f *failFastCaptureClient) ListSessionNamesProbe() ([]string, error) {
 	return f.listSessionNames, f.listSessionNamesErr
 }
 
@@ -1611,18 +1611,19 @@ func (f *failFastCaptureClient) ShowAllServerOptions() (string, error) {
 }
 
 func TestCaptureStructurePreLoopFailFatal(t *testing.T) {
-	t.Run("it returns an error when ListSessionNames fails and does not call show-environment", func(t *testing.T) {
-		client := &failFastCaptureClient{
-			t:                   t,
-			listSessionNamesErr: errors.New("exec: tmux broken"),
-		}
+	t.Run("it returns an error when the production client's list-sessions fails and does not call show-environment", func(t *testing.T) {
+		listErr := &tmux.CommandError{Stderr: "server exited unexpectedly", Err: errors.New("exit status 1")}
+		mock := &captureMock{listSessionsE: listErr, t: t}
 
-		idx, _, err := state.CaptureStructure(client, nil, nil, nil)
-		if err == nil {
-			t.Fatal("expected error from ListSessionNames failure, got nil")
+		idx, _, err := state.CaptureStructure(tmux.NewClient(mock.commander()), nil, nil, nil)
+		if !errors.Is(err, listErr) {
+			t.Fatalf("error = %v, want one wrapping the failed list-sessions", err)
 		}
 		if len(idx.Sessions) != 0 {
 			t.Errorf("expected empty Sessions on pre-loop fail-fatal, got %d", len(idx.Sessions))
+		}
+		if mock.listPanesCalls != 0 || mock.showEnvCalls != 0 {
+			t.Errorf("list-panes calls = %d, show-environment calls = %d, want 0 and 0", mock.listPanesCalls, mock.showEnvCalls)
 		}
 	})
 
@@ -1810,7 +1811,7 @@ func TestCaptureStructureResumePending(t *testing.T) {
 	t.Run("it returns an empty pending set alongside a failed enumeration", func(t *testing.T) {
 		pendingRow := paneLineWithPending("work", 0, "main", "L", false, true, 0, "/tmp", true, "zsh", "tok", "1")
 		cases := map[string]func(t *testing.T) state.CaptureClient{
-			"ListSessionNames fails": func(t *testing.T) state.CaptureClient {
+			"the session listing fails": func(t *testing.T) state.CaptureClient {
 				return &failFastCaptureClient{t: t, listSessionNamesErr: errors.New("exec: tmux broken")}
 			},
 			"ListAllPanesWithFormat fails": func(t *testing.T) state.CaptureClient {
