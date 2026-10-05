@@ -50,12 +50,15 @@
           "format": "tick",
           "spec_commit": "00a770ea5750b62f4d8305942ad288959f1a03ba",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "killing-all-sessions-wipes-restore-state-1-1",
-          "task_map": {},
+          "task": "killing-all-sessions-wipes-restore-state-1-2",
+          "task_map": {
+            "killing-all-sessions-wipes-restore-state-1-1": "tick-eb3a09",
+            "killing-all-sessions-wipes-restore-state-1": "tick-0f9993"
+          },
           "storage_paths": [
             ".tick/"
           ],
@@ -64,7 +67,22 @@
             "tasks": {
               "p1": "2026-10-05"
             }
-          }
+          },
+          "staging": {
+            "author-p1": {
+              "tasks": {
+                "killing-all-sessions-wipes-restore-state-1-1": "approved",
+                "killing-all-sessions-wipes-restore-state-1-2": "approved",
+                "killing-all-sessions-wipes-restore-state-1-3": "approved",
+                "killing-all-sessions-wipes-restore-state-1-4": "approved",
+                "killing-all-sessions-wipes-restore-state-1-5": "approved",
+                "killing-all-sessions-wipes-restore-state-1-6": "approved",
+                "killing-all-sessions-wipes-restore-state-1-7": "approved",
+                "killing-all-sessions-wipes-restore-state-1-8": "approved"
+              }
+            }
+          },
+          "external_id": "tick-6dd578"
         }
       }
     }
