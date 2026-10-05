@@ -47,7 +47,7 @@ Restate the Outcome's last sentence in the spec's terms (§3.1, §6.2): the hook
 **Proposed Text**:
 **Outcome**: A SIGTERM to the shell running a resume hook no longer ends the pane or its session. The session stays up until tmux itself exits, and by then no committer can reach the server. The hook program and the user's shell start with SIGTERM at its default disposition, never inherited as ignored.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---

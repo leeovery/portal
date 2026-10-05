@@ -8,7 +8,7 @@
 
 **Solution**: The shell a resume hook runs in survives SIGTERM, the way an interactive shell already does. The handling is a caught trap, never an ignored disposition, so the hook program and the user's shell the pane goes on to keep default SIGTERM handling. An answered lazy pane runs its hook through the same shell, so the same change covers it.
 
-**Outcome**: A SIGTERM to the shell running a resume hook no longer ends the pane or its session. The session stays up until tmux itself exits, and by then no committer can reach the server. The hook program and the user's shell still end on SIGTERM.
+**Outcome**: A SIGTERM to the shell running a resume hook no longer ends the pane or its session. The session stays up until tmux itself exits, and by then no committer can reach the server. The hook program and the user's shell start with SIGTERM at its default disposition, never inherited as ignored.
 
 **Acceptance Criteria**:
 - [ ] A restored eager resume pane's hook program is still running, and the pane's top process (the shell running the hook) receives SIGTERM. The pane and its session stay up, the hook program keeps running, and when it ends the pane goes on to the user's shell. (§3.1, §6.2)
