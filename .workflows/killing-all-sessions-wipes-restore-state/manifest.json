@@ -53,8 +53,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 2,
-          "task": "killing-all-sessions-wipes-restore-state-2-9",
+          "phase": 3,
+          "task": null,
           "task_map": {
             "killing-all-sessions-wipes-restore-state-1-1": "tick-eb3a09",
             "killing-all-sessions-wipes-restore-state-1": "tick-0f9993",
@@ -86,21 +86,7 @@
               "p2": "2026-10-05"
             }
           },
-          "staging": {
-            "author-p2": {
-              "tasks": {
-                "killing-all-sessions-wipes-restore-state-2-1": "approved",
-                "killing-all-sessions-wipes-restore-state-2-2": "approved",
-                "killing-all-sessions-wipes-restore-state-2-3": "approved",
-                "killing-all-sessions-wipes-restore-state-2-4": "approved",
-                "killing-all-sessions-wipes-restore-state-2-5": "approved",
-                "killing-all-sessions-wipes-restore-state-2-6": "approved",
-                "killing-all-sessions-wipes-restore-state-2-7": "approved",
-                "killing-all-sessions-wipes-restore-state-2-8": "approved",
-                "killing-all-sessions-wipes-restore-state-2-9": "approved"
-              }
-            }
-          },
+          "staging": {},
           "external_id": "tick-6dd578"
         }
       }
