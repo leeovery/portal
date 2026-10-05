@@ -46,9 +46,9 @@
     "planning": {
       "items": {
         "killing-all-sessions-wipes-restore-state": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
-          "spec_commit": "00a770ea5750b62f4d8305942ad288959f1a03ba",
+          "spec_commit": "2796c0ccfc7cc957999e71d920090aee7f1d4504",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "auto",
