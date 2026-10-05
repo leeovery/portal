@@ -42,6 +42,7 @@ func (m *captureMock) commander() *commandertest.Scripted {
 		commandertest.Answering(commandertest.ArgvPrefix("list-panes"), m.answerListPanes),
 		commandertest.Answering(commandertest.ArgvPrefix("show-environment"), m.answerShowEnvironment),
 		commandertest.When(commandertest.ArgvPrefix("show-options"), m.markers, m.markersE),
+		commandertest.Returns("", "display-message"),
 	).Strict()
 }
 
@@ -1609,6 +1610,8 @@ func (f *failFastCaptureClient) ShowEnvironment(session string) (string, error) 
 func (f *failFastCaptureClient) ShowAllServerOptions() (string, error) {
 	return "", nil
 }
+
+func (f *failFastCaptureClient) ConfirmAnswering() error { return nil }
 
 func TestCaptureStructurePreLoopFailFatal(t *testing.T) {
 	t.Run("it returns an error when the production client's list-sessions fails and does not call show-environment", func(t *testing.T) {

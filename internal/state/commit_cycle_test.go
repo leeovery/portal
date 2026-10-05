@@ -83,6 +83,11 @@ func (c *worldClient) ShowAllServerOptions() (string, error) {
 	return state.SkeletonMarkerPrefix + handOverKey + ` "1"`, nil
 }
 
+func (c *worldClient) ConfirmAnswering() error {
+	c.calls.Add(1)
+	return nil
+}
+
 func (c *worldClient) ListSessionNamesProbe() ([]string, error) {
 	c.calls.Add(1)
 	_, _, sessions := c.world.snapshot()

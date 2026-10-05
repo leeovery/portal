@@ -53,6 +53,8 @@ type daemonFakeCommander struct {
 	captureByTarget    map[string]string
 	captureErrByTarget map[string]error
 
+	confirmErr error
+
 	// Invoked after every dispatch resolution, so a cancellation test can fire
 	// cancel() while a tmux subcall is in flight.
 	dispatchHook func(args []string)
@@ -112,6 +114,8 @@ func (c *daemonFakeCommander) dispatch(args []string) (string, error) {
 			Stderr: "unknown option: " + name,
 			Err:    errors.New("exit status 1"),
 		}
+	case "display-message":
+		return "", c.confirmErr
 	case "list-sessions":
 		return c.sessionsOut, c.sessionsErr
 	case "list-panes":

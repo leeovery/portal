@@ -248,10 +248,19 @@ func linkMovedPane(dir, paneKey string, p *Pane, logger *slog.Logger) {
 }
 
 // CaptureCycleClient is what one capture cycle reads through: the skeleton
-// markers as well as the structure.
+// markers as well as the structure, and the confirmation sent after them.
 type CaptureCycleClient interface {
 	CaptureClient
 	ServerOptionLister
+	AnsweringConfirmer
+}
+
+// AnsweringConfirmer confirms tmux is still answering. ConfirmAnswering must
+// return nil only for a read tmux answered with exit status 0: an exiting tmux
+// can answer a read already in flight with exit status 0 and no output, and only
+// a refused read sent after it tells that answer apart from an empty server.
+type AnsweringConfirmer interface {
+	ConfirmAnswering() error
 }
 
 // CaptureCycle is what one capture cycle hands its caller: the index to commit
@@ -291,7 +300,9 @@ func (c CaptureCycle) SkipsScrollback(paneKey string) bool {
 // positional path, bar a pane whose token the pane-token rule refuses or whose
 // link or re-file failed. A failed marker read returns its wrapped error before
 // any capture is taken. A failed capture returns before anything is re-filed,
-// with the empty index, the empty pending set and the error the capture gave.
+// with the empty index, the empty pending set and the error the capture gave. A
+// refused confirmation, sent after the last capture read, returns its error and
+// an empty cycle before anything is linked or re-filed.
 func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
 	skeleton, err := ListSkeletonMarkers(c)
 	if err != nil {
@@ -301,6 +312,9 @@ func captureAndRefile(c CaptureCycleClient, dir string, prev *Index, hm HashMap,
 	capture := CaptureCycle{Index: captured.index, Pending: captured.pending, Skeleton: skeleton, Carried: captured.carried}
 	if err != nil {
 		return capture, err
+	}
+	if err := c.ConfirmAnswering(); err != nil {
+		return CaptureCycle{}, err
 	}
 	linkMovedSkeletonScrollback(dir, &capture.Index, skeleton, logger)
 	waiting := make(map[string]struct{}, len(capture.Pending)+len(captured.carriedWaiting))

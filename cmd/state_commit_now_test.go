@@ -38,6 +38,8 @@ func (f *fakeCaptureClient) ShowAllServerOptions() (string, error) {
 	return f.markers, f.markersErr
 }
 
+func (f *fakeCaptureClient) ConfirmAnswering() error { return nil }
+
 func (f *fakeCaptureClient) ListAllPanesWithFormat(_ string) (string, error) {
 	return f.rows, f.rowsErr
 }
