@@ -201,7 +201,7 @@ func tick(ctx context.Context, deps *daemonDeps) {
 	}
 
 	if err := captureAndCommit(ctx, deps); err != nil {
-		deps.Logger.Warn("tick failed", "error", err)
+		deps.Logger.Warn(cycleFailureMessage("tick", err), "error", err)
 		if err := state.TouchSaveRequested(deps.Dir); err != nil {
 			deps.Logger.Warn("touch save.requested failed", "error", err)
 		}
@@ -239,6 +239,13 @@ func maybeRunProjectCleanup(deps *daemonDeps) {
 		deps.Logger.Warn("projects stale-cleanup failed", "error", err)
 	}
 	deps.lastProjectCleanup = time.Now()
+}
+
+func cycleFailureMessage(stage string, err error) string {
+	if errors.Is(err, state.ErrTmuxStoppedAnswering) {
+		return stage + " backed off: tmux stopped answering"
+	}
+	return stage + " failed"
 }
 
 // errCycleCancelled ends a cycle whose context was cancelled mid-dump, before
@@ -376,7 +383,7 @@ func defaultShutdownFlush(deps *daemonDeps) error {
 	// Non-cancellable: the cancelled context is what triggered this flush.
 	flushErr := captureAndCommit(context.Background(), deps)
 	if flushErr != nil {
-		deps.Logger.Warn("final flush failed", "error", flushErr)
+		deps.Logger.Warn(cycleFailureMessage("final flush", flushErr), "error", flushErr)
 	}
 	deps.Logger.Info("shutdown", "reason", deps.shutdownReason(), "flush_completed", flushErr == nil)
 	return nil

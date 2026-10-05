@@ -54,7 +54,7 @@ func TestShutdownFlushReportsAConfirmationFromAnotherServerAsIncomplete(t *testi
 		t.Fatalf("defaultShutdownFlush: %v", err)
 	}
 
-	failed := sink.Records().WithMessage("final flush failed").Only(t, "final flush failure")
+	failed := sink.Records().WithMessage(finalFlushBackedOff).Only(t, "final flush back-off")
 	if err := failed.ErrorAttr(t, "error"); !errors.Is(err, state.ErrNotOwnServer) {
 		t.Errorf("final flush failure error = %v, want one wrapping ErrNotOwnServer", err)
 	}

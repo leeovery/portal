@@ -149,7 +149,7 @@ func touchAfterShortCircuit(logger *slog.Logger, dir string, touch func(string) 
 // wrapped: the cause survives as interpolated text, since portal.log is the
 // authoritative diagnostic sink and stderr stays silent.
 func failCommitNow(logger *slog.Logger, dir string, touch func(string) error, stage string, cause error) error {
-	logger.Error(stage+" failed", "error", cause)
+	logger.Error(cycleFailureMessage(stage, cause), "error", cause)
 	if terr := touch(dir); terr != nil {
 		logger.Warn("touch save.requested after commit-now failure failed", "error", terr)
 	}

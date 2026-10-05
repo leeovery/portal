@@ -265,6 +265,11 @@ type AnsweringConfirmer interface {
 	ConfirmAnswering() (int, error)
 }
 
+// ErrTmuxStoppedAnswering marks a committing cycle that stood down because tmux
+// stopped answering: its session listing failed, or its confirmation was
+// refused. Such a cycle wrote nothing and ran no housekeeping pass.
+var ErrTmuxStoppedAnswering = errors.New("tmux stopped answering")
+
 // ErrNotOwnServer is a confirmation that does not prove the committer's own
 // tmux server answered it: one answered by another server or naming none. A
 // committer that does not know its own server sends none and is refused with it.
@@ -341,7 +346,7 @@ func captureAndRefile(c CaptureCycleClient, ownServer int, dir string, prev *Ind
 		return capture, err
 	}
 	if err := confirmOwnServer(c, ownServer); err != nil {
-		return CaptureCycle{}, err
+		return CaptureCycle{}, fmt.Errorf("%w: %w", ErrTmuxStoppedAnswering, err)
 	}
 	linkMovedSkeletonScrollback(dir, &capture.Index, skeleton, logger)
 	waiting := make(map[string]struct{}, len(capture.Pending)+len(captured.carriedWaiting))

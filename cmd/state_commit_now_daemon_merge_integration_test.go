@@ -66,7 +66,7 @@ func TestCommitNowDaemonMergeStability(t *testing.T) {
 			daemonTickBudget, err, fixture.diagnostic(),
 		)
 	}
-	if strings.Contains(portaltest.ReadPortalLogSafe(fixture.stateDir), "daemon: tick failed") {
+	if logged := portaltest.ReadPortalLogSafe(fixture.stateDir); strings.Contains(logged, "daemon: tick failed") || strings.Contains(logged, "daemon: tick backed off") {
 		t.Fatalf(
 			"daemon's forced tick failed rather than committed; the reads below "+
 				"would see commit-now's sessions.json, not the daemon's\n%s\n--- portal.log ---\n%s",

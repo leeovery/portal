@@ -91,7 +91,7 @@ func captureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 
 	names, err := c.ListSessionNamesProbe()
 	if err != nil {
-		return empty, err
+		return empty, fmt.Errorf("%w: %w", ErrTmuxStoppedAnswering, err)
 	}
 
 	keep := keepSessionNames(names)

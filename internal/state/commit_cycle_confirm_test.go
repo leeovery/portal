@@ -386,3 +386,61 @@ func sessionNames(idx state.Index) []string {
 	}
 	return names
 }
+
+func TestRunCommitCycleClassifiesAStandDownAsTmuxStoppedAnswering(t *testing.T) {
+	refusedListing := &exitingServer{pid: ownServerPID, exitsAfter: exitsAfterRead("show-options")}
+	refusedConfirmation := onlyWorkLive()
+	refusedConfirmation.exitsAfter = func(args []string) bool { return args[0] == "show-environment" }
+	namingNoServer := onlyWorkLive()
+	namingNoServer.exitsAfter = exitsAfterConfirmation
+	namingNoServer.shutdownAnswers = map[string]bool{confirmRead: true}
+	anotherServer := onlyWorkLive()
+	anotherServer.pid = ownServerPID + 1
+
+	tests := []struct {
+		name   string
+		server *exitingServer
+	}{
+		{"a failed session listing", refusedListing},
+		{"a refused confirmation", refusedConfirmation},
+		{"a confirmation naming no server", namingNoServer},
+		{"a confirmation from another server", anotherServer},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			saved := seedSavedPair(t)
+
+			err := saved.runCycle(tt.server)
+
+			if !errors.Is(err, state.ErrTmuxStoppedAnswering) {
+				t.Fatalf("error = %v, want one wrapping ErrTmuxStoppedAnswering", err)
+			}
+			saved.assertUnchanged(t)
+		})
+	}
+}
+
+func TestRunCommitCycleDoesNotClassifyAFailedMarkerReadAsTmuxStoppedAnswering(t *testing.T) {
+	saved := seedSavedPair(t)
+	failing := commandertest.FromFunc(func(args ...string) (string, error) {
+		if args[0] == "show-options" {
+			return "", &tmux.CommandError{Args: args, Stderr: "lost server", Err: errors.New("exit status 1")}
+		}
+		return "", nil
+	})
+
+	_, err := state.RunCommitCycle(state.CommitCycle{
+		Client:    tmux.NewClient(failing),
+		OwnServer: ownServerPID,
+		Dir:       saved.dir,
+		LoadPrev:  func() *state.Index { return &saved.index },
+		HashMap:   state.HashMap{},
+	})
+
+	if err == nil {
+		t.Fatal("cycle returned nil, want the failed marker read")
+	}
+	if errors.Is(err, state.ErrTmuxStoppedAnswering) {
+		t.Errorf("error = %v, want a failed marker read left unclassified", err)
+	}
+}
