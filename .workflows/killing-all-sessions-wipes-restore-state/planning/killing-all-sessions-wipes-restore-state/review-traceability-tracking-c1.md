@@ -22,7 +22,7 @@ Restate the criterion in the spec's terms (§6.2, first bullet): the hook progra
 **Proposed Text**:
 - [ ] Restored eager and lazy resume-hook panes each receive SIGTERM on the pane's top process. Each pane and its session stay up. The hook program and the user's shell started afterwards receive SIGTERM with default handling: each starts with SIGTERM at its default disposition, not inherited as ignored.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
