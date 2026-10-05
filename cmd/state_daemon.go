@@ -339,6 +339,11 @@ func (d *scrollbackDump) dumpPane(session string, windowIdx, paneIdx int, paneKe
 		d.deps.Logger.Warn("capture pane failed", "pane_key", paneKey, "error", err)
 		return false
 	}
+	if err := state.ConfirmEmptyCapture(d.deps.Client, d.deps.OwnServer, d.deps.Dir, paneKey, data); err != nil {
+		d.anomalous++
+		d.deps.Logger.Warn("empty capture not confirmed; saved transcript kept", "pane_key", paneKey, "error", err)
+		return false
+	}
 	written, err := state.WriteScrollbackIfChanged(d.deps.Dir, paneKey, data, hash, d.deps.HashMap)
 	if err != nil {
 		d.anomalous++

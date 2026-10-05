@@ -62,6 +62,9 @@ type daemonFakeCommander struct {
 	// answeringPID is the server pid the confirmation names; zero answers as
 	// the committer's own server, fakeOwnServerPID.
 	answeringPID int
+	// silentConfirm answers the confirmation read with exit status 0 and no
+	// output, the way an exiting tmux can.
+	silentConfirm bool
 
 	// Invoked after every dispatch resolution, so a cancellation test can fire
 	// cancel() while a tmux subcall is in flight.
@@ -125,6 +128,9 @@ func (c *daemonFakeCommander) dispatch(args []string) (string, error) {
 	case "display-message":
 		if c.confirmErr != nil {
 			return "", c.confirmErr
+		}
+		if c.silentConfirm {
+			return "", nil
 		}
 		if c.answeringPID != 0 {
 			return strconv.Itoa(c.answeringPID), nil

@@ -294,6 +294,35 @@ func confirmOwnServer(c AnsweringConfirmer, ownServer int) error {
 	return nil
 }
 
+// ErrUnconfirmedEmptyCapture refuses an empty capture over a non-empty saved
+// transcript that the committer's own tmux server did not confirm.
+var ErrUnconfirmedEmptyCapture = errors.New("empty capture over a saved transcript not confirmed")
+
+// ConfirmEmptyCapture returns nil when data, just captured for paneKey, may be
+// written over the pane's saved transcript. Only an empty capture over a saved
+// file that may hold bytes needs confirming, and it is confirmed only when
+// ownServer answers a read sent after the capture: an exiting tmux can answer a
+// capture already in flight with exit status 0 and no output. A refusal returns
+// an error wrapping ErrUnconfirmedEmptyCapture and the confirmation's cause.
+func ConfirmEmptyCapture(c AnsweringConfirmer, ownServer int, dir, paneKey string, data []byte) error {
+	if len(data) > 0 || !savedTranscriptMayHoldBytes(ScrollbackFile(dir, paneKey)) {
+		return nil
+	}
+	if err := confirmOwnServer(c, ownServer); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnconfirmedEmptyCapture, err)
+	}
+	return nil
+}
+
+// A file that cannot be inspected is presumed to hold bytes.
+func savedTranscriptMayHoldBytes(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return !errors.Is(err, fs.ErrNotExist)
+	}
+	return info.Size() > 0
+}
+
 // CaptureCycle is what one capture cycle hands its caller: the index to commit
 // and the sets of pane keys the caller's own scrollback dump must skip.
 type CaptureCycle struct {
