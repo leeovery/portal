@@ -88,7 +88,10 @@
           },
           "staging": {},
           "external_id": "tick-6dd578",
-          "review_baseline_words": 12466
+          "review_baseline_words": 12466,
+          "tracking": {
+            "review-traceability-tracking-c1": "in-progress"
+          }
         }
       }
     }
