@@ -27,6 +27,19 @@ status: draft
 - [ ] The session listing fails at bootstrap. Restore rebuilds every session from the saved state, and no empty commit follows it. The picker, the resolver and shell completion still read a failed listing as "no sessions".
 - [ ] Several live sessions are killed one at a time. Each kill removes that session and its scrollback, and the last kill leaves zero sessions and zero scrollback files. The next hook-staleness sweep reaps the killed sessions' resume hooks. The empty-save contract tests listed in §5.1 still pass.
 
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killing-all-sessions-wipes-restore-state-1-1 | Failed session listing stands the commit cycle down | restore with a failed listing still rebuilds every session from the saved state and no empty commit follows it (§2.1, §6.1), the picker, the resolver and shell completion still read a failed listing as no sessions (§2.1, §5.1) |
+| killing-all-sessions-wipes-restore-state-1-2 | A refused confirmation read stands the commit cycle down | a confirmation answered with exit 0 and no output still counts (§2.2, §6.1), an empty `list-sessions` (exit 0, no output) from a server that then refuses connections writes nothing (§2.2, §6.1), an empty `list-panes` beside an environment read that still succeeds writes no windowless session and deletes no scrollback (§2.2, §6.1), a confirmed empty listing still commits the empty index (§5.1) |
+| killing-all-sessions-wipes-restore-state-1-3 | The confirmation counts only from the committer's own server | `portal uninstall` kills `_portal-saver` on a running server and the shutdown flush still commits and reports `flush_completed=true` (§2.2, §6.1), a new server on the same socket that answers capture reads or the confirmation before its restore has run gets nothing written (§2.2, §6.1), commit-now's own server is the one whose `session-closed` hook ran it (§2.2) |
+| killing-all-sessions-wipes-restore-state-1-4 | Each committer reports a stand-down through its existing failure route with a back-off line | a kill whose `commit-now` stood down is committed by the daemon's next tick (§5.1, §5.2), a transient listing failure on a healthy server delays the save by one tick (§2.5), the existing WARN lines for a failed restore-marker read stay as they are (§4.2), a marker that reads as set logs nothing new (§4.2) |
+| killing-all-sessions-wipes-restore-state-1-5 | The daemon's dump never writes an unconfirmed empty capture over a saved transcript | a confirmed empty capture still replaces the saved transcript (§2.4), the confirming read must be answered by the server that answered the capture (§2.4) |
+| killing-all-sessions-wipes-restore-state-1-6 | A stand-down never leaves sessions.json naming a missing scrollback file | a stand-down injected after the capture cycle's renames (§2.3, §6.1), a stand-down at shutdown where no later cycle runs to repair the record (§2.3) |
+| killing-all-sessions-wipes-restore-state-1-7 | Kill path stays final under the hardened save path | the last user session's kill commits the empty state while tmux keeps running for `_portal-saver` and `_portal-bootstrap` (§5.1), the next hook-staleness sweep reaps the killed sessions' resume hooks (§1.1, §6.4), the three empty-save contract tests listed in §5.1 stay green and unchanged (§5.1) |
+| killing-all-sessions-wipes-restore-state-1-8 | Shutdown orderings against real tmux preserve the full saved state | the trials run at the production default log level with nothing wrapping `tmux` (§6.5), survival under `kill-server` no longer depends on which read fails first (§2.2, §6.5) |
+
 ### Phase 2: Portal's resume-hook panes outlast the shutdown signal, and every dropped session is logged by name
 status: draft
 
