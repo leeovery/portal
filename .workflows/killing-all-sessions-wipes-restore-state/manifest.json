@@ -166,7 +166,8 @@
             "killing-all-sessions-wipes-restore-state-3-1",
             "killing-all-sessions-wipes-restore-state-3-2",
             "killing-all-sessions-wipes-restore-state-3-3",
-            "killing-all-sessions-wipes-restore-state-3-4"
+            "killing-all-sessions-wipes-restore-state-3-4",
+            "killing-all-sessions-wipes-restore-state-3-5"
           ],
           "staging": {
             "p1": {
@@ -195,7 +196,8 @@
           ],
           "completed_phases": [
             1,
-            2
+            2,
+            3
           ]
         }
       }
