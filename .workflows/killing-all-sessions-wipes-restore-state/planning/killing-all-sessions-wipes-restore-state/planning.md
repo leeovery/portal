@@ -123,3 +123,13 @@ status: draft
 | killing-all-sessions-wipes-restore-state-6-2 | Each Commit Cycle Merges And Carries From The Index It Read Under The Lock | an answered pane in a carried session keeps naming its token-named transcript, which stays on disk, from the tick and the shutdown flush (§2.4, §1.1), a stale and a fresh in-memory index commit the same index and files for skeleton-marked, waiting and carried panes (§2.4), a readable `sessions.json` never calls `LoadPrev` (§2.4), an absent or undecodable `sessions.json` calls `LoadPrev` once under the lock and `commit-now` keeps its WARN lines (§2.4), the lag repairs and the uncommitted-end tests stand (§2.3) |
 | killing-all-sessions-wipes-restore-state-6-3 | Commit-Now's Previous-Index Loader Is Reduced To The Fallback It Now Is | an absent and an undecodable `sessions.json` each commit from a zero-value previous index with their WARN text unchanged, a readable `sessions.json` runs the real cycle with no `LoadPrev` call and neither WARN, the stand-in cycle calls `LoadPrev` only over an absent or undecodable file, the byte-identical-on-failed-commit test's undecodable seed still sends the stand-in through `LoadPrev`, no test is added and no surviving test's assertions change |
 | killing-all-sessions-wipes-restore-state-6-4 | Corrections | each old sentence in the `state` row is replaced in place between its neighbouring sentences, neither old phrase is found in CLAUDE.md afterwards, no other CLAUDE.md text and no Go source or test file changes |
+
+### Phase 7: Analysis (Cycle 5)
+
+**Goal**: Address findings from Analysis (Cycle 5).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killing-all-sessions-wipes-restore-state-7-1 | A Pane Restored Away From Its Saved Address Keeps Its Transcript Until A Confirmed Save Replaces It | an empty capture whose confirmation is refused, answered by another server or naming no server keeps the saved file and writes nothing at the live positional path, a refused `capture-pane`, a dump-less `commit-now` or a dump-less flush keeps every later commit naming the saved file, a confirmed write files the pane at its positional path and reclaims the old file, a saved file another record names leaves the tokened pane judged at its own positional file with no file on two records, a tokenless pane restored one window lower is judged at its own positional file, an answered lazy pane on its token-named transcript is held exactly as today |
