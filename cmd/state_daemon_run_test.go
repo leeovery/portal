@@ -702,7 +702,7 @@ func TestDaemonTick_CapturesOnALaterTickAfterAMarkerReadFailure(t *testing.T) {
 
 	tick(t.Context(), deps)
 
-	sink.Records().Matching("daemon", "tick failed").AtExactLevel(slog.LevelWarn).Only(t, "tick failed WARN")
+	sink.Records().Matching("daemon", tickBackedOff).AtExactLevel(slog.LevelWarn).Only(t, "tick back-off WARN")
 	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
 		t.Errorf("list-sessions invoked after a failed marker read: %v", got)
 	}
@@ -762,8 +762,8 @@ func TestDaemonTick_LogsAndSkipsOnShowOptionsError(t *testing.T) {
 	tick(t.Context(), deps)
 
 	got := sink.Body()
-	if !strings.Contains(got, "tick failed") {
-		t.Errorf("expected tick failure log entry; got:\n%s", got)
+	if !strings.Contains(got, tickBackedOff) {
+		t.Errorf("expected tick back-off log entry; got:\n%s", got)
 	}
 	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
 		t.Errorf("sessions.json should not be written on list-markers error; stat=%v", err)

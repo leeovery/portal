@@ -420,27 +420,35 @@ func TestRunCommitCycleClassifiesAStandDownAsTmuxStoppedAnswering(t *testing.T) 
 	}
 }
 
-func TestRunCommitCycleDoesNotClassifyAFailedMarkerReadAsTmuxStoppedAnswering(t *testing.T) {
-	saved := seedSavedPair(t)
-	failing := commandertest.FromFunc(func(args ...string) (string, error) {
-		if args[0] == "show-options" {
-			return "", &tmux.CommandError{Args: args, Stderr: "lost server", Err: errors.New("exit status 1")}
-		}
-		return "", nil
-	})
+func TestRunCommitCycleClassifiesARefusedCaptureReadAsTmuxStoppedAnswering(t *testing.T) {
+	refusedMarkers := &exitingServer{pid: ownServerPID, exited: true}
+	refusedPanes := &exitingServer{pid: ownServerPID, sessions: listSessionsFor("work"), exitsAfter: exitsAfterRead("list-sessions")}
 
-	_, err := state.RunCommitCycle(state.CommitCycle{
-		Client:    tmux.NewClient(failing),
-		OwnServer: ownServerPID,
-		Dir:       saved.dir,
-		LoadPrev:  func() *state.Index { return &saved.index },
-		HashMap:   state.HashMap{},
-	})
-
-	if err == nil {
-		t.Fatal("cycle returned nil, want the failed marker read")
+	tests := []struct {
+		name     string
+		server   *exitingServer
+		wantRead string
+	}{
+		{"a refused skeleton-marker read", refusedMarkers, "show-options"},
+		{"a refused pane listing", refusedPanes, "list-panes"},
 	}
-	if errors.Is(err, state.ErrTmuxStoppedAnswering) {
-		t.Errorf("error = %v, want a failed marker read left unclassified", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			saved := seedSavedPair(t)
+
+			err := saved.runCycle(tt.server)
+
+			if !errors.Is(err, state.ErrTmuxStoppedAnswering) {
+				t.Fatalf("error = %v, want one wrapping ErrTmuxStoppedAnswering", err)
+			}
+			cmdErr, ok := errors.AsType[*tmux.CommandError](err)
+			if !ok || cmdErr.Stderr != "no server running" || cmdErr.Args[0] != tt.wantRead {
+				t.Errorf("error = %v, want the refused %s read reachable through it", err, tt.wantRead)
+			}
+			if got := tt.server.callNames(); got[len(got)-1] != tt.wantRead {
+				t.Errorf("reads = %v, want the cycle to end at the refused %s", got, tt.wantRead)
+			}
+			saved.assertUnchanged(t)
+		})
 	}
 }

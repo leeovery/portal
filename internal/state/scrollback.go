@@ -243,8 +243,9 @@ type AnsweringConfirmer interface {
 }
 
 // ErrTmuxStoppedAnswering marks a committing cycle that stood down because tmux
-// stopped answering: its session listing failed, or its confirmation was
-// refused. Such a cycle wrote nothing and ran no housekeeping pass.
+// stopped answering: one of its capture reads failed — the skeleton markers,
+// the session listing or the pane listing — or its confirmation was refused.
+// Such a cycle wrote nothing and ran no housekeeping pass.
 var ErrTmuxStoppedAnswering = errors.New("tmux stopped answering")
 
 // ErrNotOwnServer is a confirmation that does not prove the committer's own
@@ -335,16 +336,17 @@ func (c CaptureCycle) SkipsScrollback(paneKey string) bool {
 // can commit an index that omits a mid-restore pane's record, has two records
 // naming one scrollback file, or still names a waiting pane's positional
 // path, bar a pane whose token the pane-token rule refuses or whose link or
-// re-file failed. A failed marker read returns its wrapped error before
-// any capture is taken. A failed capture returns before anything is re-filed,
-// with the empty index, the empty pending set and the error the capture gave. A
+// re-file failed. A failed marker read returns its error, wrapped in
+// ErrTmuxStoppedAnswering, before any capture is taken. A failed capture
+// returns before anything is re-filed, with the empty index, the empty pending
+// set and the error the capture gave. A
 // refused confirmation, sent after the last capture read, returns its error and
 // an empty cycle before anything is linked or re-filed; so does one not
 // answered by ownServer, the pid of the committer's own tmux server.
 func captureAndRefile(c CaptureCycleClient, ownServer int, dir string, prev *Index, hm HashMap, logger *slog.Logger) (CaptureCycle, error) {
 	skeleton, err := ListSkeletonMarkers(c)
 	if err != nil {
-		return CaptureCycle{}, fmt.Errorf("list skeleton markers: %w", err)
+		return CaptureCycle{}, fmt.Errorf("%w: list skeleton markers: %w", ErrTmuxStoppedAnswering, err)
 	}
 	captured, err := captureStructure(c, skeleton, prev, logger)
 	capture := CaptureCycle{Index: captured.index, Pending: captured.pending, Skeleton: skeleton, Carried: captured.carried}

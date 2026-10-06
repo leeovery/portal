@@ -94,7 +94,7 @@ func TestDaemonTick_WarnsWhenReRaisingSaveRequestedAfterAFailedCycleFails(t *tes
 
 	tick(t.Context(), deps)
 
-	sink.Records().Matching("daemon", "tick failed").AtExactLevel(slog.LevelWarn).Only(t, "tick failed WARN")
+	sink.Records().Matching("daemon", tickBackedOff).AtExactLevel(slog.LevelWarn).Only(t, "tick back-off WARN")
 	sink.Records().Matching("daemon", "touch save.requested failed").AtExactLevel(slog.LevelWarn).Only(t, "failed re-raise WARN")
 	if n := len(sink.Records().AtOrAboveLevel(slog.LevelWarn)); n != 2 {
 		t.Errorf("WARN records = %d, want 2 in:\n%s", n, sink.Body())
