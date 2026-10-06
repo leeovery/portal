@@ -80,7 +80,8 @@
             "killing-all-sessions-wipes-restore-state-3-1": "tick-ecdc01",
             "killing-all-sessions-wipes-restore-state-3-2": "tick-b26f2c",
             "killing-all-sessions-wipes-restore-state-3-3": "tick-8c440b",
-            "killing-all-sessions-wipes-restore-state-3-4": "tick-ec62c6"
+            "killing-all-sessions-wipes-restore-state-3-4": "tick-ec62c6",
+            "killing-all-sessions-wipes-restore-state-3-5": "tick-bc5cc6"
           },
           "storage_paths": [
             ".tick/"
@@ -195,18 +196,6 @@
           "completed_phases": [
             1,
             2
-          ],
-          "bank": [
-            {
-              "task": "killing-all-sessions-wipes-restore-state-3-4",
-              "source": "reviewer",
-              "summary": "TestStateCommitNow_ACarryOntoALiveSessionsNameFailsTheCommit passes without checking the carry-collision refusal",
-              "failure": "With no own server set, a carry collision that slipped through stands down on own server unknown, which also returns errCommitNowFailed and leaves state unchanged; a regression putting two sessions under one name or dropping a waiting pane transcript on the commit-now path ships with the test green, noticed only when a transcript is missing after a restore",
-              "detail": "cmd/state_carry_missed_session_test.go:190-221 never calls withOwnTmuxServer; its fakeCaptureClient answers the confirmation as fakeOwnServerPID (cmd/state_commit_now_test.go:41). Mutating the errCarryNameTaken return at internal/state/capture.go:208 into a no-op leaves the test passing; adding withOwnTmuxServer(t, fakeOwnServerPID) makes it fail as it should (error = nil, want errCommitNowFailed); the daemon-tick sibling TestDaemonTick_ACarryOntoALiveSessionsNameFailsTheTick already fails correctly",
-              "files": [
-                "cmd/state_carry_missed_session_test.go"
-              ]
-            }
           ]
         }
       }
