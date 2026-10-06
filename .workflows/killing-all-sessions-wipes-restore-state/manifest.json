@@ -107,7 +107,7 @@
           "fix_attempts": 0,
           "analysis_cycle_total": 0,
           "current_phase": 2,
-          "current_task": "killing-all-sessions-wipes-restore-state-2-4",
+          "current_task": "killing-all-sessions-wipes-restore-state-2-5",
           "project_skills": [
             ".claude/skills/golang-how-to",
             ".claude/skills/golang-testing",
@@ -150,7 +150,8 @@
             "killing-all-sessions-wipes-restore-state-1-9",
             "killing-all-sessions-wipes-restore-state-2-1",
             "killing-all-sessions-wipes-restore-state-2-2",
-            "killing-all-sessions-wipes-restore-state-2-3"
+            "killing-all-sessions-wipes-restore-state-2-3",
+            "killing-all-sessions-wipes-restore-state-2-4"
           ],
           "staging": {
             "p1": {
@@ -196,6 +197,18 @@
               "summary": "CLAUDE.md Resume hooks section describes the resume shells as they were before Tasks 2.1-2.3",
               "failure": "A contributor or agent reading CLAUDE.md takes the parked chain as trap : INT QUIT and the eager shell as untrapped, concludes SIGTERM kills both panes, and may build a change that drops the TERM handling; no test reads CLAUDE.md",
               "detail": "CLAUDE.md:192 shows /bin/sh -c trap : INT QUIT; <draw argv>; ... and says the trap covers a group interrupt or quit; the eager shell is shown as sh -c <HOOK>; exec $SHELL though hookExecArgs now prefixes trap : TERM; (cmd/state_resume_chain.go:213); neither mentions the draw and waiter SIGTERM catch from Task 2.2",
+              "files": [
+                "CLAUDE.md",
+                "cmd/state_hydrate.go",
+                "cmd/state_resume_chain.go"
+              ]
+            },
+            {
+              "task": "killing-all-sessions-wipes-restore-state-2-4",
+              "source": "reviewer",
+              "summary": "CLAUDE.md Resume hooks paragraph omits the TERM traps and the parked chain redraw loop",
+              "failure": "An agent working from CLAUDE.md thinks the draw runs once and the shells have no trap, and may restore the documented shape or remove the loop, bringing back transcript loss on reboot; noticed only when a reboot loses a waiting pane scrollback",
+              "detail": "CLAUDE.md line 192 (parked-chain and eager-shell descriptions); current code: parkedChainTrap / parkedChainDraw / parkedResumeChain in cmd/state_hydrate.go:281-351, hookShellTrap / hookExecArgs in cmd/state_resume_chain.go:213-221",
               "files": [
                 "CLAUDE.md",
                 "cmd/state_hydrate.go",
