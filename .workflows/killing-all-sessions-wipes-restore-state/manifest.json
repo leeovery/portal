@@ -125,7 +125,7 @@
           "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 5,
-          "current_phase": 6,
+          "current_phase": 7,
           "current_task": null,
           "project_skills": [
             ".claude/skills/golang-how-to",
@@ -188,7 +188,8 @@
             "killing-all-sessions-wipes-restore-state-6-1",
             "killing-all-sessions-wipes-restore-state-6-2",
             "killing-all-sessions-wipes-restore-state-6-3",
-            "killing-all-sessions-wipes-restore-state-6-4"
+            "killing-all-sessions-wipes-restore-state-6-4",
+            "killing-all-sessions-wipes-restore-state-7-1"
           ],
           "staging": {
             "p1": {
@@ -254,6 +255,32 @@
             4,
             5,
             6
+          ],
+          "bank": [
+            {
+              "task": "killing-all-sessions-wipes-restore-state-7-1",
+              "source": "reviewer",
+              "summary": "When restore closes a window-index gap with two or more windows after it, the hold protects only the last shifted pane; every other shifted tokened pane falls under AC 4's carve-out, so the task's stated Outcome does not hold for them.",
+              "failure": "Saved windows 0, 2, 3 restore as 0, 1, 2. If shutdown lands in the first save after hydration, pane A (2→1) is judged at the absent work__1.0.bin and its empty capture is written with no confirmation. Its saved work__2.0.bin is B's live positional file, and B is held on work__3.0.bin, so no committed record names work__2.0.bin and housekeeping deletes it (or B's later write replaces it). The user finds that pane restored with an empty scrollback after reboot — the same loss this task set out to fix. Reproduced in a scratch copy with the current code: the commit named work__1.0.bin (empty) for A and work__3.0.bin for B, and work__2.0.bin was gone.",
+              "detail": "The general fix mirrors linkMovedSkeletonScrollback (internal/state/scrollback.go:180-231): when a hold candidate's committed file is named by another capture record, link it to PendingScrollbackFile(token) and hold the pane there, instead of dropping the hold. This contradicts task 7-1's AC 4 ('judged at its own positional file as today'), so it needs a plan or spec decision. Hold sites: internal/state/commit_cycle.go:162-191; the AC 4 pin is internal/state/commit_cycle_moved_test.go:324-372, whose case 'another moved pane is live at the saved address' currently asserts the lossy outcome.",
+              "files": [
+                "internal/state/commit_cycle.go",
+                "internal/state/scrollback.go",
+                "internal/state/commit_cycle_moved_test.go"
+              ]
+            },
+            {
+              "task": "killing-all-sessions-wipes-restore-state-7-1",
+              "source": "reviewer",
+              "summary": "When a restore shifts two or more consecutive windows, every shifted pane except the last in the run is still unprotected; criterion 4 leaves these panes unprotected on purpose.",
+              "failure": "Restore recreates windows in sequence (internal/restore/session.go:98-110). Saved windows 0,2,3 come back as 0,1,2: pane A moves 2.0→1.0, pane B 3.0→2.0. B's fresh record names S__2.0.bin (A's saved file), so A is not held; B is held on S__3.0.bin, so nothing names S__2.0.bin. If a shutdown, refused capture-pane or commit-now lands in the first save after hydration, A's empty capture is written to the absent S__1.0.bin with no confirmation and housekeeping deletes S__2.0.bin; A comes back with no scrollback after the next reboot. Same for every shifted pane but the last, and for a base-index change (run shifts upward).",
+              "detail": "Holding A on S__2.0.bin is unsafe as things stand: B's confirmed write lands on its positional path S__2.0.bin and would replace A's held file. Likely direction mirrors linkMovedSkeletonScrollback/linkMovedPane (internal/state/scrollback.go:180-231) for writable panes: when another capture record names a tokened pane's saved file, hard-link it to PendingScrollbackFile(token) before the dump and hold the pane there; the own-token hold then covers it and B's atomic replace leaves A's inode under the token name. Care needed: a cycle that writes B then ends uncommitted leaves sessions.json naming S__2.0.bin for A while that path holds B's bytes. The test case 'another moved pane is live at the saved address' (internal/state/commit_cycle_moved_test.go:334) encodes the unprotected outcome as expected.",
+              "files": [
+                "internal/state/commit_cycle.go",
+                "internal/state/scrollback.go",
+                "internal/state/commit_cycle_moved_test.go"
+              ]
+            }
           ]
         }
       }
