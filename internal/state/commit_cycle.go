@@ -107,10 +107,9 @@ func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool,
 // from that one index.
 //
 // A tokened pane whose last committed record names a file other than its live
-// positional file — its token-named transcript, or another address's
-// positional file no other record names — keeps that file on its record until
-// a dump writes its new capture, so no commit leaves the pane's record off the
-// file holding its bytes.
+// positional file keeps those bytes on its record, under its token-named
+// transcript, until a dump writes its new capture — unless that file cannot be
+// linked under its token, or another such pane's last record names it too.
 func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	lock, err := acquireCommitLock(cycle.Dir)
 	if err != nil {
@@ -128,7 +127,7 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 		return capture, fmt.Errorf("capture: %w", err)
 	}
 	if prev != nil {
-		keepAnsweredTranscripts(&capture, *prev)
+		keepAnsweredTranscripts(&capture, *prev, cycle.Dir, cycle.Logger)
 	}
 	changed := false
 	if cycle.Dump != nil {
@@ -155,14 +154,17 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 // keepAnsweredTranscripts points each tokened pane the dump may write back at
 // the file its record in from, matched on its token, names when that file is
 // not the pane's live positional file: that file holds the pane's bytes, and
-// housekeeping would delete it once no record named it. No such pane is held
-// on a file another record in the capture names or another such pane claims,
-// so no commit names one file on two records. A pane's own token-named
-// transcript is held whatever else names it.
-func keepAnsweredTranscripts(capture *CaptureCycle, from Index) {
+// housekeeping would delete it once no record named it. A pane's own
+// token-named transcript is held whatever else names it, so any other such
+// file is first given a second name under the pane's token: a later write to
+// the original name replaces that name and leaves the pane's bytes under the
+// token. A pane whose file cannot be linked, or which another such pane claims,
+// is held only on a file no other record in the capture names and no other
+// such pane claims, so no commit names one file on two records.
+func keepAnsweredTranscripts(capture *CaptureCycle, from Index, dir string, logger *slog.Logger) {
 	byToken, _ := indexPrevPanes(from, nil)
 	named := recordsPerScrollbackFile(capture.Index)
-	holds := map[*Pane]string{}
+	holds := map[*Pane]heldFile{}
 	claims := map[string]int{}
 	for si := range capture.Index.Sessions {
 		s := &capture.Index.Sessions[si]
@@ -178,16 +180,44 @@ func keepAnsweredTranscripts(capture *CaptureCycle, from Index) {
 				if !found || record.ScrollbackFile == "" || record.ScrollbackFile == p.ScrollbackFile {
 					continue
 				}
-				holds[p] = record.ScrollbackFile
+				holds[p] = heldFile{paneKey: key, stored: record.ScrollbackFile}
 				claims[record.ScrollbackFile]++
 			}
 		}
 	}
-	for p, file := range holds {
+	logger = loggerOrDiscard(logger)
+	for p, held := range holds {
+		file := held.stored
+		if claims[file] == 1 {
+			file = linkHeldTranscript(dir, held, p.PortalPaneID, logger)
+		}
 		if file == PendingScrollbackFile(p.PortalPaneID) || (named[file] == 0 && claims[file] == 1) {
 			p.ScrollbackFile = file
 		}
 	}
+}
+
+type heldFile struct {
+	paneKey string
+	stored  string
+}
+
+// linkHeldTranscript returns the pane's token-named transcript once held.stored
+// is linked to it, and held.stored itself when the token is one the pane-token
+// rule refuses or the link fails.
+func linkHeldTranscript(dir string, held heldFile, token string, logger *slog.Logger) string {
+	if _, ok := PendingScrollbackPath(dir, token); !ok {
+		return held.stored
+	}
+	tokenPath := PendingScrollbackFile(token)
+	if held.stored == tokenPath {
+		return tokenPath
+	}
+	if err := linkStoredScrollback(dir, held.stored, tokenPath); err != nil {
+		logger.Warn("link held scrollback failed", "pane_key", held.paneKey, "path", held.stored, "error", err)
+		return held.stored
+	}
+	return tokenPath
 }
 
 // heldTranscripts maps the key of every tokened pane the dump may write whose

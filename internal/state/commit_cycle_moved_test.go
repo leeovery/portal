@@ -176,22 +176,45 @@ func assertNoFileOnTwoRecords(t *testing.T, idx state.Index) {
 	}
 }
 
+func tokenFile(token string) string { return "pane-" + token + ".bin" }
+
+func savedBytes(p movedPane) string { return movedTranscript + "-" + p.key() }
+
+// assertHeldOnTranscript checks the committed record at live names the moved
+// pane's token-named transcript, holding the bytes saved at saved.
+func assertHeldOnTranscript(t *testing.T, dir string, committed state.Index, saved, live movedPane) {
+	t.Helper()
+	if got, want := recordAt(t, committed, live).ScrollbackFile, state.PendingScrollbackFile(live.token); got != want {
+		t.Errorf("sessions.json names %q for the pane moved to %s, want its token-named transcript %q", got, live.key(), want)
+	}
+	if got := readScrollback(t, dir, tokenFile(live.token)); got != savedBytes(saved) {
+		t.Errorf("token-named transcript of %s = %q, want its saved bytes", live.key(), got)
+	}
+}
+
 // assertMovedKeptOnSaved checks the committed state keeps the moved pane on
-// its saved file, holding its saved bytes, with nothing at its live file.
+// its token-named transcript, holding its saved bytes, with nothing at its
+// live file.
 func assertMovedKeptOnSaved(t *testing.T, dir string, saved, live movedPane) {
 	t.Helper()
 	committed := onDiskIndex(t, dir)
-	if got := recordAt(t, committed, live).ScrollbackFile; got != saved.stored() {
-		t.Errorf("sessions.json names %q for the moved pane, want its saved file %q", got, saved.stored())
-	}
-	if got := readScrollback(t, dir, saved.file()); got != movedTranscript+"-"+saved.key() {
-		t.Errorf("saved file = %q, want its saved bytes", got)
-	}
+	assertHeldOnTranscript(t, dir, committed, saved, live)
 	if !scrollbackAbsent(t, dir, live.file()) {
 		t.Errorf("%s written at the moved pane's live positional path", live.file())
 	}
 	assertSavedScrollbackPresent(t, dir)
 	assertNoFileOnTwoRecords(t, committed)
+}
+
+// emptyCaptureRefusals are the answers to the read sent after an empty
+// capture that do not confirm it.
+var emptyCaptureRefusals = []struct {
+	name  string
+	later func() (int, error)
+}{
+	{"refused", func() (int, error) { return 0, errors.New("server exited") }},
+	{"answered by another server on the socket", func() (int, error) { return ownServerPID + 1, nil }},
+	{"answered naming no server", func() (int, error) { return 0, nil }},
 }
 
 type paneMove struct {
@@ -208,16 +231,8 @@ func paneMoves() []paneMove {
 }
 
 func TestRunCommitCycleKeepsAMovedPanesTranscriptOverAnUnconfirmedEmptyCapture(t *testing.T) {
-	refusals := []struct {
-		name  string
-		later func() (int, error)
-	}{
-		{"refused", func() (int, error) { return 0, errors.New("server exited") }},
-		{"answered by another server on the socket", func() (int, error) { return ownServerPID + 1, nil }},
-		{"answered naming no server", func() (int, error) { return 0, nil }},
-	}
 	for _, move := range paneMoves() {
-		for _, refusal := range refusals {
+		for _, refusal := range emptyCaptureRefusals {
 			t.Run(move.name+", the read after the empty capture "+refusal.name, func(t *testing.T) {
 				dir := t.TempDir()
 				seed := seedMoved(t, dir, move.saved)
@@ -315,15 +330,19 @@ func TestRunCommitCycleFilesAMovedPaneAtItsLivePositionalFileOnceItsCaptureIsWri
 				if !scrollbackAbsent(t, dir, move.saved.file()) {
 					t.Errorf("%s still on disk once a commit naming the live capture ran its housekeeping", move.saved.file())
 				}
+				if !scrollbackAbsent(t, dir, tokenFile(move.live.token)) {
+					t.Errorf("token-named transcript still on disk once a commit naming the live capture ran its housekeeping")
+				}
 				assertSavedScrollbackPresent(t, dir)
 			})
 		}
 	}
 }
 
-func TestRunCommitCycleJudgesAMovedPaneAtItsOwnPositionalFileWhenAnotherRecordNamesItsSavedFile(t *testing.T) {
+func TestRunCommitCycleHoldsAMovedPaneOnItsTranscriptWhenAnotherRecordNamesItsSavedFile(t *testing.T) {
 	saved := movedPane{"work", 2, 0, waitingPaneToken}
 	live := movedPane{"work", 1, 0, waitingPaneToken}
+	otherSaved := movedPane{"work", 3, 0, otherMovedToken}
 	cases := []struct {
 		name     string
 		saved    []movedPane
@@ -331,7 +350,7 @@ func TestRunCommitCycleJudgesAMovedPaneAtItsOwnPositionalFileWhenAnotherRecordNa
 		heldOn   string
 	}{
 		{"a new pane occupies the saved address", []movedPane{saved}, movedPane{"work", 2, 0, ""}, ""},
-		{"another moved pane is live at the saved address", []movedPane{saved, {"work", 3, 0, otherMovedToken}}, movedPane{"work", 2, 0, otherMovedToken}, "scrollback/work__3.0.bin"},
+		{"another moved pane is live at the saved address", []movedPane{saved, otherSaved}, movedPane{"work", 2, 0, otherMovedToken}, state.PendingScrollbackFile(otherMovedToken)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -345,22 +364,23 @@ func TestRunCommitCycleJudgesAMovedPaneAtItsOwnPositionalFileWhenAnotherRecordNa
 				t.Fatalf("RunCommitCycle: %v", err)
 			}
 
-			if !written || writeErr != nil {
-				t.Errorf("Write = %t, %v; want a write", written, writeErr)
+			if written || !errors.Is(writeErr, state.ErrUnconfirmedEmptyCapture) {
+				t.Errorf("Write = %t, %v; want a refusal wrapping ErrUnconfirmedEmptyCapture", written, writeErr)
 			}
-			if client.laterReads != 0 {
-				t.Errorf("confirmation reads after the capture = %d, want none", client.laterReads)
+			if client.laterReads != 1 {
+				t.Errorf("confirmation reads after the capture = %d, want 1", client.laterReads)
 			}
 			committed := onDiskIndex(t, dir)
-			if got := recordAt(t, committed, live).ScrollbackFile; got != live.stored() {
-				t.Errorf("sessions.json names %q for the tokened pane, want its own positional file", got)
-			}
-			if got := readScrollback(t, dir, live.file()); got != "" {
-				t.Errorf("own positional file = %q, want the empty capture", got)
+			assertHeldOnTranscript(t, dir, committed, saved, live)
+			if !scrollbackAbsent(t, dir, live.file()) {
+				t.Errorf("%s written at the moved pane's live positional path", live.file())
 			}
 			wantOccupant := tc.occupant.stored()
 			if tc.heldOn != "" {
 				wantOccupant = tc.heldOn
+				if got := readScrollback(t, dir, tokenFile(otherMovedToken)); got != savedBytes(otherSaved) {
+					t.Errorf("occupant's token-named transcript = %q, want its saved bytes", got)
+				}
 			}
 			if got := recordAt(t, committed, tc.occupant).ScrollbackFile; got != wantOccupant {
 				t.Errorf("sessions.json names %q for the occupant, want %q", got, wantOccupant)
