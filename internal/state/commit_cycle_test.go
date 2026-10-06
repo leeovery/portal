@@ -210,8 +210,8 @@ func awaitSignal(t *testing.T, ch <-chan struct{}, what string) {
 	}
 }
 
-// commitNowCycle is the cycle `portal state commit-now` runs: the previous index
-// read from disk, and no dump. prevs records each index it read.
+// commitNowCycle is the cycle `portal state commit-now` runs, with no dump.
+// prevs records each index its LoadPrev fallback loads.
 func commitNowCycle(t *testing.T, client *worldClient, dir string, prevs *[]state.Index) state.CommitCycle {
 	return state.CommitCycle{
 		OwnServer: ownServerPID,

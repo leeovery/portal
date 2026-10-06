@@ -420,8 +420,8 @@ var stateDaemonCmd = &cobra.Command{
 
 		hm := state.SeedHashMap(dir, logger)
 
-		// Skeleton-marked panes merge from this pre-boot state during the first
-		// capture.
+		// The previous index a cycle falls back on when it cannot read
+		// sessions.json itself.
 		var prevIdx *state.Index
 		if idx, skip, err := state.ReadIndex(dir); !skip {
 			prevIdx = &idx

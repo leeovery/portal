@@ -110,8 +110,6 @@ var stateCommitNowCmd = &cobra.Command{
 			return nil
 		}
 
-		// The previous index is read under the commit lock, so it is the
-		// sessions.json the last committer to hold the lock left behind.
 		_, err = deps.RunCommitCycle(state.CommitCycle{
 			Client:    deps.NewClient(),
 			OwnServer: ownTmuxServer(),
