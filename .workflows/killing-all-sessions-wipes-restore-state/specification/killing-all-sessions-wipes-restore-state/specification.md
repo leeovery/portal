@@ -77,15 +77,15 @@ The confirmation counts only when it is answered by the tmux server the committe
 
 #### 2.3 A cycle that ends uncommitted never leaves the saved state naming a missing file
 
-The capture cycle renames a newly waiting pane's transcript from its positional path to its token-named path (`refilePendingScrollback` in `internal/state/scrollback.go`). It does this expecting the cycle to commit the record that points at the new path. If the cycle ends without that commit, `sessions.json` still names the vacated positional path. A later committing cycle repairs the record, because its re-file adopts the token-named file once the positional one is gone. At shutdown no later cycle may commit, so the next restore would find no transcript at the path the record names.
+The capture cycle re-files a newly waiting pane's transcript from its positional path to its token-named path (`refilePendingScrollback` in `internal/state/scrollback.go`). The re-file is a hard link (`link(2)`) that never overwrites an existing token-named file: the positional name stays on disk until the housekeeping pass of a commit naming the token-named path removes it. So a cycle that ends without that commit leaves `sessions.json` naming the positional path, and the file is still there. A later committing cycle files the pane under its token-named path alone.
 
-A cycle can end without committing after the rename in three ways:
+A cycle can end without committing after the re-file in three ways:
 
 - it stands down (§2.5);
-- the daemon's tick is cancelled mid-dump by the shutdown signal (`errCycleCancelled` in `cmd/state_daemon.go`, returned after the renames and before the commit), and the shutdown flush that follows can itself stand down;
+- the daemon's tick is cancelled mid-dump by the shutdown signal (`errCycleCancelled` in `cmd/state_daemon.go`, returned after the re-file and before the commit), and the shutdown flush that follows can itself stand down;
 - its `sessions.json` write fails.
 
-However a cycle ends, it never leaves `sessions.json` naming a scrollback file that is not on disk. How that is met is open. Confirming (§2.2) before any file is moved covers a stand-down, but not a cancellation or a failed write that comes after the move, so it is not enough on its own.
+However a cycle ends, it never leaves `sessions.json` naming a scrollback file that is not on disk. Confirming (§2.2) before the re-file covers a stand-down, but not a cancellation or a failed write that comes after it; leaving the positional name in place until a commit's housekeeping pass covers all three.
 
 #### 2.4 The scrollback dump never zeroes a saved transcript on an unconfirmed read
 
@@ -126,7 +126,7 @@ These two are the only non-interactive-shell panes Portal creates (`rg -n '"sh",
 
 Trapping TERM in the parked shell is not enough on its own. While a pane waits, its parked shell runs the panel's draw, which hands off to the waiter (`portal state resume-draw` → `portal state resume-wait`). Today the waiter handles only SIGWINCH (`rg -n 'signal.Notify' cmd/state_resume_wait.go` → 1 hit, `SIGWINCH`), so a reboot SIGTERM would end it. The parked shell would then run its recovery tail, and `resume-recover` would clear `@portal-resume-pending` while tmux is still answering. Three things would follow:
 
-1. A capture builds the pane a fresh record naming its positional scrollback path. That file was renamed away when the pane first went waiting.
+1. A capture builds the pane a fresh record naming its positional scrollback path. That name is gone: the first commit after the pane went waiting named its token-named path, and that commit's housekeeping pass removed the positional name.
 2. A commit with no scrollback dump writes that record. One such commit is the `commit-now` that fires when `_portal-saver` itself closes after the daemon's flush; `commit-now` passes no dump.
 3. The housekeeping pass deletes the token-named transcript.
 
@@ -218,7 +218,7 @@ The measurement is not part of this fix. After the fix, the dropped-session logg
 - A capture whose session or pane listing came back empty from a server that then refuses connections writes nothing.
 - A confirmation whose own read returns exit 0 with no output names no server, and the cycle writes nothing.
 - The daemon's shutdown flush after `_portal-saver` is killed on a running server, as `portal uninstall` does, still commits and reports `flush_completed=true`. A save whose capture reads or confirmation reach a different server started on the same socket writes nothing.
-- A stand-down injected after the capture cycle's renames leaves `sessions.json` naming only files that exist. So does a daemon tick cancelled after the renames and followed by a shutdown flush that stands down, and a cycle whose `sessions.json` write fails after them.
+- A stand-down injected after the capture cycle's re-file leaves `sessions.json` naming only files that exist. So does a daemon tick cancelled after the re-file and followed by a shutdown flush that stands down, and a cycle whose `sessions.json` write fails after it.
 - The daemon's dump does not overwrite a non-empty saved transcript with an empty capture it cannot confirm.
 - Restore with a failed session listing behaves exactly as today: it rebuilds from the saved state, and no empty commit follows it.
 
@@ -277,3 +277,5 @@ These run in the integration lane, on real tmux with an isolated socket:
 > **Corrigendum 2026-10-05** (from `planning/killing-all-sessions-wipes-restore-state`): §4.1 said "A renamed session is not a drop and gets no drop line" with no identity the commit could compare, since the saved index names a session by its name alone — corrected: which identity tells a rename from a drop is the implementer's, and at shutdown, where no new session appears beside a dropped one, the drop lines come out the same under any identity — settled by: the specification review's recorded observation (`review-gap-analysis-tracking-c1.md`, Observations) that any session identity the builder matches on serves, because drops at shutdown never coincide with new sessions.
 
 > **Corrigendum 2026-10-05** (from `implementation/killing-all-sessions-wipes-restore-state`): §2.2 said "The confirmation counts as answered when tmux returns exit status 0, whatever the output … So even tmux's own shutdown answer to the confirmation (exit 0, no output) still proves that every earlier read was answered in full", and §6.1 said "The confirmation is safe even when its own read returns exit 0 with no output" — corrected: the confirmation counts only when its exit-0 answer names the server that answered it; an empty answer names no server, cannot meet §2.2's own-server rule, and stands the cycle down, and §6.1 tests that — settled by: §2.2's own-server paragraph, which an answer naming no server cannot satisfy, as landed in `confirmOwnServer` (`internal/state/scrollback.go`); the cost is one stood-down save when the committer's own server begins exiting during the confirmation itself, with the previous saved state kept.
+
+> **Corrigendum 2026-10-06** (from `implementation/killing-all-sessions-wipes-restore-state`): §2.3 said "The capture cycle renames a newly waiting pane's transcript from its positional path to its token-named path … `sessions.json` still names the vacated positional path" and "How that is met is open", §3.2 said the positional file "was renamed away when the pane first went waiting", and §6.1 spoke of "the capture cycle's renames" — corrected: the re-file is a hard link (`link(2)`) that never overwrites an existing token-named file, the positional name stays on disk until the housekeeping pass of a commit naming the token-named path removes it, so a cycle that ends uncommitted leaves `sessions.json` naming a file still present, and §3.2's fresh record names a positional path that commit's housekeeping already removed — settled by: the landed change in `refilePendingPane` / `linkStoredScrollback` (`internal/state/scrollback.go`), with `rename_noreplace_{darwin,linux}.go` deleted and `internal/state/commit_cycle_uncommitted_test.go` asserting the positional name goes only once a committing cycle's housekeeping has run.
