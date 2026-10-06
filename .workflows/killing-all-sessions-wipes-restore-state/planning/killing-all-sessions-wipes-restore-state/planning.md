@@ -110,3 +110,14 @@ status: draft
 |-------------|------|------------|
 | killing-all-sessions-wipes-restore-state-5-1 | The Scrollback Writer Refuses A Pane The Cycle Skips | a skeleton-marked, waiting or carried pane handed to the writer writes nothing, sends no confirmation and leaves its dedup entry and saved transcript as they were, an empty capture the own server would confirm is refused the same way, the committed `sessions.json` names the same file for the skipped pane as a dump that never handed it over, a pane the cycle does not skip is written exactly as before, the daemon's tick still sends no `capture-pane` for a skeleton-marked or waiting pane |
 | killing-all-sessions-wipes-restore-state-5-2 | A Confirmation Naming No Server Is Refused In Its Own Right | a cycle and `commit-now` that do not know their own server stand down against a confirmation naming no server (§2.2), either check alone keeps that stand-down and only removing both fails the test (§2.2), a cycle that knows its own server refuses an answer naming no server after the capture, after a failed capture and before an empty capture replaces a saved transcript (§2.2), an unknown own server with a failed capture sends no confirmation and returns the capture's error unchanged, `ConfirmAnswering` still answers pid 0 with no error and a silent answer stays classified apart from a refused read |
+
+### Phase 6: Analysis (Cycle 4)
+
+**Goal**: Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killing-all-sessions-wipes-restore-state-6-1 | The Lazy-Resume Fixture's Capture Rounds Write Through The Cycle's Scrollback Writer | an answered pane's next round commits its record naming its positional file, and that file holds the capture (§2.4), the same subtest fails against the former `WriteScrollbackIfChanged` route (§2.4), a waiting or skeleton-marked pane is still reported unwritten while a live pane beside it is written (§2.4), the five lazy-resume suites keep every existing assertion (§2.4), no non-test file changes and `WriteScrollbackIfChanged` stays exported (§2.4) |
+| killing-all-sessions-wipes-restore-state-6-2 | Each Commit Cycle Merges And Carries From The Index It Read Under The Lock | an answered pane in a carried session keeps naming its token-named transcript, which stays on disk, from the tick and the shutdown flush (§2.4, §1.1), a stale and a fresh in-memory index commit the same index and files for skeleton-marked, waiting and carried panes (§2.4), a readable `sessions.json` never calls `LoadPrev` (§2.4), an absent or undecodable `sessions.json` calls `LoadPrev` once under the lock and `commit-now` keeps its WARN lines (§2.4), the lag repairs and the uncommitted-end tests stand (§2.3) |
