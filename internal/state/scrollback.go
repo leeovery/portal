@@ -312,7 +312,7 @@ func savedTranscriptMayHoldBytes(path string) bool {
 }
 
 // CaptureCycle is what one capture cycle hands its caller: the index to commit
-// and the sets of pane keys the caller's own scrollback dump must skip.
+// and the sets of pane keys the cycle's scrollback writer refuses.
 type CaptureCycle struct {
 	Index Index
 	// Pending holds every live pane carrying the resume pending marker in a
@@ -327,8 +327,8 @@ type CaptureCycle struct {
 	Carried map[string]struct{}
 }
 
-// SkipsScrollback reports whether a scrollback dump over this capture must skip
-// paneKey: a key in Skeleton, Pending or Carried. Capturing a pane held behind a
+// SkipsScrollback reports whether paneKey's scrollback is never written over
+// this capture: a key in Skeleton, Pending or Carried. Capturing a pane held behind a
 // waiting resume panel writes back its transcript minus the screenful that
 // panel covers, and no copy of those lines survives anywhere else. A carried
 // session's address may now answer to another pane, or to that waiting pane.
