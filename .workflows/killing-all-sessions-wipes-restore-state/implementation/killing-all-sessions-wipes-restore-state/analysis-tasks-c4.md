@@ -13,6 +13,24 @@ Take a pane answered after it waited. The fixture's round writes the pane's posi
 **Solution**: `captureRound`'s dump writes through the writer it is handed. It calls `writer.Write(key, data, hash)` in place of `state.WriteScrollbackIfChanged(fx.stateDir, key, data, hash, fx.hashes)` and keeps recording the result in `written[key]`, so the fixture's round applies the same write rule as the daemon's `dumpPane`. The discard suite's "resumes writing" subtest also checks what that rule guarantees, not just the write's return value: after the round commits, the subject's record names its positional file, and that file is on disk holding the capture. This follows the record. The routing is the finding's recommendation and matches cycle 1 Task 1, which made the writer the daemon's only write route. The added check answers the finding's own observation that no assertion tells the two routes apart. `WriteScrollbackIfChanged` stays exported for the other test fixtures, as cycle 1 Task 1 set it. No production code changes.
 **Outcome**: The five real-tmux lazy-resume suites save an answered pane through the same writer as the daemon, so a regression in that write path fails them before it reaches a reboot.
 
+**Acceptance Criteria**:
+- [ ] In the discard suite, the subject waited across a reboot, so a capture round filed it under its token-named transcript. After its resume is discarded, the next capture round reports the subject written, commits the subject's record naming its positional scrollback file, and that file is on disk holding the capture the round wrote. (§2.4)
+- [ ] Taken against the former route, with the round's dump discarding its writer and writing through `state.WriteScrollbackIfChanged`, that same subtest fails: the commit names the token-named transcript, and its housekeeping has removed the positional file the round wrote. (§2.4)
+- [ ] A capture round taken while a pane waits or is skeleton-marked still reports nothing written for that pane, and a live pane beside it is still written. (§2.4)
+- [ ] The panel, discard, burst, renumbered-restore and hangup suites pass with every capture round writing through the writer. Every assertion they carry today stands unchanged beside the discard suite's added check. (§2.4)
+- [ ] No non-test file changes, and `state.WriteScrollbackIfChanged` stays exported. (§2.4)
+
+**Do**:
+- `internal/restore/lazy_resume_panel_integration_test.go`, `captureRound`'s dump (`:502-526`): take the `state.ScrollbackWriter` the cycle hands it in place of `_`, and write each pane through `writer.Write(key, data, hash)` in place of `state.WriteScrollbackIfChanged(fx.stateDir, key, data, hash, fx.hashes)` (`:516`). Keep recording the result in `written[key]`. The cycle's `HashMap` stays `fx.hashes` (`:533`).
+- `internal/restore/lazy_resume_discard_integration_test.go`, the "it clears the pending marker and resumes writing the pane's scrollback" subtest (`:167-186`): after `after := fx.captureRound(t)` (`:178`), check that the subject's record in `after.idx` names its positional file and that this file is on disk holding the capture.
+- The scope is measured. `rg -n '_ state\.ScrollbackWriter' --type go` gives 1 hit, this dump (`:502`), the only commit-cycle dump that discards its writer. `rg -n 'state\.CaptureAndHashPane\(' --type go` gives 6 hits:
+  - the daemon's `dumpPane` (`cmd/state_daemon.go:331`), which already writes through the writer (`:342`);
+  - this fixture (`:512`);
+  - `cmd/bootstrap/daemon_tick_test_helpers_test.go:68`, which commits through `state.Commit` with no commit cycle and so no writer, and stays on `WriteScrollbackIfChanged` as cycle 1 Task 1 left it;
+  - three `internal/state` tests of the capture itself (`scrollback_test.go:196`, `:212`; `capture_period_session_realtmux_test.go:65`).
+- The fixture's suites are the five that call `captureRound`: `lazy_resume_panel_integration_test.go`, `lazy_resume_discard_integration_test.go`, `lazy_resume_burst_integration_test.go`, `lazy_resume_renumbered_restore_integration_test.go` and `resume_pane_hangup_integration_test.go`, all in `internal/restore` and all `//go:build integration`, so they run under `go test -tags integration -p 1 ./internal/restore`.
+- Unchanged: `ScrollbackWriter.Write` (`internal/state/commit_cycle.go:74-95`), `fileAtPositional` (`:189-205`), and `WriteScrollbackIfChanged` (`internal/state/scrollback.go:80`), which stays exported for test fixtures.
+
 ## Task 2: Each Commit Cycle Merges And Carries From The Index It Read Under The Lock
 severity: low
 sources: architecture
@@ -38,3 +56,24 @@ This reverses cycle 2 Task 1's settled direction that `LoadPrev` keeps feeding t
 
 A narrower fix would extend the hold to answered panes in a carried session. That closes this one site but leaves the next merge that reads the caller's index open in the same way, so it is not taken.
 **Outcome**: One commit cycle reasons from one previous index. An answered pane in a session carried forward keeps naming its token-named transcript, and that file stays on disk. Whichever committer last filed a pane, the daemon's next cycle merges and carries from the records that commit left.
+
+**Acceptance Criteria**:
+- [ ] Panes X and Y wait in session S. A `commit-now` files X under its token-named transcript, its housekeeping removes X's positional file, and the user then answers X. The daemon's in-memory previous index predates that `commit-now` and names X at its positional path. On the daemon's next cycle, S misses the capture (renamed mid-capture, or its environment read failing) while Y still waits. The daemon's tick and its shutdown flush each carry S forward with X's record naming its token-named transcript, commit it, and leave that file on disk with its bytes, so the next restore finds them. (§2.4, §1.1)
+- [ ] `sessions.json` holds a `commit-now`'s commit, and the daemon's in-memory previous index predates it. The daemon's next cycle commits the same index, and leaves the same files on disk, as a cycle whose in-memory index matches `sessions.json`, for skeleton-marked, waiting and carried panes alike. (§2.4)
+- [ ] A cycle over a `sessions.json` that reads and decodes under the lock never calls the caller's `LoadPrev`. Neither the daemon's in-memory index nor `commit-now`'s re-read of the file is consulted. (§2.4)
+- [ ] With `sessions.json` absent or not decodable, the cycle calls `LoadPrev` once, under the lock. The skeleton merge, the waiting-pane merge, the carry and the answered-pane hold take their records from that index as they do today. `commit-now` logs `sessions.json absent; proceeding with zero-value PrevIndex` at WARN for an absent file, and `read sessions.json failed; proceeding with zero-value PrevIndex` at WARN for one that does not decode. (§2.4)
+- [ ] The lag repairs stay. `linkStoredScrollback` still adopts a missing source or an existing token-named file. A cycle that linked and then ended uncommitted (stood down, cancelled mid-dump, or with a failed `sessions.json` write) still leaves `sessions.json` naming only files on disk, and the existing tests for those ends pass unchanged. (§2.3)
+
+**Do**:
+- `internal/state/commit_cycle.go`, `RunCommitCycle` (`:109-145`): the index read under the lock (`committed`, `:116`) is the previous index handed to `captureAndRefile` (`:118`), and so the one the hold reads (`:122-124`). `cycle.LoadPrev()` (`:117`) is called only when that read returns nil.
+  - `readPriorIndex` (`internal/state/commit.go:63-74`) returns nil exactly when `sessions.json` is absent or does not decode.
+  - Those are the two cases in which `state.ReadIndex` reports a skip (`internal/state/index_reader.go:17-32`), and so the two in which `commit-now`'s `loadPrevIndex` (`cmd/state_commit_now.go:162-173`) emits its WARN lines.
+- `CommitCycle.LoadPrev` (`internal/state/commit_cycle.go:40-42`) changes its contract: it is called under the lock, and only when `sessions.json` cannot be read.
+- Unchanged:
+  - `commitOver`'s drop log and no-change test against `committed` (`internal/state/commit.go:34-60`);
+  - `captureAndRefile` (`internal/state/scrollback.go:356-375`), and the skeleton merge, waiting-pane merge and carry it feeds (`internal/state/capture.go:153-167`);
+  - `linkStoredScrollback` (`internal/state/scrollback.go:148-157`) and its callers `refilePendingPane` (`:127-142`) and `linkMovedPane` (`:217-231`);
+  - the daemon's `LoadPrev` (`cmd/state_daemon.go:271`), its start-up load (`:425-430`) and its replacement on a successful cycle (`:283`);
+  - `commit-now`'s `LoadPrev` (`cmd/state_commit_now.go:119-122`).
+- Existing test encoding the old contract: the "two commit-nows started back to back across X's pending mark run one after the other, the second reading the first's commit" subtest (`internal/state/commit_cycle_test.go:327-364`). It wants the second commit-now's `LoadPrev` called once (`:354`) and reads the index that call returned (`:357-362`). The first commit-now's `sessions.json` is readable, so after this change the second's `LoadPrev` does not run there. `rg -n '[lL]oads\s*(!=|==)' --type go` gives 3 hits. The other two are unaffected: `TestRunCommitCycleLockBound` wants zero loads under a held lock (`internal/state/commit_cycle_test.go:437`), and `cmd/state_hydrate_lazy_test.go:537` does not count `LoadPrev`.
+- The carry's committer table is `internal/state/capture_carry_test.go:87-118`. Its daemon-tick row hands its in-memory index through `LoadPrev` (`:95`), and its commit-now row re-reads `sessions.json` (`:108-114`).
