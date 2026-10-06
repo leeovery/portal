@@ -1,0 +1,24 @@
+## Attempt 1
+
+ISSUES:
+- internal/state/commit_cycle_test.go:327-359 — The subtest is still titled "…the second reading the first's commit", but nothing in it now checks that. With this change, that property lives entirely in the `readPriorIndex` call under the lock, since `prev == committed` on the normal path. The old pin on `secondPrevs[0]` went away with `LoadPrev`, and nothing replaced it. Moving `committed := readPriorIndex(cycle.Dir)` above `acquireCommitLock` in a scratch copy left the whole `internal/state` and `cmd` unit suite passing. That mutation brings back the lag this task closes, for a committer racing another (a commit-now's merges and carry would read a pre-commit `sessions.json`), and no test notices.
+  FIX: Give the second commit-now a capture logger and assert that it logs no `session dropped` record. Replace `secondDone := runCycleAsync(commitNowCycle(...))` (line 339) with a cycle whose `Logger` comes from `logtest.NewCaptureLogger(t)`, then add `if n := len(secondSink.Records().WithMessage("session dropped")); n != 0 { t.Errorf(...) }`. The seed holds `closed` and the world does not, so the first commit-now drops it. A second commit-now that read `sessions.json` before the first committed logs that drop again. Run in a scratch copy, this assertion fails (1 drop) against the out-of-lock mutation and passes against the working-tree code. Optionally also give the first commit-now a sink and assert it logs exactly one drop, of `closed`, so the guard can't pass because the seed changed.
+  ALTERNATIVE: Seed a field the first commit rewrites and the second's merge would carry, then assert the second commit carries the first's value. More fixture work for the same pin; the drop-log assertion reuses what the seed already sets up.
+  CONFIDENCE: high
+- internal/state/commit_cycle_prev_test.go:215 and :250 — The "the waiting-pane merge" row of `TestRunCommitCycleFallsBackToLoadPrevWhenSessionsJSONCannotBeRead` passes whether or not the merge took its records from `LoadPrev`'s index. With `LoadPrev` returning `&state.Index{}` in a scratch copy, the carry, skeleton and hold rows failed, but both waiting-pane-merge rows (absent and not decodable) still passed. With no previous record, the re-file's adoption of the existing token-named file still points X at `pane-<T>.bin`, which is all `assertXFiledAt` checks. What the merge contributes is X's `CWD` and `CurrentCommand`: `/x`/`claude` with the fix, the live `/live`/`zsh` without it, and the row checks neither, though criterion 4 names this merge explicitly.
+  FIX: Turn the `worlds` map at :213 into a struct per row carrying the expected `CWD`/`CurrentCommand` for X. Use `/x`/`claude` (from `carryPrev`) for the carry, waiting-pane merge and skeleton rows, and the live `/live`/`zsh` for the answered-pane hold row (whose record is fresh, with only its scrollback file held). After `assertXFiledAt` at :250, assert them with `findPane(onDiskIndex(t, dir), "foo", 0, 0)`.
+  CONFIDENCE: high
+
+COMMENT_CORRECTIONS:
+- internal/state/commit_cycle.go:39-41 — The doc names a narrower trigger than the code has: `readPriorIndex` returns nil on any read error, not only an absent file, so a present but unreadable `sessions.json` also calls `LoadPrev`.
+  OLD: 	// LoadPrev supplies the previous index when sessions.json, read under the
+	// commit lock, is absent or does not decode. It is called under the lock,
+	// and never when sessions.json reads.
+  NEW: 	// LoadPrev supplies the previous index only when sessions.json, read under
+	// the commit lock, cannot be read or decoded. It is called under the lock.
+
+NOTES:
+- The comment at cmd/state_commit_now.go:113-114 ("The previous index is read under the commit lock, so it is the sessions.json the last committer to hold the lock left behind.") was not touched by the diff and is still literally true of the cycle's previous index. Read as a description of the `LoadPrev` closure beneath it, though, it now misleads: that closure runs only when `sessions.json` cannot be read, and then returns the zero index.
+- The `loads != 0` part of `TestRunCommitCycleLockBound` (internal/state/commit_cycle_test.go:431) can no longer fail, because `sessions.json` is readable there and so `LoadPrev` never runs. The test still guards a held lock through its tmux-read, dump and file assertions, and the new fallback test covers `LoadPrev` under the lock.
+- `TestDaemonCycleAfterACommitNowMatchesOneWhoseIndexIsCurrent`'s rows "a waiting pane beside an answered one" and "both panes still waiting" pass with or without the fix, because the existing lag repairs already covered them. They work as regression guards for criterion 2's equivalence. Only the skeleton-marked and carried rows fail without the fix.
+- The reviewer also ran the integration tests for commit-now, shutdown and kill-path in ./cmd (TestCommitNowDaemonMergeStability, TestCommitNowSymptom, TestShutdown*, TestKillPath*), and all pass.
