@@ -154,20 +154,18 @@ func failCommitNow(logger *slog.Logger, dir string, touch func(string) error, st
 	return fmt.Errorf("%w: %s: %v", errCommitNowFailed, stage, cause)
 }
 
-// An absent or unusable sessions.json yields a zero-value Index with a WARN:
-// dropping killed sessions does not depend on PrevIndex, so a read failure must
-// never abort the synchronous commit.
+// The cycle calls this only once its own read of sessions.json under the lock
+// has failed, so it reports why the file could not be read and yields the zero
+// Index: dropping killed sessions does not depend on PrevIndex, so a read
+// failure must never abort the synchronous commit.
 func loadPrevIndex(dir string, readIndex func(string) (state.Index, bool, error), logger *slog.Logger) state.Index {
-	idx, skip, err := readIndex(dir)
+	_, skip, err := readIndex(dir)
 	if err != nil {
 		logger.Warn("read sessions.json failed; proceeding with zero-value PrevIndex", "error", err)
-		return state.Index{}
-	}
-	if skip {
+	} else if skip {
 		logger.Warn("sessions.json absent; proceeding with zero-value PrevIndex")
-		return state.Index{}
 	}
-	return idx
+	return state.Index{}
 }
 
 func init() {

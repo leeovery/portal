@@ -88,12 +88,15 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 	t.Helper()
 	deps := &CommitNowDeps{
 		NewClient: func() state.CaptureCycleClient { return f.client },
-		// Stands in for the committing cycle: the previous index is loaded, the
-		// capture returned, the caller's dump run and the commit made, in the
-		// entry point's order.
+		// Stands in for the committing cycle: the capture returned, the caller's
+		// dump run and the commit made, in the entry point's order. As there,
+		// LoadPrev is called only when the sessions.json in the cycle's
+		// directory does not read and decode.
 		RunCommitCycle: func(cycle state.CommitCycle) (state.CaptureCycle, error) {
 			f.captureCalls++
-			f.capturePrevs = append(f.capturePrevs, cycle.LoadPrev())
+			if _, skip, err := state.ReadIndex(cycle.Dir); skip || err != nil {
+				f.capturePrevs = append(f.capturePrevs, cycle.LoadPrev())
+			}
 			if f.captureErr != nil {
 				return state.CaptureCycle{}, f.captureErr
 			}
@@ -279,64 +282,6 @@ func TestStateCommitNow_WritesMultiWindowMultiPaneSession(t *testing.T) {
 	}
 	if len(wins[1].Panes) != 3 {
 		t.Errorf("window 1 panes = %d, want 3", len(wins[1].Panes))
-	}
-}
-
-func TestStateCommitNow_PassesPrevIndexFromDiskToCaptureAndRefile(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-
-	prior := state.Index{
-		Version: state.SchemaVersion,
-		Sessions: []state.Session{
-			{
-				Name:        "work",
-				Environment: map[string]string{},
-				Windows: []state.Window{
-					{Index: 0, Name: "main", Panes: []state.Pane{
-						{Index: 0, CWD: "/home/u", Active: true, CurrentCommand: "zsh", ScrollbackFile: "scrollback/work__0.0.bin"},
-					}},
-				},
-			},
-		},
-	}
-	data, err := state.EncodeIndex(prior)
-	if err != nil {
-		t.Fatalf("encode seed: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "sessions.json"), data, 0o600); err != nil {
-		t.Fatalf("seed sessions.json: %v", err)
-	}
-
-	f := &commitNowFixture{
-		client:        &fakeCaptureClient{sessions: []string{"work"}},
-		captureReturn: prior,
-	}
-	installCommitNowDeps(t, f)
-
-	if _, _, err := runRootCmd(t, "state", "commit-now"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if f.captureCalls != 1 {
-		t.Fatalf("CaptureAndRefile called %d times, want 1", f.captureCalls)
-	}
-	if got := f.capturePrevs[0]; got == nil {
-		t.Fatal("prev passed to CaptureAndRefile was nil; want pointer to decoded prior Index")
-	} else if len(got.Sessions) != 1 || got.Sessions[0].Name != "work" {
-		t.Errorf("prev.Sessions = %v, want [{Name: work, ...}]", got.Sessions)
-	}
-
-	out := readSessionsJSON(t, dir)
-	if len(out.Sessions) != 1 || out.Sessions[0].Name != "work" {
-		t.Fatalf("post-commit sessions = %v, want [work]", sessionNamesSlice(out))
-	}
-	pane := out.Sessions[0].Windows[0].Panes[0]
-	if pane.CurrentCommand != "zsh" || pane.CWD != "/home/u" {
-		t.Errorf("pane fields not preserved: %+v", pane)
 	}
 }
 
