@@ -116,7 +116,7 @@
           "fix_attempts": 0,
           "analysis_cycle_total": 2,
           "current_phase": 4,
-          "current_task": "killing-all-sessions-wipes-restore-state-4-2",
+          "current_task": null,
           "project_skills": [
             ".claude/skills/golang-how-to",
             ".claude/skills/golang-testing",
@@ -171,7 +171,8 @@
             "killing-all-sessions-wipes-restore-state-3-3",
             "killing-all-sessions-wipes-restore-state-3-4",
             "killing-all-sessions-wipes-restore-state-3-5",
-            "killing-all-sessions-wipes-restore-state-4-1"
+            "killing-all-sessions-wipes-restore-state-4-1",
+            "killing-all-sessions-wipes-restore-state-4-2"
           ],
           "staging": {
             "p1": {
@@ -208,6 +209,22 @@
             1,
             2,
             3
+          ],
+          "bank": [
+            {
+              "task": "killing-all-sessions-wipes-restore-state-4-2",
+              "source": "reviewer",
+              "summary": "A session name containing the listing's field separator blocks every save for as long as that session exists, and breaks every session-list reader.",
+              "failure": "A user who renames a session to `work|notes` in the picker (ValidateSessionName accepts it) or creates it with tmux directly gets no committed save from the tick, the shutdown flush or commit-now until that session is gone; saved state goes stale so a reboot restores an old snapshot, and ListSessions errors for the whole listing so the picker, completion, portal list and restore's live-set read lose the other sessions too; the only sign is a repeating tick failed WARN / commit cycle failed ERROR in portal.log. The pane captureFormat separator `|||` has the same exposure for a name containing `|||`.",
+              "detail": "listSessionsArgs / parseSessionList SplitN(line, \"|\", 4) (internal/tmux/tmux.go:147,190). @portal-dir can only take the trailing slot, so the name cannot also go last. Options: a separator tmux names cannot carry (a control character), or ValidateSessionName plus SanitiseProjectName refusing `|`. Rename modal check at internal/tui/model.go:2869, RenameSession's at internal/tmux/tmux.go:323. Refusing in the validator does not cover sessions created outside Portal, so the format change is the complete fix.",
+              "files": [
+                "internal/tmux/tmux.go",
+                "internal/tmux/errors.go",
+                "internal/session/naming.go",
+                "internal/state/capture.go",
+                "internal/tui/model.go"
+              ]
+            }
           ]
         }
       }
