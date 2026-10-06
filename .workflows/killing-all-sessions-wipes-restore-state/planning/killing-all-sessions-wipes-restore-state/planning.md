@@ -74,3 +74,16 @@ status: draft
 | killing-all-sessions-wipes-restore-state-2-7 | A renamed session is not logged as dropped | a session dropped at shutdown, where no new session appears beside it, is still logged as dropped whichever identity tells renames apart (§4.1, §4.3) |
 | killing-all-sessions-wipes-restore-state-2-8 | A waiting pane outlasts a shutdown SIGTERM and comes back still asking | the dump-less `commit-now` fired by the `_portal-saver` close lands between the pane's SIGTERM and the server's end (§3.2, §6.2), the server's exit then ends the parked chain on SIGHUP before its recovery tail (§3.2) |
 | killing-all-sessions-wipes-restore-state-2-9 | Signalling pane programs and the daemon before the server preserves hardened sessions against real tmux | sessions whose panes are interactive shells, eager resume panes, waiting lazy panes or answered lazy panes are all preserved (§3.1, §6.5), a session whose pane runs a program started directly rather than inside a shell is accepted residue and is not asserted preserved (§5.2) |
+
+### Phase 3: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killing-all-sessions-wipes-restore-state-3-1 | The commit cycle owns the empty-capture confirmation of every scrollback write | a confirmation refused, answered by another server or naming no server keeps the saved transcript (§2.4, §4.2), a confirmed empty capture is still written (§2.4), a non-empty capture, an empty capture with no saved transcript and an empty capture over an empty saved transcript send no confirmation read (§2.4), a dedup match writes nothing (§2.4), the guard catches a value use under an import alias and ignores test files, `internal/state` and a same-named selector on another package (§2.4) |
+| killing-all-sessions-wipes-restore-state-3-2 | A capture that fails because tmux stopped answering logs as a back-off whichever read failed | every environment read refused then a refused confirmation logs the back-off line from the tick, the flush and `commit-now` (§2.5, §4.2), the own server answering keeps `tick failed` for a parse failure, a carry collision and an all-anomalous capture (§4.2), an unknown own server sends no confirmation and returns the capture's error unchanged (§2.2), a refused session or pane listing ends the cycle with no confirmation after it (§4.2) |
+| killing-all-sessions-wipes-restore-state-3-3 | CLAUDE.md describes the save path and resume shells as they were before this fix | every touched sentence holds whether or not the other analysis tasks land, no source or test file changes (§2.3, §3.1) |
+| killing-all-sessions-wipes-restore-state-3-4 | Corrections | the `commit-now` subtest stands down on the failed listing itself, not on an unknown own server (§6.1), no production code or other test changes (§6.1) |
