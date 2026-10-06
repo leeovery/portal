@@ -123,6 +123,7 @@ func TestCommittersStandDownOnAFailedSessionListing(t *testing.T) {
 	})
 
 	t.Run("commit-now", func(t *testing.T) {
+		withOwnTmuxServer(t, fakeOwnServerPID)
 		saved := seedSavedState(t)
 		client := tmux.NewClient(failingListSessionsCommander())
 		withCommitNowDeps(t, CommitNowDeps{
