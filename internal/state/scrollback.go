@@ -141,9 +141,7 @@ func refilePendingPane(dir, paneKey string, p *Pane, hm HashMap, logger *slog.Lo
 // A record naming no file is treated as a missing source: the bytes are already
 // wherever they are, and joining an empty path onto dir would name the state
 // directory itself. An existing token-named file is adopted rather than
-// replaced: the positional file may by now hold another pane's capture, and
-// link(2) refuses an existing name atomically so a concurrent re-file cannot
-// slip between check and placement.
+// replaced: the positional file may by now hold another pane's capture.
 func linkStoredScrollback(dir, stored, tokenPath string) error {
 	if stored == "" {
 		return nil
@@ -239,10 +237,7 @@ type CaptureCycleClient interface {
 
 // AnsweringConfirmer confirms tmux is still answering. ConfirmAnswering must
 // return a nil error only for a read tmux answered with exit status 0, with the
-// pid of the server that answered it, or 0 for an answer naming none: an exiting
-// tmux can answer a read already in flight with exit status 0 and no output, and
-// only a refused read sent after it tells that answer apart from an empty
-// server.
+// pid of the server that answered it, or 0 for an answer naming none.
 type AnsweringConfirmer interface {
 	ConfirmAnswering() (int, error)
 }
