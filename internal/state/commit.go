@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,9 +22,9 @@ import (
 // failure is logged, not returned — sessions.json is the source of truth.
 //
 // A written commit logs, at INFO, each session the prior on-disk index held
-// that idx does not. The on-disk index is the measure, not any caller's
-// in-memory one, so a session removed by one committer is never reported again
-// by another.
+// that idx does not hold under its name or, renamed, under another. The
+// on-disk index is the measure, not any caller's in-memory one, so a session
+// removed by one committer is never reported again by another.
 func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *slog.Logger) error {
 	logger = loggerOrDiscard(logger)
 	idx.Canonicalize()
@@ -75,15 +76,36 @@ func structuralChange(prior, idx Index) bool {
 }
 
 func logDroppedSessions(prior, idx Index, logger *slog.Logger) {
-	kept := make(map[string]struct{}, len(idx.Sessions))
-	for _, s := range idx.Sessions {
-		kept[s.Name] = struct{}{}
-	}
+	priorNames := make(map[string]struct{}, len(prior.Sessions))
 	for _, s := range prior.Sessions {
-		if _, ok := kept[s.Name]; !ok {
-			logger.Info("session dropped", "session", s.Name)
+		priorNames[s.Name] = struct{}{}
+	}
+	keptNames := make(map[string]struct{}, len(idx.Sessions))
+	var appeared []Session
+	for _, s := range idx.Sessions {
+		keptNames[s.Name] = struct{}{}
+		if _, ok := priorNames[s.Name]; !ok {
+			appeared = append(appeared, s)
 		}
 	}
+	for _, s := range prior.Sessions {
+		if _, ok := keptNames[s.Name]; ok {
+			continue
+		}
+		if i := slices.IndexFunc(appeared, func(a Session) bool { return sameSessionUnderAnyName(s, a) }); i >= 0 {
+			appeared = slices.Delete(appeared, i, i+1)
+			continue
+		}
+		logger.Info("session dropped", "session", s.Name)
+	}
+}
+
+// sameSessionUnderAnyName reports whether two records describe one session by
+// their window layouts alone, which a rename leaves as they were. A window
+// layout carries tmux's server-unique pane ids, so two live sessions compare
+// equal only when they share their windows.
+func sameSessionUnderAnyName(a, b Session) bool {
+	return slices.EqualFunc(a.Windows, b.Windows, func(x, y Window) bool { return x.Layout == y.Layout })
 }
 
 // ComputeReferencedSet collects ScrollbackFile paths verbatim, as stored in idx.

@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -146,6 +147,118 @@ func TestCommitLogsNoDropWhenTheWriteFails(t *testing.T) {
 
 	if err := state.Commit(dir, namedSessionsIndex("alpha"), false, logger); err == nil {
 		t.Fatal("Commit: want an error from a denied write")
+	}
+
+	if got := droppedSessionNames(t, sink); len(got) != 0 {
+		t.Errorf("dropped sessions logged = %v, want none", got)
+	}
+}
+
+// capturedSessionRecord is a session as a capture records it: its window
+// layout carries its pane's tmux id, and its pane's scrollback path is spelled
+// from the session's name.
+func capturedSessionRecord(name string, paneID int) state.Session {
+	return state.Session{
+		Name:        name,
+		Environment: map[string]string{},
+		Windows: []state.Window{{
+			Index: 0, Name: "zsh", Layout: fmt.Sprintf("b25d,80x24,0,0,%d", paneID), Active: true,
+			Panes: []state.Pane{{
+				Index: 0, CWD: "/work", Active: true, CurrentCommand: "zsh",
+				ScrollbackFile: "scrollback/" + state.SanitizePaneKey(name, 0, 0) + ".bin",
+			}},
+		}},
+	}
+}
+
+func indexOf(sessions ...state.Session) state.Index {
+	return state.Index{Version: state.SchemaVersion, Sessions: sessions}
+}
+
+func seedIndex(t *testing.T, dir string, idx state.Index) {
+	t.Helper()
+	if err := state.Commit(dir, idx, false, nil); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+}
+
+func TestCommitLogsNoDropForARenamedSession(t *testing.T) {
+	dir := t.TempDir()
+	seedIndex(t, dir, indexOf(
+		capturedSessionRecord("alpha", 1),
+		capturedSessionRecord("bravo", 2),
+	))
+	logger, sink := logtest.NewCaptureLogger(t)
+
+	renamed := indexOf(
+		capturedSessionRecord("alpha", 1),
+		capturedSessionRecord("zulu", 2),
+	)
+	if err := state.Commit(dir, renamed, false, logger); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	if got := droppedSessionNames(t, sink); len(got) != 0 {
+		t.Errorf("dropped sessions logged = %v, want none", got)
+	}
+	got := sessionNames(readIndexFile(t, dir))
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"alpha", "zulu"}) {
+		t.Errorf("committed sessions = %v, want [alpha zulu]", got)
+	}
+}
+
+func TestCommitLogsADropBesideAnUnrelatedNewSession(t *testing.T) {
+	dir := t.TempDir()
+	seedIndex(t, dir, indexOf(
+		capturedSessionRecord("alpha", 1),
+		capturedSessionRecord("bravo", 2),
+	))
+	logger, sink := logtest.NewCaptureLogger(t)
+
+	next := indexOf(
+		capturedSessionRecord("alpha", 1),
+		capturedSessionRecord("zulu", 3),
+	)
+	if err := state.Commit(dir, next, false, logger); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	if got, want := droppedSessionNames(t, sink), []string{"bravo"}; !slices.Equal(got, want) {
+		t.Errorf("dropped sessions logged = %v, want %v", got, want)
+	}
+}
+
+func TestCommitTakesOneNewSessionAsTheRenameOfOneSavedSessionOnly(t *testing.T) {
+	dir := t.TempDir()
+	seedIndex(t, dir, indexOf(
+		capturedSessionRecord("bravo", 2),
+		capturedSessionRecord("charlie", 2),
+	))
+	logger, sink := logtest.NewCaptureLogger(t)
+
+	if err := state.Commit(dir, indexOf(capturedSessionRecord("zulu", 2)), false, logger); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	got := droppedSessionNames(t, sink)
+	if len(got) != 1 || (got[0] != "bravo" && got[0] != "charlie") {
+		t.Errorf("dropped sessions logged = %v, want exactly one of bravo or charlie", got)
+	}
+}
+
+func TestCommitLogsNoDropForASessionRenamedAfterItsPaneMovedOn(t *testing.T) {
+	dir := t.TempDir()
+	seedIndex(t, dir, indexOf(capturedSessionRecord("proj-ab12cd", 1)))
+	logger, sink := logtest.NewCaptureLogger(t)
+
+	renamed := capturedSessionRecord("editing", 1)
+	renamed.Environment = map[string]string{"EDITOR": "nvim"}
+	renamed.Windows[0].Name = "nvim"
+	renamed.Windows[0].Panes[0].CWD = "/work/proj"
+	renamed.Windows[0].Panes[0].CurrentCommand = "nvim"
+	if err := state.Commit(dir, indexOf(renamed), false, logger); err != nil {
+		t.Fatalf("Commit: %v", err)
 	}
 
 	if got := droppedSessionNames(t, sink); len(got) != 0 {
