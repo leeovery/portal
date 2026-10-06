@@ -191,7 +191,7 @@ func TestHydrateExecLog_RegisteredHook_HitThenHookChainExec(t *testing.T) {
 	if !strings.Contains(info, "target=/bin/sh") {
 		t.Errorf("exec INFO missing target=/bin/sh: %q", info)
 	}
-	if !strings.Contains(info, "args=sh -c echo hi; exec /bin/zsh") {
+	if !strings.Contains(info, "args=sh -c trap : TERM; echo hi; exec /bin/zsh") {
 		t.Errorf("exec INFO missing joined hook-chain args: %q", info)
 	}
 	if !strings.Contains(info, "hook_present=true") {
@@ -221,7 +221,7 @@ func TestHydrateExecLog_HitRendersArgsVerbatimIncludingEmbeddedQuotes(t *testing
 
 	body := sink.Body()
 	info := execLogLine(t, body, "INFO", "exec")
-	wantArgs := "args=sh -c " + rawCmd + "; exec /bin/zsh"
+	wantArgs := "args=sh -c trap : TERM; " + rawCmd + "; exec /bin/zsh"
 	if !strings.Contains(info, wantArgs) {
 		t.Errorf("exec INFO args not rendered verbatim; want substring %q in %q", wantArgs, info)
 	}

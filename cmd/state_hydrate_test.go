@@ -1318,7 +1318,7 @@ func TestHydrate_SignalArrived_ExecsHookChainWhenHookRegistered(t *testing.T) {
 	if exec.target != "/bin/sh" {
 		t.Errorf("ExecShell prog = %q, want /bin/sh", exec.target)
 	}
-	want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+	want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 	if !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("ExecShell args = %#v, want %#v", exec.args, want)
 	}
@@ -1387,7 +1387,7 @@ func TestHydrate_FileMissing_ExecsHookChainWhenHookRegistered(t *testing.T) {
 	if exec.target != "/bin/sh" {
 		t.Errorf("ExecShell prog = %q, want /bin/sh", exec.target)
 	}
-	want := []string{"sh", "-c", "claude --resume abc; exec /bin/zsh"}
+	want := []string{"sh", "-c", "trap : TERM; claude --resume abc; exec /bin/zsh"}
 	if !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("ExecShell args = %#v, want %#v", exec.args, want)
 	}
@@ -1444,7 +1444,7 @@ func TestHydrate_Timeout_FiresHookWhenRegistered(t *testing.T) {
 	if exec.target != "/bin/sh" {
 		t.Errorf("ExecShell prog = %q, want /bin/sh", exec.target)
 	}
-	want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+	want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 	if !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("ExecShell args = %#v, want %#v", exec.args, want)
 	}
@@ -1609,7 +1609,7 @@ func TestHydrate_LooksUpHooksByHookKeyVerbatimNotByLivePaneKey(t *testing.T) {
 	if exec.target != "/bin/sh" {
 		t.Errorf("ExecShell prog = %q, want /bin/sh (hook chain)", exec.target)
 	}
-	want := []string{"sh", "-c", "echo saved; exec /bin/zsh"}
+	want := []string{"sh", "-c", "trap : TERM; echo saved; exec /bin/zsh"}
 	if !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("ExecShell args = %#v, want %#v (lookup must use HookKey verbatim)", exec.args, want)
 	}
@@ -1650,7 +1650,7 @@ func TestHydrate_PassesHookCommandAsSingleArgvElementToShDashC(t *testing.T) {
 	if exec.args[0] != "sh" || exec.args[1] != "-c" {
 		t.Errorf("ExecShell args[0:2] = %v, want [sh -c]", exec.args[0:2])
 	}
-	wantArg2 := rawCmd + "; exec /bin/zsh"
+	wantArg2 := "trap : TERM; " + rawCmd + "; exec /bin/zsh"
 	if exec.args[2] != wantArg2 {
 		t.Errorf("ExecShell args[2] = %q, want %q (verbatim cmd in single argv slot)", exec.args[2], wantArg2)
 	}

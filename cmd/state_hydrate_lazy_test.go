@@ -159,7 +159,7 @@ func TestHydrateLazy_EagerRegistrationRestoresAsToday(t *testing.T) {
 
 				lazyRun(t, tail, opts)
 
-				want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+				want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 				if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
 					t.Errorf("exec = %q %v, want /bin/sh %v", exec.target, exec.args, want)
 				}
@@ -327,7 +327,7 @@ func TestHydrateLazy_FiresTheHookWhenThePaneCannotBeMarked(t *testing.T) {
 
 			paneKey := lazyRun(t, lazyTails()[0], opts)
 
-			want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+			want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
 				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
 			}
@@ -378,7 +378,7 @@ func TestHydrateLazy_LiftsThePinWhenTheMarkerWriteIsRefused(t *testing.T) {
 			t.Errorf("pin at %d, marker at %d, lift at %d; want pin, then the refused marker, then the lift; calls: %v",
 				pin, marker, lift, cmder.Calls())
 		}
-		want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+		want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
 			t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
 		}
@@ -404,7 +404,7 @@ func TestHydrateLazy_LiftsThePinWhenTheMarkerWriteIsRefused(t *testing.T) {
 
 		paneKey := lazyRun(t, lazyTails()[0], opts)
 
-		want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+		want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
 			t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
 		}
@@ -636,7 +636,7 @@ func TestHydrateLazy_FiresTheHookOnEveryTailWhenThePaneCannotBeMarked(t *testing
 
 			paneKey := lazyRun(t, tail, opts)
 
-			want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+			want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
 				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
 			}
@@ -663,7 +663,7 @@ func TestHydrateLazy_ExecWithNoParkedPaneRunsTheHookAndLooksNothingUp(t *testing
 
 	execShellOrHookAndExit(cfg, registration, nil)
 
-	want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+	want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 	if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("exec = %q %v, want the hook %v", exec.target, exec.args, want)
 	}
@@ -818,7 +818,7 @@ func TestHydrateLazy_LeavesTheTokenWhenALaterWriteIsRefused(t *testing.T) {
 				t.Fatalf("no token write ahead of the refusal; calls: %v", cmder.Calls())
 			}
 			assertNeverReadsTheToken(t, cmder)
-			want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+			want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
 				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
 			}

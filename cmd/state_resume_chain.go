@@ -194,12 +194,19 @@ func resumeRegistrationOrLog(logger *slog.Logger, lookup func(hookKey string) (h
 	return onResume
 }
 
+// hookShellTrap keeps the shell running a resume hook alive through a SIGTERM,
+// as an interactive shell is, so the pane outlasts a shutdown's SIGTERM until
+// tmux itself exits. It must stay a caught trap: an ignored signal stays
+// ignored across exec, and the hook and the user's shell would inherit it.
+// SIGHUP stays uncaught so a kill still ends the pane.
+const hookShellTrap = "trap : TERM; "
+
 // hookExecArgs composes the argv a pane's registered command is run as. The
 // command occupies its own argv slot so sh's parser handles any embedded quotes
 // - Portal never interpolates it - and the trailing exec leaves the pane on its
 // own shell, so it closes on the first exit.
 func hookExecArgs(command, shell string) (prog string, args []string) {
-	return "/bin/sh", []string{"sh", "-c", command + "; exec " + shell}
+	return "/bin/sh", []string{"sh", "-c", hookShellTrap + command + "; exec " + shell}
 }
 
 // A pane whose kill keys could not be given back is still handed on: a hook

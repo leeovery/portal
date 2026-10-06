@@ -197,7 +197,7 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 			t.Errorf("store read with %q, want one read of %q", probe.lookupKeys, payload.HookKey)
 		}
 		assertHookHandOff(t, &probe, "make deploy-rewritten")
-		if slices.Contains(probe.execArgs, payload.Command+"; exec "+resolveShell()) {
+		if _, displayedArgs := hookExecArgs(payload.Command, resolveShell()); slices.Equal(probe.execArgs, displayedArgs) {
 			t.Errorf("exec argv = %q, want the command the store holds rather than the one the panel displayed", probe.execArgs)
 		}
 	})

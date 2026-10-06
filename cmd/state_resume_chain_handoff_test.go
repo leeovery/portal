@@ -160,14 +160,14 @@ func TestHandOffToHookOrShell(t *testing.T) {
 			shellEnv:    "/bin/zsh",
 			command:     "claude --resume 'x'",
 			wantProg:    "/bin/sh",
-			wantArgs:    []string{"sh", "-c", "claude --resume 'x'; exec /bin/zsh"},
+			wantArgs:    []string{"sh", "-c", "trap : TERM; claude --resume 'x'; exec /bin/zsh"},
 			wantPresent: "true",
 		},
 		{
 			name:        "it follows the command with /bin/sh when SHELL is unset",
 			command:     "make dev",
 			wantProg:    "/bin/sh",
-			wantArgs:    []string{"sh", "-c", "make dev; exec /bin/sh"},
+			wantArgs:    []string{"sh", "-c", "trap : TERM; make dev; exec /bin/sh"},
 			wantPresent: "true",
 		},
 	}
