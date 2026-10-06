@@ -1186,15 +1186,20 @@ func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
 	}
 }
 
-func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
+func seedUndecodableSessionsJSON(t *testing.T, dir string) {
+	t.Helper()
 	if _, err := state.EnsureDir(); err != nil {
 		t.Fatalf("EnsureDir: %v", err)
 	}
 	if err := os.WriteFile(state.SessionsJSON(dir), []byte("{not json"), 0o600); err != nil {
 		t.Fatalf("seed bad sessions.json: %v", err)
 	}
+}
+
+func TestDaemonStartup_UndecodableSessionsJSONLogsNothingAndSeedsNoIndex(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	seedUndecodableSessionsJSON(t, dir)
 
 	sink := logtest.Install(t)
 
@@ -1204,11 +1209,94 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
 		t.Fatalf("runRootCmd(state daemon): %v", err)
 	}
+	if *holder == nil {
+		t.Fatal("daemonRunFunc not invoked")
+	}
 	if (*holder).PrevIndex != nil {
 		t.Errorf("PrevIndex should be nil on decode error; got %+v", *(*holder).PrevIndex)
 	}
-	if logged := sink.Body(); !strings.Contains(logged, "sessions.json corrupt") {
-		t.Errorf("expected corrupt-index warning in log; got:\n%s", logged)
+	if n := len(sink.Records().WithMessage("ReadIndex failed")); n != 0 {
+		t.Errorf("startup logged %q %d times, want 0", "ReadIndex failed", n)
+	}
+	for _, rec := range sink.Records() {
+		if rec.HasAttr("error") && errors.Is(rec.ErrorAttr(t, "error"), state.ErrCorruptIndex) {
+			t.Errorf("startup logged the decode error before the tick loop: %+v", rec)
+		}
+	}
+}
+
+func TestDaemonStartup_FirstTickIsTheOneReportOfAnUndecodableSessionsJSON(t *testing.T) {
+	cases := []struct {
+		name       string
+		confirmErr error
+		committed  bool
+	}{
+		{name: "the tick commits", committed: true},
+		{name: "the tick stands down", confirmErr: refusedConfirmation()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("PORTAL_STATE_DIR", dir)
+			seedUndecodableSessionsJSON(t, dir)
+
+			sink := logtest.Install(t)
+			withDaemonLockFileReset(t)
+
+			var tickErr error
+			ran := false
+			withFuncSeam(t, &daemonTickLoopFunc, func(ctx context.Context, deps *daemonDeps) error {
+				ran = true
+				deps.Client = tmux.NewClient(workOnlyCommander(tc.confirmErr))
+				deps.OwnServer = fakeOwnServerPID
+				tickErr = captureAndCommit(ctx, deps)
+				return nil
+			})
+
+			if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
+				t.Fatalf("runRootCmd(state daemon): %v", err)
+			}
+			if !ran {
+				t.Fatal("tick loop not invoked")
+			}
+
+			rec := sink.Records().Matching("daemon", unreadableIndexWarn).AtExactLevel(slog.LevelWarn).Only(t, unreadableIndexWarn)
+			if cause := rec.ErrorAttr(t, "error"); !errors.Is(cause, state.ErrCorruptIndex) {
+				t.Errorf("error = %v, want the decode failure", cause)
+			}
+			if n := len(sink.Records().Matching("daemon", "ReadIndex failed")); n != 0 {
+				t.Errorf("daemon logged %q %d times, want 0", "ReadIndex failed", n)
+			}
+			var corrupt int
+			for _, r := range sink.Records() {
+				if r.HasAttr("error") && errors.Is(r.ErrorAttr(t, "error"), state.ErrCorruptIndex) {
+					corrupt++
+				}
+			}
+			if corrupt != 1 {
+				t.Errorf("records carrying the decode error = %d, want 1", corrupt)
+			}
+
+			committed, _, readErr := state.ReadIndex(dir)
+			if tc.committed {
+				if tickErr != nil {
+					t.Fatalf("captureAndCommit: %v", tickErr)
+				}
+				if readErr != nil {
+					t.Fatalf("tick did not replace sessions.json: %v", readErr)
+				}
+				if len(committed.Sessions) != 1 || committed.Sessions[0].Name != "work" {
+					t.Errorf("committed sessions = %+v, want the captured [work]", committed.Sessions)
+				}
+				return
+			}
+			if !errors.Is(tickErr, state.ErrTmuxStoppedAnswering) {
+				t.Errorf("tick error = %v, want one wrapping ErrTmuxStoppedAnswering", tickErr)
+			}
+			if !errors.Is(readErr, state.ErrCorruptIndex) {
+				t.Errorf("sessions.json after a stand-down: err = %v, want it left undecodable", readErr)
+			}
+		})
 	}
 }
 

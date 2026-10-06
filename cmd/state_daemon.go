@@ -421,12 +421,11 @@ var stateDaemonCmd = &cobra.Command{
 		hm := state.SeedHashMap(dir, logger)
 
 		// The previous index a cycle falls back on when it cannot read
-		// sessions.json itself.
+		// sessions.json itself. An unreadable file is reported by the cycle that
+		// reads it, so this read logs nothing.
 		var prevIdx *state.Index
-		if idx, skip, err := state.ReadIndex(dir); !skip {
+		if idx, skip, _ := state.ReadIndex(dir); !skip {
 			prevIdx = &idx
-		} else if err != nil {
-			logger.Warn("ReadIndex failed", "error", err)
 		}
 
 		// A path-resolution failure must not abort the daemon's primary job, so
