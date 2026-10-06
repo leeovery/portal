@@ -31,6 +31,10 @@ const (
 	termPaneBinEnv      = "PORTAL_TEST_TERM_PANE_BIN"
 	termPaneHookEnv     = "PORTAL_TEST_TERM_PANE_HOOK"
 	termPaneHoldDrawEnv = "PORTAL_TEST_TERM_PANE_HOLD_DRAW"
+
+	// termPaneHoldCatchEnv names one process to hold before it installs its
+	// SIGTERM catch, as "<kind> <n>": the nth draw or waiter of the pane.
+	termPaneHoldCatchEnv = "PORTAL_TEST_TERM_PANE_HOLD_CATCH"
 )
 
 const (
@@ -39,6 +43,9 @@ const (
 	termEventCleared   = "cleared"
 	termEventRecovered = "recovered"
 	termEventFailed    = "failed"
+
+	// A process records its pre-catch event, under its own kind, as it starts.
+	termEventPreCatch = "precatch-"
 )
 
 const termPaneWait = 10 * time.Second
@@ -57,6 +64,16 @@ resume-draw)
 	;;
 resume-recover)
 	echo ` + termEventRecovered + ` >> "$` + termPaneDirEnv + `/events"
+	;;
+esac
+`
+
+// stubTermPaneTmux answers the parked chain's pending-marker read as the pane
+// stands: set until a waiter has cleared it.
+const stubTermPaneTmux = `#!/bin/sh
+case "$*" in
+display-message*@portal-resume-pending*)
+	if grep -qx ` + termEventCleared + ` "$` + termPaneDirEnv + `/events" 2>/dev/null; then echo; else echo 1; fi
 	;;
 esac
 `
@@ -154,7 +171,29 @@ func (p termPaneProcess) drawConfig(cfg resumeDrawConfig) resumeDrawConfig {
 		return th, nil
 	}
 	cfg.ExecSelf = p.execSelf
+	cfg.CatchSIGTERM = p.holdingCatch(termEventDraw, cfg.CatchSIGTERM)
 	return cfg
+}
+
+// holdingCatch installs catch once the harness has had its chance to hold this
+// process in the moment before it, when a SIGTERM still ends it.
+func (p termPaneProcess) holdingCatch(kind string, catch func()) func() {
+	return func() {
+		p.recordSelf(termEventPreCatch + kind)
+		if p.holdsCatch(kind) {
+			time.Sleep(termPaneWait)
+		}
+		catch()
+	}
+}
+
+func (p termPaneProcess) holdsCatch(kind string) bool {
+	var want string
+	var n int
+	if _, err := fmt.Sscan(os.Getenv(termPaneHoldCatchEnv), &want, &n); err != nil || want != kind {
+		return false
+	}
+	return len(termPane{dir: p.dir}.pidsOf(termEventPreCatch+kind)) == n
 }
 
 // holdDraw keeps a draw mid-paint until the harness releases it, once: a later
@@ -196,6 +235,7 @@ func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 		Pause:       func(time.Duration) {},
 	}
 	cfg.ExecSelf = p.execSelf
+	cfg.CatchSIGTERM = p.holdingCatch(termEventWait, cfg.CatchSIGTERM)
 	return cfg
 }
 
@@ -223,6 +263,9 @@ type termPane struct {
 
 type termPaneOpts struct {
 	holdDraw bool
+
+	// holdCatch is the termPaneHoldCatchEnv value, empty to hold none.
+	holdCatch string
 }
 
 func startTermPane(t *testing.T, opts termPaneOpts) termPane {
@@ -240,6 +283,11 @@ func startTermPane(t *testing.T, opts termPaneOpts) termPane {
 	if err := os.Mkdir(tmp, 0o700); err != nil {
 		t.Fatalf("stage the pane's temp root: %v", err)
 	}
+	stubBin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(stubBin, 0o700); err != nil {
+		t.Fatalf("stage the pane's stub bin dir: %v", err)
+	}
+	stageStub(t, stubBin, "tmux", stubTermPaneTmux)
 
 	chain := exec.Command("/bin/sh", "-c", parkedResumeChain(exe, samplePayload()))
 	chain.Env = append(os.Environ(),
@@ -249,9 +297,13 @@ func startTermPane(t *testing.T, opts termPaneOpts) termPane {
 		"HOOK_DIR="+dir,
 		"SHELL="+stageStub(t, dir, "user-shell", stubUserShell),
 		"TMPDIR="+tmp,
+		"PATH="+stubBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	if opts.holdDraw {
 		chain.Env = append(chain.Env, termPaneHoldDrawEnv+"=1")
+	}
+	if opts.holdCatch != "" {
+		chain.Env = append(chain.Env, termPaneHoldCatchEnv+"="+opts.holdCatch)
 	}
 	stderr, err := os.Create(filepath.Join(dir, "stderr"))
 	if err != nil {

@@ -288,15 +288,11 @@ const parkedChainTrap = "trap : INT QUIT TERM; "
 // that exited 126 or 127 itself. The binary can leave the baked path while an
 // answered pane's shell runs, so the tail's own gate comes first: a marker that
 // reads back clear ends the chain, and a read that fails counts as still
-// pending. A plain format read serves: the one pane it misreads as clear is a
-// gone one, which wants no shell either. Past the gate it takes the tail's own
-// steps in the tail's order, since no Portal binary is left to take them.
+// pending. Past the gate it takes the tail's own steps in the tail's order,
+// since no Portal binary is left to take them.
 func parkedChainBackstop(exe string, payload resumeChainPayload) string {
 	target := string(tmux.PaneIDTarget(payload.Pane))
-	readMarker := shellquote.Join([]string{
-		"tmux", "display-message", "-p", "-t", target, "-F", "#{" + state.ResumePendingOption + "}",
-	}) + ` 2>/dev/null`
-	answeredGate := `if m=$(` + readMarker + `); then case $m in '') exit $s;; esac; fi`
+	answeredGate := `if ! ` + paneStillPending(payload.Pane) + `; then exit $s; fi`
 	reset := `printf '%s' ` + shellquote.Single(hydrateResetPreamble)
 	clearMarker := shellquote.Join([]string{
 		"tmux", "set-option", "-pu", "-t", target, state.ResumePendingOption,
@@ -322,9 +318,34 @@ func backstopReleasePin(pane string) string {
 		`if [ $n -gt 0 ]; then ` + unpin + `; fi`
 }
 
+// paneStillPending is a shell test that succeeds unless the pane's pending
+// marker reads back clear; a read that fails counts as still pending. A plain
+// format read serves: the one pane it misreads as clear is a gone one, which
+// wants nothing more from the chain.
+func paneStillPending(pane string) string {
+	readMarker := shellquote.Join([]string{
+		"tmux", "display-message", "-p", "-t", string(tmux.PaneIDTarget(pane)), "-F", "#{" + state.ResumePendingOption + "}",
+	}) + ` 2>/dev/null`
+	return `{ ! m=$(` + readMarker + `) || [ -n "$m" ]; }`
+}
+
+// sigtermStatus is the status the shell reports for a child a SIGTERM ended.
+const sigtermStatus = 128 + int(syscall.SIGTERM)
+
+// parkedChainDraw starts the draw again when the draw, or the waiter it became,
+// was ended by a SIGTERM while the pane still waits: a catch is not inherited
+// across fork or exec and a Go image cannot install one before its runtime has
+// started, so each hand-off opens a moment only the parked shell can close. The
+// marker gate keeps an answered pane, whose own shell now runs as that process,
+// off the panel.
+func parkedChainDraw(exe string, payload resumeChainPayload) string {
+	return `while ` + shellquote.Join(resumeChainArgv(exe, resumeDrawSubcommand, payload)) +
+		`; [ $? -eq ` + strconv.Itoa(sigtermStatus) + ` ] && ` + paneStillPending(payload.Pane) + `; do :; done`
+}
+
 func parkedResumeChain(exe string, payload resumeChainPayload) string {
 	return parkedChainTrap +
-		shellquote.Join(resumeChainArgv(exe, resumeDrawSubcommand, payload)) + "; " +
+		parkedChainDraw(exe, payload) + "; " +
 		shellquote.Join(resumeChainArgv(exe, resumeRecoverSubcommand, payload)) +
 		parkedChainBackstop(exe, payload)
 }

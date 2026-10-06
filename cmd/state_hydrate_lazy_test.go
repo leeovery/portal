@@ -114,9 +114,8 @@ func lazyChainArgs(command, paneKey string) []string {
 		Pane:    lazyPaneID,
 		PaneKey: paneKey,
 	}
-	draw := shellquote.Join(resumeChainArgv(lazyExe, resumeDrawSubcommand, payload))
 	recover := shellquote.Join(resumeChainArgv(lazyExe, resumeRecoverSubcommand, payload))
-	return []string{"sh", "-c", parkedChainTrap + draw + "; " + recover + parkedChainBackstop(lazyExe, payload)}
+	return []string{"sh", "-c", parkedChainTrap + parkedChainDraw(lazyExe, payload) + "; " + recover + parkedChainBackstop(lazyExe, payload)}
 }
 
 func TestHydrateLazy_NoRegistrationRestoresAsToday(t *testing.T) {
@@ -251,14 +250,18 @@ func TestHydrateLazy_SeparatesTheDrawAndTheTailWithASemicolon(t *testing.T) {
 	exec := &stubExecShell{}
 	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
 
-	lazyRun(t, lazyTails()[0], opts)
+	paneKey := lazyRun(t, lazyTails()[0], opts)
 
-	chained := strings.TrimPrefix(exec.args[2], parkedChainTrap)
-	if strings.Contains(chained, "&&") {
-		t.Errorf("chain %q joins its halves with &&; the tail must run whatever the draw did", chained)
+	payload := resumeChainPayload{Command: "echo hi", HookKey: lazyHookKey, Pane: lazyPaneID, PaneKey: paneKey}
+	tail, found := strings.CutPrefix(exec.args[2], parkedChainTrap+parkedChainDraw(lazyExe, payload))
+	if !found {
+		t.Fatalf("chain %q does not open on the draw", exec.args[2])
 	}
-	if n := strings.Count(chained, "; "+shellquote.Single(lazyExe)); n != 1 {
-		t.Errorf("chain %q does not separate the two halves with exactly one semicolon", chained)
+	if strings.Contains(tail, "&&") {
+		t.Errorf("tail %q joins the halves with &&; the tail must run whatever the draw did", tail)
+	}
+	if !strings.HasPrefix(tail, "; "+shellquote.Single(lazyExe)) {
+		t.Errorf("tail %q is not separated from the draw by a semicolon", tail)
 	}
 }
 
@@ -268,11 +271,11 @@ func TestHydrateLazy_ComposesTheTailWithThePaneIdentityAlone(t *testing.T) {
 
 	paneKey := lazyRun(t, lazyTails()[0], opts)
 
-	_, tail, found := strings.Cut(strings.TrimPrefix(exec.args[2], parkedChainTrap), "; ")
+	payload := resumeChainPayload{Command: "echo hi", HookKey: lazyHookKey, Pane: lazyPaneID, PaneKey: paneKey}
+	tail, found := strings.CutPrefix(exec.args[2], parkedChainTrap+parkedChainDraw(lazyExe, payload)+"; ")
 	if !found {
 		t.Fatalf("chain %q has no tail", exec.args[2])
 	}
-	payload := resumeChainPayload{Command: "echo hi", HookKey: lazyHookKey, Pane: lazyPaneID, PaneKey: paneKey}
 	want := shellquote.Join([]string{lazyExe, "state", resumeRecoverSubcommand, "--hook-key", lazyHookKey, "--pane", lazyPaneID, "--pane-key", paneKey}) + parkedChainBackstop(lazyExe, payload)
 	if tail != want {
 		t.Errorf("tail = %q, want %q", tail, want)
