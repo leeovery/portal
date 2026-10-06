@@ -319,9 +319,12 @@ func TestRunCommitCycleStandsDownOnAConfirmationNamingNoServer(t *testing.T) {
 
 func TestRunCommitCycleStandsDownWithNoOwnServer(t *testing.T) {
 	saved := seedSavedPair(t)
+	server := onlyWorkLive()
+	server.exitsAfter = exitsAfterConfirmation
+	server.shutdownAnswers = map[string]bool{confirmRead: true}
 
 	_, err := state.RunCommitCycle(state.CommitCycle{
-		Client:   onlyWorkLive().client(),
+		Client:   server.client(),
 		Dir:      saved.dir,
 		LoadPrev: func() *state.Index { return &saved.index },
 		HashMap:  state.HashMap{},

@@ -262,7 +262,8 @@ var ErrNotOwnServer = errors.New("confirmation not answered by the committer's o
 // confirmation. A tmux server that has begun exiting refuses every new
 // connection and never stops exiting, and only a server that has exited lets
 // another start on its socket, so an answer from ownServer proves every read
-// before it reached ownServer too.
+// before it reached ownServer too. An answer naming no server is tmux's own
+// shutdown answer and is refused whatever ownServer holds.
 func confirmOwnServer(c AnsweringConfirmer, ownServer int) error {
 	if ownServer <= 0 {
 		return fmt.Errorf("%w: own server unknown", ErrNotOwnServer)
@@ -270,6 +271,9 @@ func confirmOwnServer(c AnsweringConfirmer, ownServer int) error {
 	answered, err := c.ConfirmAnswering()
 	if err != nil {
 		return err
+	}
+	if answered <= 0 {
+		return fmt.Errorf("%w: answer named no server", ErrNotOwnServer)
 	}
 	if answered != ownServer {
 		return fmt.Errorf("%w: answered by server pid %d, own server pid %d", ErrNotOwnServer, answered, ownServer)

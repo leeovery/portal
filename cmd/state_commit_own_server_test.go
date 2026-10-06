@@ -85,7 +85,9 @@ func TestCommitNowFailsOnAConfirmationFromAnotherServer(t *testing.T) {
 func TestCommitNowStandsDownOutsideAnyTmuxServer(t *testing.T) {
 	saved := seedSavedState(t)
 	t.Setenv("TMUX", "")
-	client := tmux.NewClient(workOnlyCommander(nil))
+	fc := workOnlyCommander(nil)
+	fc.silentConfirm = true
+	client := tmux.NewClient(fc)
 	withCommitNowDeps(t, CommitNowDeps{
 		NewClient:   func() state.CaptureCycleClient { return client },
 		IsRestoring: func() (bool, error) { return state.IsRestoringSet(client) },
