@@ -367,39 +367,7 @@ func captureAndRefile(c CaptureCycleClient, ownServer int, dir string, prev *Ind
 	maps.Copy(waiting, capture.Pending)
 	maps.Copy(waiting, captured.carriedWaiting)
 	refilePendingScrollback(dir, &capture.Index, waiting, hm, logger)
-	holdTokenFiledTranscripts(dir, &capture)
 	return capture, nil
-}
-
-// holdTokenFiledTranscripts points at its token-named transcript every pane the
-// dump may write whose record names a file not on disk while that token-named
-// file is. A committer's previous index can predate the commit another
-// committer filed the pane under its token with, and housekeeping would delete
-// the file holding its bytes.
-func holdTokenFiledTranscripts(dir string, capture *CaptureCycle) {
-	for si := range capture.Index.Sessions {
-		s := &capture.Index.Sessions[si]
-		for wi := range s.Windows {
-			w := &s.Windows[wi]
-			for pi := range w.Panes {
-				p := &w.Panes[pi]
-				if capture.SkipsScrollback(SanitizePaneKey(s.Name, w.Index, p.Index)) {
-					continue
-				}
-				tokenFile, ok := PendingScrollbackPath(dir, p.PortalPaneID)
-				if !ok || p.ScrollbackFile == "" || fileExists(joinStored(dir, p.ScrollbackFile)) || !fileExists(tokenFile) {
-					continue
-				}
-				p.ScrollbackFile = PendingScrollbackFile(p.PortalPaneID)
-			}
-		}
-	}
-}
-
-// A file that cannot be inspected is presumed present.
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // An answer from ownServer proves every capture read before it reached

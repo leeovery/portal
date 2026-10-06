@@ -266,3 +266,64 @@ func cloneIndex(t *testing.T, idx state.Index) state.Index {
 	}
 	return out
 }
+
+func TestDaemonDumpKeepsAnAnsweredPanesTokenNamedTranscriptWhenItsPositionalPathHoldsAnotherPanesFile(t *testing.T) {
+	const occupant = "killed-pane-old-transcript"
+	unanswered := []struct {
+		name      string
+		commander func() *daemonFakeCommander
+	}{
+		{"the read after its empty capture is refused", func() *daemonFakeCommander {
+			return emptyCaptureThen(func(fc *daemonFakeCommander) { fc.confirmErr = refusedConfirmation() })
+		}},
+		{"the read after its empty capture is answered by another server", func() *daemonFakeCommander {
+			return emptyCaptureThen(func(fc *daemonFakeCommander) { fc.answeringPID = fakeOwnServerPID + 1 })
+		}},
+		{"the read after its empty capture is answered naming no server", func() *daemonFakeCommander {
+			return emptyCaptureThen(func(fc *daemonFakeCommander) { fc.silentConfirm = true })
+		}},
+		{"its capture is refused", func() *daemonFakeCommander {
+			fc := workOnlyCommander(nil)
+			fc.captureErrByTarget = map[string]error{"work:0.0": refusedConfirmation()}
+			return fc
+		}},
+	}
+	for _, d := range daemonDumpers {
+		for _, u := range unanswered {
+			t.Run(d.name+"/"+u.name, func(t *testing.T) {
+				saved := seedSavedState(t)
+				daemonView := cloneIndex(t, saved.index)
+				fc := u.commander()
+				tokenPath := answeredWorkPane(t, &saved, fc)
+				saved.index = daemonView
+				positional := state.ScrollbackFile(saved.dir, workPaneKey())
+				if err := os.WriteFile(positional, []byte(occupant), 0o600); err != nil {
+					t.Fatalf("occupy positional file: %v", err)
+				}
+
+				logger, _ := newCaptureLoggerForComponent(t, "daemon")
+
+				d.run(t, saved, fc, logger)
+
+				idx, _, err := state.ReadIndex(saved.dir)
+				if err != nil {
+					t.Fatalf("ReadIndex: %v", err)
+				}
+				for _, s := range idx.Sessions {
+					if s.Name == "work" {
+						if got := s.Windows[0].Panes[0].ScrollbackFile; got != tokenPath {
+							t.Errorf("sessions.json names %q for the answered pane, want %q", got, tokenPath)
+						}
+					}
+				}
+				data, err := os.ReadFile(filepath.Join(saved.dir, filepath.FromSlash(tokenPath)))
+				if err != nil || string(data) != "work-transcript" {
+					t.Errorf("token-named transcript = %q, %v; want %q", data, err, "work-transcript")
+				}
+				if data, err := os.ReadFile(positional); err == nil && string(data) != occupant {
+					t.Errorf("positional file = %q, want the other pane's %q or nothing", data, occupant)
+				}
+			})
+		}
+	}
+}

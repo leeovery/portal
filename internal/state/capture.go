@@ -45,9 +45,6 @@ const internalSessionPrefix = "_"
 // live pane in a session the capture reached carries that record's token. A
 // stale marker never resurrects a killed pane.
 //
-// A pane neither skipped nor pending whose previous record carrying its token
-// names that token's re-filed scrollback keeps naming it.
-//
 // A pane the enumeration lists as waiting whose session missed the capture —
 // renamed or killed mid-capture, or failing its environment read — would lose
 // its only transcript to the commit's housekeeping pass, so the previous
@@ -151,10 +148,6 @@ func captureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 
 	if len(live) > 0 && prev != nil {
 		mergeFrozenPanes(&idx, *prev, live, liveTokens)
-	}
-
-	if prev != nil {
-		keepAnsweredTranscripts(&idx, *prev, skipSet, live)
 	}
 
 	carried := map[string]struct{}{}
@@ -351,36 +344,6 @@ func mergeFrozenPanes(fresh *Index, prev Index, live map[string]livePane, liveTo
 					continue
 				}
 				carryPrevContent(p, record)
-			}
-		}
-	}
-}
-
-// keepAnsweredTranscripts points each pane neither skipped nor waiting whose
-// previous record, matched on its token, names that token's re-filed
-// transcript back at it: the positional file a fresh record names may hold
-// none of the pane's bytes, and housekeeping would delete the file that does.
-// The commit cycle moves the record back to its positional file once a dump
-// has written the pane's new capture there.
-func keepAnsweredTranscripts(fresh *Index, prev Index, skipSet map[string]struct{}, live map[string]livePane) {
-	byToken, _ := indexPrevPanes(prev, nil)
-	for si := range fresh.Sessions {
-		s := &fresh.Sessions[si]
-		for wi := range s.Windows {
-			w := &s.Windows[wi]
-			for pi := range w.Panes {
-				p := &w.Panes[pi]
-				key := SanitizePaneKey(s.Name, w.Index, p.Index)
-				if _, skipped := skipSet[key]; skipped {
-					continue
-				}
-				if _, waiting := live[key]; waiting || p.PortalPaneID == "" {
-					continue
-				}
-				tokenPath := PendingScrollbackFile(p.PortalPaneID)
-				if record, found := byToken[p.PortalPaneID]; found && record.ScrollbackFile == tokenPath {
-					p.ScrollbackFile = tokenPath
-				}
 			}
 		}
 	}

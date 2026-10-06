@@ -1,6 +1,7 @@
 package state
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -96,7 +97,9 @@ func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool,
 //
 // A pane answered since it was filed under its token keeps that token-named
 // transcript on its record until a dump writes its new capture, so no commit
-// leaves the pane's record off the file holding its bytes.
+// leaves the pane's record off the file holding its bytes. That hold is decided
+// from sessions.json as read under the lock, which a caller's previous index
+// can lag behind, and from LoadPrev only when sessions.json cannot be read.
 func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	lock, err := acquireCommitLock(cycle.Dir)
 	if err != nil {
@@ -104,9 +107,14 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	}
 	defer func() { _ = lock.Close() }()
 
-	capture, err := captureAndRefile(cycle.Client, cycle.OwnServer, cycle.Dir, cycle.LoadPrev(), cycle.HashMap, cycle.Logger)
+	committed := readPriorIndex(cycle.Dir)
+	prev := cycle.LoadPrev()
+	capture, err := captureAndRefile(cycle.Client, cycle.OwnServer, cycle.Dir, prev, cycle.HashMap, cycle.Logger)
 	if err != nil {
 		return capture, fmt.Errorf("capture: %w", err)
+	}
+	if hold := cmp.Or(committed, prev); hold != nil {
+		keepAnsweredTranscripts(&capture, *hold)
 	}
 	changed := false
 	if cycle.Dump != nil {
@@ -123,10 +131,34 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 		}
 		fileAtPositional(&capture.Index, writer.captured)
 	}
-	if err := Commit(cycle.Dir, capture.Index, changed, cycle.Logger); err != nil {
+	if err := commitOver(cycle.Dir, capture.Index, committed, changed, cycle.Logger); err != nil {
 		return capture, fmt.Errorf("commit: %w", err)
 	}
 	return capture, nil
+}
+
+// keepAnsweredTranscripts points each pane the dump may write whose record in
+// from, matched on its token, names that token's re-filed transcript back at
+// it: the positional file a fresh record names may hold none of the pane's
+// bytes, and housekeeping would delete the file that does.
+func keepAnsweredTranscripts(capture *CaptureCycle, from Index) {
+	byToken, _ := indexPrevPanes(from, nil)
+	for si := range capture.Index.Sessions {
+		s := &capture.Index.Sessions[si]
+		for wi := range s.Windows {
+			w := &s.Windows[wi]
+			for pi := range w.Panes {
+				p := &w.Panes[pi]
+				if p.PortalPaneID == "" || capture.SkipsScrollback(SanitizePaneKey(s.Name, w.Index, p.Index)) {
+					continue
+				}
+				tokenPath := PendingScrollbackFile(p.PortalPaneID)
+				if record, found := byToken[p.PortalPaneID]; found && record.ScrollbackFile == tokenPath {
+					p.ScrollbackFile = tokenPath
+				}
+			}
+		}
+	}
 }
 
 // heldTranscripts maps the key of every pane the dump may write whose record
