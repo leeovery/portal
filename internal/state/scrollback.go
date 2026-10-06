@@ -344,10 +344,7 @@ func (c CaptureCycle) SkipsScrollback(paneKey string) bool {
 // re-file failed. A failed marker read returns its error, wrapped in
 // ErrTmuxStoppedAnswering, before any capture is taken. A failed capture
 // returns before anything is re-filed, with the empty index, the empty pending
-// set and the error the capture gave, classified by the confirmation sent after
-// it unless one of its reads was already refused: refused, or not answered by
-// ownServer, wraps that error in ErrTmuxStoppedAnswering, while an answer from
-// ownServer, or an ownServer unknown and so sent nothing, leaves it unchanged. A
+// set and the error the capture gave, as classifyFailedCapture classifies it. A
 // refused confirmation, sent after the last capture read, returns its error and
 // an empty cycle before anything is linked or re-filed; so does one not
 // answered by ownServer, the pid of the committer's own tmux server.
