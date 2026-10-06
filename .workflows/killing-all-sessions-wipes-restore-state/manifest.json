@@ -112,7 +112,7 @@
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "current_phase": 3,
-          "current_task": "killing-all-sessions-wipes-restore-state-3-4",
+          "current_task": null,
           "project_skills": [
             ".claude/skills/golang-how-to",
             ".claude/skills/golang-testing",
@@ -164,7 +164,8 @@
             "killing-all-sessions-wipes-restore-state-2-9",
             "killing-all-sessions-wipes-restore-state-3-1",
             "killing-all-sessions-wipes-restore-state-3-2",
-            "killing-all-sessions-wipes-restore-state-3-3"
+            "killing-all-sessions-wipes-restore-state-3-3",
+            "killing-all-sessions-wipes-restore-state-3-4"
           ],
           "staging": {
             "p1": {
@@ -188,6 +189,18 @@
           "completed_phases": [
             1,
             2
+          ],
+          "bank": [
+            {
+              "task": "killing-all-sessions-wipes-restore-state-3-4",
+              "source": "reviewer",
+              "summary": "TestStateCommitNow_ACarryOntoALiveSessionsNameFailsTheCommit passes without checking the carry-collision refusal",
+              "failure": "With no own server set, a carry collision that slipped through stands down on own server unknown, which also returns errCommitNowFailed and leaves state unchanged; a regression putting two sessions under one name or dropping a waiting pane transcript on the commit-now path ships with the test green, noticed only when a transcript is missing after a restore",
+              "detail": "cmd/state_carry_missed_session_test.go:190-221 never calls withOwnTmuxServer; its fakeCaptureClient answers the confirmation as fakeOwnServerPID (cmd/state_commit_now_test.go:41). Mutating the errCarryNameTaken return at internal/state/capture.go:208 into a no-op leaves the test passing; adding withOwnTmuxServer(t, fakeOwnServerPID) makes it fail as it should (error = nil, want errCommitNowFailed); the daemon-tick sibling TestDaemonTick_ACarryOntoALiveSessionsNameFailsTheTick already fails correctly",
+              "files": [
+                "cmd/state_carry_missed_session_test.go"
+              ]
+            }
           ]
         }
       }
