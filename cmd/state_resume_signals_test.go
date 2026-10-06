@@ -95,8 +95,8 @@ func TestHydrateLazy_ParksTheChainBehindACaughtTrap(t *testing.T) {
 
 	lazyRun(t, lazyTails()[0], opts)
 
-	if len(stub.args) != 3 || !strings.HasPrefix(stub.args[2], "trap : INT QUIT; ") {
-		t.Errorf("parked chain = %q, want it to open with a caught trap on INT and QUIT", stub.args)
+	if len(stub.args) != 3 || !strings.HasPrefix(stub.args[2], "trap : INT QUIT TERM; ") {
+		t.Errorf("parked chain = %q, want it to open with a caught trap on INT, QUIT and TERM", stub.args)
 	}
 }
 

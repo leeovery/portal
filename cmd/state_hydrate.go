@@ -274,10 +274,11 @@ func execResumeChainAndExit(cfg hydrateConfig, command string, parked parkedPane
 }
 
 // parkedChainTrap keeps the parked shell alive through a group interrupt or
-// quit so its recovery tail still runs. It must stay a caught trap: an ignored
+// quit so its recovery tail still runs, and through a SIGTERM so the pane keeps
+// its session until tmux itself exits. It must stay a caught trap: an ignored
 // signal stays ignored across exec, and the hook and the user's shell would
-// inherit it.
-const parkedChainTrap = "trap : INT QUIT; "
+// inherit it. SIGHUP stays uncaught, so a kill still ends the pane.
+const parkedChainTrap = "trap : INT QUIT TERM; "
 
 // parkedChainBackstop leaves the pane at a shell when the tail could not start
 // at all. It keys on the shell's could-not-run statuses, not on any failure: a

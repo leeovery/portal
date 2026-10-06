@@ -216,6 +216,7 @@ func (r *announcingReader) Read(b []byte) (int, error) {
 // with the pane's stdin held by the test.
 type termPane struct {
 	dir    string
+	parked int
 	stdin  io.WriteCloser
 	exited chan struct{}
 }
@@ -267,7 +268,7 @@ func startTermPane(t *testing.T, opts termPaneOpts) termPane {
 	}
 	_ = stderr.Close()
 
-	p := termPane{dir: dir, stdin: stdin, exited: make(chan struct{})}
+	p := termPane{dir: dir, parked: chain.Process.Pid, stdin: stdin, exited: make(chan struct{})}
 	go func() {
 		_ = chain.Wait()
 		close(p.exited)
