@@ -56,6 +56,15 @@ var standDowns = []standDown{
 		heal:   func(fc *daemonFakeCommander) { fc.panesErr = nil },
 	},
 	{
+		name:   "every environment read and the confirmation refused",
+		fc:     refusedEnvironmentReadsCommander,
+		stderr: "server exited unexpectedly",
+		heal: func(fc *daemonFakeCommander) {
+			fc.envErrBySession = nil
+			fc.confirmErr = nil
+		},
+	},
+	{
 		name:   "a refused confirmation",
 		fc:     func() *daemonFakeCommander { return workOnlyCommander(refusedConfirmation()) },
 		stderr: "no server running",
@@ -76,6 +85,17 @@ func refusedMarkerReadCommander() *daemonFakeCommander {
 func refusedPaneListingCommander() *daemonFakeCommander {
 	fc := workOnlyCommander(nil)
 	fc.panesErr = &tmux.CommandError{Args: []string{"list-panes"}, Stderr: "server exited unexpectedly", Err: errors.New("exit status 1")}
+	return fc
+}
+
+// refusedEnvironmentReadsCommander lists "work" as live with its panes, then
+// refuses its environment read and the confirmation after it, the way a tmux
+// that began exiting after the pane listing does.
+func refusedEnvironmentReadsCommander() *daemonFakeCommander {
+	fc := workOnlyCommander(refusedConfirmation())
+	fc.envErrBySession = map[string]error{
+		"work": &tmux.CommandError{Args: []string{"show-environment"}, Stderr: "server exited unexpectedly", Err: errors.New("exit status 1")},
+	}
 	return fc
 }
 

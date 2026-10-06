@@ -452,3 +452,119 @@ func TestRunCommitCycleClassifiesARefusedCaptureReadAsTmuxStoppedAnswering(t *te
 		})
 	}
 }
+
+var errEnvironmentRead = errors.New("environment read blew up")
+
+// failingEnvironmentReads is a client over server whose every session
+// environment read fails with errEnvironmentRead before reaching it, so the
+// capture fails on no read already classed as refused.
+func failingEnvironmentReads(server *exitingServer) *tmux.Client {
+	return tmux.NewClient(commandertest.FromFunc(func(args ...string) (string, error) {
+		if args[0] == "show-environment" {
+			return "", errEnvironmentRead
+		}
+		return server.answer(args...)
+	}))
+}
+
+func TestRunCommitCycleClassifiesAFailedCaptureByItsConfirmation(t *testing.T) {
+	refused := onlyWorkLive()
+	refused.exitsAfter = exitsAfterRead("list-panes")
+	silent := onlyWorkLive()
+	silent.shutdownAnswers = map[string]bool{confirmRead: true}
+	anotherServer := onlyWorkLive()
+	anotherServer.pid = ownServerPID + 1
+
+	tests := []struct {
+		name        string
+		server      *exitingServer
+		wantRefusal func(error) bool
+	}{
+		{"a refused confirmation", refused, func(err error) bool {
+			cmdErr, ok := errors.AsType[*tmux.CommandError](err)
+			return ok && cmdErr.Args[0] == confirmRead && cmdErr.Stderr == "no server running"
+		}},
+		{"a confirmation naming no server", silent, func(err error) bool { return errors.Is(err, state.ErrNotOwnServer) }},
+		{"a confirmation from another server", anotherServer, func(err error) bool { return errors.Is(err, state.ErrNotOwnServer) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			saved := seedSavedPair(t)
+
+			_, err := state.RunCommitCycle(state.CommitCycle{
+				Client:    failingEnvironmentReads(tt.server),
+				OwnServer: ownServerPID,
+				Dir:       saved.dir,
+				LoadPrev:  func() *state.Index { return &saved.index },
+				HashMap:   state.HashMap{},
+			})
+
+			if !errors.Is(err, state.ErrTmuxStoppedAnswering) {
+				t.Fatalf("error = %v, want one wrapping ErrTmuxStoppedAnswering", err)
+			}
+			if !errors.Is(err, errEnvironmentRead) {
+				t.Errorf("error = %v, want the capture's error reachable through it", err)
+			}
+			if !tt.wantRefusal(err) {
+				t.Errorf("error = %v, want the confirmation's cause reachable through it", err)
+			}
+			if got := tt.server.callNames(); got[len(got)-1] != confirmRead {
+				t.Errorf("reads = %v, want the confirmation sent after the failed capture", got)
+			}
+			saved.assertUnchanged(t)
+		})
+	}
+}
+
+func TestRunCommitCycleWithNoOwnServerReturnsAFailedCaptureUnconfirmed(t *testing.T) {
+	saved := seedSavedPair(t)
+	server := onlyWorkLive()
+
+	_, err := state.RunCommitCycle(state.CommitCycle{
+		Client:   failingEnvironmentReads(server),
+		Dir:      saved.dir,
+		LoadPrev: func() *state.Index { return &saved.index },
+		HashMap:  state.HashMap{},
+	})
+
+	if !errors.Is(err, errEnvironmentRead) {
+		t.Fatalf("error = %v, want the capture's error", err)
+	}
+	if errors.Is(err, state.ErrTmuxStoppedAnswering) || errors.Is(err, state.ErrNotOwnServer) {
+		t.Errorf("error = %v, want the capture's error unchanged", err)
+	}
+	if got := server.callNames(); slices.Contains(got, confirmRead) {
+		t.Errorf("reads = %v, want no confirmation sent", got)
+	}
+	saved.assertUnchanged(t)
+}
+
+func TestRunCommitCycleSendsNoConfirmationAfterARefusedListing(t *testing.T) {
+	tests := []struct {
+		name     string
+		server   *exitingServer
+		wantRead string
+	}{
+		{"a refused session listing", &exitingServer{pid: ownServerPID, exitsAfter: exitsAfterRead("show-options")}, "list-sessions"},
+		{"a refused pane listing", &exitingServer{pid: ownServerPID, sessions: listSessionsFor("work"), exitsAfter: exitsAfterRead("list-sessions")}, "list-panes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			saved := seedSavedPair(t)
+
+			err := saved.runCycle(tt.server)
+
+			if !errors.Is(err, state.ErrTmuxStoppedAnswering) {
+				t.Fatalf("error = %v, want one wrapping ErrTmuxStoppedAnswering", err)
+			}
+			got := tt.server.callNames()
+			if slices.Contains(got, confirmRead) {
+				t.Errorf("reads = %v, want no confirmation sent after the refused %s", got, tt.wantRead)
+			}
+			if got[len(got)-1] != tt.wantRead {
+				t.Errorf("reads = %v, want the cycle to end at the refused %s", got, tt.wantRead)
+			}
+			saved.assertUnchanged(t)
+		})
+	}
+}

@@ -248,6 +248,8 @@ type AnsweringConfirmer interface {
 // ErrTmuxStoppedAnswering marks a committing cycle that stood down because tmux
 // stopped answering: one of its capture reads failed — the skeleton markers,
 // the session listing or the pane listing — or its confirmation was refused.
+// Any other capture failure is classified by the confirmation sent after it:
+// one the committer's own server does not answer makes it a stand-down too.
 // Such a cycle wrote nothing and ran no housekeeping pass.
 var ErrTmuxStoppedAnswering = errors.New("tmux stopped answering")
 
@@ -342,7 +344,10 @@ func (c CaptureCycle) SkipsScrollback(paneKey string) bool {
 // re-file failed. A failed marker read returns its error, wrapped in
 // ErrTmuxStoppedAnswering, before any capture is taken. A failed capture
 // returns before anything is re-filed, with the empty index, the empty pending
-// set and the error the capture gave. A
+// set and the error the capture gave, classified by the confirmation sent after
+// it unless one of its reads was already refused: refused, or not answered by
+// ownServer, wraps that error in ErrTmuxStoppedAnswering, while an answer from
+// ownServer, or an ownServer unknown and so sent nothing, leaves it unchanged. A
 // refused confirmation, sent after the last capture read, returns its error and
 // an empty cycle before anything is linked or re-filed; so does one not
 // answered by ownServer, the pid of the committer's own tmux server.
@@ -354,7 +359,7 @@ func captureAndRefile(c CaptureCycleClient, ownServer int, dir string, prev *Ind
 	captured, err := captureStructure(c, skeleton, prev, logger)
 	capture := CaptureCycle{Index: captured.index, Pending: captured.pending, Skeleton: skeleton, Carried: captured.carried}
 	if err != nil {
-		return capture, err
+		return capture, classifyFailedCapture(c, ownServer, err)
 	}
 	if err := confirmOwnServer(c, ownServer); err != nil {
 		return CaptureCycle{}, fmt.Errorf("%w: %w", ErrTmuxStoppedAnswering, err)
@@ -365,4 +370,17 @@ func captureAndRefile(c CaptureCycleClient, ownServer int, dir string, prev *Ind
 	maps.Copy(waiting, captured.carriedWaiting)
 	refilePendingScrollback(dir, &capture.Index, waiting, hm, logger)
 	return capture, nil
+}
+
+// An answer from ownServer proves every capture read before it reached
+// ownServer, so the capture failed for a reason other than tmux exiting. With
+// ownServer unknown no confirmation is sent, and an unsent read proves nothing.
+func classifyFailedCapture(c AnsweringConfirmer, ownServer int, captureErr error) error {
+	if errors.Is(captureErr, ErrTmuxStoppedAnswering) || ownServer <= 0 {
+		return captureErr
+	}
+	if err := confirmOwnServer(c, ownServer); err != nil {
+		return fmt.Errorf("%w: %w: %w", ErrTmuxStoppedAnswering, captureErr, err)
+	}
+	return captureErr
 }
