@@ -75,7 +75,12 @@
             "killing-all-sessions-wipes-restore-state-2-7": "tick-357799",
             "killing-all-sessions-wipes-restore-state-2-8": "tick-f1bea1",
             "killing-all-sessions-wipes-restore-state-2-9": "tick-9431d8",
-            "killing-all-sessions-wipes-restore-state-1-9": "tick-bbdc90"
+            "killing-all-sessions-wipes-restore-state-1-9": "tick-bbdc90",
+            "killing-all-sessions-wipes-restore-state-3": "tick-addf59",
+            "killing-all-sessions-wipes-restore-state-3-1": "tick-ecdc01",
+            "killing-all-sessions-wipes-restore-state-3-2": "tick-b26f2c",
+            "killing-all-sessions-wipes-restore-state-3-3": "tick-8c440b",
+            "killing-all-sessions-wipes-restore-state-3-4": "tick-ec62c6"
           },
           "storage_paths": [
             ".tick/"
@@ -102,7 +107,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
@@ -166,10 +171,10 @@
             },
             "c1": {
               "tasks": {
-                "1": "pending",
-                "2": "pending",
-                "3": "pending",
-                "4": "pending"
+                "1": "approved",
+                "2": "approved",
+                "3": "approved",
+                "4": "approved"
               }
             }
           },
