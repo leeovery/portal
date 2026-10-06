@@ -29,3 +29,29 @@ The doc comments on `RunCommitCycle`, `ScrollbackWriter.held`, `keepAnsweredTran
 This is derived from the record. §2.4 states the general measure, and this extends the approved phase 3 Task 1 and cycle 2 Task 1 hold from the token-named case to every file a last commit can name, without reversing it. The no-other-record condition is the finding's own. It keeps the commit from putting two records on one file, which `captureAndRefile`'s contract already forbids.
 
 **Outcome**: A tokened pane that restore placed away from its saved address keeps its saved transcript, and so does a pane tmux has renumbered or whose session was renamed. Every commit names that transcript and leaves it on disk, whether the pane's capture comes back empty, is refused, or no dump runs (`commit-now`). This lasts until a dump writes the pane's capture with confirmed bytes. Only then does a commit file the pane at its positional path and reclaim the old file.
+
+**Acceptance Criteria**:
+
+The moved pane in the first three criteria carries a token and is one the dump may write: not waiting, not mid-restore, not in a carried session. Its last committed record names another address's positional file that holds its transcript, and no other record in the capture names that file. Three ways produce it: restore closed a window-index gap, so the pane was saved at `S:2.0` on `scrollback/S__2.0.bin` and is now live at `S:1.0` with no live pane at `S:2.0`; tmux renumbered its window; or its session was renamed since that commit.
+
+- [ ] A daemon tick or shutdown flush takes an empty capture of the moved pane, and the read after it is refused, answered by another server on the socket, or answered naming no server. The cycle writes nothing for the pane and logs the refused write as today. The commit names the saved file, which keeps its bytes, and nothing is written at the pane's live positional path.
+- [ ] Some cycles reach the moved pane without writing its capture: its `capture-pane` is refused, a `commit-now` dumps nothing, or a shutdown flush dumps nothing. Every such commit, one after another, names the saved file and leaves it on disk with its bytes, until a dump writes the pane's capture.
+- [ ] A dump writes the moved pane's capture: either non-empty, or empty and confirmed by the committer's own server against the saved file, which takes one confirmation read. The commit names the pane's live positional file, which holds that capture, and that commit's housekeeping removes the old file.
+- [ ] A tokened pane's saved file is also named by another record in the capture. That record may be a pane now live at the saved address, including another moved pane whose live address that is. The tokened pane is judged at its own positional file as today: an empty capture over its absent positional file is written with no confirmation read. No commit names one file on two records.
+- [ ] A tokenless pane restored one window lower is judged at its own positional file as today. Its empty capture over its absent positional file is written with no confirmation read, and the commit names its positional file.
+- [ ] An answered lazy pane whose last committed record names its token-named transcript is held exactly as today.
+
+**Do**:
+- The hold lives in `internal/state/commit_cycle.go`, in two functions:
+  - `keepAnsweredTranscripts` (:157) points a pane's record back at the file its last committed record names.
+  - `heldTranscripts` (:179) gives that file to `ScrollbackWriter`.
+
+  Both take the hold only when the record names `PendingScrollbackFile(token)` (:169, :185). Widen that test to the Solution's rule:
+  - The pane carries a token and the dump may write it.
+  - Its last committed record names a file other than its live positional file. That record is matched on token from the cycle's previous index, as today: `sessions.json` read under the lock, else `LoadPrev`.
+  - When that file is another address's positional file, no other record in the commit names it.
+  - A token-named transcript keeps today's hold with no new condition.
+- Send a held pane through the existing hand-back. `ScrollbackWriter.Write` (:73-94) judges its empty capture against the held file and records a confirmed write in `captured`. `fileAtPositional` (:195) then files the pane at its positional path, and the commit's housekeeping (`gcOrphanScrollback`, `internal/state/commit.go:130`) removes the old file.
+- A tokenless pane, and a pane whose saved file another record names, stay judged at `ScrollbackFile(w.dir, paneKey)` as today.
+- Widen the doc comments on `RunCommitCycle`, `ScrollbackWriter.held`, `keepAnsweredTranscripts` and `heldTranscripts` to describe the widened hold.
+- Existing tests already cover the token-named hold this task leaves alone: `internal/state/commit_cycle_answered_test.go`, `internal/state/commit_cycle_answered_disk_test.go` and `cmd/state_daemon_empty_capture_test.go`.

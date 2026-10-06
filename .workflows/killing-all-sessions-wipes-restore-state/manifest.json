@@ -92,7 +92,9 @@
             "killing-all-sessions-wipes-restore-state-6-1": "tick-0d1cc8",
             "killing-all-sessions-wipes-restore-state-6-2": "tick-adfe17",
             "killing-all-sessions-wipes-restore-state-6-3": "tick-ed8613",
-            "killing-all-sessions-wipes-restore-state-6-4": "tick-8298cd"
+            "killing-all-sessions-wipes-restore-state-6-4": "tick-8298cd",
+            "killing-all-sessions-wipes-restore-state-7": "tick-046d8a",
+            "killing-all-sessions-wipes-restore-state-7-1": "tick-8fc847"
           },
           "storage_paths": [
             ".tick/"
@@ -233,7 +235,7 @@
             },
             "c5": {
               "tasks": {
-                "1": "pending"
+                "1": "approved"
               }
             }
           },
