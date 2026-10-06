@@ -59,7 +59,7 @@ func commitOver(dir string, idx Index, prior *Index, anyScrollbackChanged bool, 
 	return nil
 }
 
-// readPriorIndex returns nil when sessions.json is absent or not decodable.
+// readPriorIndex returns nil when sessions.json cannot be read or decoded.
 func readPriorIndex(dir string) *Index {
 	priorBytes, err := os.ReadFile(SessionsJSON(dir))
 	if err != nil {
