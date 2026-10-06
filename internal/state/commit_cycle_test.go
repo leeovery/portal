@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -331,15 +332,17 @@ func TestRunCommitCycleSerialisesOverlappingCommitters(t *testing.T) {
 
 		firstClient := &worldClient{world: world, afterStructure: make(chan struct{})}
 		var firstPrevs, secondPrevs []state.Index
-		firstDone := runCycleAsync(commitNowCycle(t, firstClient, dir, &firstPrevs))
+		firstCycle := commitNowCycle(t, firstClient, dir, &firstPrevs)
+		var firstSink *logtest.Sink
+		firstCycle.Logger, firstSink = logtest.NewCaptureLogger(t)
+		firstDone := runCycleAsync(firstCycle)
 		waitForCalls(t, firstClient, 4)
 
 		world.markPending()
 		secondClient := &worldClient{world: world}
-		secondLoads := 0
 		secondCycle := commitNowCycle(t, secondClient, dir, &secondPrevs)
-		loadPrev := secondCycle.LoadPrev
-		secondCycle.LoadPrev = func() *state.Index { secondLoads++; return loadPrev() }
+		var secondSink *logtest.Sink
+		secondCycle.Logger, secondSink = logtest.NewCaptureLogger(t)
 		secondDone := runCycleAsync(secondCycle)
 
 		time.Sleep(heldWindow)
@@ -349,16 +352,24 @@ func TestRunCommitCycleSerialisesOverlappingCommitters(t *testing.T) {
 
 		close(firstClient.afterStructure)
 		firstCapture := awaitCycle(t, firstDone, "first commit-now")
-		awaitCycle(t, secondDone, "second commit-now")
+		if got := recordFor(t, firstCapture.Index, "work").ScrollbackFile; got != "scrollback/"+handOverPositionalFile() {
+			t.Fatalf("first commit-now's index names %q for X, want the positional file", got)
+		}
+		secondCapture := awaitCycle(t, secondDone, "second commit-now")
 
-		if secondLoads != 1 || len(secondPrevs) != 1 {
-			t.Fatalf("the second commit-now read its previous index %d times, want 1", secondLoads)
+		if len(secondPrevs) != 0 {
+			t.Errorf("the second commit-now loaded a previous index of its own %d times over the first's readable commit, want 0", len(secondPrevs))
 		}
-		if got, want := sessionNamesOf(secondPrevs[0]), sessionNamesOf(firstCapture.Index); strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Errorf("second commit-now's previous index holds sessions %v, want the first's commit %v", got, want)
+		// The first commit drops the closed session; a second commit-now whose
+		// previous index predated that commit would log the drop again.
+		if got := firstSink.Records().WithMessage(droppedSessionMsg).Only(t, "first commit-now's drop").AttrOrEmpty("session"); got != closedSession {
+			t.Errorf("first commit-now dropped %q, want %q", got, closedSession)
 		}
-		if got := recordFor(t, secondPrevs[0], "work").ScrollbackFile; got != "scrollback/"+handOverPositionalFile() {
-			t.Errorf("second commit-now's previous index names %q for X, want the positional file the first committed", got)
+		if n := len(secondSink.Records().WithMessage(droppedSessionMsg)); n != 0 {
+			t.Errorf("second commit-now logged %d session drops, want 0: its previous index must be the first's commit", n)
+		}
+		if _, waiting := secondCapture.Pending[handOverKey]; !waiting {
+			t.Errorf("second commit-now's pending set = %v, want X in it", secondCapture.Pending)
 		}
 		assertTranscriptFiledUnderToken(t, dir)
 	})

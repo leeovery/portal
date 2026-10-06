@@ -1,7 +1,6 @@
 package state
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,8 +36,8 @@ type CommitCycle struct {
 	// every cycle down.
 	OwnServer int
 	Dir       string
-	// LoadPrev supplies the previous index, and is called only once the commit
-	// lock is held.
+	// LoadPrev supplies the previous index only when sessions.json, read under
+	// the commit lock, cannot be read or decoded. It is called under the lock.
 	LoadPrev func() *Index
 	HashMap  HashMap
 	// Dump writes the caller's scrollback for the capture through the writer
@@ -101,11 +100,15 @@ func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool,
 // written. A failed capture returns before the dump, and a failed dump before
 // the commit, its error returned as the dump gave it.
 //
+// The cycle's previous index is sessions.json as read under the lock, which a
+// caller's own index can lag behind once another committer has committed;
+// LoadPrev supplies it only when sessions.json cannot be read. The skeleton
+// merge, the waiting-pane merge, the carry and the hold all take their records
+// from that one index.
+//
 // A pane answered since it was filed under its token keeps that token-named
 // transcript on its record until a dump writes its new capture, so no commit
-// leaves the pane's record off the file holding its bytes. That hold is decided
-// from sessions.json as read under the lock, which a caller's previous index
-// can lag behind, and from LoadPrev only when sessions.json cannot be read.
+// leaves the pane's record off the file holding its bytes.
 func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	lock, err := acquireCommitLock(cycle.Dir)
 	if err != nil {
@@ -114,13 +117,16 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	defer func() { _ = lock.Close() }()
 
 	committed := readPriorIndex(cycle.Dir)
-	prev := cycle.LoadPrev()
+	prev := committed
+	if prev == nil {
+		prev = cycle.LoadPrev()
+	}
 	capture, err := captureAndRefile(cycle.Client, cycle.OwnServer, cycle.Dir, prev, cycle.HashMap, cycle.Logger)
 	if err != nil {
 		return capture, fmt.Errorf("capture: %w", err)
 	}
-	if hold := cmp.Or(committed, prev); hold != nil {
-		keepAnsweredTranscripts(&capture, *hold)
+	if prev != nil {
+		keepAnsweredTranscripts(&capture, *prev)
 	}
 	changed := false
 	if cycle.Dump != nil {

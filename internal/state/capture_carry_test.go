@@ -43,11 +43,12 @@ func seedCarryPrev(t *testing.T, dir string, prev state.Index) {
 }
 
 // carryWorld is one capture's view of tmux: the session-name read, the pane
-// rows and the per-session environment failures.
+// rows, the per-session environment failures and the skeleton markers.
 type carryWorld struct {
 	names   []string
 	rows    []string
 	envErrs map[string]error
+	markers string
 }
 
 func (w carryWorld) client(t *testing.T) state.CaptureCycleClient {
@@ -55,6 +56,7 @@ func (w carryWorld) client(t *testing.T) state.CaptureCycleClient {
 		listSessions: listSessionsFor(w.names...),
 		listPanes:    strings.Join(w.rows, "\n"),
 		envErrs:      w.envErrs,
+		markers:      w.markers,
 		t:            t,
 	}).commander())
 }
