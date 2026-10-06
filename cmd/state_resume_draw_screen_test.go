@@ -92,6 +92,7 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 				resumeChainPayload: drawScreenPayload(screen),
 				Stdout:             rec,
 				Logger:             drawTestLogger(t),
+				CatchSIGTERM:       func() {},
 				DisableEcho: func() error {
 					calls = append(calls, "echo-off")
 					return nil

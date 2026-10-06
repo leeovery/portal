@@ -46,6 +46,7 @@ func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPa
 		Stdout:             &p.stdout,
 		Logger:             drawTestLogger(t),
 		Size:               size,
+		CatchSIGTERM:       func() {},
 		DisableEcho: func() error {
 			p.echoOffCalls++
 			p.execsAtEchoOff = p.execCalls

@@ -89,6 +89,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 		In:                 in,
 		Logger:             logger,
 		IsTerminal:         func() bool { return true },
+		CatchSIGTERM:       func() {},
 		Settle:             time.After,
 		// Input handed in whole is already queued behind whatever is read.
 		AwaitInput: func(time.Duration) (bool, error) { return true, nil },
@@ -471,42 +472,45 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 	})
 }
 
-// A waiter declining a hangup would outlive the destruction of its own pane,
-// leaving a Portal process per culled session.
-// SIGWINCH is the one signal the wait path may watch, so a resize seam leaves
-// this green while a declined hangup fails it.
-func TestRunResumeWait_InstallsNoHangupTerminateOrInterruptHandler(t *testing.T) {
-	source := sourceguardtest.PackageSource(t, ".", "state_resume_wait.go")
+// A waiting pane's process declining a hangup would outlive the destruction of
+// its own pane, leaving a Portal process per culled session. SIGWINCH is
+// watched for a resize and SIGTERM caught to outlast a shutdown; nothing else
+// may be taken off its default disposition.
+func TestResumeWaitingPane_LeavesHangupAndInterruptAtTheirDefault(t *testing.T) {
+	const onlyWatchable = "only syscall.SIGWINCH and syscall.SIGTERM may be notified — the default disposition must end a waiting pane's process when tmux tears the pane down"
+	watchable := map[string]bool{"syscall.SIGWINCH": true, "syscall.SIGTERM": true}
 
-	const onlyWatchable = "only syscall.SIGWINCH may be watched — the default disposition must end the waiter when tmux tears the pane down"
+	for _, name := range []string{"state_resume_wait.go", "state_resume_draw.go", "state_resume_chain.go"} {
+		source := sourceguardtest.PackageSource(t, ".", name)
 
-	sourceguardtest.ForEachFuncCall(source.File, func(_ string, call *ast.CallExpr) bool {
-		switch sourceguardtest.CalleeName(call) {
-		case "Ignore", "Reset":
-			t.Errorf("%s: the wait path takes a signal off its default disposition without a Notify; %s",
-				source.Position(call.Pos()), onlyWatchable)
-			return true
-		case "Notify", "NotifyContext":
-		default:
-			return true
-		}
-
-		// A Notify naming no signal relays every signal, which is the refusal
-		// this guard exists to forbid.
-		if len(call.Args) < 2 {
-			t.Errorf("%s: the wait path notifies on every signal; %s",
-				source.Position(call.Pos()), onlyWatchable)
-			return true
-		}
-
-		for _, arg := range call.Args[1:] {
-			if got := signalName(arg); got != "syscall.SIGWINCH" {
-				t.Errorf("%s: the wait path notifies on %s; %s",
-					source.Position(call.Pos()), got, onlyWatchable)
+		sourceguardtest.ForEachFuncCall(source.File, func(_ string, call *ast.CallExpr) bool {
+			switch sourceguardtest.CalleeName(call) {
+			case "Ignore", "Reset":
+				t.Errorf("%s: a waiting pane's process takes a signal off its default disposition without a Notify; %s",
+					source.Position(call.Pos()), onlyWatchable)
+				return true
+			case "Notify", "NotifyContext":
+			default:
+				return true
 			}
-		}
-		return true
-	})
+
+			// A Notify naming no signal relays every signal, which is the
+			// refusal this guard exists to forbid.
+			if len(call.Args) < 2 {
+				t.Errorf("%s: a waiting pane's process notifies on every signal; %s",
+					source.Position(call.Pos()), onlyWatchable)
+				return true
+			}
+
+			for _, arg := range call.Args[1:] {
+				if got := signalName(arg); !watchable[got] {
+					t.Errorf("%s: a waiting pane's process notifies on %s; %s",
+						source.Position(call.Pos()), got, onlyWatchable)
+				}
+			}
+			return true
+		})
+	}
 }
 
 func signalName(arg ast.Expr) string {

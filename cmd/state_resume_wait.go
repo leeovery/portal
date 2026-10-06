@@ -47,6 +47,8 @@ type resumeWaitConfig struct {
 	MakeRaw    func() (restore func(), err error)
 	ExecSelf   func(prog string, args []string)
 
+	CatchSIGTERM func()
+
 	// Winch and Settle are the resize pair: a change arms the settle window and
 	// each further change restarts it, so a drag of any length costs at most one
 	// redraw. Size reads the pane at start-up and at the moment a window
@@ -95,9 +97,10 @@ func (cfg resumeWaitConfig) restore() {
 // screen offers answers it. A key answers only when it arrives alone, so a
 // paste or a burst answers nothing whatever it carries, and every other byte is
 // swallowed — the three keys that would signal a foreground process among them,
-// since raw mode delivers them as bytes. No signal is declined: tmux tearing the
-// pane down ends the waiter.
+// since raw mode delivers them as bytes. A SIGTERM is caught and changes
+// nothing; a hangup is not, so tmux tearing the pane down ends the waiter.
 func runResumeWait(cfg resumeWaitConfig) error {
+	cfg.CatchSIGTERM()
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 
 	// Spinning on a reader that is not a tty would burn a core for the life of
@@ -496,6 +499,7 @@ var stateResumeWaitCmd = &cobra.Command{
 			EnableTTYSignals: setStdinSignals,
 			EnableEcho:       setStdinEcho,
 			AltScreen:        paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),
+			CatchSIGTERM:     catchSIGTERM,
 		})
 	},
 }

@@ -582,7 +582,7 @@ func (fx *lazyPanelFixture) endWaiterUnanswered(t *testing.T) {
 	tree := fx.restingTree(t)
 	assertRestingTreeShape(t, tree)
 	waiter := tree[1]
-	if err := syscall.Kill(waiter.pid, syscall.SIGTERM); err != nil {
+	if err := syscall.Kill(waiter.pid, syscall.SIGKILL); err != nil {
 		t.Fatalf("signal the subject's waiter %d: %v", waiter.pid, err)
 	}
 }

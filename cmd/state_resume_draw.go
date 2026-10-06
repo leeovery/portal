@@ -24,6 +24,8 @@ type resumeDrawConfig struct {
 	Size       func() (int, int, error)
 	ExecSelf   func(prog string, args []string)
 
+	CatchSIGTERM func()
+
 	// DisableEcho runs ahead of the appearance query and the input drop, so the
 	// modes each puts back on its way out have echo off.
 	DisableEcho func() error
@@ -39,6 +41,7 @@ type resumeDrawConfig struct {
 // as long as the pane waits. The leave sequence is never written here: it
 // belongs to whatever answers the panel.
 func runResumeDraw(cfg resumeDrawConfig) error {
+	cfg.CatchSIGTERM()
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 
 	// A refusal still paints: a panel over an echoing tty is better than none.
@@ -179,6 +182,7 @@ var stateResumeDrawCmd = &cobra.Command{
 			ResolveTheme:   paneDrawTheme,
 			DropInputQueue: dropStdinInputQueue,
 			ExecSelf:       defaultExecShell,
+			CatchSIGTERM:   catchSIGTERM,
 		})
 	},
 }

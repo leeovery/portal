@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/leeovery/portal/internal/hooks"
 )
@@ -192,6 +194,15 @@ func resumeRegistrationOrLog(logger *slog.Logger, lookup func(hookKey string) (h
 	}
 	logger.Debug("hook lookup", "hook_key", hookKey, "result", "hit")
 	return onResume
+}
+
+// catchSIGTERM keeps a waiting pane's draw and waiter running through a
+// shutdown's SIGTERM, so the pane is saved still waiting rather than recovered
+// while tmux is still answering. It must stay a catch: an ignored signal stays
+// ignored across exec, and an answered pane's hook program and shell would
+// inherit it. The relay is never read; a caught SIGTERM is dropped.
+func catchSIGTERM() {
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGTERM)
 }
 
 // hookShellTrap keeps the shell running a resume hook alive through a SIGTERM,
