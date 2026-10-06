@@ -19,7 +19,10 @@ import (
 //
 // ListSessionNamesProbe must return a failed list-sessions as an error: a
 // committer reading it as zero sessions would commit an empty index and its
-// housekeeping pass would delete every saved transcript.
+// housekeeping pass would delete every saved transcript. A listing tmux
+// answered but that cannot be parsed must wrap tmuxerr.ErrSessionListUnparseable
+// instead, so the confirmation classifies it rather than it reading as a
+// refused read.
 type CaptureClient interface {
 	ListSessionNamesProbe() ([]string, error)
 	ListAllPanesWithFormat(format string) (string, error)
@@ -91,6 +94,11 @@ func captureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 
 	names, err := c.ListSessionNamesProbe()
 	if err != nil {
+		// A listing tmux answered but Portal could not parse is no refused
+		// read: the confirmation sent after it classifies it.
+		if errors.Is(err, tmuxerr.ErrSessionListUnparseable) {
+			return empty, err
+		}
 		return empty, fmt.Errorf("%w: %w", ErrTmuxStoppedAnswering, err)
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/commandertest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tmuxerr"
 )
 
 const confirmRead = "display-message"
@@ -567,4 +568,97 @@ func TestRunCommitCycleSendsNoConfirmationAfterARefusedListing(t *testing.T) {
 			saved.assertUnchanged(t)
 		})
 	}
+}
+
+// unparseableListing lists "work", "notes" and a live "work|notes", whose
+// pipe shifts the listing's fields so Portal cannot parse the line tmux
+// answered with.
+func unparseableListing() *exitingServer {
+	return &exitingServer{pid: ownServerPID, sessions: listSessionsFor("work", "notes", "work|notes"), panes: panesFor("work", "notes")}
+}
+
+func TestRunCommitCycleReportsAnUnparseableSessionListingItsOwnServerAnswersAsFailed(t *testing.T) {
+	saved := seedSavedPair(t)
+	server := unparseableListing()
+
+	err := saved.runCycle(server)
+
+	if !errors.Is(err, tmuxerr.ErrSessionListUnparseable) {
+		t.Fatalf("error = %v, want the listing's parse error", err)
+	}
+	if errors.Is(err, state.ErrTmuxStoppedAnswering) {
+		t.Errorf("error = %v, want no stand-down for a listing tmux answered", err)
+	}
+	got := server.callNames()
+	if got[len(got)-1] != confirmRead {
+		t.Errorf("reads = %v, want the confirmation sent after the unparseable listing", got)
+	}
+	assertConfirmedAfterCaptureReads(t, got)
+	saved.assertUnchanged(t)
+}
+
+func TestRunCommitCycleClassifiesAnUnparseableSessionListingByItsConfirmation(t *testing.T) {
+	refused := unparseableListing()
+	refused.exitsAfter = exitsAfterRead("list-sessions")
+	silent := unparseableListing()
+	silent.shutdownAnswers = map[string]bool{confirmRead: true}
+	anotherServer := unparseableListing()
+	anotherServer.pid = ownServerPID + 1
+
+	tests := []struct {
+		name        string
+		server      *exitingServer
+		wantRefusal func(error) bool
+	}{
+		{"a refused confirmation", refused, func(err error) bool {
+			cmdErr, ok := errors.AsType[*tmux.CommandError](err)
+			return ok && cmdErr.Args[0] == confirmRead && cmdErr.Stderr == "no server running"
+		}},
+		{"a confirmation naming no server", silent, func(err error) bool { return errors.Is(err, state.ErrNotOwnServer) }},
+		{"a confirmation from another server", anotherServer, func(err error) bool { return errors.Is(err, state.ErrNotOwnServer) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			saved := seedSavedPair(t)
+
+			err := saved.runCycle(tt.server)
+
+			if !errors.Is(err, state.ErrTmuxStoppedAnswering) {
+				t.Fatalf("error = %v, want one wrapping ErrTmuxStoppedAnswering", err)
+			}
+			if !errors.Is(err, tmuxerr.ErrSessionListUnparseable) {
+				t.Errorf("error = %v, want the listing's parse error reachable through it", err)
+			}
+			if !tt.wantRefusal(err) {
+				t.Errorf("error = %v, want the confirmation's cause reachable through it", err)
+			}
+			if got := tt.server.callNames(); got[len(got)-1] != confirmRead {
+				t.Errorf("reads = %v, want the confirmation sent after the unparseable listing", got)
+			}
+			saved.assertUnchanged(t)
+		})
+	}
+}
+
+func TestRunCommitCycleWithNoOwnServerReturnsAnUnparseableSessionListingUnconfirmed(t *testing.T) {
+	saved := seedSavedPair(t)
+	server := unparseableListing()
+
+	_, err := state.RunCommitCycle(state.CommitCycle{
+		Client:   server.client(),
+		Dir:      saved.dir,
+		LoadPrev: func() *state.Index { return &saved.index },
+		HashMap:  state.HashMap{},
+	})
+
+	if !errors.Is(err, tmuxerr.ErrSessionListUnparseable) {
+		t.Fatalf("error = %v, want the listing's parse error", err)
+	}
+	if errors.Is(err, state.ErrTmuxStoppedAnswering) || errors.Is(err, state.ErrNotOwnServer) {
+		t.Errorf("error = %v, want the listing's parse error unchanged", err)
+	}
+	if got := server.callNames(); slices.Contains(got, confirmRead) {
+		t.Errorf("reads = %v, want no confirmation sent", got)
+	}
+	saved.assertUnchanged(t)
 }

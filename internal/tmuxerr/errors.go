@@ -15,3 +15,9 @@ var ErrNoSuchSession = errors.New("no such session")
 // reading that as a vanished session drops a live session from the capture with
 // nothing to show for it.
 var ErrUnaddressableSessionName = errors.New("session name not addressable by exact target")
+
+// ErrSessionListUnparseable is wrapped by the session-list readers when tmux
+// answered list-sessions with a line Portal cannot parse — a session name
+// carrying the field separator is one. It marks a listing tmux did answer, so a
+// caller can tell it from a failed list-sessions read.
+var ErrSessionListUnparseable = errors.New("session list unparseable")

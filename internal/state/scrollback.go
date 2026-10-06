@@ -246,11 +246,11 @@ type AnsweringConfirmer interface {
 }
 
 // ErrTmuxStoppedAnswering marks a committing cycle that stood down because tmux
-// stopped answering: one of its capture reads failed — the skeleton markers,
-// the session listing or the pane listing — or its confirmation was refused.
-// Any other capture failure is classified by the confirmation sent after it:
-// one the committer's own server does not answer makes it a stand-down too.
-// Such a cycle wrote nothing and ran no housekeeping pass.
+// stopped answering: its read of the skeleton markers, the session listing or
+// the pane listing failed, or its confirmation was refused. Any other capture
+// failure is classified by the confirmation sent after it: one the committer's
+// own server does not answer makes it a stand-down too. Such a cycle wrote
+// nothing and ran no housekeeping pass.
 var ErrTmuxStoppedAnswering = errors.New("tmux stopped answering")
 
 // ErrNotOwnServer is a confirmation that does not prove the committer's own

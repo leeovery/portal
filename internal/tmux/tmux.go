@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmuxerr"
 )
 
 var ErrOptionNotFound = errors.New("option not found")
@@ -168,6 +169,9 @@ func (c *Client) ListSessionsProbe() ([]Session, error) {
 	return parseSessionList(output)
 }
 
+// parseSessionList marks every failure to parse a line with
+// tmuxerr.ErrSessionListUnparseable, so a listing tmux answered stays
+// distinguishable from a failed list-sessions read.
 func parseSessionList(output string) ([]Session, error) {
 	if output == "" {
 		return []Session{}, nil
@@ -184,17 +188,17 @@ func parseSessionList(output string) ([]Session, error) {
 
 		parts := strings.SplitN(line, "|", 4)
 		if len(parts) != 4 {
-			return nil, fmt.Errorf("unexpected session format: %q", line)
+			return nil, fmt.Errorf("%w: unexpected session format: %q", tmuxerr.ErrSessionListUnparseable, line)
 		}
 
 		windows, err := strconv.Atoi(parts[1])
 		if err != nil {
-			return nil, fmt.Errorf("invalid window count %q: %w", parts[1], err)
+			return nil, fmt.Errorf("%w: invalid window count %q: %w", tmuxerr.ErrSessionListUnparseable, parts[1], err)
 		}
 
 		attachedCount, err := strconv.Atoi(parts[2])
 		if err != nil {
-			return nil, fmt.Errorf("invalid attached count %q: %w", parts[2], err)
+			return nil, fmt.Errorf("%w: invalid attached count %q: %w", tmuxerr.ErrSessionListUnparseable, parts[2], err)
 		}
 
 		sessions = append(sessions, Session{

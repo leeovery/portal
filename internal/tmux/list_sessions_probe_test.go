@@ -8,6 +8,7 @@ import (
 
 	"github.com/leeovery/portal/internal/commandertest"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tmuxerr"
 )
 
 func failingListSessions(t *testing.T, stderr string) *commandertest.Scripted {
@@ -203,4 +204,62 @@ func TestListSessionNamesProbe(t *testing.T) {
 			t.Errorf("names = %v, want an empty slice", got)
 		}
 	})
+}
+
+func TestListSessionsProbe_MarksAnUnparseableListing(t *testing.T) {
+	readers := map[string]func(*tmux.Client) error{
+		"ListSessionsProbe": func(c *tmux.Client) error {
+			_, err := c.ListSessionsProbe()
+			return err
+		},
+		"ListSessionNamesProbe": func(c *tmux.Client) error {
+			_, err := c.ListSessionNamesProbe()
+			return err
+		},
+	}
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{"a line missing fields", "dev|3"},
+		{"a session name carrying a pipe", "work|notes|1|0|"},
+		{"an unparseable attached count", "dev|1|many|"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for reader, read := range readers {
+				mock := commandertest.New(t, commandertest.Returns(tt.output, "list-sessions"))
+
+				err := read(tmux.NewClient(mock))
+
+				if !errors.Is(err, tmuxerr.ErrSessionListUnparseable) {
+					t.Errorf("%s: error = %v, want one matching ErrSessionListUnparseable", reader, err)
+				}
+			}
+		})
+	}
+}
+
+func TestListSessionsProbe_DoesNotMarkAFailedReadUnparseable(t *testing.T) {
+	const stderr = "server exited unexpectedly"
+	readers := map[string]func(*tmux.Client) error{
+		"ListSessionsProbe": func(c *tmux.Client) error {
+			_, err := c.ListSessionsProbe()
+			return err
+		},
+		"ListSessionNamesProbe": func(c *tmux.Client) error {
+			_, err := c.ListSessionNamesProbe()
+			return err
+		},
+	}
+	for reader, read := range readers {
+		err := read(tmux.NewClient(failingListSessions(t, stderr)))
+
+		if errors.Is(err, tmuxerr.ErrSessionListUnparseable) {
+			t.Errorf("%s: error = %v, want a failed read not marked unparseable", reader, err)
+		}
+		if cmdErr, ok := errors.AsType[*tmux.CommandError](err); !ok || cmdErr.Stderr != stderr {
+			t.Errorf("%s: error = %v, want tmux's *CommandError carrying %q", reader, err, stderr)
+		}
+	}
 }
