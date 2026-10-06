@@ -166,60 +166,12 @@
             }
           },
           "consolidated_phases": [
-            1
+            1,
+            2
           ],
           "completed_phases": [
-            1
-          ],
-          "bank": [
-            {
-              "task": "killing-all-sessions-wipes-restore-state-2-1",
-              "source": "reviewer",
-              "summary": "CLAUDE.md Resume hooks paragraph still quotes the pre-phase-2 hook shell and parked chain argvs",
-              "failure": "Agents treat CLAUDE.md as the architecture reference and may write code or tests matching the documented argv, dropping the TERM handling; the regression shows only as sessions and scrollback lost at the next reboot",
-              "detail": "CLAUDE.md:192 quotes sh -c <HOOK>; exec $SHELL as it always has and the parked chain as trap : INT QUIT only; after phase 2 it should match hookShellTrap (cmd/state_resume_chain.go:202) and the final parkedChainTrap (cmd/state_hydrate.go:280), and say SIGTERM is caught not ignored and SIGHUP is not trapped",
-              "files": [
-                "CLAUDE.md",
-                "cmd/state_resume_chain.go",
-                "cmd/state_hydrate.go"
-              ]
-            },
-            {
-              "task": "killing-all-sessions-wipes-restore-state-2-1",
-              "source": "reviewer",
-              "summary": "CLAUDE.md Resume hooks paragraph quotes stale hook-shell and parked-chain argvs",
-              "failure": "Agents take argv shapes from CLAUDE.md for pgrep patterns and process-tree assertions; a guard built from the documented argv matches nothing and passes while checking nothing",
-              "detail": "CLAUDE.md:192: the eager shell sh -c <HOOK>; exec $SHELL becomes the trap : TERM; form, the parked chain trap : INT QUIT takes Task 2.3s form, plus one clause that the TERM trap keeps these panes alive through a shutdown SIGTERM",
-              "files": [
-                "CLAUDE.md",
-                "cmd/state_resume_chain.go",
-                "cmd/state_hydrate.go"
-              ]
-            },
-            {
-              "task": "killing-all-sessions-wipes-restore-state-2-3",
-              "source": "executor",
-              "summary": "CLAUDE.md Resume hooks section describes the resume shells as they were before Tasks 2.1-2.3",
-              "failure": "A contributor or agent reading CLAUDE.md takes the parked chain as trap : INT QUIT and the eager shell as untrapped, concludes SIGTERM kills both panes, and may build a change that drops the TERM handling; no test reads CLAUDE.md",
-              "detail": "CLAUDE.md:192 shows /bin/sh -c trap : INT QUIT; <draw argv>; ... and says the trap covers a group interrupt or quit; the eager shell is shown as sh -c <HOOK>; exec $SHELL though hookExecArgs now prefixes trap : TERM; (cmd/state_resume_chain.go:213); neither mentions the draw and waiter SIGTERM catch from Task 2.2",
-              "files": [
-                "CLAUDE.md",
-                "cmd/state_hydrate.go",
-                "cmd/state_resume_chain.go"
-              ]
-            },
-            {
-              "task": "killing-all-sessions-wipes-restore-state-2-4",
-              "source": "reviewer",
-              "summary": "CLAUDE.md Resume hooks paragraph omits the TERM traps and the parked chain redraw loop",
-              "failure": "An agent working from CLAUDE.md thinks the draw runs once and the shells have no trap, and may restore the documented shape or remove the loop, bringing back transcript loss on reboot; noticed only when a reboot loses a waiting pane scrollback",
-              "detail": "CLAUDE.md line 192 (parked-chain and eager-shell descriptions); current code: parkedChainTrap / parkedChainDraw / parkedResumeChain in cmd/state_hydrate.go:281-351, hookShellTrap / hookExecArgs in cmd/state_resume_chain.go:213-221",
-              "files": [
-                "CLAUDE.md",
-                "cmd/state_hydrate.go",
-                "cmd/state_resume_chain.go"
-              ]
-            }
+            1,
+            2
           ]
         }
       }
