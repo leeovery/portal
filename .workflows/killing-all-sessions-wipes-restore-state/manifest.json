@@ -187,6 +187,12 @@
               "tasks": {
                 "1": "approved"
               }
+            },
+            "c2": {
+              "tasks": {
+                "1": "pending",
+                "2": "pending"
+              }
             }
           },
           "consolidated_phases": [
