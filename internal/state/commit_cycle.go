@@ -42,9 +42,9 @@ type CommitCycle struct {
 	LoadPrev func() *Index
 	HashMap  HashMap
 	// Dump writes the caller's scrollback for the capture through the writer
-	// it is handed and reports whether any file changed, skipping every pane
-	// CaptureCycle.SkipsScrollback answers true for. Nil dumps nothing. An
-	// error ends the cycle uncommitted.
+	// it is handed and reports whether any file changed. The writer refuses
+	// every pane CaptureCycle.SkipsScrollback answers true for. Nil dumps
+	// nothing. An error ends the cycle uncommitted.
 	Dump   func(CaptureCycle, ScrollbackWriter) (bool, error)
 	Logger *slog.Logger
 }
@@ -52,6 +52,7 @@ type CommitCycle struct {
 // ScrollbackWriter writes captured scrollback for the commit cycle that handed
 // it out, against that cycle's own server, state directory and dedup map.
 type ScrollbackWriter struct {
+	capture   CaptureCycle
 	confirmer AnsweringConfirmer
 	ownServer int
 	dir       string
@@ -64,11 +65,16 @@ type ScrollbackWriter struct {
 }
 
 // Write writes data, just captured for paneKey, unless hash matches the
-// cycle's dedup entry, reporting whether it wrote. An empty capture over a
-// saved transcript the cycle's own server does not confirm writes nothing and
-// returns an error wrapping ErrUnconfirmedEmptyCapture. A pane's saved
-// transcript is the file its record names.
+// cycle's dedup entry, reporting whether it wrote. A pane the cycle skips is
+// never written: Write returns (false, nil) having sent no confirmation and
+// touched no dedup entry or file. An empty capture over a saved transcript the
+// cycle's own server does not confirm writes nothing and returns an error
+// wrapping ErrUnconfirmedEmptyCapture. A pane's saved transcript is the file
+// its record names.
 func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool, error) {
+	if w.capture.SkipsScrollback(paneKey) {
+		return false, nil
+	}
 	saved := ScrollbackFile(w.dir, paneKey)
 	stored, held := w.held[paneKey]
 	if held {
@@ -119,6 +125,7 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	changed := false
 	if cycle.Dump != nil {
 		writer := ScrollbackWriter{
+			capture:   capture,
 			confirmer: cycle.Client,
 			ownServer: cycle.OwnServer,
 			dir:       cycle.Dir,
