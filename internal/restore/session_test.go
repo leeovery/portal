@@ -847,6 +847,18 @@ func failOnPaneOptionTarget(livePanesOutput, failTarget string) func(args ...str
 	}
 }
 
+// mintsInOrder hands out tokens in order, then fails.
+func mintsInOrder(tokens ...string) func() (string, error) {
+	next := 0
+	return func() (string, error) {
+		if next == len(tokens) {
+			return "", errors.New("no more tokens")
+		}
+		next++
+		return tokens[next-1], nil
+	}
+}
+
 func TestSessionRestorer_ReStampsSavedPaneToken(t *testing.T) {
 	t.Run("it stamps each saved token onto its paired live pane", func(t *testing.T) {
 		mock := commandertest.FromFunc(restoreRunFunc("0:0\n0:1"))
@@ -893,10 +905,10 @@ func TestSessionRestorer_ReStampsSavedPaneToken(t *testing.T) {
 		}
 	})
 
-	t.Run("it stamps nothing for a saved pane with an empty token", func(t *testing.T) {
+	t.Run("it stamps a freshly minted token on a saved pane with an empty token, before it arms the pane", func(t *testing.T) {
 		mock := commandertest.FromFunc(restoreRunFunc("0:0"))
 		logger, sink := logtest.NewCaptureLogger(t)
-		r := &restore.SessionRestorer{Client: tmux.NewClient(mock), StateDir: t.TempDir(), Logger: logger}
+		r := &restore.SessionRestorer{Client: tmux.NewClient(mock), StateDir: t.TempDir(), Logger: logger, MintToken: mintsInOrder("mint0a")}
 
 		sess := newSession("work", nil,
 			newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
@@ -906,11 +918,91 @@ func TestSessionRestorer_ReStampsSavedPaneToken(t *testing.T) {
 			t.Fatalf("Restore: %v", err)
 		}
 
-		if stamps := setPaneOptionCalls(mock.Calls()); len(stamps) != 0 {
-			t.Errorf("set-option -p calls = %v, want none for an untokened saved pane", stamps)
+		stamps := setPaneOptionCalls(mock.Calls())
+		if len(stamps) != 1 {
+			t.Fatalf("set-option -p calls = %v, want one stamp of the minted token", stamps)
+		}
+		assertPaneTokenStamp(t, stamps[0], "=work:0.0", "mint0a")
+		if stampIdx, respawnIdx := callsAt(mock.Calls(), "set-option"), callsAt(mock.Calls(), "respawn-pane"); stampIdx > respawnIdx {
+			t.Errorf("set-option at %d follows respawn-pane at %d; the stamp must precede the arm", stampIdx, respawnIdx)
 		}
 		if body := sink.Body(); body != "" {
-			t.Errorf("log body = %q, want empty; an untokened pane is silent", body)
+			t.Errorf("log body = %q, want empty", body)
+		}
+	})
+
+	t.Run("it mints a token per untokened saved pane and re-stamps each saved token", func(t *testing.T) {
+		mock := commandertest.FromFunc(restoreRunFunc("0:0\n1:0\n2:0"))
+		r := &restore.SessionRestorer{Client: tmux.NewClient(mock), StateDir: t.TempDir(), MintToken: mintsInOrder("mint0a", "mint1b")}
+
+		sess := newSession("work", nil,
+			newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
+			newWindow(2, "mid", newPaneWithToken(0, "/work", "scrollback/work__2.0.bin", "tokA")),
+			newWindow(3, "last", newPane(0, "/work", "scrollback/work__3.0.bin")),
+		)
+
+		if _, err := r.Restore(sess); err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+
+		stamps := setPaneOptionCalls(mock.Calls())
+		if len(stamps) != 3 {
+			t.Fatalf("set-option -p calls = %v, want 3", stamps)
+		}
+		assertPaneTokenStamp(t, stamps[0], "=work:0.0", "mint0a")
+		assertPaneTokenStamp(t, stamps[1], "=work:1.0", "tokA")
+		assertPaneTokenStamp(t, stamps[2], "=work:2.0", "mint1b")
+	})
+
+	t.Run("it bakes no hook key for a pane it minted a token for", func(t *testing.T) {
+		mock := commandertest.FromFunc(restoreRunFunc("0:0"))
+		r := &restore.SessionRestorer{Client: tmux.NewClient(mock), StateDir: t.TempDir(), MintToken: mintsInOrder("mint0a")}
+
+		sess := newSession("work", nil,
+			newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
+		)
+
+		if _, err := r.Restore(sess); err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+
+		if key, found := extractHookKey(t, respawnPaneHydrateCommand(t, mock.Calls())); found {
+			t.Errorf("hydrate cmd bakes --hook-key %q, want none for a pane saved with no token", key)
+		}
+	})
+
+	t.Run("it warns, stamps nothing and still arms the pane when minting fails", func(t *testing.T) {
+		mock := commandertest.FromFunc(restoreRunFunc("0:0"))
+		logger, sink := logtest.NewCaptureLogger(t)
+		mintErr := errors.New("entropy boom")
+		r := &restore.SessionRestorer{
+			Client: tmux.NewClient(mock), StateDir: t.TempDir(), Logger: logger,
+			MintToken: func() (string, error) { return "", mintErr },
+		}
+
+		sess := newSession("work", nil,
+			newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
+		)
+
+		if _, err := r.Restore(sess); err != nil {
+			t.Fatalf("Restore returned %v, want nil (a failed mint must not abort)", err)
+		}
+
+		if stamps := setPaneOptionCalls(mock.Calls()); len(stamps) != 0 {
+			t.Errorf("set-option -p calls = %v, want none", stamps)
+		}
+		if got := len(findAllCalls(mock.Calls(), "respawn-pane")); got != 1 {
+			t.Errorf("respawn-pane calls = %d, want 1 (the pane is still armed)", got)
+		}
+		warn := sink.Records().WithMessage("mint pane token failed").Only(t, "mint pane token failed record")
+		if warn.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", warn.Level)
+		}
+		if wantKeys := []string{"session", "pane_key", "error"}; !slices.Equal(warn.Keys, wantKeys) {
+			t.Errorf("attr keys = %v, want %v", warn.Keys, wantKeys)
+		}
+		if got := warn.ErrorAttr(t, "error"); !errors.Is(got, mintErr) {
+			t.Errorf("error attr = %v, want %v", got, mintErr)
 		}
 	})
 

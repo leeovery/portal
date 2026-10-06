@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -29,6 +30,11 @@ type SessionRestorer struct {
 
 	// Exe is optional; nil resolves through os.Executable.
 	Exe ExecutableResolver
+
+	// MintToken is optional; nil mints through nanoid.NewPaneTokenGenerator.
+	MintToken nanoid.Generator
+
+	minted []state.RestoredPaneToken
 }
 
 // ExecutableResolver resolves the running binary's own path; production callers
@@ -41,6 +47,8 @@ type ExecutableResolver func() (string, error)
 // path must never read it from the live server: baking from the snapshot keeps
 // firing correct whatever the restore re-stamp does.
 type savedPaneArmInfo struct {
+	window    int
+	pane      int
 	scrollAbs string
 	paneToken string
 }
@@ -66,6 +74,8 @@ func (r *SessionRestorer) collectArmInfos(sess state.Session) []savedPaneArmInfo
 	for _, w := range sess.Windows {
 		for _, p := range w.Panes {
 			infos = append(infos, savedPaneArmInfo{
+				window:    w.Index,
+				pane:      p.Index,
 				scrollAbs: filepath.Join(r.StateDir, p.ScrollbackFile),
 				paneToken: p.PortalPaneID,
 			})
@@ -143,7 +153,7 @@ func (r *SessionRestorer) armPanes(sess state.Session, armInfos []savedPaneArmIn
 			return nil, fmt.Errorf("session %q: %w", sess.Name, err)
 		}
 
-		r.restampPaneToken(sess.Name, liveKey, liveTarget, info.paneToken)
+		r.stampPaneIdentity(sess.Name, liveKey, liveTarget, info)
 
 		hydrateCmd := buildHydrateCommand(exe, fifo, info.scrollAbs, info.paneToken)
 		if err := r.Client.RespawnPane(liveTarget, hydrateCmd); err != nil {
@@ -154,18 +164,39 @@ func (r *SessionRestorer) armPanes(sess state.Session, armInfos []savedPaneArmIn
 	return livePanes, nil
 }
 
-// restampPaneToken re-establishes a pane's durable identity on the live server,
-// which a tmux pane option cannot carry across a reboot. An empty saved token
-// is skipped rather than written: a stamped "" reads back indistinguishably
-// from absence. A failure costs that pane its hook rather than its session, so
-// it degrades to a WARN instead of aborting the restore.
-func (r *SessionRestorer) restampPaneToken(sessionName, liveKey string, liveTarget tmux.Target, token string) {
-	if token == "" {
+// stampPaneIdentity gives the pane a durable identity on the live server,
+// which a tmux pane option cannot carry across a reboot: its saved token, or a
+// freshly minted one tying it to the saved record it was built from. A failure
+// costs that pane its identity rather than its session, so it degrades to a
+// WARN instead of aborting the restore.
+func (r *SessionRestorer) stampPaneIdentity(sessionName, liveKey string, liveTarget tmux.Target, info savedPaneArmInfo) {
+	if info.paneToken != "" {
+		r.writePaneToken(sessionName, liveKey, liveTarget, info.paneToken)
 		return
 	}
+	token, err := r.mintToken()
+	if err != nil {
+		r.logger().Warn("mint pane token failed", "session", sessionName, "pane_key", liveKey, "error", err)
+		return
+	}
+	if r.writePaneToken(sessionName, liveKey, liveTarget, token) {
+		r.minted = append(r.minted, state.RestoredPaneToken{Session: sessionName, Window: info.window, Pane: info.pane, Token: token})
+	}
+}
+
+func (r *SessionRestorer) writePaneToken(sessionName, liveKey string, liveTarget tmux.Target, token string) bool {
 	if err := r.Client.SetPaneOption(liveTarget, state.PortalPaneIDOption, token); err != nil {
 		r.logger().Warn("set pane token failed", "session", sessionName, "pane_key", liveKey, "error", err)
+		return false
 	}
+	return true
+}
+
+func (r *SessionRestorer) mintToken() (string, error) {
+	if r.MintToken == nil {
+		r.MintToken = nanoid.NewPaneTokenGenerator()
+	}
+	return r.MintToken()
 }
 
 // ApplyWindowGeometry degrades locally on failure. Order matters: zoom is a

@@ -775,7 +775,7 @@ func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *
 	newSessionAt := callsAt(mock.Calls(), "new-session")
 	listPanesIdxs := findAllCalls(mock.Calls(), "list-panes")
 	layoutAt := callsAt(mock.Calls(), "select-layout")
-	setOptAt := callsAt(mock.Calls(), "set-option")
+	setOptAt := skeletonMarkerCallAt(mock.Calls())
 
 	if newSessionAt < 0 || len(listPanesIdxs) != 1 || layoutAt < 0 || setOptAt < 0 {
 		t.Fatalf("expected calls present (with exactly 1 list-panes): new-session=%d list-panes=%v select-layout=%d set-option=%d; calls: %v",
@@ -788,6 +788,15 @@ func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *
 	}
 }
 
+func skeletonMarkerCallAt(calls [][]string) int {
+	for i, c := range calls {
+		if len(c) >= 3 && c[0] == "set-option" && strings.HasPrefix(c[2], state.SkeletonMarkerPrefix) {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestOrchestrator_RebuildsEverySavedSessionWhenListSessionsFails(t *testing.T) {
 	dir := t.TempDir()
 	saved := []state.Session{
@@ -795,10 +804,6 @@ func TestOrchestrator_RebuildsEverySavedSessionWhenListSessionsFails(t *testing.
 		newSession("notes", nil, state.Window{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/n", ScrollbackFile: "scrollback/notes__0.0.bin", Active: true}}}),
 	}
 	writeValidIndex(t, dir, saved)
-	sessionsBefore, err := os.ReadFile(state.SessionsJSON(dir))
-	if err != nil {
-		t.Fatalf("read seeded sessions.json: %v", err)
-	}
 	listErr := &tmux.CommandError{Args: []string{"list-sessions"}, Stderr: "server exited unexpectedly", Err: errors.New("exit status 1")}
 	rf := &orchestratorRunFunc{listSessionsErr: listErr, listPanesOut: "0:0"}
 	mock := commandertest.FromFunc(rf.run)
@@ -820,6 +825,10 @@ func TestOrchestrator_RebuildsEverySavedSessionWhenListSessionsFails(t *testing.
 	}
 	if strings.Join(created, ",") != "work,notes" {
 		t.Errorf("sessions created = %v, want every saved session [work notes]", created)
+	}
+	sessionsBefore, err := os.ReadFile(state.SessionsJSON(dir))
+	if err != nil {
+		t.Fatalf("read sessions.json as restore left it: %v", err)
 	}
 
 	if _, err := state.RunCommitCycle(state.CommitCycle{

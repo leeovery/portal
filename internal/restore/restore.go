@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -25,6 +26,9 @@ type Orchestrator struct {
 
 	// Exe is optional; nil resolves through os.Executable.
 	Exe ExecutableResolver
+
+	// MintToken is optional; nil mints through nanoid.NewPaneTokenGenerator.
+	MintToken nanoid.Generator
 }
 
 // Restore returns (false, nil) on the happy path and after isolating a
@@ -64,6 +68,7 @@ func (o *Orchestrator) Restore() (bool, error) {
 			restoredPanes += len(w.Panes)
 		}
 	}
+	o.recordMintedTokens(sr)
 	o.logger().Info("skeleton complete",
 		"sessions", restoredSessions,
 		"windows", restoredWindows,
@@ -73,12 +78,23 @@ func (o *Orchestrator) Restore() (bool, error) {
 	return false, nil
 }
 
+// recordMintedTokens ties each token restore minted to its saved record before
+// any commit can run, so the first commit after restore finds every restored
+// pane's record by its token wherever restore placed the pane. A failure leaves
+// those panes judged at their live addresses; it does not undo the restore.
+func (o *Orchestrator) recordMintedTokens(sr *SessionRestorer) {
+	if err := state.RecordRestoredPaneTokens(o.StateDir, sr.minted); err != nil {
+		o.logger().Warn("record restored pane tokens failed", "error", err)
+	}
+}
+
 func (o *Orchestrator) newSessionRestorer() *SessionRestorer {
 	return &SessionRestorer{
-		Client:   o.Client,
-		StateDir: o.StateDir,
-		Logger:   o.Logger,
-		Exe:      o.Exe,
+		Client:    o.Client,
+		StateDir:  o.StateDir,
+		Logger:    o.Logger,
+		Exe:       o.Exe,
+		MintToken: o.MintToken,
 	}
 }
 

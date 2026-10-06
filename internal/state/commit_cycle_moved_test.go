@@ -391,33 +391,6 @@ func TestRunCommitCycleHoldsAMovedPaneOnItsTranscriptWhenAnotherRecordNamesItsSa
 	}
 }
 
-func TestRunCommitCycleJudgesATokenlessPaneRestoredOneWindowLowerAtItsOwnPositionalFile(t *testing.T) {
-	dir := t.TempDir()
-	saved := movedPane{"work", 2, 0, ""}
-	live := movedPane{"work", 1, 0, ""}
-	seed := seedMoved(t, dir, saved)
-	client := &movedClient{live: []movedPane{live}, later: func() (int, error) { return ownServerPID + 1, nil }}
-	var written bool
-	var writeErr error
-
-	if _, err := state.RunCommitCycle(movedTick(client, dir, seed, state.HashMap{}, writesPane(live.key(), nil, &written, &writeErr))); err != nil {
-		t.Fatalf("RunCommitCycle: %v", err)
-	}
-
-	if !written || writeErr != nil {
-		t.Errorf("Write = %t, %v; want a write", written, writeErr)
-	}
-	if client.laterReads != 0 {
-		t.Errorf("confirmation reads after the capture = %d, want none", client.laterReads)
-	}
-	if got := recordAt(t, onDiskIndex(t, dir), live).ScrollbackFile; got != live.stored() {
-		t.Errorf("sessions.json names %q, want its own positional file", got)
-	}
-	if got := readScrollback(t, dir, live.file()); got != "" {
-		t.Errorf("own positional file = %q, want the empty capture", got)
-	}
-}
-
 func TestRunCommitCycleHoldsNeitherMovedPaneWhenBothLastRecordsNameOneFile(t *testing.T) {
 	dir := t.TempDir()
 	shared := movedPane{"work", 2, 0, ""}

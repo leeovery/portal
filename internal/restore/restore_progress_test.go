@@ -198,6 +198,7 @@ func TestProgress_NilCallbackLeavesRestoreOutcomesUnchanged(t *testing.T) {
 		logger, _ := logtest.NewCaptureLogger(t)
 		o := restoretest.NewFakeExeOrchestrator(t, tmux.NewClient(mock), dir, logger)
 		o.Progress = progress
+		o.MintToken = mintsInOrder("mint0a", "mint1b")
 		if _, err := o.Restore(); err != nil {
 			t.Fatalf("Restore: %v", err)
 		}

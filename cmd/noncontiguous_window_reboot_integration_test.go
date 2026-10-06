@@ -3,16 +3,19 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/resumemode"
@@ -127,42 +130,83 @@ func TestNonContiguousWindowReboot_KeepsTokenKeyedHooks(t *testing.T) {
 		// respawn-pane'd process inherits and which equals that pane's
 		// #{pane_id}) — that pins the fire site directly rather than through
 		// the stamp. The token check pins the pairing restore chose: restore
-		// walks saved panes onto live ones by structural position, so the
-		// trailing un-stamped sibling must come back carrying nothing.
+		// walks saved panes onto live ones by structural position, so each
+		// stamped pane's token lands on the live pane at its position.
 		for i, live := range fx.livePanes {
+			if i >= len(fx.stamped) {
+				continue
+			}
 			target := tmux.PaneTarget(divergentSessionName, live.Window, live.Pane)
 			row, ok := liveRows[target]
 			if !ok {
 				t.Fatalf("live pane %s is absent from the live pane enumeration %v", target, liveRows)
 			}
-
-			wantToken := ""
-			if i < len(fx.stamped) {
-				wantToken = fx.stamped[i].token
-			}
-			if row.token != wantToken {
+			if row.token != fx.stamped[i].token {
 				t.Errorf("live pane %s (structural position %d) carries token %q; want %q — restore paired the wrong saved pane to it",
-					target, i, row.token, wantToken)
+					target, i, row.token, fx.stamped[i].token)
 			}
-			if i < len(fx.stamped) {
-				assertDivergentHookFiredInPane(t, fx.stamped[i], row.paneID)
-			}
+			assertDivergentHookFiredInPane(t, fx.stamped[i], row.paneID)
 		}
 	})
 
-	t.Run("it fires no hook on the pane that carries no token", func(t *testing.T) {
+	siblingRow := fx.siblingRow(t, liveRows)
+
+	t.Run("it gives the pane saved with no token a token of its own, recorded on its saved record", func(t *testing.T) {
+		if !nanoid.IsTokenShaped(siblingRow.token) {
+			t.Fatalf("pane saved with no token carries %q; want a token restore minted", siblingRow.token)
+		}
+		for _, p := range fx.stamped {
+			if siblingRow.token == p.token {
+				t.Errorf("pane saved with no token carries %s's token %q", p.role, p.token)
+			}
+		}
+		saved, _, err := state.ReadIndex(fx.stateDir)
+		if err != nil {
+			t.Fatalf("ReadIndex: %v", err)
+		}
+		sess := restoretest.FindCapturedSession(t, saved, divergentSessionName)
+		if got := divergentSavedToken(t, sess, fx.unstamped); got != siblingRow.token {
+			t.Errorf("saved record of the pane saved with no token carries %q; want the token restore gave it %q", got, siblingRow.token)
+		}
+	})
+
+	t.Run("it fires no hook on the pane saved with no token", func(t *testing.T) {
 		live := divergentLiveTokens(liveRows)
 		for _, p := range fx.stamped {
 			if !slices.Contains(live, p.token) {
 				t.Errorf("stamped pane %s: token %q absent from the live enumeration %v", p.role, p.token, live)
 			}
 		}
-		if got := len(live); got != len(fx.stamped) {
-			t.Errorf("live token count = %d (%v); want %d — the un-stamped sibling must carry none",
-				got, live, len(fx.stamped))
+		if got, want := len(live), len(fx.allPanes()); got != want {
+			t.Errorf("live token count = %d (%v); want %d — one per restored pane", got, live, want)
 		}
 		if got := divergentMarkerFileNames(t, fx.sideEffectDir); len(got) != len(fx.stamped) {
 			t.Errorf("hook side-effect files = %v; want exactly one per stamped pane", got)
+		}
+	})
+
+	t.Run("it keeps each restored pane's saved bytes on its first committed record after hydration", func(t *testing.T) {
+		fx.commitNow(t)
+		saved, _, err := state.ReadIndex(fx.stateDir)
+		if err != nil {
+			t.Fatalf("ReadIndex: %v", err)
+		}
+		sess := restoretest.FindCapturedSession(t, saved, divergentSessionName)
+		for i, p := range fx.allPanes() {
+			live := fx.livePanes[i]
+			target := tmux.PaneTarget(divergentSessionName, live.Window, live.Pane)
+			record := divergentRecordAt(t, sess, live)
+			if want := liveRows[target].token; record.PortalPaneID != want {
+				t.Errorf("record for %s (%s) carries token %q; want its live token %q", p.role, target, record.PortalPaneID, want)
+			}
+			data, err := os.ReadFile(filepath.Join(fx.stateDir, record.ScrollbackFile))
+			if err != nil {
+				t.Errorf("record for %s names %q, which cannot be read: %v", p.role, record.ScrollbackFile, err)
+				continue
+			}
+			if got, want := string(data), divergentSavedBytes(p); got != want {
+				t.Errorf("record for %s names %q holding %q; want the bytes it was saved with %q", p.role, record.ScrollbackFile, got, want)
+			}
 		}
 	})
 
@@ -215,6 +259,89 @@ func TestNonContiguousWindowReboot_KeepsTokenKeyedHooks(t *testing.T) {
 				fx.staleKey, keysOf(swept))
 		}
 	})
+
+	t.Run("it registers a hook in the pane saved with no token under the token restore gave it, stamping nothing", func(t *testing.T) {
+		const command = "echo sibling"
+		stamper := &recordingPaneStamper{err: errors.New("hook set must not stamp a pane restore gave a token")}
+		withHooksDeps(t, HooksDeps{
+			KeyResolver: fx.client,
+			PaneLister:  fx.client,
+			PaneStamper: stamper,
+			TokenMinter: func() (string, error) {
+				return "", errors.New("hook set must not mint for a pane restore gave a token")
+			},
+		})
+		t.Setenv("TMUX_PANE", siblingRow.paneID)
+
+		if out, err := runHookSet(t, command); err != nil {
+			t.Fatalf("hook set: %v (output %q)", err, out)
+		}
+
+		if len(stamper.calls) != 0 {
+			t.Errorf("hook set stamped %v; want nothing", stamper.calls)
+		}
+		registered, err := fx.store.Load(hooks.ViaInternal)
+		if err != nil {
+			t.Fatalf("store.Load: %v", err)
+		}
+		if got := registered[siblingRow.token]["on-resume"].Command; got != command {
+			t.Errorf("hook under the restored token %q = %q; want %q (keys=%v)", siblingRow.token, got, command, keysOf(registered))
+		}
+		if got := fx.siblingRow(t, fx.livePaneRows(t)).token; got != siblingRow.token {
+			t.Errorf("pane token after hook set = %q; want the one restore gave it %q", got, siblingRow.token)
+		}
+	})
+}
+
+// siblingRow is the live row of the pane saved with no token, the last at its
+// structural position.
+func (fx *divergentRebootFixture) siblingRow(t *testing.T, rows map[string]divergentLivePane) divergentLivePane {
+	t.Helper()
+	live := fx.livePanes[len(fx.stamped)]
+	target := tmux.PaneTarget(divergentSessionName, live.Window, live.Pane)
+	row, ok := rows[target]
+	if !ok {
+		t.Fatalf("live pane %s is absent from the live pane enumeration %v", target, rows)
+	}
+	return row
+}
+
+// commitNow takes the capture `portal state commit-now` takes: the committing
+// cycle with the previous index read from disk and no dump.
+func (fx *divergentRebootFixture) commitNow(t *testing.T) {
+	t.Helper()
+	pid, err := strconv.Atoi(strings.TrimSpace(fx.ts.Run(t, "display-message", "-p", "#{pid}")))
+	if err != nil {
+		t.Fatalf("read server pid: %v", err)
+	}
+	if _, err := state.RunCommitCycle(state.CommitCycle{
+		Client:    fx.client,
+		OwnServer: pid,
+		Dir:       fx.stateDir,
+		LoadPrev:  func() *state.Index { return nil },
+	}); err != nil {
+		t.Fatalf("RunCommitCycle: %v", err)
+	}
+}
+
+func divergentSavedBytes(p divergentPane) string {
+	return fmt.Sprintf("before reboot: %s\n", p.role)
+}
+
+func divergentRecordAt(t *testing.T, sess state.Session, live tmux.PaneCoord) state.Pane {
+	t.Helper()
+	for _, w := range sess.Windows {
+		if w.Index != live.Window {
+			continue
+		}
+		for _, p := range w.Panes {
+			if p.Index == live.Pane {
+				return p
+			}
+		}
+	}
+	t.Fatalf("committed session has no record at w%d.p%d", live.Window, live.Pane)
+	return state.Pane{}
 }
 
 // newDivergentRebootFixture builds and saves the pre-reboot session: three
@@ -334,7 +461,7 @@ func (fx *divergentRebootFixture) saveIndex(t *testing.T) {
 				p.role, p.savedWin, p.savedPane, got, p.token)
 		}
 		restoretest.SeedScrollback(t, fx.stateDir, divergentSessionName, p.savedWin, p.savedPane,
-			[]byte(fmt.Sprintf("before reboot: %s\n", p.role)))
+			[]byte(divergentSavedBytes(p)))
 	}
 
 	for _, p := range fx.stamped {
@@ -434,7 +561,7 @@ func (fx *divergentRebootFixture) livePaneRows(t *testing.T) map[string]divergen
 }
 
 // divergentLiveTokens is every non-empty token on the server, from the same
-// single enumeration — an un-stamped pane contributes none.
+// single enumeration.
 func divergentLiveTokens(rows map[string]divergentLivePane) []string {
 	var tokens []string
 	for _, row := range rows {
