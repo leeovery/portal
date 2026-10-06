@@ -19,6 +19,11 @@ import (
 // flag, or a structural difference from the prior on-disk index with SavedAt
 // ignored on both sides, so timestamp churn alone never triggers a write. A GC
 // failure is logged, not returned — sessions.json is the source of truth.
+//
+// A written commit logs, at INFO, each session the prior on-disk index held
+// that idx does not. The on-disk index is the measure, not any caller's
+// in-memory one, so a session removed by one committer is never reported again
+// by another.
 func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *slog.Logger) error {
 	logger = loggerOrDiscard(logger)
 	idx.Canonicalize()
@@ -28,12 +33,17 @@ func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *slog.Logge
 		return fmt.Errorf("encode sessions.json: %w", err)
 	}
 
-	if !structuralChange(dir, idx) && !anyScrollbackChanged {
+	prior, priorOK := readPriorIndex(dir)
+	if priorOK && !structuralChange(prior, idx) && !anyScrollbackChanged {
 		return nil
 	}
 
 	if err := fileutil.AtomicWrite0600(SessionsJSON(dir), data); err != nil {
 		return fmt.Errorf("write sessions.json: %w", err)
+	}
+
+	if priorOK {
+		logDroppedSessions(prior, idx, logger)
 	}
 
 	if err := gcOrphanScrollback(dir, idx, logger); err != nil {
@@ -43,22 +53,37 @@ func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *slog.Logge
 	return nil
 }
 
-func structuralChange(dir string, idx Index) bool {
+func readPriorIndex(dir string) (Index, bool) {
 	priorBytes, err := os.ReadFile(SessionsJSON(dir))
 	if err != nil {
-		return true
+		return Index{}, false
 	}
 	prior, err := DecodeIndex(priorBytes)
 	if err != nil {
-		return true
+		return Index{}, false
 	}
 	prior.Canonicalize()
+	return prior, true
+}
 
+func structuralChange(prior, idx Index) bool {
 	a := idx
 	a.SavedAt = time.Time{}
 	b := prior
 	b.SavedAt = time.Time{}
 	return !reflect.DeepEqual(a, b)
+}
+
+func logDroppedSessions(prior, idx Index, logger *slog.Logger) {
+	kept := make(map[string]struct{}, len(idx.Sessions))
+	for _, s := range idx.Sessions {
+		kept[s.Name] = struct{}{}
+	}
+	for _, s := range prior.Sessions {
+		if _, ok := kept[s.Name]; !ok {
+			logger.Info("session dropped", "session", s.Name)
+		}
+	}
 }
 
 // ComputeReferencedSet collects ScrollbackFile paths verbatim, as stored in idx.
