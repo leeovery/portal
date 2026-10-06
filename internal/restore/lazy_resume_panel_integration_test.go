@@ -499,7 +499,7 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 
 	prev := fx.prev
 	written := map[string]bool{}
-	dump := func(capture state.CaptureCycle) (bool, error) {
+	dump := func(capture state.CaptureCycle, _ state.ScrollbackWriter) (bool, error) {
 		anyWritten := false
 		for _, sess := range capture.Index.Sessions {
 			for _, win := range sess.Windows {

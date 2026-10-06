@@ -300,7 +300,7 @@ type scrollbackDump struct {
 	panes, naturalChurn, anomalous int
 }
 
-func (d *scrollbackDump) run(capture state.CaptureCycle) (bool, error) {
+func (d *scrollbackDump) run(capture state.CaptureCycle, writer state.ScrollbackWriter) (bool, error) {
 	if d.ctx.Err() != nil {
 		return false, errCycleCancelled
 	}
@@ -315,7 +315,7 @@ func (d *scrollbackDump) run(capture state.CaptureCycle) (bool, error) {
 				if capture.SkipsScrollback(paneKey) {
 					continue
 				}
-				if d.dumpPane(sess.Name, win.Index, pane.Index, paneKey) {
+				if d.dumpPane(writer, sess.Name, win.Index, pane.Index, paneKey) {
 					anyScrollbackChanged = true
 				}
 			}
@@ -324,7 +324,7 @@ func (d *scrollbackDump) run(capture state.CaptureCycle) (bool, error) {
 	return anyScrollbackChanged, nil
 }
 
-func (d *scrollbackDump) dumpPane(session string, windowIdx, paneIdx int, paneKey string) bool {
+func (d *scrollbackDump) dumpPane(writer state.ScrollbackWriter, session string, windowIdx, paneIdx int, paneKey string) bool {
 	d.panes++
 	captureLogger.Debug("pane captured", "pane_key", paneKey, "session", session)
 	target := tmux.PaneTargetExact(session, windowIdx, paneIdx)
@@ -339,12 +339,12 @@ func (d *scrollbackDump) dumpPane(session string, windowIdx, paneIdx int, paneKe
 		d.deps.Logger.Warn("capture pane failed", "pane_key", paneKey, "error", err)
 		return false
 	}
-	if err := state.ConfirmEmptyCapture(d.deps.Client, d.deps.OwnServer, d.deps.Dir, paneKey, data); err != nil {
+	written, err := writer.Write(paneKey, data, hash)
+	if errors.Is(err, state.ErrUnconfirmedEmptyCapture) {
 		d.anomalous++
 		d.deps.Logger.Warn("empty capture not confirmed; saved transcript kept", "pane_key", paneKey, "error", err)
 		return false
 	}
-	written, err := state.WriteScrollbackIfChanged(d.deps.Dir, paneKey, data, hash, d.deps.HashMap)
 	if err != nil {
 		d.anomalous++
 		d.deps.Logger.Warn("write scrollback failed", "pane_key", paneKey, "error", err)

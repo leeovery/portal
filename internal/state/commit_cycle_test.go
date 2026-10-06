@@ -236,7 +236,7 @@ func heldTick(client *worldClient, dir string, prev state.Index, started, releas
 		Dir:       dir,
 		LoadPrev:  func() *state.Index { return &prev },
 		HashMap:   state.HashMap{},
-		Dump: func(state.CaptureCycle) (bool, error) {
+		Dump: func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) {
 			close(started)
 			<-release
 			return false, nil
@@ -281,7 +281,7 @@ func TestRunCommitCycleSerialisesOverlappingCommitters(t *testing.T) {
 				Dir:       dir,
 				LoadPrev:  func() *state.Index { return &tickCapture.Index },
 				HashMap:   state.HashMap{},
-				Dump:      func(state.CaptureCycle) (bool, error) { return false, nil },
+				Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { return false, nil },
 			}
 			capture, err := state.RunCommitCycle(nextTick)
 			if err != nil {
@@ -425,7 +425,7 @@ func TestRunCommitCycleLockBound(t *testing.T) {
 			Dir:       dir,
 			LoadPrev:  func() *state.Index { loads++; return &seed },
 			HashMap:   state.HashMap{},
-			Dump:      func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
+			Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { dumps++; return true, nil },
 		})
 
 		if !errors.Is(err, state.ErrCommitLockHeld) {
@@ -572,7 +572,7 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 			Dir:       dir,
 			LoadPrev:  func() *state.Index { prev := onDiskIndex(t, dir); return &prev },
 			HashMap:   state.HashMap{},
-			Dump:      func(state.CaptureCycle) (bool, error) { return false, nil },
+			Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { return false, nil },
 		}); err != nil {
 			t.Fatalf("control RunCommitCycle: %v", err)
 		}
@@ -587,7 +587,7 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 			Dir:       dir,
 			LoadPrev:  func() *state.Index { prev := onDiskIndex(t, dir); return &prev },
 			HashMap:   state.HashMap{},
-			Dump:      func(state.CaptureCycle) (bool, error) { return true, nil },
+			Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { return true, nil },
 		}); err != nil {
 			t.Fatalf("RunCommitCycle: %v", err)
 		}
@@ -631,7 +631,7 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 			Client:    &worldClient{world: newHandOverWorld()},
 			Dir:       dir,
 			LoadPrev:  func() *state.Index { return &seed },
-			Dump:      func(state.CaptureCycle) (bool, error) { return true, dumpErr },
+			Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { return true, dumpErr },
 		})
 		if !errors.Is(err, dumpErr) {
 			t.Fatalf("error = %v, want the dump's", err)
@@ -654,7 +654,7 @@ func TestRunCommitCycleWithNoOtherCommitter(t *testing.T) {
 			Client:    &failFastCaptureClient{t: t, listSessionNamesErr: captureErr},
 			Dir:       dir,
 			LoadPrev:  func() *state.Index { return &seed },
-			Dump:      func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
+			Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { dumps++; return true, nil },
 		})
 		if !errors.Is(err, captureErr) {
 			t.Fatalf("error = %v, want the capture's", err)
@@ -703,7 +703,7 @@ func TestRunCommitCycleStandsDownOnAFailedSessionListing(t *testing.T) {
 		Dir:       dir,
 		LoadPrev:  func() *state.Index { return &seed },
 		HashMap:   state.HashMap{},
-		Dump:      func(state.CaptureCycle) (bool, error) { dumps++; return true, nil },
+		Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { dumps++; return true, nil },
 	})
 
 	if !errors.Is(err, listErr) {
@@ -765,7 +765,7 @@ func TestRunCommitCycleHoldsTheLockThroughTheHousekeepingPass(t *testing.T) {
 		Dir:       dir,
 		LoadPrev:  func() *state.Index { return &prev },
 		HashMap:   state.HashMap{},
-		Dump:      func(state.CaptureCycle) (bool, error) { return true, nil },
+		Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { return true, nil },
 		Logger:    slog.New(probe),
 	})
 	if err != nil {

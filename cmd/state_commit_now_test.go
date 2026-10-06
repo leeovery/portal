@@ -101,7 +101,7 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 			changed := false
 			if cycle.Dump != nil {
 				var err error
-				if changed, err = cycle.Dump(capture); err != nil {
+				if changed, err = cycle.Dump(capture, state.ScrollbackWriter{}); err != nil {
 					return capture, err
 				}
 			}

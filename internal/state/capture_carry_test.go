@@ -94,7 +94,7 @@ var committers = []committer{
 				Dir:       dir,
 				LoadPrev:  func() *state.Index { return &memPrev },
 				HashMap:   state.HashMap{},
-				Dump:      func(state.CaptureCycle) (bool, error) { return false, nil },
+				Dump:      func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) { return false, nil },
 			})
 		},
 	},

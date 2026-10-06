@@ -15,11 +15,11 @@ import (
 // what runs after the cycle's re-file and before its commit.
 type uncommittedCommitter struct {
 	name  string
-	cycle func(t *testing.T, dir string, seed state.Index, dump func(state.CaptureCycle) (bool, error)) state.CommitCycle
+	cycle func(t *testing.T, dir string, seed state.Index, dump func(state.CaptureCycle, state.ScrollbackWriter) (bool, error)) state.CommitCycle
 }
 
 var uncommittedCommitters = []uncommittedCommitter{
-	{"the daemon's tick or shutdown flush", func(_ *testing.T, dir string, seed state.Index, dump func(state.CaptureCycle) (bool, error)) state.CommitCycle {
+	{"the daemon's tick or shutdown flush", func(_ *testing.T, dir string, seed state.Index, dump func(state.CaptureCycle, state.ScrollbackWriter) (bool, error)) state.CommitCycle {
 		return state.CommitCycle{
 			OwnServer: ownServerPID,
 			Client:    &worldClient{world: waitingWorld()},
@@ -29,7 +29,7 @@ var uncommittedCommitters = []uncommittedCommitter{
 			Dump:      dump,
 		}
 	}},
-	{"commit-now", func(t *testing.T, dir string, _ state.Index, dump func(state.CaptureCycle) (bool, error)) state.CommitCycle {
+	{"commit-now", func(t *testing.T, dir string, _ state.Index, dump func(state.CaptureCycle, state.ScrollbackWriter) (bool, error)) state.CommitCycle {
 		var prevs []state.Index
 		cycle := commitNowCycle(t, &worldClient{world: waitingWorld()}, dir, &prevs)
 		cycle.Dump = dump
@@ -47,8 +47,8 @@ func waitingWorld() *handOverWorld {
 
 // standsDownAfterTheRefile ends the cycle the way a stand-down does, once X's
 // transcript has been filed under its token.
-func standsDownAfterTheRefile(t *testing.T, dir string) func(state.CaptureCycle) (bool, error) {
-	return func(state.CaptureCycle) (bool, error) {
+func standsDownAfterTheRefile(t *testing.T, dir string) func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) {
+	return func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) {
 		assertTokenFileHoldsTranscript(t, dir)
 		return false, fmt.Errorf("injected: %w", state.ErrTmuxStoppedAnswering)
 	}
@@ -57,8 +57,8 @@ func standsDownAfterTheRefile(t *testing.T, dir string) func(state.CaptureCycle)
 // failsTheWriteAfterTheRefile lets the cycle reach its commit with the state
 // directory refusing the new sessions.json, once X's transcript has been filed
 // under its token.
-func failsTheWriteAfterTheRefile(t *testing.T, dir string) func(state.CaptureCycle) (bool, error) {
-	return func(state.CaptureCycle) (bool, error) {
+func failsTheWriteAfterTheRefile(t *testing.T, dir string) func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) {
+	return func(state.CaptureCycle, state.ScrollbackWriter) (bool, error) {
 		assertTokenFileHoldsTranscript(t, dir)
 		if err := os.Chmod(dir, 0o500); err != nil {
 			t.Fatalf("chmod state dir: %v", err)
@@ -110,7 +110,7 @@ func assertRestoreFindsXTranscript(t *testing.T, dir string) {
 func TestRunCommitCycleEndingUncommittedLeavesEverySavedScrollbackPathOnDisk(t *testing.T) {
 	ends := []struct {
 		name  string
-		after func(t *testing.T, dir string) func(state.CaptureCycle) (bool, error)
+		after func(t *testing.T, dir string) func(state.CaptureCycle, state.ScrollbackWriter) (bool, error)
 		check func(t *testing.T, err error)
 	}{
 		{"a stand-down after the re-file", standsDownAfterTheRefile, func(t *testing.T, err error) {

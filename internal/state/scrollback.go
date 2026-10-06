@@ -74,6 +74,9 @@ func CaptureAndHashPane[T ~string](c PaneCapturer[T], target T) ([]byte, uint64,
 
 // WriteScrollbackIfChanged writes only when newHash differs from hm's entry,
 // updating hm on a write. A dedup hit touches no disk and returns (false, nil).
+// It writes an empty capture unconfirmed, so production code writes through
+// the ScrollbackWriter a commit cycle hands its dump; it is exported for
+// test fixtures.
 func WriteScrollbackIfChanged(dir, paneKey string, data []byte, newHash uint64, hm HashMap) (bool, error) {
 	if existing, ok := hm[paneKey]; ok && existing == newHash {
 		return false, nil
@@ -276,13 +279,13 @@ func confirmOwnServer(c AnsweringConfirmer, ownServer int) error {
 // transcript that the committer's own tmux server did not confirm.
 var ErrUnconfirmedEmptyCapture = errors.New("empty capture over a saved transcript not confirmed")
 
-// ConfirmEmptyCapture returns nil when data, just captured for paneKey, may be
+// confirmEmptyCapture returns nil when data, just captured for paneKey, may be
 // written over the pane's saved transcript. Only an empty capture over a saved
 // file that may hold bytes needs confirming, and it is confirmed only when
 // ownServer answers a read sent after the capture: an exiting tmux can answer a
 // capture already in flight with exit status 0 and no output. A refusal returns
 // an error wrapping ErrUnconfirmedEmptyCapture and the confirmation's cause.
-func ConfirmEmptyCapture(c AnsweringConfirmer, ownServer int, dir, paneKey string, data []byte) error {
+func confirmEmptyCapture(c AnsweringConfirmer, ownServer int, dir, paneKey string, data []byte) error {
 	if len(data) > 0 || !savedTranscriptMayHoldBytes(ScrollbackFile(dir, paneKey)) {
 		return nil
 	}

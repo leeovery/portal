@@ -3,6 +3,7 @@ package cmd
 import (
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -117,5 +118,68 @@ func TestDaemonDumpWritesAnEmptyCaptureItsOwnServerConfirms(t *testing.T) {
 				t.Errorf("confirmation reads = %d, want the cycle's and the empty capture's", got)
 			}
 		})
+	}
+}
+
+func TestDaemonDumpTalliesARefusedEmptyWriteOnceAsAnomalous(t *testing.T) {
+	for _, d := range daemonDumpers {
+		t.Run(d.name, func(t *testing.T) {
+			saved := seedSavedState(t)
+			sink := logtest.Install(t)
+			fc := emptyCaptureThen(func(fc *daemonFakeCommander) { fc.answeringPID = fakeOwnServerPID + 1 })
+
+			d.run(t, saved, fc, daemonLogger)
+
+			summary := sink.Records().Matching("capture", "tick complete").Only(t, "tick complete line")
+			if got := summary.IntAttr(t, "anomalous"); got != 1 {
+				t.Errorf("anomalous = %d, want 1", got)
+			}
+			sink.Records().Matching("daemon", emptyCaptureRefused).AtExactLevel(slog.LevelWarn).Only(t, "refused empty write line")
+			if got := sink.Records().WithMessage("write scrollback failed"); len(got) != 0 {
+				t.Errorf("write scrollback failed lines = %d, want none", len(got))
+			}
+		})
+	}
+}
+
+func TestDaemonDumpLogsAFailedWriteWithoutTheRefusalLine(t *testing.T) {
+	for _, d := range daemonDumpers {
+		t.Run(d.name, func(t *testing.T) {
+			saved := seedSavedState(t)
+			sink := logtest.Install(t)
+			fc := workOnlyCommander(nil)
+			fc.captureByTarget = map[string]string{"work:0.0": "fresh scrollback"}
+			blockWorkTranscript(t, saved.dir)
+
+			d.run(t, saved, fc, daemonLogger)
+
+			warn := sink.Records().Matching("daemon", "write scrollback failed").AtExactLevel(slog.LevelWarn).Only(t, "write scrollback failed line")
+			if want := []string{"component", "pane_key", "error"}; !slices.Equal(warn.Keys, want) {
+				t.Errorf("write scrollback failed keys = %v, want %v", warn.Keys, want)
+			}
+			if got := warn.AttrString(t, "pane_key"); got != workPaneKey() {
+				t.Errorf("write scrollback failed pane_key = %q, want %q", got, workPaneKey())
+			}
+			if got := sink.Records().WithMessage(emptyCaptureRefused); len(got) != 0 {
+				t.Errorf("refused empty write lines = %d, want none", len(got))
+			}
+			summary := sink.Records().Matching("capture", "tick complete").Only(t, "tick complete line")
+			if got := summary.IntAttr(t, "anomalous"); got != 1 {
+				t.Errorf("anomalous = %d, want 1", got)
+			}
+		})
+	}
+}
+
+// blockWorkTranscript puts a non-empty directory at the work pane's transcript
+// path, so a write's rename over it fails.
+func blockWorkTranscript(t *testing.T, dir string) {
+	t.Helper()
+	path := state.ScrollbackFile(dir, workPaneKey())
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove work transcript: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(path, "occupant"), 0o700); err != nil {
+		t.Fatalf("block work transcript: %v", err)
 	}
 }
