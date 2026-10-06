@@ -37,7 +37,8 @@ type CommitCycle struct {
 	OwnServer int
 	Dir       string
 	// LoadPrev supplies the previous index only when sessions.json, read under
-	// the commit lock, cannot be read or decoded. It is called under the lock.
+	// the commit lock, is absent or cannot be read or decoded, which the cycle
+	// has logged at WARN before calling it. It is called under the lock.
 	LoadPrev func() *Index
 	HashMap  HashMap
 	// Dump writes the caller's scrollback for the capture through the writer
@@ -117,9 +118,10 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	}
 	defer func() { _ = lock.Close() }()
 
-	committed := readPriorIndex(cycle.Dir)
+	committed, absent, err := readPriorIndex(cycle.Dir)
 	prev := committed
 	if prev == nil {
+		logUnreadIndex(cycle.Logger, absent, err)
 		prev = cycle.LoadPrev()
 	}
 	capture, err := captureAndRefile(cycle.Client, cycle.OwnServer, cycle.Dir, prev, cycle.HashMap, cycle.Logger)
@@ -149,6 +151,15 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 		return capture, fmt.Errorf("commit: %w", err)
 	}
 	return capture, nil
+}
+
+func logUnreadIndex(logger *slog.Logger, absent bool, cause error) {
+	logger = loggerOrDiscard(logger)
+	if absent {
+		logger.Warn("sessions.json absent; committing without the saved index")
+		return
+	}
+	logger.Warn("read sessions.json failed; committing without the saved index", "error", cause)
 }
 
 // keepAnsweredTranscripts points each tokened pane the dump may write back at

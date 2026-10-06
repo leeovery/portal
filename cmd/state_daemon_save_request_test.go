@@ -96,8 +96,9 @@ func TestDaemonTick_WarnsWhenReRaisingSaveRequestedAfterAFailedCycleFails(t *tes
 
 	sink.Records().Matching("daemon", tickBackedOff).AtExactLevel(slog.LevelWarn).Only(t, "tick back-off WARN")
 	sink.Records().Matching("daemon", "touch save.requested failed").AtExactLevel(slog.LevelWarn).Only(t, "failed re-raise WARN")
-	if n := len(sink.Records().AtOrAboveLevel(slog.LevelWarn)); n != 2 {
-		t.Errorf("WARN records = %d, want 2 in:\n%s", n, sink.Body())
+	sink.Records().Matching("daemon", absentIndexWarn).AtExactLevel(slog.LevelWarn).Only(t, "absent sessions.json WARN")
+	if n := len(sink.Records().AtOrAboveLevel(slog.LevelWarn)); n != 3 {
+		t.Errorf("WARN records = %d, want 3 in:\n%s", n, sink.Body())
 	}
 	if !deps.LastSaveAt.Equal(originalLastSave) {
 		t.Errorf("LastSaveAt advanced despite a failed cycle: %v != %v", deps.LastSaveAt, originalLastSave)
@@ -136,8 +137,9 @@ func TestDaemonTick_ConsumesSaveRequestedWhenTheCycleIsCancelled(t *testing.T) {
 	if n := len(fc.callsContaining("capture-pane")); n >= 2 {
 		t.Errorf("capture-pane invoked %d times, want the cancel to stop the dump before the second pane", n)
 	}
-	if recs := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(recs) != 0 {
-		t.Errorf("cancelled cycle logged WARN; body:\n%s", sink.Body())
+	warns := sink.Records().AtOrAboveLevel(slog.LevelWarn)
+	if len(warns) != 1 || len(warns.WithMessage(absentIndexWarn)) != 1 {
+		t.Errorf("cancelled cycle logged a WARN beyond the absent sessions.json one; body:\n%s", sink.Body())
 	}
 	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
 		t.Errorf("save.requested stat err = %v, want it consumed rather than re-raised", err)

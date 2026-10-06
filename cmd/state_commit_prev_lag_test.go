@@ -140,21 +140,17 @@ func TestDaemonCarriesAnAnsweredPaneFromTheIndexACommitNowLeft(t *testing.T) {
 }
 
 func TestStateCommitNow_WarnsOnlyWhenSessionsJSONCannotBeRead(t *testing.T) {
-	const (
-		absentWarn  = "sessions.json absent; proceeding with zero-value PrevIndex"
-		corruptWarn = "read sessions.json failed; proceeding with zero-value PrevIndex"
-	)
 	cases := []struct {
 		name  string
 		stage func(t *testing.T, dir string)
 		want  string
 	}{
-		{name: "absent", stage: func(*testing.T, string) {}, want: absentWarn},
+		{name: "absent", stage: func(*testing.T, string) {}, want: absentIndexWarn},
 		{name: "not decodable", stage: func(t *testing.T, dir string) {
 			if err := os.WriteFile(state.SessionsJSON(dir), []byte("{not valid json"), 0o600); err != nil {
 				t.Fatalf("seed corrupt sessions.json: %v", err)
 			}
-		}, want: corruptWarn},
+		}, want: unreadableIndexWarn},
 		{name: "readable", stage: func(t *testing.T, dir string) {
 			if err := state.Commit(dir, state.Index{Version: state.SchemaVersion}, false, nil); err != nil {
 				t.Fatalf("seed sessions.json: %v", err)
@@ -179,7 +175,7 @@ func TestStateCommitNow_WarnsOnlyWhenSessionsJSONCannotBeRead(t *testing.T) {
 				t.Fatalf("commit-now: %v", err)
 			}
 
-			for _, msg := range []string{absentWarn, corruptWarn} {
+			for _, msg := range []string{absentIndexWarn, unreadableIndexWarn} {
 				got := len(sink.Records().Matching("daemon", msg).AtExactLevel(slog.LevelWarn))
 				want := 0
 				if msg == tc.want {
@@ -188,6 +184,13 @@ func TestStateCommitNow_WarnsOnlyWhenSessionsJSONCannotBeRead(t *testing.T) {
 				if got != want {
 					t.Errorf("WARN %q logged %d times, want %d", msg, got, want)
 				}
+			}
+			wantWarns := 0
+			if tc.want != "" {
+				wantWarns = 1
+			}
+			if n := len(sink.Records().AtOrAboveLevel(slog.LevelWarn)); n != wantWarns {
+				t.Errorf("WARN records = %d, want %d in:\n%s", n, wantWarns, sink.Body())
 			}
 		})
 	}

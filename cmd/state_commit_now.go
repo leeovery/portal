@@ -31,7 +31,6 @@ func IsSilentExitError(err error) bool {
 var commitNowDeps *CommitNowDeps
 
 type CommitNowDeps struct {
-	ReadIndex      func(dir string) (state.Index, bool, error)
 	RunCommitCycle func(cycle state.CommitCycle) (state.CaptureCycle, error)
 	NewClient      func() state.CaptureCycleClient
 
@@ -55,9 +54,6 @@ func resolveCommitNowDeps() *CommitNowDeps {
 		*deps = *commitNowDeps
 	}
 
-	if deps.ReadIndex == nil {
-		deps.ReadIndex = state.ReadIndex
-	}
 	if deps.RunCommitCycle == nil {
 		deps.RunCommitCycle = state.RunCommitCycle
 	}
@@ -114,11 +110,9 @@ var stateCommitNowCmd = &cobra.Command{
 			Client:    deps.NewClient(),
 			OwnServer: ownTmuxServer(),
 			Dir:       dir,
-			LoadPrev: func() *state.Index {
-				prev := loadPrevIndex(dir, deps.ReadIndex, logger)
-				return &prev
-			},
-			Logger: logger,
+			// commit-now holds no index of its own to fall back on.
+			LoadPrev: func() *state.Index { return &state.Index{} },
+			Logger:   logger,
 		})
 		if err != nil {
 			return failCommitNow(logger, dir, deps.TouchSaveRequested, "commit cycle", err)
@@ -152,20 +146,6 @@ func failCommitNow(logger *slog.Logger, dir string, touch func(string) error, st
 		logger.Warn("touch save.requested after commit-now failure failed", "error", terr)
 	}
 	return fmt.Errorf("%w: %s: %v", errCommitNowFailed, stage, cause)
-}
-
-// The cycle calls this only once its own read of sessions.json under the lock
-// has failed, so it reports why the file could not be read and yields the zero
-// Index: dropping killed sessions does not depend on PrevIndex, so a read
-// failure must never abort the synchronous commit.
-func loadPrevIndex(dir string, readIndex func(string) (state.Index, bool, error), logger *slog.Logger) state.Index {
-	_, skip, err := readIndex(dir)
-	if err != nil {
-		logger.Warn("read sessions.json failed; proceeding with zero-value PrevIndex", "error", err)
-	} else if skip {
-		logger.Warn("sessions.json absent; proceeding with zero-value PrevIndex")
-	}
-	return state.Index{}
 }
 
 func init() {

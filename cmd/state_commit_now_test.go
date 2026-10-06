@@ -65,10 +65,6 @@ type commitNowFixture struct {
 	commitCalls     int
 	commitArgs      []commitInvocation
 	commitErr       error
-	readIdxErr      error
-	readIdxSkip     bool
-	readIdxReturn   state.Index
-	readIdxOverride bool
 
 	restoring      bool
 	restoringErr   error
@@ -127,11 +123,6 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 			}
 			return state.TouchSaveRequested(dir)
 		},
-	}
-	if f.readIdxOverride {
-		deps.ReadIndex = func(_ string) (state.Index, bool, error) {
-			return f.readIdxReturn, f.readIdxSkip, f.readIdxErr
-		}
 	}
 	withCommitNowDeps(t, *deps)
 }
@@ -323,11 +314,9 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 	}
 }
 
-func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnWhenSessionsJSONMissing(t *testing.T) {
+func TestStateCommitNow_FallsBackToZeroPrevWhenSessionsJSONMissing(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
-	t.Setenv("PORTAL_LOG_LEVEL", "warn")
-	sink := logtest.Install(t)
 
 	f := &commitNowFixture{
 		client: &fakeCaptureClient{sessions: nil},
@@ -349,27 +338,14 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnWhenSessionsJSONMissing(t 
 		t.Errorf("prev should be zero-value Index, got: %+v", got)
 	}
 
-	logged := sink.Body()
-	if !strings.Contains(logged, "WARN") {
-		t.Errorf("log missing WARN level entry: %q", logged)
-	}
-	if !strings.Contains(logged, "component="+"daemon") {
-		t.Errorf("log missing %q component column: %q", "daemon", logged)
-	}
-	if !strings.Contains(logged, "sessions.json") {
-		t.Errorf("log missing 'sessions.json' marker: %q", logged)
-	}
-
 	if _, err := os.Stat(filepath.Join(dir, "sessions.json")); err != nil {
 		t.Errorf("sessions.json not written: %v", err)
 	}
 }
 
-func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnOnCorruptSessionsJSON(t *testing.T) {
+func TestStateCommitNow_FallsBackToZeroPrevOnCorruptSessionsJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
-	t.Setenv("PORTAL_LOG_LEVEL", "warn")
-	sink := logtest.Install(t)
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -393,14 +369,6 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnOnCorruptSessionsJSON(t *t
 
 	if got := f.capturePrevs[0]; got == nil || len(got.Sessions) != 0 || got.Version != 0 {
 		t.Errorf("prev should be zero-value Index, got: %+v", got)
-	}
-
-	logged := sink.Body()
-	if !strings.Contains(logged, "WARN") {
-		t.Errorf("log missing WARN level entry: %q", logged)
-	}
-	if !strings.Contains(logged, "component="+"daemon") {
-		t.Errorf("log missing %q component column: %q", "daemon", logged)
 	}
 }
 
@@ -835,11 +803,7 @@ func TestStateCommitNow_LeavesSessionsJSONByteIdenticalWhenCommitFailsBeforeRena
 			Version:  state.SchemaVersion,
 			Sessions: []state.Session{},
 		},
-		// The seed is deliberately invalid JSON, so the override is what keeps
-		// the decode failure off the path while still pinning the on-disk bytes.
-		readIdxOverride: true,
-		readIdxSkip:     true,
-		commitErr:       errors.New("disk full pre-rename"),
+		commitErr: errors.New("disk full pre-rename"),
 	}
 	installCommitNowDeps(t, f)
 

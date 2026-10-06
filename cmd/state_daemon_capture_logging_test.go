@@ -115,11 +115,13 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 
 	log := sink.Body()
 
-	// One per failing session and no more: the all-natural-churn path returns a
-	// nil error, so tick must add no "tick failed" wrapper of its own.
+	// One per failing session beside the absent sessions.json one, and no more:
+	// the all-natural-churn path returns a nil error, so tick must add no "tick
+	// failed" wrapper of its own.
+	sink.Records().WithMessage(absentIndexWarn).Only(t, "absent sessions.json WARN")
 	warnCount := strings.Count(log, "WARN")
-	if warnCount != 2 {
-		t.Errorf("WARN entries = %d, want 2; log:\n%s", warnCount, log)
+	if warnCount != 3 {
+		t.Errorf("WARN entries = %d, want 3; log:\n%s", warnCount, log)
 	}
 	if !strings.Contains(log, "session=A") {
 		t.Errorf("expected WARN for session A; log:\n%s", log)

@@ -26,7 +26,8 @@ import (
 // on-disk index is the measure, not any caller's in-memory one, so a session
 // removed by one committer is never reported again by another.
 func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *slog.Logger) error {
-	return commitOver(dir, idx, readPriorIndex(dir), anyScrollbackChanged, logger)
+	prior, _, _ := readPriorIndex(dir)
+	return commitOver(dir, idx, prior, anyScrollbackChanged, logger)
 }
 
 // commitOver is Commit measured against prior, the on-disk index its caller
@@ -59,18 +60,18 @@ func commitOver(dir string, idx Index, prior *Index, anyScrollbackChanged bool, 
 	return nil
 }
 
-// readPriorIndex returns nil when sessions.json cannot be read or decoded.
-func readPriorIndex(dir string) *Index {
-	priorBytes, err := os.ReadFile(SessionsJSON(dir))
+// readPriorIndex returns sessions.json canonicalized, or nil with why it read
+// nothing: absent for a missing file, err for a read or decode failure.
+func readPriorIndex(dir string) (prior *Index, absent bool, err error) {
+	idx, skip, err := ReadIndex(dir)
 	if err != nil {
-		return nil
+		return nil, false, err
 	}
-	prior, err := DecodeIndex(priorBytes)
-	if err != nil {
-		return nil
+	if skip {
+		return nil, true, nil
 	}
-	prior.Canonicalize()
-	return &prior
+	idx.Canonicalize()
+	return &idx, false, nil
 }
 
 func structuralChange(prior, idx Index) bool {

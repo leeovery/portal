@@ -114,9 +114,6 @@ func TestResolveCommitNowDepsMergeConvention(t *testing.T) {
 
 		deps := resolveCommitNowDeps()
 
-		if deps.ReadIndex == nil {
-			t.Error("ReadIndex = nil; an unset seam must fall through to its production default")
-		}
 		if deps.RunCommitCycle == nil {
 			t.Error("RunCommitCycle = nil; an unset seam must fall through to its production default")
 		}
@@ -271,20 +268,6 @@ func doctorSeamCases() []seamCase {
 
 func commitNowSeamCases() []seamCase {
 	return []seamCase{
-		{
-			field: "ReadIndex",
-			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{ReadIndex: func(string) (state.Index, bool, error) {
-					return state.Index{Version: 99}, true, nil
-				}})
-			},
-			assert: func(t *testing.T) {
-				idx, _, _ := resolveCommitNowDeps().ReadIndex("")
-				if idx.Version != 99 {
-					t.Errorf("ReadIndex() version = %d; want the injected seam's 99", idx.Version)
-				}
-			},
-		},
 		{
 			field: "RunCommitCycle",
 			inject: func(t *testing.T) {
