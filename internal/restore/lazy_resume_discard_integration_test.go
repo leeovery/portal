@@ -183,6 +183,24 @@ func TestLazyResumeDiscard_RealPaneDiscardsItsResume(t *testing.T) {
 			t.Fatalf("subject scrollback written=%v captured=%v after the discard; a pane that no "+
 				"longer waits is captured again", written, ok)
 		}
+		// The answered pane's record goes back to its positional file, which
+		// holds the capture just written; a record left on the token-named
+		// transcript would let housekeeping delete that capture and restore the
+		// pre-answer transcript on the next reboot.
+		sess := restoretest.FindCapturedSession(t, after.idx, discardSubjectSession)
+		if len(sess.Windows) == 0 || len(sess.Windows[0].Panes) == 0 {
+			t.Fatalf("captured session %q holds no pane 0.0", discardSubjectSession)
+		}
+		record := sess.Windows[0].Panes[0]
+		positional := state.ScrollbackFile(fx.stateDir, discardSubjectKey())
+		if got := filepath.Join(fx.stateDir, record.ScrollbackFile); got != positional {
+			t.Fatalf("subject record names %q after the discard; want its positional file %q",
+				record.ScrollbackFile, positional)
+		}
+		if got := fx.readScrollbackAt(t, record.ScrollbackFile); string(got) != string(after.captured[discardSubjectKey()]) {
+			t.Fatalf("subject positional file holds %q; want the capture the round wrote %q",
+				got, after.captured[discardSubjectKey()])
+		}
 	})
 
 	t.Run("it closes the pane on the first exit", func(t *testing.T) {

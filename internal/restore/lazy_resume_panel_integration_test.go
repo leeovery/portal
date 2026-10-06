@@ -480,26 +480,28 @@ func (fx *lazyPanelFixture) printLine(t *testing.T, target tmux.Target, line str
 }
 
 // captureRoundResult is what one pass of the saver's own route produced: the
-// index it committed, the panes it reported pending, and which panes it wrote
-// scrollback for.
+// index it committed, the panes it reported pending, which panes it wrote
+// scrollback for, and the bytes each written pane's capture held.
 type captureRoundResult struct {
-	idx     state.Index
-	pending map[string]struct{}
-	written map[string]bool
+	idx      state.Index
+	pending  map[string]struct{}
+	written  map[string]bool
+	captured map[string][]byte
 }
 
 // captureRound takes a capture the way the daemon takes one, through the
 // committing cycle: the composite that reads the markers and the structure and
 // re-files every frozen pane's scrollback onto its own token, the per-pane
-// scrollback dump, then the commit that reclaims whatever the committed index
-// no longer names. A capture landing
+// scrollback dump through the writer the cycle hands it, then the commit that
+// reclaims whatever the committed index no longer names. A capture landing
 // while a pane waits reaches the state an install reaches only if all three run.
 func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 	t.Helper()
 
 	prev := fx.prev
 	written := map[string]bool{}
-	dump := func(capture state.CaptureCycle, _ state.ScrollbackWriter) (bool, error) {
+	captured := map[string][]byte{}
+	dump := func(capture state.CaptureCycle, writer state.ScrollbackWriter) (bool, error) {
 		anyWritten := false
 		for _, sess := range capture.Index.Sessions {
 			for _, win := range sess.Windows {
@@ -513,11 +515,14 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 					if err != nil {
 						return false, fmt.Errorf("CaptureAndHashPane %s: %w", target, err)
 					}
-					wrote, err := state.WriteScrollbackIfChanged(fx.stateDir, key, data, hash, fx.hashes)
+					wrote, err := writer.Write(key, data, hash)
 					if err != nil {
-						return false, fmt.Errorf("WriteScrollbackIfChanged %s: %w", key, err)
+						return false, fmt.Errorf("write scrollback %s: %w", key, err)
 					}
 					written[key] = wrote
+					if wrote {
+						captured[key] = data
+					}
 					anyWritten = anyWritten || wrote
 				}
 			}
@@ -537,7 +542,7 @@ func (fx *lazyPanelFixture) captureRound(t *testing.T) captureRoundResult {
 		t.Fatalf("RunCommitCycle: %v", err)
 	}
 	fx.prev = capture.Index
-	return captureRoundResult{idx: capture.Index, pending: capture.Pending, written: written}
+	return captureRoundResult{idx: capture.Index, pending: capture.Pending, written: written, captured: captured}
 }
 
 // rebootRestoreHydrate runs the whole recovery a user's reboot runs: the server
