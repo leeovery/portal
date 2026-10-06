@@ -129,7 +129,7 @@
           "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 6,
-          "current_phase": 7,
+          "current_phase": 8,
           "current_task": null,
           "project_skills": [
             ".claude/skills/golang-how-to",
@@ -195,7 +195,8 @@
             "killing-all-sessions-wipes-restore-state-6-4",
             "killing-all-sessions-wipes-restore-state-7-1",
             "killing-all-sessions-wipes-restore-state-7-2",
-            "killing-all-sessions-wipes-restore-state-7-3"
+            "killing-all-sessions-wipes-restore-state-7-3",
+            "killing-all-sessions-wipes-restore-state-8-1"
           ],
           "staging": {
             "p1": {
