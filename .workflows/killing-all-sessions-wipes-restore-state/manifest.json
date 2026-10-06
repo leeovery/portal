@@ -119,7 +119,7 @@
           "fix_attempts": 0,
           "analysis_cycle_total": 3,
           "current_phase": 5,
-          "current_task": "killing-all-sessions-wipes-restore-state-5-2",
+          "current_task": null,
           "project_skills": [
             ".claude/skills/golang-how-to",
             ".claude/skills/golang-testing",
@@ -176,7 +176,8 @@
             "killing-all-sessions-wipes-restore-state-3-5",
             "killing-all-sessions-wipes-restore-state-4-1",
             "killing-all-sessions-wipes-restore-state-4-2",
-            "killing-all-sessions-wipes-restore-state-5-1"
+            "killing-all-sessions-wipes-restore-state-5-1",
+            "killing-all-sessions-wipes-restore-state-5-2"
           ],
           "staging": {
             "p1": {
