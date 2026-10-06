@@ -320,8 +320,8 @@ func backstopReleasePin(pane string) string {
 
 // paneStillPending is a shell test that succeeds unless the pane's pending
 // marker reads back clear; a read that fails counts as still pending. A plain
-// format read serves: the one pane it misreads as clear is a gone one, which
-// wants nothing more from the chain.
+// format read serves: a pane it misreads as clear is gone or on a server
+// already exiting, and wants nothing more from the chain.
 func paneStillPending(pane string) string {
 	readMarker := shellquote.Join([]string{
 		"tmux", "display-message", "-p", "-t", string(tmux.PaneIDTarget(pane)), "-F", "#{" + state.ResumePendingOption + "}",
