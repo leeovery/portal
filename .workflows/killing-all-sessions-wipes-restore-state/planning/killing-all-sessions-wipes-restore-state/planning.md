@@ -88,3 +88,14 @@ status: draft
 | killing-all-sessions-wipes-restore-state-3-3 | CLAUDE.md describes the save path and resume shells as they were before this fix | every touched sentence holds whether or not the other analysis tasks land, no source or test file changes (§2.3, §3.1) |
 | killing-all-sessions-wipes-restore-state-3-4 | Corrections | the `commit-now` subtest stands down on the failed listing itself, not on an unknown own server (§6.1), no production code or other test changes (§6.1) |
 | killing-all-sessions-wipes-restore-state-3-5 | An Answered Lazy Pane Keeps Its Transcript Until A Confirmed Save Replaces It | an empty capture whose confirmation is refused, answered by another server or naming no server keeps the token-named transcript (§2.4, §4.2, §1.1), a refused capture or failed write keeps every later commit naming the token-named file (§1.1), a dump-less `commit-now` before any dump names the token-named transcript (§1.1, §3.2), an empty capture is judged against the token-named transcript so its confirmation read is sent (§2.4), a cycle ending uncommitted never leaves `sessions.json` naming a missing positional file (§2.3, §1.1), a pane that never waited and a pane still waiting are saved as today (§2.3, §2.4) |
+
+### Phase 4: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killing-all-sessions-wipes-restore-state-4-1 | The Answered-Pane Hold Is Decided From The Last Committed Index | the daemon's previous index predates the `commit-now` that filed the pane under its token and the pane's new positional path holds another pane's old transcript (§2.4), a confirmed dump still moves the pane to its positional file and reclaims the token-named transcript (§2.4), a fresh and a stale previous index commit the same record whether the positional path is absent or occupied (§2.4), `sessions.json` absent or not decodable falls back to the caller's previous index (§2.4), the skeleton, waiting-pane and carry merges and the drop and no-change measures are unchanged (§4.1) |
+| killing-all-sessions-wipes-restore-state-4-2 | A Session Listing Tmux Answered But Portal Could Not Parse Is Classified By The Confirmation | a session named `work\|notes` with the own server answering logs `… failed` from the tick, the flush and `commit-now` (§2.5, §4.2), the failure routes still re-touch `save.requested`, exit non-zero and report `flush_completed=false` (§2.5), an unparseable listing whose confirmation is refused, names no server or is answered by another server logs the back-off line, and an unknown own server returns the parse error unchanged (§2.2, §4.2), a refused `list-sessions` still backs off with no confirmation after it (§2.1, §4.2), a parse failure matches the new `tmuxerr` sentinel and a failed read does not (§4.2) |
