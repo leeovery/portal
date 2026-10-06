@@ -69,11 +69,14 @@ esac
 `
 
 // stubTermPaneTmux answers the parked chain's pending-marker read as the pane
-// stands: set until a waiter has cleared it.
+// stands, set until something has cleared it, and records the chain's own clear.
 const stubTermPaneTmux = `#!/bin/sh
 case "$*" in
 display-message*@portal-resume-pending*)
 	if grep -qx ` + termEventCleared + ` "$` + termPaneDirEnv + `/events" 2>/dev/null; then echo; else echo 1; fi
+	;;
+set-option*@portal-resume-pending*)
+	echo ` + termEventCleared + ` >> "$` + termPaneDirEnv + `/events"
 	;;
 esac
 `
@@ -252,13 +255,19 @@ func (r *announcingReader) Read(b []byte) (int, error) {
 	return r.inner.Read(b)
 }
 
-// termPane is a waiting pane: the parked chain, started as restore leaves it,
-// with the pane's stdin held by the test.
+// termPane is a waiting pane: the parked chain, started as restore leaves it.
 type termPane struct {
 	dir    string
 	parked int
 	stdin  io.WriteCloser
 	exited chan struct{}
+
+	// ended holds how the parked chain ended, once exited is closed.
+	ended *termPaneEnd
+}
+
+type termPaneEnd struct {
+	state *os.ProcessState
 }
 
 type termPaneOpts struct {
@@ -266,6 +275,11 @@ type termPaneOpts struct {
 
 	// holdCatch is the termPaneHoldCatchEnv value, empty to hold none.
 	holdCatch string
+
+	// tty, when set, is the pane's terminal: the parked chain leads a session
+	// with it as its controlling terminal, as a tmux pane's process does, and
+	// the test holds no stdin.
+	tty *os.File
 }
 
 func startTermPane(t *testing.T, opts termPaneOpts) termPane {
@@ -310,19 +324,25 @@ func startTermPane(t *testing.T, opts termPaneOpts) termPane {
 		t.Fatalf("stage the pane's stderr: %v", err)
 	}
 	chain.Stderr = stderr
-	chain.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	stdin, err := chain.StdinPipe()
-	if err != nil {
-		t.Fatalf("open the pane's stdin: %v", err)
+	var stdin io.WriteCloser
+	if opts.tty != nil {
+		chain.Stdin, chain.Stdout = opts.tty, opts.tty
+		chain.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
+	} else {
+		chain.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if stdin, err = chain.StdinPipe(); err != nil {
+			t.Fatalf("open the pane's stdin: %v", err)
+		}
 	}
 	if err := chain.Start(); err != nil {
 		t.Fatalf("start the parked chain: %v", err)
 	}
 	_ = stderr.Close()
 
-	p := termPane{dir: dir, parked: chain.Process.Pid, stdin: stdin, exited: make(chan struct{})}
+	p := termPane{dir: dir, parked: chain.Process.Pid, stdin: stdin, exited: make(chan struct{}), ended: &termPaneEnd{}}
 	go func() {
 		_ = chain.Wait()
+		p.ended.state = chain.ProcessState
 		close(p.exited)
 	}()
 	t.Cleanup(func() {
@@ -507,6 +527,17 @@ func TestResumeWaitingPane_SIGTERM(t *testing.T) {
 
 		if !harnesstest.PollUntil(t, termPaneWait, 10*time.Millisecond, func() bool { return !processAlive(waiter) }) {
 			t.Fatalf("the waiter survived SIGHUP; %s", p.diagnostics())
+		}
+	})
+
+	t.Run("a draw still ends on SIGHUP", func(t *testing.T) {
+		p := startTermPane(t, termPaneOpts{holdDraw: true})
+		draw := p.awaitEvent(t, termEventDraw, 1)
+
+		p.signal(t, draw, syscall.SIGHUP)
+
+		if !harnesstest.PollUntil(t, termPaneWait, 10*time.Millisecond, func() bool { return !processAlive(draw) }) {
+			t.Fatalf("the draw survived SIGHUP; %s", p.diagnostics())
 		}
 	})
 }
