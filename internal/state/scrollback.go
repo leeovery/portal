@@ -281,14 +281,15 @@ func confirmOwnServer(c AnsweringConfirmer, ownServer int) error {
 // transcript that the committer's own tmux server did not confirm.
 var ErrUnconfirmedEmptyCapture = errors.New("empty capture over a saved transcript not confirmed")
 
-// confirmEmptyCapture returns nil when data, just captured for paneKey, may be
-// written over the pane's saved transcript. Only an empty capture over a saved
-// file that may hold bytes needs confirming, and it is confirmed only when
-// ownServer answers a read sent after the capture: an exiting tmux can answer a
-// capture already in flight with exit status 0 and no output. A refusal returns
-// an error wrapping ErrUnconfirmedEmptyCapture and the confirmation's cause.
-func confirmEmptyCapture(c AnsweringConfirmer, ownServer int, dir, paneKey string, data []byte) error {
-	if len(data) > 0 || !savedTranscriptMayHoldBytes(ScrollbackFile(dir, paneKey)) {
+// confirmEmptyCapture returns nil when data, just captured for a pane, may
+// replace its saved transcript, the file at saved. Only an empty capture over a
+// saved file that may hold bytes needs confirming, and it is confirmed only
+// when ownServer answers a read sent after the capture: an exiting tmux can
+// answer a capture already in flight with exit status 0 and no output. A
+// refusal returns an error wrapping ErrUnconfirmedEmptyCapture and the
+// confirmation's cause.
+func confirmEmptyCapture(c AnsweringConfirmer, ownServer int, saved string, data []byte) error {
+	if len(data) > 0 || !savedTranscriptMayHoldBytes(saved) {
 		return nil
 	}
 	if err := confirmOwnServer(c, ownServer); err != nil {
@@ -366,7 +367,39 @@ func captureAndRefile(c CaptureCycleClient, ownServer int, dir string, prev *Ind
 	maps.Copy(waiting, capture.Pending)
 	maps.Copy(waiting, captured.carriedWaiting)
 	refilePendingScrollback(dir, &capture.Index, waiting, hm, logger)
+	holdTokenFiledTranscripts(dir, &capture)
 	return capture, nil
+}
+
+// holdTokenFiledTranscripts points at its token-named transcript every pane the
+// dump may write whose record names a file not on disk while that token-named
+// file is. A committer's previous index can predate the commit another
+// committer filed the pane under its token with, and housekeeping would delete
+// the file holding its bytes.
+func holdTokenFiledTranscripts(dir string, capture *CaptureCycle) {
+	for si := range capture.Index.Sessions {
+		s := &capture.Index.Sessions[si]
+		for wi := range s.Windows {
+			w := &s.Windows[wi]
+			for pi := range w.Panes {
+				p := &w.Panes[pi]
+				if capture.SkipsScrollback(SanitizePaneKey(s.Name, w.Index, p.Index)) {
+					continue
+				}
+				tokenFile, ok := PendingScrollbackPath(dir, p.PortalPaneID)
+				if !ok || p.ScrollbackFile == "" || fileExists(joinStored(dir, p.ScrollbackFile)) || !fileExists(tokenFile) {
+					continue
+				}
+				p.ScrollbackFile = PendingScrollbackFile(p.PortalPaneID)
+			}
+		}
+	}
+}
+
+// A file that cannot be inspected is presumed present.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // An answer from ownServer proves every capture read before it reached

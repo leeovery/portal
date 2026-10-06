@@ -55,17 +55,36 @@ type ScrollbackWriter struct {
 	ownServer int
 	dir       string
 	hm        HashMap
+	// held maps a pane key to the token-named transcript its record still
+	// names.
+	held map[string]string
+	// captured holds every held pane key this cycle wrote a capture for.
+	captured map[string]struct{}
 }
 
 // Write writes data, just captured for paneKey, unless hash matches the
 // cycle's dedup entry, reporting whether it wrote. An empty capture over a
 // saved transcript the cycle's own server does not confirm writes nothing and
-// returns an error wrapping ErrUnconfirmedEmptyCapture.
+// returns an error wrapping ErrUnconfirmedEmptyCapture. A pane's saved
+// transcript is the file its record names.
 func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool, error) {
-	if err := confirmEmptyCapture(w.confirmer, w.ownServer, w.dir, paneKey, data); err != nil {
+	saved := ScrollbackFile(w.dir, paneKey)
+	stored, held := w.held[paneKey]
+	if held {
+		saved = joinStored(w.dir, stored)
+		// The positional file the dedup entry describes may since have been
+		// removed by housekeeping, and a dedup hit would then keep the pane
+		// off its new capture for good.
+		delete(w.hm, paneKey)
+	}
+	if err := confirmEmptyCapture(w.confirmer, w.ownServer, saved, data); err != nil {
 		return false, err
 	}
-	return WriteScrollbackIfChanged(w.dir, paneKey, data, hash, w.hm)
+	written, err := WriteScrollbackIfChanged(w.dir, paneKey, data, hash, w.hm)
+	if written && held {
+		w.captured[paneKey] = struct{}{}
+	}
+	return written, err
 }
 
 // RunCommitCycle runs cycle under the exclusive commit lock, held from the
@@ -74,6 +93,10 @@ func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool,
 // the bound returns an error wrapping ErrCommitLockHeld with nothing read or
 // written. A failed capture returns before the dump, and a failed dump before
 // the commit, its error returned as the dump gave it.
+//
+// A pane answered since it was filed under its token keeps that token-named
+// transcript on its record until a dump writes its new capture, so no commit
+// leaves the pane's record off the file holding its bytes.
 func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	lock, err := acquireCommitLock(cycle.Dir)
 	if err != nil {
@@ -87,15 +110,59 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	}
 	changed := false
 	if cycle.Dump != nil {
-		writer := ScrollbackWriter{confirmer: cycle.Client, ownServer: cycle.OwnServer, dir: cycle.Dir, hm: cycle.HashMap}
+		writer := ScrollbackWriter{
+			confirmer: cycle.Client,
+			ownServer: cycle.OwnServer,
+			dir:       cycle.Dir,
+			hm:        cycle.HashMap,
+			held:      heldTranscripts(capture),
+			captured:  map[string]struct{}{},
+		}
 		if changed, err = cycle.Dump(capture, writer); err != nil {
 			return capture, err
 		}
+		fileAtPositional(&capture.Index, writer.captured)
 	}
 	if err := Commit(cycle.Dir, capture.Index, changed, cycle.Logger); err != nil {
 		return capture, fmt.Errorf("commit: %w", err)
 	}
 	return capture, nil
+}
+
+// heldTranscripts maps the key of every pane the dump may write whose record
+// names its token-named transcript to that stored path.
+func heldTranscripts(capture CaptureCycle) map[string]string {
+	held := map[string]string{}
+	for _, s := range capture.Index.Sessions {
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				key := SanitizePaneKey(s.Name, w.Index, p.Index)
+				if p.PortalPaneID == "" || p.ScrollbackFile != PendingScrollbackFile(p.PortalPaneID) || capture.SkipsScrollback(key) {
+					continue
+				}
+				held[key] = p.ScrollbackFile
+			}
+		}
+	}
+	return held
+}
+
+func fileAtPositional(idx *Index, keys map[string]struct{}) {
+	if len(keys) == 0 {
+		return
+	}
+	for si := range idx.Sessions {
+		s := &idx.Sessions[si]
+		for wi := range s.Windows {
+			w := &s.Windows[wi]
+			for pi := range w.Panes {
+				key := SanitizePaneKey(s.Name, w.Index, w.Panes[pi].Index)
+				if _, ok := keys[key]; ok {
+					w.Panes[pi].ScrollbackFile = positionalScrollbackFile(key)
+				}
+			}
+		}
+	}
 }
 
 // The lock is released by closing the returned file, and by the kernel when

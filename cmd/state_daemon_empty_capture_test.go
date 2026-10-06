@@ -183,3 +183,86 @@ func blockWorkTranscript(t *testing.T, dir string) {
 		t.Fatalf("block work transcript: %v", err)
 	}
 }
+
+const answeredPaneToken = "an12sw"
+
+// answeredWorkPane re-files saved's work pane under answeredPaneToken, the way
+// a lazy pane is saved while it waits, and makes fc list it answered: carrying
+// its token, no longer marked pending.
+func answeredWorkPane(t *testing.T, saved *savedStateFixture, fc *daemonFakeCommander) string {
+	t.Helper()
+	tokenPath := state.PendingScrollbackFile(answeredPaneToken)
+	positional := state.ScrollbackFile(saved.dir, workPaneKey())
+	if err := os.Rename(positional, filepath.Join(saved.dir, filepath.FromSlash(tokenPath))); err != nil {
+		t.Fatalf("re-file work transcript: %v", err)
+	}
+	pane := &saved.index.Sessions[slices.IndexFunc(saved.index.Sessions, func(s state.Session) bool { return s.Name == "work" })].Windows[0].Panes[0]
+	pane.ScrollbackFile = tokenPath
+	pane.PortalPaneID = answeredPaneToken
+	if err := state.Commit(saved.dir, saved.index, false, nil); err != nil {
+		t.Fatalf("commit the waiting pane's record: %v", err)
+	}
+	fc.panesOut = "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh|||" + answeredPaneToken + "|||"
+	return tokenPath
+}
+
+func TestDaemonDumpKeepsAnAnsweredPanesTokenNamedTranscriptOverAnUnconfirmedEmptyCapture(t *testing.T) {
+	prevs := []struct {
+		name string
+		// stale leaves the daemon's previous index at its view from before a
+		// commit-now filed the pane under its token.
+		stale bool
+	}{
+		{"its previous index naming the token-named transcript", false},
+		{"its previous index predating the token filing", true},
+	}
+	for _, d := range daemonDumpers {
+		for _, prev := range prevs {
+			t.Run(d.name+"/"+prev.name, func(t *testing.T) {
+				saved := seedSavedState(t)
+				daemonView := cloneIndex(t, saved.index)
+				fc := emptyCaptureThen(func(fc *daemonFakeCommander) { fc.answeringPID = fakeOwnServerPID + 1 })
+				tokenPath := answeredWorkPane(t, &saved, fc)
+				if prev.stale {
+					saved.index = daemonView
+				}
+				logger, sink := newCaptureLoggerForComponent(t, "daemon")
+
+				d.run(t, saved, fc, logger)
+
+				assertEmptyCaptureRefusedLine(t, sink)
+				idx, _, err := state.ReadIndex(saved.dir)
+				if err != nil {
+					t.Fatalf("ReadIndex: %v", err)
+				}
+				for _, s := range idx.Sessions {
+					if s.Name == "work" {
+						if got := s.Windows[0].Panes[0].ScrollbackFile; got != tokenPath {
+							t.Errorf("sessions.json names %q for the answered pane, want %q", got, tokenPath)
+						}
+					}
+				}
+				data, err := os.ReadFile(filepath.Join(saved.dir, filepath.FromSlash(tokenPath)))
+				if err != nil || string(data) != "work-transcript" {
+					t.Errorf("token-named transcript = %q, %v; want %q", data, err, "work-transcript")
+				}
+				if _, err := os.Stat(state.ScrollbackFile(saved.dir, workPaneKey())); !os.IsNotExist(err) {
+					t.Errorf("positional file stat err = %v, want nothing written", err)
+				}
+			})
+		}
+	}
+}
+
+func cloneIndex(t *testing.T, idx state.Index) state.Index {
+	t.Helper()
+	data, err := state.EncodeIndex(idx)
+	if err != nil {
+		t.Fatalf("encode index: %v", err)
+	}
+	out, err := state.DecodeIndex(data)
+	if err != nil {
+		t.Fatalf("decode index: %v", err)
+	}
+	return out
+}
