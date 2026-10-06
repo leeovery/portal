@@ -56,8 +56,8 @@ type ScrollbackWriter struct {
 	ownServer int
 	dir       string
 	hm        HashMap
-	// held maps a pane key to the token-named transcript its record still
-	// names.
+	// held maps a pane key to the file its last committed record named, which
+	// its record still names and its empty capture is judged against.
 	held map[string]string
 	// captured holds every held pane key this cycle wrote a capture for.
 	captured map[string]struct{}
@@ -106,9 +106,11 @@ func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool,
 // merge, the waiting-pane merge, the carry and the hold all take their records
 // from that one index.
 //
-// A pane answered since it was filed under its token keeps that token-named
-// transcript on its record until a dump writes its new capture, so no commit
-// leaves the pane's record off the file holding its bytes.
+// A tokened pane whose last committed record names a file other than its live
+// positional file — its token-named transcript, or another address's
+// positional file no other record names — keeps that file on its record until
+// a dump writes its new capture, so no commit leaves the pane's record off the
+// file holding its bytes.
 func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	lock, err := acquireCommitLock(cycle.Dir)
 	if err != nil {
@@ -150,39 +152,54 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	return capture, nil
 }
 
-// keepAnsweredTranscripts points each pane the dump may write whose record in
-// from, matched on its token, names that token's re-filed transcript back at
-// it: the positional file a fresh record names may hold none of the pane's
-// bytes, and housekeeping would delete the file that does.
+// keepAnsweredTranscripts points each tokened pane the dump may write back at
+// the file its record in from, matched on its token, names when that file is
+// not the pane's live positional file: that file holds the pane's bytes, and
+// housekeeping would delete it once no record named it. No such pane is held
+// on a file another record in the capture names or another such pane claims,
+// so no commit names one file on two records. A pane's own token-named
+// transcript is held whatever else names it.
 func keepAnsweredTranscripts(capture *CaptureCycle, from Index) {
 	byToken, _ := indexPrevPanes(from, nil)
+	named := recordsPerScrollbackFile(capture.Index)
+	holds := map[*Pane]string{}
+	claims := map[string]int{}
 	for si := range capture.Index.Sessions {
 		s := &capture.Index.Sessions[si]
 		for wi := range s.Windows {
 			w := &s.Windows[wi]
 			for pi := range w.Panes {
 				p := &w.Panes[pi]
-				if p.PortalPaneID == "" || capture.SkipsScrollback(SanitizePaneKey(s.Name, w.Index, p.Index)) {
+				key := SanitizePaneKey(s.Name, w.Index, p.Index)
+				if p.PortalPaneID == "" || capture.SkipsScrollback(key) {
 					continue
 				}
-				tokenPath := PendingScrollbackFile(p.PortalPaneID)
-				if record, found := byToken[p.PortalPaneID]; found && record.ScrollbackFile == tokenPath {
-					p.ScrollbackFile = tokenPath
+				record, found := byToken[p.PortalPaneID]
+				if !found || record.ScrollbackFile == "" || record.ScrollbackFile == p.ScrollbackFile {
+					continue
 				}
+				holds[p] = record.ScrollbackFile
+				claims[record.ScrollbackFile]++
 			}
+		}
+	}
+	for p, file := range holds {
+		if file == PendingScrollbackFile(p.PortalPaneID) || (named[file] == 0 && claims[file] == 1) {
+			p.ScrollbackFile = file
 		}
 	}
 }
 
-// heldTranscripts maps the key of every pane the dump may write whose record
-// names its token-named transcript to that stored path.
+// heldTranscripts maps the key of every tokened pane the dump may write whose
+// record names a file other than its positional file to that stored path: the
+// file keepAnsweredTranscripts held it on.
 func heldTranscripts(capture CaptureCycle) map[string]string {
 	held := map[string]string{}
 	for _, s := range capture.Index.Sessions {
 		for _, w := range s.Windows {
 			for _, p := range w.Panes {
 				key := SanitizePaneKey(s.Name, w.Index, p.Index)
-				if p.PortalPaneID == "" || p.ScrollbackFile != PendingScrollbackFile(p.PortalPaneID) || capture.SkipsScrollback(key) {
+				if p.PortalPaneID == "" || p.ScrollbackFile == positionalScrollbackFile(key) || capture.SkipsScrollback(key) {
 					continue
 				}
 				held[key] = p.ScrollbackFile
