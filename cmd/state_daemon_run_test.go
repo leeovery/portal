@@ -650,8 +650,8 @@ func TestDaemonTick_KeepsAMovedPaneTranscriptFromThePaneAtItsSavedAddress(t *tes
 	if got := scrollbackBody(t, dir, tokenFile); got != "y-saved" {
 		t.Errorf("after the skeleton tick %s = %q, want %q", tokenFile, got, "y-saved")
 	}
-	if got := scrollbackBody(t, dir, "work__2.0.bin"); got != "x-captured" {
-		t.Errorf("after the skeleton tick work__2.0.bin = %q, want %q", got, "x-captured")
+	if got := scrollbackBody(t, dir, "work__2.0.bin"); got != "y-saved" {
+		t.Errorf("after the skeleton tick work__2.0.bin = %q, want %q left unwritten while the moved pane's record named it", got, "y-saved")
 	}
 
 	setRenumberedStage(fc, "", "1")

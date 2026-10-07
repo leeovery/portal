@@ -99,7 +99,7 @@ func TestRunCommitCycleKeepsEveryShiftedPanesTranscriptOverAnUnconfirmedEmptyCap
 					if err := results[shiftedBLive.key()]; err != nil {
 						t.Errorf("Write(%s) = %v; want a write", shiftedBLive.key(), err)
 					}
-					assertWrittenAt(t, dir, committed, shiftedBLive, "b-capture")
+					assertWrittenUnderToken(t, dir, committed, shiftedBLive, "b-capture")
 				} else {
 					assertHeldOnTranscript(t, dir, committed, shiftedBSaved, shiftedBLive)
 				}
@@ -178,7 +178,7 @@ func TestRunCommitCycleKeepsEachSwappedPanesOwnTranscript(t *testing.T) {
 			}
 			committed := onDiskIndex(t, dir)
 			assertHeldOnTranscript(t, dir, committed, xSaved, xLive)
-			assertWrittenAt(t, dir, committed, yLive, "y-capture")
+			assertWrittenUnderToken(t, dir, committed, yLive, "y-capture")
 			assertSavedScrollbackPresent(t, dir)
 			assertNoFileOnTwoRecords(t, committed)
 		})
@@ -192,9 +192,10 @@ func TestRunCommitCycleKeepsAMovedPanesTranscriptBesideANewPaneAtItsSavedAddress
 	arrivals := []struct {
 		name       string
 		priorCycle bool
+		newWritten bool
 	}{
-		{"in the same cycle", false},
-		{"in a later cycle after the moved pane's record was committed", true},
+		{"in the same cycle", false, false},
+		{"in a later cycle after the moved pane's record was committed", true, true},
 	}
 	for _, arrival := range arrivals {
 		t.Run(arrival.name, func(t *testing.T) {
@@ -219,12 +220,21 @@ func TestRunCommitCycleKeepsAMovedPanesTranscriptBesideANewPaneAtItsSavedAddress
 			if err := results[live.key()]; !errors.Is(err, state.ErrUnconfirmedEmptyCapture) {
 				t.Errorf("Write(moved) = %v; want a refusal wrapping ErrUnconfirmedEmptyCapture", err)
 			}
-			if err := results[newPane.key()]; err != nil {
-				t.Errorf("Write(new pane) = %v; want a write", err)
-			}
 			committed := onDiskIndex(t, dir)
 			assertHeldOnTranscript(t, dir, committed, saved, live)
-			assertWrittenAt(t, dir, committed, newPane, "new-capture")
+			if arrival.newWritten {
+				if err := results[newPane.key()]; err != nil {
+					t.Errorf("Write(new pane) = %v; want a write", err)
+				}
+				assertWrittenAt(t, dir, committed, newPane, "new-capture")
+			} else {
+				if err := results[newPane.key()]; !errors.Is(err, errNotWritten) {
+					t.Errorf("Write(new pane) = %v; want it deferred", err)
+				}
+				if got := readScrollback(t, dir, newPane.file()); got != savedBytes(saved) {
+					t.Errorf("%s = %q, want the moved pane's saved bytes left in place", newPane.file(), got)
+				}
+			}
 			assertSavedScrollbackPresent(t, dir)
 			assertNoFileOnTwoRecords(t, committed)
 		})
@@ -257,8 +267,8 @@ func TestRunCommitCycleEndingUncommittedAfterALinkKeepsTheMovedPanesTranscript(t
 			live2 := []movedPane{live, newPane}
 			dump := func(_ state.CaptureCycle, w state.ScrollbackWriter) (bool, error) {
 				data := []byte("new-capture")
-				if written, err := w.Write(newPane.key(), data, xxhash.Sum64(data)); !written || err != nil {
-					t.Fatalf("Write(new pane) = %t, %v; want a write", written, err)
+				if written, err := w.Write(newPane.key(), data, xxhash.Sum64(data)); written || err != nil {
+					t.Fatalf("Write(new pane) = %t, %v; want it deferred", written, err)
 				}
 				return tc.end(t, dir)
 			}
@@ -270,6 +280,12 @@ func TestRunCommitCycleEndingUncommittedAfterALinkKeepsTheMovedPanesTranscript(t
 				t.Fatalf("restore state dir mode: %v", err)
 			}
 			assertSavedScrollbackPresent(t, dir)
+			if got := recordAt(t, onDiskIndex(t, dir), saved).ScrollbackFile; got != saved.stored() {
+				t.Fatalf("sessions.json names %q for the moved pane, want its saved record %q", got, saved.stored())
+			}
+			if got := readScrollback(t, dir, saved.file()); got != savedBytes(saved) {
+				t.Errorf("%s, which the moved pane's record names, = %q, want its saved bytes", saved.file(), got)
+			}
 
 			if _, err := state.RunCommitCycle(movedTick(&movedClient{live: live2}, dir, seed, state.HashMap{}, dumpsNothing)); err != nil {
 				t.Fatalf("next committing cycle: %v", err)

@@ -33,10 +33,12 @@ func (p movedPane) file() string { return p.key() + ".bin" }
 func (p movedPane) stored() string { return "scrollback/" + p.file() }
 
 // movedClient is the live state after restore: every pane listed, none
-// skeleton-marked or waiting. It answers the cycle's own confirmation as
-// ownServerPID and every confirmation after it with later.
+// skeleton-marked, and waiting only where waiting names its key. It answers
+// the cycle's own confirmation as ownServerPID and every confirmation after it
+// with later.
 type movedClient struct {
 	live       []movedPane
+	waiting    map[string]bool
 	later      func() (int, error)
 	cycleReads int
 	laterReads int
@@ -58,7 +60,11 @@ func (c *movedClient) ListSessionNamesProbe() ([]string, error) {
 func (c *movedClient) ListAllPanesWithFormat(string) (string, error) {
 	lines := make([]string, 0, len(c.live))
 	for _, p := range c.live {
-		lines = append(lines, paneLineWithPending(p.session, p.window, "main", "tiled", false, true, p.pane, "/tmp", true, "zsh", p.token, ""))
+		pending := ""
+		if c.waiting[p.key()] {
+			pending = "1"
+		}
+		lines = append(lines, paneLineWithPending(p.session, p.window, "main", "tiled", false, true, p.pane, "/tmp", true, "zsh", p.token, pending))
 	}
 	return strings.Join(lines, "\n"), nil
 }

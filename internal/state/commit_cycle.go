@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/leeovery/portal/internal/fileutil"
 	"golang.org/x/sys/unix"
 )
 
@@ -50,18 +51,29 @@ type CommitCycle struct {
 }
 
 // ScrollbackWriter writes captured scrollback for the commit cycle that handed
-// it out, against that cycle's own server, state directory and dedup map.
+// it out, against that cycle's own server, state directory and dedup map. A
+// pane's positional name is contested when sessions.json, as the cycle read it
+// under the commit lock, names it on a record carrying another pane's token.
+// The writer never writes a contested name: a pane whose token the pane-token
+// rule accepts is written under its token-named transcript, which its record
+// then names, and any other contested pane is not written that cycle.
 type ScrollbackWriter struct {
 	capture   CaptureCycle
 	confirmer AnsweringConfirmer
 	ownServer int
 	dir       string
 	hm        HashMap
-	// held maps a pane key to the file its last committed record named, which
-	// its record still names and its empty capture is judged against.
+	// held maps a pane key to the file keepAnsweredTranscripts held it on —
+	// its token-named transcript, or the file its last committed record named —
+	// which its record names in this cycle and its empty capture is judged
+	// against.
 	held map[string]string
-	// captured holds every held pane key this cycle wrote a capture for.
-	captured map[string]struct{}
+	// contested maps the key of every pane whose positional name is contested
+	// to that pane's token, empty for none.
+	contested map[string]string
+	// filed maps every pane key this cycle wrote a capture for, held or
+	// contested, to the file its record names once written.
+	filed map[string]string
 }
 
 // Write writes data, just captured for paneKey, unless hash matches the
@@ -71,27 +83,58 @@ type ScrollbackWriter struct {
 // cycle's own server does not confirm writes nothing and returns an error
 // wrapping ErrUnconfirmedEmptyCapture. A pane's saved transcript is the file
 // its record names.
+//
+// A pane whose positional name is contested is written under its token-named
+// transcript, whatever its dedup entry, and its record names that file in this
+// cycle's commit. One whose token the pane-token rule refuses, or which has
+// none, returns (false, nil) with its dedup entry untouched, its record left
+// as an unwritten capture leaves it.
 func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool, error) {
 	if w.capture.SkipsScrollback(paneKey) {
 		return false, nil
 	}
-	saved := ScrollbackFile(w.dir, paneKey)
-	stored, held := w.held[paneKey]
+	if token, contested := w.contested[paneKey]; contested {
+		return w.writeUnderToken(paneKey, token, data)
+	}
+	_, held := w.held[paneKey]
 	if held {
-		saved = joinStored(w.dir, stored)
 		// The positional file the dedup entry describes may since have been
 		// removed by housekeeping, and a dedup hit would then keep the pane
 		// off its new capture for good.
 		delete(w.hm, paneKey)
 	}
-	if err := confirmEmptyCapture(w.confirmer, w.ownServer, saved, data); err != nil {
+	if err := confirmEmptyCapture(w.confirmer, w.ownServer, w.savedTranscript(paneKey), data); err != nil {
 		return false, err
 	}
 	written, err := WriteScrollbackIfChanged(w.dir, paneKey, data, hash, w.hm)
 	if written && held {
-		w.captured[paneKey] = struct{}{}
+		w.filed[paneKey] = positionalScrollbackFile(paneKey)
 	}
 	return written, err
+}
+
+// writeUnderToken writes without consulting the dedup map: the token-named
+// file may since have been re-linked to other bytes.
+func (w ScrollbackWriter) writeUnderToken(paneKey, token string, data []byte) (bool, error) {
+	path, ok := PendingScrollbackPath(w.dir, token)
+	if !ok {
+		return false, nil
+	}
+	if err := confirmEmptyCapture(w.confirmer, w.ownServer, w.savedTranscript(paneKey), data); err != nil {
+		return false, err
+	}
+	if err := fileutil.AtomicWrite0600(path, data); err != nil {
+		return false, fmt.Errorf("write scrollback %s: %w", paneKey, err)
+	}
+	w.filed[paneKey] = PendingScrollbackFile(token)
+	return true, nil
+}
+
+func (w ScrollbackWriter) savedTranscript(paneKey string) string {
+	if stored, held := w.held[paneKey]; held {
+		return joinStored(w.dir, stored)
+	}
+	return ScrollbackFile(w.dir, paneKey)
 }
 
 // RunCommitCycle runs cycle under the exclusive commit lock, held from the
@@ -140,12 +183,13 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 			dir:       cycle.Dir,
 			hm:        cycle.HashMap,
 			held:      heldTranscripts(capture),
-			captured:  map[string]struct{}{},
+			contested: contestedPanes(capture.Index, committed),
+			filed:     map[string]string{},
 		}
 		if changed, err = cycle.Dump(capture, writer); err != nil {
 			return capture, err
 		}
-		fileAtPositional(&capture.Index, writer.captured)
+		fileWritten(&capture.Index, writer.filed)
 	}
 	if err := commitOver(cycle.Dir, capture.Index, committed, changed, cycle.Logger); err != nil {
 		return capture, fmt.Errorf("commit: %w", err)
@@ -250,8 +294,41 @@ func heldTranscripts(capture CaptureCycle) map[string]string {
 	return held
 }
 
-func fileAtPositional(idx *Index, keys map[string]struct{}) {
-	if len(keys) == 0 {
+// contestedPanes ignores a record carrying no token: it may be this same pane,
+// stamped since it was saved.
+func contestedPanes(idx Index, committed *Index) map[string]string {
+	contested := map[string]string{}
+	if committed == nil {
+		return contested
+	}
+	tokensNaming := map[string][]string{}
+	for _, s := range committed.Sessions {
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				if p.PortalPaneID != "" {
+					tokensNaming[p.ScrollbackFile] = append(tokensNaming[p.ScrollbackFile], p.PortalPaneID)
+				}
+			}
+		}
+	}
+	for _, s := range idx.Sessions {
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				key := SanitizePaneKey(s.Name, w.Index, p.Index)
+				for _, token := range tokensNaming[positionalScrollbackFile(key)] {
+					if token != p.PortalPaneID {
+						contested[key] = p.PortalPaneID
+						break
+					}
+				}
+			}
+		}
+	}
+	return contested
+}
+
+func fileWritten(idx *Index, filed map[string]string) {
+	if len(filed) == 0 {
 		return
 	}
 	for si := range idx.Sessions {
@@ -260,8 +337,8 @@ func fileAtPositional(idx *Index, keys map[string]struct{}) {
 			w := &s.Windows[wi]
 			for pi := range w.Panes {
 				key := SanitizePaneKey(s.Name, w.Index, w.Panes[pi].Index)
-				if _, ok := keys[key]; ok {
-					w.Panes[pi].ScrollbackFile = positionalScrollbackFile(key)
+				if file, ok := filed[key]; ok {
+					w.Panes[pi].ScrollbackFile = file
 				}
 			}
 		}

@@ -410,6 +410,12 @@ func TestCaptureAndCommit_RefilesResumePendingScrollback(t *testing.T) {
 		if err := captureAndCommit(context.Background(), deps); err != nil {
 			t.Fatalf("captureAndCommit after the displacement: %v", err)
 		}
+		if got := scrollbackBody(t, deps.Dir, "work__0.1.bin"); got != "waiting-body" {
+			t.Fatalf("positional file after the displacing tick = %q, want it unwritten while the waiting pane's record named it", got)
+		}
+		if err := captureAndCommit(context.Background(), deps); err != nil {
+			t.Fatalf("captureAndCommit once the waiting pane's record was re-filed: %v", err)
+		}
 
 		if got, want := scrollbackFiles(t, deps.Dir), []string{waitingRefiled, "work__0.1.bin"}; !slices.Equal(got, want) {
 			t.Fatalf("scrollback files = %v, want %v", got, want)
@@ -448,12 +454,21 @@ func TestCaptureAndCommit_RefilesResumePendingScrollback(t *testing.T) {
 		if deps.PrevIndex != committedBefore {
 			t.Fatal("cancelled tick advanced PrevIndex, want it to stop before the commit")
 		}
-		if got := scrollbackBody(t, deps.Dir, "work__0.1.bin"); got != "intruder-body" {
-			t.Fatalf("positional file after the cancelled tick = %q, want the live pane's capture", got)
+		if got := scrollbackBody(t, deps.Dir, "work__0.1.bin"); got != "waiting-body" {
+			t.Fatalf("positional file after the cancelled tick = %q, want it unwritten while the waiting pane's record named it", got)
 		}
 
 		if err := defaultShutdownFlush(deps); err != nil {
 			t.Fatalf("defaultShutdownFlush: %v", err)
+		}
+		if got, want := recordedScrollback(t, deps.Dir, 0, 2), "scrollback/"+waitingRefiled; got != want {
+			t.Fatalf("waiting pane record after the flush = %q, want %q", got, want)
+		}
+		if got := scrollbackBody(t, deps.Dir, waitingRefiled); got != "waiting-body" {
+			t.Fatalf("token-named file after the flush = %q, want %q", got, "waiting-body")
+		}
+		if err := captureAndCommit(context.Background(), deps); err != nil {
+			t.Fatalf("captureAndCommit once the waiting pane's record was re-filed: %v", err)
 		}
 
 		assertDisplacedFilesKept(t, deps.Dir)
