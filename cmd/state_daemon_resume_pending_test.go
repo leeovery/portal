@@ -410,8 +410,11 @@ func TestCaptureAndCommit_RefilesResumePendingScrollback(t *testing.T) {
 		if err := captureAndCommit(context.Background(), deps); err != nil {
 			t.Fatalf("captureAndCommit after the displacement: %v", err)
 		}
-		if got := scrollbackBody(t, deps.Dir, "work__0.1.bin"); got != "waiting-body" {
-			t.Fatalf("positional file after the displacing tick = %q, want it unwritten while the waiting pane's record named it", got)
+		if got := scrollbackBody(t, deps.Dir, "work__0.1.bin"); got != "intruder-body" {
+			t.Fatalf("positional file after the displacing tick = %q, want the new pane's capture written once the tick's commit landed", got)
+		}
+		if got := scrollbackBody(t, deps.Dir, waitingRefiled); got != "waiting-body" {
+			t.Fatalf("token-named file after the displacing tick = %q, want %q", got, "waiting-body")
 		}
 		if err := captureAndCommit(context.Background(), deps); err != nil {
 			t.Fatalf("captureAndCommit once the waiting pane's record was re-filed: %v", err)

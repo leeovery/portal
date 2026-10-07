@@ -27,26 +27,28 @@ import (
 // removed by one committer is never reported again by another.
 func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *slog.Logger) error {
 	prior, _, _ := readPriorIndex(dir)
-	return commitOver(dir, idx, prior, anyScrollbackChanged, logger)
+	_, err := commitOver(dir, idx, prior, anyScrollbackChanged, logger)
+	return err
 }
 
 // commitOver is Commit measured against prior, the on-disk index its caller
-// read; nil when sessions.json could not be read.
-func commitOver(dir string, idx Index, prior *Index, anyScrollbackChanged bool, logger *slog.Logger) error {
+// read; nil when sessions.json could not be read. It reports whether it wrote
+// sessions.json.
+func commitOver(dir string, idx Index, prior *Index, anyScrollbackChanged bool, logger *slog.Logger) (bool, error) {
 	logger = loggerOrDiscard(logger)
 	idx.Canonicalize()
 
 	data, err := EncodeIndex(idx)
 	if err != nil {
-		return fmt.Errorf("encode sessions.json: %w", err)
+		return false, fmt.Errorf("encode sessions.json: %w", err)
 	}
 
 	if prior != nil && !structuralChange(*prior, idx) && !anyScrollbackChanged {
-		return nil
+		return false, nil
 	}
 
 	if err := fileutil.AtomicWrite0600(SessionsJSON(dir), data); err != nil {
-		return fmt.Errorf("write sessions.json: %w", err)
+		return false, fmt.Errorf("write sessions.json: %w", err)
 	}
 
 	if prior != nil {
@@ -57,7 +59,7 @@ func commitOver(dir string, idx Index, prior *Index, anyScrollbackChanged bool, 
 		logger.Warn("gc orphan scrollback failed", "error", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 // readPriorIndex returns sessions.json canonicalized, or nil with why it read

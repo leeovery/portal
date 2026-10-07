@@ -1,11 +1,13 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/leeovery/portal/internal/fileutil"
@@ -54,9 +56,10 @@ type CommitCycle struct {
 // it out, against that cycle's own server, state directory and dedup map. A
 // pane's positional name is contested when sessions.json, as the cycle read it
 // under the commit lock, names it on a record carrying another pane's token.
-// The writer never writes a contested name: a pane whose token the pane-token
-// rule accepts is written under its token-named transcript, which its record
-// then names, and any other contested pane is not written that cycle.
+// The writer never writes a contested name during the dump: a pane whose token
+// the pane-token rule accepts is written under its token-named transcript,
+// which its record then names, and any other contested pane's capture is
+// deferred until the cycle's sessions.json write has landed.
 type ScrollbackWriter struct {
 	capture   CaptureCycle
 	confirmer AnsweringConfirmer
@@ -74,6 +77,13 @@ type ScrollbackWriter struct {
 	// filed maps every pane key this cycle wrote a capture for, held or
 	// contested, to the file its record names once written.
 	filed map[string]string
+	// deferred maps the key of every contested pane with no usable token to its capture.
+	deferred map[string]deferredCapture
+}
+
+type deferredCapture struct {
+	data []byte
+	hash uint64
 }
 
 // Write writes data, just captured for paneKey, unless hash matches the
@@ -87,14 +97,15 @@ type ScrollbackWriter struct {
 // A pane whose positional name is contested is written under its token-named
 // transcript, whatever its dedup entry, and its record names that file in this
 // cycle's commit. One whose token the pane-token rule refuses, or which has
-// none, returns (false, nil) with its dedup entry untouched, its record left
-// as an unwritten capture leaves it.
+// none, returns (false, nil) with its dedup entry untouched: its capture is
+// written at its positional name only once this cycle's sessions.json write
+// lands.
 func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool, error) {
 	if w.capture.SkipsScrollback(paneKey) {
 		return false, nil
 	}
 	if token, contested := w.contested[paneKey]; contested {
-		return w.writeUnderToken(paneKey, token, data)
+		return w.writeContested(paneKey, token, data, hash)
 	}
 	_, held := w.held[paneKey]
 	if held {
@@ -113,15 +124,16 @@ func (w ScrollbackWriter) Write(paneKey string, data []byte, hash uint64) (bool,
 	return written, err
 }
 
-// writeUnderToken writes without consulting the dedup map: the token-named
+// writeContested writes without consulting the dedup map: the token-named
 // file may since have been re-linked to other bytes.
-func (w ScrollbackWriter) writeUnderToken(paneKey, token string, data []byte) (bool, error) {
-	path, ok := PendingScrollbackPath(w.dir, token)
-	if !ok {
-		return false, nil
-	}
+func (w ScrollbackWriter) writeContested(paneKey, token string, data []byte, hash uint64) (bool, error) {
 	if err := confirmEmptyCapture(w.confirmer, w.ownServer, w.savedTranscript(paneKey), data); err != nil {
 		return false, err
+	}
+	path, ok := PendingScrollbackPath(w.dir, token)
+	if !ok {
+		w.deferred[paneKey] = deferredCapture{data: bytes.Clone(data), hash: hash}
+		return false, nil
 	}
 	if err := fileutil.AtomicWrite0600(path, data); err != nil {
 		return false, fmt.Errorf("write scrollback %s: %w", paneKey, err)
@@ -154,6 +166,11 @@ func (w ScrollbackWriter) savedTranscript(paneKey string) string {
 // positional file keeps those bytes on its record, under its token-named
 // transcript, until a dump writes its new capture — unless that file cannot be
 // linked under its token, or another such pane's last record names it too.
+//
+// A capture the writer deferred is written at its positional name, under the
+// lock, only once sessions.json has been written, and only when the index just
+// committed names that file on the deferred pane's record alone. A failed
+// write is logged at WARN and does not fail the cycle, which has committed.
 func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 	lock, err := acquireCommitLock(cycle.Dir)
 	if err != nil {
@@ -175,6 +192,7 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 		keepAnsweredTranscripts(&capture, *prev, cycle.Dir, cycle.Logger)
 	}
 	changed := false
+	deferred := map[string]deferredCapture{}
 	if cycle.Dump != nil {
 		writer := ScrollbackWriter{
 			capture:   capture,
@@ -185,16 +203,52 @@ func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
 			held:      heldTranscripts(capture),
 			contested: contestedPanes(capture.Index, committed),
 			filed:     map[string]string{},
+			deferred:  deferred,
 		}
 		if changed, err = cycle.Dump(capture, writer); err != nil {
 			return capture, err
 		}
 		fileWritten(&capture.Index, writer.filed)
 	}
-	if err := commitOver(cycle.Dir, capture.Index, committed, changed, cycle.Logger); err != nil {
+	wrote, err := commitOver(cycle.Dir, capture.Index, committed, changed, cycle.Logger)
+	if err != nil {
 		return capture, fmt.Errorf("commit: %w", err)
 	}
+	if wrote {
+		writeDeferredCaptures(cycle.Dir, capture.Index, deferred, cycle.HashMap, cycle.Logger)
+	}
 	return capture, nil
+}
+
+// writeDeferredCaptures ignores a deferred pane's dedup entry: that entry may
+// describe the file before another pane's bytes were filed under its name.
+func writeDeferredCaptures(dir string, committed Index, deferred map[string]deferredCapture, hm HashMap, logger *slog.Logger) {
+	if len(deferred) == 0 {
+		return
+	}
+	logger = loggerOrDiscard(logger)
+	naming := recordKeysPerScrollbackFile(committed)
+	for paneKey, kept := range deferred {
+		if !slices.Equal(naming[positionalScrollbackFile(paneKey)], []string{paneKey}) {
+			continue
+		}
+		delete(hm, paneKey)
+		if _, err := WriteScrollbackIfChanged(dir, paneKey, kept.data, kept.hash, hm); err != nil {
+			logger.Warn("write scrollback failed", "pane_key", paneKey, "error", err)
+		}
+	}
+}
+
+func recordKeysPerScrollbackFile(idx Index) map[string][]string {
+	naming := map[string][]string{}
+	for _, s := range idx.Sessions {
+		for _, w := range s.Windows {
+			for _, p := range w.Panes {
+				naming[p.ScrollbackFile] = append(naming[p.ScrollbackFile], SanitizePaneKey(s.Name, w.Index, p.Index))
+			}
+		}
+	}
+	return naming
 }
 
 func logUnreadIndex(logger *slog.Logger, absent bool, cause error) {

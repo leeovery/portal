@@ -192,10 +192,10 @@ func TestRunCommitCycleKeepsAMovedPanesTranscriptBesideANewPaneAtItsSavedAddress
 	arrivals := []struct {
 		name       string
 		priorCycle bool
-		newWritten bool
+		deferred   bool
 	}{
-		{"in the same cycle", false, false},
-		{"in a later cycle after the moved pane's record was committed", true, true},
+		{"in the same cycle", false, true},
+		{"in a later cycle after the moved pane's record was committed", true, false},
 	}
 	for _, arrival := range arrivals {
 		t.Run(arrival.name, func(t *testing.T) {
@@ -222,19 +222,14 @@ func TestRunCommitCycleKeepsAMovedPanesTranscriptBesideANewPaneAtItsSavedAddress
 			}
 			committed := onDiskIndex(t, dir)
 			assertHeldOnTranscript(t, dir, committed, saved, live)
-			if arrival.newWritten {
-				if err := results[newPane.key()]; err != nil {
-					t.Errorf("Write(new pane) = %v; want a write", err)
-				}
-				assertWrittenAt(t, dir, committed, newPane, "new-capture")
-			} else {
-				if err := results[newPane.key()]; !errors.Is(err, errNotWritten) {
-					t.Errorf("Write(new pane) = %v; want it deferred", err)
-				}
-				if got := readScrollback(t, dir, newPane.file()); got != savedBytes(saved) {
-					t.Errorf("%s = %q, want the moved pane's saved bytes left in place", newPane.file(), got)
-				}
+			wantWrite := error(nil)
+			if arrival.deferred {
+				wantWrite = errNotWritten
 			}
+			if err := results[newPane.key()]; !errors.Is(err, wantWrite) {
+				t.Errorf("Write(new pane) = %v; want %v", err, wantWrite)
+			}
+			assertWrittenAt(t, dir, committed, newPane, "new-capture")
 			assertSavedScrollbackPresent(t, dir)
 			assertNoFileOnTwoRecords(t, committed)
 		})

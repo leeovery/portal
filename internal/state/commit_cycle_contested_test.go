@@ -226,19 +226,22 @@ func TestRunCommitCycleWritesEachSwappedPaneUnderItsOwnToken(t *testing.T) {
 	}
 }
 
-func TestRunCommitCycleDefersAContestedPaneThatHasNoUsableToken(t *testing.T) {
+// noUsableTokenOccupants are the new panes at an address a tokened pane
+// vacated that have no token the pane-token rule accepts.
+var noUsableTokenOccupants = []struct {
+	name string
+	pane movedPane
+}{
+	{"a new pane with no token", movedPane{"work", 2, 0, ""}},
+	{"a new pane whose token the rule refuses", movedPane{"work", 2, 0, "not-a-token"}},
+}
+
+func TestRunCommitCycleWritesADeferredPaneOnceItsCommitHasLanded(t *testing.T) {
 	saved := movedPane{"work", 2, 0, waitingPaneToken}
 	live := movedPane{"work", 1, 0, waitingPaneToken}
-	occupants := []struct {
-		name string
-		pane movedPane
-	}{
-		{"a new pane with no token", movedPane{"work", 2, 0, ""}},
-		{"a new pane whose token the rule refuses", movedPane{"work", 2, 0, "not-a-token"}},
-	}
 	const staleHash = uint64(0xfeed)
-	for _, occ := range occupants {
-		t.Run(occ.name+", the cycle commits", func(t *testing.T) {
+	for _, occ := range noUsableTokenOccupants {
+		t.Run(occ.name, func(t *testing.T) {
 			dir := t.TempDir()
 			seed := seedMoved(t, dir, saved)
 			hm := state.HashMap{occ.pane.key(): staleHash}
@@ -257,13 +260,15 @@ func TestRunCommitCycleDefersAContestedPaneThatHasNoUsableToken(t *testing.T) {
 			}
 
 			committed := onDiskIndex(t, dir)
-			if got := recordAt(t, committed, occ.pane).ScrollbackFile; got != occ.pane.stored() {
-				t.Errorf("sessions.json names %q for the deferred pane, want %q as an unwritten capture leaves it", got, occ.pane.stored())
+			assertWrittenAt(t, dir, committed, occ.pane, "new-capture")
+			if got, want := hm[occ.pane.key()], xxhash.Sum64String("new-capture"); got != want {
+				t.Errorf("dedup entry of the deferred pane = %x, want %x describing its written capture", got, want)
 			}
 			assertHeldOnTranscript(t, dir, committed, saved, live)
+			assertSavedScrollbackPresent(t, dir)
 			assertNoFileOnTwoRecords(t, committed)
 
-			next := writesThen(t, []paneWrite{{occ.pane, "new-capture"}}, true, commits)
+			next := writesThen(t, []paneWrite{{occ.pane, "new-capture"}}, false, commits)
 			if _, err := state.RunCommitCycle(movedTick(client(), dir, capture.Index, hm, next)); err != nil {
 				t.Fatalf("next cycle: %v", err)
 			}
@@ -273,21 +278,185 @@ func TestRunCommitCycleDefersAContestedPaneThatHasNoUsableToken(t *testing.T) {
 			assertSavedScrollbackPresent(t, dir)
 			assertNoFileOnTwoRecords(t, committed)
 		})
-		t.Run(occ.name+", the cycle ends uncommitted", func(t *testing.T) {
-			dir := t.TempDir()
-			seed := seedMoved(t, dir, saved)
-			dump := writesThen(t, []paneWrite{{occ.pane, "new-capture"}}, false, func() (bool, error) {
-				return false, errors.New("injected dump failure")
-			})
+	}
+}
 
-			if _, err := state.RunCommitCycle(movedTick(&movedClient{live: []movedPane{live, occ.pane}}, dir, seed, state.HashMap{}, dump)); err == nil {
-				t.Fatal("cycle returned nil, want it to end uncommitted")
+func TestRunCommitCycleEndingUncommittedWritesNoDeferredPane(t *testing.T) {
+	saved := movedPane{"work", 2, 0, waitingPaneToken}
+	live := movedPane{"work", 1, 0, waitingPaneToken}
+	for _, occ := range noUsableTokenOccupants {
+		for _, end := range uncommittedEnds {
+			t.Run(occ.name+", "+end.name, func(t *testing.T) {
+				dir := t.TempDir()
+				seed := seedMoved(t, dir, saved)
+				before := sessionsJSONBytes(t, dir)
+				dump := writesThen(t, []paneWrite{{occ.pane, "new-capture"}}, false, func() (bool, error) { return end.end(t, dir) })
+
+				if _, err := state.RunCommitCycle(movedTick(&movedClient{live: []movedPane{live, occ.pane}}, dir, seed, state.HashMap{}, dump)); err == nil {
+					t.Fatal("cycle returned nil, want it to end uncommitted")
+				}
+				if err := os.Chmod(dir, 0o700); err != nil {
+					t.Fatalf("restore state dir mode: %v", err)
+				}
+
+				if !bytes.Equal(sessionsJSONBytes(t, dir), before) {
+					t.Errorf("sessions.json changed by a cycle that ended uncommitted")
+				}
+				assertScrollbackHolds(t, dir, saved.file(), savedBytes(saved))
+				assertSavedScrollbackPresent(t, dir)
+			})
+		}
+	}
+}
+
+// The moved-tokenless layout: restore closed the gap at window 1, so tokenless
+// A, saved at work:3.0, is live at work:2.0 — the address tokened B's saved
+// record names — and B, saved at work:2.0, is live at work:1.0.
+var (
+	tokenlessASaved = movedPane{"work", 3, 0, ""}
+	tokenlessALive  = movedPane{"work", 2, 0, ""}
+	tokenedBSaved   = movedPane{"work", 2, 0, otherMovedToken}
+	tokenedBLive    = movedPane{"work", 1, 0, otherMovedToken}
+)
+
+func TestRunCommitCycleWritesAMovedTokenlessPaneAtAContestedNameOnceItsCommitHasLanded(t *testing.T) {
+	bWrites := []struct {
+		name   string
+		writes []paneWrite
+	}{
+		{"B is not written", nil},
+		{"B is written", []paneWrite{{tokenedBLive, "b-capture"}}},
+	}
+	for _, b := range bWrites {
+		t.Run(b.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seed := seedMoved(t, dir, tokenlessASaved, tokenedBSaved)
+			results := map[string]error{}
+			writes := append(append([]paneWrite{}, b.writes...), paneWrite{tokenlessALive, "a-capture"})
+			dump := func(c state.CaptureCycle, w state.ScrollbackWriter) (bool, error) {
+				changed, err := writesPanes(writes, results)(c, w)
+				assertScrollbackHolds(t, dir, tokenedBSaved.file(), savedBytes(tokenedBSaved))
+				return changed, err
 			}
 
-			assertScrollbackHolds(t, dir, saved.file(), savedBytes(saved))
+			if _, err := state.RunCommitCycle(movedTick(&movedClient{live: []movedPane{tokenedBLive, tokenlessALive}}, dir, seed, state.HashMap{}, dump)); err != nil {
+				t.Fatalf("RunCommitCycle: %v", err)
+			}
+
+			if err := results[tokenlessALive.key()]; !errors.Is(err, errNotWritten) {
+				t.Errorf("Write(A) = %v; want it deferred", err)
+			}
+			committed := onDiskIndex(t, dir)
+			assertWrittenAt(t, dir, committed, tokenlessALive, "a-capture")
+			if !scrollbackAbsent(t, dir, tokenlessASaved.file()) {
+				t.Errorf("%s still on disk once a commit naming A's capture ran its housekeeping", tokenlessASaved.file())
+			}
+			if b.writes != nil {
+				assertWrittenAt(t, dir, committed, tokenedBLive, "b-capture")
+			} else {
+				assertHeldOnTranscript(t, dir, committed, tokenedBSaved, tokenedBLive)
+			}
+			assertSavedScrollbackPresent(t, dir)
+			assertNoFileOnTwoRecords(t, committed)
+		})
+	}
+}
+
+func TestRunCommitCycleRefusesADeferredPanesUnconfirmedEmptyCapture(t *testing.T) {
+	for _, refusal := range emptyCaptureRefusals {
+		t.Run("the read after the empty capture "+refusal.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seed := seedMoved(t, dir, tokenlessASaved, tokenedBSaved)
+			client := &movedClient{live: []movedPane{tokenedBLive, tokenlessALive}, later: refusal.later}
+			results := map[string]error{}
+
+			if _, err := state.RunCommitCycle(movedTick(client, dir, seed, state.HashMap{}, writesPanes([]paneWrite{{tokenlessALive, ""}}, results))); err != nil {
+				t.Fatalf("RunCommitCycle: %v", err)
+			}
+
+			if err := results[tokenlessALive.key()]; !errors.Is(err, state.ErrUnconfirmedEmptyCapture) {
+				t.Errorf("Write(A) = %v; want a refusal wrapping ErrUnconfirmedEmptyCapture", err)
+			}
+			if client.laterReads != 1 {
+				t.Errorf("confirmation reads after the capture = %d, want 1", client.laterReads)
+			}
+			assertScrollbackHolds(t, dir, tokenlessALive.file(), savedBytes(tokenedBSaved))
+			assertHeldOnTranscript(t, dir, onDiskIndex(t, dir), tokenedBSaved, tokenedBLive)
 			assertSavedScrollbackPresent(t, dir)
 		})
 	}
+}
+
+// stageUnlinkedContest runs one committing cycle over the moved-tokenless
+// layout with B skeleton-marked and its link onto its token refused, so the
+// index it commits names work__2.0.bin on both B's record and A's. The
+// scrollback directory is left denied; dumpAllowingWrites lifts it.
+func stageUnlinkedContest(t *testing.T, dir string) (*movedClient, state.CaptureCycle) {
+	t.Helper()
+	seed := seedMoved(t, dir, tokenlessASaved, tokenedBSaved)
+	client := &movedClient{live: []movedPane{tokenedBLive, tokenlessALive}, skeleton: map[string]bool{tokenedBLive.key(): true}}
+	denyScrollbackWrites(t, dir)
+	capture, err := state.RunCommitCycle(movedTick(client, dir, seed, state.HashMap{}, dumpsNothing))
+	if err != nil {
+		t.Fatalf("staging cycle: %v", err)
+	}
+	committed := onDiskIndex(t, dir)
+	for _, p := range []movedPane{tokenedBLive, tokenlessALive} {
+		if got := recordAt(t, committed, p).ScrollbackFile; got != tokenlessALive.stored() {
+			t.Fatalf("staged sessions.json names %q for %s, want %q", got, p.key(), tokenlessALive.stored())
+		}
+	}
+	return client, capture
+}
+
+// dumpAllowingWrites lifts the denial on the scrollback directory once the
+// capture's links have been refused, then writes A's capture, which the writer
+// defers.
+func dumpAllowingWrites(t *testing.T, dir string) dumpFunc {
+	return func(c state.CaptureCycle, w state.ScrollbackWriter) (bool, error) {
+		if err := os.Chmod(state.ScrollbackDir(dir), 0o700); err != nil {
+			t.Fatalf("allow scrollback writes: %v", err)
+		}
+		return writesThen(t, []paneWrite{{tokenlessALive, "a-capture"}}, false, func() (bool, error) { return false, nil })(c, w)
+	}
+}
+
+func TestRunCommitCycleLeavesADeferredPaneUnwrittenWhileATokenedRecordStillNamesItsName(t *testing.T) {
+	dir := t.TempDir()
+	seed := seedMoved(t, dir, tokenlessASaved, tokenedBSaved)
+	client := &movedClient{live: []movedPane{tokenedBLive, tokenlessALive}, skeleton: map[string]bool{tokenedBLive.key(): true}}
+	denyScrollbackWrites(t, dir)
+	before := sessionsJSONBytes(t, dir)
+
+	if _, err := state.RunCommitCycle(movedTick(client, dir, seed, state.HashMap{}, dumpAllowingWrites(t, dir))); err != nil {
+		t.Fatalf("RunCommitCycle: %v", err)
+	}
+
+	if bytes.Equal(sessionsJSONBytes(t, dir), before) {
+		t.Fatal("sessions.json unchanged, want the cycle to have committed")
+	}
+	committed := onDiskIndex(t, dir)
+	if got := recordAt(t, committed, tokenedBLive).ScrollbackFile; got != tokenlessALive.stored() {
+		t.Fatalf("sessions.json names %q for B, want %q its failed link left it on", got, tokenlessALive.stored())
+	}
+	assertScrollbackHolds(t, dir, tokenlessALive.file(), savedBytes(tokenedBSaved))
+	assertSavedScrollbackPresent(t, dir)
+}
+
+func TestRunCommitCycleSkippingItsSessionsJSONWriteWritesNoDeferredPane(t *testing.T) {
+	dir := t.TempDir()
+	client, capture := stageUnlinkedContest(t, dir)
+	before := sessionsJSONBytes(t, dir)
+
+	if _, err := state.RunCommitCycle(movedTick(client, dir, capture.Index, state.HashMap{}, dumpAllowingWrites(t, dir))); err != nil {
+		t.Fatalf("RunCommitCycle: %v", err)
+	}
+
+	if !bytes.Equal(sessionsJSONBytes(t, dir), before) {
+		t.Fatal("sessions.json changed, want the cycle to have skipped its write")
+	}
+	assertScrollbackHolds(t, dir, tokenlessALive.file(), savedBytes(tokenedBSaved))
+	assertSavedScrollbackPresent(t, dir)
 }
 
 func TestRunCommitCycleWritesANewTokenedPaneAtAContestedNameUnderItsToken(t *testing.T) {
