@@ -102,7 +102,8 @@
             "killing-all-sessions-wipes-restore-state-8-2": "tick-600a86",
             "killing-all-sessions-wipes-restore-state-8-3": "tick-a9f564",
             "killing-all-sessions-wipes-restore-state-9": "tick-38dd5b",
-            "killing-all-sessions-wipes-restore-state-9-1": "tick-4e3d8b"
+            "killing-all-sessions-wipes-restore-state-9-1": "tick-4e3d8b",
+            "killing-all-sessions-wipes-restore-state-9-2": "tick-6e97ab"
           },
           "storage_paths": [
             ".tick/"
@@ -130,7 +131,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
-          "consolidation_gate_mode": "gated",
+          "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 7,
           "current_phase": 9,
@@ -269,6 +270,11 @@
                 "1": "approved",
                 "2": "approved"
               }
+            },
+            "p9": {
+              "tasks": {
+                "1": "approved"
+              }
             }
           },
           "consolidated_phases": [
@@ -279,7 +285,8 @@
             5,
             6,
             7,
-            8
+            8,
+            9
           ],
           "completed_phases": [
             1,
