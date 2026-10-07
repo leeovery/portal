@@ -204,7 +204,8 @@
             "killing-all-sessions-wipes-restore-state-8-1",
             "killing-all-sessions-wipes-restore-state-8-2",
             "killing-all-sessions-wipes-restore-state-8-3",
-            "killing-all-sessions-wipes-restore-state-9-1"
+            "killing-all-sessions-wipes-restore-state-9-1",
+            "killing-all-sessions-wipes-restore-state-9-2"
           ],
           "staging": {
             "p1": {
@@ -296,7 +297,8 @@
             5,
             6,
             7,
-            8
+            8,
+            9
           ],
           "updated": "2026-10-07"
         }
