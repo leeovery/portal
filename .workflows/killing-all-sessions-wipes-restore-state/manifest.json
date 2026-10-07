@@ -307,7 +307,7 @@
     "review": {
       "items": {
         "killing-all-sessions-wipes-restore-state": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "killing-all-sessions-wipes-restore-state-1-1",
             "killing-all-sessions-wipes-restore-state-1-2",
