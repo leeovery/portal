@@ -130,7 +130,7 @@
           "analysis_gate_mode": "auto",
           "consolidation_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle_total": 6,
+          "analysis_cycle_total": 7,
           "current_phase": 8,
           "current_task": null,
           "project_skills": [
