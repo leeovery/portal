@@ -344,7 +344,15 @@
                 "internal/restore/lazy_resume_burst_integration_test.go"
               ]
             }
-          ]
+          ],
+          "staging": {
+            "c1": {
+              "gate_mode": "gated",
+              "tasks": {
+                "1": "pending"
+              }
+            }
+          }
         }
       }
     }
