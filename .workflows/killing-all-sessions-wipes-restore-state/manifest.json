@@ -1,7 +1,7 @@
 {
   "name": "killing-all-sessions-wipes-restore-state",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-10-02",
   "description": "Rebooting the Mac or killing the tmux server while Portal is running must not empty the saved restore state or delete saved scrollback or resume hooks — only a session the user kills is gone for good, and no special Portal shutdown step should be needed first",
   "phases": {
@@ -367,5 +367,6 @@
       "source": "inbox:bug",
       "seeded_at": "2026-10-02T13:02:01Z"
     }
-  ]
+  ],
+  "completed_at": "2026-10-07"
 }
