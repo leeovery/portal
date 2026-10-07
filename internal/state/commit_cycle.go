@@ -32,8 +32,8 @@ func CommitLock(dir string) string { return filepath.Join(dir, commitLockName) }
 type CommitCycle struct {
 	Client CaptureCycleClient
 	// OwnServer is the pid of the tmux server the committer belongs to. The
-	// cycle commits only on a confirmation that server answered; zero stands
-	// every cycle down.
+	// cycle commits only on a confirmation that server answered; zero commits
+	// nothing, and sends no confirmation.
 	OwnServer int
 	Dir       string
 	// LoadPrev supplies the previous index only when sessions.json, read under

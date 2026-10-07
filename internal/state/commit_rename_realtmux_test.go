@@ -9,6 +9,7 @@ import (
 
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -16,6 +17,8 @@ import (
 
 func TestCommitRealTmuxTellsARenameFromADropBesideANewSession(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
+	_, stateDir := portaltest.IsolateStateForTest(t)
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 
 	ts := tmuxtest.New(t, "ptl-renamedrop-")
 	client := ts.Client()
@@ -27,7 +30,6 @@ func TestCommitRealTmuxTellsARenameFromADropBesideANewSession(t *testing.T) {
 		ts.Run(t, "new-session", "-d", "-s", name, "-c", paneDir)
 	}
 	waitForListedSessions(t, ts, tmux.PortalBootstrapName, "alpha", "bravo")
-	stateDir := t.TempDir()
 	captureAndCommit(t, client, stateDir, nil)
 
 	movePaneOn(t, ts, "bravo", t.TempDir())
