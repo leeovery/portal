@@ -22,7 +22,7 @@ The 10–30ms ordering test was also run against the pre-fix tree, and it failed
 
 Linters are clean in both lanes. The host load average reached roughly 290 on 10 cores during these runs, so every timing result was taken under heavy contention. Only the whole-suite run is unmeasured.
 
-The out-of-scope item held from the previous cycle (A4, an order-dependent lazy-resume paste test) stays held for the user's call.
+The out-of-scope item held from the previous cycle (A4, an order-dependent lazy-resume paste test) was re-checked before close and dropped as no longer holding. The burst-then-paste pair, and the whole `./internal/restore` integration package, pass on the current tree.
 
 ## QA Verification
 
@@ -189,7 +189,7 @@ The out-of-scope item held from the previous cycle (A4, an order-dependent lazy-
 - [x] Phase 3 acceptance criteria met, except any named below as not measured
 - [x] Phase 4 acceptance criteria met, except any named below as not measured
 - [x] Phase 5 acceptance criteria met, except any named below as not measured
-- [x] Phase 6 acceptance criteria met, except any named below as not measured. Task 6-1's suites were measured this cycle with `go test -tags integration -p 1 -count=1 ./internal/restore -run 'TestLazyResumePanel_|TestLazyResumeDiscard_RealPaneDiscardsItsResume|TestLazyResumeDiscard_BurstNeverConfirms|TestLazyResumePaste_NeverAnswersAWaitingPane|TestResumePanes_EndWhenTheirTerminalCloses'`: all 7 top-level tests passed. The order dependence held as out of scope (A4) was seen on a whole-package run, which this cycle did not take.
+- [x] Phase 6 acceptance criteria met, except any named below as not measured. Task 6-1's suites were measured this cycle with `go test -tags integration -p 1 -count=1 ./internal/restore -run 'TestLazyResumePanel_|TestLazyResumeDiscard_RealPaneDiscardsItsResume|TestLazyResumeDiscard_BurstNeverConfirms|TestLazyResumePaste_NeverAnswersAWaitingPane|TestResumePanes_EndWhenTheirTerminalCloses'`: all 7 top-level tests passed. The order dependence held as out of scope (A4) did not reproduce on the re-check before close: `go test -tags integration -p 1 -count=1 ./internal/restore` passed whole, with the burst test followed by the paste test.
 - [x] Phase 7 acceptance criteria met, except any named below as not measured
 - [x] Phase 8 acceptance criteria met, except any named below as not measured
 - [x] Phase 9 acceptance criteria met, except any named below as not measured. Task 9-1's fifth criterion said a committing cycle leaves a deferred pane as an unwritten capture leaves it. Task 9-2 superseded that, deliberately, after a measured regression: a moved tokenless pane's record named a neighbour's bytes and its own file was collected. Both verifiers judged the superseding sound.

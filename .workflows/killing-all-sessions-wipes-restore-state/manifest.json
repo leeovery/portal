@@ -349,17 +349,6 @@
             "killing-all-sessions-wipes-restore-state-9-1",
             "killing-all-sessions-wipes-restore-state-9-2"
           ],
-          "out_of_scope": [
-            {
-              "id": "A4",
-              "summary": "Lazy-resume paste test fails after the discard burst test",
-              "kind": "bug",
-              "fails": "The integration lane (`go test -tags integration -p 1 ./...`) goes red on every package run of internal/restore whether or not the save path is correct. Its verdict on this or any later change-set cannot be read without rerunning the test alone.",
-              "files": [
-                "internal/restore/lazy_resume_burst_integration_test.go"
-              ]
-            }
-          ],
           "staging": {
             "c1": {
               "gate_mode": "auto",
