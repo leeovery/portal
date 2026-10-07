@@ -290,6 +290,63 @@
           ]
         }
       }
+    },
+    "review": {
+      "items": {
+        "killing-all-sessions-wipes-restore-state": {
+          "status": "in-progress",
+          "reviewed_tasks": [
+            "killing-all-sessions-wipes-restore-state-1-1",
+            "killing-all-sessions-wipes-restore-state-1-2",
+            "killing-all-sessions-wipes-restore-state-1-3",
+            "killing-all-sessions-wipes-restore-state-1-4",
+            "killing-all-sessions-wipes-restore-state-1-5",
+            "killing-all-sessions-wipes-restore-state-1-6",
+            "killing-all-sessions-wipes-restore-state-1-7",
+            "killing-all-sessions-wipes-restore-state-1-8",
+            "killing-all-sessions-wipes-restore-state-1-9",
+            "killing-all-sessions-wipes-restore-state-2-1",
+            "killing-all-sessions-wipes-restore-state-2-2",
+            "killing-all-sessions-wipes-restore-state-2-3",
+            "killing-all-sessions-wipes-restore-state-2-4",
+            "killing-all-sessions-wipes-restore-state-2-5",
+            "killing-all-sessions-wipes-restore-state-2-6",
+            "killing-all-sessions-wipes-restore-state-2-7",
+            "killing-all-sessions-wipes-restore-state-2-8",
+            "killing-all-sessions-wipes-restore-state-2-9",
+            "killing-all-sessions-wipes-restore-state-3-1",
+            "killing-all-sessions-wipes-restore-state-3-2",
+            "killing-all-sessions-wipes-restore-state-3-3",
+            "killing-all-sessions-wipes-restore-state-3-4",
+            "killing-all-sessions-wipes-restore-state-3-5",
+            "killing-all-sessions-wipes-restore-state-4-1",
+            "killing-all-sessions-wipes-restore-state-4-2",
+            "killing-all-sessions-wipes-restore-state-5-1",
+            "killing-all-sessions-wipes-restore-state-5-2",
+            "killing-all-sessions-wipes-restore-state-6-1",
+            "killing-all-sessions-wipes-restore-state-6-2",
+            "killing-all-sessions-wipes-restore-state-6-3",
+            "killing-all-sessions-wipes-restore-state-6-4",
+            "killing-all-sessions-wipes-restore-state-7-1",
+            "killing-all-sessions-wipes-restore-state-7-2",
+            "killing-all-sessions-wipes-restore-state-7-3",
+            "killing-all-sessions-wipes-restore-state-8-1",
+            "killing-all-sessions-wipes-restore-state-8-2",
+            "killing-all-sessions-wipes-restore-state-8-3"
+          ],
+          "out_of_scope": [
+            {
+              "id": "A4",
+              "summary": "Lazy-resume paste test fails after the discard burst test",
+              "kind": "bug",
+              "fails": "The integration lane (`go test -tags integration -p 1 ./...`) goes red on every package run of internal/restore whether or not the save path is correct. Its verdict on this or any later change-set cannot be read without rerunning the test alone.",
+              "files": [
+                "internal/restore/lazy_resume_burst_integration_test.go"
+              ]
+            }
+          ]
+        }
+      }
     }
   },
   "seeds": [
