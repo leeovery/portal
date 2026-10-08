@@ -234,6 +234,8 @@ Kill a tmux session by name.
 xctl kill myproject
 ```
 
+A kill is final: the session's saved state, scrollback and resume hooks are removed, and it does not come back after a reboot.
+
 ### `xctl alias`
 
 Manage path aliases for quick session access.
@@ -439,6 +441,13 @@ zoom, and working directories intact. Scrollback (including ANSI colour) loads a
 attach, and each recreated pane carrying a resume hook comes back holding the resume
 panel, which runs the command when you answer it.
 
+Only a kill is final. Killing a session — `k` in the picker, `xctl kill`, `tmux kill-session`,
+or exiting its last program — removes its saved state, scrollback and resume hooks for
+good. Detaching, `tmux kill-server` and shutting down or rebooting the machine all leave
+your sessions restorable, with nothing to run first. One gap remains: a pane whose program
+was started directly rather than from a shell can be ended by the shutdown signal before
+tmux goes, and a session left with no surviving pane is then saved as closed.
+
 This replaces tmux-continuum and tmux-resurrect for session persistence. If you have
 either installed, remove it (or set `@continuum-restore off`) to avoid restoring twice.
 
@@ -519,6 +528,7 @@ Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_S
 - **Rotation:** a new file each local day; older files are kept read-only. A size-cap safety valve rolls over to `portal.log.<date>.N` if a single day ever grows huge.
 - **Retention:** rotated files older than 30 days are deleted automatically (one breadcrumb logged per deletion). `xctl doctor --fix` forces a sweep on demand.
 - **Level:** defaults to `info` (a few lines per meaningful event). Set `PORTAL_LOG_LEVEL=debug` to capture full reconstruction detail when investigating an issue.
+- **After a reboot:** `grep -E 'session dropped|backed off' portal.log` shows what shutdown did to your saved state. `session dropped session=<name>` names each session removed from it (a rename is not a drop); `<stage> backed off: tmux stopped answering` means a save was in flight as tmux went down and wrote nothing, leaving the previous save in place.
 
 | Env var | Purpose | Default |
 |---|---|---|
