@@ -39,13 +39,17 @@ const framed = (answer: string, plugin = 'workflow-gates') =>
     "This is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.",
   ].join('\n')
 
-type Row = RenderInput<'UserMessage', 'terminal'>
+/** The screens a row draws on: the terminal app's and the Desktop app's. */
+type Surface = 'terminal' | 'desktop'
+
+type Row = RenderInput<'UserMessage', Surface>
 
 const rowOf = (
   requestId: string,
   props: Partial<RenderPropsOf['UserMessage']> = {},
+  surface: Surface = 'terminal',
 ): Row => ({
-  surface: 'terminal',
+  surface,
   component: 'UserMessage',
   requestId,
   viewport: { columns: 72, rows: 24 },
@@ -54,6 +58,14 @@ const rowOf = (
 
 const recordOf = (answer = 'yes', question = QUESTION, label = COMMIT) =>
   JSON.stringify({ answer, question, label })
+
+/** What a handoff sends, and the line naming where the work goes. */
+const CONTINUATION = 'Invoke `/workflow-discussion-process feature note-window`.'
+const WHERE = '→ Discussion · note-window'
+
+/** The record a handoff leaves: its continuation, and its line. */
+const handoffOf = (answer = CONTINUATION, line = WHERE) =>
+  JSON.stringify({ answer, line })
 
 /**
  * The world beneath the plugin: the process's environment, the files, the
@@ -195,11 +207,13 @@ async function drawn($: Engine, row: Row): Promise<string> {
 }
 
 describe('register', () => {
-  test('a sent answer draws as the question it answered, the answer and its label', async ($, on) => {
-    world(on, recordOf())
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`a sent answer draws as the question it answered, the answer and its label — ${surface}`, async ($, on) => {
+      world(on, recordOf())
 
-    expect(await drawn($, rowOf('m1'))).toBe(PAIRED)
-  })
+      expect(await drawn($, rowOf('m1', {}, surface))).toBe(PAIRED)
+    })
+  }
 
   test('the label is left out where it is the answer itself, or empty', async ($, on) => {
     const { leaves } = world(on)
@@ -380,6 +394,8 @@ describe('register', () => {
       'another answer': recordOf('no'),
       'a field missing': JSON.stringify({ answer: 'yes', question: QUESTION }),
       'a field not text': JSON.stringify({ answer: 'yes', question: QUESTION, label: 7 }),
+      'a line not text': JSON.stringify({ answer: 'yes', line: 7 }),
+      'a line for another answer': handoffOf('no'),
     }
 
     for (const [name, record] of Object.entries(records)) {
@@ -387,6 +403,20 @@ describe('register', () => {
 
       expect(await drawn($, rowOf(name)), name).toBe('yes')
     }
+  })
+
+  test("a handoff's continuation draws as the line its record carries, kept and spent as an answer's is", async ($, on) => {
+    const { files, rowsIn } = world(on, handoffOf())
+
+    expect(await drawn($, rowOf('m1', { text: framed(CONTINUATION) }))).toBe(WHERE)
+    expect(rowsIn('s0')).toEqual({ m1: WHERE })
+    expect(files.get(SENT)).toBe('null')
+  })
+
+  test('a line drawn verbatim wins over a question and label the same record carries', async ($, on) => {
+    world(on, JSON.stringify({ answer: CONTINUATION, question: QUESTION, label: COMMIT, line: WHERE }))
+
+    expect(await drawn($, rowOf('m1', { text: framed(CONTINUATION) }))).toBe(WHERE)
   })
 
   test('rows that cannot be read keep nothing: the row pairs, and the file is written afresh', async ($, on) => {

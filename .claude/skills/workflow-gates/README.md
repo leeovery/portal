@@ -7,11 +7,12 @@ The engine states each gate as data beside the menu it composed. This mod
 announces itself at the session's start so the engine collects that data, arms
 the gate off the Bash result that carried it, cuts the menu out of what the
 model reads, and draws the rows where they stay put while the transcript
-scrolls; while any screen but the terminal is attached, it leaves the menu as
-text so every screen shows it, though a screen that attaches after a menu was
-drawn on the terminal does not get that menu. No gate's prose names the mod;
-only workflow-start's setup step does, which stops the session until the mod
-is running in Claude Code's terminal app.
+scrolls; while any screen but the terminal or the Desktop app is attached
+beside it, it leaves the menu as text so every screen shows it, though a
+screen that attaches after a menu was drawn does not get that menu. No gate's
+prose names the mod; only workflow-start's setup step does, with a notice when
+the mod could run in Claude Code's terminal app or the Desktop app's Code tab
+but is not running.
 
 A click on a row puts its answer in the prompt box; a second click on it sends
 it as the next message, which the workflows read as the answer. Once a click
@@ -81,38 +82,67 @@ Code picks up only as a session starts, or one that crashed.
 The engine emits the menu regardless, so where the mod is off or absent the
 model reads the text menu the engine wrote.
 
-The mod is part of the workflows, and the first `/workflow-start` switches it
-on wherever it can run: Claude Code's terminal app, from 2.1.282, with this
-directory installed in the project. Claude Code takes
-`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` from the person's own settings, managed
-settings or the shell, never from a project's settings, so there every
-`/workflow-start` makes it `"1"` in the `env` of the person's Claude Code
-settings — `settings.json` in `CLAUDE_CONFIG_DIR` where that is set, else
-`~/.claude/settings.json`. Claude Code reads its settings only when it starts,
-so a start that writes it ends by asking for a restart, and the next session
-loads the mod. In the terminal app the workflows run only with the mod: a
-start that finds the flag there with the mod not running, that cannot read or
-write that file, or that runs on a Claude Code older than 2.1.282 stops and
-says why. Anywhere else — the web, an IDE extension, another entrypoint, a
-project without this directory — nothing is written, and the workflows carry
-on with the text menus.
+The mod is part of the workflows, and it runs in Claude Code's terminal app
+and the Desktop app's Code tab, from 2.1.287, with this directory installed in
+the project; mods are on by default there, so nothing switches it on. Claude
+Code loads a plugin as a session starts, so a session already open when the
+mod was installed or updated loads it in the next one. The mod is the
+workflows' upgrade layer and the engine's text menus their floor: a
+`/workflow-start` that finds the mod not running — a session started before
+the mod was installed or updated, mods turned off by `--safe-mode`, `--bare`,
+`"disableAllHooks": true` or an organization's policy, or installed mods
+switched off remotely by Anthropic — says so and carries on with typed menus;
+one that runs on a Claude Code older than 2.1.287 stops and says why. Anywhere
+else — the web, the VS Code extension, a Desktop session that runs in the
+cloud, another entrypoint, a project without this directory — the workflows
+carry on with the text menus and say nothing.
 
-Function hooks can be on where the mod cannot run — the flag in the person's
-settings reaches every Claude Code app and version that reads them, and
-anyone's own settings or shell can set it — so at the session's start the mod
-applies the boot's rules: where `CLAUDE_CODE_ENTRYPOINT` is other than `cli`,
-`CLAUDE_CODE_REMOTE` is set, or the version the session reports is older than
-2.1.282 or not a release's (a development build among them), it announces
-nothing, so it draws, keeps and sets nothing — the menus stay text, and Claude
-Code runs as it would without it.
+The Desktop app runs the session as an SDK host: the session starts drawing
+nowhere and the app attaches after, so the band reads the screens attached at
+each Bash call that states a gate, and the person's own message there arrives
+as the host's (an `sdk` origin), which the band reads as theirs.
+
+Claude Code can load the mod where it does not run — another entrypoint, or an
+older Claude Code with function hooks switched on — so at the session's start
+the mod applies the boot's rules: where `CLAUDE_CODE_ENTRYPOINT` is none of
+`cli`, `claude-desktop` and `claude-desktop-3p`, `CLAUDE_CODE_REMOTE` is set,
+or the version the session reports is older than 2.1.287 or not a release's (a
+development build among them), it announces nothing, so it draws, keeps and
+sets nothing — the menus stay text, and Claude Code runs as it would without
+it.
+
+## Handoffs
+
+The mod also carries the workflows' handoffs: every move into work, which the
+engine names with `engine handoff`, starts in a cleared conversation. At the
+session's start, where it announces the gate surface, the mod announces that
+it carries handoffs too (`WORKFLOWS_HANDOFF=1`, a variable of its own, which
+the engine reads apart from `WORKFLOWS_GATE_SURFACE`). The engine then answers
+a handoff with a `HANDOFF` payload beside the line naming where the work goes:
+the continuation to send (``Invoke `/<skill> <args>`.``) and that line. The
+payload on a Bash result of the conversation's own call — never a subagent's —
+arms the handoff, and every call has it cut from what the model reads; the
+line and the skill stay. As the turn ends the mod clears the conversation and,
+in the conversation that follows, leaves what it sends with the line as
+`sent.json` in that conversation's folder, then sends the continuation, which
+Claude acts on there, and shows a toast naming where the work went
+(`Handed off → Planning · auth-flow`). The clear runs from a timer started at
+the turn's end, whatever else there fails: a mod cannot run a command inside a
+hook the turn waits on. A send that is dropped or fails goes into the prompt
+box for Enter instead; where the box will not take it either, the toast holds
+the continuation for the person to send, and stays longer. A clear that fails
+sends in place, so the work still goes on. Esc on the turn that handed off
+carries nothing: Esc means stop. `workflow-gates-rows` draws the continuation's
+transcript row as the line. Where the mod does not announce, the engine says so
+and the workflows invoke the skill in the same conversation.
 
 ## What it sets in Claude Code
 
-Every session in Claude Code's terminal app, from 2.1.282, starts with Claude
-Code's `SendUserMessage` tool switched on (`CLAUDE_CODE_PEWTER_OWL_TOOL=true`):
-Claude Code builds its tool list just after the session starts, so that is
-the only moment the switch counts. The mod keeps the tool behind ToolSearch
-in every such session, one answer that never changes and so never spends the
+Every session in either app, from 2.1.287, starts with Claude Code's
+`SendUserMessage` tool switched on (`CLAUDE_CODE_PEWTER_OWL_TOOL=true`):
+Claude Code builds its tool list just after the session starts, so that is the
+only moment the switch counts. The mod keeps the tool behind ToolSearch in
+every such session, one answer that never changes and so never spends the
 prompt cache; a plain session's tool list is Claude Code's own.
 
 In a conversation that runs the workflows there, the mod sets
@@ -127,11 +157,13 @@ conversation's Bash calls and when it starts, so a command that only mentions
 the engine marks nothing. What the settings replace, the person's own value or
 none, is kept in the process's environment (`WORKFLOWS_HARNESS_REPLACED`),
 which a reload of the mod's files keeps, and a `/clear` or a resume puts it
-back exactly. A marked conversation gets the workflow values back when the mod
-next follows it, whether `claude --resume`, a restart or `/resume` in the same
-process brings it back. A plain conversation in the same project keeps Claude
-Code's defaults and the person's own settings: the mod never touches either
-there.
+back exactly — except the clear a handoff runs, which leads into a workflow
+conversation by construction and so leaves the workflow values on, the
+person's own put back as that conversation ends. A marked conversation gets
+the workflow values back when the mod next follows it, whether
+`claude --resume`, a restart or `/resume` in the same process brings it back.
+A plain conversation in the same project keeps Claude Code's defaults and the
+person's own settings: the mod never touches either there.
 
 ## Working on it
 
@@ -142,7 +174,5 @@ there.
 The declarations come from the Claude Code repository and are regenerable, so
 they are not committed. Fetch them before the first typecheck.
 
-Function hooks are early access: Claude Code loads this mod only where they
-are on — `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in the environment or in any
-settings file but a project's, or switched on for the account — and the test
-script sets the flag for itself.
+The suites run on Claude Code 2.1.287 or newer, where mods are on by
+default.

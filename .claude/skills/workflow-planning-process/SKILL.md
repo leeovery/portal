@@ -14,13 +14,16 @@ Your role spans product (WHAT we're building and WHY) and technical (HOW to stru
 
 Follows specification. Transform the validated specification into actionable phases, tasks, and acceptance criteria.
 
+**Stay in your lane**: Create the plan - phases, tasks, and acceptance criteria. Don't jump to implementation or write code. The specification is your sole input; transform it into actionable work items.
+
 ### What This Skill Needs
 
-- **Specification content** (required) - The validated specification from the prior phase
-- **Topic name** (optional) - Will derive from specification if not provided
-- **Output format preference** (optional) - Will ask if not specified
-- **Work type** (required) — `epic`, `feature`, or `bugfix`. Determines which context-specific guidance is loaded during phase and task design.
-- **Cross-cutting references** (optional) - Cross-cutting specifications that inform technical decisions in this plan
+Positional arguments:
+- `$0` — **work_type**: `epic`, `feature`, or `bugfix`. Determines which context-specific guidance is loaded during phase and task design.
+- `$1` — **work_unit**: the work unit name.
+- `$2` — **topic**: the specification to plan. A single-topic unit's topic is the work unit, so it may be left off: topic = `$2`, or `$1` where `work_type` is not `epic`.
+
+The plan is built from the specification at `.workflows/{work_unit}/specification/{topic}/specification.md`. Initialization settles the rest — any context added since the specification completed, the cross-cutting specifications that bear on the plan, and the output format.
 
 ---
 
@@ -95,7 +98,29 @@ The user calls the topic off — they say to cancel, or the conversation agrees 
 
 ---
 
-## Step 0: Resume Detection
+## Step 0: Phase Start
+
+### Step 0.1: Entry Gate
+
+Check the specification prerequisite — the engine derives the verdict from manifest state:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render entry-gate {work_unit}.planning.{topic}
+```
+
+#### If the response is empty
+
+The specification is completed and settled — clear to plan.
+
+→ Proceed to **Step 0.2**.
+
+#### If the response carried `DISPLAY: entry blocker`
+
+Emit both sections verbatim per their markers — the red blocker line, then its guidance.
+
+**STOP.** Do not proceed — terminal condition.
+
+### Step 0.2: Resume Detection
 
 Refresh the tmux session label — a no-op unless the user opted in and this session runs inside tmux:
 
@@ -103,30 +128,33 @@ Refresh the tmux session label — a no-op unless the user opted in and this ses
 node .claude/skills/workflow-engine/scripts/engine.cjs session label {work_unit} planning {topic}
 ```
 
-Read the planning entry from the manifest as one subtree — empty means no entry exists:
+Read the phase status, storing it as `phase_status`:
+
 ```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic}
+node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} status
 ```
 
-#### If output is empty (no planning entry)
+#### If `phase_status` is empty
+
+A first start.
 
 → Proceed to **Step 1**.
 
-#### Otherwise (planning entry exists)
+#### If `phase_status` is `in-progress` or `completed`
 
-> *Output the next fenced block as markdown (not a code block):*
+Where `phase_status` is `completed`, reopen it — resuming is not starting:
 
-```
-**`□ Resume Detection`**
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> An in-progress plan exists for this topic — choose whether to pick it up or start fresh.
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs topic reopen {work_unit} planning {topic}
 ```
 
-The subtree carries the current `phase` and `task` position (for the resume prompt below) and the `spec_commit` baseline (for spec-change detection).
+Render the phase note — `Reopening` for a plan just reopened, `Resuming` otherwise — and emit the section verbatim per its marker:
+
+```bash
+node .claude/skills/workflow-engine/scripts/engine.cjs render phase-note {work_unit}.planning.{topic} --verb {Reopening|Resuming} --noun plan
+```
+
+Load **[reconcile-advisory.md](../workflow-shared/references/reconcile-advisory.md)** with work_type = `{work_type}`, work_unit = `{work_unit}`, topic = `{topic}`, downstream_phase = `planning`.
 
 Load **[spec-change-detection.md](references/spec-change-detection.md)** and follow its instructions as written. Then render the resume menu (the position parenthetical derives from the planning item) and emit its section verbatim per its marker:
 
@@ -137,12 +165,6 @@ node .claude/skills/workflow-engine/scripts/engine.cjs render resume-gate {work_
 **STOP.** Wait for user response.
 
 #### If `continue`
-
-**If the subtree carries no `storage_paths` field** (absent, not empty — a plan initialised before the field existed): record it now, before anything commits — read the format's authoring.md → Storage Pathspecs and copy the fenced array:
-
-```bash
-node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} storage_paths '{format storage pathspecs}'
-```
 
 If spec-change-detection reported changes, carry them into the walkthrough: reconcile the changed spec content into the affected phases and tasks before concluding. The `spec_commit` baseline is re-stamped only at conclusion.
 
@@ -157,22 +179,18 @@ Order matters — the cleanup commits while the planning item still exists, so `
    node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} format
    node .claude/skills/workflow-engine/scripts/engine.cjs manifest get {work_unit}.planning.{topic} external_id
    ```
-2. **If the subtree read at resume detection carries no `storage_paths` field** (absent, not empty — a plan initialised before the field existed): record it now, before anything commits — read the format's authoring.md → Storage Pathspecs and copy the fenced array:
-   ```bash
-   node .claude/skills/workflow-engine/scripts/engine.cjs manifest set {work_unit}.planning.{topic} storage_paths '{format storage pathspecs}'
-   ```
-3. Load the format's **[authoring.md](references/output-formats/{format}/authoring.md)**
-4. Follow the authoring file's cleanup instructions to remove authored tasks for this topic — the cleanup targets the entity identified by `external_id`
-5. Delete all planning files: `rm -rf .workflows/{work_unit}/planning/{topic}/`
-6. Commit the cleanup — `--plan` stages the planning topic, both manifests, and the plan's declared storage, so the deleted plan files and the format's own cleanup land together:
+2. Load the format's **[authoring.md](references/output-formats/{format}/authoring.md)**
+3. Follow the authoring file's cleanup instructions to remove authored tasks for this topic — the cleanup targets the entity identified by `external_id`
+4. Delete all planning files: `rm -rf .workflows/{work_unit}/planning/{topic}/`
+5. Commit the cleanup — `--plan` stages the planning topic, both manifests, and the plan's declared storage, so the deleted plan files and the format's own cleanup land together:
    ```bash
    node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "planning({work_unit}): restart planning — clear the authored plan" --plan {topic}
    ```
-7. Delete the planning manifest entry:
+6. Delete the planning manifest entry:
    ```bash
    node .claude/skills/workflow-engine/scripts/engine.cjs manifest delete {work_unit}.planning items.{topic}
    ```
-8. Commit the entry's removal on the topic's own scope:
+7. Commit the entry's removal on the topic's own scope:
    ```bash
    node .claude/skills/workflow-engine/scripts/engine.cjs commit {work_unit} -m "planning({work_unit}): restart planning" --topic planning/{topic}
    ```
