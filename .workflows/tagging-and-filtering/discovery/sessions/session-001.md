@@ -50,6 +50,10 @@ Checked against the live install: all three worktree sessions sit in worktree fo
 
 Open: sessions in folders that are not registered projects. ~/Code/flowx is a separate repository from the registered ~/Code/fabric/flowx (not a symlink), and ~/Code/goosemates is a repository with no project record. The flowx-MSy3gd, flowx-x0DHXP and goosemates-2DAjC4 session names carry Portal's generated suffix, so Portal created them, and Portal registers a project when it creates a session — yet neither folder is registered. Cause unknown; possibly a second bug. Whether Portal should register a session's folder as a project when it finds none is not yet decided.
 
+Correction, from Portal's own log: the goosemates gap is not a bug. The session was created on 2026-09-26 in ~/Code/homeos, and Portal saved a project "homeos" at that path. The user later renamed the folder (HomeOS became Goosemates) and the session with it. The saved project then pointed at a folder that no longer existed, and Portal's stale-project housekeeping removes such records — it ran on 2026-09-28 and removed one entry (the summary line does not name it, but the timing fits). The session kept running with no project. ~/Code/flowx predates the oldest retained log (2026-09-08), so its history cannot be read; it is a separate repository from the registered ~/Code/fabric/flowx. No bug to log.
+
+What the goosemates case surfaces for this epic: renaming or moving a project's folder silently drops the project and every tag on it — housekeeping removes the record, and its summary line records only a count, so neither the project nor its tags can be recovered from the log. Tags carry more weight once this epic makes them the basis of filtering, so what happens to a project and its tags when its folder moves or disappears is an impacted area.
+
 The user framed the rest — how the filters behave, how they combine with what exists, persistence, bulk tagging's location, the command-line behaviour — as conversations for the discussion phase, not discovery. The remaining discovery job is an impact sweep: what else this work touches, so the topics cover every base.
 
 ## Edits
