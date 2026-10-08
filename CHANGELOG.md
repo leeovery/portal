@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-10-08
+
+🔧 Changed
+- Killing a session is now final — its saved state, scrollback and resume hooks are removed and it does not return after a reboot, while detach, `tmux kill-server` and shutdown/reboot leave sessions restorable.
+- Saves now commit only when tmux's own server confirms it is still answering — a save in flight as tmux shuts down writes nothing and leaves the previous save intact.
+- An empty scrollback capture no longer overwrites a non-empty saved transcript unless tmux confirms it is still answering.
+- Waiting resume panes now survive a shutdown SIGTERM and are saved still waiting, instead of being recovered while tmux is going down.
+- Resume hook commands now run in a shell that survives SIGTERM, so the pane outlasts a shutdown until tmux itself exits.
+- Restored panes saved without a token now get one minted and tied to their saved record, so their scrollback and hooks are found wherever restore places them.
+- `portal.log` now records each session removed from saved state (`session dropped session=<name>`) and logs a cycle that stood down as `backed off: tmux stopped answering`.
+- Scrollback transcripts are now re-filed by hard link only, so an interrupted save never leaves `sessions.json` naming a missing file.
+- README reorganized with a "Why Portal?" intro, Quick Start, How It Works overview and a dedicated Resume panel section; theming docs now cover the resume panel's theme resolution.
+
+🐛 Fixed
+- Killing all sessions, or a shutdown racing a save, no longer wipes saved restore state.
+- A failed `list-sessions` read during a save is no longer mistaken for "no sessions", which could commit an empty index and delete saved transcripts.
+- A scrollback file shared by two panes' records is no longer overwritten by the wrong pane's capture.
+
 ## [0.12.1] - 2026-10-01
 
 ✨ Added
