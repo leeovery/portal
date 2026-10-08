@@ -1,0 +1,12 @@
+{
+  "name": "tagging-and-filtering",
+  "work_type": "epic",
+  "status": "in-progress",
+  "created": "2026-10-08",
+  "description": "Improve tagging, filtering and the related display surfaces in the picker — tag suggestions while typing, bulk tagging, tag management, filtering the session list by tags and by project, and settling what project a session belongs to.",
+  "phases": {
+    "discovery": {
+      "active_session": "001"
+    }
+  }
+}

@@ -191,6 +191,9 @@
     },
     "killing-all-sessions-wipes-restore-state": {
       "work_type": "bugfix"
+    },
+    "tagging-and-filtering": {
+      "work_type": "epic"
     }
   },
   "defaults": {
