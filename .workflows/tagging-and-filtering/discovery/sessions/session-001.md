@@ -83,8 +83,26 @@ At the harvest the user confirmed four topics as proposed. The two inbox bugs on
 
 ## Topics Identified
 
-(none)
+### project-link
+
+- Routing: discussion
+- Why: the user described the rule (repository the session started in, worktrees roll up, the folio workspace pattern) — the remaining questions are choices between known options
+
+### tagging
+
+- Routing: discussion
+- Why: the user named the behaviours wanted (suggestions, bulk tagging, management) and settled where tags live
+
+### filtering
+
+- Routing: discussion
+- Why: the user described the filters wanted; what is left is how they combine with the existing controls — decisions, not unknowns
+
+### command-line-filters
+
+- Routing: discussion
+- Why: a deferred thread with a clear shape (`x --tag work`); the open choices are between familiar behaviours
 
 ## Conclusion
 
-(none)
+4 topic(s) added. Map now has 4 topics.

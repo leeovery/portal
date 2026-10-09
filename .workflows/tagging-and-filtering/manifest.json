@@ -6,7 +6,36 @@
   "description": "Improve tagging, filtering and the related display surfaces in the picker — tag suggestions while typing, bulk tagging, tag management, filtering the session list by tags and by project, and settling what project a session belongs to.",
   "phases": {
     "discovery": {
-      "active_session": "001"
+      "items": {
+        "project-link": {
+          "routing": "discussion",
+          "source": "discovery",
+          "summary": "Every session reliably linked to the right project — worktrees, unregistered folders, renamed folders, nested projects and folder-name case",
+          "description": "Settles which project a session belongs to, since tags and project filters are only as good as that link. Discovery decided a session's project is the repository it was started in and a worktree belongs to the repository it was made from, decided while the folder still exists; still open are whether a folder with no project is saved as one, linking an Unknown session to a project from the picker, what happens to a project and its tags when its folder is renamed or moved (housekeeping silently drops both today), whether a project takes in the projects nested inside it (Folio's api and sdk, the ~/code project), and the folder-name case mismatch on a case-insensitive Mac. Builds on the separate reboot bugfix that restores the link after a reboot.",
+          "brief_path": "discovery/briefs/project-link.md"
+        },
+        "tagging": {
+          "routing": "discussion",
+          "source": "discovery",
+          "summary": "Getting tags onto projects with less effort — suggestions while typing, bulk tagging, tag management and tagging from the sessions list",
+          "description": "Covers every way tags are added, changed and removed: suggestions drawn from tags already in use while typing, bulk tagging across several marked projects, managing tags in one place (rename, delete, merge, how many projects carry each), and tagging a session's project without leaving the sessions list. Discovery decided tags stay on projects only, with sessions tagged through their project; open are whether a new project inherits the tags of the project whose folder encloses it (32 of 34 nested projects already match their parent), how case-sensitive tags behave once suggestions and merging put near-duplicates side by side, and which key tagging takes now that t opens the theme panel.",
+          "brief_path": "discovery/briefs/tagging.md"
+        },
+        "filtering": {
+          "routing": "discussion",
+          "source": "discovery",
+          "summary": "Narrowing the picker by tag and by project, with the active filter visible on screen",
+          "description": "Narrowing the sessions list to one or more tags (matching any or all), to a project, or excluding a tag, keeping group headings while filtered, and showing the active filter as chips in the header. Open are how these filters sit beside the existing text filter and the grouping cycle, whether a filter persists between launches, whether the projects list filters too, and whether typing a tag name in the text filter matches its sessions. Filter chips add a row to the same vertical space where the keymap footer already disappears on short terminals.",
+          "brief_path": "discovery/briefs/filtering.md"
+        },
+        "command-line-filters": {
+          "routing": "discussion",
+          "source": "discovery",
+          "summary": "Opening sessions by tag or project from the command line, e.g. x --tag work",
+          "description": "A command-line way to reach tagged or project sessions, deferred when tagging first shipped. Open are whether it opens the picker already narrowed or opens every matching session at once in its own window, how it sits beside the existing -f filter flag and the x /term search, and shell completion for tag names.",
+          "brief_path": "discovery/briefs/command-line-filters.md"
+        }
+      }
     }
   }
 }
