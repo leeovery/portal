@@ -63,6 +63,8 @@ Impact sweep, continued (measured read-only against the live projects.json, 62 p
 - The obvious tag key is taken: `t` opens the theme panel on both pages.
 - Folder-name case: on this case-insensitive Mac, ~/code/papercode and ~/Code/papercode are the same folder, but Portal compares project folders with their case as written (checked: its path canonicalisation leaves case untouched). The papercode project is stored as ~/code/papercode, and the ~/code project duplicates ~/Code. A session whose folder is written with the other case would not match its project, and opening the same folder under both spellings can register it as two projects with separate tags. Likely a bug in the project link; not yet confirmed against a live session.
 
+Decided: the folder-name case issue is part of this epic, not a separate bugfix — the epic reworks how a session links to its project anyway, so it is fixed there rather than logged to the inbox.
+
 The user framed the rest — how the filters behave, how they combine with what exists, persistence, bulk tagging's location, the command-line behaviour — as conversations for the discussion phase, not discovery. The remaining discovery job is an impact sweep: what else this work touches, so the topics cover every base.
 
 ## Edits
