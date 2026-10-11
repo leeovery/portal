@@ -67,6 +67,10 @@ A session records two things at creation: **the folder it was started in** and *
 
 Sibling check: open-with-forced-filter (specification) — the recorded folder alone is shown on the row and matched by `x /term` and the text filter; consistent, the session's folder keeps exactly that role.
 
+**Sessions alive at ship.** When this ships, running sessions carry the folder recorded at their creation (restored across reboots by the reboot bugfix) but no recorded project, because the project is recorded from this release on. A session with a recorded folder and no recorded project takes its project the way creation would have — the repository that folder belongs to, a worktree's being the repository it was made from — and Portal records that project the first time it sees the session, while the folder still exists, so it survives the worktree's later deletion. Where the recorded folder is already gone, the recorded folder stands as the project, as today. The answer is read from where the session was started, never from where its pane is now; for every session not created inside a worktree it is the recorded folder itself. On this install no recorded session sits in a worktree (`tmux list-sessions -F '#{@portal-dir}' | grep -c /.claude/worktrees/` → 0, 2026-10-11). (resolves review-001 F3)
+
+Sibling check: the reboot bugfix (inbox: `session-project-link-lost-on-reboot`) restores the recorded folder; this reads it and adds nothing to what that fix carries. No overlap.
+
 ---
 
 ## Unrecorded Sessions
