@@ -208,6 +208,13 @@ Under 2 or 3, sessions recorded under the missing project keep grouping under it
 ### Decision
 
 #### 2026-10-11 — revised
+*Trigger: settled call — re-pointing and merging left the project's name unspecified.*
+
+**Settled by derivation** — not discussed. Determined by how project names are generated today (a project's default name is its folder's name) and the merge the decision already carries.
+
+The entries below stand, and a re-pointed project takes its new folder's name unless its name was changed by hand: a name still equal to the old folder's name was never chosen by the user and follows the folder (`homeos` pointed at `~/Code/goosemates` becomes `goosemates`), while a hand-set name stays. Pointed at a folder that is already a project, the two merge into one project at that folder with their tags combined, named by the same rule.
+
+#### 2026-10-11 — revised
 *Trigger: settled call — a session started at or under a renamed folder keeps showing a path that no longer exists while its shell has followed the rename.*
 
 **Settled by derivation** — not discussed. Determined by the session folder's job of showing and finding where the session actually is (Session Folder And Project).
