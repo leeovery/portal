@@ -233,3 +233,29 @@ The entry below stands, and pointing a project at a new folder also rewrites the
 **Option 2 — tagged projects are never removed by housekeeping.** When a tagged project's folder disappears, the project is kept and marked missing on the projects page, where the user points it at a new folder or deletes it. Sessions recorded under it keep grouping under it and stay in its filters meanwhile. Pointing it at a new folder carries its tags and sessions; pointing it at a folder that is already a project merges the two. Untagged projects whose folder disappears are removed as today. The rule is the same on every housekeeping path — the daemon's prune, the picker's, and `portal doctor --fix`.
 
 ---
+
+## Folder Name Case
+
+### Context
+
+On this case-insensitive Mac, `~/code` and `~/Code` are one folder, but Portal compares project folders by their spelling as written: its path canonicalisation resolves symlinks and leaves case untouched, and the system's own path resolution does the same.
+
+`python3 -I -c "import os; print(os.path.realpath('/Users/leeovery/code'))"` → `/Users/leeovery/code` (the folder is spelled `Code` on disk: `ls ~ | grep -ix code` → `Code`)
+
+Two saved projects carry a spelling the disk does not — `~/code` and `~/code/papercode` — and one live session is recorded at `/Users/leeovery/code` (`code-OQWkFt · sitrep`). No two saved projects collide when compared without case today:
+
+`jq -r '.projects[].path|ascii_downcase' ~/.config/portal/projects.json | sort | uniq -d` → no output (2026-10-11)
+
+A session whose folder is spelled the other way from its project would not match it, and opening one folder under both spellings saves it as two projects with separate tags. The retained log also shows a project named `Code` at `/Users/leeovery/Code` removed from the projects page on 2026-09-30, while the `~/code` project — the same folder — survived.
+
+### Journey
+
+Discovery already decided the mismatch is fixed inside this epic. The only key that names a folder once whatever it is typed as is the spelling on disk; on a case-sensitive filesystem that is the spelling as written, so the same rule holds there unchanged.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by discovery's decision to fix the case mismatch here and on-disk identity being the only defensible key.
+
+**Two spellings of one folder are one project.** Saved projects and recorded session folders are compared as the folder is spelled on disk, and saved projects written another way are re-spelled — `~/code` becomes `~/Code`, `~/code/papercode` becomes `~/Code/papercode`. Should two saved projects ever turn out to be the same folder, they merge with their tags combined. The re-spelled `~/code` project sits at the same folder as the `Code` project deleted on 2026-09-30; whether a project belongs at the Code folder at all is Nested Projects'.
+
+---
