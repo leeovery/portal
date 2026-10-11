@@ -169,6 +169,8 @@ The closing review found the chooser's save entry would offer a vanished folder 
 
 When the folder the save entry would offer no longer exists — the session's project sat at a folder since renamed or moved, and housekeeping removed it because it carried no tags — the save entry offers instead the folder the session's active pane is in now, resolved by the repository rule exactly as a guess is. After a rename the shell has followed the folder to its new name, so one pick repairs the session; the folder is shown before anything is saved, so a pane that has wandered elsewhere offers a folder the user can see is wrong and ignore. (resolves review-001 F4)
 
+Sibling check: tagging (discovery brief) — sessions-list tagging relies on this chooser to reach a project and says nothing about a vanished folder; no overlap.
+
 Sibling check: tagging (discovery brief) — sessions-list tagging needs Unknown sessions to reach a project, which this action supplies; the key it takes and how the tagging flow invokes it are the tagging topic's.
 
 ---
