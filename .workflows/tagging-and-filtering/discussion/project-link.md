@@ -171,6 +171,12 @@ When the folder the save entry would offer no longer exists — the session's pr
 
 Sibling check: tagging (discovery brief) — sessions-list tagging relies on this chooser to reach a project and says nothing about a vanished folder; no overlap.
 
+The chooser is the projects list exactly as the projects page draws it: each row the project's name with its folder beneath — which tells the three `api` projects (`evvi/api`, `fabric/folio/api`, `acom/mach2/api`) apart, and the two `docman` and two `leeovery` — narrowed by typing, most recently used first. The session's current project is marked in the list, labelled as a guess when it is one, since the repair starts from seeing the current link is wrong and the Flat view shows nothing of it. The user meets nothing new. (resolves review-001 F5)
+
+`jq '.projects|length' ~/.config/portal/projects.json` → 63; `jq -r '.projects[].name' ~/.config/portal/projects.json | sort | uniq -c | awk '$1>1'` → 3 api, 2 docman, 2 leeovery (2026-10-11)
+
+Sibling check: filtering (discovery brief) — the picker's existing text filter and the projects page are untouched; the chooser reuses the projects list rather than adding a list of its own. No overlap.
+
 Sibling check: tagging (discovery brief) — sessions-list tagging needs Unknown sessions to reach a project, which this action supplies; the key it takes and how the tagging flow invokes it are the tagging topic's.
 
 ---
