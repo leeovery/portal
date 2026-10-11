@@ -259,3 +259,29 @@ Discovery already decided the mismatch is fixed inside this epic. The only key t
 **Two spellings of one folder are one project.** Saved projects and recorded session folders are compared as the folder is spelled on disk, and saved projects written another way are re-spelled — `~/code` becomes `~/Code`, `~/code/papercode` becomes `~/Code/papercode`. Should two saved projects ever turn out to be the same folder, they merge with their tags combined. The re-spelled `~/code` project sits at the same folder as the `Code` project deleted on 2026-09-30; whether a project belongs at the Code folder at all is Nested Projects'.
 
 ---
+
+## Lookup Cost
+
+### Context
+
+Switching the picker to By Project or By Tag is slow today (~0.5s reported) because the folder of each session with no record is looked up one session at a time — the active pane's folder, then its git root. Discovery expected most of it to disappear with the reboot fix, but under Unrecorded Sessions the live guess keeps running for every session that has no record, including the 30 running now whose origin was never saved, and tag and project filters take the same path as grouping.
+
+Measured on the live install 2026-10-11 (read-only), for the 30 unrecorded sessions:
+
+`S=$(tmux list-sessions -F '#{session_name}|#{@portal-dir}' | awk -F'|' '$2=="" && $1 !~ /^_portal/ {print $1}'); time (echo "$S" | while read n; do tmux display-message -p -t "=$n:" '#{pane_current_path}' >/dev/null; done)` → 0.201s
+
+`P=$(tmux list-panes -a -F '#{pane_active}|#{pane_current_path}' | awk -F'|' '$1==1{print $2}' | head -30); time (echo "$P" | while read p; do git -C "$p" rev-parse --show-toplevel >/dev/null 2>&1; done)` → 0.199s
+
+`time (tmux list-panes -a -F '#{session_name}|#{pane_active}|#{pane_current_path}' >/dev/null)` → 0.007s
+
+### Journey
+
+The cost scales with the number of guessed sessions, and the live-guess decision keeps that number at 30 until those sessions are killed; filters are interactive, so the delay would recur on every filter change, not only on a view switch.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by the live-guess decision (Unrecorded Sessions) and filters being interactive.
+
+**Switching to a grouped view, or applying a tag or project filter, shows no delay however many sessions are guessed.** Guessed folders are read for all sessions at once, never one session at a time.
+
+---

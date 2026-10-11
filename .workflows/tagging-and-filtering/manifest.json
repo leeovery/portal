@@ -72,7 +72,7 @@
               "parent": null
             },
             "lookup-cost": {
-              "status": "converging",
+              "status": "decided",
               "parent": null
             },
             "unrecorded-sessions": {
