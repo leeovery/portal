@@ -260,6 +260,40 @@ Discovery already decided the mismatch is fixed inside this epic. The only key t
 
 ---
 
+## Nested Projects
+
+### Context
+
+Many saved projects sit inside another project's folder, which raises whether a project — its By Project heading and a project filter — takes in sessions started in the projects nested inside it. The case discovery named: sessions are started at the folio level, but a session started in `folio/api` gets its own heading, "api" — one of three "api" headings beside `evvi/api` and `mach2/api` — and a folio project filter misses it. Two saved projects sit at folders that contain nearly every other project: the home folder (`~`, tagged personal) and the Code folder (saved as `~/code`, re-spelled `~/Code` under Folder Name Case).
+
+Measured 2026-10-11 (read-only). Excluding the home and Code folder projects, 12 saved projects contain others; only two are git repositories (`fabric/folio` with `api` and `sdk`; `fabric/finder` with `finder-api`), the other ten plain folders (`acom`, `acom/mach2`, `curated`, `detaillab`, `dex`, `evvi`, `fabric`, `fabric/docman`, `fabric/flowv1`, `fabric/flowx`). Under every parent, all nested projects carry the parent's tag but three: `acom/mach2` (untagged under acom), `fabric/flowx/flowx-api` and `fabric/packages/laravel-workflow` (both personal under fabric).
+
+`python3 -I -c "import json,os,subprocess as s; ps={p['path']:p for p in json.load(open(os.path.expanduser('~/.config/portal/projects.json')))['projects']}; ex={os.path.expanduser('~'),os.path.expanduser('~/code')}; [print('GIT' if s.run(['git','-C',q,'rev-parse','--show-toplevel'],capture_output=True,text=True).stdout.strip()==q else 'PLAIN', q, ps[q].get('tags'), [(k[len(q)+1:],ps[k].get('tags')) for k in sorted(ps) if k.startswith(q+'/')]) for q in sorted(ps) if q not in ex and any(k.startswith(q+'/') for k in ps)]"` → 12 rows, 2 GIT
+
+### Options Considered
+
+**1. Projects stand alone; tags group them** — a project filter shows sessions started at that project's folder; a family (folio, api, sdk) is a tag put on its members and filtered on.
+- Pros: one way of saying "these projects belong together", the one already in use — the user's tags already form the families at the broad level; a project filter means exactly that folder; the home and Code folder projects need no special case.
+- Cons: a finer family (folio's) needs a tag added to its members.
+
+**2. Repositories take in what's inside them** — a project that is itself a git repository includes the projects inside it (folio takes in api and sdk, finder takes in finder-api); plain-folder projects never do, which stops the home and Code folder projects swallowing everything. Under By Project, folio/api's sessions would show under folio, their own folder on the row. Today: 2 parents taking in 3 projects.
+- Cons: whether a project takes in its neighbours turns on whether its folder happens to be a git repository, which nothing in the picker shows — folio absorbs its children and docman does not, with no visible reason.
+
+**3. A per-project switch** — the project's edit screen gains "takes in nested projects", on for folio, off for the home folder.
+- Cons: a second way to group projects beside tags, for the 3 projects that would use it.
+
+### Journey
+
+Discovery leaned toward rollup ("given the workspace pattern, likely wanted"), but the measurement showed the families the user cares about are already expressed as tags at the broad level, and only two of the twelve containing projects are repositories at all — so a repository-based rollup would serve folio and finder while leaving the plain-folder families (docman, mach2, dex) flat for reasons the picker cannot show. Whether a new nested project picks up its enclosing project's tags automatically is the tagging topic's open question, and it is what would make a family tag cost nothing to maintain.
+
+### Decision
+
+**Option 1 — projects stand alone; families are tags.** No project takes in the projects nested inside it: a session belongs to the project it was started in (Session Folder And Project), appears under that project's heading in By Project, and matches a project filter for that project only. A group of related projects is expressed by tagging its members. The home folder and Code folder projects are ordinary projects for the sessions started there.
+
+Sibling check: tagging (discovery brief) — whether a new project inherits the tags of the project whose folder encloses it is open there; this decision leaves families to tags and anticipates that question rather than deciding it. Filtering (discovery brief) — narrowing to a project is that topic's surface; consistent, a project filter matches that project's sessions alone.
+
+---
+
 ## Lookup Cost
 
 ### Context
