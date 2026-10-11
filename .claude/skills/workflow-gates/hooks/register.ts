@@ -29,6 +29,11 @@
  * doing, the person's own values of both put back as it ends. A conversation
  * the engine has not marked keeps them untouched.
  *
+ * It registers the rest of what the mod does in a workflow conversation as
+ * well: the spinner saying the phase (`spinner.ts`), the guard on direct
+ * manifest edits (`guard.ts`), and the compaction — Claude Code's own, the
+ * engine's note appended last (`compaction.ts`).
+ *
  * All of it happens in Claude Code's terminal app and the Desktop app's Code
  * tab alone, from 2.1.287. Elsewhere — the VS Code extension, Claude Code on
  * the web, an older Claude Code — the session is not announced, and the
@@ -43,6 +48,9 @@ import type {
   SessionMessage,
 } from 'claude-code'
 
+import { compaction } from './compaction.ts'
+import { MARKER, folderOf as folderNamed } from './folder.ts'
+import { guard } from './guard.ts'
 import {
   IDLE,
   NO_SENDS,
@@ -52,6 +60,7 @@ import {
   type Option,
   type Sends,
 } from './layout.ts'
+import { spinner } from './spinner.ts'
 
 /** The payload's marker and the menu it sits directly above. */
 const GATE_MARKER = '=== GATE ('
@@ -88,14 +97,8 @@ type Handoff = { text: string; line: string }
 /** How long a continuation the mod could not carry stays on screen to send. */
 const UNCARRIED_TOAST_MS = 30_000
 
-/**
- * Where each conversation that runs the workflows keeps what belongs to it,
- * in the workflows' system config directory.
- */
-const CONVERSATIONS = 'conversations'
-
-/** The file the engine marks a conversation that runs the workflows with. */
-const MARKER = 'workflow'
+/** How long the toast saying where the work went stays up. */
+const HANDED_OFF_TOAST_MS = 8_000
 
 /** The file a conversation's band is kept in for a resume. */
 const KEPT = 'gate.json'
@@ -409,7 +412,7 @@ async function handOff($: EngineInterface, { text, line }: Handoff) {
     (await took(fill($, text)))
 
   if (isCarried) {
-    $.ui.toast(`Handed off ${line}`)
+    $.ui.toast(`Handed off ${line}`, { timeoutMs: HANDED_OFF_TOAST_MS })
   } else {
     $.ui.toast(`Not handed off ${line} — send this to carry on: ${text}`, {
       timeoutMs: UNCARRIED_TOAST_MS,
@@ -528,24 +531,18 @@ const isKept = (value: unknown): value is Kept =>
   typeof (value as Kept).stamp === 'string'
 
 /**
- * The folder of the conversation `id`, which the engine names by the id's
- * safe characters alone, in the workflows' system config directory:
- * `WORKFLOWS_CONFIG_DIR`, else `.config/workflows` in the home directory.
- * Found by the id, so a `cd` or a resume elsewhere finds it all the same;
+ * The folder of the conversation `id`, as the engine names it (`folder.ts`);
  * null where the process names neither directory.
  */
 async function folderOf(
   $: EngineInterface,
   id: string,
 ): Promise<string | null> {
-  const home = await $.env.get('HOME')
-  const config =
-    (await $.env.get('WORKFLOWS_CONFIG_DIR')) ||
-    (home ? `${home}/.config/workflows` : null)
-
-  return config === null
-    ? null
-    : `${config}/${CONVERSATIONS}/${id.replace(/[^A-Za-z0-9_-]/g, '')}`
+  return folderNamed(
+    await $.env.get('WORKFLOWS_CONFIG_DIR'),
+    await $.env.get('HOME'),
+    id,
+  )
 }
 
 /** A file in a conversation's folder. */
@@ -1145,4 +1142,8 @@ export const register: Register = on => {
 
     return next(e)
   }).catch(($, e, next) => next(e))
+
+  spinner(on)
+  guard(on)
+  compaction(on)
 }

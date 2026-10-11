@@ -126,15 +126,16 @@ line and the skill stay. As the turn ends the mod clears the conversation and,
 in the conversation that follows, leaves what it sends with the line as
 `sent.json` in that conversation's folder, then sends the continuation, which
 Claude acts on there, and shows a toast naming where the work went
-(`Handed off → Planning · auth-flow`). The clear runs from a timer started at
-the turn's end, whatever else there fails: a mod cannot run a command inside a
-hook the turn waits on. A send that is dropped or fails goes into the prompt
-box for Enter instead; where the box will not take it either, the toast holds
-the continuation for the person to send, and stays longer. A clear that fails
-sends in place, so the work still goes on. Esc on the turn that handed off
-carries nothing: Esc means stop. `workflow-gates-rows` draws the continuation's
-transcript row as the line. Where the mod does not announce, the engine says so
-and the workflows invoke the skill in the same conversation.
+(`Handed off → Planning · auth-flow`) for eight seconds. The clear runs from
+a timer started at the turn's end, whatever else there fails: a mod cannot run
+a command inside a hook the turn waits on. A send that is dropped or fails
+goes into the prompt box for Enter instead; where the box will not take it
+either, the toast holds the continuation for the person to send, and stays
+longer. A clear that fails sends in place, so the work still goes on. Esc on
+the turn that handed off carries nothing: Esc means stop.
+`workflow-gates-rows` draws the continuation's transcript row as the line.
+Where the mod does not announce, the engine says so and the workflows invoke
+the skill in the same conversation.
 
 ## What it sets in Claude Code
 
@@ -165,14 +166,79 @@ the workflow values back when the mod next follows it, whether
 A plain conversation in the same project keeps Claude Code's defaults and the
 person's own settings: the mod never touches either there.
 
+## What the spinner says
+
+In a session that announced, in a conversation the engine has marked, on the
+terminal app and the Desktop app, the spinner keeps Claude Code's animation
+and ellipsis, its word the phase the conversation works in — `Discussing`,
+`Specifying`, `Implementing task 2.3`, `Shaping` in discovery, `Roadmapping`,
+`Assessing` at the baseline — from the position the engine keeps in the
+conversation's folder (`position.json`). The drawing alone changes, never what
+Claude reads. The mod reads the position once for each conversation the
+spinner draws in, and again after each engine call that moves it (`session
+label`, `session repair`, `boot`, `task start`, `task complete`), never per
+frame. At a work unit's menu or the start menu it keeps Claude Code's word,
+and on the Desktop app a step that names itself (`Creating notes.md`) keeps
+its words.
+
+## What it refuses
+
+In a session that announced, in a conversation the engine has marked, a Write,
+Edit or NotebookEdit aimed at a manifest the engine keeps — the project's
+`.workflows/manifest.json`, or a work unit's
+`.workflows/{work-unit}/manifest.json` — is refused with one line telling
+Claude to write it through the engine's `manifest` verbs. Where the path leads
+is what counts: a path relative to the working directory, one from the home
+directory (`~/`), `..` and a symbolic link are followed — a `.workflows/` that
+is itself a link, and a file elsewhere linked to a manifest, included — and a
+manifest not written yet is placed by its nearest folder that exists. Any
+other file under `.workflows/`, a `manifest.json` anywhere else, and every
+write in a plain conversation or a session that did not announce go through.
+Bash is not guarded.
+
+## How it compacts a workflow conversation
+
+Claude Code compacts a workflow conversation as it compacts any other — its
+summary, and the recent messages it keeps as they were, the person's waiting
+message among them — and the mod appends one message last: the engine's
+`conversation position` note. It says the conversation was just compacted and
+where it is working, the work unit named by its work type, then tells Claude
+to follow the skill's "Resuming After Context Refresh" steps before anything
+else — the skill and its framework re-read in full, then the topic's
+documents, each by its absolute path. Those steps end by carrying on from
+where the conversation was, as if the break never happened. A `/compact`
+starts no turn of its own, so after one the mod sends a short continuation
+once the command is done — into the prompt box for Enter where the send is
+dropped — and Claude follows the note without the person typing anything.
+Words typed after `/compact` go to Claude Code's summary as they always do.
+
+Claude Code stores the note as an ordinary user row and would draw it as a
+prompt the person typed. So the mod records every note it hands up in the
+conversation's folder as `compacted.json`, each with the place the engine
+names (`fumi › discussion › management-window`), and `workflow-gates-rows`
+draws the note's row from it as one dim line.
+
+It does so in a session that announced, in a conversation the engine has
+marked, in its main loop, at a position that names a skill. A subagent's
+transcript, a plain conversation, a work unit's menu or the start menu, a
+place no longer open, and an engine that cannot answer all compact as Claude
+Code does, with nothing appended; so does a compaction Claude Code skips. The
+compaction Claude Code computes ahead of time passes through untouched, and
+the compaction that comes reuses it beneath the note.
+
 ## Working on it
 
-    npm run mod:types       # fetch the API declarations into types/ (gitignored)
-    npm run typecheck:mod   # tsc against those declarations
+    npm run typecheck:mod   # tsc against the declarations Claude Code laid
     npm run test:mod        # claude plugin test
 
-The declarations come from the Claude Code repository and are regenerable, so
-they are not committed. Fetch them before the first typecheck.
+Claude Code lays its own build's API declarations into a mod's
+`.claude-plugin/types/` whenever it loads the mod for development, with a
+`tsconfig.json` this mod's own extends; the folder ignores itself. Load the
+mods once in a session — `claude --plugin-dir skills/workflow-gates
+--plugin-dir skills/workflow-gates-rows` — before the first typecheck, and
+every load lays them afresh for the Claude Code running; a worktree Claude
+Code creates starts with a copy (`.worktreeinclude`). `test:mod` needs
+none: it runs the suites against the installed Claude Code.
 
 The suites run on Claude Code 2.1.287 or newer, where mods are on by
 default.
