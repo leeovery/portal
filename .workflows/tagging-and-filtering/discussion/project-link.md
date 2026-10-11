@@ -24,7 +24,7 @@ Discovery reached these with the user; they carry forward as working ground, ope
 - Whether Portal saves a folder as a project when it finds a session whose folder has none (`~/Code/flowx`, `~/Code/goosemates` today).
 - A way to link an Unknown session to a project, or save its folder as one, from the picker. Tagging a session's project from the sessions list needs it for any Unknown session, and it is also the repair for a renamed folder.
 - What happens to a project and its tags when its folder is renamed or moved. Housekeeping removes the record silently — both the daemon's throttled prune and `portal doctor --fix` — and its summary line records only a count, so neither the project nor its tags can be recovered from the log. Tolerable while tags only feed a grouping view; once tags drive filtering, a folder rename silently drops sessions out of filters.
-- Whether a project takes in the projects nested inside it. 34 of the 62 saved projects sit inside another project's folder (folio holds folio/api and folio/sdk; docman holds docman/docman and docman/sdk-php; finder holds finder/finder-api; flowx holds flowx/flowx-api; fabric holds most of the fabric projects). It decides whether a folio filter or By Project group takes in sessions started in folio/api — given the workspace pattern, likely wanted. A project is also saved at `~/code` (the Code folder itself), which under any nesting rule would contain nearly every project.
+- Whether a project takes in the projects nested inside it. 34 of the 62 saved projects sat inside another project's folder at discovery (63 saved on 2026-10-11; see Nested Projects for this session's measurement) (folio holds folio/api and folio/sdk; docman holds docman/docman and docman/sdk-php; finder holds finder/finder-api; flowx holds flowx/flowx-api; fabric holds most of the fabric projects). It decides whether a folio filter or By Project group takes in sessions started in folio/api — given the workspace pattern, likely wanted. A project is also saved at `~/code` (the Code folder itself), which under any nesting rule would contain nearly every project.
 - Folder-name case. On this case-insensitive Mac, `~/code/papercode` and `~/Code/papercode` are the same folder, but Portal compares project folders with their case as written (path canonicalisation leaves case untouched — checked in discovery). The papercode project is saved as `~/code/papercode` and the `~/code` project duplicates `~/Code`. A session whose folder is spelled the other way would not match its project, and opening one folder under both spellings can save it as two projects with separate tags. Not yet confirmed against a live mislinked session.
 - A session's folder and its project become two different things. Today one recorded folder serves both as the project link and as the folder shown and searched beside a session in `x /term`. A session started in a worktree would have the worktree as its folder and the parent repository as its project.
 - The slow switch to By Project / By Tag comes from looking up each session's folder one at a time; project and tag filtering take the same path. Most of it disappears once the reboot fix lands and restored sessions carry their recorded link again.
@@ -71,7 +71,9 @@ Sibling check: open-with-forced-filter (specification) — the recorded folder a
 
 Sibling check: the reboot bugfix (inbox: `session-project-link-lost-on-reboot`) restores the recorded folder; this reads it and adds nothing to what that fix carries. No overlap.
 
-**Worktrees of a bare repository.** A bare repository has no checked-out folder of its own, so the worktree rule names the bare repository's folder itself: worktrees of `~/Code/foo.git` belong to a project at `~/Code/foo.git`, named `foo`. Where the bare repository is the hidden `.bare` folder inside a project folder, with its worktrees beside it (`~/Code/foo/.bare`), they belong to that folder, `~/Code/foo`. The folder above a bare repository is never the answer — for `~/Code/foo.git` that would be the Code-folder project. The same rule holds at creation and in the guess. No saved project on this install is in a bare repository (each saved path checked with `git rev-parse --is-bare-repository`, 2026-10-11, by the closing review). (resolves review-001 F6)
+**Worktrees of a bare repository.** A bare repository has no checked-out folder of its own, so the worktree rule names the bare repository's folder itself: worktrees of `~/Code/foo.git` belong to a project at `~/Code/foo.git`, named `foo`. Where the bare repository is the hidden `.bare` folder inside a project folder, with its worktrees beside it (`~/Code/foo/.bare`), they belong to that folder, `~/Code/foo`. The folder above a bare repository is never the answer — for `~/Code/foo.git` that would be the Code-folder project. The same rule holds at creation and in the guess. No saved project on this install is in a bare repository:
+
+`jq -r '.projects[].path' ~/.config/portal/projects.json | while read p; do [ -d "$p" ] && [ "$(git -C "$p" rev-parse --is-bare-repository 2>/dev/null)" = true ] && echo "$p"; done` → no output (2026-10-11). (resolves review-001 F6)
 
 Sibling check: no overlap found.
 
@@ -169,7 +171,7 @@ The fork was what a link applies to, worked on the four `~/Code/flowx` sessions 
 
 The flowx case itself argued against folder-level linking: `~/Code/flowx` and `~/Code/fabric/flowx` are different things that only look alike (the user: "they are different (kind of)") — `~/Code/flowx` is its own git repository, `~/Code/fabric/flowx` a plain folder holding `flowx-api` — so a folder-level rule taught by one link would have folded future work in a separate repository into the wrong project. Saving a folder as a project already covers the many-sessions case where it matters: saving `~/Code/goosemates` fixes every other session guessed into that folder at once, because their guess now lands on a project.
 
-The closing review found the chooser's save entry would offer a vanished folder once a recorded session's untagged project had been removed after a rename: replaying the homeos history on a recorded session, the entry would offer `~/Code/homeos`, and nothing would offer `~/Code/goosemates` until a fresh session there had saved it. A tagged project never reaches this — it is kept as missing and re-pointed from the projects page (Renamed Or Moved Folders). The repair chosen leans on the shell having followed the rename; the alternative, dropping the save entry, left a detour through a fresh session.
+Replaying the homeos history on a recorded session exposed an edge in the chooser: once a recorded session's untagged project had been removed after a rename, the entry would offer `~/Code/homeos`, and nothing would offer `~/Code/goosemates` until a fresh session there had saved it. A tagged project never reaches this — it is kept as missing and re-pointed from the projects page (Renamed Or Moved Folders). The repair chosen leans on the shell having followed the rename; the alternative, dropping the save entry, left a detour through a fresh session.
 
 ### Decision
 
@@ -258,7 +260,9 @@ The entry below stands, and pointing a project at a new folder also rewrites the
 
 ### Context
 
-On this case-insensitive Mac, `~/code` and `~/Code` are one folder, but Portal compares project folders by their spelling as written: its path canonicalisation resolves symlinks and leaves case untouched, and the system's own path resolution does the same.
+On this case-insensitive Mac, `~/code` and `~/Code` are one folder, but Portal compares project folders by their spelling as written: its path canonicalisation resolves symlinks with Go's `filepath.EvalSymlinks`, which keeps the case as typed, and the system's own path resolution does the same.
+
+`d=$(mktemp -d) && printf 'package main\nimport ("fmt"; "path/filepath")\nfunc main() { fmt.Println(filepath.EvalSymlinks("/Users/leeovery/code/papercode")) }\n' > $d/main.go && go run $d/main.go` → `/Users/leeovery/code/papercode <nil>` (2026-10-11)
 
 `python3 -I -c "import os; print(os.path.realpath('/Users/leeovery/code'))"` → `/Users/leeovery/code` (the folder is spelled `Code` on disk: `ls ~ | grep -ix code` → `Code`)
 
@@ -339,3 +343,24 @@ The cost scales with the number of guessed sessions, and the live-guess decision
 **Switching to a grouped view, or applying a tag or project filter, shows no delay however many sessions are guessed.** Guessed folders are read for all sessions at once, never one session at a time.
 
 ---
+
+## Summary
+
+### Key Insights
+
+1. The link is recorded, not inferred. A session carries its project from creation, recorded apart from the folder it started in, and every repair — linking from the picker, re-pointing a project, sessions alive at ship — ends in a recorded value. Guessing survives only for sessions Portal holds no record for.
+2. Groups of projects are tags, not folder containment. The user's tags already express the families at the broad level, and any containment rule breaks on the home and Code folder projects, which contain nearly everything.
+3. What the user made is never deleted on the strength of a missing folder: tagged projects survive a rename or move and wait to be re-pointed, while untagged records that carry nothing the user made still clear themselves.
+4. Once filters depend on the link, being missing from a filter is as much a failure as being misplaced in one — the trade that decided the live guess over leaving unrecorded sessions in Unknown.
+
+### Open Threads
+
+- Rerouted to command-line-filters triage (2026-10-11): whether `x --tag` / `x --project` read guessed project links, given the per-session read the shell path refuses.
+- Rerouted to tagging triage (2026-10-11): how sessions-list tagging treats a session whose project is a guess.
+- Left with the tagging topic, as its brief already holds them: whether a new nested project inherits its enclosing project's tags, and the key and flow by which sessions-list tagging invokes the link action.
+- The reboot bugfix (inbox: `session-project-link-lost-on-reboot`) lands before this epic's implementation: it restores the recorded folder, and this epic adds the recorded project to what save and restore carry.
+
+### Current State
+
+- Resolved: a session records its folder and its project separately; worktrees (including bare-repository worktrees) belong to their repository; sessions alive at ship take their project from their recorded folder; sessions with no record keep a live guess with the worktree rule applied; Portal never saves a project on its own; linking is per session through the projects list, with the current link marked; tagged projects survive a missing folder, with re-pointing, naming, merging and doctor reporting defined; folders compare by on-disk spelling; projects stand alone; grouping and filtering never pay a per-session lookup.
+- Uncertain: a wrong guess is silent by accepted trade-off; the chooser's offer of the pane's folder after a rename relies on the shell having followed the rename.
