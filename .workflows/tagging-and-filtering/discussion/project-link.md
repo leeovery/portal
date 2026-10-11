@@ -168,3 +168,45 @@ The flowx case itself argued against folder-level linking: `~/Code/flowx` and `~
 Sibling check: tagging (discovery brief) — sessions-list tagging needs Unknown sessions to reach a project, which this action supplies; the key it takes and how the tagging flow invokes it are the tagging topic's.
 
 ---
+
+## Renamed Or Moved Folders
+
+### Context
+
+Housekeeping removes a saved project whose folder no longer exists — on the daemon's throttled idle tick, when the picker runs it, and under `portal doctor --fix` — and takes the project's tags with it. Its log line is a summary count; the per-project detail is written at DEBUG, below the production level, so neither the project nor its tags can be recovered from the log. A folder renamed or moved looks exactly like a folder deleted for good: from a missing folder alone housekeeping cannot tell `homeos` (renamed to goosemates, still in use) from a spike folder the user is finished with. Tolerable while tags only fed a grouping view; once tags drive filtering, a folder rename silently drops every session of that project out of its filters.
+
+Measured from the retained logs (2026-09-11 → 2026-10-11): housekeeping removed 13 projects in 7 runs, from both the daemon and the picker.
+
+`grep -h "projects: clean-stale" ~/.config/portal/state/portal.log.* | grep -o 'entries=[0-9]*'` → 7 lines, entries summing to 13
+
+The log does not name them; matching the INFO project-creation lines in the same logs against today's `projects.json` identifies 6 — one rename (`~/Code/homeos`), one worktree (`dex-engine/.claude/worktrees/fixes-0-2-3`), and four folders since deleted (`fumi-hooklab`, `harness-spike`, `portal-spike`, `dex/business`):
+
+`comm -23 <(grep -h "projects: set" ~/.config/portal/state/portal.log.* | grep -o 'path=[^ ]*' | sed 's/path=//' | sort -u) <(jq -r '.projects[].path' ~/.config/portal/projects.json | sort)` → those 6 paths
+
+The worktree case disappears under Session Folder And Project: worktrees no longer become projects.
+
+### Options Considered
+
+**1. As today, but logged** — any missing project is removed; each removal is logged with its path, name and tags so it can be rebuilt by hand.
+- Cons: the repair is manual reconstruction from a log; sessions drop out of filters at the next prune.
+
+**2. Keep tagged projects** — a tagged project whose folder disappears is marked missing on the projects page instead of being removed, where the user points it at its new folder or deletes it; untagged projects are still removed as today.
+- Pros: the user's own work is never deleted silently; the projects list still clears itself of deleted experiments, which carry nothing the user made.
+- Cons: a tagged project whose folder was deleted for good waits for the user to delete it.
+
+**3. Keep every project** — nothing is removed on its own; missing projects sit flagged until the user deals with them.
+- Pros: also preserves a project's name and sessions' grouping when it carried no tags.
+- Cons: the projects list accumulates every deleted folder.
+
+**4. Detect the move automatically** — e.g. match a missing project to a new folder with the same git history.
+- Cons: two clones of one repository share that history, and plain folders (`fabric/flowx`, `papercode`) have no history to match. Rejected.
+
+### Journey
+
+Under 2 or 3, sessions recorded under the missing project keep grouping under it and stay in its filters until the user acts, because their recorded project still names it. Pointing the project at its new folder brings its tags and its sessions along; if a session has already been started in the new folder, it saved a second project there, so pointing the old project at that folder merges the two. The deciding line between 2 and 3 was what counts as the user's own work: tags are, and once filters depend on them, removing them silently is data loss — the same stance the hooks store takes (a key the staleness rule cannot judge is retained). An untagged project holds only a folder name and a last-used time; removing those keeps the projects list clear of the deleted experiments that made up four of the six traceable removals.
+
+### Decision
+
+**Option 2 — tagged projects are never removed by housekeeping.** When a tagged project's folder disappears, the project is kept and marked missing on the projects page, where the user points it at a new folder or deletes it. Sessions recorded under it keep grouping under it and stay in its filters meanwhile. Pointing it at a new folder carries its tags and sessions; pointing it at a folder that is already a project merges the two. Untagged projects whose folder disappears are removed as today. The rule is the same on every housekeeping path — the daemon's prune, the picker's, and `portal doctor --fix`.
+
+---

@@ -60,7 +60,7 @@
               "parent": null
             },
             "renamed-or-moved-folders": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "nested-projects": {
