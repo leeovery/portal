@@ -71,6 +71,10 @@ Sibling check: open-with-forced-filter (specification) — the recorded folder a
 
 Sibling check: the reboot bugfix (inbox: `session-project-link-lost-on-reboot`) restores the recorded folder; this reads it and adds nothing to what that fix carries. No overlap.
 
+**Worktrees of a bare repository.** A bare repository has no checked-out folder of its own, so the worktree rule names the bare repository's folder itself: worktrees of `~/Code/foo.git` belong to a project at `~/Code/foo.git`, named `foo`. Where the bare repository is the hidden `.bare` folder inside a project folder, with its worktrees beside it (`~/Code/foo/.bare`), they belong to that folder, `~/Code/foo`. The folder above a bare repository is never the answer — for `~/Code/foo.git` that would be the Code-folder project. The same rule holds at creation and in the guess. No saved project on this install is in a bare repository (each saved path checked with `git rev-parse --is-bare-repository`, 2026-10-11, by the closing review). (resolves review-001 F6)
+
+Sibling check: no overlap found.
+
 ---
 
 ## Unrecorded Sessions
