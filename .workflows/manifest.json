@@ -244,7 +244,8 @@
         "origin": "park:lazy-resume-on-attach",
         "sources": [
           "lazy-resume-on-attach/discussion/lazy-resume-on-attach.md"
-        ]
+        ],
+        "kind": "idea"
       },
       "preferences-ui": {
         "horizon": "next",
@@ -252,7 +253,8 @@
         "origin": "park:lazy-resume-on-attach",
         "sources": [
           "lazy-resume-on-attach/discussion/lazy-resume-on-attach.md"
-        ]
+        ],
+        "kind": "idea"
       },
       "durable-pane-identity": {
         "horizon": "next",
@@ -260,7 +262,8 @@
         "origin": "park:lazy-resume-on-attach",
         "sources": [
           "lazy-resume-on-attach/planning/lazy-resume-on-attach/planning.md"
-        ]
+        ],
+        "kind": "idea"
       }
     }
   },

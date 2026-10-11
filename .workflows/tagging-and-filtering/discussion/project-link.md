@@ -355,8 +355,8 @@ The cost scales with the number of guessed sessions, and the live-guess decision
 
 ### Open Threads
 
-- Rerouted to command-line-filters triage (2026-10-11): whether `x --tag` / `x --project` read guessed project links, given the per-session read the shell path refuses.
-- Rerouted to tagging triage (2026-10-11): how sessions-list tagging treats a session whose project is a guess.
+- Sent to command-line-filters's mailbox (2026-10-11): whether `x --tag` / `x --project` read guessed project links, given the per-session read the shell path refuses.
+- Sent to tagging's mailbox (2026-10-11): how sessions-list tagging treats a session whose project is a guess.
 - Left with the tagging topic, as its brief already holds them: whether a new nested project inherits its enclosing project's tags, and the key and flow by which sessions-list tagging invokes the link action.
 - The reboot bugfix (inbox: `session-project-link-lost-on-reboot`) lands before this epic's implementation: it restores the recorded folder, and this epic adds the recorded project to what save and restore carry.
 

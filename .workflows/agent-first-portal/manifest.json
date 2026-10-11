@@ -94,7 +94,7 @@
           }
         },
         "agent-state-surfacing": {
-          "status": "triaged"
+          "status": "unstarted"
         }
       }
     }
