@@ -83,6 +83,9 @@
         },
         "command-line-filters": {
           "status": "triaged"
+        },
+        "tagging": {
+          "status": "triaged"
         }
       }
     }
