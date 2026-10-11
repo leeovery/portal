@@ -207,6 +207,15 @@ Under 2 or 3, sessions recorded under the missing project keep grouping under it
 
 ### Decision
 
+#### 2026-10-11 — revised
+*Trigger: settled call — a session started at or under a renamed folder keeps showing a path that no longer exists while its shell has followed the rename.*
+
+**Settled by derivation** — not discussed. Determined by the session folder's job of showing and finding where the session actually is (Session Folder And Project).
+
+The entry below stands, and pointing a project at a new folder also rewrites the recorded folder of every session started at or under the old folder to the same place under the new one, so the session row and `x /term` show and match a folder that exists.
+
+#### 2026-10-11
+
 **Option 2 — tagged projects are never removed by housekeeping.** When a tagged project's folder disappears, the project is kept and marked missing on the projects page, where the user points it at a new folder or deletes it. Sessions recorded under it keep grouping under it and stay in its filters meanwhile. Pointing it at a new folder carries its tags and sessions; pointing it at a folder that is already a project merges the two. Untagged projects whose folder disappears are removed as today. The rule is the same on every housekeeping path — the daemon's prune, the picker's, and `portal doctor --fix`.
 
 ---

@@ -68,11 +68,11 @@
               "parent": null
             },
             "folder-name-case": {
-              "status": "pending",
+              "status": "converging",
               "parent": null
             },
             "lookup-cost": {
-              "status": "pending",
+              "status": "converging",
               "parent": null
             },
             "unrecorded-sessions": {
