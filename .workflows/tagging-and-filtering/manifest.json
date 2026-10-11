@@ -40,6 +40,13 @@
           "brief_path": "discovery/briefs/command-line-filters.md",
           "order": 4
         }
+      },
+      "gap_analysis_cache": {
+        "checksum": "c87bc447dbf1c30dc91978e736cb8ebf",
+        "generated": "2026-10-11T16:56:14.532Z",
+        "input_files": [
+          "project-link.md"
+        ]
       }
     },
     "discussion": {
