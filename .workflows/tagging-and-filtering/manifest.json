@@ -48,11 +48,11 @@
           "status": "in-progress",
           "subtopics": {
             "session-folder-and-project": {
-              "status": "converging",
+              "status": "decided",
               "parent": null
             },
             "unregistered-folders": {
-              "status": "exploring",
+              "status": "converging",
               "parent": null
             },
             "linking-from-picker": {

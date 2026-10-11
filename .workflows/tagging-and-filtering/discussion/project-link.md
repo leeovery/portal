@@ -40,6 +40,35 @@ Discovery reached these with the user; they carry forward as working ground, ope
 
 ---
 
+## Session Folder And Project
+
+### Context
+
+Today Portal records one folder on each session at creation, and it does several jobs at once: it decides which project the session groups under (and so its tags), it is the folder shown on the session's row, it is what the picker's text filter and `x /term` match against, and its name generates the session's name (`{folder name}-{nanoid}`). Discovery's worktree rule pulls those apart. A session started in `~/Code/portal/.claude/worktrees/tag-filters` belongs to the portal project, but if the one recorded folder became `~/Code/portal`, its row would show `~/Code/portal`, typing `tag-filters` in the filter would find nothing, and the session would be named `portal-…` — indistinguishable from the main-checkout session beside it under the same heading. Session names are not a durable cue either: sessions are routinely renamed.
+
+Today a session started in a worktree saves the worktree folder as a project of its own (creation resolves to the worktree's own git root), which housekeeping prunes — tags and all — once the worktree is deleted. No saved project is a worktree today:
+
+`while read p; do g=$(git -C "$p" rev-parse --path-format=absolute --git-dir 2>/dev/null); c=$(git -C "$p" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); [ -n "$g" ] && [ "$g" != "$c" ] && echo "$p"; done < <(jq -r '.projects[].path' ~/.config/portal/projects.json)` → no output (2026-10-11)
+
+### Options Considered
+
+**Record both** — the folder the session was started in, and the project it belongs to.
+**Record the project only** — the row shows the project folder; a worktree session is found and told apart by name alone.
+
+### Journey
+
+Recording the project alone regresses what a worktree session shows and is found by today, and leans on the session name, which the user renames freely. Recording both changes nothing visible for any session not started in a worktree, where folder and project are the same folder. The reboot bugfix restores the one folder Portal records today; the project is new here, and must survive a reboot on its own account because a deleted worktree's project cannot be re-derived — so carrying it through save and restore belongs to this epic.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by discovery's worktree rule plus no regression to what a worktree session shows and is found by today.
+
+A session records two things at creation: **the folder it was started in** and **the project it belongs to**. The folder keeps every job it has today apart from grouping — the session row, the picker's text filter, `x /term`, and the generated session name. The project drives the By Project heading, the session's tags, and every tag or project filter. Save and restore carry both. For every session not started in a worktree the two are the same folder.
+
+Sibling check: open-with-forced-filter (specification) — the recorded folder alone is shown on the row and matched by `x /term` and the text filter; consistent, the session's folder keeps exactly that role.
+
+---
+
 ## Unrecorded Sessions
 
 ### Context
