@@ -52,7 +52,7 @@
               "parent": null
             },
             "unregistered-folders": {
-              "status": "converging",
+              "status": "decided",
               "parent": null
             },
             "linking-from-picker": {

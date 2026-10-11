@@ -111,3 +111,28 @@ The trade turned on filters. With filters, being missing is as much a failure as
 Sibling check: open-with-forced-filter (specification) — a derived folder never lands in the recorded one and is read by grouping alone; consistent, with tag and project filtering reading it as grouping does.
 
 ---
+
+## Unregistered Folders
+
+### Context
+
+Every session Portal creates saves its folder as a project on the spot (creation upserts the project), so a session whose folder has no project arises only two ways: the session's recorded folder still exists but its project was deleted (the projects page's delete, or a hand edit — housekeeping only prunes projects whose folder is gone), or the session has no record and its live guess lands in a folder that was never a project. Live examples on 2026-10-11: four sessions guessed into `~/Code/flowx` (a separate repository from the saved `~/Code/fabric/flowx`), one into `~/Code/goosemates` (the renamed `~/Code/homeos`, whose project housekeeping removed), and `ws-folio-dev` guessed into `~/Code/fabric/folio/app` (a repository inside folio, never saved as a project). The open question discovery left: whether Portal saves such a folder as a project when it finds one.
+
+### Options Considered
+
+**Save it automatically** — the session then groups under a new project at that folder.
+**Never save automatically** — the session sits in Unknown until the user saves or links it from the picker.
+
+### Journey
+
+Each source makes automatic saving wrong in its own way. For a recorded folder, a missing project is the user's own deletion, and recreating it would undo them. For a guessed folder, saving it as a project converts a guess chosen *because* it corrects itself into a durable record that does not: `ws-folio-dev`'s pane sitting in `folio/app` would mint a `folio/app` project and keep the session filed there after the pane moved back. The goosemates case, where automatic saving would have helped, is served by the picker's explicit save.
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by the live-guess decision's own rationale (Unrecorded Sessions).
+
+**Portal never saves a folder as a project on its own when a session's folder has none.** Such a session stays in Unknown until the user saves its folder as a project or links the session to an existing one from the picker (Linking From Picker). Creation's existing behaviour — a new session's project is saved when the session is created — is unchanged.
+
+Sibling check: no overlap found.
+
+---
