@@ -90,23 +90,22 @@ At session creation, Portal stamps the tmux session user-option **`@portal-dir =
 
 The grouped render uses `@portal-dir` to look up the directory's `Project` record and its `tags`.
 
-### The lazy stamp-on-render fallback (stamp absent)
+### The derived fallback (stamp absent)
 
-`@portal-dir` is the fast path, not a guarantee. When the grouped render encounters a session with **no `@portal-dir`**, it resolves that session's directory from the **active pane's current path → git-root** and **stamps `@portal-dir` then and there** (lazy). After that first grouped render the session is on the fast path.
+`@portal-dir` is the fast path, not a guarantee. When the grouped render encounters a session with **no `@portal-dir`**, it derives that session's directory from the **active pane's current path → git-root** and groups it on that derived value. The derived value is **grouping-only and held in memory**: it is cleared on every session-list refresh and **never stamped back to tmux** — a pane's cwd can drift from the origin directory, and freezing that drift would permanently mis-group the session. It never lands in the recorded `@portal-dir`, so it never feeds the row's directory column or the text match: a regroup can never make a session findable by a path it was not findable by a moment earlier.
 
-One mechanism covers **both** stamp-absence cases — no schema change, no restore-engine change, no first-boot backfill:
+The same fallback covers **both** stamp-absence cases:
 
-- **Post-reboot:** restored sessions return without the option (`@portal-dir` is in-memory tmux state, not persisted in `sessions.json`). The first grouped render re-derives and re-stamps. There is no need to persist the resolved directory into the session record.
-- **Pre-existing live sessions on first ship:** sessions already running when the feature ships have no stamp; the same fallback stamps them on first render. They appear in **By Project** immediately — **no "restart to appear" gap**.
+- **Post-reboot:** restored sessions return without the option (`@portal-dir` is in-memory tmux state, not persisted in `sessions.json`). Every grouped render derives their directory afresh.
+- **Pre-existing live sessions on first ship:** sessions already running when the feature ships have no stamp; the fallback groups them on the derived value. They appear in **By Project** immediately — **no "restart to appear" gap**.
 
-So deriving the directory live from the pane's `current_path` is **not rejected** — it is precisely this fallback, used only for the un-stamped minority (typically still sitting at their project directory), then cached via the lazy stamp. The drift/perf objections applied only to using live derivation as the *primary* path, which v1 does not.
+So deriving the directory live from the pane's `current_path` is **not rejected** — it is precisely this fallback, used only for the un-stamped minority (typically still sitting at their project directory). The drift/perf objections applied only to using live derivation as the *primary* path, which v1 does not.
 
-**Failure & ordering semantics (the fallback writes during a render):**
+**Failure semantics:**
 
-- **The derived value is used for *this* render**, not just cached for the next one — that is what makes "they appear in By Project immediately" true. The stamp write is a side-effect that accelerates *subsequent* renders.
-- **The stamp write is best-effort.** If `set-session-option` fails (tmux error, session killed mid-render), the session still renders this pass using the in-memory derived directory; the stamp is simply re-attempted on the next grouped render. A write failure never drops the session from the view.
-- **If git-root derivation itself fails** (pane has no enclosing git repository), the session is not stamped and falls to the **Unknown** bucket (By Project) / **Untagged** (By Tag) — see *Empty States*. It is re-attempted each render (cheap; this is the rare case).
-- **First-ship cost is a bounded one-time amortisation.** On first ship every live session is un-stamped, so the *first* grouped render performs N git-root derivations + N stamp writes (N = live session count, ~15–20). This one-time cost is accepted; from the second render on, all sessions are on the fast path. The steady-state "un-stamped minority" framing applies after this first pass.
+- **The derived value is used for *this* render** — that is what makes "they appear in By Project immediately" true.
+- **If git-root derivation itself fails** (the pane's current path is gone from disk, or no current path is readable), the session falls to the **Unknown** bucket (By Project) / **Untagged** (By Tag) — see *Empty States*. It is re-attempted each render.
+- **Cost recurs per grouped render for every un-stamped session** — one pane read and one git-root derivation each, since nothing is cached beyond the current session list.
 
 ### Path-keying canonicalisation (build-time requirement)
 
@@ -215,7 +214,7 @@ The last-used grouping mode is **persisted** so Portal opens in the user's usual
 - **By Tag with zero tags** — does **not** silently flatten. Render the plain (ungrouped) session list **with an explicit "No tags yet" message**, so the user sees they are in tag view, understands why there are no groups, and knows where to add them (the projects page). This is a degrade-to-flat **with a signpost**, not a silent one — it preserves the no-regression feel (the session list itself is unchanged) while keeping the mode legible.
 - **Empty tags field in the projects edit modal** — shows a clear empty state ("no tags") rather than a blank.
 - **By Project with nothing to group** — follows the same no-regression principle as By Tag:
-  - **No live sessions:** renders exactly as flat mode would (an empty list). There is nothing to group; By Project never renders worse than flat, so no dedicated signpost is required. Unlike By Tag (which can be globally empty whenever zero tags exist anywhere), By Project is effectively always populated once any session is live, because every session resolves to a directory (via the `@portal-dir` stamp or the lazy fallback).
+  - **No live sessions:** renders exactly as flat mode would (an empty list). There is nothing to group; By Project never renders worse than flat, so no dedicated signpost is required. Unlike By Tag (which can be globally empty whenever zero tags exist anywhere), By Project is effectively always populated once any session is live, because every session resolves to a directory (via the `@portal-dir` stamp or the derived fallback).
   - **Unresolvable directory:** a session whose `@portal-dir` is absent *and* whose lazy fallback cannot derive a git-root (e.g. a pane with no enclosing git repository) collects under a single pinned **Unknown** group at the end — mirroring the By-Tag **Untagged** bucket — so no session is ever silently dropped from the grouped view.
   - **Stamped, but no matching project record** (e.g. the project was deleted from the projects page while a session stamped with its `@portal-dir` is still live): the path lookup misses. This routes the same way as an unresolvable directory:
     - **By Project:** the session falls to the **Unknown** bucket (the Unknown bucket covers *both* "no derivable directory" and "directory resolved but not a known project").
@@ -314,7 +313,7 @@ Verifiable behaviours to anchor planning and test cases. (Decisions and rational
 **Resolution & buckets**
 
 8. **Given** a newly created session, **then** `@portal-dir` is stamped at creation and By Project groups it without a `git rev-parse` at render.
-9. **Given** a live session with no `@portal-dir` (post-reboot or pre-existing on first ship), **when** the grouped list first renders, **then** the session is resolved from its active pane → git-root, grouped **this render**, and stamped for subsequent renders.
+9. **Given** a live session with no `@portal-dir` (post-reboot or pre-existing on first ship), **when** the grouped list renders, **then** the session is resolved from its active pane → git-root and grouped **this render**, and the derived value is never written to `@portal-dir`.
 10. **Given** a session whose directory cannot be resolved to a git-root, **or** a stamped session whose project record no longer exists, **then** it renders under **Unknown** (By Project) / **Untagged** (By Tag) and is never dropped.
 
 **Persistence & empty states**
@@ -334,3 +333,7 @@ Verifiable behaviours to anchor planning and test cases. (Decisions and rational
 ---
 
 ## Working Notes
+
+## Corrigenda
+
+> **Corrigendum 2026-10-11** (from `tagging-and-filtering`): "When the grouped render encounters a session with no `@portal-dir`, it resolves that session's directory from the active pane's current path → git-root and stamps `@portal-dir` then and there (lazy)" — corrected: the derived directory is grouping-only, held in memory and cleared on every session-list refresh, and never stamped back to tmux or written to `@portal-dir`, as the `open-with-forced-filter` specification decided (a derived value never lands in the recorded one); section *The lazy stamp-on-render fallback* is now *The derived fallback*, and acceptance criterion 9 matches.
