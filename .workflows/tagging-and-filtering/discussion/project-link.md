@@ -136,3 +136,35 @@ Each source makes automatic saving wrong in its own way. For a recorded folder, 
 Sibling check: no overlap found.
 
 ---
+
+## Linking From Picker
+
+### Context
+
+With automatic saving ruled out and wrong guesses accepted as silent, the picker needs a way for the user to say which project a session belongs to: it is the repair for a wrong guess (`laravel-workflow-PGR3jA` filed under the home-folder project), the way out of Unknown (`ws-folio-dev`, the `~/Code/flowx` and `~/Code/goosemates` sessions), and the prerequisite for tagging an Unknown session's project from the sessions list (the tagging topic's sessions-list tagging needs a project to put the tag on).
+
+### Options Considered
+
+The shape was proposed and stood without objection: an action available on **every** session row — guessed, recorded or Unknown — opening a chooser of the saved projects, with **"save `<folder>` as a project"** at its top when the session's folder is not a project. The folder offered there is the session's recorded folder, or for an unrecorded session its guessed folder, resolved by the same repository rule as creation (a worktree to the repository it was made from). Picking records the session's project; the folder the session shows on its row and is searched by is left as it was — an unrecorded session stays without one.
+
+The fork was what a link applies to, worked on the four `~/Code/flowx` sessions linked to the saved `fabric/flowx` project:
+
+**This session only**
+- Pros: matches the repair's grain — a wrong guess is about one session; adds no second membership rule beside the repository rule.
+- Cons: the other three stay Unknown until each is linked; the next session started in `~/Code/flowx` saves that folder as a project of its own, per the repository rule.
+
+**That whole folder** — Portal remembers that `~/Code/flowx` belongs to `fabric/flowx`; all four move at once and so do future sessions started there.
+- Pros: one action for many sessions.
+- Cons: a second way of deciding which project a folder belongs to, beside the repository rule — the same shape nested projects might want (`folio/api` belonging to folio), so deciding it here would settle that subtopic sideways.
+
+### Journey
+
+The flowx case itself argued against folder-level linking: `~/Code/flowx` and `~/Code/fabric/flowx` are different things that only look alike (the user: "they are different (kind of)") — `~/Code/flowx` is its own git repository, `~/Code/fabric/flowx` a plain folder holding `flowx-api` — so a folder-level rule taught by one link would have folded future work in a separate repository into the wrong project. Saving a folder as a project already covers the many-sessions case where it matters: saving `~/Code/goosemates` fixes every other session guessed into that folder at once, because their guess now lands on a project.
+
+### Decision
+
+**A link applies to the one session it is made on.** Every session row offers the action; the chooser lists the saved projects and, when the session's folder is not one, offers saving it as a project. Picking records the session's project — durable across reboots like any recorded project (Session Folder And Project) — and replaces any guess for that session; the session's folder is untouched. Future sessions started in the same folder follow the repository rule as before. If nested projects later needs folder-level membership, linking can grow into it then.
+
+Sibling check: tagging (discovery brief) — sessions-list tagging needs Unknown sessions to reach a project, which this action supplies; the key it takes and how the tagging flow invokes it are the tagging topic's.
+
+---
