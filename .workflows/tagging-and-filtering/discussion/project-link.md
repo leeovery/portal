@@ -39,3 +39,46 @@ Discovery reached these with the user; they carry forward as working ground, ope
 *Subtopics are documented below as they reach `decided` or accumulate enough exploration to capture. Not every subtopic needs its own section — minor items resolved in passing can be folded into their parent. The Discussion Map (which subtopics exist and their states) lives in the manifest, not this file.*
 
 ---
+
+## Unrecorded Sessions
+
+### Context
+
+Once the reboot bugfix lands, every session Portal creates keeps the folder it was started in across reboots. Two populations still carry no record: sessions created some other way (tmux's own `new-session`, a script, another tool), and the sessions running when the fix ships that already lost their record at an earlier reboot — the fix cannot recover an origin that was never saved. For those, Portal guesses today from the folder the session's active pane currently sits in, resolved to its git root. The guess is grouping-only: the `open-with-forced-filter` specification established that a derived folder never lands in the recorded one and never feeds the session row's folder, the text filter or `x /term`, so a regroup cannot make a session findable by a path it was not findable by a moment earlier.
+
+Measured against the live install on 2026-10-11 (read-only): 30 non-hidden sessions carry no recorded folder; the guess puts 21 under a plausible project and 9 elsewhere —
+
+- `laravel-workflow-PGR3jA` — pane in `~`, so it files under the home-folder project and takes that project's tags.
+- `ws-folio-dev` — pane in `folio/app`, not a project → Unknown.
+- Two worktree sessions (agentic-workflows' `mailbox-and-inbox`, switchboard's `capture-harness`) → Unknown, because the guess resolves a worktree to the worktree folder.
+- Four sessions in `~/Code/flowx` and one in `~/Code/goosemates` → Unknown, no project at either folder.
+
+`tmux list-sessions -F '#{session_name}|#{@portal-dir}' | while IFS='|' read n d; do case "$n" in _portal-*) continue;; esac; [ -n "$d" ] && continue; p=$(tmux display-message -p -t "=$n:" '#{pane_current_path}'); r=$(git -C "$p" rev-parse --show-toplevel 2>/dev/null || echo "$p"); echo "$n -> $r"; done` → 30 rows (session names compared against the guessed folder by hand; renamed sessions judged on the folder alone)
+
+### Options Considered
+
+**1. Keep guessing, live** (today's behaviour, with the worktree rule applied to the guess)
+- Pros: right for most sessions with no record; a session whose pane wanders off files under wherever the pane went and returns when the pane does — the guess corrects itself; no one-time chore at ship.
+- Cons: silent when wrong — a wrongly guessed session appears in a filter it doesn't belong to, or drops out of one it does.
+
+**2. Guess once, then keep it** — the first guess becomes the session's record.
+- Pros: stops drift; the guess never runs again for that session.
+- Cons: locks in whatever folder the pane happened to be in at that moment. Portal deliberately avoids this today for exactly that reason (`internal/tui/model.go`: freezing a drifted cwd would permanently mis-group the session).
+
+**3. No guess** — sessions without a record sit in Unknown until the user links them.
+- Pros: never wrong.
+- Cons: all 30 current unrecorded sessions start in Unknown and are missing from every tag and project filter until linked one by one.
+
+All three assume the picker gains a way to link a session to a project (Linking From Picker), which turns any guess into a record the user chose.
+
+### Journey
+
+The trade turned on filters. With filters, being missing is as much a failure as being misplaced: option 3 trades 9 misplaced-or-Unknown sessions for 30 missing from every filter until a manual pass. Between 1 and 2, the live guess self-corrects when the pane returns and the frozen one does not, so 2 buys stability at the price of making a transient wrong answer permanent. Applying the worktree rule to the guess moves the two worktree sessions from Unknown to their parent project while their worktree still exists.
+
+### Decision
+
+**Option 1 — keep the live guess for sessions with no record, with the worktree rule applied to it.** A guess resolves the pane's folder to the repository it belongs to (a worktree to the repository it was made from), exactly as creation does. The guess stays a project-link value only — heading, tags, and tag/project filters — and never becomes the session's folder: the row, the text filter and `x /term` keep matching only what was recorded, as `open-with-forced-filter` decided. A link the user records from the picker replaces the guess for that session. Accepted trade-off: a wrong guess is silent.
+
+Sibling check: open-with-forced-filter (specification) — a derived folder never lands in the recorded one and is read by grouping alone; consistent, with tag and project filtering reading it as grouping does.
+
+---

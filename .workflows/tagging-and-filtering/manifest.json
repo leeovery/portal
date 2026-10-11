@@ -48,11 +48,11 @@
           "status": "in-progress",
           "subtopics": {
             "session-folder-and-project": {
-              "status": "pending",
+              "status": "converging",
               "parent": null
             },
             "unregistered-folders": {
-              "status": "pending",
+              "status": "exploring",
               "parent": null
             },
             "linking-from-picker": {
@@ -73,6 +73,10 @@
             },
             "lookup-cost": {
               "status": "pending",
+              "parent": null
+            },
+            "unrecorded-sessions": {
+              "status": "decided",
               "parent": null
             }
           }
