@@ -208,6 +208,13 @@ Under 2 or 3, sessions recorded under the missing project keep grouping under it
 ### Decision
 
 #### 2026-10-11 — revised
+*Trigger: settled call — a kept missing project needs a place outside the projects page where it is reported.*
+
+**Settled by derivation** — not discussed. Determined by the keep-tagged rule above and doctor's role as the health catalog.
+
+The entries below stand, and `portal doctor` lists each missing tagged project as an info line — info lines never fail its exit code — while `portal doctor --fix` leaves them in place, following the same keep-tagged rule as every other housekeeping path.
+
+#### 2026-10-11 — revised
 *Trigger: settled call — re-pointing and merging left the project's name unspecified.*
 
 **Settled by derivation** — not discussed. Determined by how project names are generated today (a project's default name is its folder's name) and the merge the decision already carries.
