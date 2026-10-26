@@ -171,6 +171,13 @@ The projects page is the natural parent: tags live on projects, and the page alr
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: review finding (review-001 F10) — written before the Tags list was designed, it asked where tag management is reached from and how rename, delete and counts behave; the entries below answer all but whether the sessions page reaches the Tags list too.*
+
+**Settled by derivation** — not discussed. Determined by tags living on projects, the sessions page having its own tags editor for a session's project (Sessions List Tagging), and `x` already reaching the projects page in one key (review-001 F10).
+
+The entries below stand, and the Tags list is reached from the projects page only; the sessions page gains no key for it.
+
+#### 2026-10-26 — revised
 *Trigger: review finding (review-001 F7) — deleting a tag everywhere was covered by the entry below, but unticking a missing project's last tag in a checklist, and `x` on its last chip in the edit screen or the sessions-list tag editor, would also leave it untagged, and the next housekeeping pass would remove it with nothing said.*
 
 **Settled by derivation** — not discussed. Determined by project-link's Renamed Or Moved Folders (a missing project is kept only because it carries a tag — the user's work — and removal is housekeeping's, the same on every path) and the entry below's rule that the loss is shown before it happens (review-001 F7).
