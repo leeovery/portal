@@ -58,11 +58,11 @@ Because a tag value is also the **grouping key** (it becomes a By-Tag heading an
 
 - **Whitespace:** leading/trailing whitespace is **trimmed** on add. `"  work "` is stored as `work`.
 - **Empty / whitespace-only:** rejected. Pressing Enter on a blank (or whitespace-only) input is a **no-op** — no tag is added.
-- **Case:** the **canonical form is lower-cased**. `Work`, `WORK`, and `work` are the **same tag** — they collapse into one By-Tag heading and dedup in the union. Tags are stored and displayed in this canonical lower-cased form (no separate display casing in v1).
+- **Case:** **case is preserved and significant**. A tag is stored and displayed exactly as typed (after the trim), and comparison is case-sensitive: `Work`, `WORK`, and `work` are **three distinct tags** — three By-Tag headings, three entries in the union.
 - **Duplicate within a project:** adding a tag a project already carries (after normalisation) is a **no-op** — `tags` is a deduped set per project, so a project never appears twice under one heading.
-- **Allowed characters / length:** no character whitelist and no hard max length in v1 (freeform, like aliases). The trim + lower-case + non-empty + per-project dedup rules above are the complete validation set.
+- **Allowed characters / length:** no character whitelist and no hard max length in v1 (freeform, like aliases). The trim + non-empty + per-project dedup rules above are the complete validation set.
 
-The same canonical form (trim + lower-case) is used everywhere a tag is compared: per-project dedup, the cross-project union that defines "which tags exist," and By-Tag grouping.
+The same canonical form (trim only) is used everywhere a tag is compared: per-project dedup, the cross-project union that defines "which tags exist," and By-Tag grouping.
 
 ### Taggable surface — projects only
 
@@ -135,7 +135,7 @@ A directory can carry multiple tags, so a session can belong to multiple tag gro
 **Heading label text.**
 
 - **By Project headings show the project `name`** (the friendly name on the `Project` record), e.g. `Portal`. The **grouping key is the canonical directory path**, not the name — so two distinct directories that happen to share a `name` (e.g. `~/code/portal` and `~/archive/portal`) form **two separate groups** that may display the same heading text. This visual repeat is accepted in v1 (no path-disambiguation suffix); it is rare and harmless. (A session whose directory is not a known project — stamped path with no matching `Project` record — does not appear here; see *Empty States → Unknown bucket*.)
-- **By Tag headings show the canonical (trimmed, lower-cased) tag value.**
+- **By Tag headings show the canonical (trimmed) tag value, in the case it was typed.**
 
 Accepted downside of Pattern B: a heavily-tagged list is longer than the flat list (sessions repeat). Mitigations beyond the Untagged catch-all (e.g. collapsible headers) are **deferred** — not built up front, revisited only if it bites.
 
@@ -307,8 +307,8 @@ Verifiable behaviours to anchor planning and test cases. (Decisions and rational
 
 **Tag values**
 
-6. **Given** the projects edit modal, **when** the user adds `  Work `, **then** it is stored/displayed as `work`; adding `WORK` again is a no-op; pressing Enter on a blank input adds nothing.
-7. **Given** two projects tagged `work` and `Work` respectively, **when** in By Tag mode, **then** their sessions appear under a **single** `work` heading.
+6. **Given** the projects edit modal, **when** the user adds `  Work `, **then** it is stored/displayed as `Work`; adding `Work` again is a no-op; adding `work` adds a second, distinct tag; pressing Enter on a blank input adds nothing.
+7. **Given** two projects tagged `work` and `Work` respectively, **when** in By Tag mode, **then** their sessions appear under **two** headings, `work` and `Work`.
 
 **Resolution & buckets**
 
@@ -337,3 +337,5 @@ Verifiable behaviours to anchor planning and test cases. (Decisions and rational
 ## Corrigenda
 
 > **Corrigendum 2026-10-11** (from `tagging-and-filtering`): "When the grouped render encounters a session with no `@portal-dir`, it resolves that session's directory from the active pane's current path → git-root and stamps `@portal-dir` then and there (lazy)" — corrected: the derived directory is grouping-only, held in memory and cleared on every session-list refresh, and never stamped back to tmux or written to `@portal-dir`, as the `open-with-forced-filter` specification decided (a derived value never lands in the recorded one); section *The lazy stamp-on-render fallback* is now *The derived fallback*, and acceptance criterion 9 matches.
+
+> **Corrigendum 2026-10-26** (from `tagging-and-filtering`): "the canonical form is lower-cased. `Work`, `WORK`, and `work` are the same tag … Tags are stored and displayed in this canonical lower-cased form" — corrected: since commit `e0e41a13d` (2026-06-08) a tag is trimmed only, stored and displayed as typed, and compared case-sensitively, so `Work` and `work` are distinct tags. Applied throughout: the Case rule and the validation summary in *Tag value normalisation & validation*, the canonical-form sentence beneath it, the By Tag headings rule, and acceptance criteria 6 and 7.
