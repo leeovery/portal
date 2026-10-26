@@ -87,6 +87,11 @@ The history reframed discovery's open question: the deliberate choice was displa
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: review finding (review-001 F5) — the tie-break in the entry below rests on a project's last-used time, which moves every time a session is created in it, and a majority can flip when a tag is removed elsewhere; either way the displayed casing could change with no rename.*
+
+The casing is settled once and written, not worked out on every read. Whenever Portal writes the projects file — a merge, a rename, a tag added or removed anywhere — any tag carried in more than one casing is rewritten to its winning casing on every project that carries it: the casing carried by more projects, a tie going to the casing that sorts first. From then on the tag has one spelling on disk, so its heading, chips and suggestions never change casing on their own, and project-link's merges never leave two casings behind. Between a hand edit that introduces a second casing and the next write, the display uses the same rule. The last-used tie-break in the entry below is replaced. Accepted cost: Portal rewrites casing a hand edit put on projects the user did not touch — two casings of one tag is never a state the user chose.
+
+#### 2026-10-26 — revised
 *Trigger: settled call — case-insensitive identity left unsaid which casing shows when two casings of one tag are already on disk.*
 
 **Settled by derivation** — not discussed. Determined by the case-insensitive identity below and the paths that can still put two casings on disk: a hand edit of `projects.json`, and project-link's merges (re-pointing a project at a folder that is already a project, and two spellings of one folder becoming one project), which combine two projects' tags.
