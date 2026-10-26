@@ -55,6 +55,41 @@ Discovery reached these with the user; they carry forward as working ground, ope
 
 ---
 
+## Tag Case
+
+### Context
+
+Today a tag is stored and shown exactly as typed, and two tags differing only in case are two tags: `Work` and `work` give two By Tag headings and two separate sets of projects (`project.NormaliseTag` trims and preserves case; every comparison goes through it). Suggestions put such near-duplicates side by side, tag management would show them as two rows with separate counts, a tag filter on one misses projects carrying the other, and renaming a tag into one that already exists has to be handled as a merge. How tag identity treats case decides all of these.
+
+The original tagging work (session-tagging-and-grouping specification) made the canonical form lower-cased: `Work`, `WORK` and `work` were one tag, stored and shown as `work`. A later fix changed it — commit `e0e41a13d` (2026-06-08), "preserve tag casing": `NormaliseTag` now trims only, "so a tag is stored and displayed exactly as typed ("Personal" no longer renders "personal"). Matching/dedup/grouping are consequently case-sensitive". The aim of that change was display casing; case-sensitive identity followed from it rather than being chosen for itself. Discovery recorded the current behaviour as case-sensitive "by deliberate choice".
+
+On the live install no tag carries a capital and no two tags differ only by case (2026-10-26):
+
+`jq -r '.projects[].tags[]?' ~/.config/portal/projects.json | sort -u | awk '{print tolower($0)}' | sort | uniq -d | wc -l` → 0
+
+`jq -r '.projects[].tags[]?' ~/.config/portal/projects.json | sort -u | grep -c '[A-Z]'` → 0
+
+### Options Considered
+
+**Case-sensitive (today)** — `Work` typed where `work` exists becomes a second tag.
+- Cons: two By Tag headings, a filter on one misses the other, suggestions and tag management show both; the repair is a rename that merges.
+
+**One tag whatever the case, keeping the casing it was first written with** — typing `Work` matches the existing `work`; the suggestion highlights it and adding it adds `work`.
+- Pros: keeps what the June fix was for (the user's casing is shown as written) and removes its side effect; two tags differing only in case cannot arise.
+- Cons: a tag's casing is set by whichever project used it first; changing it is a deliberate rename.
+
+**Lower-case everything** (the original rule) — not reopened: the June fix rejected it for erasing the user's casing.
+
+### Journey
+
+The history reframed discovery's open question: the deliberate choice was display casing, not case-sensitive identity. Suggestions make the question sharper than it is today — once tags are picked from a list, a stray capital is the main way a duplicate gets made, and under case-sensitive identity it would silently split a tag in two (two headings, a filter that misses half the projects). Nothing on the install needs merging at ship. The test that would have kept case-sensitivity — a real case where `API` and `api` should mean different things — has no instance.
+
+### Decision
+
+**One tag whatever the case, shown in the casing it was first written with.** Tag identity ignores case everywhere a tag is compared — adding a tag to a project, suggestions, grouping, tag management, and tag filters. Typing a tag that matches an existing one in another case adds the existing tag, in its existing casing. Changing a tag's casing everywhere (`work` → `Work`) is an ordinary rename in tag management, never a merge. The user's casing is still shown as written — the June fix's aim stands; only its side effect is dropped.
+
+---
+
 ## Summary
 
 ### Key Insights
