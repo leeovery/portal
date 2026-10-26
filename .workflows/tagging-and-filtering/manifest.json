@@ -31,7 +31,8 @@
           "summary": "Narrowing the picker by tag and by project, with the active filter visible on screen",
           "description": "Narrowing the sessions list to one or more tags (matching any or all), to a project, or excluding a tag, keeping group headings while filtered, and showing the active filter as chips in the header. Open are how these filters sit beside the existing text filter and the grouping cycle, whether a filter persists between launches, whether the projects list filters too, and whether typing a tag name in the text filter matches its sessions. Filter chips add a row to the same vertical space where the keymap footer already disappears on short terminals.",
           "brief_path": "discovery/briefs/filtering.md",
-          "order": 3
+          "order": 3,
+          "brief_incorporated": true
         },
         "command-line-filters": {
           "routing": "discussion",
@@ -140,6 +141,47 @@
             "tagging-a-sessions-project-from-the-sessions-list-when-its-project-link-is-a-guess": {
               "status": "decided",
               "parent": "sessions-list-tagging"
+            }
+          }
+        },
+        "filtering": {
+          "status": "in-progress",
+          "subtopics": {
+            "filter-model": {
+              "status": "pending",
+              "parent": null
+            },
+            "any-all-and-exclude": {
+              "status": "pending",
+              "parent": null
+            },
+            "grouped-while-filtering": {
+              "status": "pending",
+              "parent": null
+            },
+            "text-filter-and-tags": {
+              "status": "pending",
+              "parent": null
+            },
+            "filter-persistence": {
+              "status": "pending",
+              "parent": null
+            },
+            "projects-list-filtering": {
+              "status": "pending",
+              "parent": null
+            },
+            "sessions-without-a-project": {
+              "status": "pending",
+              "parent": null
+            },
+            "keys-and-footer": {
+              "status": "pending",
+              "parent": null
+            },
+            "filter-chips": {
+              "status": "pending",
+              "parent": null
             }
           }
         }
