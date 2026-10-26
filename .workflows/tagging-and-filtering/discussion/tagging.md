@@ -157,6 +157,15 @@ The projects page is the natural parent: tags live on projects, and the page alr
 
 ### Decision
 
+#### 2026-10-26 — revised
+*Trigger: settled call — the Tags list needed an order.*
+
+**Settled by derivation** — not discussed. Determined by Tag Suggestions, which orders tags by how many projects carry them.
+
+The entry below stands, and the Tags list is ordered most-used first, ties alphabetical — the order the suggestions dropdown uses, so a tag sits in the same place on both surfaces.
+
+#### 2026-10-26
+
 **A Tags list off the projects page manages tags.** A key on the projects page (Keys And Footer) opens it: every tag in use, each with how many projects carry it. `r` renames a tag on every project that carries it; renaming into a tag that already exists, ignoring case, merges the two after a confirmation showing the counts involved, and a project carrying both ends up with the one; a rename that changes only the casing is a plain rename (Tag Case). `d` removes a tag from every project after a confirmation showing how many projects carry it. Enter on a tag opens its project checklist (Bulk Tagging). A `+ new tag` row asks for a name — offering the existing tags as the suggestions dropdown does, so a name that already exists lands on that tag — and opens its empty checklist; a new tag with nothing ticked when the checklist closes leaves nothing behind, since a tag exists only while a project carries it.
 
 ---
