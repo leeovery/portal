@@ -192,6 +192,15 @@ The mark-first case is served tag-first at the same cost — open `personal`, ti
 
 ### Decision
 
+#### 2026-10-26 — revised
+*Trigger: settled call — the checklist needed a save model.*
+
+**Settled by derivation** — not discussed. Determined by the edit screen's existing behaviour: each chip is saved the moment it is added or removed, and closing the screen never discards.
+
+The entry below stands, and each tick or untick in a tag's checklist is written at once, with no save step; Esc closes the checklist.
+
+#### 2026-10-26
+
 **Bulk tagging is the tag's project checklist in the Tags list; the projects page gains no multi-select.** Enter on a tag opens a checklist of every saved project, ticked where it carries the tag; Space ticks or unticks the highlighted project, adding or removing the tag on it; typing narrows the list. A new tag (Tag Management's `+ new tag`) opens on an empty checklist.
 
 ---
