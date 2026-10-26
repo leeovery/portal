@@ -93,7 +93,7 @@
           "status": "unstarted"
         },
         "tagging": {
-          "status": "in-progress",
+          "status": "completed",
           "subtopics": {
             "tag-suggestions": {
               "status": "decided",
