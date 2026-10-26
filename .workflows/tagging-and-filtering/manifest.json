@@ -104,11 +104,11 @@
               "parent": null
             },
             "tag-management": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "bulk-tagging": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "sessions-list-tagging": {

@@ -131,6 +131,62 @@ Reuse is the common case by a wide margin — five tags on the install after mon
 
 ---
 
+## Tag Management
+
+### Context
+
+Tags have no home of their own: a tag exists only as the union of what projects carry (no registry — the session-tagging-and-grouping design), and the only way to see which projects carry a tag is the By Tag view of the sessions list, which shows only projects with a live session. Renaming a tag means editing every project that carries it one by one; deleting a tag likewise. Discovery accepted tag management in one place: rename or delete a tag everywhere, and see how many projects carry each. Tag Case already settled that renaming into an existing tag (ignoring case) is a merge, and that a case-only rename is a rename.
+
+### Options Considered
+
+Proposed as one surface with bulk tagging (see Bulk Tagging), and it stood: a **Tags list** opened by a key on the projects page — one row per tag with its project count; `r` renames a tag everywhere, a rename into an existing tag being a merge confirmed with the counts; `d` deletes a tag from every project, confirmed with the count; Enter opens the tag's project checklist (Bulk Tagging); a `+ new tag` row starts a new tag.
+
+```text
+Tags                          acom — 5 projects
+  personal   27                 [x] acom
+  fabric     22                 [x] acom/mach2/api
+▸ acom        5     ⏎ ──▶       [ ] acom/mach2
+  curated     3                 [ ] switchboard
+  detaillab   2                 …
+  + new tag
+```
+
+### Journey
+
+The projects page is the natural parent: tags live on projects, and the page already owns the edit screen where single-project tagging happens. Management and bulk tagging collapsed into one surface once membership was seen as the thing both act on — the tag's row says how many, its checklist says which, and changing either is the same act.
+
+### Decision
+
+**A Tags list off the projects page manages tags.** A key on the projects page (Keys And Footer) opens it: every tag in use, each with how many projects carry it. `r` renames a tag on every project that carries it; renaming into a tag that already exists, ignoring case, merges the two after a confirmation showing the counts involved, and a project carrying both ends up with the one; a rename that changes only the casing is a plain rename (Tag Case). `d` removes a tag from every project after a confirmation showing how many projects carry it. Enter on a tag opens its project checklist (Bulk Tagging). A `+ new tag` row asks for a name — offering the existing tags as the suggestions dropdown does, so a name that already exists lands on that tag — and opens its empty checklist; a new tag with nothing ticked when the checklist closes leaves nothing behind, since a tag exists only while a project carries it.
+
+---
+
+## Bulk Tagging
+
+### Context
+
+Discovery accepted bulk tagging — add or remove a tag on several projects at once — and left open where it happens: marking several items exists only on the sessions list (`m`, multi-select), where it opens several sessions at once. The families project-link left to tags (folio with folio/api and folio/sdk) are the motivating case: tagging a family is one tag across several projects.
+
+### Options Considered
+
+**Tag first, then tick projects** — inside the Tags list, a tag's checklist shows every saved project, ticked where it carries the tag; Space ticks and unticks; typing filters the list.
+- Pros: bulk add and bulk remove in one place, with the tag's current membership visible while it changes; reuses the Tags list rather than adding a second mode to the projects page.
+- Cons: the checklist holds every saved project (66 on the install), so finding the ones wanted relies on typing to filter.
+
+**Mark projects first, then pick a tag** — multi-select on the projects page, like `m` on the sessions list, then an add-tag or remove-tag action on the marked set.
+- Pros: suits "these three new projects all get `personal`".
+- Cons: needs separate add and remove paths, and shows nothing of who already carries the tag.
+
+### Journey
+
+The mark-first case is served tag-first at the same cost — open `personal`, tick three rows — while the reverse does not hold: mark-first cannot show a tag's membership. Single-project tagging stays in the edit screen, so a projects-page multi-select would add a mode for nothing the checklist lacks.
+
+### Decision
+
+**Bulk tagging is the tag's project checklist in the Tags list; the projects page gains no multi-select.** Enter on a tag opens a checklist of every saved project, ticked where it carries the tag; Space ticks or unticks the highlighted project, adding or removing the tag on it; typing narrows the list. A new tag (Tag Management's `+ new tag`) opens on an empty checklist.
+
+---
+
 ## Tagging a session's project from the sessions list when its project link is a guess
 
 ### Context
