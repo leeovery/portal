@@ -253,6 +253,45 @@ The entry below stands, and each tick or untick in a tag's checklist is written 
 
 ---
 
+## Tag Inheritance
+
+### Context
+
+New projects arrive untagged: Portal saves a session's project silently when the session is created (or, under project-link, when the user saves a folder from the link chooser), and nothing tags it. The user's tags follow the folder layout, and project-link decided that a family of projects is expressed by tagging its members rather than by folder containment — anticipating inheritance as what would make a family tag cost nothing to maintain. Discovery raised inheritance and did not take it up. Measured 2026-10-26 by nearest enclosing saved project (see Context above): 36 projects sit directly under a tagged project, 31 carry exactly its tags; the five that do not are `~/.config/kit` and `~/code` (untagged under the home-folder project, tagged personal), `acom/mach2` (untagged under acom), and `fabric/flowx/flowx-api` and `fabric/packages/laravel-workflow` (personal under fabric). Four untagged top-level projects (`~/Code/kit`, `packages`, `switchboard`, `terrace`) sit directly under the untagged Code-folder project.
+
+The background review (review-001 F9) listed the angles open: what happens when the nearest enclosing project is untagged, which saves inherit, whether a later change to a parent reaches projects already inside it, whether the user ever sees inherited tags, and what inheritance does to housekeeping — a tagged project is kept when its folder disappears, so a nested spike that inherits a tag lingers as missing instead of clearing itself. Of the deleted folders housekeeping removed in the retained logs, `dex/business` sits under `dex` (tagged personal) and would have inherited; `~/Code/harness-spike` and `~/Code/portal-spike` sit directly under the untagged Code-folder project and would not:
+
+`grep -hE 'harness-spike|portal-spike' ~/.config/portal/state/portal.log.* | grep -oE '/Users/leeovery/[^ "]*(harness-spike|portal-spike)' | sort -u` → `/Users/leeovery/Code/harness-spike`, `/Users/leeovery/Code/portal-spike` (2026-10-26)
+
+### Options Considered
+
+**No inheritance (today)** — every new project starts untagged.
+- Cons: every family member is tagged by hand, and an untagged project silently drops out of the family's tag filter until it is.
+
+**Copy at save, from the nearest enclosing project** — a newly saved project takes the tags its nearest enclosing saved project carries at that moment.
+- Pros: right for 31 of 36 nested projects on the install; `acom/mach2` would have been tagged acom with no action; the exceptions are fixed once by removing a tag.
+- Cons: a nested spike that inherits a tag is kept as missing when its folder is deleted, rather than clearing itself.
+
+**Live inheritance** — a project's tags include whatever its enclosing project carries now.
+- Cons: tags appear and vanish on projects the user never touched; the measured exceptions (personal projects inside the fabric tree) would need an override mechanism; it reintroduces folder containment as a grouping rule, which project-link rejected.
+
+**Walk up past an untagged enclosing project to the nearest tagged one.**
+- Cons: every new project under the Code folder would take the home folder's `personal`, though the Code-folder project itself — the nearest statement — carries nothing; a new top-level work project would land personal.
+
+### Journey
+
+The user left this call to Claude. The measurement carried the yes: the folder layout predicts the user's own tagging for 31 of 36 nested projects, and the five misses are cheaper to fix by removing one tag than the hits are to add by hand. Copy-at-save over live inheritance followed from project-link's standing decision that projects stand alone — a tag on a project is the project's, whatever happens to its parent later. Nearest-only followed from the home folder: walking up would make `personal` the default for nearly everything. The housekeeping cost was weighed and accepted: on the retained logs one of the traceable deleted folders (`dex/business`) would have lingered, and a lingering missing project is listed on the projects page and by `portal doctor`, and cleared by deleting it or removing its tag (with Tag Management's confirmation).
+
+### Decision
+
+**Settled by derivation** — not discussed. Determined by the nested-project measurement (31 of 36 match their nearest enclosing project), project-link's Nested Projects (projects stand alone; families are tags) and Renamed Or Moved Folders (tagged projects are kept when their folder disappears) (review-001 F9).
+
+**A newly saved project copies the tags of its nearest enclosing saved project.** When Portal saves a project that did not exist — at session creation, or from the link chooser's "save `<folder>` as a project" — it gives the new project the tags carried at that moment by the deepest saved project whose folder contains it, folders compared by their on-disk spelling (project-link's Folder Name Case). When that project carries no tags, nothing is inherited; Portal never looks further up. The copy is made once: a later change to the enclosing project's tags never reaches projects already saved, and the inherited tags are the new project's own, edited and removed like any other. Re-pointing a missing project at a new folder and merging two projects keep and combine their own tags and inherit nothing. Projects that exist when this ships are not touched. Nothing announces the inheritance — creation's save is silent today, and the tags show wherever tags show (By Tag, the Tags list counts, the edit screen). Inherited tags are tags for housekeeping: a nested project that inherited one is kept, marked missing, when its folder disappears.
+
+Sibling check: project-link — Nested Projects left this question to tagging and anticipated it; Unregistered Folders keeps Portal from saving projects on its own, so inheritance runs only on the saves the user's actions make. Consistent.
+
+---
+
 ## Sessions List Tagging
 
 ### Context
