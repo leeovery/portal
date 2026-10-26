@@ -88,6 +88,8 @@ The history reframed discovery's open question: the deliberate choice was displa
 
 **One tag whatever the case, shown in the casing it was first written with.** Tag identity ignores case everywhere a tag is compared — adding a tag to a project, suggestions, grouping, tag management, and tag filters. Typing a tag that matches an existing one in another case adds the existing tag, in its existing casing. Changing a tag's casing everywhere (`work` → `Work`) is an ordinary rename in tag management, never a merge. The user's casing is still shown as written — the June fix's aim stands; only its side effect is dropped.
 
+Sibling check: filtering, command-line-filters (discovery briefs) — neither says how a tag filter or `x --tag` treats case; both compare tags, so they inherit this identity. No overlap.
+
 ---
 
 ## Summary
