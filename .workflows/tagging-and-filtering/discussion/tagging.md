@@ -346,6 +346,22 @@ Sibling check: theming-system (specification) — "Key: `t`" opens the theme pan
 
 ---
 
+## Surface Design
+
+### Context
+
+Discovery noted that each new surface needs designing in the current look, including the no-colour mode. The decisions above add these surfaces: the suggestions dropdown (under the tag box on the edit screen and in the sessions-list editor — counts per row, a pinned `+ new tag` row, the current-value and already-on-this-project markers, floating over what lies below and opening upward when short of room); the sessions-list tags editor (titled with the project's name and folder); the Tags list (tags with counts, a `+ new tag` row); a tag's checklist (ticks, the missing marker, a typed filter); and the confirmations — rename-into-existing merge with counts, delete with its count and how many projects are missing, and removing a missing project's last tag. The link chooser adds nothing visual: project-link made it the projects list as the projects page draws it.
+
+### Journey
+
+The user set the direction while deciding Tag Suggestions: the look is spiked in Paper, in the existing Portal design file, starting from one of the existing designs. The behaviour of each surface is fixed here; Paper fixes how it looks.
+
+### Decision
+
+**Each new surface is designed in Paper, in the existing Portal design file, starting from an existing design.** The surfaces are those listed above. Behaviour — what each surface shows, its markers, its scrolling and placement rules, its keys — is fixed by this discussion; the look is the Paper design's.
+
+---
+
 ## Sessions List Tagging
 
 ### Context
