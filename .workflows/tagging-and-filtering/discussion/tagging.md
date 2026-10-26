@@ -112,6 +112,8 @@ Sibling check: filtering, command-line-filters (discovery briefs) — neither sa
 
 Adding a tag today means typing it in full into the edit screen's TAGS field (Enter on the `+ add` slot opens a text box; Enter commits it as a chip; Esc discards). Nothing shows which tags already exist, so reusing a tag depends on remembering its exact spelling — and a misremembered spelling silently makes a new tag. Discovery accepted suggestions drawn from the tags already in use across all projects, narrowing as you type. While a tag is being typed, ↑ and ↓ do nothing in that box today (they move between fields only when no text box is open), so they are free to move through a suggestion list.
 
+`sed -n '/^func (m Model) updateEditModeKey/,/^}/p' internal/tui/model.go | grep -c 'KeyUp\|KeyDown'` → 0 (2026-10-26)
+
 ### Options Considered
 
 The list's content and behaviour were proposed as one shape and stood: it opens as soon as a tag is being typed — before any text — showing tags in use on other projects that this project does not already carry, each with how many projects carry it, most-used first; typing narrows it, matching anywhere in the tag and ignoring case (Tag Case); ↑↓ move through it; it serves editing an existing chip as well as adding one, so replacing one tag with another on a project is a pick, not a retype.
@@ -200,7 +202,7 @@ The entry below stands, and the Tags list is ordered most-used first, ties alpha
 
 #### 2026-10-26
 
-**A Tags list off the projects page manages tags.** A key on the projects page (Keys And Footer) opens it: every tag in use, each with how many projects carry it. `r` renames a tag on every project that carries it; renaming into a tag that already exists, ignoring case, merges the two after a confirmation showing the counts involved, and a project carrying both ends up with the one; a rename that changes only the casing is a plain rename (Tag Case). `d` removes a tag from every project after a confirmation showing how many projects carry it. Enter on a tag opens its project checklist (Bulk Tagging). A `+ new tag` row asks for a name — offering the existing tags as the suggestions dropdown does, so a name that already exists lands on that tag — and opens its empty checklist; a new tag with nothing ticked when the checklist closes leaves nothing behind, since a tag exists only while a project carries it.
+**A Tags list off the projects page manages tags.** A key on the projects page (Keys And Footer) opens it: every tag in use, each with how many projects carry it. `r` renames a tag on every project that carries it; renaming into a tag that already exists, ignoring case, merges the two after a confirmation showing the counts involved, and a project carrying both ends up with the one; a rename that changes only the casing is a plain rename (Tag Case). `d` removes a tag from every project after a confirmation showing how many projects carry it. Enter on a tag opens its project checklist (Bulk Tagging). A `+ new tag` row asks for a name and opens its empty checklist — a name that matches an existing tag, ignoring case, is that tag (Tag Case), so it opens that tag's checklist instead; a new tag with nothing ticked when the checklist closes leaves nothing behind, since a tag exists only while a project carries it.
 
 ---
 
@@ -298,7 +300,7 @@ Sibling check: project-link — Nested Projects left this question to tagging an
 
 Three new entry points need keys: tagging a session's project and linking a session to a project (both on the sessions page; project-link left the link action's key to this topic), and opening the Tags list (projects page). The obvious key for tags, `t`, opens the theme panel on both pages (theming-system specification). Taken on the sessions page: Enter, `/`, Space, `s`, `n`, `r`, `k`, `q`, `x`, `t`, `m`, `?`; on the projects page: Enter, `x`, `e`, `/`, `t`, `d`, `n`, `q`, Esc, `?` (`internal/tui/keymap.go`). The footer shows the keys marked core and competes for width. Under `NO_COLOR` the theme key is unavailable — filtered out of the footer and help at the call site — since there is no colour to theme.
 
-`grep -c '\`t\`' README.md docs/theming.md` → README.md 4, docs/theming.md 2 (2026-10-26): the theme key is documented in both.
+``grep -c '`t`' README.md docs/theming.md`` → README.md 4, docs/theming.md 2 (2026-10-26): the theme key is documented in both.
 
 ### Options Considered
 
@@ -467,7 +469,6 @@ Sibling check: project-link — Linking From Picker decided the chooser (the pro
 ### Open Threads
 
 - The narrow-width overflow bug (inbox) touches the edit screen, where the suggestions dropdown now floats; discovery left it out of the epic.
-- The theming-system specification and README/`docs/theming.md` describe `t` as the theme key; the move to `c` is this epic's change, carried by its specification.
 
 ### Current State
 
