@@ -158,6 +158,13 @@ The projects page is the natural parent: tags live on projects, and the page alr
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: settled call — tagged projects whose folder has gone carry tags, and removing their last tag hands them to housekeeping.*
+
+**Settled by derivation** — not discussed. Determined by project-link's Renamed Or Moved Folders: tagged projects whose folder disappears are kept and marked missing; untagged ones are removed on every housekeeping path.
+
+The entries below stand, and missing projects count toward each tag they carry and appear in its checklist marked missing. Removing a missing project's last tag leaves it to housekeeping like any untagged missing project, so the delete confirmation states how many of the projects losing the tag are missing and will be cleared with it.
+
+#### 2026-10-26 — revised
 *Trigger: settled call — the Tags list needed an order.*
 
 **Settled by derivation** — not discussed. Determined by Tag Suggestions, which orders tags by how many projects carry them.
