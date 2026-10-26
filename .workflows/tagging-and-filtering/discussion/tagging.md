@@ -92,6 +92,44 @@ Sibling check: filtering, command-line-filters (discovery briefs) — neither sa
 
 ---
 
+## Tagging a session's project from the sessions list when its project link is a guess
+
+### Context
+
+*From: project-link · discussion · 2026-10-11*
+
+The project-link discussion decided that a session with no recorded project keeps a live guess of its project — the folder its active pane is in now, resolved to the repository it belongs to — for its heading, its tags and the tag and project filters. A wrong guess was accepted as silent because it corrects itself: when the pane moves back, the guess follows. The picker also gains a "link to project" action on every session row, which records the session's project by the user's choice and replaces any guess; its chooser is the projects list as the projects page draws it, with the session's current project marked and labelled as a guess when it is one.
+
+Tagging a session's project from the sessions list (this topic's flow) writes a tag onto the session's project. When that project is a guess, the tag lands durably on whatever project the guess chose. Live example on 2026-10-11: `laravel-workflow-PGR3jA`'s pane sits in `~`, so its guess is the home-folder project; tagging it from the sessions list would tag the home-folder project — and with it every session the guess files there — while the session itself belongs to `~/Code/fabric/packages/laravel-workflow`. Unlike the guess, the tag does not correct itself when the pane moves.
+
+Options in sight from project-link: treat a guessed link like a recorded one; route the tag action through the link chooser first when the link is a guess (the user confirms the project, which records it, then tags); or refuse with a pointer to linking. How the sessions-list tagging flow invokes the link action, and which key it takes, were already left to this topic.
+
+The ask: whether sessions-list tagging treats a session whose project is a guess the same as one whose project is recorded.
+
+### Options Considered
+
+**Treat a guess like a recorded link** — the tag goes straight onto the guessed project.
+- Cons: a wrong guess puts a durable tag on an unrelated project, and through it on every other session filed there, with nothing shown.
+
+**Chooser first when the link is a guess** — the tag action opens the link chooser with the guessed project highlighted; confirming records the link, then the tag editor opens.
+- Pros: a correct guess costs one Enter and leaves the session with a recorded link it keeps; a wrong guess is caught at the moment a tag would make it durable.
+- Cons: one extra step on every guessed session tagged.
+
+**Refuse, pointing at the link action.**
+- Cons: a detour that reaches the same chooser with nothing gained over opening it directly.
+
+### Journey
+
+The asymmetry decided it: the guess is tolerable because it corrects itself, and a tag does not — so the moment a tag would be written is exactly when a guess has to become a choice. Opening the chooser with the guess highlighted makes the right-guess case nearly free, and turns a guessed session into a recorded one as a side effect, which is the outcome project-link wants for every repair. Refusing was strictly worse than the chooser: the same destination behind an extra hop.
+
+### Decision
+
+**A guessed link goes through the link chooser before anything is tagged.** Tagging from the sessions list on a session whose project is a guess opens the link-to-project chooser with the guessed project highlighted; picking a project (the guess or another) records the session's link, and the tag editor then opens on that project. A session whose project is recorded goes straight to the tag editor. Tagging never writes onto a guessed project.
+
+Sibling check: project-link — Linking From Picker decided the chooser (the projects list, the current project marked and labelled as a guess) and that a picked link replaces the guess for that session; it left how the sessions-list tagging flow invokes it to this topic. Consistent; this is that invocation.
+
+---
+
 ## Summary
 
 ### Key Insights
