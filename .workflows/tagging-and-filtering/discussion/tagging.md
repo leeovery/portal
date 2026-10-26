@@ -292,6 +292,37 @@ Sibling check: project-link — Nested Projects left this question to tagging an
 
 ---
 
+## Keys And Footer
+
+### Context
+
+Three new entry points need keys: tagging a session's project and linking a session to a project (both on the sessions page; project-link left the link action's key to this topic), and opening the Tags list (projects page). The obvious key for tags, `t`, opens the theme panel on both pages (theming-system specification). Taken on the sessions page: Enter, `/`, Space, `s`, `n`, `r`, `k`, `q`, `x`, `t`, `m`, `?`; on the projects page: Enter, `x`, `e`, `/`, `t`, `d`, `n`, `q`, Esc, `?` (`internal/tui/keymap.go`). The footer shows the keys marked core and competes for width. Under `NO_COLOR` the theme key is unavailable — filtered out of the footer and help at the call site — since there is no colour to theme.
+
+`grep -c '\`t\`' README.md docs/theming.md` → README.md 4, docs/theming.md 2 (2026-10-26): the theme key is documented in both.
+
+### Options Considered
+
+**Tags take `t`; theme moves to `c` (colours)** — theme leaves the footer for help only, so the footer keeps its width.
+- Pros: the strong mnemonic goes to the more frequent action — a theme is set once and rarely revisited; tagging recurs.
+- Cons: the user relearns the theme key.
+
+**Theme keeps `t`; tags take `g`.**
+- Cons: a weak mnemonic for the more frequent action.
+
+`#`, the natural tag symbol, was ruled out: on a UK Mac layout it is ⌥3.
+
+### Journey
+
+Frequency decided it: the key with the strong mnemonic belongs to the action used more often, and the theme panel's only cost of moving is the user's own muscle memory. The link action is rare and takes `l`, kept out of the footer.
+
+### Decision
+
+**`t` opens tagging on both pages; the theme panel moves to `c`.** On the sessions page `t` opens the tags-only editor for the highlighted session's project — through the link chooser first when its project is not a saved project (Sessions List Tagging); on the projects page `t` opens the Tags list (Tag Management). `t` takes the theme key's place among the footer's core keys on both pages, and `c` opens the theme panel from help only. The `NO_COLOR` filter that hides the theme key now applies to `c`; `t` stays available there, since tagging needs no colour. The link-to-project action takes `l` on the sessions page, listed in help, not in the footer. README and `docs/theming.md` name `t` as the theme key and change with it.
+
+Sibling check: theming-system (specification) — "Key: `t`" opens the theme panel on Sessions and Projects; that is what ships today, so no correction is owed now — this epic's specification carries the move to `c` as a change to existing behaviour. Project-link — left the link action's key to this topic; consistent.
+
+---
+
 ## Sessions List Tagging
 
 ### Context
