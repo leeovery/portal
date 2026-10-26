@@ -22,7 +22,8 @@
           "summary": "Getting tags onto projects with less effort — suggestions while typing, bulk tagging, tag management and tagging from the sessions list",
           "description": "Covers every way tags are added, changed and removed: suggestions drawn from tags already in use while typing, bulk tagging across several marked projects, managing tags in one place (rename, delete, merge, how many projects carry each), and tagging a session's project without leaving the sessions list. Discovery decided tags stay on projects only, with sessions tagged through their project; open are whether a new project inherits the tags of the project whose folder encloses it (32 of 34 nested projects already match their parent), how case-sensitive tags behave once suggestions and merging put near-duplicates side by side, and which key tagging takes now that t opens the theme panel.",
           "brief_path": "discovery/briefs/tagging.md",
-          "order": 2
+          "order": 2,
+          "brief_incorporated": true
         },
         "filtering": {
           "routing": "discussion",
@@ -92,7 +93,41 @@
           "status": "unstarted"
         },
         "tagging": {
-          "status": "unstarted"
+          "status": "in-progress",
+          "subtopics": {
+            "tag-suggestions": {
+              "status": "pending",
+              "parent": null
+            },
+            "tag-case": {
+              "status": "pending",
+              "parent": null
+            },
+            "tag-management": {
+              "status": "pending",
+              "parent": null
+            },
+            "bulk-tagging": {
+              "status": "pending",
+              "parent": null
+            },
+            "sessions-list-tagging": {
+              "status": "pending",
+              "parent": null
+            },
+            "tag-inheritance": {
+              "status": "pending",
+              "parent": null
+            },
+            "keys-and-footer": {
+              "status": "pending",
+              "parent": null
+            },
+            "surface-design": {
+              "status": "pending",
+              "parent": null
+            }
+          }
         }
       }
     }
