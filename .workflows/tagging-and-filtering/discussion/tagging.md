@@ -193,6 +193,13 @@ The mark-first case is served tag-first at the same cost — open `personal`, ti
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: settled call — the checklist needed an order.*
+
+**Settled by derivation** — not discussed. Determined by project-link's Linking From Picker, whose chooser reuses the projects list exactly as the projects page draws it.
+
+The entries below stand, and the checklist lists the projects in the projects page's order; a tick or untick leaves the row where it is, so the highlight never jumps.
+
+#### 2026-10-26 — revised
 *Trigger: settled call — the checklist needed a save model.*
 
 **Settled by derivation** — not discussed. Determined by the edit screen's existing behaviour: each chip is saved the moment it is added or removed, and closing the screen never discards.
