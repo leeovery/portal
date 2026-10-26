@@ -442,6 +442,18 @@ Sibling check: project-link — Linking From Picker decided the chooser (the pro
 
 ### Key Insights
 
+1. The default keystroke belongs to reuse, never to creation. Five tags after months of use means picking an existing tag is the common case: Enter takes the highlighted suggestion, a new tag takes a deliberate move, case never splits a tag, and Enter on a box the user has not typed into writes nothing.
+2. A tag is the moment a guess must become a choice. A guessed project link corrects itself when the pane moves; a tag written onto it would not — so every session without a saved project passes through the link chooser before anything is tagged, and comes out with a recorded link.
+3. Membership is the thing management and bulk tagging both act on. One Tags list — a count per tag, a checklist per tag — replaced a separate multi-select mode, and shows who carries a tag while it changes.
+4. Removing a tag can remove a project. Project-link keeps a missing project only while it carries a tag, so every tag-removal path that can leave a missing project bare says so before it acts.
+5. The folder layout predicts the user's tagging: 31 of 36 nested projects carry exactly their nearest enclosing project's tags, which makes copy-at-save inheritance right far more often than wrong.
+
 ### Open Threads
 
+- The narrow-width overflow bug (inbox) touches the edit screen, where the suggestions dropdown now floats; discovery left it out of the epic.
+- The theming-system specification and README/`docs/theming.md` describe `t` as the theme key; the move to `c` is this epic's change, carried by its specification.
+
 ### Current State
+
+- Resolved: tag identity ignores case and a tag has one casing on disk; suggestions with ranking, blank-box, chip-edit, carried-tag, scrolling and placement rules; a Tags list off the projects page with rename-merge, delete and per-tag checklists for bulk tagging; a tags-only editor from the sessions list, reached through the link chooser for any session without a saved project; copy-at-save inheritance from the nearest enclosing project; confirmations before a missing project loses its last tag; `t` for tagging, `c` for theme, `l` for link; every new surface designed in Paper.
+- Uncertain: inheritance is the call closest to taste — the user left it to derivation; a nested spike that inherits a tag lingers as a missing project after its folder is deleted.
