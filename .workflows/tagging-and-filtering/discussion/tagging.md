@@ -227,6 +227,13 @@ The mark-first case is served tag-first at the same cost — open `personal`, ti
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: review finding (review-001 F8) — written before bulk tagging was placed, it listed clashes by location: marked sessions on the sessions list sharing a project or carrying guessed links, suggestions having no single project to exclude tags from, and marked projects that already carry (or lack) the tag.*
+
+**Settled by derivation** — not discussed. Determined by the entries below, which place bulk tagging in a tag's checklist: it works on one tag at a time, so suggestions never span several projects, and each row shows that project's current state, so partial overlap is visible rather than resolved behind the user's back (review-001 F8).
+
+The entries below stand, and the sessions list's multi-select keeps its one job, opening several sessions at once; it does not tag. A session's project is tagged from the sessions list one session at a time (Sessions List Tagging), so the guessed-link rule never meets a set of marked sessions.
+
+#### 2026-10-26 — revised
 *Trigger: settled call — the checklist needed an order.*
 
 **Settled by derivation** — not discussed. Determined by project-link's Linking From Picker, whose chooser reuses the projects list exactly as the projects page draws it.
