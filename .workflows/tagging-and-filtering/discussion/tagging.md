@@ -318,6 +318,13 @@ Frequency decided it: the key with the strong mnemonic belongs to the action use
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: settled call — a tag's checklist needed its keys.*
+
+**Settled by derivation** — not discussed. Determined by the checklist being a modal list with no letter actions — so typing can narrow it directly, as project-link's link chooser is narrowed — the checkbox convention for Space, and Esc's behaviour in Portal's filtered lists.
+
+The entries below stand, and in a tag's checklist typing narrows the list, ␣ ticks or unticks the highlighted project, ↑↓ move, and Esc clears a typed filter first and otherwise returns to the Tags list.
+
+#### 2026-10-26 — revised
 *Trigger: settled call — the Tags list needed its keys.*
 
 **Settled by derivation** — not discussed. Determined by the pages the Tags list sits beside: `d` deletes on the projects page, `r` renames on the sessions page, `/` filters every Portal list, and Esc steps back from the edit screen.
