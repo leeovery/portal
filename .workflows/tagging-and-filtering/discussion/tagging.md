@@ -358,6 +358,15 @@ The user set the direction while deciding Tag Suggestions: the look is spiked in
 
 ### Decision
 
+#### 2026-10-26 — revised
+*Trigger: settled call — the new surfaces carry states that the no-colour mode must still show.*
+
+**Settled by derivation** — not discussed. Determined by Portal's standing TUI rule that under `NO_COLOR` every state stays glyph- or letter-backed, never colour-only.
+
+The entry below stands, and every state the new surfaces carry — the highlighted suggestion, ticked and unticked projects, the current-value and already-on-this-project markers, missing projects, the guess label — is shown by a glyph or word as well as any colour, so the no-colour mode loses nothing.
+
+#### 2026-10-26
+
 **Each new surface is designed in Paper, in the existing Portal design file, starting from an existing design.** The surfaces are those listed above. Behaviour — what each surface shows, its markers, its scrolling and placement rules, its keys — is fixed by this discussion; the look is the Paper design's.
 
 ---
