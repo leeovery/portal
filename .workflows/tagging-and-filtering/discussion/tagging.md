@@ -251,6 +251,15 @@ The asymmetry decided it: the guess is tolerable because it corrects itself, and
 
 ### Decision
 
+#### 2026-10-26 — revised
+*Trigger: review finding — "a recorded project goes straight to the tag editor" breaks for a session whose recorded project the user has since deleted (the tag would be written to a project that does not exist), and no rule covered a session with no guess at all (its pane's folder gone or unreadable).*
+
+**Settled by derivation** — not discussed. Determined by the carried-in point that an Unknown session has nowhere to put a tag until it is linked, the rejection of refusing in the entry below (the same destination behind an extra hop), and project-link's Linking From Picker, whose chooser already serves exactly these sessions — "save `<folder>` as a project" for a recorded-but-deleted project or an unsaved guess, the saved projects alone when there is neither (review-001 F6).
+
+The entry below stands, widened: **any session whose project is not a saved project goes through the link chooser before anything is tagged** — a guessed project, a guess that lands on a folder that is not a saved project, a recorded project since deleted, and no project at all. The tag editor then opens on the project picked or saved in the chooser. Only a session whose recorded project is still a saved project goes straight to the tag editor — including a tagged project kept despite its missing folder.
+
+#### 2026-10-26
+
 **A guessed link goes through the link chooser before anything is tagged.** Tagging from the sessions list on a session whose project is a guess opens the link-to-project chooser with the guessed project highlighted; picking a project (the guess or another) records the session's link, and the tag editor then opens on that project. A session whose project is recorded goes straight to the tag editor. Tagging never writes onto a guessed project.
 
 Sibling check: project-link — Linking From Picker decided the chooser (the projects list, the current project marked and labelled as a guess) and that a picked link replaces the guess for that session; it left how the sessions-list tagging flow invokes it to this topic. Consistent; this is that invocation.
