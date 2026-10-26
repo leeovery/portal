@@ -359,6 +359,13 @@ The user set the direction while deciding Tag Suggestions: the look is spiked in
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: settled call — the new surfaces need colours.*
+
+**Settled by derivation** — not discussed. Determined by Portal's closed colour vocabulary: every colour in the picker is one of 19 theme tokens, whose names are a public contract for drop-in theme files, and a token is added only for a genuinely distinct reusable role.
+
+The entries below stand, and the new surfaces use the existing tokens — their rows, highlights, markers, borders and confirmations are roles the existing tokens already serve. No token is added, so no theme file has to change.
+
+#### 2026-10-26 — revised
 *Trigger: settled call — the new surfaces carry states that the no-colour mode must still show.*
 
 **Settled by derivation** — not discussed. Determined by Portal's standing TUI rule that under `NO_COLOR` every state stays glyph- or letter-backed, never colour-only.
