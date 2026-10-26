@@ -101,6 +101,36 @@ Sibling check: filtering, command-line-filters (discovery briefs) — neither sa
 
 ---
 
+## Tag Suggestions
+
+### Context
+
+Adding a tag today means typing it in full into the edit screen's TAGS field (Enter on the `+ add` slot opens a text box; Enter commits it as a chip; Esc discards). Nothing shows which tags already exist, so reusing a tag depends on remembering its exact spelling — and a misremembered spelling silently makes a new tag. Discovery accepted suggestions drawn from the tags already in use across all projects, narrowing as you type. While a tag is being typed, ↑ and ↓ do nothing in that box today (they move between fields only when no text box is open), so they are free to move through a suggestion list.
+
+### Options Considered
+
+The list's content and behaviour were proposed as one shape and stood: it opens as soon as a tag is being typed — before any text — showing tags in use on other projects that this project does not already carry, each with how many projects carry it, most-used first; typing narrows it, matching anywhere in the tag and ignoring case (Tag Case); ↑↓ move through it; it serves editing an existing chip as well as adding one, so replacing one tag with another on a project is a pick, not a retype.
+
+The fork was what Enter does with `fab` typed while `fabric` is listed:
+
+**Enter takes the highlighted suggestion** — the best match is highlighted from the start; creating a new tag means moving to a `+ new tag "fab"` row, present only when the typed text is not already a tag.
+- Pros: the easy keystroke reuses a tag; a near-duplicate takes a deliberate move.
+- Cons: one extra ↓ to create a tag that happens to be a prefix of an existing one.
+
+**Enter adds what was typed** — nothing is highlighted until ↓.
+- Pros: creating a tag is a keystroke shorter.
+- Cons: `fab` + Enter creates `fab` beside `fabric` — the duplicate trap Tag Case closed for capitals, reopened for prefixes.
+
+### Journey
+
+Reuse is the common case by a wide margin — five tags on the install after months of use — so the default keystroke belongs to it. The user then pushed back on the list showing every tag: with a hundred tags it would run off the bottom of the screen. The list is a scrollable dropdown of bounded height that fits the space available, scrolling for the rest; its look is to be spiked in Paper, in the existing Portal design file, starting from one of the existing designs.
+
+### Decision
+
+**Suggestions open with the tag box, and Enter takes the highlighted suggestion.** While a tag is being typed — added or edited — a dropdown below the box lists the tags in use on other projects that this project does not carry, each with its project count, most-used first, narrowed as the user types by a case-insensitive match anywhere in the tag. The best match is highlighted from the start and Enter adds it; ↑↓ move the highlight. When the typed text is not already a tag, a `+ new tag "…"` row closes the list and is the way to create one; when nothing matches, it is the only row and is highlighted, so Enter creates the tag. The dropdown has a bounded height that fits the space available and scrolls beyond it — it never runs off the screen however many tags exist.
+
+---
+
 ## Tagging a session's project from the sessions list when its project link is a guess
 
 ### Context

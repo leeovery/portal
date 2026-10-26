@@ -96,7 +96,7 @@
           "status": "in-progress",
           "subtopics": {
             "tag-suggestions": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "tag-case": {
