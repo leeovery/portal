@@ -171,6 +171,13 @@ The projects page is the natural parent: tags live on projects, and the page alr
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: review finding (review-001 F7) — deleting a tag everywhere was covered by the entry below, but unticking a missing project's last tag in a checklist, and `x` on its last chip in the edit screen or the sessions-list tag editor, would also leave it untagged, and the next housekeeping pass would remove it with nothing said.*
+
+**Settled by derivation** — not discussed. Determined by project-link's Renamed Or Moved Folders (a missing project is kept only because it carries a tag — the user's work — and removal is housekeeping's, the same on every path) and the entry below's rule that the loss is shown before it happens (review-001 F7).
+
+The entries below stand, and every way of removing a missing project's last tag says so first. Unticking its last tag in a checklist, or `x` on its last chip in the edit screen or the sessions-list tag editor, asks in one line before removing: the project's folder is gone, and with no tags left Portal will clear the project. Housekeeping still does the clearing, at its next pass — no tag surface removes a project itself, so removal stays on the one path project-link defined. Renames and merges never take a tag off a project and ask nothing.
+
+#### 2026-10-26 — revised
 *Trigger: settled call — tagged projects whose folder has gone carry tags, and removing their last tag hands them to housekeeping.*
 
 **Settled by derivation** — not discussed. Determined by project-link's Renamed Or Moved Folders: tagged projects whose folder disappears are kept and marked missing; untagged ones are removed on every housekeeping path.
