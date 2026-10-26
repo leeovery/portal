@@ -318,6 +318,13 @@ Frequency decided it: the key with the strong mnemonic belongs to the action use
 ### Decision
 
 #### 2026-10-26 — revised
+*Trigger: settled call — the sessions-list tags editor needed its keys.*
+
+**Settled by derivation** — not discussed. Determined by Sessions List Tagging: the editor is the edit screen's TAGS field on its own.
+
+The entries below stand, and the sessions-list tags editor uses exactly the TAGS field's keys: ←→ move between chips, ⏎ on `+ add` starts a tag and on a chip edits it, `x` removes the highlighted chip, Esc closes.
+
+#### 2026-10-26 — revised
 *Trigger: settled call — a tag's checklist needed its keys.*
 
 **Settled by derivation** — not discussed. Determined by the checklist being a modal list with no letter actions — so typing can narrow it directly, as project-link's link chooser is narrowed — the checkbox convention for Space, and Esc's behaviour in Portal's filtered lists.
