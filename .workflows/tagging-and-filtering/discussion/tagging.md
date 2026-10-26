@@ -317,6 +317,15 @@ Frequency decided it: the key with the strong mnemonic belongs to the action use
 
 ### Decision
 
+#### 2026-10-26 — revised
+*Trigger: settled call — the Tags list needed its keys.*
+
+**Settled by derivation** — not discussed. Determined by the pages the Tags list sits beside: `d` deletes on the projects page, `r` renames on the sessions page, `/` filters every Portal list, and Esc steps back from the edit screen.
+
+The entry below stands, and in the Tags list ↑↓ move, ⏎ opens the highlighted tag's checklist (on the `+ new tag` row, starts a new tag), `r` renames, `d` deletes, `/` filters, and Esc returns to the projects page.
+
+#### 2026-10-26
+
 **`t` opens tagging on both pages; the theme panel moves to `c`.** On the sessions page `t` opens the tags-only editor for the highlighted session's project — through the link chooser first when its project is not a saved project (Sessions List Tagging); on the projects page `t` opens the Tags list (Tag Management). `t` takes the theme key's place among the footer's core keys on both pages, and `c` opens the theme panel from help only. The `NO_COLOR` filter that hides the theme key now applies to `c`; `t` stays available there, since tagging needs no colour. The link-to-project action takes `l` on the sessions page, listed in help, not in the footer. README and `docs/theming.md` name `t` as the theme key and change with it.
 
 Sibling check: theming-system (specification) — "Key: `t`" opens the theme panel on Sessions and Projects; that is what ships today, so no correction is owed now — this epic's specification carries the move to `c` as a change to existing behaviour. Project-link — left the link action's key to this topic; consistent.
