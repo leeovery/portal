@@ -119,6 +119,55 @@ Sibling check: command-line-filters (discovery brief) — whether `x --tag work`
 
 ---
 
+## Setting The Filter
+
+### Context
+
+Filter Model made the scope a control of its own; this is the surface the user sets it on. The picker already has one precedent for a side panel over a live page: the theme panel is a slide-over at the right edge, a left border only, opaque over the page, with the page beside it not re-laid out, and it refuses to open below a minimum width (`internal/tui/theme_panel_render.go`, `theme_panel_geometry.go`). Tagging's tag checklist set the other precedent this surface leans on: every tick is written at once, with no save step, and Esc closes.
+
+### Options Considered
+
+**A filter panel, as a slide-over** — opened by a key, at the right edge like the theme panel, with the sessions list visible and updating beside it.
+
+```text
+ Sessions 9 — by project         │ Filter                   any · all
+   folio ··· 3                   │ TAGS
+ ▌ folio-a1b2                    │ ▌ + fabric               14
+   folio-x9y8                    │     acom                  4
+   finder ··· 2                  │   − personal             12
+   …                             │     curated               2
+                                 │ PROJECTS
+                                 │     folio                 3
+                                 │     portal                2
+```
+
+- Pros: every change is seen in the list as it is made; one place holds the whole scope, including any/all and exclusions.
+
+**Gestures on the list** — a key narrows to the highlighted session's project, another hides its tag.
+- Pros: fast for "just this project".
+- Cons: any/all cannot be built from gestures, and each gesture needs its own undo. Could be added later as a shortcut beside the panel.
+
+**A centred modal**, like the edit screen.
+- Cons: it covers the list, so the effect of a change is invisible until it closes.
+
+### Journey
+
+The slide-over won on seeing the effect: the scope is a choice about what the list shows, so the list should be on screen while it is made. The theme panel already established the shape in this picker, and the tag checklist the apply-at-once rule. The user agreed with the slide-over as the main control.
+
+### Decision
+
+**The scope is set in a filter panel that slides in at the right edge, over the sessions list, which stays visible and updates as the scope changes.**
+
+- **What it lists**: the tags carried by live sessions, then the projects with live sessions, each with how many live sessions it holds. A tag or project with no live session is not listed, since choosing it could only empty the list — except one already in the scope, which stays listed so it can be switched off.
+- **Rows**: a tag row is off, included (`+`) or excluded (`−`). What a project row can be — included only, or excluded too — and how several selections combine is open under Any All And Exclude.
+- **Behaviour**: each change applies to the list the moment it is made, with no save step; typing narrows the panel's rows; Esc closes the panel and leaves the scope in place.
+
+The panel's keys are Keys And Footer's; its look, and the chips the scope shows in the header, are Filter Chips'.
+
+Sibling check: tagging (discussion) — the tag checklist writes each tick at once and closes on Esc; the panel follows the same rule for the scope. Theming-system (specification) — the theme panel's slide-over shape is reused, not changed. No overlap.
+
+---
+
 ## Summary
 
 ### Key Insights
