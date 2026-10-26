@@ -112,7 +112,7 @@
               "parent": null
             },
             "sessions-list-tagging": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "tag-inheritance": {

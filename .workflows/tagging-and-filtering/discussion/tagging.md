@@ -219,6 +219,35 @@ The entry below stands, and each tick or untick in a tag's checklist is written 
 
 ---
 
+## Sessions List Tagging
+
+### Context
+
+Discovery accepted tagging a session's project from the sessions list, "without going to the projects edit screen" — today that means leaving for the projects page, finding the project, and opening its edit screen. Which sessions reach the tag editor directly and which go through the link chooser first is decided below (Tagging a session's project from the sessions list when its project link is a guess, widened to every session whose project is not a saved project). What remained open was what the tag editor is: the guessed-link decision says "the tag editor then opens on that project" without saying what the user lands in, whether it removes as well as adds, where Esc returns, and how the user sees which project they are tagging — the Flat view shows nothing of a session's project link.
+
+### Options Considered
+
+**The edit screen's TAGS field on its own, over the sessions list** — the project's tag chips, `+ add` with the suggestions dropdown, `x` to remove a chip; titled with the project's name and folder; Esc returns to the same session row.
+- Pros: the TAGS field's behaviour exactly, so nothing new to learn; the title shows which project is being tagged.
+
+**The full projects edit screen, over the sessions list** — name, aliases and tags.
+- Cons: brings renaming and aliases into a moment that is only about tags; discovery's wording reads as ruling the edit screen out here.
+
+**A single add-a-tag box.**
+- Cons: cannot remove a tag, and shows nothing of what the project already carries.
+
+### Journey
+
+Raised by the background review (review-001 F11). The deciding points were discovery's own wording — tagging from the sessions list without the edit screen — and visibility: since the Flat view shows nothing of which project a session belongs to, the editor's title is where the user sees what they are about to tag. The user accepted the tags-only editor.
+
+### Decision
+
+**Tagging from the sessions list opens a tags-only editor over the list.** It is the edit screen's TAGS field on its own — the project's chips, `+ add` with the suggestions dropdown (Tag Suggestions), `x` to remove the highlighted chip — titled with the project's name and folder, so the user sees which project they are tagging. Changes save as they are made, as on the edit screen. Esc closes it and returns to the same session row. A session whose project is not a saved project reaches it through the link chooser first (below); Esc in the chooser returns to the session row with nothing changed. The key that opens it, and the link action's own key, are Keys And Footer's.
+
+Sibling check: project-link — Linking From Picker decided the chooser and left how sessions-list tagging invokes it to this topic; consistent. Session-tagging-and-grouping (specification) — "Tags are edited from the projects page only, never from a session row", deferred there as an indirect "edit this session's project"; this epic takes up that deferral, as discovery scoped it.
+
+---
+
 ## Tagging a session's project from the sessions list when its project link is a guess
 
 ### Context
