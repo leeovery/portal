@@ -68,6 +68,57 @@ Settled elsewhere and not reopened here: whether a project filter takes in neste
 
 ---
 
+## Filter Model
+
+### Context
+
+The new tag, project and exclusion filters need a place beside the two controls the sessions list already has: the `/` text filter and the `s` grouping cycle. The worked case: an afternoon where only work should show, across 33 live sessions (`tmux list-sessions -F '#{session_name}' | grep -vc '^_portal'` → 33, 2026-10-26). Today that means switching to By Tag and scrolling to the `fabric` heading, or typing `/fabric` — which catches sessions whose recorded folder sits under `~/Code/fabric`, an approximation of the tag rather than the tag. Either way, typing `/folio` to find one session then drops the headings and re-ranks the list flat.
+
+The framing that drove the choice: two different jobs. **Search** (`/`) is "find one session now" — transient: type, pick, gone. **Scope** is "this is my working set for a while" — sticky: it should survive a search, a view switch, perhaps a relaunch.
+
+### Options Considered
+
+**A. Scope apart from search** — the tag/project/exclusion filter is set on its own, stays put, and shows as chips in the header; `/` searches within it and clearing a search leaves the scope alone; `s` arranges whatever is in scope.
+- Pros: each control keeps one lifetime; the scope persists naturally if persistence is wanted; a command-line way to open the picker pre-narrowed has an obvious thing to set.
+- Cons: a new control to learn and to find a key for.
+
+**B. One box with a syntax** — `/` accepts tokens such as `t:fabric -t:personal folio` beside free text; chips are the parsed tokens.
+- Pros: one control; fast to type.
+- Cons: the scope lives and dies with the search box — clearing a search clears the scope; persisting it means opening the picker with text already in the box.
+
+**C. Filter through the grouped views** — in By Tag, hide or isolate tag groups; in By Project, isolate a project.
+- Pros: no new control.
+- Cons: the filter is tied to a view — switching to Flat loses or hides it; "match all" has no group to map onto, since a session with two tags shows under both headings.
+
+```text
+ Sessions 9 — by project    fabric · −personal          / to filter
+   folio ··· 3
+ ▌ folio-a1b2
+   folio-x9y8
+   finder ··· 2
+   …
+```
+
+(Illustration of A only; the chips' look and placement are Filter Chips'.)
+
+### Journey
+
+The deciding point was lifetime: under B a transient search wipes out a lasting choice, and under C the choice depends on which view is showing. The question put to the user was whether they reach for filtering mostly as "find one session" — which would have favoured B's single box. They agreed with A.
+
+### Decision
+
+**The tag and project filter is a scope, separate from the `/` search and from the `s` grouping cycle.** Three independent controls:
+
+- **Scope** — which sessions are in the list at all: tags included or excluded, a project. It stays in place until the user changes it, and is shown as chips in the header.
+- **Search** (`/`) — finds sessions within the scope, as today; clearing the search returns to the scoped list, never to the unscoped one.
+- **Arrangement** (`s`) — Flat, By Project or By Tag over whatever is in scope; switching views leaves the scope as it is.
+
+How the scope is set is Setting The Filter's; whether it survives a relaunch is Filter Persistence's.
+
+Sibling check: command-line-filters (discovery brief) — whether `x --tag work` opens the picker narrowed is open there; a scope separate from the search box gives that flag something to set without pre-filling `/`, as `-f` does. No overlap.
+
+---
+
 ## Summary
 
 ### Key Insights

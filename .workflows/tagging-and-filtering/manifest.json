@@ -148,7 +148,7 @@
           "status": "in-progress",
           "subtopics": {
             "filter-model": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "any-all-and-exclude": {
@@ -180,6 +180,10 @@
               "parent": null
             },
             "filter-chips": {
+              "status": "pending",
+              "parent": null
+            },
+            "setting-the-filter": {
               "status": "pending",
               "parent": null
             }
