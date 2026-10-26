@@ -86,6 +86,15 @@ The history reframed discovery's open question: the deliberate choice was displa
 
 ### Decision
 
+#### 2026-10-26 — revised
+*Trigger: settled call — case-insensitive identity left unsaid which casing shows when two casings of one tag are already on disk.*
+
+**Settled by derivation** — not discussed. Determined by the case-insensitive identity below and the paths that can still put two casings on disk: a hand edit of `projects.json`, and project-link's merges (re-pointing a project at a folder that is already a project, and two spellings of one folder becoming one project), which combine two projects' tags.
+
+The entry below stands. Where two casings of one tag are already on disk — `Work` on one project, `work` on another — they are one tag, shown in the casing carried by more projects; a tie keeps the casing of the most recently used project. Any project that gains the tag afterwards takes that casing.
+
+#### 2026-10-26
+
 **One tag whatever the case, shown in the casing it was first written with.** Tag identity ignores case everywhere a tag is compared — adding a tag to a project, suggestions, grouping, tag management, and tag filters. Typing a tag that matches an existing one in another case adds the existing tag, in its existing casing. Changing a tag's casing everywhere (`work` → `Work`) is an ordinary rename in tag management, never a merge. The user's casing is still shown as written — the June fix's aim stands; only its side effect is dropped.
 
 Sibling check: filtering, command-line-filters (discovery briefs) — neither says how a tag filter or `x --tag` treats case; both compare tags, so they inherit this identity. No overlap.
