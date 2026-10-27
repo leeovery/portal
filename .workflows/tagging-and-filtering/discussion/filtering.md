@@ -109,7 +109,7 @@ The deciding point was lifetime: under B a transient search wipes out a lasting 
 
 **The tag and project filter is a scope, separate from the `/` search and from the `s` grouping cycle.** Three independent controls:
 
-- **Scope** — which sessions are in the list at all: tags included or excluded, a project. It stays in place until the user changes it, and is shown as chips in the header.
+- **Scope** — which sessions are in the list at all: tags and projects, included or excluded (Project Filter). It stays in place until the user changes it, and is shown as chips in the header.
 - **Search** (`/`) — finds sessions within the scope, as today; clearing the search returns to the scoped list, never to the unscoped one.
 - **Arrangement** (`s`) — Flat, By Project or By Tag over whatever is in scope; switching views leaves the scope as it is.
 
@@ -200,6 +200,46 @@ The fork was how a tag pick and a project pick combine, worked on `fabric` inclu
 How exclusions and inclusions settle against each other on one session is Any All And Exclude's.
 
 Sibling check: project-link — Nested Projects decided a project filter matches that project's sessions alone; consistent, a picked project takes in no project nested inside it. Linking From Picker tells same-named projects apart by their folder; the panel does the same. Command-line-filters (discovery brief) — whether a project can be named on the command line the same way is open there; no overlap.
+
+---
+
+## Any All And Exclude
+
+### Context
+
+Discovery accepted narrowing to one or more tags "with a choice between matching any of them and matching all of them", and excluding a tag. Raised by the background review (review-001 F6): any/all, and some exclusion outcomes, make a difference only when a session's project carries more than one tag, and none does on the install —
+
+`jq '[.projects[]|select((.tags//[])|length>1)]|length' ~/.config/portal/projects.json` → 0; `jq -r '.projects[].tags[]?' ~/.config/portal/projects.json | sort | uniq -c | sort -rn` → 27 personal, 22 fabric, 5 acom, 3 curated, 2 detaillab (2026-10-27)
+
+— so "all" of two different tags would return nothing today. Two-tag projects become likely once families are tags (project-link's Nested Projects: folio, folio/api and folio/sdk carrying a `folio` tag on top of `fabric`). Open were: the concrete case "all" serves; whether any/all applies to excluded tags; which wins when one session matches both an inclusion and an exclusion; and which headings By Tag shows under a scope.
+
+### Options Considered
+
+**Keep "match all"** — the panel carries an any/all switch; "fabric + api" would show only fabric's API projects.
+- Pros: serves tags along two independent lines — who a project is for (`fabric`, `acom`) and what kind it is (`api`, `infra`, `frontend`).
+- Cons: along a single line of tags it never helps — "fabric and folio" gives exactly what `folio` alone gives, since the family sits inside the client.
+
+**Drop "match all"** — every included tag or project widens the list; no switch.
+- Pros: the panel and its chips carry no mode; the one combination with a real case today ("fabric or acom") is the only one there is.
+- Cons: a second line of tags, if it ever appears, has no "both" until the switch is added.
+
+### Journey
+
+Three of the four questions had one defensible shape and were proposed as such: "except archive and personal" never means "only when it carries both", so exclusions hide on any excluded tag; "except" reads as the last word, so an exclusion beats an inclusion on the same session; and Filter Model made the arrangement independent of the scope, so By Tag shows each in-scope session under all its tags, as it does unscoped. A session tagged `fabric` and `folio` under a `fabric` scope therefore also appears under `folio` — every session under that heading is in scope, so the heading is accurate rather than a leak.
+
+The live question was whether "all" earns its place. Asked whether they tag, or would, along a second line, the user saw some value in a client line crossed with a kind line (infra, backend, frontend) but judged it unlikely: their tags name clients, project families and personal work, which run along one line rather than crossing. Along one line "all" is redundant with the narrower tag. What tipped it: adding the switch later is purely additive, so dropping it now loses nothing if a second line ever appears.
+
+### Decision
+
+**Every inclusion widens the list; exclusions hide; exclusion has the last word. There is no "match all".** (resolves review-001 F6)
+
+- With nothing included, the list holds every session; with anything included, it holds the sessions that carry any included tag or sit in any included project.
+- An excluded tag or project hides every session carrying that tag or sitting in that project, whatever else the scope includes.
+- By Tag arranges the in-scope sessions under all their tags, exactly as it does with no scope.
+
+This moves discovery's accepted any/all choice: the "all" half is dropped because the user's tags run along a single line, and it can be added later as a switch on the panel without changing anything decided here.
+
+Sibling check: command-line-filters (discovery brief) — whether the any/all and exclude choices carry over to the command line is open there; with "all" dropped there is only "any" to carry. The brief anticipates this decision; nothing owed. Tagging — Tag Case decided tag filters compare tags ignoring case; consistent.
 
 ---
 

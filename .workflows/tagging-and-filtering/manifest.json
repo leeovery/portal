@@ -152,7 +152,7 @@
               "parent": null
             },
             "any-all-and-exclude": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "grouped-while-filtering": {
