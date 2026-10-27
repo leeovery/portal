@@ -186,6 +186,10 @@
             "setting-the-filter": {
               "status": "decided",
               "parent": null
+            },
+            "project-filter": {
+              "status": "decided",
+              "parent": null
             }
           }
         }

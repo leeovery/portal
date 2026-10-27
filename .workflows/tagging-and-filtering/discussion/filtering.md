@@ -159,12 +159,47 @@ The slide-over won on seeing the effect: the scope is a choice about what the li
 **The scope is set in a filter panel that slides in at the right edge, over the sessions list, which stays visible and updates as the scope changes.**
 
 - **What it lists**: the tags carried by live sessions, then the projects with live sessions, each with how many live sessions it holds. A tag or project with no live session is not listed, since choosing it could only empty the list — except one already in the scope, which stays listed so it can be switched off.
-- **Rows**: a tag row is off, included (`+`) or excluded (`−`). What a project row can be — included only, or excluded too — and how several selections combine is open under Any All And Exclude.
+- **Rows**: a tag row is off, included (`+`) or excluded (`−`). Project rows take the same three states, and picks combine as Project Filter and Any All And Exclude decide.
 - **Behaviour**: each change applies to the list the moment it is made, with no save step; typing narrows the panel's rows; Esc closes the panel and leaves the scope in place.
 
 The panel's keys are Keys And Footer's; its look, and the chips the scope shows in the header, are Filter Chips'.
 
 Sibling check: tagging (discussion) — the tag checklist writes each tick at once and closes on Esc; the panel follows the same rule for the scope. Theming-system (specification) — the theme panel's slide-over shape is reused, not changed. No overlap.
+
+---
+
+## Project Filter
+
+### Context
+
+Raised by the background review (review-001 F7): the scope was described as "tags included or excluded, a project", and nothing said whether several projects can be picked, how a project pick combines with tag picks, whether a project can be excluded, which projects are offered, or how same-named projects are told apart — the install has three `api` projects, two `docman` and two `leeovery` (project-link, Linking From Picker). Which projects are offered was already settled by Setting The Filter: those with live sessions, plus any already in the scope.
+
+### Options Considered
+
+The fork was how a tag pick and a project pick combine, worked on `fabric` included under TAGS and `portal` — a personal project — picked under PROJECTS because it is the one personal thing on the go that afternoon:
+
+**Either** — the 14 fabric sessions plus the 2 portal ones.
+- Pros: the afternoon the user wanted: work, plus one named exception.
+
+**Both** — sessions tagged `fabric` that are also in `portal`.
+- Cons: none, since portal is tagged personal. In general a project either carries the tag — "both" then gives that project alone, which picking the project alone already gives — or it does not, and "both" gives nothing.
+
+### Journey
+
+"Both" was degenerate rather than merely weaker: a project's tags are fixed at any moment, so intersecting a project with a tag can only return the project or nothing. The remaining questions each had one defensible shape: a session belongs to exactly one project, so several picked projects can only mean any of them; excluding a project costs nothing beyond what excluding a tag costs and keeps every row in the panel behaving alike ("everything except the four flowx sessions" is one row); and the link chooser already tells same-named projects apart by folder. Proposed as one shape and accepted by the user.
+
+### Decision
+
+**Project picks add to tag picks.** (resolves review-001 F7)
+
+- A project pick and a tag pick combine as "either": a session is in when it matches the tag picks or is in a picked project.
+- Several projects can be picked, and a session is in when it is in any of them.
+- A project row can be excluded as a tag row can; every row in the panel takes the same three states.
+- Where two listed projects share a name, the panel shows each one's folder, as the link chooser does. How a chip names such a project is Filter Chips'.
+
+How exclusions and inclusions settle against each other on one session is Any All And Exclude's.
+
+Sibling check: project-link — Nested Projects decided a project filter matches that project's sessions alone; consistent, a picked project takes in no project nested inside it. Linking From Picker tells same-named projects apart by their folder; the panel does the same. Command-line-filters (discovery brief) — whether a project can be named on the command line the same way is open there; no overlap.
 
 ---
 
