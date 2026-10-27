@@ -172,7 +172,7 @@
               "parent": null
             },
             "sessions-without-a-project": {
-              "status": "pending",
+              "status": "decided",
               "parent": null
             },
             "keys-and-footer": {

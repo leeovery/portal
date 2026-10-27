@@ -243,6 +243,39 @@ Sibling check: command-line-filters (discovery brief) — whether the any/all an
 
 ---
 
+## Sessions Without A Project
+
+### Context
+
+Discovery carried in that sessions with no project drop out of any tag or project filter, so filtering is only as reliable as the session-to-project link. Since then project-link decided how that link is made and repaired — sessions with no record keep a live guess of their project, `l` links any session to a project, and the reboot bugfix restores the recorded link before this epic's implementation — so the reliability concern itself is settled ground. Raised by the background review (review-001 F3): the carried-in wording holds only for inclusions. Under an exclusion such as "everything except personal", a session with no project and a session whose project carries no tag both stay in the list, since neither carries `personal` — which is the right reading of "except" under Any All And Exclude. What was left open was whether the user can scope to these sessions directly.
+
+The grouped views already gather them: By Project puts sessions whose project is not a saved project under **Unknown**, and By Tag puts sessions carrying no tag — whether their project has none or they have no project at all — under **Untagged** (`sed -n '/^func resolveSessionTags/,/^}/p' internal/tui/grouping.go` → returns no tags when the session has no folder or its folder matches no saved project, 2026-10-27).
+
+### Options Considered
+
+**A row for each in the panel** — "no project" under PROJECTS and "no tags" under TAGS, each with its count, each included or excluded like any other row.
+- Pros: these are the sessions `l` (link to a project) and `t` (tag a session's project) exist to repair; including "no project" gives the list of sessions waiting to be linked, and excluding it hides the clutter.
+
+**No rows for them**
+- Cons: finding the sessions to repair means switching to a grouped view and scrolling to its catch-all heading.
+
+### Journey
+
+The deciding point was that these two groups are where the repair work comes from: the link and tag actions decided by project-link and tagging act on exactly the sessions the catch-all headings hold. The user agreed.
+
+### Decision
+
+**The filter panel lists "no project" under PROJECTS and "no tags" under TAGS**, each with its live-session count, each taking the same three states as any other row. (resolves review-001 F3)
+
+- "no project" holds the sessions the By Project view puts under Unknown — those whose project, recorded or guessed, is not a saved project, or who have none.
+- "no tags" holds the sessions the By Tag view puts under Untagged — those carrying no tag, a session with no project included.
+- Like any row, each is listed only while it holds a live session or is already in the scope (Setting The Filter).
+- They combine like any other pick (Any All And Exclude): including "no project" adds those sessions; excluding "no tags" hides every untagged session.
+
+Sibling check: project-link — Unrecorded Sessions and Linking From Picker decided the live guess and the `l` action; "no project" lists the sessions that action repairs and changes neither. Tagging — Sessions List Tagging routes any session whose project is not a saved project through the link chooser before tagging; consistent, "no project" is that same set. No overlap.
+
+---
+
 ## Summary
 
 ### Key Insights
