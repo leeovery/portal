@@ -276,6 +276,42 @@ Sibling check: project-link — Unrecorded Sessions and Linking From Picker deci
 
 ---
 
+## What The Filter Hides
+
+### Context
+
+Raised by the background review (review-001 F2): the picker's screens were written for a list with no scope, and three of them mislead once one is set.
+
+- **A search that finds nothing inside the scope.** Filtered to `fabric`, the user types `/goose` to find goosemates, tagged personal. The screen reads `No sessions match "goose"` with "⌫ to widen the search · esc to clear the filter" (`grep -n 'noMatchesHint' internal/tui/filtering_no_matches.go` → `"⌫ to widen the search · esc to clear the filter"`, 2026-10-28). Under Filter Model, Esc clears the search only and lands back on the fabric sessions — goosemates still hidden, and the "find one session fast" job fails without a word.
+- **A scope that matches nothing.** The last session carrying an included tag is killed, or an exclusion removes everything. The list is empty and the empty state reads "No sessions yet" with "Press n to start one in the current directory · x for projects" (`grep -n 'emptySessions' internal/tui/empty_states.go` → `"No sessions yet"`, `"Press n to start one in the current directory · x for projects"`, 2026-10-28), while 33 sessions are running.
+- **The header count.** Nothing said whether the count beside "Sessions" counts the scoped list alone or also tells the user how many are hidden — after a relaunch, if the scope persists, it is the first clue that something is.
+
+### Options Considered
+
+The rule proposed: **the list never hides sessions without saying so** — each of the three screens says the scope is in play and how to get out of it.
+
+The alternative weighed for the no-match case: **let a search look past the scope when nothing inside it matches.**
+- Cons: the user stops being able to tell what the scope is doing — the same search would return scoped results one moment and unscoped ones the next.
+
+### Journey
+
+The deciding point was the failure being silent: under a scope, every one of these screens would point the user the wrong way or tell them something false, while the session they wanted sat one key away. The chips say what the scope is; the count is what says how much it hides. Counting matches outside the scope on the no-match screen was preferred over a bare "searching inside the filter" note because it tells the user whether clearing the scope would help at all. The user accepted the rule.
+
+### Decision
+
+**A scope never hides sessions silently.** (resolves review-001 F2)
+
+- **The header count shows what is hidden.** With a scope set, the count reads as the sessions shown out of the sessions running ("9 of 33"); with no scope, it is the plain count as today.
+- **A search that finds nothing inside the scope but something outside it says so** — how many sessions outside the scope match (`No sessions match "goose" here · 1 outside the filter`, as an illustration) and the key that clears the scope. A search that matches nothing anywhere keeps today's no-match screen.
+- **A scope that matches nothing has its own empty state**, saying nothing is in the filter and how to change or clear it. "No sessions yet" stays for a picker with no sessions at all.
+- A search never looks past the scope on its own.
+
+Wording and look are the Paper design's; the key that clears the scope is Keys And Footer's.
+
+Sibling check: spectrum-tui-design (specification) — the section header carries a count, the no-match screen reads `No sessions match "<query>"` with "⌫ to widen the search · esc to clear the filter", and the empty sessions state reads "No sessions yet"; that is what ships today, so no correction is owed now — this epic's specification carries these as changes to existing behaviour under a scope. Its rule that no match-count is shown while typing a search is untouched: the outside-the-filter count appears only on the no-match screen.
+
+---
+
 ## Summary
 
 ### Key Insights

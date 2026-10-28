@@ -190,6 +190,10 @@
             "project-filter": {
               "status": "decided",
               "parent": null
+            },
+            "what-the-filter-hides": {
+              "status": "decided",
+              "parent": null
             }
           }
         }
