@@ -312,6 +312,39 @@ Sibling check: spectrum-tui-design (specification) — the section header carrie
 
 ---
 
+## Scope Follows Changes
+
+### Context
+
+Raised by the background review (review-001 F5): a scope can name a tag that changes under it, within one sitting. Filtered to `work`, the user presses `x` for the projects page, opens the Tags list, and renames `work` to `client`, merges it into `fabric`, or deletes it — tagging decided all three (Tag Management: a rename changes the tag on every project, renaming into an existing tag merges the two, `d` removes a tag everywhere, and a tag exists only while a project carries it). Back on the sessions page, a scope still holding the old name would show a chip for a tag that no longer exists; as an inclusion it would empty the list, as an exclusion it would bring back the sessions it was hiding with nothing said. A project in the scope meets the same through project-link's re-pointing and merging (Renamed Or Moved Folders).
+
+### Options Considered
+
+**The scope follows the change.**
+- Pros: the user's own rename, merge or delete never quietly breaks their scope.
+
+**The scope keeps the old name.**
+- Cons: a rename the user made elsewhere in Portal silently breaks the scope.
+
+### Journey
+
+Every one of these changes is made inside Portal by the user, so Portal knows what became of the tag and can carry the scope along. The one change it cannot see is a hand edit of the projects file; for that, Setting The Filter already keeps a pick that holds no live session listed in the panel, so it can be switched off. Proposed as one shape; the user accepted it.
+
+### Decision
+
+**A scope follows its tags and projects through every change Portal makes to them.** (resolves review-001 F5)
+
+- A renamed tag stays in the scope under its new name; a tag merged into another becomes that tag in the scope; a deleted tag leaves the scope.
+- A project re-pointed at a new folder stays in the scope; two projects merged become the one in the scope.
+- If the scope persists between launches (Filter Persistence), the saved scope is updated by the same change.
+- A change Portal does not make — a hand edit of the projects file — is not followed: the stale pick stays listed in the panel with no sessions, as any pick already in the scope does, so it can be switched off.
+
+Tag Case already makes the scope compare tags ignoring case, so the casing rewrite on write changes nothing here.
+
+Sibling check: tagging — Tag Management's rename, merge and delete are the changes followed; consistent. Project-link — Renamed Or Moved Folders' re-pointing and merging are the project changes followed; consistent. No overlap.
+
+---
+
 ## Summary
 
 ### Key Insights

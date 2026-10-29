@@ -194,6 +194,10 @@
             "what-the-filter-hides": {
               "status": "decided",
               "parent": null
+            },
+            "scope-follows-changes": {
+              "status": "decided",
+              "parent": null
             }
           }
         }
