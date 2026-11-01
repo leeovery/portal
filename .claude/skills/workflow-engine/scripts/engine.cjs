@@ -28,8 +28,9 @@ const fs = require('fs');
 const path = require('path');
 const { signpost, box, wrapWithPrefix, renderTree, WIDTH } = require('./kernel/render.cjs');
 const { resetDisplayWidth } = require('./kernel/terminal.cjs');
-const { commitPathspecScoped, commitStagedScoped, discoveryScope, OWNED_PATHS } = require('./domain/commit.cjs');
-const { dirtyPaths, stageableSpecs, hasStagedDeletions } = require('./kernel/git.cjs');
+const { commitPathspecScoped, commitAcrossRepos, commitStagedScoped, discoveryScope, OWNED_PATHS } = require('./domain/commit.cjs');
+const { stageableSpecs, hasStagedDeletions, deletedAtHead, onBranch, operationInProgress, addRefused } = require('./kernel/git.cjs');
+const { projectRepos, repoOf, repoPath, repoName, commitGroups, projectDirtyEntries } = require('./kernel/repos.cjs');
 const { recordSubtopicAdd, recordSubtopicState, recordSubtopicStates, SUBTOPIC_STATES } = require('./domain/discussion-map.cjs');
 const { recordThreadAdd, recordThreadState, recordThreadStates, recordThreadReframe, recordThreadRemove } = require('./domain/research-threads.cjs');
 const { VALID_ROUTINGS, VALID_THREAD_STATUSES, TERMINAL_STATUSES, isParentExperimentId } = require('./kernel/manifest-schema.cjs');
@@ -48,7 +49,7 @@ const { boot } = require('./domain/boot.cjs');
 const { beatPresence, clearPresence, beatQuietly, refreshQuietly, clearQuietly, scanPresence, scanProject, cleanupPresence, deferralSection, CODE_PHASES } = require('./domain/presence.cjs');
 const { applySessionLabel, restoreSessionLabel, repairSessionLabels, resumeSessionLabel, recordLabelChoice } = require('./domain/session-label.cjs');
 const { markConversation, endConversation } = require('./domain/conversation.cjs');
-const { assertPlace, recordPosition, recordTask, clearTask, positionReads, positionSections } = require('./domain/position.cjs');
+const { assertPlace, recordPosition, recordTask, recordExecutor, clearTask, isAgentId, positionReads, positionSections } = require('./domain/position.cjs');
 const { createWorkUnit } = require('./domain/workunit-create.cjs');
 const { importWorkUnitFiles } = require('./domain/workunit-import.cjs');
 const { completeWorkUnit, cancelWorkUnit, reactivateWorkUnit, pivotWorkUnit } = require('./domain/workunit-lifecycle.cjs');
@@ -60,6 +61,7 @@ const { renderSurface, SURFACES } = require('./domain/render.cjs');
 const { resolveHandoff, handoffSections } = require('./domain/handoff.cjs');
 const roadmap = require('./domain/roadmap.cjs');
 const baseline = require('./domain/baseline.cjs');
+const { subjectSelector, taskSelector, codeLog, selectedDiff, uncommittedDiff, codeStatus } = require('./domain/code.cjs');
 const walkthrough = require('./domain/walkthrough.cjs');
 const roadmapSession = require('./domain/roadmap-session.cjs');
 const { runKnowledge, knowledgeWaits } = require('./domain/knowledge/commands.cjs');
@@ -201,6 +203,7 @@ Commands:
   session resume [session-id]
   conversation end
   conversation position [session-id]
+  conversation executor <session-id> <agent-id>
   topic complete <work-unit> <phase> <topic>
   topic reopen <work-unit> <phase> <topic>
   topic supersede <work-unit> <phase> <topic> --by <topic>
@@ -258,6 +261,10 @@ Commands:
   commit --roadmap -m <message>
   commit --workflows -m <message>
   commit --migrations -m <message>
+  code log    <work-unit> <topic> [--phase <N>]
+  code log    --subject <prefix>
+  code diff   [<work-unit> <topic> [--phase <N>] | --subject <prefix>]
+  code status
   render resume-gate <wu.phase.topic> [--mail N] [--variant plan|review|scoping|session]  (session: bare <wu>)
   render task-list   <wu.planning.topic> --file <payload.json>
   render plan-progress <wu.planning.topic> --variant construction-complete|concluded
@@ -1019,7 +1026,16 @@ function runConversation(call, argv) {
       respondSections(call, positionSections(positionReads(call.cwd, sessionId)));
       return;
     }
-    throw new Error('Usage: engine conversation <end|position> …');
+    if (command === 'executor') {
+      // The gate mod's target, as an executor is dispatched.
+      const [sessionId, agentId] = rest;
+      if (rest.length !== 2 || !sessionId || !isAgentId(agentId)) {
+        throw new Error('Usage: engine conversation executor <session-id> <agent-id> — the agent id letters, digits, - and _ alone');
+      }
+      respond(call, recordExecutor(sessionId, agentId));
+      return;
+    }
+    throw new Error('Usage: engine conversation <end|position|executor> …');
   } catch (err) {
     failJson(call, err);
   }
@@ -1618,7 +1634,8 @@ function runBoot(call) {
 // the discovery session's paths (`--discovery`), the imports home and the
 // manifest that records its entries (`--imports`), a plan's declared storage
 // (`--plan`), or declared code paths (`--paths`). A clean scope is fine:
-// {committed: null}.
+// {committed: null}, and for `--paths`, whose commits are listed per repo,
+// {committed: []}.
 // ---------------------------------------------------------------------------
 
 // Per-phase artifact pathspecs for `commit --topic` — the paths a topic's
@@ -1672,18 +1689,16 @@ function topicStatus(cwd, wu, phase, topic) {
 
 /**
  * Validate one declared code path. Code has no layout to derive a pathspec
- * from, so the paths are Claude's to name — and every one is checked before
- * anything is staged: inside the project, literal (a glob would commit
- * whatever it happened to match), and never a workflow artifact, which has a
- * derived scope of its own.
- * @param {string} cwd @param {string} given
+ * from, so the paths are Claude's to name — each taken literally, so a
+ * routing file (`app/[id]/page.tsx`) is that file and never a pattern — and
+ * every one is checked before anything is staged: inside the project, never
+ * a workflow artifact, which has a derived scope of its own, and committable
+ * in the repo that owns it.
+ * @param {string} cwd @param {import('./kernel/repos.cjs').Repo[]} repos @param {string} given
  * @returns {string} the project-relative path
  */
-function codePathSpec(cwd, given) {
+function codePathSpec(cwd, repos, given) {
   if (given === '' || given === '-') throw new Error(`commit --paths: "${given}" is not a path`);
-  if (/[*?\[\]]/.test(given) || given.startsWith(':')) {
-    throw new Error(`commit --paths: "${given}" is a pattern — name each file literally`);
-  }
   const abs = path.resolve(cwd, given);
   const rel = path.relative(cwd, abs);
   if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
@@ -1693,15 +1708,50 @@ function codePathSpec(cwd, given) {
   if (spec === '.workflows' || spec.startsWith('.workflows/')) {
     throw new Error(`commit --paths: "${given}" is a workflow artifact — those commit by their own scope (--topic/--discovery/--plan)`);
   }
-  // On disk, in the index, or — the case `stageableSpecs` cannot see — gone
-  // from both with its deletion already staged, which is what a `git mv` or
-  // `git rm` leaves behind. The commit door accepts that path; so must the
-  // validator in front of it, or the vanished side of a rename cannot be
-  // named and the commit lands half a move.
-  if (stageableSpecs(cwd, [spec]).length === 0 && !hasStagedDeletions(cwd, spec)) {
+  assertCommittable(repos, spec, given);
+  return spec;
+}
+
+/**
+ * Check a code path in the repo that owns it, so no repo commits while
+ * another's path was always going to fail. On disk or in the index, git
+ * there must stage it. Otherwise its deletion must be staged — what a
+ * `git mv` or `git rm` leaves behind, which the commit door accepts, or the
+ * vanished side of a rename cannot be named and the commit lands half a
+ * move — or be the repo's HEAD commit's own: an earlier run of the same call
+ * landed it before another repo failed, so re-running the call is its retry,
+ * with nothing left to commit there.
+ * @param {import('./kernel/repos.cjs').Repo[]} repos @param {string} spec @param {string} given
+ */
+function assertCommittable(repos, spec, given) {
+  const repo = repoOf(repos, spec);
+  const own = repoPath(repo, spec);
+  if (stageableSpecs(repo.path, [own]).length > 0) {
+    if (addRefused(repo.path, own, repo.heldOut)) {
+      throw new Error(`commit --paths: git in ${repoName(repo)} refuses to stage "${given}" (an ignore rule, or a path beyond a symbolic link)`);
+    }
+  } else if (!hasStagedDeletions(repo.path, own) && !deletedAtHead(repo.path, own)) {
     throw new Error(`commit --paths: "${given}" is neither on disk nor tracked`);
   }
-  return spec;
+}
+
+/**
+ * Check a repo the code commit would commit in — a reached submodule's
+ * parent among them, for its pointer. No merge, cherry-pick, revert or
+ * rebase may be in progress there: the commit would take on its state. And
+ * it must be on a branch: a commit on a detached HEAD (a submodule after
+ * `git submodule update`) is orphaned by the next checkout there. The
+ * operation is asked first, as a rebase detaches HEAD while it runs.
+ * @param {import('./kernel/repos.cjs').Repo} repo
+ */
+function assertCommitsHere(repo) {
+  const open = operationInProgress(repo.path);
+  if (open !== null) {
+    throw new Error(`commit --paths: ${open.operation} is in progress in ${repoName(repo)} (${open.marker}) — finish or abort it there, then run the commit again`);
+  }
+  if (!onBranch(repo.path)) {
+    throw new Error(`commit --paths: ${repoName(repo)} is on a detached HEAD — check out a branch there, then run the commit again`);
+  }
 }
 
 /**
@@ -1725,24 +1775,26 @@ function assertCodeTarget(cwd, target) {
 }
 
 /**
- * The code commit: the declared paths, committed confined under the commit
- * lock, answering with what the working tree still holds. `left_dirty` is the
- * backstop for a forgotten path — every tracked modification and untracked
- * file left outside `.workflows` (a doc session's dirt is its own, and runs
- * concurrently by design).
+ * The code commit: the declared paths, each committed confined in the repo
+ * that owns it under that repo's commit lock, answering with what the
+ * project's repos still hold. `left_dirty` is the backstop for a forgotten
+ * path — every tracked modification and untracked file left outside
+ * `.workflows` (a doc session's dirt is its own, and runs concurrently by
+ * design).
  * @param {string} cwd @param {string[]} paths @param {string} message
  * @param {{workUnit: string, phase: string, topic: string}} target
- * @returns {{committed: string|null, left_dirty: string[], note?: string}}
+ * @returns {{committed: {repo: string, sha: string}[], left_dirty: string[], note?: string}}
  */
 function commitCodePaths(cwd, paths, message, target) {
   assertCodeTarget(cwd, target);
-  const specs = paths.map((p) => codePathSpec(cwd, p));
-  const committed = commitPathspecScoped(cwd, specs, message);
+  const repos = projectRepos(cwd);
+  const groups = commitGroups(repos, paths.map((p) => codePathSpec(cwd, repos, p)));
+  groups.forEach(({ repo }) => assertCommitsHere(repo));
+  const committed = commitAcrossRepos(groups, message);
   beatQuietly(cwd, target.workUnit, target.phase, target.topic);
-  const left = dirtyPaths(cwd).filter((p) => p !== '.workflows' && !p.startsWith('.workflows/'));
-  /** @type {{committed: string|null, left_dirty: string[], note?: string}} */
-  const result = { committed, left_dirty: left };
-  if (committed === null) result.note = 'nothing to commit';
+  /** @type {{committed: {repo: string, sha: string}[], left_dirty: string[], note?: string}} */
+  const result = { committed, left_dirty: projectDirtyEntries(repos).map((e) => e.path) };
+  if (committed.length === 0) result.note = 'nothing to commit';
   return result;
 }
 
@@ -1964,6 +2016,56 @@ function runCommit(call, argv) {
 }
 
 // ---------------------------------------------------------------------------
+// code — the code change, read across every repo in the project
+// (domain/code.cjs). `log` and the selecting `diff` take a topic's task
+// commits by identity, or any commits by subject prefix. `log` and `status`
+// answer the engine's JSON line; the two `diff` forms answer the unified diff
+// itself, empty when there is none, read as `git diff` is read. Nothing is
+// written.
+// ---------------------------------------------------------------------------
+
+const CODE_USAGE = 'Usage: engine code log (<work-unit> <topic> [--phase <N>] | --subject <prefix>) | engine code diff [<work-unit> <topic> [--phase <N>] | --subject <prefix>] | engine code status';
+
+/**
+ * The commits a `code` call selects, or null where it names none.
+ * @param {string[]} args
+ * @returns {import('./domain/code.cjs').Selector|null}
+ */
+function codeSelector(args) {
+  const { opts, lists, positional } = parseArgs(args, [], ['subject', 'phase']);
+  const subjects = lists.subject || [];
+  const phases = lists.phase || [];
+  if (Object.keys(opts).length > 0 || subjects.length > 1 || phases.length > 1
+      || [...subjects, ...phases, ...positional].some((value) => !value)) {
+    throw new Error(CODE_USAGE);
+  }
+  const [subject] = subjects;
+  const [phase] = phases;
+  if (subject !== undefined) {
+    if (positional.length > 0 || phase !== undefined) throw new Error(CODE_USAGE);
+    return subjectSelector(subject);
+  }
+  if (positional.length === 0 && phase === undefined) return null;
+  if (positional.length !== 2 || (phase !== undefined && !/^[1-9][0-9]*$/.test(phase))) throw new Error(CODE_USAGE);
+  return taskSelector(positional[0], positional[1], phase === undefined ? undefined : Number(phase));
+}
+
+/** @param {Call} call @param {string[]} argv */
+function runCode(call, argv) {
+  const [command, ...rest] = argv;
+  try {
+    const selector = codeSelector(rest);
+    const { cwd } = call;
+    if (command === 'log' && selector !== null) respond(call, codeLog(cwd, selector));
+    else if (command === 'diff') call.out(selector === null ? uncommittedDiff(cwd) : selectedDiff(cwd, selector));
+    else if (command === 'status' && selector === null) respond(call, codeStatus(cwd));
+    else throw new Error(CODE_USAGE);
+  } catch (err) {
+    failJson(call, err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // handoff — a move into work (domain/handoff.cjs): the skill and its
 // arguments checked against the table, answered in sections like a render
 // surface's. Nothing is written.
@@ -2101,6 +2203,9 @@ function runCli(call, argv) {
       break;
     case 'commit':
       runCommit(call, rest);
+      break;
+    case 'code':
+      runCode(call, rest);
       break;
     case 'render':
       runRender(call, rest);

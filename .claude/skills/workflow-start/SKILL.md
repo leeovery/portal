@@ -1,7 +1,7 @@
 ---
 name: workflow-start
 disable-model-invocation: true
-allowed-tools: Bash(node .claude/skills/workflow-start/scripts/gateway.cjs), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs), Bash(git status), Bash(git diff)
+allowed-tools: Bash(node .claude/skills/workflow-start/scripts/gateway.cjs *), Bash(node .claude/skills/workflow-engine/scripts/engine.cjs *)
 ---
 
 Unified workflow entry point. Discovers state, shows all active work, and routes to start or continue skills.
@@ -24,7 +24,7 @@ Load **[framework.md](../workflow-shared/references/framework.md)** and follow i
 █▀█░█▀▀░█▀▀░█▀█░▀█▀░▀█▀░█▀▀ █░█░█▀█░█▀▄░█░█░█▀▀░█░░░█▀█░█░█░█▀▀
 █▀█░█░█░█▀▀░█░█░░█░░░█░░█░░ █▄█░█░█░█▀▄░█▀▄░█▀▀░█░░░█░█░█▄█░▀▀█
 ▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀▀▀░▀▀▀ ▀░▀░▀▀▀░▀░▀░▀░▀░▀░░░▀▀▀░▀▀▀░▀░▀░▀▀▀
-                                                        v0.8.16
+                                                        v0.8.18
 ```
 
 > *Output the next fenced block as markdown (not a code block):*

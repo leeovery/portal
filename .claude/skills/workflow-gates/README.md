@@ -226,19 +226,33 @@ Code does, with nothing appended; so does a compaction Claude Code skips. The
 compaction Claude Code computes ahead of time passes through untouched, and
 the compaction that comes reuses it beneath the note.
 
+## How it keeps the task's executor
+
+The implementation phase dispatches one executor agent per task and sends the
+task's later rounds — a fix, a retry, a comment at the gate — to that same
+agent by its id, so it keeps what it learned. In a session that announced, in
+a conversation the engine has marked, when the main loop dispatches
+`workflow-implementation-task-executor`, the mod hands the agent id the
+dispatch answers with, foreground or background, to the engine's
+`conversation executor`, which records it on the position beside the task in
+flight; with no task in flight it records nothing. The id rides with that
+task and goes when the task completes, so a compaction's note names it
+beside the task (``on task 2.3 (internal id `ledger-2-3`), its executor agent
+`aa76bd7f82a2ef3e4` ``) and the next round continues that agent rather than
+dispatching a fresh one. Another agent, a subagent's own dispatch, a dispatch
+that was refused or errored, a plain conversation and a session that did not
+announce record nothing, and whatever the engine answers, the dispatch's
+result is Claude Code's own.
+
 ## Working on it
 
-    npm run typecheck:mod   # tsc against the declarations Claude Code laid
     npm run test:mod        # claude plugin test
 
-Claude Code lays its own build's API declarations into a mod's
-`.claude-plugin/types/` whenever it loads the mod for development, with a
-`tsconfig.json` this mod's own extends; the folder ignores itself. Load the
-mods once in a session — `claude --plugin-dir skills/workflow-gates
---plugin-dir skills/workflow-gates-rows` — before the first typecheck, and
-every load lays them afresh for the Claude Code running; a worktree Claude
-Code creates starts with a copy (`.worktreeinclude`). `test:mod` needs
-none: it runs the suites against the installed Claude Code.
+`test:mod` runs the suites against the installed Claude Code. Claude Code
+lays its own build's API declarations into a mod's `.claude-plugin/types/`
+whenever it loads the mod for development, with a `tsconfig.json` this mod's
+own extends, so an editor reads the mod's types once a session has loaded it;
+the folder ignores itself.
 
 The suites run on Claude Code 2.1.287 or newer, where mods are on by
 default.
