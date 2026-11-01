@@ -18,3 +18,6 @@ diff_exclude = [
     'art/**',         # README screenshot + demo-clip assets (docs, not source)
     'demo/**',        # sandboxed demo-recording harness (Dockerfiles, tapes, scripts)
 ]
+
+[release]
+diff_exclude = ["internal/capture/fixtures.go"]
