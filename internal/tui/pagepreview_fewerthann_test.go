@@ -112,20 +112,20 @@ func TestPreviewFewerThanN_ScrollUpAtTopBoundaryIsSilentNoOp(t *testing.T) {
 	}
 	beforeView := m.viewport.View()
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 
 	if updated.viewport.YOffset() != 0 {
-		t.Errorf("expected YOffset still 0 after Up at top, got %d", updated.viewport.YOffset())
+		t.Errorf("expected YOffset still 0 after k at top, got %d", updated.viewport.YOffset())
 	}
 	if cmd != nil {
-		t.Errorf("expected nil cmd on silent no-op Up at top, got non-nil")
+		t.Errorf("expected nil cmd on silent no-op k at top, got non-nil")
 	}
 	afterView := updated.viewport.View()
 	if afterView != beforeView {
-		t.Errorf("expected viewport content unchanged after Up at top boundary;\nbefore=%q\nafter =%q", beforeView, afterView)
+		t.Errorf("expected viewport content unchanged after k at top boundary;\nbefore=%q\nafter =%q", beforeView, afterView)
 	}
 	if strings.Contains(afterView, previewPlaceholder) {
-		t.Errorf("expected placeholder absent after Up at top; got view=%q", afterView)
+		t.Errorf("expected placeholder absent after k at top; got view=%q", afterView)
 	}
 }
 

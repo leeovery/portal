@@ -67,17 +67,27 @@ func TestPreviewPrecedence_PrevWindowDoesNotAdvanceViewportScrollOffset(t *testi
 	}
 }
 
-func TestPreviewPrecedence_UpScrollsViewportUpwardPassthroughPreserved(t *testing.T) {
-	m, _ := newPreviewModelForPrecedence(t)
+func TestPreviewPrecedence_UpStepsSessionWithoutReachingViewport(t *testing.T) {
+	m, reader := newPreviewModelForPrecedence(t)
 	before := m.viewport.YOffset()
 	if before == 0 {
-		t.Fatalf("setup: expected YOffset > 0 (anchored at bottom), got 0 — Up has nowhere to go")
+		t.Fatalf("setup: expected YOffset > 0 (anchored at bottom), got 0 — a leak to the viewport would be invisible")
 	}
+	tailsBefore := len(reader.calls)
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 
-	if updated.viewport.YOffset() >= before {
-		t.Errorf("expected YOffset to decrease after Up (passthrough to viewport), got %d (was %d)", updated.viewport.YOffset(), before)
+	if updated.viewport.YOffset() != before {
+		t.Errorf("Up reached the viewport: YOffset %d → %d", before, updated.viewport.YOffset())
+	}
+	if len(reader.calls) != tailsBefore {
+		t.Errorf("Up re-read the scrollback in the preview itself; the parent owns the session step")
+	}
+	if cmd == nil {
+		t.Fatal("Up emitted no cmd; want a previewStepSessionMsg")
+	}
+	if step, ok := cmd().(previewStepSessionMsg); !ok || step.delta != -1 {
+		t.Errorf("Up emitted %#v, want previewStepSessionMsg{delta: -1}", step)
 	}
 }
 

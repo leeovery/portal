@@ -27,18 +27,40 @@ func newPreviewModelWithLines(t *testing.T, lineCount int) (previewModel, *recor
 	return m, reader
 }
 
-func TestPreviewScrollsDownOnDownKey(t *testing.T) {
-	m, _ := newPreviewModelWithLines(t, 50)
-	m.viewport.GotoTop()
-	if !m.viewport.AtTop() {
-		t.Fatalf("setup: expected AtTop after GotoTop, got YOffset=%d", m.viewport.YOffset())
+func TestPreviewArrowsLeaveTheScrollbackAlone(t *testing.T) {
+	for _, code := range []rune{tea.KeyUp, tea.KeyDown} {
+		m, _ := newPreviewModelWithLines(t, 50)
+		m.viewport.GotoTop()
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModCtrl})
+		before := m.viewport.YOffset()
+
+		updated, _ := m.Update(tea.KeyPressMsg{Code: code})
+
+		if updated.viewport.YOffset() != before {
+			t.Errorf("arrow %d scrolled the scrollback from %d to %d; ↑/↓ step sessions in the preview", code, before, updated.viewport.YOffset())
+		}
 	}
+}
+
+func TestPreviewCtrlDownPagesDown(t *testing.T) {
+	m, _ := newPreviewModelWithLines(t, 200)
+	m.viewport.GotoTop()
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModCtrl})
+
+	if got, want := updated.viewport.YOffset(), m.viewport.Height(); got != want {
+		t.Errorf("YOffset after ^↓ = %d, want one page (%d)", got, want)
+	}
+}
+
+func TestPreviewCtrlUpPagesUp(t *testing.T) {
+	m, _ := newPreviewModelWithLines(t, 200)
 	before := m.viewport.YOffset()
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl})
 
-	if updated.viewport.YOffset() <= before {
-		t.Errorf("expected YOffset to increase from %d after Down, got %d", before, updated.viewport.YOffset())
+	if got, want := updated.viewport.YOffset(), before-m.viewport.Height(); got != want {
+		t.Errorf("YOffset after ^↑ = %d, want one page up (%d)", got, want)
 	}
 }
 
@@ -49,13 +71,13 @@ func TestPreviewSilentNoOpScrollUpAtTop(t *testing.T) {
 		t.Fatalf("setup: expected YOffset=0 at top, got %d", m.viewport.YOffset())
 	}
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 
 	if updated.viewport.YOffset() != 0 {
-		t.Errorf("expected YOffset still 0 after Up at top, got %d", updated.viewport.YOffset())
+		t.Errorf("expected YOffset still 0 after k at top, got %d", updated.viewport.YOffset())
 	}
 	if cmd != nil {
-		t.Errorf("expected nil cmd on silent no-op Up at top, got non-nil")
+		t.Errorf("expected nil cmd on silent no-op k at top, got non-nil")
 	}
 }
 
@@ -68,10 +90,10 @@ func TestPreviewSilentNoOpScrollDownAtBottom(t *testing.T) {
 	}
 	before := m.viewport.YOffset()
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 
 	if updated.viewport.YOffset() != before {
-		t.Errorf("expected YOffset unchanged at bottom after Down, got %d (was %d)", updated.viewport.YOffset(), before)
+		t.Errorf("expected YOffset unchanged at bottom after j, got %d (was %d)", updated.viewport.YOffset(), before)
 	}
 }
 
@@ -182,15 +204,15 @@ func TestPreviewEmptyContentDownIsNoOp(t *testing.T) {
 		t.Fatalf("setup: expected YOffset=0 on empty content, got %d", m.viewport.YOffset())
 	}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 
 	if updated.viewport.YOffset() != 0 {
-		t.Errorf("expected YOffset=0 after Down on empty content, got %d", updated.viewport.YOffset())
+		t.Errorf("expected YOffset=0 after j on empty content, got %d", updated.viewport.YOffset())
 	}
 
-	updated2, _ := updated.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	updated2, _ := updated.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	if updated2.viewport.YOffset() != 0 {
-		t.Errorf("expected YOffset=0 after Up on empty content, got %d", updated2.viewport.YOffset())
+		t.Errorf("expected YOffset=0 after k on empty content, got %d", updated2.viewport.YOffset())
 	}
 }
 
@@ -206,10 +228,10 @@ func TestPreviewSingleLineContentDownIsNoOp(t *testing.T) {
 		t.Fatalf("setup: expected ok=true, got false")
 	}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 
 	if updated.viewport.YOffset() != 0 {
-		t.Errorf("expected YOffset=0 after Down on single-line content, got %d", updated.viewport.YOffset())
+		t.Errorf("expected YOffset=0 after j on single-line content, got %d", updated.viewport.YOffset())
 	}
 }
 

@@ -49,8 +49,9 @@ func TestPreviewHelpOpensOnQuestionMark(t *testing.T) {
 
 	view := stripANSI(m.View())
 	for _, action := range []string{
-		"Scroll up / down",
+		"Scroll down / up",
 		"Page up / down",
+		"Prev / next session",
 		"Prev / next window",
 		"Next pane",
 		"Attach this pane",
@@ -146,8 +147,10 @@ func TestPreviewHelpConsumesOtherKeysWhileOpen(t *testing.T) {
 		{"right window", tea.KeyPressMsg{Code: tea.KeyRight}},
 		{"tab pane", tea.KeyPressMsg{Code: tea.KeyTab}},
 		{"enter attach", tea.KeyPressMsg{Code: tea.KeyEnter}},
-		{"up scroll", tea.KeyPressMsg{Code: tea.KeyUp}},
-		{"down scroll", tea.KeyPressMsg{Code: tea.KeyDown}},
+		{"up session", tea.KeyPressMsg{Code: tea.KeyUp}},
+		{"down session", tea.KeyPressMsg{Code: tea.KeyDown}},
+		{"k scroll", tea.KeyPressMsg{Code: 'k', Text: "k"}},
+		{"j scroll", tea.KeyPressMsg{Code: 'j', Text: "j"}},
 		{"home top", tea.KeyPressMsg{Code: tea.KeyHome}},
 		{"end bottom", tea.KeyPressMsg{Code: tea.KeyEnd}},
 	}

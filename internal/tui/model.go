@@ -1399,6 +1399,50 @@ func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
 	}
 }
 
+func (m Model) newSessionPreview(session string) (previewModel, bool) {
+	pmodel, ok := NewPreviewModel(session, m.enumerator, m.reader, m.previewAttacher, m.contentWidth(), m.contentHeight())
+	if !ok {
+		return previewModel{}, false
+	}
+	pmodel.th = m.themeState.active
+	pmodel.colourless = m.colourless
+	return pmodel, true
+}
+
+// Steps the preview to the next session in the list's visible order, wrapping as
+// the list's arrows do and skipping group headings. The list cursor moves with
+// it, so a dismiss lands on the session last previewed and the filter is never
+// touched. A session that no longer enumerates is passed over, as Space passes
+// over it; with no other session to open, the preview stays where it is.
+func (m *Model) stepPreviewSession(delta int) {
+	visible := m.sessionList.VisibleItems()
+	n := len(visible)
+	start := m.sessionList.Index()
+	// A late refresh can re-anchor the cursor away from the previewed session.
+	if cur, ok := m.selectedSessionItem(); !ok || cur.Session.Name != m.preview.session {
+		for i, it := range visible {
+			if si, ok := it.(SessionItem); ok && si.Session.Name == m.preview.session {
+				start = i
+				break
+			}
+		}
+	}
+	for step := 1; step < n; step++ {
+		i := ((start+delta*step)%n + n) % n
+		si, ok := visible[i].(SessionItem)
+		if !ok {
+			continue
+		}
+		pmodel, ok := m.newSessionPreview(si.Session.Name)
+		if !ok {
+			continue
+		}
+		m.sessionList.Select(i)
+		m.preview = pmodel
+		return
+	}
+}
+
 // Capture preserveName before calling: m.preview is zeroed in place, so reading
 // m.preview.session afterwards yields an empty string.
 func (m *Model) exitPreviewToSessions(preserveName string) tea.Cmd {
@@ -1773,6 +1817,13 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		captured := m.preview.session
 		refreshCmd := m.exitPreviewToSessions(captured)
 		return m, refreshCmd
+	case previewStepSessionMsg:
+		// A dismiss can land between the key and this message.
+		if m.activePage != pagePreview {
+			return m, nil
+		}
+		m.stepPreviewSession(msg.delta)
+		return m, nil
 	case previewAttachBailMsg:
 		// Batch, not Sequence: the flash must render on the same frame as the
 		// page flip, with list consistency converging a render or two later.
@@ -2601,12 +2652,10 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			pmodel, ok := NewPreviewModel(si.Session.Name, m.enumerator, m.reader, m.previewAttacher, m.contentWidth(), m.contentHeight())
+			pmodel, ok := m.newSessionPreview(si.Session.Name)
 			if !ok {
 				return m, nil
 			}
-			pmodel.th = m.themeState.active
-			pmodel.colourless = m.colourless
 			m.preview = pmodel
 			m.activePage = pagePreview
 			return m, nil

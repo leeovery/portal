@@ -137,7 +137,7 @@ func composePreviewHeaderRow(contentWidth, windowIdx, windowCount, paneIdx, pane
 
 // Descriptor order is the footer's left-to-right order.
 func previewFooterGroups() []footerHintGroup {
-	groups := make([]footerHintGroup, 0, 4)
+	groups := make([]footerHintGroup, 0, 5)
 	for _, e := range previewKeymap() {
 		if !e.Core {
 			continue
@@ -225,7 +225,7 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		groups:     groups,
 		windowIdx:  0,
 		paneIdx:    0,
-		viewport:   viewport.New(viewport.WithWidth(innerW), viewport.WithHeight(innerH)),
+		viewport:   newPreviewViewport(innerW, innerH),
 		width:      width,
 		height:     height,
 		// A zero Theme is silently colourless with no compile error.
@@ -237,6 +237,18 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 	m.viewport = m.readFocusedPaneIntoViewport()
 
 	return m, true
+}
+
+// Plain ↑/↓ belong to the preview's session step, so the viewport's line scroll
+// is j/k alone (the wheel scrolls through its own path, not the keymap), and
+// ^↑/↓ page as they do in the lists.
+func newPreviewViewport(width, height int) viewport.Model {
+	vp := viewport.New(viewport.WithWidth(width), viewport.WithHeight(height))
+	vp.KeyMap.Up.SetKeys("k")
+	vp.KeyMap.Down.SetKeys("j")
+	vp.KeyMap.PageUp.SetKeys("pgup", "ctrl+up", "b")
+	vp.KeyMap.PageDown.SetKeys("pgdown", "ctrl+down", "f")
+	return vp
 }
 
 func (m previewModel) currentGroup() tmux.WindowGroup {
@@ -298,6 +310,12 @@ func (m previewModel) readFocusedPaneIntoViewport() viewport.Model {
 }
 
 type previewDismissedMsg struct{}
+
+// Delta is -1 for the previous session in the list, +1 for the next. The parent
+// owns the session list, so it resolves the step and rebuilds the preview.
+type previewStepSessionMsg struct {
+	delta int
+}
 
 // PreserveName is the session highlighted when preview opened, used to re-anchor
 // the cursor by name. Err is surfaced rather than swallowed so the handler can
@@ -363,6 +381,10 @@ func (m previewModel) handlePreviewKey(msg tea.KeyPressMsg) (handled bool, next 
 		}
 		windowIndex, paneIndex := m.currentRawIndices()
 		return true, m, m.attacher.Run(m.session, windowIndex, paneIndex)
+	case keyIsCode(msg, tea.KeyUp):
+		return true, m, func() tea.Msg { return previewStepSessionMsg{delta: -1} }
+	case keyIsCode(msg, tea.KeyDown):
+		return true, m, func() tea.Msg { return previewStepSessionMsg{delta: +1} }
 	// Tab, not Ctrl+←/→, because macOS Mission Control hijacks the latter.
 	case keyIsCode(msg, tea.KeyTab):
 		return true, m.cyclePane(+1), nil

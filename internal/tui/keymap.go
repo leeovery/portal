@@ -91,12 +91,14 @@ func commandPendingKeymap() []keymapEntry {
 }
 
 // Pane cycling is Tab, not Ctrl+←/→ — macOS Mission Control hijacks Ctrl+←/→
-// for Spaces switching.
+// for Spaces switching. Line scroll is j/k, not ⌘↑/↓: the terminal keeps ⌘↑/↓
+// and tmux drops the ⌘ modifier, so neither would reach Portal.
 func previewKeymap() []keymapEntry {
 	return []keymapEntry{
-		{Key: "↑/↓", Action: "scroll", HelpAction: "Scroll up / down"},
+		{Key: "j/k", Action: "scroll", HelpAction: "Scroll down / up"},
 		{Key: "^↑/↓", Action: "page", HelpAction: "Page up / down"},
 		{Key: "Home/End", Action: "top/bottom", HelpAction: "Jump to top / bottom"},
+		{Key: "↑↓", HelpKey: "↑/↓", Action: "session", HelpAction: "Prev / next session", Core: true},
 		{Key: "←→", Action: "window", HelpAction: "Prev / next window", Core: true},
 		{Key: "⇥", Action: "pane", HelpAction: "Next pane", Core: true},
 		{Key: "⏎", Action: "attach", HelpAction: "Attach this pane", Core: true},

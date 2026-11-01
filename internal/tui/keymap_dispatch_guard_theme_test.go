@@ -427,9 +427,10 @@ func TestKeymapGuard_PageDescriptorsUnchanged(t *testing.T) {
 			"? core=true right=true destructive=false",
 		}},
 		{page: "preview", got: previewKeymap(), want: []string{
-			"↑/↓ core=false right=false destructive=false",
+			"j/k core=false right=false destructive=false",
 			"^↑/↓ core=false right=false destructive=false",
 			"Home/End core=false right=false destructive=false",
+			"↑↓ core=true right=false destructive=false",
 			"←→ core=true right=false destructive=false",
 			"⇥ core=true right=false destructive=false",
 			"⏎ core=true right=false destructive=false",

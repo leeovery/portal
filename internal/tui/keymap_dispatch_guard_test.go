@@ -194,15 +194,24 @@ func TestProjectsDescriptorDispatchParity(t *testing.T) {
 
 func TestPreviewDescriptorDispatchParity(t *testing.T) {
 	probes := map[string]dispatchProbe{
-		"↑/↓": {press: tea.KeyPressMsg{Code: tea.KeyDown}, honour: func(t *testing.T) bool {
-			m := previewGuardModel(t)
-			handled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyDown})
-			return !handled
+		"j/k": {press: tea.KeyPressMsg{Code: 'j', Text: "j"}, honour: func(t *testing.T) bool {
+			return previewKeysScrollApart(t, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: 'k', Text: "k"})
 		}},
-		"^↑/↓": {press: tea.KeyPressMsg{Code: tea.KeyPgDown}, honour: func(t *testing.T) bool {
+		"^↑/↓": {press: tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModCtrl}, honour: func(t *testing.T) bool {
+			return previewKeysScrollApart(t, tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModCtrl}, tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl})
+		}},
+		"↑↓": {press: tea.KeyPressMsg{Code: tea.KeyDown}, honour: func(t *testing.T) bool {
 			m := previewGuardModel(t)
-			handled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
-			return !handled
+			for code, want := range map[rune]int{tea.KeyUp: -1, tea.KeyDown: +1} {
+				handled, _, cmd := m.handlePreviewKey(tea.KeyPressMsg{Code: code})
+				if !handled || cmd == nil {
+					return false
+				}
+				if step, ok := cmd().(previewStepSessionMsg); !ok || step.delta != want {
+					return false
+				}
+			}
+			return true
 		}},
 		"Home/End": {press: tea.KeyPressMsg{Code: tea.KeyHome}, honour: func(t *testing.T) bool {
 			m := previewGuardModel(t)
@@ -252,6 +261,18 @@ func sessionsGuardModel(t *testing.T) Model {
 func previewGuardModel(t *testing.T) previewModel {
 	t.Helper()
 	return newPreviewHelpModel(t, testDarkTheme(t), false)
+}
+
+// Down moves the scrollback off the top and up brings it back: the pair is
+// honoured only if both halves reach the viewport.
+func previewKeysScrollApart(t *testing.T, down, up tea.KeyPressMsg) bool {
+	t.Helper()
+	m, _ := newPreviewModelWithLines(t, 50)
+	m.viewport.GotoTop()
+	m, _ = m.Update(down)
+	moved := m.viewport.YOffset()
+	m, _ = m.Update(up)
+	return moved > 0 && m.viewport.YOffset() < moved
 }
 
 func themeGuardModel(t *testing.T, m Model) Model {

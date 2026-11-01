@@ -8,7 +8,7 @@ import (
 )
 
 func TestPreviewFooterCanonicalByteContent(t *testing.T) {
-	const want = "←→ window  ⇥ pane  ⏎ attach  ␣ back"
+	const want = "↑↓ session  ←→ window  ⇥ pane  ⏎ attach  ␣ back"
 	got := stripANSI(composePreviewFooterRow(200, testDarkTheme(t), false))
 	if got != want {
 		t.Errorf("preview footer = %q, want %q", got, want)
@@ -24,11 +24,11 @@ func TestPreviewFooterNoMiddots(t *testing.T) {
 
 func TestPreviewFooterCompactGlyphsOnly(t *testing.T) {
 	got := stripANSI(composePreviewFooterRow(20, testDarkTheme(t), false))
-	const want = "←→  ⇥  ⏎  ␣"
+	const want = "↑↓  ←→  ⇥  ⏎  ␣"
 	if got != want {
 		t.Errorf("compact preview footer = %q, want %q", got, want)
 	}
-	for _, label := range []string{"window", "pane", "attach", "back"} {
+	for _, label := range []string{"session", "window", "pane", "attach", "back"} {
 		if strings.Contains(got, label) {
 			t.Errorf("compact preview footer must drop labels; found %q in %q", label, got)
 		}
