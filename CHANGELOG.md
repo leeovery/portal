@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.3] - 2026-11-01
+
+✨ Added
+- Mouse and touch support in the picker — wheel, trackpad or swipe moves the highlight through sessions, projects and themes and scrolls the preview, and tapping a row opens it (marks it in multi-select).
+- Three new built-in themes: Nord Wave, GitLab Dark Grey and Horizon — pick them with `t` or pin one in `prefs.json`.
+
+🐛 Fixed
+- Config files that are symlinks (such as into a dotfiles repository) are no longer replaced by regular files when Portal writes to them — the link now survives and the target file is updated.
+
 ## [0.12.2] - 2026-10-08
 
 🔧 Changed
