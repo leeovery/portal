@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -40,6 +41,12 @@ resume-recover)
 esac
 `
 
+// groupSignalDeadline bounds the wait on a parked chain. The chain catches INT,
+// QUIT and TERM, so one that never ends would hold the test until go test's own
+// timeout, whose panic skips every cleanup and leaves the chain's process group
+// running for good.
+const groupSignalDeadline = 30 * time.Second
+
 func TestParkedResumeChain_GroupSignal(t *testing.T) {
 	for _, signal := range []string{"INT", "QUIT"} {
 		t.Run("a SIG"+signal+" to the whole group while the draw runs ends in the recovery tail", func(t *testing.T) {
@@ -48,11 +55,26 @@ func TestParkedResumeChain_GroupSignal(t *testing.T) {
 				t.Fatalf("stage the stub executable: %v", err)
 			}
 
-			parked := exec.Command("/bin/sh", "-c", parkedResumeChain(exe, samplePayload()))
+			ctx, cancel := context.WithTimeout(context.Background(), groupSignalDeadline)
+			defer cancel()
+			parked := exec.CommandContext(ctx, "/bin/sh", "-c", parkedResumeChain(exe, samplePayload()))
 			parked.Env = append(os.Environ(), "CHAIN_SIGNAL="+signal)
 			parked.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			// The whole group, not the shell alone: the draw it started would
+			// outlive it. A shell already reaped answers ErrProcessDone, and its
+			// pid is then nobody's to signal.
+			parked.Cancel = func() error {
+				if err := parked.Process.Signal(syscall.Signal(0)); err != nil {
+					return err
+				}
+				return syscall.Kill(-parked.Process.Pid, syscall.SIGKILL)
+			}
+			parked.WaitDelay = time.Second
 			out, err := parked.Output()
 
+			if ctx.Err() != nil {
+				t.Fatalf("the parked shell was still running after %v; its group was killed (output %q)", groupSignalDeadline, out)
+			}
 			if err != nil {
 				t.Fatalf("the parked shell died: %v (output %q)", err, out)
 			}
