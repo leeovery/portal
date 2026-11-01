@@ -223,7 +223,7 @@ theme that never loads, whatever is inside it.
   capitals, and no leading hyphen (it would read as a flag everywhere a slug is
   typed). There is no length limit.
 - **The extension must be exactly lowercase `.theme`.**
-- **Three slugs are already taken** — the built-ins' own, listed under *The
+- **Six slugs are already taken** — the built-ins' own, listed under *The
   built-in themes* below. `nord.theme` is rejected as `reserved name` however
   good the palette inside it is, and the copy in the workflow below is named
   `nord-lee` for exactly that reason.
@@ -329,15 +329,18 @@ no theme named nord-le
 
 ## The built-in themes
 
-Portal ships three built-in themes:
+Portal ships six built-in themes:
 
 | Slug | Palette |
 |---|---|
 | `tokyo-night` | Tokyo Night — dark |
 | `tokyo-night-day` | Tokyo Night Day — light |
 | `nord` | Nord — dark |
+| `nord-wave` | Nord Wave — dark; Nord on a near-black canvas |
+| `gitlab-dark-grey` | GitLab Dark Grey — dark |
+| `horizon` | Horizon — dark |
 
-**All three slugs are reserved.** A file of your own called `nord.theme` is
+**All six slugs are reserved.** A file of your own called `nord.theme` is
 rejected as `reserved name`: the answer comes from the slug alone, before the
 file is opened, so nothing you write inside it changes the outcome.
 
@@ -351,7 +354,7 @@ The fix is a rename, and it is the line the drop-in workflow already uses:
 portal theme export nord > ~/.config/portal/themes/nord-lee.theme
 ```
 
-Any name outside the three works, provided it keeps to the naming rules above —
+Any name outside the six works, provided it keeps to the naming rules above —
 `nord-lee` is a convention, not a rule. `portal doctor` names both the collision
 and the fix:
 
@@ -473,13 +476,14 @@ default; a present one is your choice.
 
 ## Attribution
 
-Both palettes Portal ships were ported from someone else's work, and they keep
-their own names:
+Every palette Portal ships was ported from someone else's work, and each keeps
+its own name:
 
 | Theme | Source |
 |---|---|
 | `tokyo-night`, `tokyo-night-day` | Tokyo Night — https://github.com/tokyo-night/tokyo-night-vscode-theme |
 | `nord` | Nord — https://www.nordtheme.com/ |
+| `nord-wave`, `gitlab-dark-grey`, `horizon` | The terminal schemes of the same names in iTerm2-Color-Schemes — https://github.com/mbadolato/iTerm2-Color-Schemes (the set Ghostty ships) |
 
 Each file carries the same credit in its header, so an exported copy travels with
 it.
@@ -511,3 +515,22 @@ the band it was measured against, and two (`text.tertiary` and `state.positive`)
 driven by the selected-row band `#D0C6F0` rather than by the canvas — with the
 same kind of `#` comment beside each value, so
 `portal theme export tokyo-night-day` prints them.
+
+### The terminal-scheme ports
+
+`nord-wave`, `gitlab-dark-grey` and `horizon` come from sixteen-colour terminal
+schemes: a foreground, a background and sixteen ANSI colours. Their accents carry
+over as published, but a terminal scheme has no selected-row tint, no warning band,
+and too few greys for Portal's text ramp, so those values are invented on each
+scheme's own hues and measured against the same floors as every other built-in.
+
+- **`nord-wave`** is Nord on the scheme's `#212121` canvas. The darker canvas
+  moves the surfaces one step down Nord's own dark greys, and leaves Nord's
+  green legible on the selected row, so it ships as published. Nord's red still
+  falls short on this canvas and ships corrected, by a smaller margin than the
+  `nord` built-in needs.
+- **`gitlab-dark-grey`** and **`horizon`** ship with no value corrected: every
+  colour taken from the scheme clears its floor as published.
+
+Each invented value carries its derivation as a `#` comment beside it, so
+`portal theme export <slug>` prints it.

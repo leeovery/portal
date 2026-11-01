@@ -1,0 +1,55 @@
+# GitLab Dark Grey — https://github.com/mbadolato/iTerm2-Color-Schemes
+#
+# A sixteen-colour terminal scheme on a neutral #222222 canvas, ported onto
+# Portal's 19 roles. Every accent is the scheme's own colour and clears its
+# floor on this canvas, so nothing is corrected. The scheme holds only three
+# greys — #FFFFFF, #BFBFBF and #666666 — so the middle of the text ramp and every
+# surface but the canvas are invented. 10 values come straight from the scheme,
+# eight are invented, and text.on-selection #FFFFFF is a contrast choice.
+# 10 + 8 + 1 = 19. Ratios are WCAG, against #222222 unless the note beside a
+# value names another surface.
+
+# Text ramp, bright to faint.
+# The scheme's foreground: 15.91.
+text.primary = #FFFFFF
+# Invention 1 of 8. A neutral step between white and #BFBFBF: 12.05.
+text.secondary = #E0E0E0
+# The scheme's cursor-text grey: 8.65.
+text.tertiary = #BFBFBF
+# Invention 2 of 8. Neutral grey at 4.61, just over the 4.50 normal-text floor.
+text.muted = #8A8A8A
+# Invention 3 of 8. Neutral grey at 3.21, inside the 3.00-4.49 band. The
+# scheme's bright black #666666 measures 2.77 and cannot serve it.
+text.subtle = #707070
+# Invention 4 of 8. Neutral grey at 2.00. #666666 sits too close to text.subtle
+# to read as a further step down.
+text.faint = #515151
+text.on-selection = #FFFFFF
+
+# Accents and states.
+# The scheme's selection colour, its one violet: 6.25.
+accent.primary = #AD95E9
+accent.key = #7FB6ED
+accent.mode = #32C5D2
+# The scheme's orange-yellow: 6.28, and 4.63 on the selected row.
+accent.attention = #D99530
+# 6.44 against the canvas, 4.74 on the selected row.
+state.positive = #52B87A
+state.destructive = #F57F6C
+
+# Surfaces, and the text drawn on the attention surface.
+canvas = #222222
+# Invention 5 of 8. A 17% blend of the scheme's violet selection colour into the
+# canvas: a fill of 1.36, kept light enough that state.positive still clears
+# 4.50 on it.
+bg.selection = #3A3644
+# Invention 6 of 8. An 8% blend of accent.attention into the canvas: a fill of
+# 1.14, inside the whisper band of Portal's other warning tints (1.11-1.20).
+bg.attention = #312B23
+# Invention 7 of 8. Neutral grey, a fill of 1.26.
+bg.subtle = #333333
+# Invention 8 of 8. Neutral grey at 1.71, clear of both the selection tint and
+# bg.subtle.
+border = #474747
+# The scheme's bright yellow, warm to match the band: 8.05 on it.
+text.on-attention = #E9BE74

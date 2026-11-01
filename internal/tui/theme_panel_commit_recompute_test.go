@@ -50,14 +50,14 @@ func TestPanelRecompute_RowDisappearsOnConstantCommit(t *testing.T) {
 	themetest.Write(t, dir, "sunset.theme", themetest.MonochromeLines("#101010"))
 	m, _, persister := newRecomputePanelModel(t, dir, theme.RawKeys{Light: "ghost", Dark: "sunset"})
 
-	requireRowLabels(t, m, "ghost", "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireCursorOn(t, m, "sunset")
 
 	m, _ = pressCommitKey(t, m)
 
 	requireCommitted(t, persister, "sunset")
 	requireConstantKeys(t, m, "sunset")
-	requireRowLabels(t, m, "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireCursorOn(t, m, "sunset")
 }
 
@@ -81,12 +81,12 @@ func TestPanelRecompute_RowAppearsForNewlyLiveSlot(t *testing.T) {
 	keys := theme.RawKeys{Theme: "sunset", Light: "ghost", Dark: "sunset"}
 	m, _, _ := newRecomputePanelModel(t, dir, keys)
 
-	requireRowLabels(t, m, "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireCursorOn(t, m, "sunset")
 
 	m = commitSlotForTest(t, m, keys.Dark, theme.MemberDark)
 
-	requireRowLabels(t, m, "ghost", "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	ghost := themePanelRowFor(t, m, "ghost")
 	if ghost.Row.Selectable() {
 		t.Error("the minted `ghost` row is selectable; a slug with no file and no built-in is unselectable with its reason")
@@ -102,11 +102,11 @@ func TestPanelRecompute_ReSortsThroughTheComparator(t *testing.T) {
 	keys := theme.RawKeys{Theme: "sunset", Light: "prism", Dark: "sunset"}
 	m, _, _ := newRecomputePanelModel(t, dir, keys)
 
-	requireRowLabels(t, m, "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 
 	m = commitSlotForTest(t, m, keys.Dark, theme.MemberDark)
 
-	requireRowLabels(t, m, "nord", "prism", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "prism", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 }
 
 func renderRecomputePanel(m Model) string {
@@ -156,7 +156,7 @@ func TestPanelRecompute_ReadsNothing(t *testing.T) {
 		dir := t.TempDir()
 		themetest.Write(t, dir, "sunset.theme", themetest.MonochromeLines("#101010"))
 		m, enumerator, persister := newRecomputePanelModel(t, dir, theme.RawKeys{Light: "ghost", Dark: "sunset"})
-		requireRowLabels(t, m, "ghost", "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+		requireRowLabels(t, m, "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 
 		if err := os.RemoveAll(dir); err != nil {
 			t.Fatalf("remove the themes directory: %v", err)
@@ -164,7 +164,7 @@ func TestPanelRecompute_ReadsNothing(t *testing.T) {
 		m, _ = pressCommitKey(t, m)
 
 		requireCommitted(t, persister, "sunset")
-		requireRowLabels(t, m, "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+		requireRowLabels(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 		if enumerator.opens != 1 {
 			t.Errorf("the commit ran %d enumerations in total, want the single one the open performed — enumeration is pinned to panel OPEN, and a commit changes prefs rather than the directory", enumerator.opens)
 		}
@@ -187,7 +187,7 @@ func TestPanelRecompute_ReadsNothing(t *testing.T) {
 
 		m = commitSlotForTest(t, m, keys.Dark, theme.MemberDark)
 
-		requireRowLabels(t, m, "ghost", "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+		requireRowLabels(t, m, "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 		after, err := os.ReadFile(prefsFile)
 		if err != nil {
 			t.Fatalf("read back prefs: %v", err)
@@ -225,7 +225,7 @@ func TestPanelRecompute_DoesNotApplyTheme(t *testing.T) {
 	m, _ = pressCommitKey(t, m)
 
 	requireCommitted(t, persister, "sunset")
-	requireRowLabels(t, m, "aurora", "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "aurora", "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	if m.themeState.active != previewed {
 		t.Errorf("the recompute rendered canvas %s, want the previewed %s left alone — the re-resolution is for the badges, never for selecting a new active member", m.themeState.active.Canvas.Value, previewed.Canvas.Value)
 	}
@@ -243,13 +243,13 @@ func TestPanelRecompute_CursorAnchoredByIdentity(t *testing.T) {
 	requireCursorOn(t, m, "sunset")
 	previewed := m.themeState.active
 	before := m.themePanel.list.Index()
-	if before != 1 {
-		t.Fatalf("fixture: the cursor opened at index %d, want 1 — the inserted row must land above it", before)
+	if before != 4 {
+		t.Fatalf("fixture: the cursor opened at index %d, want 4 — the inserted row must land above it", before)
 	}
 
 	m = commitSlotForTest(t, m, keys.Dark, theme.MemberDark)
 
-	requireRowLabels(t, m, "ghost", "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireCursorOn(t, m, "sunset")
 	if got := m.themePanel.list.Index(); got != before+1 {
 		t.Errorf("the cursor sits at index %d, want %d — the inserted row pushed `sunset` down and the anchor followed the IDENTITY", got, before+1)
