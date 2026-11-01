@@ -181,6 +181,7 @@ func fixtureBuilders() []func() *Fixture {
 		themePanelCommitFailedFixture,
 		themePanelMinHeightMessageFixture,
 		previewScreenFixture,
+		previewLongScrollbackFixture,
 		loadingScreenFixture,
 		loadingErrorFixture,
 	}
@@ -854,6 +855,19 @@ func previewScreenFixture() *Fixture {
 		enumeratorGroups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}}},
 		captureKeys:      []tea.KeyPressMsg{{Code: tea.KeySpace}},
 	}
+}
+
+// Overflows any terminal, so the preview's scrolling — keys and swipe alike —
+// has somewhere to go in the live view. Numbered lines make each step visible.
+func previewLongScrollbackFixture() *Fixture {
+	fx := previewScreenFixture()
+	fx.name = "preview-long-scrollback"
+	var b strings.Builder
+	for i := 1; i <= 300; i++ {
+		fmt.Fprintf(&b, "%3d  build step %d complete\n", i, i)
+	}
+	fx.scrollback = b.String()
+	return fx
 }
 
 func loadingScreenFixture() *Fixture {

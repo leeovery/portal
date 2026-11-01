@@ -67,6 +67,8 @@ func capturedStates() []capturedStateWant {
 		{fixture: "projects", page: tui.PageProjects, present: []string{"flow-v1-api", "Projects"}},
 		{fixture: "projects-command-pending", page: tui.PageProjects, present: []string{"flow-v1-api", "Pick a project to run", "npm run dev"}},
 		{fixture: "preview-screen", present: []string{"aviva-proxy-qNyfEO", "Window 1/1", "kubectl rollout"}},
+		// The preview opens at the bottom of the buffer, so the top of it is off the frame.
+		{fixture: "preview-long-scrollback", present: []string{"aviva-proxy-qNyfEO", "Window 1/1", "300  build step 300 complete"}, absent: []string{"  1  build step 1 complete"}},
 		{fixture: "loading-screen", page: tui.PageLoading, present: []string{"Restoring sessions", "8", "12"}},
 		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to set @portal-restoring marker"}},
 	}

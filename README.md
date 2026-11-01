@@ -340,6 +340,8 @@ Navigation is **arrows only** (no vim or page-jump aliases). Press **`?`** on an
 | `?` | Show the full keymap for the current page |
 | `q` / `Esc` | Quit (`Esc` clears an active filter first) |
 
+**Mouse and touch.** The picker reads the mouse, so a wheel, a trackpad, or a swipe on a touch terminal moves the highlight through the sessions, projects and theme lists and scrolls the preview. Tapping a session or project row opens it, as `Enter` would; in multi-select a tap marks the row instead, as `m` would. Selecting text while the picker is open takes your terminal's mouse-override modifier, such as `Shift`-drag in Ghostty.
+
 The TUI has three views: session list, project picker, and scrollback preview. It paints its own canvas in the colours of the active theme — press `t` for the theme picker, or name a theme in `prefs.json` (see [Configuration](#configuration) and [docs/theming.md](docs/theming.md)); `NO_COLOR` gives a colourless render.
 
 A session row ends in up to two status dots, packed to the right: the attached dot when a client is attached to the session, and a warm-coloured pending dot when any pane in it is waiting on its [resume panel](#resume-panel). Under `NO_COLOR` they render as `A` and `P` in the same cells. The `?` help on the sessions list carries the legend.

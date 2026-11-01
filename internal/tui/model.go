@@ -372,6 +372,10 @@ type Model struct {
 	editCursor    int
 	editIsNewChip bool // the live chip is brand-new (vanishes on Esc-discard)
 
+	// The row a pointer press landed on, awaiting its release (pointer.go).
+	tapPress   tapTarget
+	tapPressed bool
+
 	// A non-blanking overlay, unlike the modals above. While closed, the composed
 	// frame is byte-identical to a model with no panel at all.
 	themePanel themePanel
@@ -1828,6 +1832,12 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, nil
 	}
 
+	// Ahead of the slide-over and page arms: a wheel step re-enters Update as an
+	// arrow press, so it reaches whichever of them owns the keyboard.
+	if pointer, ok := msg.(tea.MouseMsg); ok {
+		return m.updatePointer(pointer)
+	}
+
 	// The open slide-over owns the keyboard, so its arm sits ahead of the page
 	// dispatch. Only key input is intercepted — resizes and refreshes must keep
 	// reaching the model beneath, which stays live and visible.
@@ -2931,6 +2941,10 @@ func (m Model) View() tea.View {
 	}
 	v := tea.NewView(m.fillCanvas(m.viewString()))
 	v.AltScreen = true
+	// Pointer input (pointer.go). Without it a terminal keeps a swipe for its own
+	// scrollback, which the alt screen has none of, and tmux drops the wheel for
+	// a pane that never asked for the mouse.
+	v.MouseMode = tea.MouseModeCellMotion
 	// Under NO_COLOR the terminal keeps its native bg: leaving BackgroundColor
 	// nil completes the canvas suppression.
 	if m.colourless {
