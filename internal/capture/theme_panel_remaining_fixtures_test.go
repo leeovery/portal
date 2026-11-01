@@ -31,7 +31,7 @@ func allPanelFixtureNames() []string {
 const (
 	minimumPanelTermWidth = 28
 
-	dirUnreadablePanelTermHeight = 16
+	dirUnreadablePanelTermHeight = 18
 )
 
 func panelFrameAt(t *testing.T, fixture string, palette theme.Theme, w, h int) string {

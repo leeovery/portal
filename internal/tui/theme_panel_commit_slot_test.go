@@ -151,7 +151,7 @@ func TestPanelSlotCommit_OtherSlotSurvives(t *testing.T) {
 	dir := t.TempDir()
 	themetest.Write(t, dir, "aurora.theme", themetest.MonochromeLines("#101010"))
 	m, persister := newSlotPairPanelModel(t, dir, "ghost", "aurora")
-	requireRowLabels(t, m, "aurora", "ghost", "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "aurora", "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireBadge(t, m, "ghost", theme.BadgeLight)
 
 	m = arrowToThemeRow(t, m, "nord")
@@ -159,7 +159,7 @@ func TestPanelSlotCommit_OtherSlotSurvives(t *testing.T) {
 
 	requireSlotCommits(t, persister, slotCommit{slug: "nord", member: theme.MemberDark})
 	requirePairKeys(t, m, "ghost", "nord")
-	requireRowLabels(t, m, "aurora", "ghost", "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "aurora", "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireBadge(t, m, "ghost", theme.BadgeLight)
 	requireBadge(t, m, "nord", theme.BadgeDark)
 	requireBadge(t, m, "aurora", theme.BadgeNone)
@@ -171,7 +171,7 @@ func TestPanelSlotCommit_EmptyOtherSlotStaysEmpty(t *testing.T) {
 	// slug is distinguishable from both.
 	themetest.Write(t, dir, "zephyr.theme", themetest.MonochromeLines("#101010"))
 	m, _, persister := newRecomputePanelModel(t, dir, theme.RawKeys{})
-	requireRowLabels(t, m, "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug, "zephyr")
+	requireRowLabels(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug, "zephyr")
 	requireCursorOn(t, m, theme.DefaultDarkSlug)
 	requireBadge(t, m, theme.DefaultLightSlug, theme.BadgeLight)
 
@@ -238,7 +238,7 @@ func TestPanelSlotCommit_ClearsTheConstantAtomically(t *testing.T) {
 		// constant to clear and the untouched slot is invisible until it is.
 		keys := theme.RawKeys{Theme: "aurora", Light: "ghost", Dark: "aurora"}
 		m, _, persister := newRecomputePanelModel(t, dir, keys)
-		requireRowLabels(t, m, "aurora", "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+		requireRowLabels(t, m, "aurora", "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 
 		if err := (&m).commitSlot("nord", theme.MemberDark); err != nil {
 			t.Fatalf("commitSlot(nord, dark): %v", err)
@@ -249,7 +249,7 @@ func TestPanelSlotCommit_ClearsTheConstantAtomically(t *testing.T) {
 			t.Errorf("the commit made %d seam call(s) (%v), want one — the clear rides the SAME write", len(persister.slugs), persister.slugs)
 		}
 		requirePairKeys(t, m, "ghost", "nord")
-		requireRowLabels(t, m, "aurora", "ghost", "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+		requireRowLabels(t, m, "aurora", "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 		requireBadge(t, m, "ghost", theme.BadgeLight)
 		requireBadge(t, m, "nord", theme.BadgeDark)
 	})

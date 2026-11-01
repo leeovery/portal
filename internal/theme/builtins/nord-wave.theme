@@ -1,0 +1,65 @@
+# Nord Wave — https://github.com/mbadolato/iTerm2-Color-Schemes
+# Nord's palette (https://www.nordtheme.com/) on a neutral near-black canvas.
+# state.destructive is corrected for Portal's contrast floors.
+#
+# The Nord Wave terminal scheme keeps Nord's sixteen ANSI colours and swaps the
+# canvas from nord0 #2E3440 to #212121, so the accents and the bright text ramp
+# carry over from the nord built-in unchanged. Only the values measured against
+# the canvas are re-derived. Ratios are WCAG, against #212121 unless the note
+# beside a value names another surface.
+#
+# The darker canvas moves the dark end down one rung of Nord's Polar Night: the
+# nord built-in's bg.subtle, bg.selection, border and text.faint are nord1,
+# nord2, nord3 and nord3; here they are nord0, nord1, nord2 and nord3, so every
+# surface is still a Nord colour. 14 values come straight from the scheme, one is
+# corrected, three are invented, and text.on-selection #FFFFFF is a contrast
+# choice rather than a palette claim. 14 + 1 + 3 + 1 = 19.
+
+# Text ramp, bright to faint.
+text.primary = #ECEFF4
+text.secondary = #E5E9F0
+text.tertiary = #D8DEE9
+# Invention 1 of 3. Interpolated on nord3's hue and saturation (HSL 220
+# degrees, 16.5%) at lightness 56.4%, landing at 4.62, just over the 4.50
+# normal-text floor. The nord built-in's #939EB2 measures 5.96 on this canvas,
+# too close to text.tertiary to read as a step down.
+text.muted = #7D8AA2
+# Invention 2 of 3. The same nord3 hue and saturation at lightness 46.3%: 3.23,
+# inside the 3.00-4.49 band this step has to sit in.
+text.subtle = #63708A
+# nord3, which is also the Nord Wave scheme's own bright black: 2.18, under the
+# 3.00 ceiling a decorative step stays below.
+text.faint = #4C566A
+text.on-selection = #FFFFFF
+
+# Accents and states.
+accent.primary = #B48EAD
+accent.key = #81A1C1
+accent.mode = #88C0D0
+accent.attention = #EBCB8B
+# nord14 as published. The nord built-in corrects it because it measures 4.23 on
+# nord2; this theme's selected row is nord1, where it measures 4.94.
+state.positive = #A3BE8C
+# Correction 1 of 1. nord11 #BF616A measures 3.94 against this canvas, under the
+# 4.50 normal-text floor. Raised in Oklab lightness alone to 4.52, keeping
+# chroma at 100.8% of the original at a distance of 0.034 — a far smaller lift
+# than the nord built-in's #DD8188 needs on its lighter canvas.
+state.destructive = #CB6B74
+
+# Surfaces, and the text drawn on the attention surface.
+canvas = #212121
+# nord1: a fill of 1.60, heavier than the nord built-in's 1.45, which a
+# near-black canvas carries without the row turning into a slab.
+bg.selection = #3B4252
+# Invention 3 of 3. A 7% nord13-into-canvas blend: a fill of 1.17, inside the
+# whisper band of Portal's other warning tints (1.11-1.20). On a neutral canvas
+# the blend comes out warm rather than the nord built-in's cool grey.
+bg.attention = #2F2D28
+# nord0, Nord's own canvas: a fill of 1.29.
+bg.subtle = #2E3440
+# nord2: 1.87, one rung above the selection tint, so a frame or chip still reads
+# where it crosses the selected row.
+border = #434C5E
+# nord6, cool like the rest of Snow Storm, as the nord built-in has it: 11.93 on
+# the band.
+text.on-attention = #ECEFF4

@@ -1,0 +1,52 @@
+# Horizon — https://github.com/mbadolato/iTerm2-Color-Schemes
+#
+# A sixteen-colour terminal scheme on the #1C1E26 canvas, ported onto Portal's
+# 19 roles. Every accent is the scheme's own colour and clears its floor on this
+# canvas, so nothing is corrected. The greys between the foreground and the
+# canvas are taken on the hue and saturation of the scheme's cursor and
+# selection colour, #6C6F93. 11 values come straight from the scheme, seven are
+# invented, and text.on-selection #FFFFFF is a contrast choice. 11 + 7 + 1 = 19.
+# Ratios are WCAG, against #1C1E26 unless the note beside a value names another
+# surface.
+
+# Text ramp, bright to faint.
+# The scheme's white: 13.20.
+text.primary = #E5E5E5
+# The scheme's foreground: 11.61.
+text.secondary = #D5D8DA
+# Invention 1 of 7. On #6C6F93's hue and saturation: 8.56.
+text.tertiary = #B7B9CA
+# Invention 2 of 7. The same hue line: 4.62, just over the 4.50 normal-text
+# floor.
+text.muted = #8285A3
+# The scheme's own cursor and selection colour: 3.43, inside the 3.00-4.49 band.
+text.subtle = #6C6F93
+# Invention 3 of 7. The same hue line: 2.02.
+text.faint = #4B4D65
+text.on-selection = #FFFFFF
+
+# Accents and states.
+# The scheme's pink: 5.58.
+accent.primary = #EE64AC
+accent.key = #26BBD9
+accent.mode = #59E1E3
+# The scheme's peach: 9.72, and 6.67 on the selected row.
+accent.attention = #FAB795
+# 8.60 against the canvas, 5.90 on the selected row.
+state.positive = #29D398
+# The scheme's red: 4.80, clear of the 4.50 floor as published.
+state.destructive = #E95678
+
+# Surfaces, and the text drawn on the attention surface.
+canvas = #1C1E26
+# Invention 4 of 7. A 33% blend of #6C6F93 into the canvas: a fill of 1.46.
+bg.selection = #36394A
+# Invention 5 of 7. A 7% blend of the peach into the canvas: a fill of 1.16,
+# inside the whisper band of Portal's other warning tints (1.11-1.20).
+bg.attention = #2C292E
+# Invention 6 of 7. A lighter step of the canvas's cool blue-grey: a fill of 1.27.
+bg.subtle = #2E303E
+# Invention 7 of 7. A 46% blend of #6C6F93 into the canvas: 1.72.
+border = #414358
+# The scheme's bright peach, warm to match the band: 9.20 on it.
+text.on-attention = #FBC3A7

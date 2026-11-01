@@ -823,7 +823,7 @@ func TestSlotConfirm_HandEditedFileNamesTheConstant(t *testing.T) {
 	themetest.Write(t, dir, "aurora.theme", themetest.MonochromeLines("#101010"))
 	keys := theme.RawKeys{Theme: "aurora", Light: "ghost", Dark: "aurora"}
 	m, _, persister := newRecomputePanelModel(t, dir, keys)
-	requireRowLabels(t, m, "aurora", "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "aurora", "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireBadge(t, m, "aurora", theme.BadgeConstant)
 
 	m = arrowToThemeRow(t, m, "nord")
@@ -844,7 +844,7 @@ func TestSlotConfirm_HandEditedFileNamesTheConstant(t *testing.T) {
 
 	requireSlotCommits(t, persister, slotCommit{slug: "nord", member: theme.MemberDark})
 	requirePairKeys(t, m, "ghost", "nord")
-	requireRowLabels(t, m, "aurora", "ghost", "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRowLabels(t, m, "aurora", "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireBadge(t, m, "ghost", theme.BadgeLight)
 	requireBadge(t, m, "nord", theme.BadgeDark)
 	requireBadge(t, m, "aurora", theme.BadgeNone)

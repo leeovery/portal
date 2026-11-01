@@ -235,7 +235,7 @@ func TestThemePanelBehaviour_Union(t *testing.T) {
 			[]theme.Entry{behaviourRejected("sunset", theme.ReasonBadColour)},
 			theme.RawKeys{Theme: "sunset"})
 
-		requireRenderedOrder(t, m, "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+		requireRenderedOrder(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 		row := themePanelRowFor(t, m, "sunset")
 		if row.Row.Selectable() {
 			t.Error("the `sunset` row is selectable; an invalid file is present and named but not committable")
@@ -253,7 +253,7 @@ func TestThemePanelBehaviour_Union(t *testing.T) {
 			[]theme.Entry{behaviourRejected("nord", theme.ReasonReservedName)},
 			theme.RawKeys{Theme: "nord"})
 
-		requireRenderedOrder(t, m, "nord", "nord.theme", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+		requireRenderedOrder(t, m, "gitlab-dark-grey", "horizon", "nord", "nord.theme", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 		collided := themePanelRowFor(t, m, "nord.theme")
 		if got := collided.Row.Slug; got != "nord" {
 			t.Errorf("the `nord.theme` row's slug is %q, want the built-in's %q — the collision IS the reason", got, "nord")
@@ -274,7 +274,7 @@ func TestThemePanelBehaviour_Ordering(t *testing.T) {
 			behaviourRejected("zebra", theme.ReasonBadSyntax),
 		}, theme.RawKeys{})
 
-		requireRenderedOrder(t, m, "aurora", "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug, "zebra")
+		requireRenderedOrder(t, m, "aurora", "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug, "zebra")
 	})
 
 	t.Run("it compares case-insensitively with a byte-wise tie-break", func(t *testing.T) {
@@ -285,7 +285,7 @@ func TestThemePanelBehaviour_Ordering(t *testing.T) {
 		}, theme.RawKeys{})
 
 		requireRenderedOrder(t, m,
-			"Alpha.theme", "alpha.THEME", "nord", theme.DefaultDarkSlug, theme.DefaultLightSlug, "Zed.theme")
+			"Alpha.theme", "alpha.THEME", "gitlab-dark-grey", "horizon", "nord", "nord-wave", theme.DefaultDarkSlug, theme.DefaultLightSlug, "Zed.theme")
 	})
 
 	t.Run("the guaranteed tie puts the built-in first and the cursor on it", func(t *testing.T) {
@@ -315,7 +315,7 @@ func TestThemePanelBehaviour_RowComposition(t *testing.T) {
 		behaviourFile(t, behaviourLongSlug, 0),
 		behaviourRejected("sunset", theme.ReasonBadColour),
 	}
-	order := []string{"nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug}
+	order := []string{"gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug}
 
 	badged, _ := behaviourPanelAt(t, entries, theme.RawKeys{Theme: "sunset"}, narrowContentW, behaviourContentH)
 	if got := badged.themePanel.width; got != themePanelMinWidth {
@@ -422,7 +422,7 @@ func TestThemePanelBehaviour_CommitRecompute(t *testing.T) {
 	keys := theme.RawKeys{Theme: "sunset", Light: "ghost", Dark: "sunset"}
 	m, persister := behaviourPanel(t, []theme.Entry{behaviourFile(t, "sunset", 0)}, keys)
 
-	requireRenderedOrder(t, m, "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRenderedOrder(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireRenderedCursorOn(t, m, "sunset")
 	requireRenderedBadge(t, m, "sunset", theme.BadgeConstant)
 	requireRenderedBadgeCount(t, m, 1)
@@ -437,7 +437,7 @@ func TestThemePanelBehaviour_CommitRecompute(t *testing.T) {
 
 	requireSlotCommits(t, persister, slotCommit{slug: "sunset", member: theme.MemberDark})
 	requirePairKeys(t, m, "ghost", "sunset")
-	requireRenderedOrder(t, m, "ghost", "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRenderedOrder(t, m, "ghost", "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireRenderedBadge(t, m, "sunset", theme.BadgeDark)
 	requireRenderedBadge(t, m, "ghost", theme.BadgeLight)
 	requireRenderedBadgeCount(t, m, 2)
@@ -458,7 +458,7 @@ func TestThemePanelBehaviour_CommitRecompute(t *testing.T) {
 		t.Errorf("`Enter` recorded %d slot commits, want the 1 the confirm made — it writes the CONSTANT and clears both slots", got)
 	}
 	requireConstantKeys(t, m, "sunset")
-	requireRenderedOrder(t, m, "nord", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
+	requireRenderedOrder(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
 	requireRenderedBadge(t, m, "sunset", theme.BadgeConstant)
 	requireRenderedBadgeCount(t, m, 1)
 	requireRenderedCursorOn(t, m, "sunset")

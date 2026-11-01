@@ -108,7 +108,7 @@ One flag pins the palette, and it takes **either** a built-in slug **or an expli
 path to a `.theme` file**:
 
 ```bash
---theme nord                      # a built-in: tokyo-night, tokyo-night-day, nord
+--theme nord                      # a built-in slug (all six are listed in docs/theming.md)
 --theme ./mytheme.theme           # a file — the only way to eyeball a drop-in
 --theme ~/themes/mytheme.txt      # any extension; a separator makes it a path
 ```

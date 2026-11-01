@@ -9,9 +9,12 @@ import (
 )
 
 var themeIsLight = map[string]bool{
-	"nord":            false,
-	"tokyo-night":     false,
-	"tokyo-night-day": true,
+	"gitlab-dark-grey": false,
+	"horizon":          false,
+	"nord":             false,
+	"nord-wave":        false,
+	"tokyo-night":      false,
+	"tokyo-night-day":  true,
 }
 
 var pinnedTokenNames = []string{

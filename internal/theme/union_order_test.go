@@ -147,7 +147,7 @@ func TestRowOrder_CaseInsensitiveThenByteWise(t *testing.T) {
 }
 
 func TestRowOrder_TotalAndDeterministic(t *testing.T) {
-	if got, want := theme.BuiltinSlugs(), []string{"nord", "tokyo-night", "tokyo-night-day"}; !slices.Equal(got, want) {
+	if got, want := theme.BuiltinSlugs(), []string{"gitlab-dark-grey", "horizon", "nord", "nord-wave", "tokyo-night", "tokyo-night-day"}; !slices.Equal(got, want) {
 		t.Fatalf("the shipped built-ins are %v, want %v — the canonical sequence below states the WHOLE ordered union, so a new built-in belongs in it", got, want)
 	}
 
@@ -161,7 +161,7 @@ func TestRowOrder_TotalAndDeterministic(t *testing.T) {
 
 	enumeration, union := assembler.Open(dir, keys)
 
-	want := []string{"../evil", "aa-early", "Bad_Name.theme", "ghost", "nord", "nord.theme", "tokyo-night", "tokyo-night-day", "zz-late"}
+	want := []string{"../evil", "aa-early", "Bad_Name.theme", "ghost", "gitlab-dark-grey", "horizon", "nord", "nord.theme", "nord-wave", "tokyo-night", "tokyo-night-day", "zz-late"}
 	if got := rowLabels(union); !slices.Equal(got, want) {
 		t.Fatalf("union labels = %v, want %v", got, want)
 	}
