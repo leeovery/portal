@@ -515,6 +515,8 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 
 Two of those overrides end in `_DIR` rather than `_FILE`: `themes/` and `state/` resolve a directory, not a single file.
 
+Any of the files may be a symlink, such as one into a dotfiles repository. Portal writes through the link to the file it names, so the link survives Portal's own writes.
+
 Projects are auto-populated when you create new sessions, pruned automatically by the daemon, and cleanable on demand with `xctl doctor --fix`.
 
 **Theme.** Every colour Portal draws comes from the active theme, painted onto its own canvas so the palette always sits on the surface it was tuned for. Six themes ship — `tokyo-night`, `tokyo-night-day`, `nord`, `nord-wave`, `gitlab-dark-grey`, and `horizon` — and by default Portal picks a light or dark one by asking your terminal what colour its background is, falling back to dark if the terminal doesn't answer. Press `t` in the picker to choose a theme, or set `"theme": "<slug>"` in `prefs.json` to pin one whatever the terminal looks like; your own themes are `.theme` files dropped into the themes directory. Setting `NO_COLOR` to any non-empty value disables the canvas and renders on your terminal's native colours — with no colour to theme, `t` is unavailable there. See [docs/theming.md](docs/theming.md) for the colour roles, the file format, the naming rules, and how the light/dark pair is set.

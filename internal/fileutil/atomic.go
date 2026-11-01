@@ -3,6 +3,7 @@ package fileutil
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -63,8 +64,18 @@ func AtomicWrite0600(path string, data []byte) error {
 
 // AtomicWrite writes data to path via temp-file-and-rename, creating the parent
 // directory if absent and removing the temp file on any error.
+//
+// A path that is a symlink is written through: the rename lands on the file the
+// link names, and the link stays. Renaming over the link itself would replace it
+// with a regular file, silently detaching a config file kept in a dotfiles
+// repository and linked into place on the first write Portal makes to it.
 func AtomicWrite(path string, data []byte) error {
-	dir := filepath.Dir(path)
+	target, err := resolveWriteTarget(path)
+	if err != nil {
+		return fmt.Errorf("%w: failed to resolve symlink: %w", ErrWriteTempCreate, err)
+	}
+
+	dir := filepath.Dir(target)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("%w: failed to create directory: %w", ErrWriteTempCreate, err)
 	}
@@ -86,10 +97,53 @@ func AtomicWrite(path string, data []byte) error {
 		return fmt.Errorf("%w: failed to close temp file: %w", ErrWriteFsync, err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := os.Rename(tmpPath, target); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("%w: failed to rename temp file: %w", ErrWriteRename, err)
 	}
 
 	return nil
+}
+
+// maxLinkHops bounds the walk as the kernel bounds its own, so a link cycle is
+// an error rather than a hang.
+const maxLinkHops = 40
+
+// resolveWriteTarget follows path through any chain of symlinks to the name the
+// write should replace. It stops at the first name that is not a link,
+// including one that does not exist yet, so a dangling link is written through
+// and creates the file it names. Directory links along the way need no
+// resolving: the temp file is created beside the final name, so the rename stays
+// within one directory whatever path reaches it.
+func resolveWriteTarget(path string) (string, error) {
+	target := path
+	for range maxLinkHops {
+		info, err := os.Lstat(target)
+		if errors.Is(err, fs.ErrNotExist) {
+			return target, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			return target, nil
+		}
+
+		dest, err := os.Readlink(target)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(dest) {
+			// The kernel reads a relative link from the directory the link
+			// physically sits in, which is not the lexical parent when that
+			// parent is reached through a directory link.
+			linkDir, err := filepath.EvalSymlinks(filepath.Dir(target))
+			if err != nil {
+				return "", err
+			}
+			dest = filepath.Join(linkDir, dest)
+		}
+		target = dest
+	}
+	return "", fmt.Errorf("%s: more than %d levels of symbolic links", path, maxLinkHops)
 }
