@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/resumekeys"
 	"github.com/leeovery/portal/internal/theme"
 )
@@ -13,6 +14,8 @@ const (
 	resumeKeyResume    = "⏎"
 	resumeLabelResume  = "resume"
 	resumeLabelDiscard = "discard"
+	resumeKeyBack      = "esc"
+	resumeLabelBack    = "back"
 )
 
 // The whole input to the waiting panel. Report is the row the card carries only
@@ -64,7 +67,7 @@ func resumeStack(s ResumeScreen, width int) []string {
 	rows := []string{headerStyle(s.Theme.TextPrimary, s.Theme, s.Colourless).Bold(true).Render(title)}
 	rows = append(rows, resumeCommandRows(s.Command, width, s.Theme.TextPrimary, false, s.Theme, s.Colourless)...)
 	rows = appendResumeReportRow(rows, s, width)
-	return append(rows, resumeKeyHintRow(s.Theme, s.Colourless))
+	return append(rows, resumeStackKeyHintRow(width, s.Theme, s.Colourless))
 }
 
 func appendResumeReportRow(rows []string, s ResumeScreen, width int) []string {
@@ -74,6 +77,27 @@ func appendResumeReportRow(rows []string, s ResumeScreen, width int) []string {
 	return rows
 }
 
+// The two keys that answer the panel lead, and Escape, which backs out of the
+// pane instead, comes last.
+func resumeKeyHints() []footerHintGroup {
+	return []footerHintGroup{
+		{resumeKeyResume, resumeLabelResume},
+		{string(resumekeys.Discard), resumeLabelDiscard},
+		{resumeKeyBack, resumeLabelBack},
+	}
+}
+
 func resumeKeyHintRow(th theme.Theme, colourless bool) string {
-	return renderConfirmCancelFooter(resumeKeyResume, resumeLabelResume, string(resumekeys.Discard), resumeLabelDiscard, th, colourless)
+	return renderModalFooter(resumeKeyHints(), th, colourless)
+}
+
+// A stack too narrow for every hint gives up Escape's whole rather than showing
+// a clipped word of it. The two answering hints are never dropped: below their
+// width the pane's clamp clips them as it always has.
+func resumeStackKeyHintRow(width int, th theme.Theme, colourless bool) string {
+	hints := resumeKeyHints()
+	if row := renderModalFooter(hints, th, colourless); lipgloss.Width(row) <= width {
+		return row
+	}
+	return renderModalFooter(hints[:len(hints)-1], th, colourless)
 }

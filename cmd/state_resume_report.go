@@ -23,8 +23,10 @@ const (
 	resumeReportLockHeld   = resumeReportLock + "another process holds it"
 	resumeReportWrite      = "can't write hooks.json: "
 	resumeReportUnpause    = "can't unpause this pane: "
-	resumeReportTmuxAbsent = resumeReportUnpause + "tmux could not be run"
+	resumeReportTmuxNotRun = "tmux could not be run"
+	resumeReportTmuxAbsent = resumeReportUnpause + resumeReportTmuxNotRun
 	resumeReportDrop       = "can't clear pending input: "
+	resumeReportBack       = "can't open the picker: "
 )
 
 // hookStoreUnlocatedError marks a store whose path could not be resolved,
@@ -64,17 +66,31 @@ func resumeDiscardRefusal(err error) string {
 // carry out: tmux's own words when it answered, and none of the argv the
 // client's error leads with.
 func resumeClearRefusal(err error) string {
+	return resumeTmuxRefusal(resumeReportUnpause, err, resumeReportFallback)
+}
+
+// resumeBackRefusal is the panel's row for an Escape that could not send the
+// terminal back to the picker. Unlike a clear, it can fail before tmux is asked
+// anything — the binary the picker runs from could not be resolved — and that
+// cause is named too.
+func resumeBackRefusal(err error) string {
+	return resumeTmuxRefusal(resumeReportBack, err, resumeReportBack+causeWords(err))
+}
+
+// resumeTmuxRefusal names act and then tmux's own words for why it did not
+// carry it out, or otherwise when err did not come from tmux.
+func resumeTmuxRefusal(act string, err error, otherwise string) string {
 	cmdErr, ok := errors.AsType[*tmux.CommandError](err)
 	if !ok {
-		return resumeReportFallback
+		return otherwise
 	}
 	if stderr := strings.TrimSpace(cmdErr.Stderr); stderr != "" {
-		return resumeReportUnpause + stderr
+		return act + stderr
 	}
 	if _, notRun := errors.AsType[*exec.Error](cmdErr); notRun {
-		return resumeReportTmuxAbsent
+		return act + resumeReportTmuxNotRun
 	}
-	return resumeReportUnpause + causeWords(cmdErr)
+	return act + causeWords(cmdErr)
 }
 
 func resumeDropRefusal(err error) string {

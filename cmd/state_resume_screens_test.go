@@ -3,10 +3,13 @@ package cmd
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 // onScreen is the payload a hand-off to screen carries: the key press that
@@ -46,6 +49,16 @@ func swallowed(t *testing.T, payload resumeChainPayload, input string) {
 }
 
 func assertNoStateTouched(t *testing.T, p *resumeWaitProbe) {
+	t.Helper()
+	assertPaneStateUntouched(t, p)
+	if p.backCalls != 0 {
+		t.Errorf("a client was sent back to the picker %d times, want 0", p.backCalls)
+	}
+}
+
+// assertPaneStateUntouched asserts nothing the pane's resume rests on moved:
+// its marker, and its registration read or written.
+func assertPaneStateUntouched(t *testing.T, p *resumeWaitProbe) {
 	t.Helper()
 	if p.clearCalls != 0 {
 		t.Errorf("ClearMarker called %d times, want 0", p.clearCalls)
@@ -107,13 +120,26 @@ func backOut(t *testing.T, payload resumeChainPayload) *resumeWaitProbe {
 	return h.probe
 }
 
-// inertEscape runs a bare Escape on the waiting panel, then ends the input and
-// asserts the loop was still reading when it did.
-func inertEscape(t *testing.T, payload resumeChainPayload) *resumeWaitProbe {
+// backToPicker runs a bare Escape on the waiting panel, then ends the input
+// and asserts it sent the client back to the picker once while the pane went on
+// waiting: no hand-off, its marker and registration untouched, and the loop
+// still reading when the input ended.
+func backToPicker(t *testing.T, payload resumeChainPayload, configure func(*resumeWaitProbe)) *resumeWaitProbe {
 	t.Helper()
 	h := startArrivals(t, payload)
+	if configure != nil {
+		configure(h.probe)
+	}
 	h.typed("\x1b")
-	h.stillWaiting()
+	_ = h.writer.Close()
+	if err := h.wait(); !errors.Is(err, io.EOF) {
+		t.Fatalf("runResumeWait() error = %v, want the EOF that ended a wait still going", err)
+	}
+	if h.probe.backCalls != 1 {
+		t.Errorf("BackToPicker called %d times, want 1", h.probe.backCalls)
+	}
+	assertNoHandOff(t, h.probe)
+	assertPaneStateUntouched(t, h.probe)
 	if got := h.reader.reads.Load(); got < 2 {
 		t.Errorf("the wait read %d times, want it to read on past the escape", got)
 	}
@@ -158,8 +184,50 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		swallowed(t, reportedPayload(resumeScreenDiscard), "Y")
 	})
 
-	t.Run("it leaves Escape inert on the waiting panel", func(t *testing.T) {
-		inertEscape(t, reportedPayload(resumeScreenPanel))
+	t.Run("it sends the client back to the picker on Escape and keeps the panel waiting", func(t *testing.T) {
+		probe := backToPicker(t, reportedPayload(resumeScreenPanel), nil)
+
+		if got := probe.sink.Records().WithMessage("back to picker").AtExactLevel(slog.LevelInfo); len(got) != 1 {
+			t.Errorf("back to picker INFO records = %d, want 1", len(got))
+		}
+	})
+
+	t.Run("it keeps waiting on Escape when no client is showing the pane", func(t *testing.T) {
+		probe := backToPicker(t, reportedPayload(resumeScreenPanel), func(p *resumeWaitProbe) { p.backUnseen = true })
+
+		if got := probe.sink.Records().AtOrAboveLevel(slog.LevelWarn); len(got) != 0 {
+			t.Errorf("WARN records = %v, want none: a key no client typed is not a failure", got)
+		}
+	})
+
+	t.Run("it reports on the panel an Escape that could not go back to the picker", func(t *testing.T) {
+		payload := reportedPayload(resumeScreenPanel)
+		h := startArrivals(t, payload)
+		h.probe.backErr = &tmux.CommandError{Args: []string{"detach-client"}, Stderr: "can't find client: /dev/ttys002", Err: errors.New("exit status 1")}
+
+		h.typed("\x1b")
+		h.answered()
+
+		want := payload
+		want.Report = "can't open the picker: can't find client: /dev/ttys002"
+		assertHandOff(t, h.probe, want)
+		assertPaneStateUntouched(t, h.probe)
+		h.probe.sink.Records().WithMessage("back to picker failed").AtExactLevel(slog.LevelWarn).Only(t, "the refused back-out")
+	})
+
+	t.Run("it answers Enter typed after an Escape that went back to the picker", func(t *testing.T) {
+		payload := reportedPayload(resumeScreenPanel)
+		h := startArrivals(t, payload)
+		h.probe.lookup = foundHook(payload.Command)
+
+		h.typed("\x1b")
+		h.typed("\r")
+
+		h.answered()
+		if h.probe.backCalls != 1 {
+			t.Errorf("BackToPicker called %d times, want 1", h.probe.backCalls)
+		}
+		assertHookHandOff(t, h.probe, payload.Command)
 	})
 
 	t.Run("it swallows an escape sequence on the confirmation", func(t *testing.T) {
@@ -254,7 +322,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		probe := backOut(t, payload)
 		assertHandOff(t, probe, onScreen(payload, resumeScreenPanel))
 
-		inertEscape(t, reportedPayload(resumeScreenPanel))
+		backToPicker(t, reportedPayload(resumeScreenPanel), nil)
 	})
 
 	t.Run("it resumes on the Enter typed after a chord on the waiting panel", func(t *testing.T) {
@@ -335,7 +403,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 	t.Run("it swallows every non-acting key on both screens", func(t *testing.T) {
 		shared := []string{"\x03", "\x04", "\x1a", "D", "q", "a", " ", "cat README"}
 		perScreen := map[string][]string{
-			resumeScreenPanel:   append(slices.Clone(shared), "\x1b", "y", "Y"),
+			resumeScreenPanel:   append(slices.Clone(shared), "y", "Y"),
 			resumeScreenDiscard: append(slices.Clone(shared), "\r", "\n", "d", "Y"),
 		}
 		for _, screen := range []string{resumeScreenPanel, resumeScreenDiscard} {

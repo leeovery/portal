@@ -41,10 +41,20 @@ func keyColumnRow(glyph, label string, keyStyle, labelStyle lipgloss.Style, colu
 }
 
 func renderConfirmCancelFooter(confirmKey, confirmLabel, cancelKey, cancelLabel string, th theme.Theme, colourless bool) string {
-	confirm := renderKeyHint(confirmKey, confirmLabel, th.AccentKey, th, colourless)
-	gap := headerCanvasBg(th, colourless).Render(modalFooterGap)
-	cancel := renderKeyHint(cancelKey, cancelLabel, th.AccentKey, th, colourless)
-	return lipgloss.JoinHorizontal(lipgloss.Top, confirm, gap, cancel)
+	return renderModalFooter([]footerHintGroup{{confirmKey, confirmLabel}, {cancelKey, cancelLabel}}, th, colourless)
+}
+
+// renderModalFooter lays a modal's key hints out on one row, modalFooterGap
+// apart.
+func renderModalFooter(groups []footerHintGroup, th theme.Theme, colourless bool) string {
+	parts := make([]string, 0, 2*len(groups))
+	for i, g := range groups {
+		if i > 0 {
+			parts = append(parts, headerCanvasBg(th, colourless).Render(modalFooterGap))
+		}
+		parts = append(parts, renderKeyHint(g.key, g.label, th.AccentKey, th, colourless))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
 const modalFooterGap = "   "

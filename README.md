@@ -117,7 +117,7 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
 - **Opening.** Outside tmux Portal hands its process to `tmux attach-session`, so nothing of Portal stays running; inside tmux it switches your client, so sessions never nest. See [`x` (open)](#x-open).
 - **Saving.** A daemon in a hidden `_portal-saver` session re-reads tmux every second and writes what changed — structure, layout, zoom, working directories, and ANSI scrollback — under `state/` (see [Configuration](#configuration)).
 - **Restoring.** After a reboot, the first command that needs tmux starts the server and rebuilds every saved session that isn't already live. See [Automatic Server Bootstrap & Restoration](#automatic-server-bootstrap--restoration).
-- **Resuming.** A pane with a resume hook comes back holding the [resume panel](#resume-panel); `Enter` runs its command, `d` discards it.
+- **Resuming.** A pane with a resume hook comes back holding the [resume panel](#resume-panel); `Enter` runs its command, `d` discards it, `Esc` goes back to the picker and leaves it waiting.
 - **Two sessions you didn't make.** `_portal-saver` hosts the daemon and `_portal-bootstrap` keeps a freshly started server alive. Both show in a raw `tmux ls`; the picker and `xctl list` hide them.
 
 ## Shell Integration
@@ -248,7 +248,7 @@ xctl alias list                      # list all aliases
 
 ### `xctl hook`
 
-Register per-pane commands to bring back after a reboot. Under the shipped default a restored pane comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume` and `d discard`, and the command runs when you answer it; a registration pinned `eager` runs its command as the pane is restored, with no panel. `hook set` must be run from inside a tmux pane; `hook rm` defaults to the current pane's token but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including panes that no longer exist, and the old-format `<session>:<window>.<pane>` keys the stale-entry sweep retains forever rather than guessing at — hand removal through this flag is the sanctioned route for those). `hook rm` exits non-zero when it removes nothing — a missing entry, a pane with no hook of its own, or a pane that is already gone — so a scripted caller can tell a real removal from a no-op.
+Register per-pane commands to bring back after a reboot. Under the shipped default a restored pane comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it; a registration pinned `eager` runs its command as the pane is restored, with no panel. `hook set` must be run from inside a tmux pane; `hook rm` defaults to the current pane's token but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including panes that no longer exist, and the old-format `<session>:<window>.<pane>` keys the stale-entry sweep retains forever rather than guessing at — hand removal through this flag is the sanctioned route for those). `hook rm` exits non-zero when it removes nothing — a missing entry, a pane with no hook of its own, or a pane that is already gone — so a scripted caller can tell a real removal from a no-op.
 
 The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent alias, so existing `xctl hooks …` scripts keep working unchanged.
 
@@ -462,7 +462,7 @@ outright for a registration pinned `eager`.
 A restored pane whose resume hook resolves **lazy** — the shipped default — comes back
 with its scrollback replayed underneath and a panel over it: `Resume session` with a
 `● PAUSED` badge, the registered command under `ON RESUME`, and `⏎ resume` /
-`d discard`. Nothing runs until you answer, so a reboot no longer starts every
+`d discard` / `esc back`. Nothing runs until you answer, so a reboot no longer starts every
 registered command at once — a waiting pane holds a small Portal process in its place,
 and the command's own process starts only for the work you go back to.
 
@@ -471,7 +471,7 @@ and the command's own process starts only for the work you go back to.
 | `Enter` | Resume: the panel goes, the transcript is revealed, and the command runs in the pane | — |
 | `d` | Open the `▲ Discard resume?` confirmation | — |
 | `y` | — | Discard the resume command |
-| `Esc` | Nothing — there is nowhere to back out to | Back to the panel |
+| `Esc` | Back to the session picker; the pane keeps waiting | Back to the panel |
 
 - **Enter runs what is registered when you press it**, not what was registered when
   the panel was drawn. A hook removed or rewritten while the pane waited is honoured;
@@ -483,6 +483,10 @@ and the command's own process starts only for the work you go back to.
   different command while the pane waited, that one is left in place. The removed
   command is written to `portal.log` (`grep 'op=discard' portal.log`), so it can be
   copied back out.
+- **Esc backs out without answering.** The terminal showing the pane leaves tmux for
+  the session picker, and the pane keeps waiting — nothing about its resume changes,
+  and the panel is there the next time you open the session. If several terminals
+  show the pane, the one you pressed it in goes back.
 - **Every other key is swallowed**, including `Ctrl-C`, `Ctrl-\`, `Ctrl-Z` and
   `Ctrl-D`. A key counts only when it arrives on its own, so a stray paste can't answer
   the panel, and input already in flight when the confirmation opens can't confirm it.
@@ -490,6 +494,9 @@ and the command's own process starts only for the work you go back to.
   the panel stays until you press a key that means something, and a reboot draws it
   again. The panes beside it stay fully live, and while it waits Portal holds that
   pane's saved scrollback at what it was when the pane was restored.
+- **It repaints when you arrive.** Attaching to a session, or switching to it, redraws
+  each of its waiting panels, so a panel drawn days ago at restore shows the theme —
+  and the light or dark half of a pair — that is in force now.
 - **A failed answer says so.** If an answer can't be carried out — `hooks.json`
   unreadable or locked on a discard, say — the panel states the reason on its own row
   and the pane keeps waiting, so the key can be pressed again.

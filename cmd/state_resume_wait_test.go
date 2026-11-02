@@ -65,6 +65,12 @@ type resumeWaitProbe struct {
 	restoresAtEchoOn int
 	execsAtEchoOn    int
 
+	// Escape on the panel sends the client showing the pane back to the
+	// picker unless the probe is told no client is showing it.
+	backCalls  int
+	backErr    error
+	backUnseen bool
+
 	pin pinProbe
 }
 
@@ -131,6 +137,14 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.restoresAtEchoOn = p.restores
 			p.execsAtEchoOn = p.execCalls
 			return p.echoOnErr
+		},
+		BackToPicker: func() (bool, error) {
+			p.order = append(p.order, "back")
+			p.backCalls++
+			if p.backErr != nil {
+				return false, p.backErr
+			}
+			return !p.backUnseen, nil
 		},
 		AltScreen: p.pin.seams(&p.order),
 		ExecSelf: func(prog string, args []string) {
@@ -590,18 +604,24 @@ func TestStateResumeWaitCommand(t *testing.T) {
 
 func TestResumeKeysFor_AnswersToTheActKeysTheFootersName(t *testing.T) {
 	panel := resumeKeysFor(resumeScreenPanel)
-	if _, ok := panel.bytes[resumekeys.Discard]; !ok {
+	if _, ok := panel[resumekeys.Discard]; !ok {
 		t.Errorf("panel does not answer to its footer's discard key %q", resumekeys.Discard)
 	}
-	if _, ok := panel.bytes[resumekeys.Confirm]; ok {
+	if _, ok := panel[resumekeys.Confirm]; ok {
 		t.Errorf("panel answers to the confirmation's key %q", resumekeys.Confirm)
+	}
+	if _, ok := panel[resumeKeyEscape]; !ok {
+		t.Error("panel does not answer to its footer's Escape key")
 	}
 
 	confirm := resumeKeysFor(resumeScreenDiscard)
-	if _, ok := confirm.bytes[resumekeys.Confirm]; !ok {
+	if _, ok := confirm[resumekeys.Confirm]; !ok {
 		t.Errorf("confirmation does not answer to its footer's confirm key %q", resumekeys.Confirm)
 	}
-	if _, ok := confirm.bytes[resumekeys.Discard]; ok {
+	if _, ok := confirm[resumekeys.Discard]; ok {
 		t.Errorf("confirmation answers to the panel's discard key %q", resumekeys.Discard)
+	}
+	if _, ok := confirm[resumeKeyEscape]; !ok {
+		t.Error("confirmation does not answer to its footer's Escape key")
 	}
 }

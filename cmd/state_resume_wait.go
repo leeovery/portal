@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/resumekeys"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -49,10 +50,15 @@ type resumeWaitConfig struct {
 
 	CatchSIGTERM func()
 
-	// Winch and Settle are the resize pair: a change arms the settle window and
-	// each further change restarts it, so a drag of any length costs at most one
-	// redraw. Size reads the pane at start-up and at the moment a window
-	// elapses.
+	// Winch and Settle are the redraw pair: a SIGWINCH arms the settle window
+	// and each further one restarts it, so a drag of any length costs at most
+	// one redraw. A SIGWINCH is the pane's tty announcing a new size or Portal
+	// asking for a repaint — signal-hydrate sends one to the waiting panes of
+	// every session a client attaches to, so a panel painted at restore is
+	// repainted in the theme as it is now — and nothing tells the two apart, so
+	// the window a SIGWINCH opens redraws at whatever size it settles. Size
+	// reads the pane at start-up, and again when the window that start-up
+	// opened elapses.
 	Winch  <-chan os.Signal
 	Settle func(d time.Duration) <-chan time.Time
 	Size   func() (int, int, error)
@@ -79,6 +85,10 @@ type resumeWaitConfig struct {
 	// EnableEcho gives echo back to a pane being handed on, which the draw
 	// turned off and the raw restore therefore leaves off.
 	EnableEcho func() error
+
+	// BackToPicker replaces the tmux client showing the pane with the session
+	// picker, reporting whether a client was showing it at all.
+	BackToPicker func() (sent bool, err error)
 
 	AltScreen altScreenPin
 
@@ -118,40 +128,48 @@ func runResumeWait(cfg resumeWaitConfig) error {
 	return resumeWaitLoop(cfg)
 }
 
-// resumeKeys is what one screen answers to. A key absent from bytes is
-// swallowed, and a nil escape leaves the Escape key inert.
-type resumeKeys struct {
-	bytes  map[byte]func(resumeWaitConfig) error
-	escape func(resumeWaitConfig) error
+// resumeKey is what one key does on one screen. ended reports whether it ended
+// the wait by handing the pane on, err being the hand-off's.
+type resumeKey func(resumeWaitConfig) (ended bool, err error)
+
+// handsOn is a key every outcome of which hands the pane on — to another
+// screen, a hook or a shell — and so ends the wait.
+func handsOn(answer func(resumeWaitConfig) error) resumeKey {
+	return func(cfg resumeWaitConfig) (bool, error) { return true, answer(cfg) }
 }
+
+// resumeKeys is what one screen does with a key that arrived alone. A key
+// absent from it is swallowed.
+type resumeKeys map[byte]resumeKey
 
 // resumeKeysFor scopes the keys to the screen in front of the user: Enter
 // resumes on the panel and must mean nothing on the confirmation one keystroke
-// later, and Escape backs out of the confirmation but has nothing to back out
-// of on the panel.
+// later. Escape backs out on both and changes nothing on either — out of the
+// confirmation to the panel, and out of the panel to the session picker.
 func resumeKeysFor(screen string) resumeKeys {
 	if screen == resumeScreenDiscard {
 		return resumeKeys{
-			bytes:  map[byte]func(resumeWaitConfig) error{resumekeys.Confirm: resumeAnswerDiscard},
-			escape: resumeCancelDiscardConfirm,
+			resumekeys.Confirm: handsOn(resumeAnswerDiscard),
+			resumeKeyEscape:    handsOn(resumeCancelDiscardConfirm),
 		}
 	}
-	return resumeKeys{bytes: map[byte]func(resumeWaitConfig) error{
-		resumeKeyEnterCR:   resumeAnswerEnter,
-		resumeKeyEnterLF:   resumeAnswerEnter,
-		resumekeys.Discard: resumeOpenDiscardConfirm,
-	}}
+	return resumeKeys{
+		resumeKeyEnterCR:   handsOn(resumeAnswerEnter),
+		resumeKeyEnterLF:   handsOn(resumeAnswerEnter),
+		resumekeys.Discard: handsOn(resumeOpenDiscardConfirm),
+		resumeKeyEscape:    resumeBackToPicker,
+	}
 }
 
-// answerTo is the answer an arrival gives, nil unless it was one byte alone.
-func (k resumeKeys) answerTo(key byte, alone bool) func(resumeWaitConfig) error {
-	switch {
-	case !alone:
-		return nil
-	case key == resumeKeyEscape:
-		return k.escape
+// answer closes the arrival and does what it means on this screen, reporting
+// whether that ended the wait. Only a byte that arrived alone means anything.
+func (k resumeKeys) answer(cfg resumeWaitConfig, arrival *resumeArrival) (ended bool, err error) {
+	key, alone := arrival.end()
+	act := k[key]
+	if !alone || act == nil {
+		return false, nil
 	}
-	return k.bytes[key]
+	return act(cfg)
 }
 
 // resumeArrival is the input that has reached the pane since it was last quiet.
@@ -195,6 +213,9 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 	defer close(reader.requests)
 
 	settled := resumeStartupSettle(cfg)
+	// Only the window start-up opened compares the size before it redraws: a
+	// SIGWINCH may be a repaint request at an unchanged size.
+	signalled := false
 	arrival := resumeArrival{carried: cfg.InputArriving}
 	cfg.InputArriving = false
 	outstanding := false
@@ -208,8 +229,8 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 		case read := <-reader.results:
 			outstanding = false
 			if read.quiet {
-				if answer := keys.answerTo(arrival.end()); answer != nil {
-					return answer(cfg)
+				if ended, err := keys.answer(cfg, &arrival); ended {
+					return err
 				}
 				continue
 			}
@@ -219,18 +240,19 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 			if read.err != nil {
 				// No byte can follow the end of the input, so what arrived
 				// last is judged as it stands.
-				if answer := keys.answerTo(arrival.end()); answer != nil {
-					return answer(cfg)
+				if ended, err := keys.answer(cfg, &arrival); ended {
+					return err
 				}
 				return fmt.Errorf("resume wait: read: %w", read.err)
 			}
 
 		case <-cfg.Winch:
 			settled = cfg.Settle(resumeResizeSettle)
+			signalled = true
 
 		case <-settled:
 			settled = nil
-			if resumeSizeUnchanged(cfg) {
+			if !signalled && resumeSizeUnchanged(cfg) {
 				continue
 			}
 			cfg.InputArriving = arrival.open()
@@ -329,6 +351,47 @@ func resumeOpenDiscardConfirm(cfg resumeWaitConfig) error {
 
 func resumeCancelDiscardConfirm(cfg resumeWaitConfig) error {
 	return resumeShowScreen(cfg, resumeScreenPanel)
+}
+
+// resumeBackToPicker is Escape on the panel. It backs out of the pane rather
+// than answering it: the terminal showing the pane goes back to the session
+// picker, and the pane keeps waiting with its registration and its freeze
+// untouched, so the panel is there again the next time the session is opened.
+// A key no client typed — send-keys, or a synchronized sibling — has no
+// terminal to send back and does nothing. One tmux refused redraws the panel
+// with the reason.
+func resumeBackToPicker(cfg resumeWaitConfig) (ended bool, err error) {
+	sent, backErr := cfg.BackToPicker()
+	if backErr != nil {
+		cfg.Logger.Warn("back to picker failed", cfg.paneRef().logAttrs("error", backErr)...)
+		return true, resumeReport(cfg, resumeScreenPanel, resumeBackRefusal(backErr))
+	}
+	if !sent {
+		cfg.Logger.Info("back to picker skipped: no client is showing the pane", cfg.paneRef().logAttrs()...)
+		return false, nil
+	}
+	cfg.Logger.Info("back to picker", cfg.paneRef().logAttrs()...)
+	return false, nil
+}
+
+// sendClientToPicker replaces the client showing paneID with this binary's
+// session picker, through detach-client -E. The client runs it in the
+// environment it was started in, outside tmux for a client attached from a
+// terminal, so the picker comes up in that terminal and attaches it to
+// whichever session is picked next.
+func sendClientToPicker(client *tmux.Client, paneID string) (bool, error) {
+	name, ok, err := client.ClientShowingPane(paneID)
+	if err != nil || !ok {
+		return false, err
+	}
+	exe, err := resumeChainExe()
+	if err != nil {
+		return false, err
+	}
+	if err := client.DetachClientTo(tmux.ClientNameTarget(name), shellquote.Join([]string{exe, "open"})); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // resumeAnswerDiscard is the confirmation's y. The removal runs while the
@@ -498,8 +561,11 @@ var stateResumeWaitCmd = &cobra.Command{
 			},
 			EnableTTYSignals: setStdinSignals,
 			EnableEcho:       setStdinEcho,
-			AltScreen:        paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),
-			CatchSIGTERM:     catchSIGTERM,
+			BackToPicker: func() (bool, error) {
+				return sendClientToPicker(tmux.DefaultClient(), pane)
+			},
+			AltScreen:    paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),
+			CatchSIGTERM: catchSIGTERM,
 		})
 	},
 }

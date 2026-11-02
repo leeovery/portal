@@ -309,6 +309,26 @@ func TestResumeClearReport(t *testing.T) {
 	})
 }
 
+func TestResumeBackReport(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  func(t *testing.T) error
+		want string
+	}{
+		{"tmux refuses the detach", tmuxRefusal, "can't open the picker: can't find pane: %7"},
+		{"tmux cannot be run", tmuxUnrunnable, "can't open the picker: tmux could not be run"},
+		{"the binary cannot be resolved", func(*testing.T) error {
+			return fmt.Errorf("resolve portal executable: %w", errors.New("empty path"))
+		}, "can't open the picker: empty path"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resumeBackRefusal(tc.err(t)); got != tc.want {
+				t.Errorf("resumeBackRefusal() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResumeReportRows_FitTheCard(t *testing.T) {
 	type prefixed struct{ act, cause string }
 	paint := func(t *testing.T, render func(tui.ResumeScreen) string, row string) string {
@@ -329,6 +349,7 @@ func TestResumeReportRows_FitTheCard(t *testing.T) {
 		resumeReportLockHeld,
 		resumeReportTmuxAbsent,
 		resumeReportFallback,
+		resumeReportBack + resumeReportTmuxNotRun,
 	}
 	for _, p := range []prefixed{
 		{resumeReportRead, "permission denied"},

@@ -103,6 +103,7 @@ var exactTargetHelpers = map[string]bool{
 	"windowTargetExact":  true,
 	"PaneTargetExact":    true,
 	"PaneIDTarget":       true,
+	"ClientNameTarget":   true,
 }
 
 // targetTypeNames are the ways the composed-target type is spelled in a
@@ -595,7 +596,7 @@ type bareTargetFinding struct {
 
 func (f bareTargetFinding) String() string { return f.pos + ": " + f.detail }
 
-const routeItThrough = "route it through SessionTargetExact, CoordTargetExact, windowTargetExact, PaneTargetExact or PaneIDTarget"
+const routeItThrough = "route it through SessionTargetExact, CoordTargetExact, windowTargetExact, PaneTargetExact, PaneIDTarget or ClientNameTarget"
 
 // scanBareTargets reports every place in dirs where a target the exactness
 // vocabulary did not produce is spent: composed into an argv after a literal

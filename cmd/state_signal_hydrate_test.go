@@ -4,10 +4,17 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/commandertest"
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/statetest"
@@ -39,15 +46,41 @@ func listPanesOutput(panes [][2]int) string {
 	return out.String()
 }
 
-// signalHydrateClient replies to the two tmux calls signal-hydrate makes;
-// anything else fails the test.
+// signalHydrateClient replies to the tmux calls signal-hydrate makes, finding no
+// pane waiting on its resume panel; anything else fails the test.
 func signalHydrateClient(t *testing.T, markersRaw string, panes [][2]int) (*tmux.Client, *commandertest.Scripted) {
 	t.Helper()
 	cmder := commandertest.New(t,
+		noWaitingPanes(),
 		commandertest.Returns(markersRaw, "show-options"),
 		commandertest.Returns(listPanesOutput(panes), "list-panes"),
 	)
 	return tmux.NewClient(cmder), cmder
+}
+
+// isWaitingPanesRead matches the repaint's list-panes, told apart from
+// hydration's by the resume-pending marker its format reads.
+func isWaitingPanesRead(args []string) bool {
+	return commandertest.ArgvPrefix("list-panes")(args) &&
+		slices.ContainsFunc(args, func(a string) bool { return strings.Contains(a, state.ResumePendingOption) })
+}
+
+// noWaitingPanes scripts the repaint's read to find no pane waiting. It goes
+// ahead of any list-panes entry hydration's read is scripted by.
+func noWaitingPanes() commandertest.Entry {
+	return commandertest.When(isWaitingPanesRead, "", nil)
+}
+
+// repaintRecorder stands in for the process-group signal, so no test signals a
+// process it did not spawn.
+type repaintRecorder struct {
+	pids []int
+	errs map[int]error
+}
+
+func (r *repaintRecorder) repaint(pid int) error {
+	r.pids = append(r.pids, pid)
+	return r.errs[pid]
 }
 
 func TestSignalHydrate_SignalsEverySkeletonMarkedPane(t *testing.T) {
@@ -232,6 +265,7 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 			return markerSet && commandertest.ArgvPrefix("show-options")(args)
 		}, markersOption(key), nil),
 		commandertest.Returns("", "show-options"),
+		noWaitingPanes(),
 		commandertest.Returns(listPanesOutput(panes), "list-panes"),
 	)
 	client := tmux.NewClient(cmder)
@@ -273,12 +307,14 @@ func TestSignalHydrate_WARNsRenderUnderSignalComponent(t *testing.T) {
 		name    string
 		script  []commandertest.Entry
 		signal  state.FIFOSignaler
+		repaint *repaintRecorder
 		wantMsg string
 	}{
 		{
 			name: "list skeleton markers failed",
 			script: []commandertest.Entry{
 				commandertest.Fails(errors.New("show-options boom"), "show-options"),
+				noWaitingPanes(),
 			},
 			signal:  &statetest.RecordingFIFOSignaler{},
 			wantMsg: "list skeleton markers failed",
@@ -287,6 +323,7 @@ func TestSignalHydrate_WARNsRenderUnderSignalComponent(t *testing.T) {
 			name: "list panes for session failed",
 			script: []commandertest.Entry{
 				commandertest.Returns(markersOption(state.SanitizePaneKey("foo", 0, 0)), "show-options"),
+				noWaitingPanes(),
 				commandertest.Fails(errors.New("can't find session: foo"), "list-panes"),
 			},
 			signal:  &statetest.RecordingFIFOSignaler{},
@@ -296,10 +333,32 @@ func TestSignalHydrate_WARNsRenderUnderSignalComponent(t *testing.T) {
 			name: "write fifo failed",
 			script: []commandertest.Entry{
 				commandertest.Returns(markersOption(state.SanitizePaneKey("foo", 0, 0)), "show-options"),
+				noWaitingPanes(),
 				commandertest.Returns(listPanesOutput([][2]int{{0, 0}}), "list-panes"),
 			},
 			signal:  &statetest.RecordingFIFOSignaler{Err: errors.New("retry exhausted (sentinel)")},
 			wantMsg: "write fifo failed",
+		},
+		{
+			name: "list waiting panes failed",
+			script: []commandertest.Entry{
+				commandertest.When(isWaitingPanesRead, "", errors.New("can't find session: foo")),
+				commandertest.Returns("", "show-options"),
+				commandertest.Returns(listPanesOutput([][2]int{{0, 0}}), "list-panes"),
+			},
+			signal:  &statetest.RecordingFIFOSignaler{},
+			wantMsg: "list waiting panes failed",
+		},
+		{
+			name: "repaint waiting pane failed",
+			script: []commandertest.Entry{
+				commandertest.When(isWaitingPanesRead, "1|4906|%4", nil),
+				commandertest.Returns("", "show-options"),
+				commandertest.Returns(listPanesOutput([][2]int{{0, 0}}), "list-panes"),
+			},
+			signal:  &statetest.RecordingFIFOSignaler{},
+			repaint: &repaintRecorder{errs: map[int]error{4906: errors.New("operation not permitted")}},
+			wantMsg: "repaint waiting pane failed",
 		},
 	}
 
@@ -307,11 +366,16 @@ func TestSignalHydrate_WARNsRenderUnderSignalComponent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := logtest.Install(t)
 
+			repaint := tc.repaint
+			if repaint == nil {
+				repaint = &repaintRecorder{}
+			}
 			cfg := signalHydrateConfig{
 				Session:  "foo",
 				StateDir: t.TempDir(),
 				Client:   tmux.NewClient(commandertest.New(t, tc.script...)),
 				Signaler: tc.signal,
+				Repaint:  repaint.repaint,
 			}
 			if err := runSignalHydrate(cfg); err != nil {
 				t.Fatalf("runSignalHydrate: %v", err)
@@ -367,6 +431,7 @@ func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.
 			captured = cfg.Session
 			cfg.Client = stubClient
 			cfg.Signaler = stubSignaler
+			cfg.Repaint = (&repaintRecorder{}).repaint
 			return runSignalHydrate(cfg)
 		})
 
@@ -418,4 +483,137 @@ func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.
 			t.Errorf("seam should not have been invoked; captured = %q", captured)
 		}
 	})
+}
+
+func TestSignalHydrate_RepaintsEveryWaitingPaneOfTheSession(t *testing.T) {
+	cmder := commandertest.New(t,
+		commandertest.When(isWaitingPanesRead, "1|4906|%4\n|5000|%5\n1|6100|%6", nil),
+		commandertest.Returns("", "show-options"),
+		commandertest.Returns(listPanesOutput([][2]int{{0, 0}, {0, 1}, {1, 0}}), "list-panes"),
+	)
+	repaint := &repaintRecorder{}
+
+	cfg := signalHydrateConfig{
+		Session:  "foo",
+		StateDir: t.TempDir(),
+		Client:   tmux.NewClient(cmder),
+		Signaler: &statetest.RecordingFIFOSignaler{},
+		Repaint:  repaint.repaint,
+	}
+	if err := runSignalHydrate(cfg); err != nil {
+		t.Fatalf("runSignalHydrate: %v", err)
+	}
+
+	if want := []int{4906, 6100}; !slices.Equal(repaint.pids, want) {
+		t.Errorf("repainted pids = %v, want %v: every waiting pane, and no pane that is not", repaint.pids, want)
+	}
+	reads := cmder.CallsMatching("list-panes", state.ResumePendingOption)
+	if len(reads) != 1 {
+		t.Fatalf("waiting-pane reads = %d, want 1", len(reads))
+	}
+	if !slices.Contains(reads[0].Argv, string(tmux.CoordTargetExact("foo"))) {
+		t.Errorf("waiting-pane read = %q, want it scoped to the attached session by its exact target", reads[0].Argv)
+	}
+}
+
+func TestSignalHydrate_RepaintsWhenHydrationCannotRead(t *testing.T) {
+	cmder := commandertest.New(t,
+		commandertest.When(isWaitingPanesRead, "1|4906|%4", nil),
+		commandertest.Fails(errors.New("show-options boom"), "show-options"),
+	)
+	repaint := &repaintRecorder{}
+
+	cfg := signalHydrateConfig{
+		Session:  "foo",
+		StateDir: t.TempDir(),
+		Client:   tmux.NewClient(cmder),
+		Signaler: &statetest.RecordingFIFOSignaler{},
+		Repaint:  repaint.repaint,
+	}
+	if err := runSignalHydrate(cfg); err != nil {
+		t.Fatalf("runSignalHydrate: %v", err)
+	}
+	if want := []int{4906}; !slices.Equal(repaint.pids, want) {
+		t.Errorf("repainted pids = %v, want %v: a failed skeleton read must not cost the repaint", repaint.pids, want)
+	}
+}
+
+func TestSignalHydrate_KeepsRepaintingPastAFailedPane(t *testing.T) {
+	cmder := commandertest.New(t,
+		commandertest.When(isWaitingPanesRead, "1|4906|%4\n1|6100|%6", nil),
+		commandertest.Returns("", "show-options"),
+		commandertest.Returns(listPanesOutput([][2]int{{0, 0}, {0, 1}}), "list-panes"),
+	)
+	repaint := &repaintRecorder{errs: map[int]error{4906: errors.New("operation not permitted")}}
+
+	cfg := signalHydrateConfig{
+		Session:  "foo",
+		StateDir: t.TempDir(),
+		Client:   tmux.NewClient(cmder),
+		Signaler: &statetest.RecordingFIFOSignaler{},
+		Repaint:  repaint.repaint,
+	}
+	if err := runSignalHydrate(cfg); err != nil {
+		t.Fatalf("runSignalHydrate must soft-fail on a refused repaint, got %v", err)
+	}
+	if want := []int{4906, 6100}; !slices.Equal(repaint.pids, want) {
+		t.Errorf("repainted pids = %v, want %v", repaint.pids, want)
+	}
+}
+
+func TestRepaintPaneGroup_RefusesAGroupItMustNeverSignal(t *testing.T) {
+	// kill(-1) signals every process the caller may signal, and kill(0) the
+	// caller's own group: neither is a pane.
+	for _, pid := range []int{-5, 0, 1} {
+		if err := repaintPaneGroup(pid); err == nil {
+			t.Errorf("repaintPaneGroup(%d) error = nil, want a refusal", pid)
+		}
+	}
+}
+
+func TestRepaintPaneGroup_SignalsTheGroupWithSIGWINCH(t *testing.T) {
+	// The test owns this group: a child it starts as a group leader, with
+	// SIGWINCH caught by a shell that reports it and exits.
+	dir := t.TempDir()
+	child := spawnWinchReporter(t, dir)
+
+	if err := repaintPaneGroup(child.Process.Pid); err != nil {
+		t.Fatalf("repaintPaneGroup: %v", err)
+	}
+	awaitWinchReport(t, child, dir)
+}
+
+// spawnWinchReporter starts a shell as the leader of its own process group,
+// standing in for a parked pane: it records a SIGWINCH to a file and exits. It
+// returns once the trap is installed, since a SIGWINCH before that is ignored.
+func spawnWinchReporter(t *testing.T, dir string) *exec.Cmd {
+	t.Helper()
+	script := `trap 'echo winch > "$1/got"; exit 0' WINCH; : > "$1/ready"; while :; do sleep 0.02; done`
+	child := exec.Command("/bin/sh", "-c", script, "sh", dir)
+	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := child.Start(); err != nil {
+		t.Fatalf("start the stand-in pane process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = child.Process.Signal(syscall.SIGKILL)
+		_ = child.Wait()
+	})
+	if !harnesstest.PollUntil(t, 5*time.Second, 10*time.Millisecond, func() bool {
+		_, err := os.Stat(filepath.Join(dir, "ready"))
+		return err == nil
+	}) {
+		t.Fatal("the stand-in pane process never installed its SIGWINCH trap")
+	}
+	return child
+}
+
+func awaitWinchReport(t *testing.T, child *exec.Cmd, dir string) {
+	t.Helper()
+	if !harnesstest.PollUntil(t, 5*time.Second, 10*time.Millisecond, func() bool {
+		_, err := os.Stat(filepath.Join(dir, "got"))
+		return err == nil
+	}) {
+		t.Fatal("the stand-in pane process's group never received SIGWINCH")
+	}
+	_ = child.Wait()
 }

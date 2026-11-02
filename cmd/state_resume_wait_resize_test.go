@@ -244,8 +244,8 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		if got := h.armed.Load(); got != 10 {
 			t.Errorf("the wait armed %d settle windows for ten size changes, want 10", got)
 		}
-		if got := h.sizes.Load(); got != 1 {
-			t.Errorf("the wait read the pane size %d times for one burst, want 1", got)
+		if got := h.sizes.Load(); got != 0 {
+			t.Errorf("the wait read the pane size %d times, want 0: a window a signal opened redraws without measuring, and the draw measures the pane itself", got)
 		}
 		assertHandOff(t, h.probe, payload)
 	})
@@ -258,10 +258,9 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		h.resize()
 		h.elapse(first)
 
+		// Taking this change at all is the proof the replaced window's timer
+		// handed nothing over: a wait that had redrawn would arm no window.
 		latest := h.resize()
-		if got := h.sizes.Load(); got != 0 {
-			t.Fatalf("the wait read the pane size %d times after a re-armed window's first timer fired, want 0", got)
-		}
 
 		h.elapse(latest)
 		if err := h.wait(); err != nil {
@@ -270,45 +269,30 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		if got := h.armed.Load(); got != 3 {
 			t.Errorf("the wait armed %d settle windows for three size changes, want 3", got)
 		}
-		if got := h.sizes.Load(); got != 1 {
-			t.Errorf("the wait read the pane size %d times, want 1", got)
+		if h.probe.execCalls != 1 {
+			t.Errorf("the wait handed over %d times, want 1", h.probe.execCalls)
 		}
 		assertHandOff(t, h.probe, payload)
 	})
 
-	t.Run("it redraws nothing when the settled size matches the drawn size", func(t *testing.T) {
+	t.Run("it redraws when a signal settles at the drawn size", func(t *testing.T) {
+		// The repaint signal-hydrate asks for on attach: a SIGWINCH at a size
+		// that has not changed, owed a redraw all the same so the panel takes
+		// up the theme as it is now.
 		payload := drawnPayload()
 		h := startResumeResize(t, payload, func() (int, int, error) {
 			return payload.Width, payload.Height, nil
 		})
 
 		h.elapse(h.resize())
-		h.awaitSize()
-		h.resize()
-
-		if got := h.sizes.Load(); got != 1 {
-			t.Errorf("the wait read the pane size %d times, want 1", got)
-		}
-		assertNoHandOff(t, h.probe)
-		if h.probe.restores != 0 {
-			t.Errorf("terminal restored %d times for a size that did not change, want 0", h.probe.restores)
-		}
-	})
-
-	t.Run("it keeps waiting after a no-op settle", func(t *testing.T) {
-		payload := drawnPayload()
-		h := startResumeResize(t, payload, func() (int, int, error) {
-			return payload.Width, payload.Height, nil
-		})
-
-		h.elapse(h.resize())
-		h.awaitSize()
-		h.press("d")
 
 		if err := h.wait(); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
-		assertHandOff(t, h.probe, opened(payload))
+		assertHandOff(t, h.probe, payload)
+		if h.probe.restoredAtExec != 1 {
+			t.Errorf("%d restores had run when the redraw exec'd, want 1: the next process image must inherit a cooked tty", h.probe.restoredAtExec)
+		}
 	})
 
 	t.Run("it hands over to a redraw when the settled size differs", func(t *testing.T) {
@@ -405,11 +389,11 @@ func TestRunResumeWait_Resize(t *testing.T) {
 
 	t.Run("it keeps one read outstanding at a time", func(t *testing.T) {
 		payload := drawnPayload()
-		h := startResumeResize(t, payload, func() (int, int, error) {
+		h := startResumeResizeFrom(t, payload, resizedSize, func() (int, int, error) {
 			return payload.Width, payload.Height, nil
 		})
 
-		h.elapse(h.resize())
+		h.elapse(h.window())
 		h.awaitSize()
 		h.resize()
 
@@ -488,10 +472,32 @@ func TestRunResumeWait_StartupSize(t *testing.T) {
 		if got := h.armed.Load(); got != 3 {
 			t.Errorf("the wait armed %d settle windows, want 3: one at start-up and one per size change", got)
 		}
+		if got := h.sizes.Load(); got != 0 {
+			t.Errorf("the wait read the pane size %d times, want 0: a signal took the window over from start-up, and its window redraws without measuring", got)
+		}
+		assertHandOff(t, h.probe, payload)
+	})
+
+	t.Run("it redraws nothing when the start-up window settles back at the drawn size", func(t *testing.T) {
+		payload := drawnPayload()
+		h := startResumeResizeFrom(t, payload, resizedSize, func() (int, int, error) {
+			return payload.Width, payload.Height, nil
+		})
+
+		h.elapse(h.window())
+		h.awaitSize()
+		h.press("d")
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
 		if got := h.sizes.Load(); got != 1 {
 			t.Errorf("the wait read the pane size %d times, want 1", got)
 		}
-		assertHandOff(t, h.probe, payload)
+		if h.probe.execCalls != 1 {
+			t.Errorf("the wait handed over %d times, want 1: the d alone, with no redraw before it", h.probe.execCalls)
+		}
+		assertHandOff(t, h.probe, opened(payload))
 	})
 
 	t.Run("it dispatches a key pressed while the start-up window is open", func(t *testing.T) {

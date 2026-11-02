@@ -548,6 +548,14 @@ func PaneIDTarget(paneID string) Target {
 	return Target(paneID)
 }
 
+// ClientNameTarget pins a tmux client by name — the client's tty, such as
+// "/dev/ttys012", the value tmux publishes as #{client_name}. A client name is
+// server-unique and is never prefix-matched, so, like a pane ID, it carries no
+// "=" and needs none.
+func ClientNameTarget(name string) Target {
+	return Target(name)
+}
+
 // windowTarget formats a plain "session:window" target, for an error message or
 // for a `-t` whose session is known to be live under that exact name.
 // windowTargetExact is its pinned sibling: the "=" applies to the session half
@@ -826,6 +834,51 @@ func parsePendingResumeRows(output string) (PendingResumeView, error) {
 		}
 	}
 	return view, nil
+}
+
+// WaitingPane is one pane of a session that is waiting on its resume panel.
+// PID is the pane's own process, which tmux started as the leader of the
+// process group the panel's waiter runs in.
+type WaitingPane struct {
+	ID  string
+	PID int
+}
+
+// The marker leads for the same reason it does in resumePendingRowFormat; the
+// pane ID and PID can carry neither the separator nor a line break.
+const waitingPaneRowFormat = "#{" + state.ResumePendingOption + "}" + paneHookRowSeparator + "#{pane_pid}" + paneHookRowSeparator + "#{pane_id}"
+
+// ListWaitingPanesInSession returns the panes of session whose resume-pending
+// marker is set, in one list-panes -s call. A tmux failure returns nil and the
+// error.
+func (c *Client) ListWaitingPanesInSession(session string) ([]WaitingPane, error) {
+	out, err := c.cmd.Run("list-panes", "-s", "-t", string(CoordTargetExact(session)), "-F", waitingPaneRowFormat)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list panes in session %q: %w", session, err)
+	}
+	return parseWaitingPaneRows(out)
+}
+
+func parseWaitingPaneRows(output string) ([]WaitingPane, error) {
+	panes := []WaitingPane{}
+	for line := range strings.SplitSeq(output, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Split(line, paneHookRowSeparator)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("failed to parse waiting pane row %q: want 3 %q-separated fields", line, paneHookRowSeparator)
+		}
+		if !state.ResumePendingSet(fields[0]) {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[1])
+		if err != nil || pid <= 0 {
+			return nil, fmt.Errorf("failed to parse waiting pane row %q: invalid pane pid %q", line, fields[1])
+		}
+		panes = append(panes, WaitingPane{ID: fields[2], PID: pid})
+	}
+	return panes, nil
 }
 
 // RespawnPane replaces the process running in the pane with command. The -k

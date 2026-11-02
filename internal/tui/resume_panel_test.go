@@ -67,6 +67,12 @@ func resumeGoldenHeader() string {
 }
 
 func resumeGoldenFooter() string {
+	return resumeGoldenAnswerFooter() + modalFooterGap + resumeKeyBack + " " + resumeLabelBack
+}
+
+// resumeGoldenAnswerFooter is the footer a stack too narrow for Escape's hint
+// keeps: the two keys that answer the panel.
+func resumeGoldenAnswerFooter() string {
 	return resumeKeyResume + " " + resumeLabelResume + modalFooterGap + string(resumekeys.Discard) + " " + resumeLabelDiscard
 }
 
@@ -119,7 +125,7 @@ func TestRenderResumePanel_Card(t *testing.T) {
 
 		t.Run("it renders the specified copy verbatim", func(t *testing.T) {
 			card := strings.Join(resumeCardRows(t, r, resumeGoldenCommand, ""), "\n")
-			for _, want := range []string{"Resume session", "● PAUSED", "ON RESUME", "⏎ resume", "d discard"} {
+			for _, want := range []string{"Resume session", "● PAUSED", "ON RESUME", "⏎ resume", "d discard", "esc back"} {
 				if !strings.Contains(card, want) {
 					t.Errorf("the card does not read %q:\n%s", want, card)
 				}
@@ -229,7 +235,7 @@ func TestRenderResumePanel_PlainStack(t *testing.T) {
 		t.Run("it renders the plain stack below the card's size", func(t *testing.T) {
 			out := RenderResumePanel(resumeScreenOf(r, twoRowCmd, resumeGoldenReport, narrowWidth, 10))
 			want := append([]string{resumePanelTitle}, wantCommandRows...)
-			want = append(want, ansi.Truncate(resumeGoldenReport, narrowWidth, resumeEllipsis), resumeGoldenFooter())
+			want = append(want, ansi.Truncate(resumeGoldenReport, narrowWidth, resumeEllipsis), resumeGoldenAnswerFooter())
 			assertRowsEqual(t, nonEmptyRows(paneRows(t, out, narrowWidth, 10)), want)
 		})
 
@@ -245,7 +251,7 @@ func TestRenderResumePanel_PlainStack(t *testing.T) {
 		t.Run("it renders the title the command and the key hints in a four-row pane", func(t *testing.T) {
 			out := RenderResumePanel(resumeScreenOf(r, twoRowCmd, "", narrowWidth, 4))
 			want := append([]string{resumePanelTitle}, wantCommandRows...)
-			assertRowsEqual(t, nonEmptyRows(paneRows(t, out, narrowWidth, 4)), append(want, resumeGoldenFooter()))
+			assertRowsEqual(t, nonEmptyRows(paneRows(t, out, narrowWidth, 4)), append(want, resumeGoldenAnswerFooter()))
 		})
 
 		t.Run("it draws the title the command and the key hints at the smallest pane", func(t *testing.T) {
@@ -254,13 +260,33 @@ func TestRenderResumePanel_PlainStack(t *testing.T) {
 				w, h int
 				want []string
 			}{
-				{"three rows", narrowWidth, 3, []string{resumePanelTitle, wantCommandRows[0], resumeGoldenFooter()}},
-				{"two rows", narrowWidth, 2, []string{resumePanelTitle, resumeGoldenFooter()}},
+				{"three rows", narrowWidth, 3, []string{resumePanelTitle, wantCommandRows[0], resumeGoldenAnswerFooter()}},
+				{"two rows", narrowWidth, 2, []string{resumePanelTitle, resumeGoldenAnswerFooter()}},
 				{"one cell", 1, 1, []string{"R"}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					out := RenderResumePanel(resumeScreenOf(r, twoRowCmd, "", tc.w, tc.h))
 					assertRowsEqual(t, nonEmptyRows(paneRows(t, out, tc.w, tc.h)), tc.want)
+				})
+			}
+		})
+
+		t.Run("it gives up Escape's hint whole, never a clipped word of it", func(t *testing.T) {
+			full := lipgloss.Width(resumeGoldenFooter())
+			for _, tc := range []struct {
+				name  string
+				width int
+				want  string
+			}{
+				{"a stack as wide as every hint", full, resumeGoldenFooter()},
+				{"a stack one cell short of them", full - 1, resumeGoldenAnswerFooter()},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					out := RenderResumePanel(resumeScreenOf(r, "vim", "", tc.width, 4))
+					rows := nonEmptyRows(paneRows(t, out, tc.width, 4))
+					if got := rows[len(rows)-1]; got != tc.want {
+						t.Errorf("the key hints read %q, want %q", got, tc.want)
+					}
 				})
 			}
 		})
@@ -288,7 +314,8 @@ func TestRenderResumePanel_Copy(t *testing.T) {
 					left := ansi.Strip(RenderResumePanel(resumeScreenOf(r, shortCommand, shortReport, size.w, size.h)))
 					for _, own := range []string{
 						resumePanelTitle, resumePausedBadge, resumeCommandLabel,
-						resumeLabelResume, resumeLabelDiscard, resumeKeyResume, string(resumekeys.Discard),
+						resumeLabelResume, resumeLabelDiscard, resumeLabelBack,
+						resumeKeyResume, string(resumekeys.Discard), resumeKeyBack,
 						shortCommand, shortReport,
 					} {
 						left = strings.ReplaceAll(left, own, " ")
@@ -348,7 +375,7 @@ func resumeStateGlyphsAt(size string) []string {
 	if size == "the plain stack" {
 		return hints
 	}
-	return append(hints, resumePausedBadge, resumeCommandLabel)
+	return append(hints, resumeKeyBack+" "+resumeLabelBack, resumePausedBadge, resumeCommandLabel)
 }
 
 // The bytes each header rendered before renderHeaderWithBadge took its badge
