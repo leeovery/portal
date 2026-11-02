@@ -100,8 +100,12 @@ func TestDecode_Refusals(t *testing.T) {
 	}{
 		{"malformed JSON", `{"version":2,`},
 		{"a missing version", `{"sessions":[]}`},
+		{"version 0", `{"version":0,"sessions":[]}`},
 		{"a future version", `{"version":3,"sessions":[]}`},
 		{"version 1", `{"version":1,"sessions":[]}`},
+		{"an entry with no name", `{"version":2,"sessions":[{"name":"a"},{"label":"x"}]}`},
+		{"an entry with an empty name", `{"version":2,"sessions":[{"name":""}]}`},
+		{"a name given twice", `{"version":2,"sessions":[{"name":"a"},{"name":"b"},{"name":"a","label":"x"}]}`},
 	} {
 		t.Run(tc.name+" is an error", func(t *testing.T) {
 			if _, err := sessionindex.Decode([]byte(tc.data)); err == nil {
@@ -110,25 +114,27 @@ func TestDecode_Refusals(t *testing.T) {
 		})
 	}
 
-	t.Run("version 1 wraps ErrLegacyIndex and carries the version found", func(t *testing.T) {
-		_, err := sessionindex.Decode([]byte(`{"version":1,"saved_at":"2026-01-01T00:00:00Z","sessions":[{"name":"a","windows":[]}]}`))
-		if !errors.Is(err, sessionindex.ErrLegacyIndex) {
-			t.Errorf("error = %v, want ErrLegacyIndex", err)
-		}
-		var verr *sessionindex.VersionError
-		if !errors.As(err, &verr) || verr.Found != 1 {
-			t.Errorf("error = %#v, want a VersionError with Found 1", err)
-		}
-	})
-
-	t.Run("another unsupported version is not ErrLegacyIndex", func(t *testing.T) {
-		_, err := sessionindex.Decode([]byte(`{"version":3,"sessions":[]}`))
-		if errors.Is(err, sessionindex.ErrLegacyIndex) {
-			t.Errorf("version 3 error %v reads as ErrLegacyIndex", err)
-		}
-		var verr *sessionindex.VersionError
-		if !errors.As(err, &verr) || verr.Found != 3 {
-			t.Errorf("error = %#v, want a VersionError with Found 3", err)
-		}
-	})
+	// The version is judged before the body: another version's body need not
+	// fit version 2's types.
+	for _, tc := range []struct {
+		name, data string
+		found      int
+		legacy     bool
+	}{
+		{"version 1", `{"version":1,"saved_at":"2026-01-01T00:00:00Z","sessions":[{"name":"a","windows":[]}]}`, 1, true},
+		{"version 1 with a body that does not fit version 2", `{"version":1,"saved_at":7,"sessions":{"a":{}}}`, 1, true},
+		{"version 3", `{"version":3,"sessions":[]}`, 3, false},
+		{"version 3 with a body that does not fit version 2", `{"version":3,"sessions":[{"name":"a","created_at":1793000000}]}`, 3, false},
+	} {
+		t.Run(tc.name+" is a VersionError carrying the version found", func(t *testing.T) {
+			_, err := sessionindex.Decode([]byte(tc.data))
+			var verr *sessionindex.VersionError
+			if !errors.As(err, &verr) || verr.Found != tc.found {
+				t.Fatalf("error = %#v, want a VersionError with Found %d", err, tc.found)
+			}
+			if got := errors.Is(err, sessionindex.ErrLegacyIndex); got != tc.legacy {
+				t.Errorf("errors.Is(ErrLegacyIndex) = %v, want %v", got, tc.legacy)
+			}
+		})
+	}
 }

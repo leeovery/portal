@@ -38,13 +38,15 @@ func Read(dir string) (Index, error) {
 }
 
 // Update reads the index in dir under the exclusive commit lock, the one the
-// state saver's commit cycle holds, and runs fn on it. When fn returns nil it
-// stamps saved_at and replaces sessions.json atomically; when fn errors,
-// nothing is written and its error is returned as fn gave it. A lock not
+// state saver's commit cycle holds, and runs fn on it. When fn returns nil
+// having changed something through Index's methods, it stamps saved_at and
+// replaces sessions.json atomically; when fn changes nothing or errors,
+// nothing is written, and fn's error is returned as fn gave it. A lock not
 // granted within the bound returns an error wrapping commitlock.ErrHeld with
 // nothing read or written, and an index that cannot be read or decoded is
-// returned as an error with fn never run.
-func Update(dir string, fn func(*Index) error) error {
+// returned as an error with fn never run. via records the calling surface:
+// cli, tui or internal.
+func Update(dir, via string, fn func(*Index) error) error {
 	lock, err := commitlock.Acquire(dir)
 	if err != nil {
 		return err
@@ -58,22 +60,31 @@ func Update(dir string, fn func(*Index) error) error {
 	if err := fn(&idx); err != nil {
 		return err
 	}
+	if len(idx.changes) == 0 {
+		logger.Debug("update-noop", "op", "update-noop", "via", via)
+		return nil
+	}
 	idx.SavedAt = now().UTC()
 	data, err := Encode(idx)
 	if err != nil {
 		return fmt.Errorf("encode sessions.json: %w", err)
 	}
-	path := Path(dir)
-	if err := fileutil.AtomicWrite0600(path, data); err != nil {
-		logger.Warn("write", "op", "write", "path", path, "error", err, "error_class", fileutil.ClassifyWriteError(err))
+	if err := fileutil.AtomicWrite0600(Path(dir), data); err != nil {
+		for _, c := range idx.changes {
+			logger.Warn(c.op, append(c.attrs(via), "error", err, "error_class", fileutil.ClassifyWriteError(err))...)
+		}
 		return fmt.Errorf("write sessions.json: %w", err)
 	}
 	for _, c := range idx.changes {
-		attrs := []any{"op", c.op, "session", c.session}
-		if c.value != "" {
-			attrs = append(attrs, "value", c.value)
-		}
-		logger.Info(c.op, attrs...)
+		logger.Info(c.op, c.attrs(via)...)
 	}
 	return nil
+}
+
+func (c change) attrs(via string) []any {
+	attrs := []any{"op", c.op, "session", c.session}
+	if c.value != "" {
+		attrs = append(attrs, "value", c.value)
+	}
+	return append(attrs, "via", via)
 }

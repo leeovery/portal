@@ -11,12 +11,12 @@ func TestLookup(t *testing.T) {
 	idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a", Dir: "/a"}, {Name: "b"}}}
 
 	e, ok := idx.Lookup("a")
-	if !ok || e.Dir != "/a" {
+	if !ok || e != (sessionindex.Entry{Name: "a", Dir: "/a"}) {
 		t.Fatalf("Lookup(a) = %+v, %v; want the a entry", e, ok)
 	}
 	e.Dir = "/moved"
-	if idx.Sessions[0].Dir != "/moved" {
-		t.Errorf("an edit through Lookup did not reach the index")
+	if idx.Sessions[0].Dir != "/a" {
+		t.Errorf("an edit to the looked-up copy reached the index")
 	}
 	if _, ok := idx.Lookup("missing"); ok {
 		t.Errorf("Lookup(missing) found an entry")
@@ -66,27 +66,52 @@ func TestSetLabel(t *testing.T) {
 				t.Errorf("Label = %q, want the name", got)
 			}
 		})
+
+		t.Run("the label "+`"`+reset+`"`+" on a session with no entry creates none", func(t *testing.T) {
+			idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "b"}}}
+			if err := idx.SetLabel("a", reset); err != nil {
+				t.Fatalf("SetLabel: %v", err)
+			}
+			if len(idx.Sessions) != 1 {
+				t.Errorf("sessions = %+v, want only b", idx.Sessions)
+			}
+		})
 	}
 
 	for name, label := range map[string]string{
-		"a newline": "two\nlines",
-		"a tab":     "tab\there",
-		"an escape": "red\x1b[31m",
-		"a DEL":     "del\x7f",
+		"a newline":             "two\nlines",
+		"a tab":                 "tab\there",
+		"an escape":             "red\x1b[31m",
+		"a DEL":                 "del\x7f",
+		"a bidi override":       "abc\u202edef",
+		"a zero-width space":    "zero\u200bwidth",
+		"a line separator":      "line\u2028sep",
+		"a paragraph separator": "para\u2029sep",
+		"invalid UTF-8":         "bad\xffbyte",
 	} {
 		t.Run("a label holding "+name+" is refused and changes nothing", func(t *testing.T) {
 			idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a", Label: "Alpha"}}}
-			if err := idx.SetLabel("a", label); !errors.Is(err, sessionindex.ErrLabelControlChar) {
-				t.Errorf("SetLabel(%q) = %v, want ErrLabelControlChar", label, err)
+			if err := idx.SetLabel("a", label); !errors.Is(err, sessionindex.ErrLabelUnprintable) {
+				t.Errorf("SetLabel(%q) = %v, want ErrLabelUnprintable", label, err)
 			}
-			if err := idx.SetLabel("b", label); !errors.Is(err, sessionindex.ErrLabelControlChar) {
-				t.Errorf("SetLabel on a new session = %v, want ErrLabelControlChar", err)
+			if err := idx.SetLabel("b", label); !errors.Is(err, sessionindex.ErrLabelUnprintable) {
+				t.Errorf("SetLabel on a new session = %v, want ErrLabelUnprintable", err)
 			}
 			if len(idx.Sessions) != 1 || idx.Sessions[0].Label != "Alpha" {
 				t.Errorf("sessions = %+v, want untouched", idx.Sessions)
 			}
 		})
 	}
+
+	t.Run("printable non-ASCII is kept", func(t *testing.T) {
+		var idx sessionindex.Index
+		if err := idx.SetLabel("a", "café — 日本"); err != nil {
+			t.Fatalf("SetLabel: %v", err)
+		}
+		if got := idx.Label("a"); got != "café — 日本" {
+			t.Errorf("Label = %q", got)
+		}
+	})
 }
 
 func TestRemove(t *testing.T) {

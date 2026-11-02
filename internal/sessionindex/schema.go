@@ -68,22 +68,46 @@ func Encode(idx Index) ([]byte, error) {
 	return json.MarshalIndent(idx, "", "  ")
 }
 
-// Decode errors on malformed JSON, a missing version field, and a version
-// other than SchemaVersion (a *VersionError); unknown fields are ignored for
-// forward compat.
+// Decode errors on malformed JSON, a missing version field, a version other
+// than SchemaVersion (a *VersionError, judged before the body, whose shape the
+// other version may not share), and an entry with an empty or repeated name.
+// Unknown fields are ignored.
 func Decode(data []byte) (Index, error) {
+	var head struct {
+		Version *int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &head); err != nil {
+		return Index{}, fmt.Errorf("decode sessions.json: %w", err)
+	}
+	if head.Version == nil {
+		return Index{}, errors.New("sessions.json missing version field")
+	}
+	if *head.Version != SchemaVersion {
+		return Index{}, &VersionError{Found: *head.Version}
+	}
 	var idx Index
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return Index{}, fmt.Errorf("decode sessions.json: %w", err)
 	}
-	if idx.Version == 0 {
-		return Index{}, errors.New("sessions.json missing version field")
-	}
-	if idx.Version != SchemaVersion {
-		return Index{}, &VersionError{Found: idx.Version}
+	if err := checkNames(idx.Sessions); err != nil {
+		return Index{}, err
 	}
 	if idx.Sessions == nil {
 		idx.Sessions = []Entry{}
 	}
 	return idx, nil
+}
+
+func checkNames(entries []Entry) error {
+	seen := make(map[string]bool, len(entries))
+	for i, e := range entries {
+		if e.Name == "" {
+			return fmt.Errorf("sessions.json entry %d has no name", i)
+		}
+		if seen[e.Name] {
+			return fmt.Errorf("sessions.json names session %q twice", e.Name)
+		}
+		seen[e.Name] = true
+	}
+	return nil
 }

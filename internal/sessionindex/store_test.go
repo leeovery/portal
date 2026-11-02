@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,11 +13,8 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/commitlock"
-	"github.com/leeovery/portal/internal/fileutil"
-	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/sourceguardtest"
-	"golang.org/x/sys/unix"
 )
 
 func writeIndex(t *testing.T, dir string, data string) {
@@ -35,21 +31,6 @@ func readFile(t *testing.T, dir string) []byte {
 		t.Fatalf("read sessions.json: %v", err)
 	}
 	return data
-}
-
-// holdCommitLock takes the commit lock through an open file description of
-// its own, as another process would.
-func holdCommitLock(t *testing.T, dir string) *os.File {
-	t.Helper()
-	f, err := os.OpenFile(commitlock.Path(dir), os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		t.Fatalf("open commit lock: %v", err)
-	}
-	t.Cleanup(func() { _ = f.Close() })
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		t.Fatalf("flock commit lock: %v", err)
-	}
-	return f
 }
 
 func TestPath(t *testing.T) {
@@ -96,7 +77,7 @@ func TestUpdate(t *testing.T) {
 		at := time.Date(2026, 11, 2, 9, 30, 0, 0, time.FixedZone("x", 3600))
 		sessionindex.SetClockForTest(t, at)
 
-		err := sessionindex.Update(dir, func(idx *sessionindex.Index) error {
+		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			return idx.SetLabel("a", "Alpha")
 		})
 		if err != nil {
@@ -118,7 +99,7 @@ func TestUpdate(t *testing.T) {
 		dir := t.TempDir()
 		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","dir":"/a"},{"name":"b"}]}`)
 
-		err := sessionindex.Update(dir, func(idx *sessionindex.Index) error {
+		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			idx.Remove("b")
 			return nil
 		})
@@ -140,7 +121,7 @@ func TestUpdate(t *testing.T) {
 		writeIndex(t, dir, seed)
 		boom := errors.New("boom")
 
-		err := sessionindex.Update(dir, func(idx *sessionindex.Index) error {
+		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			_ = idx.SetLabel("a", "Alpha")
 			return boom
 		})
@@ -154,7 +135,7 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("nothing is written for a missing file when fn errors", func(t *testing.T) {
 		dir := t.TempDir()
-		_ = sessionindex.Update(dir, func(*sessionindex.Index) error { return errors.New("boom") })
+		_ = sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return errors.New("boom") })
 		if _, err := os.Stat(sessionindex.Path(dir)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("stat sessions.json = %v, want absent", err)
 		}
@@ -166,7 +147,7 @@ func TestUpdate(t *testing.T) {
 		writeIndex(t, dir, seed)
 		ran := false
 
-		err := sessionindex.Update(dir, func(*sessionindex.Index) error { ran = true; return nil })
+		err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
 		if !errors.Is(err, sessionindex.ErrLegacyIndex) {
 			t.Errorf("Update = %v, want ErrLegacyIndex", err)
 		}
@@ -186,7 +167,7 @@ func TestUpdate(t *testing.T) {
 			t.Fatalf("stat: %v", err)
 		}
 
-		if err := sessionindex.Update(dir, func(idx *sessionindex.Index) error { return idx.SetLabel("a", "A") }); err != nil {
+		if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.SetLabel("a", "A") }); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 		after, err := os.Stat(sessionindex.Path(dir))
@@ -219,7 +200,7 @@ func TestUpdate(t *testing.T) {
 		errs := make(chan error, callers)
 		for i := range callers {
 			wg.Go(func() {
-				errs <- sessionindex.Update(dir, func(idx *sessionindex.Index) error {
+				errs <- sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 					// The pause widens the read-modify-write window an
 					// unserialised store would lose updates in.
 					time.Sleep(2 * time.Millisecond)
@@ -247,11 +228,11 @@ func TestUpdate(t *testing.T) {
 		dir := t.TempDir()
 		seed := `{"version":2,"sessions":[]}`
 		writeIndex(t, dir, seed)
-		holdCommitLock(t, dir)
+		commitlock.HoldForTest(t, dir)
 		commitlock.SetTimeoutForTest(t, 30*time.Millisecond)
 		ran := false
 
-		err := sessionindex.Update(dir, func(*sessionindex.Index) error { ran = true; return nil })
+		err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
 		if !errors.Is(err, commitlock.ErrHeld) {
 			t.Errorf("Update = %v, want ErrHeld", err)
 		}
@@ -265,93 +246,47 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("it waits out a holder that releases within the bound", func(t *testing.T) {
 		dir := t.TempDir()
-		held := holdCommitLock(t, dir)
+		held := commitlock.HoldForTest(t, dir)
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			_ = held.Close()
 		}()
-		if err := sessionindex.Update(dir, func(*sessionindex.Index) error { return nil }); err != nil {
+		if err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
 			t.Errorf("Update = %v, want it to wait for the release", err)
 		}
 	})
-}
 
-func TestUpdate_Logging(t *testing.T) {
-	t.Run("each landed label change and removal logs at INFO", func(t *testing.T) {
+	t.Run("a fn that changes nothing writes nothing and keeps saved_at", func(t *testing.T) {
 		dir := t.TempDir()
-		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Old"},{"name":"b"}]}`)
-		sink := logtest.Install(t)
+		seed := `{"version":2,"saved_at":"2026-01-01T00:00:00Z","sessions":[{"name":"a","label":"Alpha"}]}`
+		writeIndex(t, dir, seed)
+		sessionindex.SetClockForTest(t, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
 
-		err := sessionindex.Update(dir, func(idx *sessionindex.Index) error {
-			_ = idx.SetLabel("c", "Gamma")
-			_ = idx.SetLabel("a", "")
-			idx.Remove("b")
+		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			if err := idx.SetLabel("a", "Alpha"); err != nil {
+				return err
+			}
+			if err := idx.SetLabel("absent", ""); err != nil {
+				return err
+			}
+			idx.Remove("absent")
 			return nil
 		})
 		if err != nil {
 			t.Fatalf("Update: %v", err)
 		}
-		set := sink.Records().Matching("sessions", "set-label").AtExactLevel(slog.LevelInfo).Only(t, "set-label")
-		if set.AttrString(t, "session") != "c" || set.AttrString(t, "value") != "Gamma" || set.AttrString(t, "op") != "set-label" {
-			t.Errorf("set-label record = %+v", set.Attrs)
-		}
-		clear := sink.Records().Matching("sessions", "clear-label").AtExactLevel(slog.LevelInfo).Only(t, "clear-label")
-		if clear.AttrString(t, "session") != "a" || clear.HasAttr("value") {
-			t.Errorf("clear-label record = %+v", clear.Attrs)
-		}
-		rm := sink.Records().Matching("sessions", "rm").AtExactLevel(slog.LevelInfo).Only(t, "rm")
-		if rm.AttrString(t, "session") != "b" {
-			t.Errorf("rm record = %+v", rm.Attrs)
+		if got := readFile(t, dir); string(got) != seed {
+			t.Errorf("sessions.json = %s, want untouched %s", got, seed)
 		}
 	})
 
-	t.Run("an unchanged label logs nothing", func(t *testing.T) {
+	t.Run("a fn that changes nothing creates no file", func(t *testing.T) {
 		dir := t.TempDir()
-		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Alpha"}]}`)
-		sink := logtest.Install(t)
-
-		if err := sessionindex.Update(dir, func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }); err != nil {
+		if err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
-		if n := len(sink.Records()); n != 0 {
-			t.Errorf("records = %d, want none", n)
-		}
-	})
-
-	t.Run("a change fn rolls back logs nothing", func(t *testing.T) {
-		dir := t.TempDir()
-		sink := logtest.Install(t)
-
-		_ = sessionindex.Update(dir, func(idx *sessionindex.Index) error {
-			_ = idx.SetLabel("a", "Alpha")
-			return errors.New("boom")
-		})
-		if n := len(sink.Records()); n != 0 {
-			t.Errorf("records = %d, want none", n)
-		}
-	})
-
-	t.Run("a failed write logs WARN with its error class and logs no change", func(t *testing.T) {
-		dir := t.TempDir()
-		f, err := commitlock.Acquire(dir)
-		if err != nil {
-			t.Fatalf("seed commit lock: %v", err)
-		}
-		_ = f.Close()
-		if err := os.Chmod(dir, 0o500); err != nil {
-			t.Fatalf("chmod: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-		sink := logtest.Install(t)
-
-		err = sessionindex.Update(dir, func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") })
-		if !errors.Is(err, fileutil.ErrWriteTempCreate) {
-			t.Fatalf("Update = %v, want a temp-create failure", err)
-		}
-		rec := sink.Records().Matching("sessions", "write").AtExactLevel(slog.LevelWarn).Only(t, "write failure")
-		logtest.AssertWriteFailure(t, rec, "write-failed-temp-create", fileutil.ErrWriteTempCreate)
-		if n := len(sink.Records().WithMessage("set-label")); n != 0 {
-			t.Errorf("set-label records = %d, want none for a change that did not land", n)
+		if _, err := os.Stat(sessionindex.Path(dir)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat sessions.json = %v, want absent", err)
 		}
 	})
 }

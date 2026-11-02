@@ -12,21 +12,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// holdLock takes the lock through an open file description of its own, as
-// another process would.
-func holdLock(t *testing.T, dir string) *os.File {
-	t.Helper()
-	f, err := os.OpenFile(commitlock.Path(dir), os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		t.Fatalf("open commit lock: %v", err)
-	}
-	t.Cleanup(func() { _ = f.Close() })
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		t.Fatalf("flock commit lock: %v", err)
-	}
-	return f
-}
-
 func TestPath(t *testing.T) {
 	if got, want := commitlock.Path("/s"), filepath.Join("/s", "commit.lock"); got != want {
 		t.Errorf("Path = %q, want %q", got, want)
@@ -56,7 +41,7 @@ func TestAcquire(t *testing.T) {
 
 	t.Run("a lock held past the bound returns an error wrapping ErrHeld", func(t *testing.T) {
 		dir := t.TempDir()
-		holdLock(t, dir)
+		commitlock.HoldForTest(t, dir)
 		commitlock.SetTimeoutForTest(t, 30*time.Millisecond)
 
 		f, err := commitlock.Acquire(dir)
@@ -71,7 +56,7 @@ func TestAcquire(t *testing.T) {
 
 	t.Run("it waits for a holder that releases within the bound", func(t *testing.T) {
 		dir := t.TempDir()
-		held := holdLock(t, dir)
+		held := commitlock.HoldForTest(t, dir)
 		commitlock.SetTimeoutForTest(t, 5*time.Second)
 		go func() {
 			time.Sleep(50 * time.Millisecond)
