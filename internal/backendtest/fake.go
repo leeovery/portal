@@ -3,8 +3,10 @@
 package backendtest
 
 import (
+	"context"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -30,20 +32,26 @@ const (
 // AttachProgram is Argv[0] of every command AttachCommand returns.
 const AttachProgram = "backendtest-attach"
 
-// Call is one recorded Backend call. Dir and Command are set for Create only.
+// Call is one recorded Backend call. Dir and Command are set for Create only,
+// Rows for History only.
 type Call struct {
 	Op      Op
 	Name    string
 	Dir     string
 	Command []string
+	Rows    int
 }
 
-// Fake is an in-memory Backend. Create, Kill and Detach change the sessions it
-// holds; Fail makes a method return an error before it changes anything.
+// Fake is an in-memory Backend that keeps the driver's contract: names match
+// exactly, except that Create refuses a name held under another case, as zmx
+// on a case-insensitive filesystem does. Create, Kill and Detach change the
+// sessions it holds; Fail makes a method return an error before it changes
+// anything, and a call with an ended context fails with its cause.
 type Fake struct {
 	// Now stamps Created on the sessions Create makes; nil is time.Now.
 	Now func() time.Time
-	// Validate replaces the default name rule, which refuses only "".
+	// Validate replaces the default name rule, zmx's own without the length
+	// limit, which depends on a directory the Fake has none of.
 	Validate func(name string) error
 
 	mu       sync.Mutex
@@ -138,10 +146,10 @@ func (f *Fake) CallsTo(op Op) []Call {
 	return out
 }
 
-func (f *Fake) List() ([]backend.Session, error) {
+func (f *Fake) List(ctx context.Context) ([]backend.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.begin(Call{Op: OpList}); err != nil {
+	if err := f.begin(ctx, Call{Op: OpList}); err != nil {
 		return nil, err
 	}
 	sessions := make([]backend.Session, 0, len(f.sessions))
@@ -151,56 +159,56 @@ func (f *Fake) List() ([]backend.Session, error) {
 	return sessions, nil
 }
 
-func (f *Fake) Exists(name string) (bool, error) {
+func (f *Fake) Exists(ctx context.Context, name string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.begin(Call{Op: OpExists, Name: name}); err != nil {
+	if err := f.begin(ctx, Call{Op: OpExists, Name: name}); err != nil {
 		return false, err
 	}
 	_, ok := f.sessions[name]
 	return ok, nil
 }
 
-// Create renders the session's Command as zmx reports it.
-func (f *Fake) Create(name, dir string, command []string) error {
+// Create reports the session as zmx does: its Dir with symlinks resolved, as
+// the session's own working directory reads, and its Command rendered by
+// DisplayCommand.
+func (f *Fake) Create(ctx context.Context, name, dir string, command []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.begin(Call{Op: OpCreate, Name: name, Dir: dir, Command: slices.Clone(command)}); err != nil {
+	if err := f.begin(ctx, Call{Op: OpCreate, Name: name, Dir: dir, Command: slices.Clone(command)}); err != nil {
 		return err
 	}
 	if err := f.validate(name); err != nil {
 		return err
 	}
-	if _, ok := f.sessions[name]; ok {
-		return fmt.Errorf("create session %q: %w", name, backend.ErrSessionExists)
+	if held, ok := f.heldUnder(name); ok {
+		return &backend.SessionExistsError{Name: name, Held: held}
 	}
 	f.lastPID++
 	f.sessions[name] = backend.Session{
-		Name:    name,
-		Dir:     dir,
-		PID:     f.lastPID,
-		Created: f.now(),
-		Command: zmx.DisplayCommand(command),
+		Name:     name,
+		Answered: true,
+		Dir:      resolved(dir),
+		PID:      f.lastPID,
+		Created:  f.now(),
+		Command:  zmx.DisplayCommand(command),
 	}
 	return nil
 }
 
-func (f *Fake) AttachCommand(name string) (backend.Command, error) {
+func (f *Fake) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.begin(Call{Op: OpAttachCommand, Name: name}); err != nil {
-		return backend.Command{}, err
-	}
-	if err := f.validate(name); err != nil {
+	if err := f.beginHeld(ctx, Call{Op: OpAttachCommand, Name: name}); err != nil {
 		return backend.Command{}, err
 	}
 	return backend.Command{Argv: []string{AttachProgram, name}}, nil
 }
 
-func (f *Fake) Kill(name string) error {
+func (f *Fake) Kill(ctx context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.held(OpKill, name); err != nil {
+	if err := f.beginHeld(ctx, Call{Op: OpKill, Name: name}); err != nil {
 		return err
 	}
 	delete(f.sessions, name)
@@ -208,10 +216,10 @@ func (f *Fake) Kill(name string) error {
 	return nil
 }
 
-func (f *Fake) Detach(name string) error {
+func (f *Fake) Detach(ctx context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.held(OpDetach, name); err != nil {
+	if err := f.beginHeld(ctx, Call{Op: OpDetach, Name: name}); err != nil {
 		return err
 	}
 	s := f.sessions[name]
@@ -220,13 +228,20 @@ func (f *Fake) Detach(name string) error {
 	return nil
 }
 
-func (f *Fake) History(name string) ([]byte, error) {
+// History returns what SetHistory gave the session, whatever rows asks for;
+// a session given none, or an empty one, is ErrHistoryUnavailable, as the
+// driver never returns an empty history.
+func (f *Fake) History(ctx context.Context, name string, rows int) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.held(OpHistory, name); err != nil {
+	if err := f.beginHeld(ctx, Call{Op: OpHistory, Name: name, Rows: rows}); err != nil {
 		return nil, err
 	}
-	return append([]byte{}, f.history[name]...), nil
+	vt := f.history[name]
+	if len(vt) == 0 {
+		return nil, fmt.Errorf("history %q: %w", name, backend.ErrHistoryUnavailable)
+	}
+	return slices.Clone(vt), nil
 }
 
 func (f *Fake) Current() string {
@@ -241,24 +256,30 @@ func (f *Fake) ValidateName(name string) error {
 	return f.validate(name)
 }
 
-// begin records the call and returns the failure injected for its op. The
-// caller holds mu.
-func (f *Fake) begin(c Call) error {
+// begin records the call and returns the failure injected for its op, or the
+// context's cause. The caller holds mu.
+func (f *Fake) begin(ctx context.Context, c Call) error {
 	f.calls = append(f.calls, c)
-	return f.failures[c.Op]
+	if err := f.failures[c.Op]; err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	return nil
 }
 
-// held begins a call on a named session the Fake must hold. The caller holds
-// mu.
-func (f *Fake) held(op Op, name string) error {
-	if err := f.begin(Call{Op: op, Name: name}); err != nil {
+// beginHeld begins a call on a session the Fake must hold under exactly the
+// call's name. The caller holds mu.
+func (f *Fake) beginHeld(ctx context.Context, c Call) error {
+	if err := f.begin(ctx, c); err != nil {
 		return err
 	}
-	if err := f.validate(name); err != nil {
+	if err := f.validate(c.Name); err != nil {
 		return err
 	}
-	if _, ok := f.sessions[name]; !ok {
-		return fmt.Errorf("%s session %q: %w", strings.ToLower(string(op)), name, backend.ErrNoSuchSession)
+	if _, ok := f.sessions[c.Name]; !ok {
+		return fmt.Errorf("%s session %q: %w", strings.ToLower(string(c.Op)), c.Name, backend.ErrNoSuchSession)
 	}
 	return nil
 }
@@ -267,10 +288,30 @@ func (f *Fake) validate(name string) error {
 	if f.Validate != nil {
 		return f.Validate(name)
 	}
-	if name == "" {
-		return fmt.Errorf("%w: empty", backend.ErrInvalidName)
+	return zmx.CheckName(name)
+}
+
+// heldUnder finds the session name answers to, as zmx finds it on a
+// case-insensitive filesystem: the exact name first. The caller holds mu.
+func (f *Fake) heldUnder(name string) (string, bool) {
+	if _, ok := f.sessions[name]; ok {
+		return name, true
 	}
-	return nil
+	for _, held := range slices.Sorted(maps.Keys(f.sessions)) {
+		if strings.EqualFold(held, name) {
+			return held, true
+		}
+	}
+	return "", false
+}
+
+// resolved is dir with its symlinks resolved where it exists, as a process
+// working there reads it.
+func resolved(dir string) string {
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		return real
+	}
+	return filepath.Clean(dir)
 }
 
 func (f *Fake) now() time.Time {

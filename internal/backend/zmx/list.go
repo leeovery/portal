@@ -1,169 +1,128 @@
 package zmx
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"net/url"
-	"strconv"
-	"strings"
-	"time"
+	"io/fs"
+	"math"
+	"os"
+	"sync"
 
 	"github.com/leeovery/portal/internal/backend"
 )
 
-// zmx v0.8.1 prints one entry per session, tab-separated, behind a
-// two-column marker that is "→ " on the caller's own session:
-//
-//	name=<n>\tpid=<n>\tclients=<n>\tcreated=<unix s>[\tcwd=<osc7>][\tcmd=<c>][\tended=…][\texit_code=…][\t<label>=<v>…]
-//	name=<n>\terr=<error>\tstatus=<cleaning up|unreachable>
-//
-// cmd is shell-quoted, but a newline in it is printed raw, so an entry can run
-// over several lines; a tab in it ends the field early. cwd and cmd are read
-// by position, ahead of any labels. A label may be named cwd, but its value is
-// limited to [A-Za-z0-9._-] and so never reads as a directory.
-var listMarkers = []string{"  ", "→ "}
+// maxProbes caps the probes in flight, each holding a socket open, so a
+// directory of many sessions cannot exhaust Portal's file descriptors.
+const maxProbes = 64
 
-const nameField = "name="
-
-// statusGone is the status of a session whose daemon refused the probe; zmx
-// deleted its socket during this listing.
-const statusGone = "cleaning up"
-
-var errUnparseable = errors.New("unparseable zmx list output")
-
-func parseList(out string) ([]backend.Session, error) {
-	entries, err := splitEntries(out)
+// List probes every session at once, each within the probe ceiling, so
+// sessions that do not answer cost one ceiling between them, not one each.
+// A stale socket is left out, and left in place: zmx replaces it, and
+// Portal never deletes a socket.
+func (b *Backend) List(ctx context.Context) ([]backend.Session, error) {
+	names, err := b.sockets()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list zmx sessions: %w", err)
+	}
+	// Without a hostname only a cwd with no host, or localhost, reads as
+	// local; every other field is unaffected.
+	hostname, _ := b.hostname()
+	probes := make([]probed, len(names))
+	slots := make(chan struct{}, maxProbes)
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			probes[i] = b.probe(ctx, name, hostname)
+		})
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("list zmx sessions: %w", context.Cause(ctx))
 	}
 	sessions := []backend.Session{}
-	for _, entry := range entries {
-		s, live, err := parseEntry(entry)
-		if err != nil {
-			return nil, fmt.Errorf("%w: entry %q: %w", errUnparseable, entry, err)
-		}
-		if live {
-			sessions = append(sessions, s)
+	for _, p := range probes {
+		if !p.gone {
+			sessions = append(sessions, p.session)
 		}
 	}
 	return sessions, nil
 }
 
-// splitEntries returns each entry without its marker. A line that does not
-// open an entry continues the one before it.
-func splitEntries(out string) ([]string, error) {
-	out = strings.TrimSuffix(out, "\n")
-	if out == "" {
+// sockets names the directory's sessions as zmx finds them: every entry whose
+// stat, following symlinks, is a unix socket with a path short enough to
+// connect to, in name order. zmx makes the directory with its first session,
+// so a missing one holds none.
+func (b *Backend) sockets() ([]string, error) {
+	entries, err := os.ReadDir(b.dir)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	var entries []string
-	for line := range strings.SplitSeq(out, "\n") {
-		if entry, ok := entryStart(line); ok {
-			entries = append(entries, entry)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		name := e.Name()
+		if len(name) > b.MaxNameLen() {
 			continue
 		}
-		if len(entries) == 0 {
-			return nil, fmt.Errorf("%w: %q opens no entry", errUnparseable, line)
-		}
-		entries[len(entries)-1] += "\n" + line
-	}
-	return entries, nil
-}
-
-func entryStart(line string) (string, bool) {
-	for _, marker := range listMarkers {
-		if entry, ok := strings.CutPrefix(line, marker); ok && strings.HasPrefix(entry, nameField) {
-			return entry, true
+		if info, err := os.Stat(b.path(name)); err == nil && info.Mode().Type() == fs.ModeSocket {
+			names = append(names, name)
 		}
 	}
-	return "", false
+	return names, nil
 }
 
-// parseEntry reports false for a session that is already gone.
-func parseEntry(entry string) (backend.Session, bool, error) {
-	fields := fieldCursor(strings.Split(entry, "\t"))
-	name, err := fields.required(nameField)
-	if err != nil {
-		return backend.Session{}, false, err
-	}
-	if _, failed := fields.optional("err="); failed {
-		status, err := fields.required("status=")
-		if err != nil {
-			return backend.Session{}, false, err
-		}
-		return backend.Session{Name: name, Unreachable: true}, status != statusGone, nil
-	}
-	s, err := parseLive(name, fields)
-	return s, true, err
+// probed is one socket's answer: its session, or gone when the socket is
+// missing or stale.
+type probed struct {
+	session backend.Session
+	gone    bool
 }
 
-func parseLive(name string, fields fieldCursor) (backend.Session, error) {
-	pid, err := fields.requiredInt("pid=")
-	if err != nil {
-		return backend.Session{}, err
+// probe keeps a session that fails to answer, for any reason but a missing or
+// stale socket, with only its name known.
+func (b *Backend) probe(ctx context.Context, name, hostname string) probed {
+	i, err := b.readInfo(ctx, name)
+	switch {
+	case gone(err):
+		return probed{gone: true}
+	case err != nil:
+		return probed{session: backend.Session{Name: name}}
 	}
-	clients, err := fields.requiredInt("clients=")
-	if err != nil {
-		return backend.Session{}, err
+	s := backend.Session{
+		Name:     name,
+		Answered: true,
+		Clients:  int(min(i.clients, math.MaxInt)),
+		PID:      int(i.pid),
+		Created:  i.createdAt(),
+		Command:  i.cmd,
 	}
-	created, err := fields.requiredInt("created=")
-	if err != nil {
-		return backend.Session{}, err
+	if !i.cwdTruncated() {
+		s.Dir = localDir(i.cwd, hostname)
 	}
-	s := backend.Session{Name: name, PID: int(pid), Clients: int(clients)}
-	if created > 0 {
-		s.Created = time.Unix(created, 0)
-	}
-	if cwd, ok := fields.optional("cwd="); ok {
-		s.Dir = osc7Path(cwd)
-	}
-	s.Command, _ = fields.optional("cmd=")
-	return s, nil
+	return probed{session: s}
 }
 
-// fieldCursor consumes a line's fields in order.
-type fieldCursor []string
-
-func (c *fieldCursor) optional(key string) (string, bool) {
-	if len(*c) == 0 {
-		return "", false
-	}
-	v, ok := strings.CutPrefix((*c)[0], key)
-	if ok {
-		*c = (*c)[1:]
-	}
-	return v, ok
-}
-
-func (c *fieldCursor) required(key string) (string, error) {
-	v, ok := c.optional(key)
-	if !ok {
-		return "", fmt.Errorf("missing %s field", strings.TrimSuffix(key, "="))
-	}
-	return v, nil
-}
-
-func (c *fieldCursor) requiredInt(key string) (int64, error) {
-	v, err := c.required(key)
+// readInfo asks the daemon behind name's socket for its Info record, within
+// the probe ceiling. The daemon counts clients without the asker.
+func (b *Backend) readInfo(ctx context.Context, name string) (info, error) {
+	ctx, cancel := context.WithTimeout(ctx, b.limits.probe)
+	defer cancel()
+	c, err := b.connect(ctx, name)
 	if err != nil {
-		return 0, err
+		return info{}, failure(ctx, err)
 	}
-	n, err := strconv.ParseInt(v, 10, 64)
+	defer func() { _ = c.Close() }()
+	if err := c.send(tagInfo, nil); err != nil {
+		return info{}, failure(ctx, err)
+	}
+	p, err := c.await(tagInfo)
 	if err != nil {
-		return 0, fmt.Errorf("%s%q: %w", key, v, err)
+		return info{}, failure(ctx, err)
 	}
-	return n, nil
-}
-
-// osc7Path reads zmx's cwd, an OSC 7 URI (file:// or kitty-shell-cwd://,
-// percent-encoded) or a plain path, as a path; "" when it names none.
-func osc7Path(cwd string) string {
-	if strings.HasPrefix(cwd, "/") {
-		return cwd
-	}
-	u, err := url.Parse(cwd)
-	if err != nil || (u.Scheme != "file" && u.Scheme != "kitty-shell-cwd") || !strings.HasPrefix(u.Path, "/") {
-		return ""
-	}
-	return u.Path
+	return decodeInfo(p)
 }

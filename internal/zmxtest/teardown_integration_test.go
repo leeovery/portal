@@ -4,6 +4,7 @@ package zmxtest
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,14 +14,21 @@ import (
 	"github.com/leeovery/portal/internal/harnesstest"
 )
 
+func mustCreate(t *testing.T, b *zmx.Backend, name string) {
+	t.Helper()
+	if err := b.Create(t.Context(), name, t.TempDir(), []string{"sleep", "1000"}); err != nil {
+		t.Fatalf("Create(%s): %v", name, err)
+	}
+}
+
+func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
 // Each case drives teardown directly while the session's daemon is out of
 // zmx's reach; New's own cleanup then finds nothing left.
 func TestTeardown(t *testing.T) {
 	t.Run("it fails, within its bounds, on a daemon that will not die, and kills it", func(t *testing.T) {
 		b := New(t)
-		if err := b.Create("wedged", t.TempDir(), []string{"sleep", "1000"}); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
+		mustCreate(t, b, "wedged")
 		daemon := Daemon(t, b, "wedged")
 		if err := syscall.Kill(daemon, syscall.SIGSTOP); err != nil {
 			t.Fatalf("stop daemon %d: %v", daemon, err)
@@ -28,7 +36,7 @@ func TestTeardown(t *testing.T) {
 		rec := &harnesstest.Recorder{}
 		start := time.Now()
 
-		teardown(rec, b)
+		teardown(t.Context(), rec, b)
 
 		if took := time.Since(start); took > 20*time.Second {
 			t.Errorf("teardown took %s", took)
@@ -36,17 +44,15 @@ func TestTeardown(t *testing.T) {
 		if !rec.Failed() || !strings.Contains(rec.Report(), "survived their kill") {
 			t.Errorf("teardown reported %s, want the surviving daemon", rec.Report())
 		}
-		if syscall.Kill(daemon, 0) == nil {
+		if alive(daemon) {
 			_ = syscall.Kill(daemon, syscall.SIGKILL)
 			t.Errorf("daemon %d survived teardown", daemon)
 		}
 	})
 
-	t.Run("it finds and kills the daemons of a directory zmx cannot list", func(t *testing.T) {
+	t.Run("it finds and kills the processes of a directory zmx cannot list", func(t *testing.T) {
 		b := New(t)
-		if err := b.Create("hidden", t.TempDir(), []string{"sleep", "1000"}); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
+		mustCreate(t, b, "hidden")
 		daemon := Daemon(t, b, "hidden")
 		if err := os.Chmod(b.Dir(), 0); err != nil {
 			t.Fatal(err)
@@ -54,48 +60,100 @@ func TestTeardown(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chmod(b.Dir(), 0o750) })
 		rec := &harnesstest.Recorder{}
 
-		teardown(rec, b)
+		teardown(t.Context(), rec, b)
 
 		if !rec.Failed() {
 			t.Error("teardown reported nothing for a directory it could not list")
 		}
-		if syscall.Kill(daemon, 0) == nil {
+		if alive(daemon) {
 			_ = syscall.Kill(daemon, syscall.SIGKILL)
 			t.Errorf("daemon %d survived teardown", daemon)
 		}
 	})
 
+	t.Run("it passes quietly over a session whose daemon has died", func(t *testing.T) {
+		b := New(t)
+		mustCreate(t, b, "dead")
+		daemon := Daemon(t, b, "dead")
+		if err := syscall.Kill(daemon, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool { return !alive(daemon) }) {
+			t.Fatalf("daemon %d survived SIGKILL", daemon)
+		}
+		rec := &harnesstest.Recorder{}
+
+		teardown(t.Context(), rec, b)
+
+		if rec.Failed() {
+			t.Errorf("teardown reported %s for a session that cannot answer and has no process left", rec.Report())
+		}
+	})
+
 	t.Run("it passes quietly when every kill lands", func(t *testing.T) {
 		b := New(t)
-		if err := b.Create("plain", t.TempDir(), []string{"sleep", "1000"}); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
+		mustCreate(t, b, "plain")
 		daemon := Daemon(t, b, "plain")
 		rec := &harnesstest.Recorder{}
 
-		teardown(rec, b)
+		teardown(t.Context(), rec, b)
 
 		if rec.Failed() {
 			t.Errorf("teardown reported %s", rec.Report())
 		}
-		if syscall.Kill(daemon, 0) == nil {
+		if alive(daemon) {
 			t.Errorf("daemon %d survived teardown", daemon)
 		}
 	})
 }
 
-func TestDaemons(t *testing.T) {
-	t.Run("it finds only the daemons started for its own directory", func(t *testing.T) {
+func TestOwned(t *testing.T) {
+	t.Run("it finds the daemon, client and command of its own directory, and nothing of another's", func(t *testing.T) {
 		a, b := New(t), New(t)
 		for _, be := range []*zmx.Backend{a, b} {
-			if err := be.Create("same-name", t.TempDir(), []string{"sleep", "1000"}); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
+			mustCreate(t, be, "same-name")
 		}
+		Attach(t, a, "same-name")
+		sessions, err := a.List(t.Context())
+		if err != nil || len(sessions) != 1 {
+			t.Fatalf("List = %+v, %v", sessions, err)
+		}
+		daemon, command := Daemon(t, a, "same-name"), sessions[0].PID
 
-		got := daemons(a.Dir())
-		if want := Daemon(t, a, "same-name"); len(got) != 1 || got[0] != want {
-			t.Errorf("daemons(%s) = %v, want only %d", a.Dir(), got, want)
+		var got []int
+		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+			got, err = owned(a.Dir())
+			return err == nil && len(got) == 3
+		}) {
+			t.Fatalf("owned(%s) = %v, %v; want the daemon, the command and the attach client", a.Dir(), got, err)
+		}
+		if !slices.Contains(got, daemon) || !slices.Contains(got, command) {
+			t.Errorf("owned(%s) = %v, want daemon %d and command %d among them", a.Dir(), got, daemon, command)
+		}
+		if other := Daemon(t, b, "same-name"); slices.Contains(got, other) {
+			t.Errorf("owned(%s) = %v takes in %d, the daemon of %s", a.Dir(), got, other, b.Dir())
+		}
+	})
+}
+
+func TestStopDaemon(t *testing.T) {
+	t.Run("it stops the daemon and continues it at cleanup, so teardown can kill it", func(t *testing.T) {
+		b := New(t)
+		mustCreate(t, b, "paused")
+		var daemon int
+		t.Run("inner", func(t *testing.T) {
+			daemon = StopDaemon(t, b, "paused")
+			sessions, err := b.List(t.Context())
+			if err != nil || len(sessions) != 1 || sessions[0].Answered {
+				t.Errorf("List of a stopped daemon = %+v, %v; want it unanswered", sessions, err)
+			}
+		})
+
+		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+			sessions, err := b.List(t.Context())
+			return err == nil && len(sessions) == 1 && sessions[0].Answered
+		}) {
+			t.Errorf("daemon %d still stopped after its test's cleanup", daemon)
 		}
 	})
 }

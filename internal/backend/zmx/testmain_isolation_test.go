@@ -8,11 +8,13 @@ package zmx_test
 import (
 	"os"
 	"testing"
+
+	"github.com/leeovery/portal/internal/zmxtest"
 )
 
 func TestMain(m *testing.M) {
 	for _, err := range []error{
-		os.Setenv("ZMX_DIR", "/nonexistent/zmx-poison"),
+		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
 		os.Unsetenv("ZMX_SESSION"),
 		os.Unsetenv("ZMX_SESSION_PREFIX"),
 	} {

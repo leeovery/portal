@@ -11,7 +11,7 @@ import (
 )
 
 func TestValidateName(t *testing.T) {
-	b := newBackend(newRunner(t, nil))
+	b := zmx.New(zmx.Config{Dir: "/tmp/zx-unit"})
 
 	t.Run("it accepts the names Portal makes and odd ones zmx holds", func(t *testing.T) {
 		for _, name := range []string{
@@ -31,7 +31,7 @@ func TestValidateName(t *testing.T) {
 			"logs", "Logs", "LOGS", // zmx keeps its log directory beside the sockets; macOS folds case
 			"-h", "--help", "--labels=x", "--vt", "--force", // zmx reads these as flags
 			"dotfiles*", "*", // zmx kill reads a trailing * as a prefix match
-			"a\tb", "a\nb", "a\x00b", "a\x7fb", "a\u0085b", // list output cannot carry them
+			"a\tb", "a\nb", "a\x00b", "a\x7fb", "a\u0085b", // zmx's own listing prints them raw
 		} {
 			if err := b.ValidateName(name); !errors.Is(err, backend.ErrInvalidName) {
 				t.Errorf("ValidateName(%q) = %v, want ErrInvalidName", name, err)
@@ -41,7 +41,7 @@ func TestValidateName(t *testing.T) {
 
 	t.Run("it refuses a name whose socket path would pass the platform limit", func(t *testing.T) {
 		for _, dir := range []string{"/tmp/zx-unit", "/Users/lee/.local/state/zmx"} {
-			b := zmx.New(dir, fixedEnviron(), newRunner(t, nil))
+			b := zmx.New(zmx.Config{Dir: dir})
 			limit := b.MaxNameLen()
 
 			if err := b.ValidateName(strings.Repeat("a", limit)); err != nil {
@@ -61,6 +61,20 @@ func TestValidateName(t *testing.T) {
 	})
 }
 
+func TestCheckName(t *testing.T) {
+	t.Run("it applies every rule but the length", func(t *testing.T) {
+		b := zmx.New(zmx.Config{Dir: "/tmp/zx-unit"})
+		for _, name := range []string{"", "logs", "-x", "x*", "a\nb", strings.Repeat("a", b.MaxNameLen())} {
+			if got, want := zmx.CheckName(name), b.ValidateName(name); !errors.Is(got, backend.ErrInvalidName) && want != nil {
+				t.Errorf("CheckName(%q) = %v, where ValidateName refuses it: %v", name, got, want)
+			}
+		}
+		if err := zmx.CheckName(strings.Repeat("a", 500)); err != nil {
+			t.Errorf("CheckName of 500 bytes = %v, want nil: length is the directory's to judge", err)
+		}
+	})
+}
+
 func TestMaxNameLen(t *testing.T) {
 	t.Run("it leaves room for the directory and a separator within the socket path limit", func(t *testing.T) {
 		limits := map[string]int{"darwin": 103, "linux": 107}
@@ -69,7 +83,7 @@ func TestMaxNameLen(t *testing.T) {
 			t.Skipf("no socket path limit pinned for %s", runtime.GOOS)
 		}
 		for _, dir := range []string{"/tmp/zx-unit", "/Users/lee/.local/state/zmx"} {
-			b := zmx.New(dir, fixedEnviron(), newRunner(t, nil))
+			b := zmx.New(zmx.Config{Dir: dir})
 			if got := len(dir) + 1 + b.MaxNameLen(); got != limit {
 				t.Errorf("socket path for the longest name in %s = %d bytes, want %d", dir, got, limit)
 			}
@@ -77,7 +91,7 @@ func TestMaxNameLen(t *testing.T) {
 	})
 
 	t.Run("it measures the directory as zmx is given it", func(t *testing.T) {
-		if a, b := zmx.New("/tmp/zx/", fixedEnviron(), nil), zmx.New("/tmp/zx", fixedEnviron(), nil); a.MaxNameLen() != b.MaxNameLen() || a.Dir() != "/tmp/zx" {
+		if a, b := zmx.New(zmx.Config{Dir: "/tmp/zx/"}), zmx.New(zmx.Config{Dir: "/tmp/zx"}); a.MaxNameLen() != b.MaxNameLen() || a.Dir() != "/tmp/zx" {
 			t.Errorf("trailing slash: Dir %q, MaxNameLen %d vs %d", a.Dir(), a.MaxNameLen(), b.MaxNameLen())
 		}
 	})

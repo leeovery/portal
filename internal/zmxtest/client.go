@@ -19,7 +19,7 @@ type Client struct {
 // a client whose stdin reaches EOF.
 func Attach(t *testing.T, b *zmx.Backend, name string) *Client {
 	t.Helper()
-	attach, err := b.AttachCommand(name)
+	attach, err := b.AttachCommand(t.Context(), name)
 	if err != nil {
 		t.Fatalf("attach command for %s: %v", name, err)
 	}

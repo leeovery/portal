@@ -50,3 +50,6 @@ build/
 # .gifcache/ subdir so the vhs dir listing stays clean. See testdata/vhs/README.md.
 testdata/vhs/.gifcache/
 testdata/vhs/*.gif
+
+# The pinned zmx build (scripts/zmx-build).
+/.cache/

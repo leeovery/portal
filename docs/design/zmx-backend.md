@@ -35,15 +35,15 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
 
 ## Backend interface
 
-`internal/backend` defines the interface and the session model. `internal/backend/zmx` implements it by running the `zmx` binary. A fake implementation backs unit tests.
+`internal/backend` defines the interface and the session model. `internal/backend/zmx` implements it over zmx's socket protocol, running the `zmx` binary only to create and attach. A fake implementation backs unit tests. Every method that does I/O takes a context, with per-operation ceilings beneath it.
 
-- `List()` returns every session: name, cwd, attached client count, pid, created time and command. A failed read is an error, never an empty list. Sessions whose names start with `_` are Portal's own and are hidden from listings.
-- `Exists(name)`.
-- `Create(name, dir, command)` creates a detached session: `zmx attach <name> <cmd…>` with no terminal attached, succeeding only when zmx reports it created the session. It starts 120×24 and reflows on attach.
-- `AttachCommand(name)` returns the argv the attach runner starts.
-- `Kill(name)`.
-- `Detach(name)` detaches every client of a session (`zmx detach`).
-- `History(name, rows)` returns the screen plus up to `rows` of scrollback (all of it when `rows` is 0), with colours, through the protocol's bounded capture. Never empty: a daemon that doesn't answer is an error.
+- `List(ctx)` returns every session in zmx's dir, found from its sockets and probed concurrently for name, cwd, attached client count, pid, created time and command. A session that doesn't answer is kept with only its name (`Answered` false), never dropped from the list. A socket that refuses is stale only when it predates this boot, and is then left out; one from this boot is kept as not answering, its per-session calls time out and `Create` refuses its name. So a crashed daemon holds its name until the next reboot, unless a plain `zmx list` or `zmx attach` (which delete any refused socket) clears it. Portal never deletes zmx's files. Only an unreadable dir is an error; a missing one means no sessions. Sessions whose names start with `_` are Portal's own and are hidden from listings.
+- `Exists(ctx, name)`.
+- `Create(ctx, name, dir, command)` creates a detached session: `zmx attach <name> <cmd…>` with no terminal attached, succeeding only when zmx reports it created the session. A name already held, under any spelling the filesystem folds together, is refused with the held name. It starts 120×24 and reflows on attach.
+- `AttachCommand(ctx, name)` returns the argv the attach runner starts.
+- `Kill(ctx, name)`: done only when the session's socket is gone; a timeout says the kill may still land.
+- `Detach(ctx, name)` detaches every client of a session.
+- `History(ctx, name, rows)` returns the screen plus up to `rows` of scrollback (all of it when `rows` is 0), with colours, through the protocol's bounded capture. Never empty: a daemon that doesn't answer is an error.
 - `Current()` returns the session this process runs in, from `$ZMX_SESSION`.
 
 Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves about 70 bytes of name with `ZMX_DIR=$HOME/.local/state/zmx`. Generated names stay `{project}-{nanoid}`.
@@ -199,4 +199,5 @@ Phases 1–2 make it usable day to day. Phase 3 is needed before trusting it thr
   - #294: crash on session exit on macOS.
   - #295: part of the scrollback lost on reattach.
   - The protocol freeze isn't in a release yet, so an upgrade before it ships ends running sessions. Doctor reports the zmx version. Upgrade zmx deliberately, after a save.
-- **What `zmx history --vt` returns for a session showing the alternate screen** (the resume panel). Covered by skipping waiting sessions; to confirm in phase 3.
+- **What zmx's history returns for a session showing the alternate screen** (the resume panel). Covered by skipping waiting sessions; to confirm in phase 3.
+- **zmx's protocol not yet released.** The last release is v0.8.1 (5 Sep 2026); the protocol sits under "Staged" in zmx's changelog. Check before Portal's zmx release and choose: the pinned build through `leeovery/tools`, an upstream release, or a fork.

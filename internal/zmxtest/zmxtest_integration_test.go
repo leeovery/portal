@@ -3,6 +3,7 @@
 package zmxtest_test
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -34,37 +35,37 @@ func TestNew(t *testing.T) {
 		}
 	})
 
-	t.Run("it runs sessions in /bin/sh with HOME in a temp dir", func(t *testing.T) {
+	t.Run("it runs sessions in /bin/sh with HOME in a temp dir and only the allowed environment", func(t *testing.T) {
+		t.Setenv("PORTAL_SECRET_PROBE", "leaked")
 		b := zmxtest.New(t)
-		if err := b.Create("env", t.TempDir(), []string{"sh", "-c", `echo "shell=$SHELL home=$HOME"; sleep 1000`}); err != nil {
+		if err := b.Create(t.Context(), "env", t.TempDir(), []string{"sh", "-c", `echo "shell=$SHELL"; echo "probe=${PORTAL_SECRET_PROBE-unset}"; echo "home=$HOME"; sleep 1000`}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
 		var got []byte
 		if !harnesstest.PollUntil(t, 5*time.Second, 20*time.Millisecond, func() bool {
-			got, _ = b.History("env")
-			return strings.Contains(string(got), "shell=/bin/sh home=")
+			got, _ = b.History(t.Context(), "env", 0)
+			return bytes.Contains(got, []byte("shell=/bin/sh\r\n")) && bytes.Contains(got, []byte("home="))
 		}) {
 			t.Fatalf("history = %q, want the shell and home echoed", got)
 		}
 		home, _ := os.UserHomeDir()
-		if strings.Contains(string(got), "home="+home) {
+		if bytes.Contains(got, []byte("home="+home+"\r\n")) {
 			t.Errorf("session HOME is the developer's own: %q", got)
+		}
+		if !bytes.Contains(got, []byte("probe=unset")) {
+			t.Errorf("history = %q, want the variable outside the allowlist unset", got)
 		}
 	})
 
-	t.Run("it kills every daemon in the directory and removes it at cleanup", func(t *testing.T) {
+	t.Run("it kills every process of the directory and removes it at cleanup", func(t *testing.T) {
 		var dir string
 		var daemon int
 		t.Run("inner", func(t *testing.T) {
 			b := zmxtest.New(t)
 			dir = b.Dir()
-			if err := b.Create("left-running", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+			if err := b.Create(t.Context(), "left-running", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 				t.Fatalf("Create: %v", err)
-			}
-			sessions, err := b.List()
-			if err != nil || len(sessions) != 1 {
-				t.Fatalf("List = %+v, %v", sessions, err)
 			}
 			daemon = zmxtest.Daemon(t, b, "left-running")
 		})
@@ -84,7 +85,16 @@ func TestNewIgnoresAnInheritedSession(t *testing.T) {
 		t.Setenv("ZMX_SESSION_PREFIX", "pre-")
 		b := zmxtest.New(t)
 
-		cmd, err := b.AttachCommand("fresh")
+		if got := b.Current(); got != "" {
+			t.Errorf("Current = %q, want none", got)
+		}
+		if err := b.Create(t.Context(), "fresh", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if exists, err := b.Exists(t.Context(), "fresh"); err != nil || !exists {
+			t.Errorf("Exists(fresh) = %v, %v; want the session made under its own name", exists, err)
+		}
+		cmd, err := b.AttachCommand(t.Context(), "fresh")
 		if err != nil {
 			t.Fatalf("AttachCommand: %v", err)
 		}
@@ -93,27 +103,16 @@ func TestNewIgnoresAnInheritedSession(t *testing.T) {
 				t.Errorf("attach command carries %s", kv)
 			}
 		}
-		if got := b.Current(); got != "" {
-			t.Errorf("Current = %q, want none", got)
-		}
-		if err := b.Create("fresh", t.TempDir(), []string{"sleep", "1000"}); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		if exists, err := b.Exists("fresh"); err != nil || !exists {
-			t.Errorf("Exists(fresh) = %v, %v; want the session made under its own name", exists, err)
-		}
 	})
 }
 
 func TestPoisonedEnvironment(t *testing.T) {
 	t.Run("it makes a zmx run that misses the Backend's directory fail", func(t *testing.T) {
-		if _, err := exec.LookPath("zmx"); err != nil {
-			t.Skip("zmx not available")
-		}
-		if got := os.Getenv("ZMX_DIR"); got != "/nonexistent/zmx-poison" {
+		if got := os.Getenv("ZMX_DIR"); got != zmxtest.PoisonedDir {
 			t.Fatalf("ZMX_DIR = %q, want the poison", got)
 		}
-		cmd := exec.Command("zmx", "list")
+		cmd := exec.Command(zmxtest.Binary(t), "list")
+		cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
 		if out, err := cmd.CombinedOutput(); err == nil {
 			t.Errorf("zmx list on the ambient environment succeeded: %s", out)
 		}
@@ -131,7 +130,7 @@ func TestPoisonedEnvironment(t *testing.T) {
 func TestAttach(t *testing.T) {
 	t.Run("it holds a client attached until zmx detaches it", func(t *testing.T) {
 		b := zmxtest.New(t)
-		if err := b.Create("held", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+		if err := b.Create(t.Context(), "held", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
@@ -143,7 +142,7 @@ func TestAttach(t *testing.T) {
 		if c.Exited(200 * time.Millisecond) {
 			t.Fatal("client exited while attached")
 		}
-		if err := b.Detach("held"); err != nil {
+		if err := b.Detach(t.Context(), "held"); err != nil {
 			t.Fatalf("Detach: %v", err)
 		}
 		if !c.Exited(5 * time.Second) {
@@ -154,7 +153,7 @@ func TestAttach(t *testing.T) {
 
 func clients(t *testing.T, b *zmx.Backend, name string) int {
 	t.Helper()
-	sessions, err := b.List()
+	sessions, err := b.List(t.Context())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

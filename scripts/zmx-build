@@ -1,0 +1,33 @@
+#!/bin/sh
+# Builds the zmx commit pinned in scripts/zmx-commit into
+# .cache/zmx/<commit>/zmx, unless it is already there, and prints the
+# binary's path. Development and the integration tests drive that build; an
+# installed zmx is never touched. Needs git and Zig 0.17.
+#
+# ZMX_REPO overrides where the source is fetched from, such as a local clone.
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+commit=$(tr -d '[:space:]' < "$root/scripts/zmx-commit")
+cache="$root/.cache/zmx/$commit"
+bin="$cache/zmx"
+
+if [ -x "$bin" ]; then
+	printf '%s\n' "$bin"
+	exit 0
+fi
+
+src="$cache/src"
+rm -rf "$src" "$cache/out"
+mkdir -p "$src"
+git -C "$src" init --quiet
+git -C "$src" fetch --quiet --depth 1 "${ZMX_REPO:-https://github.com/neurosnap/zmx.git}" "$commit"
+git -C "$src" checkout --quiet --detach FETCH_HEAD
+if [ "$(git -C "$src" rev-parse HEAD)" != "$commit" ]; then
+	echo "zmx-build: fetched $(git -C "$src" rev-parse HEAD), want $commit" >&2
+	exit 1
+fi
+(cd "$src" && zig build -Doptimize=ReleaseSafe --prefix "$cache/out") >&2
+mv "$cache/out/bin/zmx" "$bin"
+rm -rf "$src" "$cache/out"
+printf '%s\n' "$bin"

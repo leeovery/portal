@@ -1,11 +1,15 @@
-// Package zmx implements backend.Backend by running the zmx binary, targeting
-// zmx v0.8.1.
+// Package zmx implements backend.Backend on zmx: over zmx's socket protocol
+// for listing, kill, detach and history, and by running the zmx binary to
+// create a session and to attach to one, since creation is no protocol
+// message. It targets the zmx build pinned in scripts/zmx-commit.
 package zmx
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,194 +18,255 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 )
 
-const binary = "zmx"
-
 const (
 	envDir     = "ZMX_DIR"
 	envSession = "ZMX_SESSION"
 	// envPrefix is prepended by zmx to every session name it is given.
-	envPrefix = "ZMX_SESSION_PREFIX"
+	envPrefix   = "ZMX_SESSION_PREFIX"
+	envTmux     = "TMUX"
+	envTmuxPane = "TMUX_PANE"
 )
 
-// Bounds on each zmx run. zmx gives a session's probe 1 s and a history read
-// 5 s, but kill waits on the daemon with no bound of its own, so a wedged
-// daemon would hold the caller for ever.
-const (
-	listTimeout    = 10 * time.Second
-	createTimeout  = 10 * time.Second
-	killTimeout    = 5 * time.Second
-	detachTimeout  = 5 * time.Second
-	historyTimeout = 10 * time.Second
-)
+// ceilings bound each operation beneath its caller's context. A probe gets
+// the second zmx gives one.
+type ceilings struct {
+	probe, create, kill, detach, history time.Duration
+}
 
-// What zmx v0.8.1 prints for a session it does not hold, and on stdout once
-// attach has made a session, all with the name raw between the quotes.
-func historyMissing(name string) string { return `session "` + name + `" does not exist` }
-func killMissing(name string) string    { return "failed to kill session=" + name + ": SessionNotFound" }
-func created(name string) string        { return `session "` + name + `" created` + "\n" }
+var defaultCeilings = ceilings{
+	probe:   time.Second,
+	create:  10 * time.Second,
+	kill:    5 * time.Second,
+	detach:  5 * time.Second,
+	history: 10 * time.Second,
+}
+
+var errHungUp = errors.New("zmx daemon hung up without ending its session")
+
+// Config binds a Backend.
+type Config struct {
+	// Binary is the zmx executable Create runs and AttachCommand names.
+	Binary string
+	// Dir is the zmx directory, absolute.
+	Dir string
+	// Environ supplies the environment every zmx run starts from, and the
+	// process's own ZMX_SESSION; nil is os.Environ.
+	Environ func() []string
+	// Hostname names this machine, to tell a session's local cwd from one on
+	// another host; nil is os.Hostname.
+	Hostname func() (string, error)
+	// BootTime is when this machine booted, to tell a stale socket from a
+	// session not answering; nil reads it from the kernel.
+	BootTime func() (time.Time, error)
+}
 
 // Backend drives the zmx sessions in one zmx directory.
 type Backend struct {
-	dir     string
-	environ func() []string
-	runner  Runner
+	binary   string
+	dir      string
+	environ  func() []string
+	hostname func() (string, error)
+	booted   func() (time.Time, error)
+	limits   ceilings
 }
 
 var _ backend.Backend = (*Backend)(nil)
 
-// New binds a Backend to the zmx directory dir, which must be absolute.
-// environ supplies the environment every zmx run starts from, and the
-// process's own ZMX_SESSION.
-func New(dir string, environ func() []string, runner Runner) *Backend {
-	return &Backend{dir: filepath.Clean(dir), environ: environ, runner: runner}
+// New binds a Backend to cfg.Dir.
+func New(cfg Config) *Backend {
+	b := &Backend{
+		binary:   cfg.Binary,
+		dir:      filepath.Clean(cfg.Dir),
+		environ:  cfg.Environ,
+		hostname: cfg.Hostname,
+		booted:   cfg.BootTime,
+		limits:   defaultCeilings,
+	}
+	if b.environ == nil {
+		b.environ = os.Environ
+	}
+	if b.hostname == nil {
+		b.hostname = os.Hostname
+	}
+	if b.booted == nil {
+		b.booted = bootTime
+	}
+	return b
 }
 
 // Dir is the zmx directory the Backend is bound to.
 func (b *Backend) Dir() string { return b.dir }
 
-func (b *Backend) List() ([]backend.Session, error) {
-	out, err := b.run(listTimeout, b.command("list"), true)
-	if err != nil {
-		return nil, fmt.Errorf("list zmx sessions: %w", err)
-	}
-	return parseList(out)
-}
-
-func (b *Backend) Exists(name string) (bool, error) {
-	sessions, err := b.List()
-	if err != nil {
-		return false, err
-	}
-	return slices.ContainsFunc(sessions, func(s backend.Session) bool { return s.Name == name }), nil
-}
-
-// Create runs `zmx attach` with stdin at EOF, so its client detaches as soon
-// as the daemon is up. zmx attach on a live name would attach to that session
-// and ignore the command, so a live name is refused first, compared without
-// case: on a case-insensitive filesystem foo's socket answers for FOO. When
-// the command exits before the client connects, zmx reports the session made
-// and then fails; that is still a made session.
-func (b *Backend) Create(name, dir string, command []string) error {
-	if err := b.ValidateName(name); err != nil {
-		return err
-	}
-	sessions, err := b.List()
-	if err != nil {
-		return fmt.Errorf("create session %q: %w", name, err)
-	}
-	if i := slices.IndexFunc(sessions, func(s backend.Session) bool { return strings.EqualFold(s.Name, name) }); i >= 0 {
-		return fmt.Errorf("create session %q: %w as %q", name, backend.ErrSessionExists, sessions[i].Name)
-	}
-	cmd := b.command(append([]string{"attach", name}, command...)...)
-	cmd.Dir = dir
-	_, err = b.run(createTimeout, cmd, false)
-	if ce, ok := errors.AsType[*CommandError](err); ok && strings.Contains(ce.Stdout, created(name)) {
-		return nil
+// Exists reports whether a live session is held under exactly name. A stale
+// socket, a name held only under another spelling, or one zmx cannot hold,
+// does not count. A session that refuses connections is neither live nor
+// gone, and is ErrTimeout.
+func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
+	ctx, cancel := b.bound(ctx, b.limits.probe, "")
+	defer cancel()
+	c, _, err := b.open(ctx, name)
+	if errors.Is(err, backend.ErrNoSuchSession) || errors.Is(err, backend.ErrInvalidName) {
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("create session %q: %w", name, err)
+		return false, fmt.Errorf("check session %q: %w", name, err)
 	}
-	return nil
+	_ = c.Close()
+	return true, nil
 }
 
 // AttachCommand keeps the caller's ZMX_SESSION: inside a session, zmx attach
-// then switches that session's clients to name instead of nesting.
-func (b *Backend) AttachCommand(name string) (backend.Command, error) {
-	if err := b.ValidateName(name); err != nil {
-		return backend.Command{}, err
+// then switches that session's clients to name instead of nesting. The name
+// must be live: zmx attach on a socket that refuses would replace it with a
+// new session, orphaning any daemon behind it.
+func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
+	ctx, cancel := b.bound(ctx, b.limits.probe, "")
+	defer cancel()
+	c, _, err := b.open(ctx, name)
+	if err != nil {
+		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
 	}
+	_ = c.Close()
 	return backend.Command{
-		Argv: []string{binary, "attach", name},
-		Env:  b.env(envDir, envPrefix),
+		Argv: []string{b.binary, "attach", name},
+		Env:  b.env(envPrefix),
 	}, nil
 }
 
-func (b *Backend) Kill(name string) error {
-	if err := b.ValidateName(name); err != nil {
-		return err
+// Kill waits for the daemon to hang up. zmx unlinks a session's socket before
+// it closes the session's clients, so a hangup with the socket gone means the
+// name is free. A message to a stopped daemon waits in its socket and lands
+// once it runs again.
+func (b *Backend) Kill(ctx context.Context, name string) error {
+	ctx, cancel := b.bound(ctx, b.limits.kill, "; the kill may still land")
+	defer cancel()
+	c, s, err := b.open(ctx, name)
+	if err != nil {
+		return fmt.Errorf("kill session %q: %w", name, err)
 	}
-	if err := b.requireHeld("kill", name); err != nil {
-		return err
+	defer func() { _ = c.Close() }()
+	if err := c.hangupAfter(tagKill); err != nil {
+		return fmt.Errorf("kill session %q: %w", name, failure(ctx, err))
 	}
-	_, err := b.run(killTimeout, b.command("kill", name), false)
-	return sessionError("kill", name, err, killMissing(name))
-}
-
-func (b *Backend) Detach(name string) error {
-	if err := b.ValidateName(name); err != nil {
-		return err
-	}
-	if err := b.requireHeld("detach", name); err != nil {
-		return err
-	}
-	// zmx detach takes no name; it detaches the session named by ZMX_SESSION.
-	cmd := b.command("detach")
-	cmd.Env = append(cmd.Env, envSession+"="+name)
-	if _, err := b.run(detachTimeout, cmd, false); err != nil {
-		return fmt.Errorf("detach session %q: %w", name, err)
+	if b.stillHeld(s) {
+		return fmt.Errorf("kill session %q: %w", name, errHungUp)
 	}
 	return nil
 }
 
-// History treats empty output as a failed read: zmx exits 0 with nothing when
-// its read of the daemon times out or breaks, while a live session's VT
-// screen always carries at least its cursor position.
-func (b *Backend) History(name string) ([]byte, error) {
-	if err := b.ValidateName(name); err != nil {
-		return nil, err
-	}
-	if err := b.requireHeld("read history of", name); err != nil {
-		return nil, err
-	}
-	out, err := b.run(historyTimeout, b.command("history", name, "--vt"), true)
+// Detach waits for the daemon to hang up: DetachAll answers nothing, but
+// closes every connection to the session, this one included.
+func (b *Backend) Detach(ctx context.Context, name string) error {
+	ctx, cancel := b.bound(ctx, b.limits.detach, "; the detach may still land")
+	defer cancel()
+	c, _, err := b.open(ctx, name)
 	if err != nil {
-		return nil, sessionError("read history of", name, err, historyMissing(name))
+		return fmt.Errorf("detach session %q: %w", name, err)
 	}
-	if out == "" {
-		return nil, fmt.Errorf("read history of session %q: %w", name, backend.ErrHistoryUnavailable)
+	defer func() { _ = c.Close() }()
+	if err := c.hangupAfter(tagDetachAll); err != nil {
+		return fmt.Errorf("detach session %q: %w", name, failure(ctx, err))
 	}
-	return []byte(out), nil
+	return nil
 }
 
+// History asks for the whole history with a History request, and a bounded
+// one with a Capture request: zmx's Capture of 0 rows is the screen alone.
+func (b *Backend) History(ctx context.Context, name string, rows int) ([]byte, error) {
+	if rows < 0 {
+		return nil, fmt.Errorf("read history of session %q: negative row count %d", name, rows)
+	}
+	ctx, cancel := b.bound(ctx, b.limits.history, "")
+	defer cancel()
+	c, _, err := b.open(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("read history of session %q: %w", name, err)
+	}
+	defer func() { _ = c.Close() }()
+	request, payload := tagHistory, []byte{historyVT}
+	if rows > 0 {
+		request, payload = tagCapture, encodeCapture(historyVT, uint32(min(rows, math.MaxUint32)))
+	}
+	if err := c.send(request, payload); err != nil {
+		return nil, fmt.Errorf("read history of session %q: %w", name, failure(ctx, err))
+	}
+	vt, err := c.await(request)
+	if errors.Is(err, errUnsupported) {
+		return nil, fmt.Errorf("read history of session %q: %w: %w", name, err, backend.ErrHistoryUnavailable)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read history of session %q: %w", name, failure(ctx, err))
+	}
+	if len(vt) == 0 {
+		return nil, fmt.Errorf("read history of session %q: %w", name, backend.ErrHistoryUnavailable)
+	}
+	return vt, nil
+}
+
+// Current reads ZMX_SESSION, which zmx sets in every session's processes.
 func (b *Backend) Current() string {
 	return lookup(b.environ(), envSession)
 }
 
-// requireHeld fails with ErrNoSuchSession unless zmx holds exactly name. zmx
-// finds a session by statting its socket, so on a case-insensitive filesystem
-// it would answer for foo when asked for FOO: kill FOO kills foo. zmx detach
-// also answers a missing session with success.
-func (b *Backend) requireHeld(op, name string) error {
-	exists, err := b.Exists(name)
-	if err != nil {
-		return fmt.Errorf("%s session %q: %w", op, name, err)
-	}
-	if !exists {
-		return fmt.Errorf("%s session %q: %w", op, name, backend.ErrNoSuchSession)
-	}
-	return nil
-}
-
-// run bounds one zmx run by timeout; a run cut short fails with
-// backend.ErrTimeout.
-func (b *Backend) run(timeout time.Duration, cmd backend.Command, raw bool) (string, error) {
-	cause := fmt.Errorf("%w: zmx %s gave no answer within %s", backend.ErrTimeout, cmd.Argv[1], timeout)
-	ctx, cancel := context.WithTimeoutCause(context.Background(), timeout, cause)
+// ProtocolVersion is the socket protocol version that the daemon of the live
+// session name speaks, read from the header of its answer. A daemon that
+// cannot read the driver's own frames gives no answer, so ErrTimeout.
+func (b *Backend) ProtocolVersion(ctx context.Context, name string) (int, error) {
+	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
-	if raw {
-		return b.runner.RunRaw(ctx, cmd)
+	c, _, err := b.open(ctx, name)
+	if err != nil {
+		return 0, fmt.Errorf("read protocol version of session %q: %w", name, err)
 	}
-	return b.runner.Run(ctx, cmd)
+	defer func() { _ = c.Close() }()
+	if err := c.send(tagInfo, nil); err != nil {
+		return 0, fmt.Errorf("read protocol version of session %q: %w", name, failure(ctx, err))
+	}
+	h, err := c.header()
+	if err != nil && !errors.Is(err, errProtocolVersion) {
+		return 0, fmt.Errorf("read protocol version of session %q: %w", name, failure(ctx, err))
+	}
+	return int(h.version), nil
 }
 
-// command is a zmx run with ZMX_SESSION removed: inherited, it would turn
-// attach into a switch of the caller's session and stand in for a missing
-// name elsewhere.
-func (b *Backend) command(args ...string) backend.Command {
-	return backend.Command{
-		Argv: append([]string{binary}, args...),
-		Env:  b.env(envDir, envPrefix, envSession),
+// open connects to the live session held under exactly name. A name held only
+// under another spelling, or behind a stale socket, is ErrNoSuchSession: on a
+// folding filesystem zmx's socket for foo answers for FOO. A socket from this
+// boot that refuses is ErrTimeout.
+func (b *Backend) open(ctx context.Context, name string) (*conn, socket, error) {
+	if err := b.ValidateName(name); err != nil {
+		return nil, socket{}, err
 	}
+	s, ok, err := b.held(name)
+	if err != nil {
+		return nil, socket{}, err
+	}
+	if !ok {
+		return nil, socket{}, backend.ErrNoSuchSession
+	}
+	if s.name != name {
+		return nil, socket{}, fmt.Errorf("held as %q: %w", s.name, backend.ErrNoSuchSession)
+	}
+	c, err := b.connect(ctx, name)
+	if gone(err) {
+		return nil, socket{}, fmt.Errorf("%w: %w", err, backend.ErrNoSuchSession)
+	}
+	if err != nil {
+		return nil, socket{}, failure(ctx, err)
+	}
+	return c, s, nil
+}
+
+// stillHeld reports whether the directory still holds the very socket file s.
+func (b *Backend) stillHeld(s socket) bool {
+	info, err := os.Stat(b.path(s.name))
+	return err == nil && os.SameFile(s.info, info)
+}
+
+// bound puts the operation's ceiling beneath ctx. Past it, the operation
+// fails with ErrTimeout, and note says what that leaves undecided.
+func (b *Backend) bound(ctx context.Context, limit time.Duration, note string) (context.Context, context.CancelFunc) {
+	return context.WithTimeoutCause(ctx, limit, fmt.Errorf("no answer in %s%s: %w", limit, note, backend.ErrTimeout))
 }
 
 // env is the environment without the drop keys, with ZMX_DIR set to the
@@ -209,11 +274,13 @@ func (b *Backend) command(args ...string) backend.Command {
 func (b *Backend) env(drop ...string) []string {
 	env := slices.DeleteFunc(slices.Clone(b.environ()), func(kv string) bool {
 		key, _, _ := strings.Cut(kv, "=")
-		return slices.Contains(drop, key)
+		return key == envDir || slices.Contains(drop, key)
 	})
 	return append(env, envDir+"="+b.dir)
 }
 
+// lookup is key's value in env, the last entry winning as it does in an
+// exec.Cmd's Env.
 func lookup(env []string, key string) string {
 	var value string
 	for _, kv := range env {
@@ -222,16 +289,4 @@ func lookup(env []string, key string) string {
 		}
 	}
 	return value
-}
-
-// sessionError wraps a failed run, as ErrNoSuchSession too when stderr
-// carries missing.
-func sessionError(op, name string, err error, missing string) error {
-	if err == nil {
-		return nil
-	}
-	if ce, ok := errors.AsType[*CommandError](err); ok && strings.Contains(ce.Stderr, missing) {
-		return fmt.Errorf("%s session %q: %w: %w", op, name, backend.ErrNoSuchSession, err)
-	}
-	return fmt.Errorf("%s session %q: %w", op, name, err)
 }
