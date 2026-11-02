@@ -156,8 +156,8 @@ cells `cells_test.go` reads and compares:
     frame is held again under `HOME` set to that home and to `/`;
   - **East Asian ambiguous widths:** `RUNEWIDTH_EASTASIAN` or a CJK locale would
     draw `▌` and the box glyphs two cells wide. The width libraries read them at
-    init, so the capture tests' `TestMain` (`capture.RunNarrow`) runs the test
-    binary again with `RUNEWIDTH_EASTASIAN=0` where they would. Write frames
+    init, so the capture tests' `TestMain` (`capture.RunNarrow`) refuses to run
+    where they would, naming `RUNEWIDTH_EASTASIAN=0` as the fix. Write frames
     with `--frames` from an environment without either.
 
   No screen renders the time, so the clock isn't pinned.
