@@ -42,18 +42,19 @@ type Call struct {
 	Rows    int
 }
 
-// Fake is an in-memory Backend that keeps the driver's contract: names match
-// exactly, except that Create refuses a name held under another case, as zmx
-// on a case-insensitive filesystem does. A session added with Answered false
-// does not answer, as a wedged or busy daemon does not: every call naming it
-// fails with ErrTimeout, and Create refuses its name. Create, Kill and Detach
-// change the sessions it holds; Fail makes a method return an error before it
-// changes anything, and a call with an ended context fails with its cause.
+// Fake is an in-memory Backend that keeps the driver's contract, as Contract
+// checks: names match exactly, except that Create refuses a name held under
+// another case, as zmx on a case-insensitive filesystem does. Every session
+// answers until StopAnswering. Create, Kill and Detach change the sessions it
+// holds; Fail makes a method return an error before it changes anything, and
+// a call with an ended context fails with its cause.
 type Fake struct {
 	// Now stamps Created on the sessions Create makes; nil is time.Now.
 	Now func() time.Time
-	// Validate replaces the default name rule, zmx's own without the length
-	// limit, which depends on a directory the Fake has none of.
+	// Validate replaces Create's name rule, zmx's own without the length
+	// limit, which depends on a directory the Fake has none of. Per-session
+	// calls keep zmx's lookup rules: they reach sessions made outside Portal,
+	// under names Create's rule never saw.
 	Validate func(name string) error
 
 	mu       sync.Mutex
@@ -81,11 +82,25 @@ func New(sessions ...backend.Session) *Fake {
 	return f
 }
 
-// Add puts s in the Fake, replacing any session of the same name.
+// Add puts s in the Fake as a session that answers, whatever its Answered
+// says, replacing any session of the same name.
 func (f *Fake) Add(s backend.Session) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	s.Answered = true
 	f.sessions[s.Name] = s
+}
+
+// StopAnswering makes a held session stop answering, as a stopped, wedged or
+// busy daemon does: List reports only its name, every call naming it fails
+// with ErrTimeout, and Create refuses its name.
+func (f *Fake) StopAnswering(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.sessions[name]; ok {
+		s.Answered = false
+		f.sessions[name] = s
+	}
 }
 
 // Remove drops a session as if it ended outside Portal.
@@ -148,24 +163,37 @@ func (f *Fake) CallsTo(op Op) []Call {
 	return out
 }
 
+// List, as the driver's, has nothing to cut short when it holds no session,
+// so it lists none even once its context has ended.
 func (f *Fake) List(ctx context.Context) ([]backend.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.begin(ctx, Call{Op: OpList}); err != nil {
+	if err := f.record(Call{Op: OpList}); err != nil {
 		return nil, err
+	}
+	if len(f.sessions) > 0 && ctx.Err() != nil {
+		return nil, context.Cause(ctx)
 	}
 	sessions := make([]backend.Session, 0, len(f.sessions))
 	for _, name := range slices.Sorted(maps.Keys(f.sessions)) {
-		sessions = append(sessions, f.sessions[name])
+		s := f.sessions[name]
+		if !s.Answered {
+			s = backend.Session{Name: name}
+		}
+		sessions = append(sessions, s)
 	}
 	return sessions, nil
 }
 
+// Exists reports a name no session can have as not held, as the driver does.
 func (f *Fake) Exists(ctx context.Context, name string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.begin(ctx, Call{Op: OpExists, Name: name}); err != nil {
 		return false, err
+	}
+	if zmx.CheckLookup(name) != nil {
+		return false, nil
 	}
 	s, ok := f.sessions[name]
 	if ok && !s.Answered {
@@ -267,14 +295,20 @@ func (f *Fake) ValidateName(name string) error {
 // begin records the call and returns the failure injected for its op, or the
 // context's cause. The caller holds mu.
 func (f *Fake) begin(ctx context.Context, c Call) error {
-	f.calls = append(f.calls, c)
-	if err := f.failures[c.Op]; err != nil {
+	if err := f.record(c); err != nil {
 		return err
 	}
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
 	return nil
+}
+
+// record records the call and returns the failure injected for its op. The
+// caller holds mu.
+func (f *Fake) record(c Call) error {
+	f.calls = append(f.calls, c)
+	return f.failures[c.Op]
 }
 
 // beginHeld begins a call on a session the Fake must hold, answering, under

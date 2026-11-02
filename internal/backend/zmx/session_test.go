@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -137,51 +136,7 @@ func anyRequest(info []byte) func(*daemon, net.Conn) {
 	}
 }
 
-func TestNamesZmxHolds(t *testing.T) {
-	t.Run("it reaches a session List reports under a name Create refuses, by every call", func(t *testing.T) {
-		for _, name := range []string{"-x", "--vt", "x*", "a\nb", "bad\xffname"} {
-			t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
-				dir := socketDir(t)
-				if err := zmx.CheckName(name); err == nil {
-					t.Fatalf("CheckName(%q) accepts it; the case needs a name Create refuses", name)
-				}
-				l, err := net.Listen("unix", filepath.Join(dir, name))
-				if errors.Is(err, syscall.EILSEQ) {
-					t.Skip("the filesystem refuses a name that is not UTF-8")
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				_ = l.Close()
-				serve(t, dir, name, anyRequest(infoFrame(t)))
-				b := newBackend(t, dir)
-				ctx := t.Context()
-
-				if got := list(t, b); len(got) != 1 || got[0].Name != name || !got[0].Answered {
-					t.Fatalf("List = %+v, want %q answering", got, name)
-				}
-				if exists, err := b.Exists(ctx, name); err != nil || !exists {
-					t.Errorf("Exists = %v, %v; want true", exists, err)
-				}
-				if _, err := b.History(ctx, name, 0); err != nil {
-					t.Errorf("History: %v", err)
-				}
-				if _, err := b.ProtocolVersion(ctx, name); err != nil {
-					t.Errorf("ProtocolVersion: %v", err)
-				}
-				if cmd, err := b.AttachCommand(ctx, name); err != nil || cmd.Argv[len(cmd.Argv)-1] != name {
-					t.Errorf("AttachCommand = %+v, %v; want zmx attach on %q", cmd, err, name)
-				}
-				if err := b.Detach(ctx, name); err != nil {
-					t.Errorf("Detach: %v", err)
-				}
-				if err := b.Kill(ctx, name); err != nil {
-					t.Errorf("Kill: %v", err)
-				}
-			})
-		}
-	})
-
+func TestAttachFlags(t *testing.T) {
 	t.Run("AttachCommand refuses a name zmx attach reads as its own flag, sending nothing", func(t *testing.T) {
 		for _, name := range []string{"-h", "--help", "--labels", "--labels=a=1"} {
 			dir := socketDir(t)
@@ -342,9 +297,9 @@ func envValues(env []string, key string) []string {
 }
 
 func TestAttachCommand(t *testing.T) {
-	t.Run("it runs zmx attach on the live session, pinned to the directory, without the caller's prefix", func(t *testing.T) {
+	t.Run("it runs zmx attach on the session, pinned to the directory, without the caller's prefix", func(t *testing.T) {
 		dir := socketDir(t)
-		serve(t, dir, "work", silent)
+		serve(t, dir, "work", answering(infoFrame(t)))
 		b := newBackendRunning(t, "/opt/zmx/bin/zmx", dir,
 			"PATH=/usr/bin:/bin", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION_PREFIX=pre-", "TERM=xterm-ghostty")
 
@@ -366,48 +321,79 @@ func TestAttachCommand(t *testing.T) {
 				t.Errorf("Env %s = %q, want %q", key, got, want)
 			}
 		}
-		if cmd.Switches {
-			t.Error("Switches outside any session, want an attach")
-		}
 	})
 
-	t.Run("it keeps the caller's session, to switch it, only when that session is held in the directory and answers", func(t *testing.T) {
+	t.Run("it keeps the caller's session, to switch it, only when it answers, held exactly, in the caller's own directory", func(t *testing.T) {
 		dir := socketDir(t)
-		serve(t, dir, "work", silent)
+		serve(t, dir, "work", answering(infoFrame(t)))
 		home := serve(t, dir, "home", answering(infoFrame(t)))
-		serve(t, dir, "wedged", silent)
 		refusing(t, dir, "busy")
-		for current, switches := range map[string]bool{"home": true, "wedged": false, "busy": false, "gone": false, "HOME": false, "": false} {
-			t.Run(fmt.Sprintf("inside %q", current), func(t *testing.T) {
-				b := newBackend(t, dir, "PATH=/usr/bin:/bin", "ZMX_SESSION="+current)
-
-				cmd, err := b.AttachCommand(t.Context(), "work")
+		for _, tt := range []struct {
+			inside   string
+			env      []string
+			switches bool
+		}{
+			{"home", []string{"ZMX_SESSION=home"}, true},
+			{"home, in the directory as given", []string{"ZMX_DIR=" + dir + "/", "ZMX_SESSION=home"}, true},
+			{"home in another directory", []string{"ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION=home"}, false},
+			{"a session that refuses", []string{"ZMX_SESSION=busy"}, false},
+			{"home in another case", []string{"ZMX_SESSION=HOME"}, false},
+		} {
+			t.Run("inside "+tt.inside, func(t *testing.T) {
+				cmd, err := newBackend(t, dir, tt.env...).AttachCommand(t.Context(), "work")
 				if err != nil {
 					t.Fatalf("AttachCommand: %v", err)
 				}
 
 				want := []string(nil)
-				if switches {
-					want = []string{current}
+				if tt.switches {
+					want = []string{lookupEnv(tt.env, "ZMX_SESSION")}
 				}
-				if got := envValues(cmd.Env, "ZMX_SESSION"); !slices.Equal(got, want) || cmd.Switches != switches {
-					t.Errorf("Env ZMX_SESSION = %q, Switches %v; want %q, %v", got, cmd.Switches, want, switches)
+				if got := envValues(cmd.Env, "ZMX_SESSION"); !slices.Equal(got, want) || cmd.Switches != tt.switches {
+					t.Errorf("Env ZMX_SESSION = %q, Switches %v; want %q, %v", got, cmd.Switches, want, tt.switches)
 				}
 			})
 		}
-		if reqs := home.received(); len(reqs) != 1 || reqs[0].tag != 6 {
-			t.Errorf("home received %+v, want one Info", reqs)
+		if reqs := home.received(); len(reqs) != 2 {
+			t.Errorf("home received %+v, want one Info for each attach that could switch it", reqs)
+		}
+	})
+
+	t.Run("it fails with the caller's cause when that ends while the caller's session is asked", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "work", answering(infoFrame(t)))
+		cause := errors.New("caller gave up")
+		ctx, cancel := context.WithCancelCause(t.Context())
+		serve(t, dir, "home", func(d *daemon, c net.Conn) {
+			if _, err := d.read(c); err == nil {
+				cancel(cause)
+			}
+			_, _ = io.Copy(io.Discard, c)
+		})
+
+		cmd, err := newBackend(t, dir, "ZMX_SESSION=home").AttachCommand(ctx, "work")
+
+		if !errors.Is(err, cause) {
+			t.Errorf("AttachCommand = %+v, %v; want the caller's cause", cmd, err)
 		}
 	})
 }
 
+func lookupEnv(env []string, key string) string {
+	values := envValues(env, key)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[len(values)-1]
+}
+
 func TestExists(t *testing.T) {
 	dir := socketDir(t)
-	serve(t, dir, "live", silent)
+	serve(t, dir, "live", answering(infoFrame(t)))
 	stale(t, dir, "crashed")
 	b := newBackend(t, dir)
 
-	for name, want := range map[string]bool{"live": true, "crashed": false, "gone": false, "liv": false, "logs": false, "": false} {
+	for name, want := range map[string]bool{"live": true, "crashed": false, "gone": false, "liv": false, "logs": false} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := b.Exists(t.Context(), name); err != nil || got != want {
 				t.Errorf("Exists(%q) = %v, %v; want %v", name, got, err, want)
@@ -415,17 +401,14 @@ func TestExists(t *testing.T) {
 		})
 	}
 
-	t.Run("it does not count a name held only in another case", func(t *testing.T) {
-		foldsCase(t, dir)
-		if got, err := b.Exists(t.Context(), "LIVE"); err != nil || got {
-			t.Errorf("Exists(LIVE) = %v, %v; want false", got, err)
-		}
-	})
+	t.Run("it asks the session for Info, so one that takes the connection and never answers is ErrTimeout", func(t *testing.T) {
+		d := serve(t, dir, "wedged", silent)
 
-	t.Run("it reports a refusing socket from this boot as not answering", func(t *testing.T) {
-		refusing(t, dir, "busy")
-		if got, err := b.Exists(t.Context(), "busy"); !errors.Is(err, backend.ErrTimeout) {
-			t.Errorf("Exists(busy) = %v, %v; want ErrTimeout", got, err)
+		if got, err := b.Exists(t.Context(), "wedged"); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("Exists(wedged) = %v, %v; want ErrTimeout", got, err)
+		}
+		if reqs := d.received(); len(reqs) != 1 || reqs[0].tag != 6 {
+			t.Errorf("wedged received %+v, want one Info", reqs)
 		}
 	})
 }

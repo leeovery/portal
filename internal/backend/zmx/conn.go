@@ -166,11 +166,22 @@ func gone(err error) bool {
 	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, errStale)
 }
 
-// failure is err, or the context's cause when the context has ended, since
-// an ended context is why the I/O failed.
+// failure is err, or the context's cause when the context's end is what
+// failed the I/O: a dial on an ended context, or a read or write cut by the
+// deadline dial sets once the context ends. An I/O that failed on its own
+// keeps its error, even if the context ended after.
 func failure(ctx context.Context, err error) error {
-	if ctx.Err() != nil {
+	endedIO := errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	if endedIO && ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
 	return err
+}
+
+// callerEnded reports whether err, as failure reports it, is the end of the
+// caller's own context, not of a ceiling beneath it. Each must match the
+// other: a ceiling's cause wraps ErrTimeout, which a caller's cause may be.
+func callerEnded(caller context.Context, err error) bool {
+	cause := context.Cause(caller)
+	return cause != nil && errors.Is(err, cause) && errors.Is(cause, err)
 }

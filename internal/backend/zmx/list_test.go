@@ -290,6 +290,23 @@ func TestList(t *testing.T) {
 		}
 	})
 
+	t.Run("it fails with the caller's cause when the caller's deadline comes before its ceiling", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "wedged", silent)
+		ctx, cancel := context.WithTimeout(t.Context(), ceiling/4)
+		defer cancel()
+
+		start := time.Now()
+		got, err := newBackend(t, dir).List(ctx)
+
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("List = %+v, %v; want the caller's deadline", got, err)
+		}
+		if took := time.Since(start); took >= ceiling {
+			t.Errorf("List took %s, past the caller's %s deadline to its own %s ceiling", took, ceiling/4, ceiling)
+		}
+	})
+
 	t.Run("it fails with the caller's cause once the caller's context ends", func(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "wedged", silent)

@@ -1,7 +1,6 @@
 package backendtest_test
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -96,41 +95,8 @@ func TestFake(t *testing.T) {
 		}
 	})
 
-	t.Run("it refuses to create over a held session, under any case, naming it", func(t *testing.T) {
-		for _, name := range []string{"work", "WORK", "Work"} {
-			t.Run(name, func(t *testing.T) {
-				f := backendtest.New(backend.Session{Name: "work", Command: "orig"})
-
-				err := f.Create(t.Context(), name, "/srv", nil)
-
-				exists, ok := errors.AsType[*backend.SessionExistsError](err)
-				if !ok || !errors.Is(err, backend.ErrSessionExists) || exists.Held != "work" {
-					t.Errorf("Create(%q) = %v, want a SessionExistsError held as work", name, err)
-				}
-				if got := names(t, f); !reflect.DeepEqual(got, []string{"work"}) {
-					t.Errorf("after Create(%q), List names = %v, want [work]", name, got)
-				}
-			})
-		}
-	})
-
-	t.Run("it acts on a session only under exactly its name", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "work", Answered: true})
-		f.SetHistory("work", []byte("screen"))
-
-		if err := f.Kill(t.Context(), "WORK"); !errors.Is(err, backend.ErrNoSuchSession) {
-			t.Errorf("Kill(WORK) = %v, want ErrNoSuchSession", err)
-		}
-		if _, err := f.History(t.Context(), "WORK", 0); !errors.Is(err, backend.ErrNoSuchSession) {
-			t.Errorf("History(WORK) = %v, want ErrNoSuchSession", err)
-		}
-		if exists, err := f.Exists(t.Context(), "WORK"); err != nil || exists {
-			t.Errorf("Exists(WORK) = %v, %v; want false", exists, err)
-		}
-	})
-
 	t.Run("it kills a session", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "a", Answered: true}, backend.Session{Name: "b", Answered: true})
+		f := backendtest.New(backend.Session{Name: "a"}, backend.Session{Name: "b"})
 		f.SetHistory("a", []byte("old"))
 
 		if err := f.Kill(t.Context(), "a"); err != nil {
@@ -146,7 +112,7 @@ func TestFake(t *testing.T) {
 	})
 
 	t.Run("it detaches every client of a session", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "a", Answered: true, Clients: 2})
+		f := backendtest.New(backend.Session{Name: "a", Clients: 2})
 
 		if err := f.Detach(t.Context(), "a"); err != nil {
 			t.Fatalf("Detach: %v", err)
@@ -157,7 +123,7 @@ func TestFake(t *testing.T) {
 	})
 
 	t.Run("it returns the history it was given, verbatim, and records the rows asked for", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "a", Answered: true})
+		f := backendtest.New(backend.Session{Name: "a"})
 		vt := []byte("\x1b[31mred\x1b[0m  \n\n")
 		f.SetHistory("a", vt)
 
@@ -171,29 +137,13 @@ func TestFake(t *testing.T) {
 	})
 
 	t.Run("it reports no history, never an empty one, for a session given none", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "unset", Answered: true}, backend.Session{Name: "blank", Answered: true})
+		f := backendtest.New(backend.Session{Name: "unset"}, backend.Session{Name: "blank"})
 		f.SetHistory("blank", nil)
 
 		for _, name := range []string{"unset", "blank"} {
 			if got, err := f.History(t.Context(), name, 0); !errors.Is(err, backend.ErrHistoryUnavailable) {
 				t.Errorf("History(%s) = %q, %v; want ErrHistoryUnavailable", name, got, err)
 			}
-		}
-	})
-
-	t.Run("it reports a missing session as ErrNoSuchSession", func(t *testing.T) {
-		f := backendtest.New()
-		if err := f.Kill(t.Context(), "gone"); !errors.Is(err, backend.ErrNoSuchSession) {
-			t.Errorf("Kill = %v, want ErrNoSuchSession", err)
-		}
-		if err := f.Detach(t.Context(), "gone"); !errors.Is(err, backend.ErrNoSuchSession) {
-			t.Errorf("Detach = %v, want ErrNoSuchSession", err)
-		}
-		if _, err := f.History(t.Context(), "gone", 0); !errors.Is(err, backend.ErrNoSuchSession) {
-			t.Errorf("History = %v, want ErrNoSuchSession", err)
-		}
-		if _, err := f.AttachCommand(t.Context(), "gone"); !errors.Is(err, backend.ErrNoSuchSession) {
-			t.Errorf("AttachCommand = %v, want ErrNoSuchSession", err)
 		}
 	})
 
@@ -210,86 +160,40 @@ func TestFake(t *testing.T) {
 		}
 	})
 
-	t.Run("it reaches a session under any name zmx holds, as List reports it", func(t *testing.T) {
-		odd := []string{"-x", "x*", "logs", "a\nb", "bad\xffname"}
-		f := backendtest.New()
-		for _, name := range odd {
-			f.Add(backend.Session{Name: name, Answered: true})
-			f.SetHistory(name, []byte("screen"))
-		}
-		ctx := t.Context()
-
-		for _, name := range odd {
-			if exists, err := f.Exists(ctx, name); err != nil || !exists {
-				t.Errorf("Exists(%q) = %v, %v; want true", name, exists, err)
-			}
-			if _, err := f.History(ctx, name, 0); err != nil {
-				t.Errorf("History(%q) = %v", name, err)
-			}
-			if _, err := f.AttachCommand(ctx, name); err != nil {
-				t.Errorf("AttachCommand(%q) = %v", name, err)
-			}
-			if err := f.Detach(ctx, name); err != nil {
-				t.Errorf("Detach(%q) = %v", name, err)
-			}
-			if err := f.Kill(ctx, name); err != nil {
-				t.Errorf("Kill(%q) = %v", name, err)
-			}
-		}
-	})
-
 	t.Run("it refuses to attach under a name zmx attach reads as its own flag", func(t *testing.T) {
 		f := backendtest.New()
 		for _, name := range []string{"-h", "--help", "--labels", "--labels=a=1"} {
-			f.Add(backend.Session{Name: name, Answered: true})
+			f.Add(backend.Session{Name: name})
 			if _, err := f.AttachCommand(t.Context(), name); !errors.Is(err, backend.ErrInvalidName) {
 				t.Errorf("AttachCommand(%q) = %v, want ErrInvalidName", name, err)
 			}
 		}
 	})
 
-	t.Run("it fails every call on a session that does not answer with ErrTimeout, and refuses its name to Create", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "wedged"})
-		f.SetHistory("wedged", []byte("screen"))
-		ctx := t.Context()
-		_, existsErr := f.Exists(ctx, "wedged")
-		_, historyErr := f.History(ctx, "wedged", 0)
-		_, attachErr := f.AttachCommand(ctx, "wedged")
-		calls := map[string]error{
-			"Exists":        existsErr,
-			"Kill":          f.Kill(ctx, "wedged"),
-			"Detach":        f.Detach(ctx, "wedged"),
-			"History":       historyErr,
-			"AttachCommand": attachErr,
+	t.Run("it holds every session it is given as answering until told to stop", func(t *testing.T) {
+		f := backendtest.New(backend.Session{Name: "work", Answered: false, Dir: "/srv", PID: 7, Clients: 1})
+		if exists, err := f.Exists(t.Context(), "work"); err != nil || !exists {
+			t.Errorf("Exists of a session given with Answered false = %v, %v; want it answering", exists, err)
 		}
 
-		for call, err := range calls {
-			if !errors.Is(err, backend.ErrTimeout) || errors.Is(err, backend.ErrNoSuchSession) {
-				t.Errorf("%s(wedged) = %v, want ErrTimeout", call, err)
-			}
+		f.StopAnswering("work")
+		if _, err := f.Exists(t.Context(), "work"); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("Exists after StopAnswering = %v, want ErrTimeout", err)
 		}
-		for _, name := range []string{"wedged", "WEDGED"} {
-			err := f.Create(ctx, name, "/", nil)
-			if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != "wedged" {
-				t.Errorf("Create(%s) = %v, want a SessionExistsError held as wedged", name, err)
-			}
+		if got, err := f.List(t.Context()); err != nil || len(got) != 1 || got[0] != (backend.Session{Name: "work"}) {
+			t.Errorf("List after StopAnswering = %+v, %v; want work with only its name", got, err)
 		}
-		if s, ok := f.Session("wedged"); !ok || s.Answered {
-			t.Errorf("wedged after the calls = %+v, %v; want it held, still not answering", s, ok)
+
+		f.Add(backend.Session{Name: "work"})
+		if exists, err := f.Exists(t.Context(), "work"); err != nil || !exists {
+			t.Errorf("Exists once added again = %v, %v; want it answering", exists, err)
 		}
 	})
 
-	t.Run("it switches, as zmx attach does, only from inside a session it holds that answers", func(t *testing.T) {
-		f := backendtest.New(
-			backend.Session{Name: "target", Answered: true},
-			backend.Session{Name: "home", Answered: true},
-			backend.Session{Name: "wedged"},
-		)
-		for current, want := range map[string]bool{"home": true, "wedged": false, "gone": false, "": false} {
-			f.SetCurrent(current)
-			if cmd, err := f.AttachCommand(t.Context(), "target"); err != nil || cmd.Switches != want {
-				t.Errorf("AttachCommand inside %q = %+v, %v; want Switches %v", current, cmd, err, want)
-			}
+	t.Run("it does not count a session added under a name no session can have", func(t *testing.T) {
+		f := backendtest.New(backend.Session{Name: "a/b"})
+		if exists, err := f.Exists(t.Context(), "a/b"); err != nil || exists {
+			t.Errorf("Exists(a/b) = %v, %v; want false, as the driver can hold no such session", exists, err)
 		}
 	})
 
@@ -308,7 +212,7 @@ func TestFake(t *testing.T) {
 
 	t.Run("it returns an injected failure before changing anything, until cleared", func(t *testing.T) {
 		boom := errors.New("boom")
-		f := backendtest.New(backend.Session{Name: "a", Answered: true, Clients: 1})
+		f := backendtest.New(backend.Session{Name: "a", Clients: 1})
 		for _, op := range []backendtest.Op{backendtest.OpList, backendtest.OpExists, backendtest.OpCreate, backendtest.OpAttachCommand, backendtest.OpKill, backendtest.OpDetach, backendtest.OpHistory} {
 			f.Fail(op, boom)
 		}
@@ -348,20 +252,6 @@ func TestFake(t *testing.T) {
 		}
 	})
 
-	t.Run("it fails a call whose context has ended, with the context's cause, changing nothing", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "a", Answered: true})
-		cause := errors.New("caller gave up")
-		ctx, cancel := context.WithCancelCause(t.Context())
-		cancel(cause)
-
-		if err := f.Kill(ctx, "a"); !errors.Is(err, cause) {
-			t.Errorf("Kill with an ended context = %v, want its cause", err)
-		}
-		if _, ok := f.Session("a"); !ok {
-			t.Error("a Kill with an ended context removed the session")
-		}
-	})
-
 	t.Run("it reports the current session it was given", func(t *testing.T) {
 		f := backendtest.New()
 		if got := f.Current(); got != "" {
@@ -374,7 +264,7 @@ func TestFake(t *testing.T) {
 	})
 
 	t.Run("it records every call in order", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "a", Answered: true})
+		f := backendtest.New(backend.Session{Name: "a"})
 		ctx := t.Context()
 
 		_, _ = f.List(ctx)

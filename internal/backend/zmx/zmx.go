@@ -100,60 +100,87 @@ func New(cfg Config) (*Backend, error) {
 // Dir is the zmx directory the Backend is bound to.
 func (b *Backend) Dir() string { return b.dir }
 
-// Exists reports whether a live session is held under exactly name. A stale
-// socket, a name held only under another spelling, or one no session can
-// have, does not count. A session that does not accept connections is
-// neither live nor gone, and is ErrTimeout.
+// Exists reports whether a session that answers is held under exactly name.
+// A stale socket, a name held only under another spelling, or one no session
+// can have, does not count. A session that does not answer is neither live
+// nor gone, and is ErrTimeout.
 func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
-	c, _, err := b.open(ctx, name)
+	_, err := b.ask(ctx, name)
 	if errors.Is(err, backend.ErrNoSuchSession) || errors.Is(err, backend.ErrInvalidName) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("check session %q: %w", name, err)
 	}
-	_ = c.Close()
 	return true, nil
 }
 
-// AttachCommand runs zmx attach on name, which must be live: zmx attach on
-// a socket that refuses would replace it with a new session, orphaning any
-// daemon behind it. Inside a session of the Backend's directory that answers,
-// the command keeps the caller's ZMX_SESSION, so zmx switches that session's
-// clients to name and exits at once instead of nesting; anywhere else it drops
-// ZMX_SESSION, with which zmx attach would try to switch a session it cannot
-// reach.
+// AttachCommand runs zmx attach on name, which must answer: zmx attach on a
+// socket that refuses would replace it with a new session, orphaning any
+// daemon behind it, and on a daemon that does not answer would hang the
+// terminal. Inside a session that answers in the Backend's directory, the
+// command keeps the caller's ZMX_SESSION, so zmx switches that session's
+// clients to name and exits at once instead of nesting. Anywhere else it
+// drops ZMX_SESSION, with which zmx attach would switch a session it cannot
+// reach, or another directory's session of the same name.
 func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	if err := CheckAttach(name); err != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
 	}
+	caller := ctx
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
-	c, _, err := b.open(ctx, name)
+	if _, err := b.ask(ctx, name); err != nil {
+		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
+	}
+	switches, err := b.switches(caller, ctx)
 	if err != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
 	}
-	_ = c.Close()
-	cmd := backend.Command{Argv: []string{b.binary, "attach", name}}
-	if b.answers(ctx, b.Current()) {
-		cmd.Env, cmd.Switches = b.env(envPrefix), true
+	cmd := backend.Command{Argv: []string{b.binary, "attach", name}, Switches: switches}
+	if switches {
+		cmd.Env = b.env(envPrefix)
 	} else {
 		cmd.Env = b.env(envPrefix, envSession)
 	}
 	return cmd, nil
 }
 
-// answers reports whether the session held under exactly name answers Info.
-func (b *Backend) answers(ctx context.Context, name string) bool {
+// switches reports whether zmx attach, run in this process's environment,
+// would switch the caller's session: one that answers in the Backend's own
+// directory. A session that does not answer by the ceiling does not switch;
+// the caller's context ending first is its error.
+func (b *Backend) switches(caller, ctx context.Context) (bool, error) {
+	env := b.environ()
+	if dir := lookup(env, envDir); dir != "" && filepath.Clean(dir) != b.dir {
+		return false, nil
+	}
+	current := lookup(env, envSession)
+	if current == "" {
+		return false, nil
+	}
+	_, err := b.ask(ctx, current)
+	if callerEnded(caller, err) {
+		return false, err
+	}
+	return err == nil, nil
+}
+
+// ask reads the Info record of the session held under exactly name, on a
+// connection of its own.
+func (b *Backend) ask(ctx context.Context, name string) (info, error) {
 	c, _, err := b.open(ctx, name)
 	if err != nil {
-		return false
+		return info{}, err
 	}
 	defer func() { _ = c.Close() }()
-	_, err = c.askInfo()
-	return err == nil
+	i, err := c.askInfo()
+	if err != nil {
+		return info{}, failure(ctx, err)
+	}
+	return i, nil
 }
 
 // Kill waits for the daemon to hang up. zmx unlinks a session's socket before

@@ -475,44 +475,6 @@ func TestBackendAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("it reaches, by every call, sessions plain zmx attach makes under names Create refuses", func(t *testing.T) {
-		b := zmxtest.New(t)
-		ctx := t.Context()
-		for _, name := range []string{"-x", "x*"} {
-			if err := b.ValidateName(name); err == nil {
-				t.Fatalf("ValidateName(%q) accepts it; the case needs a name Create refuses", name)
-			}
-			cmd := exec.Command(zmxtest.Binary(t), "attach", name, "sleep", "1000")
-			cmd.Env = []string{"ZMX_DIR=" + b.Dir(), "HOME=" + t.TempDir(), "PATH=/usr/bin:/bin", "SHELL=/bin/sh"}
-			cmd.Dir = t.TempDir()
-			if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "created") {
-				t.Fatalf("zmx attach %q = %q, %v", name, out, err)
-			}
-
-			if got := session(t, b, name); !got.Answered {
-				t.Errorf("%q listed as %+v, want it answering", name, got)
-			}
-			if exists, err := b.Exists(ctx, name); err != nil || !exists {
-				t.Errorf("Exists(%q) = %v, %v; want true", name, exists, err)
-			}
-			if _, err := b.History(ctx, name, 0); err != nil {
-				t.Errorf("History(%q): %v", name, err)
-			}
-			if _, err := b.AttachCommand(ctx, name); err != nil {
-				t.Errorf("AttachCommand(%q): %v", name, err)
-			}
-			if err := b.Detach(ctx, name); err != nil {
-				t.Errorf("Detach(%q): %v", name, err)
-			}
-			if err := b.Kill(ctx, name); err != nil {
-				t.Errorf("Kill(%q): %v", name, err)
-			}
-		}
-		if got := listed(t, b); len(got) != 0 {
-			t.Errorf("List after killing both = %v, want none", got)
-		}
-	})
-
 	t.Run("it lists names zmx holds that a line-oriented reader could split", func(t *testing.T) {
 		b := zmxtest.New(t)
 		names := []string{" lead", "_portal-saver", "a.b:c", "a=b", "has space", "ünï"}

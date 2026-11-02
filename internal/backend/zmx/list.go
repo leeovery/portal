@@ -16,10 +16,6 @@ import (
 // directory of many sessions cannot exhaust Portal's file descriptors.
 const maxProbes = 64
 
-// errProbeCeiling ends the probes of a List that have not answered by its
-// ceiling.
-var errProbeCeiling = errors.New("zmx session did not answer within the listing's ceiling")
-
 // List probes every session at once, under one probe ceiling for the whole
 // listing, so sessions that do not answer cost one ceiling between them, not
 // one each, however many wait for a slot. A session not answered by then is
@@ -35,7 +31,7 @@ func (b *Backend) List(ctx context.Context) ([]backend.Session, error) {
 	// Without a hostname only a cwd with no host, or localhost, reads as
 	// local; every other field is unaffected.
 	hostname, _ := b.hostname()
-	probeCtx, cancel := context.WithTimeoutCause(ctx, b.limits.probe, errProbeCeiling)
+	probeCtx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
 	probes := make([]probed, len(names))
 	slots := make(chan struct{}, maxProbes)
@@ -45,9 +41,9 @@ func (b *Backend) List(ctx context.Context) ([]backend.Session, error) {
 			select {
 			case slots <- struct{}{}:
 				defer func() { <-slots }()
-				probes[i] = b.probe(probeCtx, name, hostname)
+				probes[i] = b.probe(ctx, probeCtx, name, hostname)
 			case <-probeCtx.Done():
-				probes[i] = unanswered(probeCtx, name)
+				probes[i] = unanswered(ctx, name, context.Cause(probeCtx))
 			}
 		})
 	}
@@ -98,14 +94,15 @@ type probed struct {
 }
 
 // probe keeps a session that fails to answer, for any reason but a missing or
-// stale socket, with only its name known.
-func (b *Backend) probe(ctx context.Context, name, hostname string) probed {
+// stale socket, with only its name known. ctx carries the listing's ceiling
+// beneath the caller's context.
+func (b *Backend) probe(caller, ctx context.Context, name, hostname string) probed {
 	i, err := b.readInfo(ctx, name)
 	switch {
 	case gone(err):
 		return probed{gone: true}
 	case err != nil:
-		return unanswered(ctx, name)
+		return unanswered(caller, name, err)
 	}
 	s := backend.Session{
 		Name:     name,
@@ -121,11 +118,10 @@ func (b *Backend) probe(ctx context.Context, name, hostname string) probed {
 	return probed{session: s}
 }
 
-// unanswered is a session that gave no answer, cut short when its context
-// ended for any reason but the listing's ceiling.
-func unanswered(ctx context.Context, name string) probed {
-	cut := ctx.Err() != nil && !errors.Is(context.Cause(ctx), errProbeCeiling)
-	return probed{session: backend.Session{Name: name}, cut: cut}
+// unanswered is a session that gave no answer, failing with err: cut short
+// when err is the end of the caller's context.
+func unanswered(caller context.Context, name string, err error) probed {
+	return probed{session: backend.Session{Name: name}, cut: callerEnded(caller, err)}
 }
 
 // readInfo asks the daemon behind name's socket for its Info record. The
