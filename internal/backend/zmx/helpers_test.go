@@ -35,18 +35,29 @@ func socketDir(t *testing.T) string {
 
 // newBackend binds a Backend to dir with the given environment, a fixed
 // hostname and short ceilings. Its binary runs nothing.
-func newBackend(dir string, environ ...string) *zmx.Backend {
-	return newBackendRunning("/nonexistent/zmx", dir, environ...)
+func newBackend(t *testing.T, dir string, environ ...string) *zmx.Backend {
+	t.Helper()
+	return newBackendRunning(t, "/nonexistent/zmx", dir, environ...)
 }
 
-func newBackendRunning(binary, dir string, environ ...string) *zmx.Backend {
-	b := zmx.New(zmx.Config{
+func newBackendRunning(t *testing.T, binary, dir string, environ ...string) *zmx.Backend {
+	t.Helper()
+	b := mustNew(t, zmx.Config{
 		Binary:   binary,
 		Dir:      dir,
 		Environ:  func() []string { return slices.Clone(environ) },
 		Hostname: func() (string, error) { return hostname, nil },
 	})
 	zmx.ShortenCeilings(b, ceiling)
+	return b
+}
+
+func mustNew(t *testing.T, cfg zmx.Config) *zmx.Backend {
+	t.Helper()
+	b, err := zmx.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return b
 }
 

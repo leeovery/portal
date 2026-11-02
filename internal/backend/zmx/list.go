@@ -16,10 +16,17 @@ import (
 // directory of many sessions cannot exhaust Portal's file descriptors.
 const maxProbes = 64
 
-// List probes every session at once, each within the probe ceiling, so
-// sessions that do not answer cost one ceiling between them, not one each.
-// A stale socket is left out, and left in place: zmx replaces it, and
-// Portal never deletes a socket.
+// errProbeCeiling ends the probes of a List that have not answered by its
+// ceiling.
+var errProbeCeiling = errors.New("zmx session did not answer within the listing's ceiling")
+
+// List probes every session at once, under one probe ceiling for the whole
+// listing, so sessions that do not answer cost one ceiling between them, not
+// one each, however many wait for a slot. A session not answered by then is
+// listed with only its name. The listing fails with the caller's cause only
+// when the caller's context ends before every probe is done. A stale socket is
+// left out, and left in place: zmx replaces it, and Portal never deletes a
+// socket.
 func (b *Backend) List(ctx context.Context) ([]backend.Session, error) {
 	names, err := b.sockets()
 	if err != nil {
@@ -28,22 +35,28 @@ func (b *Backend) List(ctx context.Context) ([]backend.Session, error) {
 	// Without a hostname only a cwd with no host, or localhost, reads as
 	// local; every other field is unaffected.
 	hostname, _ := b.hostname()
+	probeCtx, cancel := context.WithTimeoutCause(ctx, b.limits.probe, errProbeCeiling)
+	defer cancel()
 	probes := make([]probed, len(names))
 	slots := make(chan struct{}, maxProbes)
 	var wg sync.WaitGroup
 	for i, name := range names {
 		wg.Go(func() {
-			slots <- struct{}{}
-			defer func() { <-slots }()
-			probes[i] = b.probe(ctx, name, hostname)
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+				probes[i] = b.probe(probeCtx, name, hostname)
+			case <-probeCtx.Done():
+				probes[i] = unanswered(probeCtx, name)
+			}
 		})
 	}
 	wg.Wait()
-	if ctx.Err() != nil {
-		return nil, fmt.Errorf("list zmx sessions: %w", context.Cause(ctx))
-	}
 	sessions := []backend.Session{}
 	for _, p := range probes {
+		if p.cut {
+			return nil, fmt.Errorf("list zmx sessions: %w", context.Cause(ctx))
+		}
 		if !p.gone {
 			sessions = append(sessions, p.session)
 		}
@@ -77,10 +90,11 @@ func (b *Backend) sockets() ([]string, error) {
 }
 
 // probed is one socket's answer: its session, or gone when the socket is
-// missing or stale.
+// missing or stale, or cut when the caller's context ended before the answer.
 type probed struct {
 	session backend.Session
 	gone    bool
+	cut     bool
 }
 
 // probe keeps a session that fails to answer, for any reason but a missing or
@@ -91,7 +105,7 @@ func (b *Backend) probe(ctx context.Context, name, hostname string) probed {
 	case gone(err):
 		return probed{gone: true}
 	case err != nil:
-		return probed{session: backend.Session{Name: name}}
+		return unanswered(ctx, name)
 	}
 	s := backend.Session{
 		Name:     name,
@@ -107,22 +121,24 @@ func (b *Backend) probe(ctx context.Context, name, hostname string) probed {
 	return probed{session: s}
 }
 
-// readInfo asks the daemon behind name's socket for its Info record, within
-// the probe ceiling. The daemon counts clients without the asker.
+// unanswered is a session that gave no answer, cut short when its context
+// ended for any reason but the listing's ceiling.
+func unanswered(ctx context.Context, name string) probed {
+	cut := ctx.Err() != nil && !errors.Is(context.Cause(ctx), errProbeCeiling)
+	return probed{session: backend.Session{Name: name}, cut: cut}
+}
+
+// readInfo asks the daemon behind name's socket for its Info record. The
+// daemon counts clients without the asker.
 func (b *Backend) readInfo(ctx context.Context, name string) (info, error) {
-	ctx, cancel := context.WithTimeout(ctx, b.limits.probe)
-	defer cancel()
 	c, err := b.connect(ctx, name)
 	if err != nil {
 		return info{}, failure(ctx, err)
 	}
 	defer func() { _ = c.Close() }()
-	if err := c.send(tagInfo, nil); err != nil {
-		return info{}, failure(ctx, err)
-	}
-	p, err := c.await(tagInfo)
+	i, err := c.askInfo()
 	if err != nil {
 		return info{}, failure(ctx, err)
 	}
-	return decodeInfo(p)
+	return i, nil
 }

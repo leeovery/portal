@@ -36,7 +36,7 @@ func TestCreate(t *testing.T) {
 	t.Run("it runs zmx attach in the directory, stdin at EOF, with the session's environment", func(t *testing.T) {
 		binary, log := fakeZmx(t, createdLine)
 		zmxDir, workDir := socketDir(t), t.TempDir()
-		b := newBackendRunning(binary, zmxDir,
+		b := newBackendRunning(t, binary, zmxDir,
 			"PATH=/usr/bin:/bin", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION=live", "ZMX_SESSION_PREFIX=pre-",
 			"TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1", "LANG=en_GB.UTF-8")
 
@@ -72,7 +72,7 @@ func TestCreate(t *testing.T) {
 	t.Run("it succeeds on zmx's created line whatever the exit code", func(t *testing.T) {
 		binary, _ := fakeZmx(t, createdLine+"; echo 'cannot connect' >&2; exit 1")
 
-		if err := newBackendRunning(binary, socketDir(t), "PATH=/usr/bin:/bin").Create(t.Context(), "brief", t.TempDir(), []string{"true"}); err != nil {
+		if err := newBackendRunning(t, binary, socketDir(t), "PATH=/usr/bin:/bin").Create(t.Context(), "brief", t.TempDir(), []string{"true"}); err != nil {
 			t.Errorf("Create = %v, want nil once zmx said it created the session", err)
 		}
 	})
@@ -80,7 +80,7 @@ func TestCreate(t *testing.T) {
 	t.Run("it counts the created line only where zmx prints it, first", func(t *testing.T) {
 		binary, _ := fakeZmx(t, `printf '\033[0m'; `+createdLine)
 
-		err := newBackendRunning(binary, socketDir(t), "PATH=/usr/bin:/bin").Create(t.Context(), "x", t.TempDir(), nil)
+		err := newBackendRunning(t, binary, socketDir(t), "PATH=/usr/bin:/bin").Create(t.Context(), "x", t.TempDir(), nil)
 
 		if !errors.Is(err, backend.ErrSessionExists) {
 			t.Errorf("Create = %v, want the run read as a join", err)
@@ -90,7 +90,7 @@ func TestCreate(t *testing.T) {
 	t.Run("it reports a run that failed and left nothing live as the failure", func(t *testing.T) {
 		binary, _ := fakeZmx(t, "echo 'error: boom' >&2; exit 1")
 
-		err := newBackendRunning(binary, socketDir(t), "PATH=/usr/bin:/bin").Create(t.Context(), "x", t.TempDir(), nil)
+		err := newBackendRunning(t, binary, socketDir(t), "PATH=/usr/bin:/bin").Create(t.Context(), "x", t.TempDir(), nil)
 
 		if err == nil || errors.Is(err, backend.ErrSessionExists) || !strings.Contains(err.Error(), "error: boom") {
 			t.Errorf("Create = %v, want zmx's failure with its stderr", err)
@@ -102,7 +102,7 @@ func TestCreate(t *testing.T) {
 		dir := socketDir(t)
 		d := serve(t, dir, "taken", silent)
 
-		err := newBackendRunning(binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "taken", t.TempDir(), nil)
+		err := newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "taken", t.TempDir(), nil)
 
 		if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != "taken" {
 			t.Errorf("Create(taken) = %v, want a SessionExistsError held as taken", err)
@@ -119,7 +119,7 @@ func TestCreate(t *testing.T) {
 		foldsCase(t, dir)
 		serve(t, dir, "taken", silent)
 
-		err := newBackendRunning(binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "TAKEN", t.TempDir(), nil)
+		err := newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "TAKEN", t.TempDir(), nil)
 
 		if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != "taken" || exists.Name != "TAKEN" {
 			t.Errorf("Create(TAKEN) = %v, want a SessionExistsError held as taken", err)
@@ -132,7 +132,7 @@ func TestCreate(t *testing.T) {
 		dir := socketDir(t)
 		stale(t, dir, "crashed")
 
-		if err := newBackendRunning(binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "crashed", t.TempDir(), nil); err != nil {
+		if err := newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "crashed", t.TempDir(), nil); err != nil {
 			t.Errorf("Create over a stale socket = %v, want nil", err)
 		}
 		ran(t, log, "args")
@@ -143,7 +143,7 @@ func TestCreate(t *testing.T) {
 		dir := socketDir(t)
 		refusing(t, dir, "busy")
 
-		err := newBackendRunning(binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "busy", t.TempDir(), nil)
+		err := newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "busy", t.TempDir(), nil)
 
 		if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != "busy" {
 			t.Errorf("Create(busy) = %v, want a SessionExistsError held as busy", err)
@@ -153,7 +153,7 @@ func TestCreate(t *testing.T) {
 
 	t.Run("it gives up on a run past its ceiling", func(t *testing.T) {
 		binary, _ := fakeZmx(t, "exec sleep 5")
-		b := newBackendRunning(binary, socketDir(t), "PATH=/usr/bin:/bin")
+		b := newBackendRunning(t, binary, socketDir(t), "PATH=/usr/bin:/bin")
 		zmx.ShortenCreateCeiling(b, time.Second)
 
 		start := time.Now()
@@ -170,7 +170,7 @@ func TestCreate(t *testing.T) {
 	t.Run("it refuses an invalid name without running zmx", func(t *testing.T) {
 		binary, log := fakeZmx(t, createdLine)
 
-		if err := newBackendRunning(binary, socketDir(t)).Create(t.Context(), "-h", t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
+		if err := newBackendRunning(t, binary, socketDir(t)).Create(t.Context(), "-h", t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
 			t.Errorf("Create(-h) = %v, want ErrInvalidName", err)
 		}
 		notRun(t, log)

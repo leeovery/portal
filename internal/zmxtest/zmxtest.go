@@ -60,11 +60,15 @@ func New(t *testing.T) *zmx.Backend {
 		t.Fatalf("make zmx dir: %v", err)
 	}
 	env := sessionEnv(os.Environ(), t.TempDir())
-	b := zmx.New(zmx.Config{
+	b, err := zmx.New(zmx.Config{
 		Binary:  binary,
 		Dir:     dir,
 		Environ: func() []string { return slices.Clone(env) },
 	})
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		teardown(context.WithoutCancel(t.Context()), t, b)
 		if err := os.RemoveAll(dir); err != nil {

@@ -73,8 +73,8 @@ func (b *Backend) refuseHeld(ctx context.Context, name string) error {
 }
 
 // holder is the entry whose session holds name, or "". A session holds its
-// name while its socket answers, or refuses since boot: its daemon may be live
-// with its listen backlog full.
+// name while its socket answers, or does not accept but may have a daemon
+// behind it: one live with its listen backlog full.
 func (b *Backend) holder(ctx context.Context, name string) (string, error) {
 	s, ok, err := b.held(name)
 	if err != nil || !ok {
@@ -84,7 +84,7 @@ func (b *Backend) holder(ctx context.Context, name string) (string, error) {
 	switch {
 	case gone(err):
 		return "", nil
-	case errors.Is(err, errRefused):
+	case errors.Is(err, errNotAccepting):
 		return s.name, nil
 	case err != nil:
 		return "", failure(ctx, err)

@@ -375,6 +375,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 
 	t.Run("it gives up on a stopped daemon's kill within its bounds, and the kill lands once it runs", func(t *testing.T) {
 		b := zmxtest.New(t)
+		zmx.ShortenCeilings(b, time.Second)
 		mustCreate(t, b, "wedged", t.TempDir(), "sleep", "1000")
 		daemon := zmxtest.StopDaemon(t, b, "wedged")
 
@@ -383,8 +384,8 @@ func TestBackendAgainstZmx(t *testing.T) {
 		if !errors.Is(err, backend.ErrTimeout) || !strings.Contains(err.Error(), "may still land") {
 			t.Errorf("Kill of a stopped daemon = %v, want ErrTimeout saying the kill may still land", err)
 		}
-		if took := time.Since(start); took > 8*time.Second {
-			t.Errorf("Kill of a stopped daemon took %s", took)
+		if took := time.Since(start); took > 3*time.Second {
+			t.Errorf("Kill of a stopped daemon took %s past its 1s ceiling", took)
 		}
 		if got := session(t, b, "wedged"); got.Answered {
 			t.Errorf("stopped session listed as %+v, want it unanswered", got)
@@ -471,6 +472,44 @@ func TestBackendAgainstZmx(t *testing.T) {
 		cmd.Env = []string{"ZMX_DIR=" + b.Dir(), "HOME=" + t.TempDir()}
 		if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "NameTooLong") {
 			t.Errorf("zmx attach of %d bytes = %q, %v; want zmx's own too-long refusal", len(tooLong), out, err)
+		}
+	})
+
+	t.Run("it reaches, by every call, sessions plain zmx attach makes under names Create refuses", func(t *testing.T) {
+		b := zmxtest.New(t)
+		ctx := t.Context()
+		for _, name := range []string{"-x", "x*"} {
+			if err := b.ValidateName(name); err == nil {
+				t.Fatalf("ValidateName(%q) accepts it; the case needs a name Create refuses", name)
+			}
+			cmd := exec.Command(zmxtest.Binary(t), "attach", name, "sleep", "1000")
+			cmd.Env = []string{"ZMX_DIR=" + b.Dir(), "HOME=" + t.TempDir(), "PATH=/usr/bin:/bin", "SHELL=/bin/sh"}
+			cmd.Dir = t.TempDir()
+			if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "created") {
+				t.Fatalf("zmx attach %q = %q, %v", name, out, err)
+			}
+
+			if got := session(t, b, name); !got.Answered {
+				t.Errorf("%q listed as %+v, want it answering", name, got)
+			}
+			if exists, err := b.Exists(ctx, name); err != nil || !exists {
+				t.Errorf("Exists(%q) = %v, %v; want true", name, exists, err)
+			}
+			if _, err := b.History(ctx, name, 0); err != nil {
+				t.Errorf("History(%q): %v", name, err)
+			}
+			if _, err := b.AttachCommand(ctx, name); err != nil {
+				t.Errorf("AttachCommand(%q): %v", name, err)
+			}
+			if err := b.Detach(ctx, name); err != nil {
+				t.Errorf("Detach(%q): %v", name, err)
+			}
+			if err := b.Kill(ctx, name); err != nil {
+				t.Errorf("Kill(%q): %v", name, err)
+			}
+		}
+		if got := listed(t, b); len(got) != 0 {
+			t.Errorf("List after killing both = %v, want none", got)
 		}
 	})
 

@@ -44,9 +44,11 @@ type Call struct {
 
 // Fake is an in-memory Backend that keeps the driver's contract: names match
 // exactly, except that Create refuses a name held under another case, as zmx
-// on a case-insensitive filesystem does. Create, Kill and Detach change the
-// sessions it holds; Fail makes a method return an error before it changes
-// anything, and a call with an ended context fails with its cause.
+// on a case-insensitive filesystem does. A session added with Answered false
+// does not answer, as a wedged or busy daemon does not: every call naming it
+// fails with ErrTimeout, and Create refuses its name. Create, Kill and Detach
+// change the sessions it holds; Fail makes a method return an error before it
+// changes anything, and a call with an ended context fails with its cause.
 type Fake struct {
 	// Now stamps Created on the sessions Create makes; nil is time.Now.
 	Now func() time.Time
@@ -165,7 +167,10 @@ func (f *Fake) Exists(ctx context.Context, name string) (bool, error) {
 	if err := f.begin(ctx, Call{Op: OpExists, Name: name}); err != nil {
 		return false, err
 	}
-	_, ok := f.sessions[name]
+	s, ok := f.sessions[name]
+	if ok && !s.Answered {
+		return false, notAnswering(OpExists, name)
+	}
 	return ok, nil
 }
 
@@ -196,19 +201,22 @@ func (f *Fake) Create(ctx context.Context, name, dir string, command []string) e
 	return nil
 }
 
+// AttachCommand switches, as the driver's does, when the current session is
+// one the Fake holds that answers.
 func (f *Fake) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.beginHeld(ctx, Call{Op: OpAttachCommand, Name: name}); err != nil {
+	if err := f.beginHeld(ctx, Call{Op: OpAttachCommand, Name: name}, zmx.CheckAttach); err != nil {
 		return backend.Command{}, err
 	}
-	return backend.Command{Argv: []string{AttachProgram, name}}, nil
+	current, ok := f.sessions[f.current]
+	return backend.Command{Argv: []string{AttachProgram, name}, Switches: ok && current.Answered}, nil
 }
 
 func (f *Fake) Kill(ctx context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.beginHeld(ctx, Call{Op: OpKill, Name: name}); err != nil {
+	if err := f.beginHeld(ctx, Call{Op: OpKill, Name: name}, zmx.CheckLookup); err != nil {
 		return err
 	}
 	delete(f.sessions, name)
@@ -219,7 +227,7 @@ func (f *Fake) Kill(ctx context.Context, name string) error {
 func (f *Fake) Detach(ctx context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.beginHeld(ctx, Call{Op: OpDetach, Name: name}); err != nil {
+	if err := f.beginHeld(ctx, Call{Op: OpDetach, Name: name}, zmx.CheckLookup); err != nil {
 		return err
 	}
 	s := f.sessions[name]
@@ -234,7 +242,7 @@ func (f *Fake) Detach(ctx context.Context, name string) error {
 func (f *Fake) History(ctx context.Context, name string, rows int) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.beginHeld(ctx, Call{Op: OpHistory, Name: name, Rows: rows}); err != nil {
+	if err := f.beginHeld(ctx, Call{Op: OpHistory, Name: name, Rows: rows}, zmx.CheckLookup); err != nil {
 		return nil, err
 	}
 	vt := f.history[name]
@@ -269,19 +277,27 @@ func (f *Fake) begin(ctx context.Context, c Call) error {
 	return nil
 }
 
-// beginHeld begins a call on a session the Fake must hold under exactly the
-// call's name. The caller holds mu.
-func (f *Fake) beginHeld(ctx context.Context, c Call) error {
+// beginHeld begins a call on a session the Fake must hold, answering, under
+// exactly the call's name, which check must accept. The caller holds mu.
+func (f *Fake) beginHeld(ctx context.Context, c Call, check func(string) error) error {
 	if err := f.begin(ctx, c); err != nil {
 		return err
 	}
-	if err := f.validate(c.Name); err != nil {
+	if err := check(c.Name); err != nil {
 		return err
 	}
-	if _, ok := f.sessions[c.Name]; !ok {
+	s, ok := f.sessions[c.Name]
+	if !ok {
 		return fmt.Errorf("%s session %q: %w", strings.ToLower(string(c.Op)), c.Name, backend.ErrNoSuchSession)
 	}
+	if !s.Answered {
+		return notAnswering(c.Op, c.Name)
+	}
 	return nil
+}
+
+func notAnswering(op Op, name string) error {
+	return fmt.Errorf("%s session %q: not answering: %w", strings.ToLower(string(op)), name, backend.ErrTimeout)
 }
 
 func (f *Fake) validate(name string) error {

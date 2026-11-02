@@ -94,15 +94,21 @@ type Command struct {
 	Argv []string
 	Env  []string
 	Dir  string
+	// Switches reports that the command, run inside a session, switches that
+	// session's clients to another and exits at once, rather than attaching
+	// the caller's terminal until it detaches.
+	Switches bool
 }
 
 // Backend is the session backend. Every call that reaches the backend takes a
 // context and fails with its cause once it ends; each also has a ceiling of
-// its own, past which it fails with ErrTimeout.
+// its own, past which it fails with ErrTimeout. List differs on both counts.
 type Backend interface {
 	// List returns every session, Portal's own included, in name order. A
-	// failed read is an error, never an empty list; a session that does not
-	// answer is listed with Answered false.
+	// failed read is an error, never an empty list. Its ceiling bounds the
+	// whole listing, and a session that has not answered by then is listed
+	// with Answered false. It fails with the context's cause only when the
+	// context ends before every session has answered or failed to.
 	List(ctx context.Context) ([]Session, error)
 	// Exists reports whether the backend holds a live session of exactly this
 	// name. A session it can tell neither live nor gone is ErrTimeout.
@@ -117,7 +123,8 @@ type Backend interface {
 	// call then briefly attaches to its session and returns the same refusal.
 	Create(ctx context.Context, name, dir string, command []string) error
 	// AttachCommand is the process that attaches the caller's terminal to the
-	// live session of exactly this name.
+	// live session of exactly this name, or, run inside a session, switches
+	// that session's clients to it, as its Switches says.
 	AttachCommand(ctx context.Context, name string) (Command, error)
 	// Kill ends the session. On ErrTimeout the kill may still land later.
 	Kill(ctx context.Context, name string) error
@@ -132,7 +139,9 @@ type Backend interface {
 	History(ctx context.Context, name string, rows int) ([]byte, error)
 	// Current returns the session this process runs inside, "" outside one.
 	Current() string
-	// ValidateName refuses a name the backend cannot hold, wrapping
-	// ErrInvalidName.
+	// ValidateName refuses a name Create refuses, wrapping ErrInvalidName.
+	// The backend can hold sessions made elsewhere under names Create
+	// refuses, and every call on a session List reports accepts its name,
+	// but AttachCommand refuses one the backend's own attach would misread.
 	ValidateName(name string) error
 }

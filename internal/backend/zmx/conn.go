@@ -17,18 +17,29 @@ import (
 
 var (
 	errUnsupported = errors.New("zmx daemon does not support the request")
+	errSecondFrame = errors.New("a second frame on one connection to a zmx daemon")
 	// errStale marks a refused connect to a socket made before this boot.
 	errStale = errors.New("socket predates this boot")
-	// errRefused marks a refused connect to a socket made since boot.
-	errRefused = fmt.Errorf("zmx daemon is not accepting connections: %w", backend.ErrTimeout)
+	// errNotAccepting marks a connect a daemon may be behind but did not
+	// accept: refused from a socket made since boot, or a full backlog.
+	errNotAccepting = fmt.Errorf("zmx daemon is not accepting connections: %w", backend.ErrTimeout)
 )
 
 // conn is one connection to a session's daemon. Its reads and writes fail
 // once the context it was dialled with ends.
+//
+// A conn sends one frame, never two, and send refuses a second. A zmx 0.8.1
+// daemon, which can share the directory, reads this protocol's 8-byte header
+// as its own 8-byte header with the length in bytes 1-4, so every frame Portal
+// sends reads to it as one still awaiting payload, and it waits. A second
+// frame on the connection would complete the first, and the bytes after it
+// would be read as frames of their own, Input among them: keystrokes into the
+// session's shell.
 type conn struct {
 	nc   net.Conn
 	r    *bufio.Reader
 	stop func() bool
+	sent bool
 }
 
 func dial(ctx context.Context, path string) (*conn, error) {
@@ -48,8 +59,24 @@ func (c *conn) Close() error {
 }
 
 func (c *conn) send(t tag, payload []byte) error {
+	if c.sent {
+		return errSecondFrame
+	}
+	c.sent = true
 	_, err := c.nc.Write(append(encodeHeader(t, len(payload)), payload...))
 	return err
+}
+
+// askInfo sends Info and reads the daemon's record.
+func (c *conn) askInfo() (info, error) {
+	if err := c.send(tagInfo, nil); err != nil {
+		return info{}, err
+	}
+	p, err := c.await(tagInfo)
+	if err != nil {
+		return info{}, err
+	}
+	return decodeInfo(p)
 }
 
 // header reads the next frame's header. On a header of another protocol
@@ -100,10 +127,24 @@ func (c *conn) hangupAfter(t tag) error {
 // connect dials the socket of a directory entry.
 func (b *Backend) connect(ctx context.Context, entry string) (*conn, error) {
 	c, err := dial(ctx, b.path(entry))
-	if errors.Is(err, syscall.ECONNREFUSED) {
-		return nil, b.refused(entry, err)
+	if err != nil {
+		return nil, b.dialFailure(entry, err)
 	}
-	return c, err
+	return c, nil
+}
+
+// dialFailure marks a failed connect as a stale socket or a daemon not
+// accepting. On Linux a connect to a unix socket whose listen backlog is full
+// fails with EAGAIN, which proves a listener, so it is never stale; on macOS
+// a full backlog refuses.
+func (b *Backend) dialFailure(entry string, err error) error {
+	switch {
+	case errors.Is(err, syscall.EAGAIN):
+		return fmt.Errorf("%w: %w", err, errNotAccepting)
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return b.refused(entry, err)
+	}
+	return err
 }
 
 // refused tells a stale socket from a session not answering. A daemon whose
@@ -116,7 +157,7 @@ func (b *Backend) refused(entry string, err error) error {
 	if statErr == nil && bootErr == nil && info.ModTime().Before(boot) {
 		return fmt.Errorf("%w: %w", err, errStale)
 	}
-	return fmt.Errorf("%w: %w", err, errRefused)
+	return fmt.Errorf("%w: %w", err, errNotAccepting)
 }
 
 // gone reports whether a connect found no session: the socket is missing, or

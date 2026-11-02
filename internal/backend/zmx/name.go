@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/leeovery/portal/internal/backend"
 )
@@ -21,38 +22,80 @@ var maxSocketPath = len(syscall.RawSockaddrUnix{}.Path) - 1
 // ZMX_DIR is set, as the Backend always sets it.
 const logDir = "logs"
 
-// nameRules are zmx's own refusals plus the names its argv parsing, its
-// directory or its own listing cannot carry.
-var nameRules = []struct {
+type nameRule struct {
 	refuses func(string) bool
 	reason  string
-}{
+}
+
+// pathRules refuse the names no entry in the directory can carry, as zmx
+// refuses them.
+var pathRules = []nameRule{
 	{func(n string) bool { return n == "" }, "is empty"},
 	{func(n string) bool { return n == "." || n == ".." }, "names a directory entry"},
-	{func(n string) bool { return strings.EqualFold(n, logDir) }, "is zmx's log directory"},
 	{func(n string) bool { return strings.ContainsRune(n, '/') }, "contains '/'"},
+	{func(n string) bool { return strings.ContainsRune(n, 0) }, "contains NUL"},
+}
+
+// attachRules refuse the names zmx attach reads as its own flags, which it
+// takes only before the session name.
+var attachRules = []nameRule{
+	{func(n string) bool { return n == "-h" || n == "--help" }, "is zmx attach's help flag"},
+	{func(n string) bool { return n == "--labels" || strings.HasPrefix(n, "--labels=") }, "is zmx attach's --labels flag"},
+}
+
+// createRules refuse as well the names Portal does not make, though zmx
+// attach makes some: ones zmx's other commands misread, or its own listing
+// cannot carry.
+var createRules = []nameRule{
+	{func(n string) bool { return strings.EqualFold(n, logDir) }, "is zmx's log directory"},
 	{func(n string) bool { return strings.HasPrefix(n, "-") }, "starts with '-', which zmx reads as a flag"},
 	{func(n string) bool { return strings.HasSuffix(n, "*") }, "ends with '*', which zmx kill reads as a prefix match"},
 	{func(n string) bool { return strings.ContainsFunc(n, unicode.IsControl) }, "contains a control character, which zmx's own listing prints raw"},
+	{func(n string) bool { return !utf8.ValidString(n) }, "is not valid UTF-8"},
 }
 
-// CheckName refuses a name by every rule zmx sets but its length, which
-// depends on the directory; Backend.ValidateName adds that.
-func CheckName(name string) error {
-	for _, rule := range nameRules {
-		if rule.refuses(name) {
-			return fmt.Errorf("%w: %q %s", backend.ErrInvalidName, name, rule.reason)
+func check(name string, rules ...[]nameRule) error {
+	for _, set := range rules {
+		for _, rule := range set {
+			if rule.refuses(name) {
+				return fmt.Errorf("%w: %q %s", backend.ErrInvalidName, name, rule.reason)
+			}
 		}
 	}
 	return nil
 }
 
-// ValidateName refuses a name zmx cannot hold. A session's socket is
+// CheckName refuses a name Create refuses, by every rule but its length,
+// which depends on the directory; Backend.ValidateName adds that.
+func CheckName(name string) error { return check(name, pathRules, createRules) }
+
+// CheckLookup refuses a name no session in the directory can have, but for
+// its length. Every call on a session found by List applies only this, since
+// zmx makes sessions under names Create refuses.
+func CheckLookup(name string) error { return check(name, pathRules) }
+
+// CheckAttach refuses a name AttachCommand cannot pass to zmx attach, but for
+// its length.
+func CheckAttach(name string) error { return check(name, pathRules, attachRules) }
+
+// ValidateName refuses a name Create refuses. A session's socket is
 // <dir>/<name>, so the room for a name shrinks as the directory grows.
 func (b *Backend) ValidateName(name string) error {
 	if err := CheckName(name); err != nil {
 		return err
 	}
+	return b.checkLength(name)
+}
+
+// checkLookup refuses a name no session in the directory can have.
+func (b *Backend) checkLookup(name string) error {
+	if err := CheckLookup(name); err != nil {
+		return err
+	}
+	return b.checkLength(name)
+}
+
+func (b *Backend) checkLength(name string) error {
 	if limit := b.MaxNameLen(); len(name) > limit {
 		return fmt.Errorf("%w: %q is %d bytes, more than the %d zmx can hold in %s",
 			backend.ErrInvalidName, name, len(name), max(limit, 0), b.dir)

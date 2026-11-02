@@ -72,8 +72,11 @@ type Backend struct {
 
 var _ backend.Backend = (*Backend)(nil)
 
-// New binds a Backend to cfg.Dir.
-func New(cfg Config) *Backend {
+// New binds a Backend to cfg.Dir, which must be absolute.
+func New(cfg Config) (*Backend, error) {
+	if !filepath.IsAbs(cfg.Dir) {
+		return nil, fmt.Errorf("bind zmx backend: directory %q is not absolute", cfg.Dir)
+	}
 	b := &Backend{
 		binary:   cfg.Binary,
 		dir:      filepath.Clean(cfg.Dir),
@@ -91,16 +94,16 @@ func New(cfg Config) *Backend {
 	if b.booted == nil {
 		b.booted = bootTime
 	}
-	return b
+	return b, nil
 }
 
 // Dir is the zmx directory the Backend is bound to.
 func (b *Backend) Dir() string { return b.dir }
 
 // Exists reports whether a live session is held under exactly name. A stale
-// socket, a name held only under another spelling, or one zmx cannot hold,
-// does not count. A session that refuses connections is neither live nor
-// gone, and is ErrTimeout.
+// socket, a name held only under another spelling, or one no session can
+// have, does not count. A session that does not accept connections is
+// neither live nor gone, and is ErrTimeout.
 func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
@@ -115,11 +118,17 @@ func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
 	return true, nil
 }
 
-// AttachCommand keeps the caller's ZMX_SESSION: inside a session, zmx attach
-// then switches that session's clients to name instead of nesting. The name
-// must be live: zmx attach on a socket that refuses would replace it with a
-// new session, orphaning any daemon behind it.
+// AttachCommand runs zmx attach on name, which must be live: zmx attach on
+// a socket that refuses would replace it with a new session, orphaning any
+// daemon behind it. Inside a session of the Backend's directory that answers,
+// the command keeps the caller's ZMX_SESSION, so zmx switches that session's
+// clients to name and exits at once instead of nesting; anywhere else it drops
+// ZMX_SESSION, with which zmx attach would try to switch a session it cannot
+// reach.
 func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
+	if err := CheckAttach(name); err != nil {
+		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
+	}
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
 	c, _, err := b.open(ctx, name)
@@ -127,10 +136,24 @@ func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Comma
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
 	}
 	_ = c.Close()
-	return backend.Command{
-		Argv: []string{b.binary, "attach", name},
-		Env:  b.env(envPrefix),
-	}, nil
+	cmd := backend.Command{Argv: []string{b.binary, "attach", name}}
+	if b.answers(ctx, b.Current()) {
+		cmd.Env, cmd.Switches = b.env(envPrefix), true
+	} else {
+		cmd.Env = b.env(envPrefix, envSession)
+	}
+	return cmd, nil
+}
+
+// answers reports whether the session held under exactly name answers Info.
+func (b *Backend) answers(ctx context.Context, name string) bool {
+	c, _, err := b.open(ctx, name)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = c.Close() }()
+	_, err = c.askInfo()
+	return err == nil
 }
 
 // Kill waits for the daemon to hang up. zmx unlinks a session's socket before
@@ -209,8 +232,9 @@ func (b *Backend) Current() string {
 }
 
 // ProtocolVersion is the socket protocol version that the daemon of the live
-// session name speaks, read from the header of its answer. A daemon that
-// cannot read the driver's own frames gives no answer, so ErrTimeout.
+// session name speaks, read from the header of its answer. Any version but
+// ProtocolVersion is unsupported. A zmx 0.8.1 daemon gives no answer, so
+// ErrTimeout: it reads the request as a frame still awaiting payload.
 func (b *Backend) ProtocolVersion(ctx context.Context, name string) (int, error) {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
@@ -231,10 +255,10 @@ func (b *Backend) ProtocolVersion(ctx context.Context, name string) (int, error)
 
 // open connects to the live session held under exactly name. A name held only
 // under another spelling, or behind a stale socket, is ErrNoSuchSession: on a
-// folding filesystem zmx's socket for foo answers for FOO. A socket from this
-// boot that refuses is ErrTimeout.
+// folding filesystem zmx's socket for foo answers for FOO. A socket that does
+// not accept, though a daemon may be behind it, is ErrTimeout.
 func (b *Backend) open(ctx context.Context, name string) (*conn, socket, error) {
-	if err := b.ValidateName(name); err != nil {
+	if err := b.checkLookup(name); err != nil {
 		return nil, socket{}, err
 	}
 	s, ok, err := b.held(name)

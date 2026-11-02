@@ -5,10 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -53,7 +56,7 @@ var perSession = []struct {
 func TestPerSessionCalls(t *testing.T) {
 	for _, op := range perSession {
 		t.Run(op.name+" reports a missing session as ErrNoSuchSession", func(t *testing.T) {
-			if err := op.call(t.Context(), newBackend(socketDir(t)), "gone"); !errors.Is(err, backend.ErrNoSuchSession) {
+			if err := op.call(t.Context(), newBackend(t, socketDir(t)), "gone"); !errors.Is(err, backend.ErrNoSuchSession) {
 				t.Errorf("%s(gone) = %v, want ErrNoSuchSession", op.name, err)
 			}
 		})
@@ -62,7 +65,7 @@ func TestPerSessionCalls(t *testing.T) {
 			dir := socketDir(t)
 			stale(t, dir, "crashed")
 
-			if err := op.call(t.Context(), newBackend(dir), "crashed"); !errors.Is(err, backend.ErrNoSuchSession) {
+			if err := op.call(t.Context(), newBackend(t, dir), "crashed"); !errors.Is(err, backend.ErrNoSuchSession) {
 				t.Errorf("%s(crashed) = %v, want ErrNoSuchSession", op.name, err)
 			}
 			if _, err := os.Lstat(filepath.Join(dir, "crashed")); err != nil {
@@ -74,7 +77,7 @@ func TestPerSessionCalls(t *testing.T) {
 			dir := socketDir(t)
 			refusing(t, dir, "busy")
 
-			err := op.call(t.Context(), newBackend(dir), "busy")
+			err := op.call(t.Context(), newBackend(t, dir), "busy")
 
 			if !errors.Is(err, backend.ErrTimeout) || errors.Is(err, backend.ErrNoSuchSession) {
 				t.Errorf("%s(busy) = %v, want ErrTimeout and not ErrNoSuchSession", op.name, err)
@@ -89,7 +92,7 @@ func TestPerSessionCalls(t *testing.T) {
 			foldsCase(t, dir)
 			d := serve(t, dir, "foo", silent)
 
-			err := op.call(t.Context(), newBackend(dir), "FOO")
+			err := op.call(t.Context(), newBackend(t, dir), "FOO")
 
 			if !errors.Is(err, backend.ErrNoSuchSession) || !strings.Contains(err.Error(), `"foo"`) {
 				t.Errorf("%s(FOO) = %v, want ErrNoSuchSession naming foo", op.name, err)
@@ -99,12 +102,99 @@ func TestPerSessionCalls(t *testing.T) {
 			}
 		})
 
-		t.Run(op.name+" refuses an invalid name", func(t *testing.T) {
-			if err := op.call(t.Context(), newBackend(socketDir(t)), "logs"); !errors.Is(err, backend.ErrInvalidName) {
-				t.Errorf("%s(logs) = %v, want ErrInvalidName", op.name, err)
+		t.Run(op.name+" refuses a name no session can have", func(t *testing.T) {
+			b := newBackend(t, socketDir(t))
+			for _, name := range []string{"", ".", "..", "a/b", "../escape", "a\x00b", strings.Repeat("n", b.MaxNameLen()+1)} {
+				if err := op.call(t.Context(), b, name); !errors.Is(err, backend.ErrInvalidName) {
+					t.Errorf("%s(%q) = %v, want ErrInvalidName", op.name, name, err)
+				}
 			}
 		})
 	}
+}
+
+// anyRequest answers every request as a zmx daemon would: Info with the fixture
+// record, History with a screen, Kill by unlinking its socket and hanging up,
+// DetachAll by hanging up.
+func anyRequest(info []byte) func(*daemon, net.Conn) {
+	return func(d *daemon, c net.Conn) {
+		r, err := d.read(c)
+		if err != nil {
+			return
+		}
+		switch r.tag {
+		case 6:
+			_, _ = c.Write(info)
+		case 8:
+			_, _ = c.Write(frame(8, 1, []byte("screen")))
+		case 5:
+			_ = os.Remove(d.path)
+			return
+		default:
+			return
+		}
+		_, _ = io.Copy(io.Discard, c)
+	}
+}
+
+func TestNamesZmxHolds(t *testing.T) {
+	t.Run("it reaches a session List reports under a name Create refuses, by every call", func(t *testing.T) {
+		for _, name := range []string{"-x", "--vt", "x*", "a\nb", "bad\xffname"} {
+			t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
+				dir := socketDir(t)
+				if err := zmx.CheckName(name); err == nil {
+					t.Fatalf("CheckName(%q) accepts it; the case needs a name Create refuses", name)
+				}
+				l, err := net.Listen("unix", filepath.Join(dir, name))
+				if errors.Is(err, syscall.EILSEQ) {
+					t.Skip("the filesystem refuses a name that is not UTF-8")
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = l.Close()
+				serve(t, dir, name, anyRequest(infoFrame(t)))
+				b := newBackend(t, dir)
+				ctx := t.Context()
+
+				if got := list(t, b); len(got) != 1 || got[0].Name != name || !got[0].Answered {
+					t.Fatalf("List = %+v, want %q answering", got, name)
+				}
+				if exists, err := b.Exists(ctx, name); err != nil || !exists {
+					t.Errorf("Exists = %v, %v; want true", exists, err)
+				}
+				if _, err := b.History(ctx, name, 0); err != nil {
+					t.Errorf("History: %v", err)
+				}
+				if _, err := b.ProtocolVersion(ctx, name); err != nil {
+					t.Errorf("ProtocolVersion: %v", err)
+				}
+				if cmd, err := b.AttachCommand(ctx, name); err != nil || cmd.Argv[len(cmd.Argv)-1] != name {
+					t.Errorf("AttachCommand = %+v, %v; want zmx attach on %q", cmd, err, name)
+				}
+				if err := b.Detach(ctx, name); err != nil {
+					t.Errorf("Detach: %v", err)
+				}
+				if err := b.Kill(ctx, name); err != nil {
+					t.Errorf("Kill: %v", err)
+				}
+			})
+		}
+	})
+
+	t.Run("AttachCommand refuses a name zmx attach reads as its own flag, sending nothing", func(t *testing.T) {
+		for _, name := range []string{"-h", "--help", "--labels", "--labels=a=1"} {
+			dir := socketDir(t)
+			d := serve(t, dir, name, anyRequest(infoFrame(t)))
+
+			if _, err := newBackend(t, dir).AttachCommand(t.Context(), name); !errors.Is(err, backend.ErrInvalidName) {
+				t.Errorf("AttachCommand(%q) = %v, want ErrInvalidName", name, err)
+			}
+			if reqs := d.received(); len(reqs) != 0 {
+				t.Errorf("AttachCommand(%q) sent %+v", name, reqs)
+			}
+		}
+	})
 }
 
 func TestKill(t *testing.T) {
@@ -112,7 +202,7 @@ func TestKill(t *testing.T) {
 		dir := socketDir(t)
 		d := serve(t, dir, "doomed", ending)
 
-		if err := newBackend(dir).Kill(t.Context(), "doomed"); err != nil {
+		if err := newBackend(t, dir).Kill(t.Context(), "doomed"); err != nil {
 			t.Fatalf("Kill: %v", err)
 		}
 		if reqs := d.received(); len(reqs) != 1 || reqs[0].tag != 5 || len(reqs[0].payload) != 0 {
@@ -124,7 +214,7 @@ func TestKill(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "survivor", hangingUp())
 
-		err := newBackend(dir).Kill(t.Context(), "survivor")
+		err := newBackend(t, dir).Kill(t.Context(), "survivor")
 
 		if err == nil || errors.Is(err, backend.ErrNoSuchSession) || errors.Is(err, backend.ErrTimeout) {
 			t.Errorf("Kill of a daemon that hung up and stayed = %v, want a plain failure", err)
@@ -135,7 +225,7 @@ func TestKill(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "wedged", silent)
 
-		err := newBackend(dir).Kill(t.Context(), "wedged")
+		err := newBackend(t, dir).Kill(t.Context(), "wedged")
 
 		if !errors.Is(err, backend.ErrTimeout) || !strings.Contains(err.Error(), "may still land") {
 			t.Errorf("Kill of a silent daemon = %v, want ErrTimeout saying the kill may still land", err)
@@ -148,7 +238,7 @@ func TestDetach(t *testing.T) {
 		dir := socketDir(t)
 		d := serve(t, dir, "watched", hangingUp())
 
-		if err := newBackend(dir).Detach(t.Context(), "watched"); err != nil {
+		if err := newBackend(t, dir).Detach(t.Context(), "watched"); err != nil {
 			t.Fatalf("Detach: %v", err)
 		}
 		if reqs := d.received(); len(reqs) != 1 || reqs[0].tag != 4 || len(reqs[0].payload) != 0 {
@@ -160,7 +250,7 @@ func TestDetach(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "wedged", silent)
 
-		err := newBackend(dir).Detach(t.Context(), "wedged")
+		err := newBackend(t, dir).Detach(t.Context(), "wedged")
 
 		if !errors.Is(err, backend.ErrTimeout) || !strings.Contains(err.Error(), "may still land") {
 			t.Errorf("Detach of a silent daemon = %v, want ErrTimeout saying the detach may still land", err)
@@ -174,7 +264,7 @@ func TestHistory(t *testing.T) {
 		vt := []byte("\x1b[31mred\x1b[0m  \r\n\r\n")
 		d := serve(t, dir, "s", answering(frame(1, 1, []byte("output")), frame(8, 1, vt)))
 
-		got, err := newBackend(dir).History(t.Context(), "s", 0)
+		got, err := newBackend(t, dir).History(t.Context(), "s", 0)
 
 		if err != nil || !bytes.Equal(got, vt) {
 			t.Errorf("History(0) = %q, %v; want %q", got, err, vt)
@@ -188,7 +278,7 @@ func TestHistory(t *testing.T) {
 		dir := socketDir(t)
 		d := serve(t, dir, "s", answering(frame(22, 1, []byte("screen"))))
 
-		got, err := newBackend(dir).History(t.Context(), "s", 300)
+		got, err := newBackend(t, dir).History(t.Context(), "s", 300)
 
 		if err != nil || string(got) != "screen" {
 			t.Errorf("History(300) = %q, %v; want screen", got, err)
@@ -211,7 +301,7 @@ func TestHistory(t *testing.T) {
 				dir := socketDir(t)
 				serve(t, dir, "s", answering(tt.reply))
 
-				if got, err := newBackend(dir).History(t.Context(), "s", 0); !errors.Is(err, backend.ErrHistoryUnavailable) {
+				if got, err := newBackend(t, dir).History(t.Context(), "s", 0); !errors.Is(err, backend.ErrHistoryUnavailable) {
 					t.Errorf("History = %q, %v; want ErrHistoryUnavailable", got, err)
 				}
 			})
@@ -222,7 +312,7 @@ func TestHistory(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "wedged", silent)
 
-		if _, err := newBackend(dir).History(t.Context(), "wedged", 0); !errors.Is(err, backend.ErrTimeout) {
+		if _, err := newBackend(t, dir).History(t.Context(), "wedged", 0); !errors.Is(err, backend.ErrTimeout) {
 			t.Errorf("History of a silent daemon = %v, want ErrTimeout", err)
 		}
 	})
@@ -231,7 +321,7 @@ func TestHistory(t *testing.T) {
 		dir := socketDir(t)
 		d := serve(t, dir, "s", silent)
 
-		if _, err := newBackend(dir).History(t.Context(), "s", -1); err == nil {
+		if _, err := newBackend(t, dir).History(t.Context(), "s", -1); err == nil {
 			t.Error("History(-1) = nil error")
 		}
 		if reqs := d.received(); len(reqs) != 0 {
@@ -252,11 +342,11 @@ func envValues(env []string, key string) []string {
 }
 
 func TestAttachCommand(t *testing.T) {
-	t.Run("it runs zmx attach on the live session, pinned to the directory, keeping the caller's session", func(t *testing.T) {
+	t.Run("it runs zmx attach on the live session, pinned to the directory, without the caller's prefix", func(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "work", silent)
-		b := newBackendRunning("/opt/zmx/bin/zmx", dir,
-			"PATH=/usr/bin:/bin", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION=live", "ZMX_SESSION_PREFIX=pre-", "TERM=xterm-ghostty")
+		b := newBackendRunning(t, "/opt/zmx/bin/zmx", dir,
+			"PATH=/usr/bin:/bin", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION_PREFIX=pre-", "TERM=xterm-ghostty")
 
 		cmd, err := b.AttachCommand(t.Context(), "work")
 		if err != nil {
@@ -268,7 +358,6 @@ func TestAttachCommand(t *testing.T) {
 		}
 		for key, want := range map[string][]string{
 			"ZMX_DIR":            {dir},
-			"ZMX_SESSION":        {"live"},
 			"ZMX_SESSION_PREFIX": nil,
 			"PATH":               {"/usr/bin:/bin"},
 			"TERM":               {"xterm-ghostty"},
@@ -277,6 +366,38 @@ func TestAttachCommand(t *testing.T) {
 				t.Errorf("Env %s = %q, want %q", key, got, want)
 			}
 		}
+		if cmd.Switches {
+			t.Error("Switches outside any session, want an attach")
+		}
+	})
+
+	t.Run("it keeps the caller's session, to switch it, only when that session is held in the directory and answers", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "work", silent)
+		home := serve(t, dir, "home", answering(infoFrame(t)))
+		serve(t, dir, "wedged", silent)
+		refusing(t, dir, "busy")
+		for current, switches := range map[string]bool{"home": true, "wedged": false, "busy": false, "gone": false, "HOME": false, "": false} {
+			t.Run(fmt.Sprintf("inside %q", current), func(t *testing.T) {
+				b := newBackend(t, dir, "PATH=/usr/bin:/bin", "ZMX_SESSION="+current)
+
+				cmd, err := b.AttachCommand(t.Context(), "work")
+				if err != nil {
+					t.Fatalf("AttachCommand: %v", err)
+				}
+
+				want := []string(nil)
+				if switches {
+					want = []string{current}
+				}
+				if got := envValues(cmd.Env, "ZMX_SESSION"); !slices.Equal(got, want) || cmd.Switches != switches {
+					t.Errorf("Env ZMX_SESSION = %q, Switches %v; want %q, %v", got, cmd.Switches, want, switches)
+				}
+			})
+		}
+		if reqs := home.received(); len(reqs) != 1 || reqs[0].tag != 6 {
+			t.Errorf("home received %+v, want one Info", reqs)
+		}
 	})
 }
 
@@ -284,7 +405,7 @@ func TestExists(t *testing.T) {
 	dir := socketDir(t)
 	serve(t, dir, "live", silent)
 	stale(t, dir, "crashed")
-	b := newBackend(dir)
+	b := newBackend(t, dir)
 
 	for name, want := range map[string]bool{"live": true, "crashed": false, "gone": false, "liv": false, "logs": false, "": false} {
 		t.Run(name, func(t *testing.T) {
@@ -311,14 +432,14 @@ func TestExists(t *testing.T) {
 
 func TestCurrent(t *testing.T) {
 	t.Run("it reads ZMX_SESSION, the last entry winning", func(t *testing.T) {
-		b := newBackend(socketDir(t), "ZMX_SESSION=first", "PATH=/bin", "ZMX_SESSION=work")
+		b := newBackend(t, socketDir(t), "ZMX_SESSION=first", "PATH=/bin", "ZMX_SESSION=work")
 		if got := b.Current(); got != "work" {
 			t.Errorf("Current = %q, want work", got)
 		}
 	})
 
 	t.Run("it is empty outside a session", func(t *testing.T) {
-		if got := newBackend(socketDir(t), "PATH=/bin").Current(); got != "" {
+		if got := newBackend(t, socketDir(t), "PATH=/bin").Current(); got != "" {
 			t.Errorf("Current = %q, want empty", got)
 		}
 	})
@@ -330,7 +451,7 @@ func TestProtocolVersion(t *testing.T) {
 			dir := socketDir(t)
 			serve(t, dir, "s", answering(frame(6, version, make([]byte, 552))))
 
-			if got, err := newBackend(dir).ProtocolVersion(t.Context(), "s"); err != nil || got != int(version) {
+			if got, err := newBackend(t, dir).ProtocolVersion(t.Context(), "s"); err != nil || got != int(version) {
 				t.Errorf("ProtocolVersion = %d, %v; want %d", got, err, version)
 			}
 		})
@@ -340,7 +461,7 @@ func TestProtocolVersion(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "old", silent)
 
-		if _, err := newBackend(dir).ProtocolVersion(t.Context(), "old"); !errors.Is(err, backend.ErrTimeout) {
+		if _, err := newBackend(t, dir).ProtocolVersion(t.Context(), "old"); !errors.Is(err, backend.ErrTimeout) {
 			t.Errorf("ProtocolVersion of a silent daemon = %v, want ErrTimeout", err)
 		}
 	})

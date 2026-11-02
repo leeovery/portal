@@ -3,9 +3,13 @@ package zmx_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,7 +31,7 @@ func TestList(t *testing.T) {
 		dir := socketDir(t)
 		d := serve(t, dir, "work", answering(infoFrame(t)))
 
-		got := list(t, newBackend(dir))
+		got := list(t, newBackend(t, dir))
 
 		if len(got) != 1 {
 			t.Fatalf("List = %+v, want one session", got)
@@ -48,7 +52,7 @@ func TestList(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "here", answering(withCwd(infoFrame(t), "file://"+hostname+"/srv/my%20app")))
 
-		if got := list(t, newBackend(dir)); len(got) != 1 || got[0].Dir != "/srv/my app" {
+		if got := list(t, newBackend(t, dir)); len(got) != 1 || got[0].Dir != "/srv/my app" {
 			t.Errorf("List = %+v, want Dir /srv/my app", got)
 		}
 	})
@@ -58,7 +62,7 @@ func TestList(t *testing.T) {
 		cwd := "/" + strings.Repeat("d", 255)
 		serve(t, dir, "deep", answering(withCwd(infoFrame(t), cwd)))
 
-		if got := list(t, newBackend(dir)); len(got) != 1 || !got[0].Answered || got[0].Dir != "" {
+		if got := list(t, newBackend(t, dir)); len(got) != 1 || !got[0].Answered || got[0].Dir != "" {
 			t.Errorf("List = %+v, want an answering session with no Dir", got)
 		}
 	})
@@ -67,7 +71,7 @@ func TestList(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "busy", answering(frame(1, 1, []byte("output")), infoFrame(t)))
 
-		if got := list(t, newBackend(dir)); len(got) != 1 || !got[0].Answered {
+		if got := list(t, newBackend(t, dir)); len(got) != 1 || !got[0].Answered {
 			t.Errorf("List = %+v, want the session answering", got)
 		}
 	})
@@ -77,7 +81,7 @@ func TestList(t *testing.T) {
 		stale(t, dir, "crashed")
 		serve(t, dir, "alive", answering(infoFrame(t)))
 
-		got := list(t, newBackend(dir))
+		got := list(t, newBackend(t, dir))
 
 		if len(got) != 1 || got[0].Name != "alive" {
 			t.Errorf("List = %+v, want only alive", got)
@@ -91,7 +95,7 @@ func TestList(t *testing.T) {
 		dir := socketDir(t)
 		refusing(t, dir, "busy")
 
-		if got := list(t, newBackend(dir)); len(got) != 1 || got[0] != (backend.Session{Name: "busy"}) {
+		if got := list(t, newBackend(t, dir)); len(got) != 1 || got[0] != (backend.Session{Name: "busy"}) {
 			t.Errorf("List = %+v, want busy with only its name: a live daemon with a full backlog refuses too", got)
 		}
 		if _, err := os.Lstat(filepath.Join(dir, "busy")); err != nil {
@@ -104,7 +108,7 @@ func TestList(t *testing.T) {
 		d := serve(t, dir, "work", answering(infoFrame(t)))
 		backdate(t, d.path)
 
-		if got := list(t, newBackend(dir)); len(got) != 1 || !got[0].Answered {
+		if got := list(t, newBackend(t, dir)); len(got) != 1 || !got[0].Answered {
 			t.Errorf("List = %+v, want work answering: only a refusing socket can be stale", got)
 		}
 	})
@@ -112,7 +116,7 @@ func TestList(t *testing.T) {
 	t.Run("it keeps a refusing socket, with only its name, when it cannot read the boot time", func(t *testing.T) {
 		dir := socketDir(t)
 		stale(t, dir, "crashed")
-		b := zmx.New(zmx.Config{
+		b := mustNew(t, zmx.Config{
 			Dir:      dir,
 			BootTime: func() (time.Time, error) { return time.Time{}, errors.New("no boot time") },
 		})
@@ -143,7 +147,7 @@ func TestList(t *testing.T) {
 				dir := socketDir(t)
 				serve(t, dir, "odd", hangingUp(tt.reply))
 
-				got := list(t, newBackend(dir))
+				got := list(t, newBackend(t, dir))
 
 				if len(got) != 1 || got[0] != (backend.Session{Name: "odd"}) {
 					t.Errorf("List = %+v, want odd with only its name", got)
@@ -156,25 +160,52 @@ func TestList(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "wedged", silent)
 
-		if got := list(t, newBackend(dir)); len(got) != 1 || got[0] != (backend.Session{Name: "wedged"}) {
+		if got := list(t, newBackend(t, dir)); len(got) != 1 || got[0] != (backend.Session{Name: "wedged"}) {
 			t.Errorf("List = %+v, want wedged with only its name", got)
 		}
 	})
 
-	t.Run("it probes every session at once", func(t *testing.T) {
+	t.Run("it probes every session at once, so silent ones do not starve those that answer", func(t *testing.T) {
 		dir := socketDir(t)
-		for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
-			serve(t, dir, name, silent)
+		answers := map[string]bool{}
+		for i := range 15 {
+			name := fmt.Sprintf("s%02d", i)
+			answers[name] = i%5 == 0
+			if answers[name] {
+				serve(t, dir, name, answering(infoFrame(t)))
+			} else {
+				serve(t, dir, name, silent)
+			}
+		}
+
+		got := list(t, newBackend(t, dir))
+
+		if len(got) != len(answers) {
+			t.Fatalf("List = %+v, want all %d", got, len(answers))
+		}
+		for _, s := range got {
+			if s.Answered != answers[s.Name] {
+				t.Errorf("%s answered %v, want %v", s.Name, s.Answered, answers[s.Name])
+			}
+		}
+	})
+
+	t.Run("it bounds the whole listing by one probe ceiling, however many sessions wait for a slot", func(t *testing.T) {
+		dir := socketDir(t)
+		const silentSessions = 130
+		for i := range silentSessions {
+			serve(t, dir, fmt.Sprintf("s%03d", i), silent)
 		}
 
 		start := time.Now()
-		got := list(t, newBackend(dir))
+		got := list(t, newBackend(t, dir))
 
-		if took := time.Since(start); took > 3*ceiling {
-			t.Errorf("List of six silent sessions took %s, want about one %s ceiling", took, ceiling)
+		if took := time.Since(start); took > 2*ceiling {
+			t.Errorf("List of %d silent sessions took %s, want about one %s ceiling", silentSessions, took, ceiling)
 		}
-		if len(got) != 6 {
-			t.Errorf("List = %+v, want all six", got)
+		answered := slices.IndexFunc(got, func(s backend.Session) bool { return s.Answered })
+		if len(got) != silentSessions || answered >= 0 {
+			t.Errorf("List = %d sessions, answered at %d; want all %d, none answering", len(got), answered, silentSessions)
 		}
 	})
 
@@ -192,7 +223,7 @@ func TestList(t *testing.T) {
 		if err := os.Symlink(filepath.Join(dir, "a"), filepath.Join(dir, "linked")); err != nil {
 			t.Fatal(err)
 		}
-		b := newBackend(dir)
+		b := newBackend(t, dir)
 		tooLong := strings.Repeat("x", b.MaxNameLen()+1)
 		if err := os.Symlink(filepath.Join(dir, "a"), filepath.Join(dir, tooLong)); err != nil {
 			t.Fatal(err)
@@ -209,7 +240,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("it lists an empty directory as no sessions", func(t *testing.T) {
-		got, err := newBackend(socketDir(t)).List(t.Context())
+		got, err := newBackend(t, socketDir(t)).List(t.Context())
 		if err != nil || got == nil || len(got) != 0 {
 			t.Errorf("List = %#v, %v; want an empty, non-nil list", got, err)
 		}
@@ -218,7 +249,7 @@ func TestList(t *testing.T) {
 	t.Run("it lists a missing directory as no sessions: zmx makes it with the first", func(t *testing.T) {
 		missing := filepath.Join(socketDir(t), "missing")
 
-		got, err := newBackend(missing).List(t.Context())
+		got, err := newBackend(t, missing).List(t.Context())
 		if err != nil || got == nil || len(got) != 0 {
 			t.Errorf("List of a missing directory = %#v, %v; want an empty, non-nil list", got, err)
 		}
@@ -231,8 +262,31 @@ func TestList(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 
-		if got, err := newBackend(locked).List(t.Context()); err == nil {
+		if got, err := newBackend(t, locked).List(t.Context()); err == nil {
 			t.Errorf("List of an unreadable directory = %+v, want an error", got)
+		}
+	})
+
+	t.Run("it returns the listing when every probe finished before the caller's context ended", func(t *testing.T) {
+		dir := socketDir(t)
+		info := infoFrame(t)
+		var cancel atomic.Pointer[context.CancelCauseFunc]
+		serve(t, dir, "work", func(d *daemon, c net.Conn) {
+			answering(info)(d, c)
+			(*cancel.Load())(errors.New("caller gave up once the probe was done"))
+		})
+		b := newBackend(t, dir)
+
+		for range 50 {
+			ctx, end := context.WithCancelCause(t.Context())
+			cancel.Store(&end)
+
+			got, err := b.List(ctx)
+
+			if err != nil || len(got) != 1 || !got[0].Answered {
+				t.Fatalf("List = %+v, %v; want work answering: its probe finished before the context ended", got, err)
+			}
+			<-ctx.Done()
 		}
 	})
 
@@ -243,7 +297,7 @@ func TestList(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 
-		if got, err := newBackend(dir).List(ctx); !errors.Is(err, cause) {
+		if got, err := newBackend(t, dir).List(ctx); !errors.Is(err, cause) {
 			t.Errorf("List with an ended context = %+v, %v; want its cause", got, err)
 		}
 	})
