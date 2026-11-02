@@ -16,14 +16,14 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
   - **Alt+Shift+D:** detach, straight to the shell.
   - **Alt+Q:** kill the session, back to the picker.
 
-  zmx's own `ctrl+\` detaches the way plain zmx does, straight to the shell, never the picker. No own zmx protocol client, no floating menu, no pinned status bar.
+  zmx's own `ctrl+\` detaches the way plain zmx does, straight to the shell, never the picker. The runner wraps `zmx attach` rather than speaking zmx's attach protocol itself; no floating menu, no pinned status bar.
 - **Picker rows.** No window count. The session label, plus the attached and waiting dots.
 - **Preview (Space).** The session's live screen and history from zmx, up to zmx's 10,000 lines, instead of the saved file. Window and pane cycling go.
 - **Opening several sessions in new windows (`m`).** Works as today: Ghostty on the Mac opens them, and Blink and rootshell get today's refusal. See Attach runner.
 - **Esc on the resume panel.** Detaches to the picker, as today.
 - **Version.** Lee's call at release.
 - **Out of scope:** the workflows tool.
-- **zmx's socket protocol, from a pinned build.** The driver speaks zmx's socket protocol (frozen on main on 16 Oct 2026, protocol version 1) for listing, kill, detach and history, so nothing parses text meant for people; zmx declined machine-readable CLI output (#220). Creating and attaching still run the `zmx` binary, since creation isn't a protocol message. Until a release carries the protocol, Portal builds zmx from one pinned main commit (MIT licence). Development and tests use that build; Lee's installed zmx stays untouched until switch-over, when a formula in `leeovery/tools` builds the same commit (or the release, once one ships) and Portal's formula depends on it. Main still reports its version as 0.8.1, so support is judged by the protocol version, never the version string. A fork stays available if upstream won't take something Portal needs; nothing above the driver would change.
+- **zmx's socket protocol, on official zmx.** The driver speaks zmx's socket protocol (frozen on main on 16 Oct 2026, protocol version 1) for listing, kill, detach and history, so nothing parses text meant for people; zmx declined machine-readable CLI output (#220). Creating and attaching still run the `zmx` binary, since creation isn't a protocol message. Portal runs on the official zmx: its formula depends on upstream's (`neurosnap/tap/zmx`), and Portal ships, pins and forks no zmx of its own. A zmx release that changes the protocol is caught up with in a Portal release, as a tmux change would have been; until then Portal names the sessions whose daemons speak a protocol it doesn't. Development and tests use a build of the main commit pinned in `scripts/zmx-commit`, so Portal on zmx releases once a zmx release carries protocol 1. Main still reports its version as 0.8.1, so support is judged by the protocol version, never the version string.
 - **Leave Portal better than found.** The move is also the refactor: simpler structure, lower complexity, cleaner code. Each phase simplifies what it touches, and nothing tmux-shaped survives above the driver.
 - **Output quality.** Rendered output is tested properly, and the README gets a demo recording to the standard Switchboard's has. Switchboard grew its capture and VHS tooling out of Portal's harness; Portal borrows it back (see Output and visuals).
 
@@ -144,7 +144,7 @@ zmx doesn't list its clients, so the runners list themselves, taking the part tm
 - **picker:** rows from `List()` joined with the index. Grouping uses the index's dir, falling back to the session cwd. Kill, rename and preview as settled above.
 - **list, kill, completion, uninstall:** re-pointed to the backend. `uninstall` kills `_portal-saver`.
 - **hook set/rm/list:** the current session comes from `$ZMX_SESSION`.
-- **doctor:** zmx present and version supported, saver up, daemon alive, state dir, stale hooks and projects, pending resumes, key config.
+- **doctor:** zmx present, the sessions whose daemons speak a protocol other than 1 named, saver up, daemon alive, state dir, stale hooks and projects, pending resumes, key config.
 - **current (new):** prints the current session's label. Works however the session was attached.
 - **rename (new):** `portal rename <text>` sets the current session's label; empty text resets it to the session name.
 - **spawn:** spawned windows run with `ZMX_SESSION` removed. Detection inside a session uses the registry.
@@ -198,6 +198,6 @@ Phases 1–2 make it usable day to day. Phase 3 is needed before trusting it thr
 - **zmx bugs:**
   - #294: crash on session exit on macOS.
   - #295: part of the scrollback lost on reattach.
-  - The protocol freeze isn't in a release yet, so an upgrade before it ships ends running sessions. Doctor reports the zmx version. Upgrade zmx deliberately, after a save.
+- **Sessions started by zmx 0.8.1** speak the older protocol and don't answer Portal: they list as not answering until killed. A 0.8.1 daemon waits on each of Portal's frames for payload that never comes, so a connection carries one frame, enforced in the driver: a second would complete the first and be read as frames of its own.
 - **What zmx's history returns for a session showing the alternate screen** (the resume panel). Covered by skipping waiting sessions; to confirm in phase 3.
-- **zmx's protocol not yet released.** The last release is v0.8.1 (5 Sep 2026); the protocol sits under "Staged" in zmx's changelog. Check before Portal's zmx release and choose: the pinned build through `leeovery/tools`, an upstream release, or a fork.
+- **zmx's protocol not yet released.** The last release is v0.8.1 (5 Sep 2026); the protocol sits under "Staged" in zmx's changelog, headed by the breaking IPC change, so it looks batched for a breaking release. Portal on zmx releases once a zmx release carries protocol 1; check upstream before then.
