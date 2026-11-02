@@ -54,6 +54,8 @@ The developer's live tmux server must never be touched:
 4. Re-verify each PID's argv immediately before signalling it (PIDs get reused).
 5. SIGTERM first, SIGKILL stragglers. Afterwards confirm the developer's server is alive with its session count unchanged and their daemon still running.
 
+For zmx, test dirs are `/tmp/zx-*`. List bound processes with `ps -x -ww -E -o pid=,command= | grep -F "ZMX_DIR=/tmp/zx-"` and treat the developer's own (`ZMX_DIR=$HOME/.local/state/zmx`) as protected. For each leaked dir run `ZMX_DIR=<that dir> <zmx> kill '*'` with the pinned test build, never without the prefix. Re-check each remaining pid's `ZMX_DIR` right before a SIGTERM, SIGKILL stragglers, remove the dirs, then confirm the developer's sockets and daemons are unchanged.
+
 For load generators, match the exact command (`ps -eo ppid,command | awk '$1==1 && $2=="yes"'`), never `pkill -f yes`. Better not to create them; if load is needed, bound it (`timeout 60 yes`).
 
 ## Architecture

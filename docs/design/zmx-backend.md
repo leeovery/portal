@@ -23,6 +23,7 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
 - **Esc on the resume panel.** Detaches to the picker, as today.
 - **Version.** Lee's call at release.
 - **Out of scope:** the workflows tool.
+- **zmx's socket protocol, from a pinned build.** The driver speaks zmx's socket protocol (frozen on main on 16 Oct 2026, protocol version 1) for listing, kill, detach and history, so nothing parses text meant for people; zmx declined machine-readable CLI output (#220). Creating and attaching still run the `zmx` binary, since creation isn't a protocol message. Until a release carries the protocol, Portal builds zmx from one pinned main commit (MIT licence). Development and tests use that build; Lee's installed zmx stays untouched until switch-over, when a formula in `leeovery/tools` builds the same commit (or the release, once one ships) and Portal's formula depends on it. Main still reports its version as 0.8.1, so support is judged by the protocol version, never the version string. A fork stays available if upstream won't take something Portal needs; nothing above the driver would change.
 - **Leave Portal better than found.** The move is also the refactor: simpler structure, lower complexity, cleaner code. Each phase simplifies what it touches, and nothing tmux-shaped survives above the driver.
 - **Output quality.** Rendered output is tested properly, and the README gets a demo recording to the standard Switchboard's has. Switchboard grew its capture and VHS tooling out of Portal's harness; Portal borrows it back (see Output and visuals).
 
@@ -38,11 +39,11 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
 
 - `List()` returns every session: name, cwd, attached client count, pid, created time and command. A failed read is an error, never an empty list. Sessions whose names start with `_` are Portal's own and are hidden from listings.
 - `Exists(name)`.
-- `Create(name, dir, command)` creates a detached session. zmx implementation: `zmx attach <name> <cmd…>` with no terminal attached. It starts 120×24 and reflows on attach. Verified on 2 Nov.
+- `Create(name, dir, command)` creates a detached session: `zmx attach <name> <cmd…>` with no terminal attached, succeeding only when zmx reports it created the session. It starts 120×24 and reflows on attach.
 - `AttachCommand(name)` returns the argv the attach runner starts.
 - `Kill(name)`.
 - `Detach(name)` detaches every client of a session (`zmx detach`).
-- `History(name)` returns the screen and all scrollback, with colours (`zmx history --vt`). zmx v0.8.1 has no bounded form, and cutting a VT stream by lines would break its modes, so callers take the last screenfuls they need after rendering.
+- `History(name, rows)` returns the screen plus up to `rows` of scrollback (all of it when `rows` is 0), with colours, through the protocol's bounded capture. Never empty: a daemon that doesn't answer is an error.
 - `Current()` returns the session this process runs in, from `$ZMX_SESSION`.
 
 Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves about 70 bytes of name with `ZMX_DIR=$HOME/.local/state/zmx`. Generated names stay `{project}-{nanoid}`.
@@ -69,7 +70,7 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 ## Saver
 
 - **Host.** `portal state daemon` runs inside a `_portal-saver` zmx session, which keeps it alive the way tmux does today. The singleton lock, pid and version files and the orphan sweep stay. Self-supervision compares the saver session's pid from `List()`.
-- **Index.** Polled every 5 s; committed when it changes. Portal records the created time of every session it creates, restore included, so a mismatch means a recreated session (see Names).
+- **Index.** Polled every 5 s; committed when it changes. Portal records the created time and pid of every session it creates, restore included; zmx keeps created time in whole seconds, so the pair tells a recreated session apart (see Names).
 - **Scrollback.** Captured at most once a minute per session, and only when its content has changed. Sessions flagged hydrating or resume-pending are skipped.
 - **Drops.**
   - A session missing from two polls at least 10 s apart is dropped. A reboot stops the saver before that, so nothing is dropped by mistake.
