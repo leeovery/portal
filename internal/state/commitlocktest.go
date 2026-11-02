@@ -3,6 +3,8 @@ package state
 import (
 	"testing"
 	"time"
+
+	"github.com/leeovery/portal/internal/commitlock"
 )
 
 // SetCommitLockTimeoutForTest lowers the commit lock's acquire bound for the
@@ -10,7 +12,5 @@ import (
 // production figure.
 func SetCommitLockTimeoutForTest(t *testing.T, d time.Duration) {
 	t.Helper()
-	prev := commitLockTimeout
-	commitLockTimeout = d
-	t.Cleanup(func() { commitLockTimeout = prev })
+	commitlock.SetTimeoutForTest(t, d)
 }
