@@ -1,0 +1,40 @@
+
+  P O R T A L ▌
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                                     │
+  Sessions 12                        │ Themes
+                                     │
+  ▌ orchard-pipeline-code-based      │   catppuccin-latte
+    orchard-pipeline-codify          │   gitlab-dark-grey
+    kiln-relayx-explore              │   horizon
+    lumen webhooks and watchers      │   nord               ●
+    tessera-proxy-Vb3kQw             │   nord-wave
+    atelier-web-m4TzpD               │   tokyo-night
+    lumen-sync-engine                │ ▌ tokyo-night-day
+    kiln-aws-migration               │
+    relay-v1-api-Hq7wNe              │
+    relayx-3RJDWA                    │
+    loom-p84cXa                      │
+    quill-Ue9fLr                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │ clear constant nord?
+                                     │ y / n
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔│ y   confirm
+  ⏎ attach · / filter · ␣ preview · s│ n   cancel
+

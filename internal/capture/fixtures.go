@@ -26,6 +26,9 @@ type Fixture struct {
 	// geometry rather than content at whatever size the caller has. Zero takes
 	// the caller's.
 	width, height int
+	// The terminal its golden frame is kept at, per dimension, where the screen
+	// is designed for one other than the harness's. Zero takes harnessSize's.
+	frame Size
 
 	Lister *fakeLister
 	// Session names, never indicator text: the delegate draws the indicator.
@@ -193,7 +196,11 @@ func FixtureByName(name string) (*Fixture, error) {
 			return fx, nil
 		}
 	}
-	return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
+	return nil, unknownFixture(name)
+}
+
+func unknownFixture(name string) error {
+	return fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 }
 
 // FixtureNames includes the standalone names too — the contrast-validation
@@ -215,18 +222,18 @@ func FixtureNames() []string {
 // fallback never fires (the harness has no tmux server).
 func sessionsFlatFixture() *Fixture {
 	sessions := []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "agentic-workflows-codify", Windows: 2, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "evvi webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
-		{Name: "designlab-web-r8suyU", Windows: 2, Attached: false, Dir: "/home/user/code/designlab"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "fab-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "flow-v1-api-XkkhTN", Windows: 1, Attached: false, Dir: "/home/user/code/flow"},
-		{Name: "flowx-7UKPZH", Windows: 2, Attached: false, Dir: "/home/user/code/flowx"},
-		{Name: "fabric-lk26UG", Windows: 1, Attached: false, Dir: "/home/user/code/fabric"},
-		{Name: "folio-Jiz4el", Windows: 1, Attached: false, Dir: "/home/user/code/folio"},
+		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Windows: 2, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Windows: 2, Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "kiln-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "relay-v1-api-Hq7wNe", Windows: 1, Attached: false, Dir: "/home/user/code/relay"},
+		{Name: "relayx-3RJDWA", Windows: 2, Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "loom-p84cXa", Windows: 1, Attached: false, Dir: "/home/user/code/loom"},
+		{Name: "quill-Ue9fLr", Windows: 1, Attached: false, Dir: "/home/user/code/quill"},
 	}
 
 	return &Fixture{
@@ -253,22 +260,22 @@ func sessionsEmptyFixture() *Fixture {
 // sides, so the grouping is deterministic without a real filesystem.
 func sessionsByProjectFixture() *Fixture {
 	sessions := []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "agentic-workflows-codify", Windows: 2, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "evvi webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
-		{Name: "designlab-web-r8suyU", Windows: 2, Attached: false, Dir: "/home/user/code/designlab"},
+		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Windows: 2, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Windows: 2, Attached: false, Dir: "/home/user/code/atelier"},
 		// Matches no project → lands in the Unknown catch-all.
 		{Name: "orphan-explore", Windows: 1, Attached: false, Dir: "/home/user/code/untracked-scratch"},
 	}
 
 	projects := []project.Project{
-		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows"},
-		{Path: "/home/user/code/fab", Name: "fab"},
-		{Path: "/home/user/code/evvi", Name: "evvi"},
-		{Path: "/home/user/code/aviva", Name: "aviva"},
-		{Path: "/home/user/code/designlab", Name: "designlab"},
+		{Path: "/home/user/code/orchard-pipeline", Name: "orchard-pipeline"},
+		{Path: "/home/user/code/kiln", Name: "kiln"},
+		{Path: "/home/user/code/lumen", Name: "lumen"},
+		{Path: "/home/user/code/tessera", Name: "tessera"},
+		{Path: "/home/user/code/atelier", Name: "atelier"},
 	}
 
 	return &Fixture{
@@ -283,24 +290,24 @@ func sessionsByProjectFixture() *Fixture {
 // sides, so the match is deterministic without a real filesystem.
 func sessionsByTagFixture() *Fixture {
 	sessions := []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "agentic-workflows-codify", Windows: 2, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "evvi webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
-		{Name: "designlab-web-r8suyU", Windows: 2, Attached: false, Dir: "/home/user/code/designlab"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "fab-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/fab"},
+		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Windows: 2, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Windows: 2, Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "kiln-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/kiln"},
 	}
 
 	projects := []project.Project{
-		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows", Tags: []string{"work"}},
-		{Path: "/home/user/code/fab", Name: "fab", Tags: []string{"work", "client"}},
-		{Path: "/home/user/code/aviva", Name: "aviva", Tags: []string{"client"}},
-		{Path: "/home/user/code/designlab", Name: "designlab", Tags: []string{"personal"}},
+		{Path: "/home/user/code/orchard-pipeline", Name: "orchard-pipeline", Tags: []string{"work"}},
+		{Path: "/home/user/code/kiln", Name: "kiln", Tags: []string{"work", "client"}},
+		{Path: "/home/user/code/tessera", Name: "tessera", Tags: []string{"client"}},
+		{Path: "/home/user/code/atelier", Name: "atelier", Tags: []string{"personal"}},
 		// Deliberately untagged → its sessions land in the Untagged catch-all,
 		// so a tagged heading and the catch-all share one frame.
-		{Path: "/home/user/code/evvi", Name: "evvi"},
+		{Path: "/home/user/code/lumen", Name: "lumen"},
 	}
 
 	return &Fixture{
@@ -316,12 +323,12 @@ func sessionsByTagFixture() *Fixture {
 func sessionsPagedFixture() *Fixture {
 	const count = 100
 	dirs := []string{
-		"/home/user/code/agentic-workflows",
-		"/home/user/code/fab",
-		"/home/user/code/evvi",
-		"/home/user/code/aviva",
-		"/home/user/code/designlab",
-		"/home/user/code/flow",
+		"/home/user/code/orchard-pipeline",
+		"/home/user/code/kiln",
+		"/home/user/code/lumen",
+		"/home/user/code/tessera",
+		"/home/user/code/atelier",
+		"/home/user/code/relay",
 	}
 	sessions := make([]tmux.Session, 0, count)
 	for i := range count {
@@ -343,10 +350,10 @@ func sessionsPagedFixture() *Fixture {
 
 func sessionsInlineFlashFixture() *Fixture {
 	sessions := []tmux.Session{
-		{Name: "fab-flowx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/fab"},
-		{Name: "agentic-workflows-codify", Windows: 1, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "flowx-7UKPZH", Windows: 2, Attached: false, Dir: "/home/user/code/flowx"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
+		{Name: "kiln-relayx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-codify", Windows: 1, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "relayx-3RJDWA", Windows: 2, Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
 	}
 
 	return &Fixture{
@@ -354,7 +361,7 @@ func sessionsInlineFlashFixture() *Fixture {
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: nil},
 		initialMode:  prefs.ModeFlat,
-		initialFlash: "folio-Jiz4el closed externally — list updated",
+		initialFlash: "quill-Ue9fLr closed externally — list updated",
 	}
 }
 
@@ -390,11 +397,11 @@ func sessionsMultiSelectActiveFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-multi-select-active"
 	fx.initialMultiSelect = []string{
-		"agentic-workflows-codify",
-		"fab-flowx-explore",
-		"designlab-web-r8suyU",
+		"orchard-pipeline-codify",
+		"kiln-relayx-explore",
+		"atelier-web-m4TzpD",
 	}
-	fx.initialCursor = "fab-flowx-explore"
+	fx.initialCursor = "kiln-relayx-explore"
 	return fx
 }
 
@@ -420,12 +427,12 @@ func sessionsMultiSelectPreflightAbortFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-multi-select-preflight-abort"
 	fx.initialMultiSelect = []string{
-		"agentic-workflows-codify",
-		"fab-flowx-explore",
-		"designlab-web-r8suyU",
+		"orchard-pipeline-codify",
+		"kiln-relayx-explore",
+		"atelier-web-m4TzpD",
 	}
-	fx.initialCursor = "fab-flowx-explore"
-	fx.initialGoneFlagged = []string{"fab-flowx-explore"}
+	fx.initialCursor = "kiln-relayx-explore"
+	fx.initialGoneFlagged = []string{"kiln-relayx-explore"}
 	return fx
 }
 
@@ -433,9 +440,9 @@ func sessionsBurstOpeningFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-burst-opening"
 	fx.initialMultiSelect = []string{
-		"agentic-workflows-codify",
-		"fab-flowx-explore",
-		"designlab-web-r8suyU",
+		"orchard-pipeline-codify",
+		"kiln-relayx-explore",
+		"atelier-web-m4TzpD",
 	}
 	fx.initialBurstOpening = [2]int{2, 3}
 	return fx
@@ -445,17 +452,17 @@ func sessionsBurstOpeningFixture() *Fixture {
 // missing store, must drive the signpost.
 func sessionsNoTagsSignpostFixture() *Fixture {
 	sessions := []tmux.Session{
-		{Name: "fab-flowx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/fab"},
-		{Name: "agentic-workflows-codify", Windows: 1, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "flowx-7UKPZH", Windows: 2, Attached: false, Dir: "/home/user/code/flowx"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 4, Attached: false, Dir: "/home/user/code/aviva"},
+		{Name: "kiln-relayx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-codify", Windows: 1, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "relayx-3RJDWA", Windows: 2, Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "tessera-proxy-Vb3kQw", Windows: 4, Attached: false, Dir: "/home/user/code/tessera"},
 	}
 
 	projects := []project.Project{
-		{Path: "/home/user/code/fab", Name: "fab"},
-		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows"},
-		{Path: "/home/user/code/flowx", Name: "flowx"},
-		{Path: "/home/user/code/aviva", Name: "aviva"},
+		{Path: "/home/user/code/kiln", Name: "kiln"},
+		{Path: "/home/user/code/orchard-pipeline", Name: "orchard-pipeline"},
+		{Path: "/home/user/code/relayx", Name: "relayx"},
+		{Path: "/home/user/code/tessera", Name: "tessera"},
 	}
 
 	return &Fixture{
@@ -495,7 +502,7 @@ func sessionsSearchResultsFixture() *Fixture {
 	home := fixtureHome()
 	portalDir := filepath.Join(home, "code/portal")
 	gatewayDir := filepath.Join(home, "code/portal-gateway")
-	evviDir := filepath.Join(home, "code/evvi")
+	lumenDir := filepath.Join(home, "code/lumen")
 
 	sessions := []tmux.Session{
 		{Name: "portal-a1b2", Windows: 3, Attached: true, Dir: portalDir},
@@ -503,14 +510,14 @@ func sessionsSearchResultsFixture() *Fixture {
 		{Name: "legacy-port-shim", Windows: 1, Attached: false},
 		{Name: "portal-design-exports-review", Windows: 2, Attached: false, Dir: filepath.Join(portalDir, "internal/capture/testdata/reference/design-exports/frames")},
 		{Name: "portal-notes", Windows: 1, Attached: false, Dir: "/opt/portal-tools"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: evviDir},
+		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: lumenDir},
 	}
 
 	projects := []project.Project{
 		{Path: portalDir, Name: "portal", Tags: []string{"work"}},
 		{Path: gatewayDir, Name: "portal-gateway", Tags: []string{"work", "client"}},
 		{Path: "/opt/portal-tools", Name: "portal-tools", Tags: []string{"tools"}},
-		{Path: evviDir, Name: "evvi"},
+		{Path: lumenDir, Name: "lumen"},
 	}
 
 	return &Fixture{
@@ -526,16 +533,16 @@ func sessionsSearchResultsFixture() *Fixture {
 // seen in one frame rather than inferred from rows showing one each.
 func sessionsPendingResumeFixture() *Fixture {
 	sessions := []tmux.Session{
-		{Name: "agentic-workflows-codify", Windows: 2, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "fabric-lk26UG", Windows: 1, Attached: false, Dir: "/home/user/code/fabric"},
-		{Name: "folio-Jiz4el", Windows: 3, Attached: true, Dir: "/home/user/code/folio"},
+		{Name: "orchard-pipeline-codify", Windows: 2, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "loom-p84cXa", Windows: 1, Attached: false, Dir: "/home/user/code/loom"},
+		{Name: "quill-Ue9fLr", Windows: 3, Attached: true, Dir: "/home/user/code/quill"},
 	}
 
 	return &Fixture{
 		name:            "sessions-pending-resume",
 		Lister:          &fakeLister{sessions: sessions},
-		pendingSessions: []string{"evvi-sync-engine", "folio-Jiz4el"},
+		pendingSessions: []string{"lumen-sync-engine", "quill-Ue9fLr"},
 		projectStore:    &fakeProjectStore{projects: nil},
 		initialMode:     prefs.ModeFlat,
 	}
@@ -604,12 +611,13 @@ func themePanelConstantPreviewingFixture() *Fixture {
 
 // Capture at the panel's minimum width (the message slot may wrap there) with
 // `--theme tokyo-night-day`, the row under the seeded cursor. The fixture
-// declares no render size, so that width comes from the capturing terminal: at
-// a wide one the same frame renders the confirm on a single row.
+// declares no render size, only its frame size, so live that width comes from
+// the capturing terminal: at a wide one it renders the confirm on a single row.
 func themePanelConfirmFixture() *Fixture {
 	fx := themePanelConstantPreviewingFixture()
 	fx.name = "theme-panel-confirm"
 	fx.initialThemeConfirm = true
+	fx.frame.Width = tui.ThemePanelMinWidthTerminal()
 	return fx
 }
 
@@ -690,11 +698,11 @@ func themePanelInvalidRowFixture() *Fixture {
 	return fx
 }
 
-const themePanelBrokenSlug = "nord-lee"
+const themePanelBrokenSlug = "nord-frost"
 
 // The dir-unreadable warning is viewport chrome, not a list row — only
 // observable after paging past where a list row would have scrolled away,
-// hence the Ctrl+↓ and a capture height that forces a second page. Capture
+// hence the Ctrl+↓ and a frame height that forces a second page. Capture
 // with `--theme tokyo-night`, where the paging key lands the cursor.
 func themePanelDirUnreadableFixture() *Fixture {
 	fx := sessionsFlatFixture()
@@ -712,12 +720,16 @@ func themePanelDirUnreadableFixture() *Fixture {
 	// the dark fallback, already on page 2, and the paging key would move nothing.
 	fx.initialThemeCursor = "nord"
 	fx.captureKeys = []tea.KeyPressMsg{keyRune('t'), keyPageDown()}
+	fx.frame.Height = themePanelDirUnreadableFrameHeight
 	return fx
 }
 
+// Short enough that the panel's list spans two pages.
+const themePanelDirUnreadableFrameHeight = 18
+
 // Sorts between the nord* rows and the tokyo-night* ones, putting one badged
 // persisted row on each page of the captured frame.
-const themePanelUnreachableLightSlug = "solarized-lee"
+const themePanelUnreachableLightSlug = "solarized-dusk"
 
 // Identical data to the adaptive pair; it declares the terminal that steps the
 // panel down to its minimum width, which is the whole of what it exercises —
@@ -779,28 +791,28 @@ func themePanelProjectsFixture() *Fixture {
 // page the capture is of.
 func projectsFixture() *Fixture {
 	sessions := []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/Users/leeovery/Code/agentic-workflows"},
-		{Name: "portal", Windows: 2, Attached: false, Dir: "/Users/leeovery/Code/portal"},
-		{Name: "flowx-7UKPZH", Windows: 1, Attached: false, Dir: "/Users/leeovery/Code/fabric/flowx"},
+		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "portal", Windows: 2, Attached: false, Dir: "/home/user/code/portal"},
+		{Name: "relayx-3RJDWA", Windows: 1, Attached: false, Dir: "/home/user/code/loom/relayx"},
 	}
 
-	// flow-v1-api's tags render as the edit-project modal's seeded chips.
-	flowPath := "/Users/leeovery/Code/fabric/flowv1/flow-v1-api"
+	// relay-v1-api's tags render as the edit-project modal's seeded chips.
+	relayPath := "/home/user/code/loom/relayv1/relay-v1-api"
 	projects := []project.Project{
-		{Name: "flow-v1-api", Path: flowPath, Tags: []string{"Fabric", "api"}},
-		{Name: "portal", Path: "/Users/leeovery/Code/portal"},
-		{Name: "mint", Path: "/Users/leeovery/Code/mint"},
-		{Name: "agntc", Path: "/Users/leeovery/Code/agntc"},
-		{Name: "agentic-workflows", Path: "/Users/leeovery/Code/agentic-workflows"},
-		{Name: "leeovery", Path: "/Users/leeovery"},
-		{Name: "flowx", Path: "/Users/leeovery/Code/fabric/flowx"},
-		{Name: "designlab-web", Path: "/Users/leeovery/Code/designlab/designlab-web"},
-		{Name: "evvi", Path: "/Users/leeovery/Code/evvi"},
-		{Name: "aviva-proxy", Path: "/Users/leeovery/Code/aviva"},
-		{Name: "fab-aws-migration", Path: "/Users/leeovery/Code/fab"},
-		{Name: "folio", Path: "/Users/leeovery/Code/folio"},
-		{Name: "fabric", Path: "/Users/leeovery/Code/fabric"},
-		{Name: "evvi-sync-engine", Path: "/Users/leeovery/Code/evvi-sync"},
+		{Name: "relay-v1-api", Path: relayPath, Tags: []string{"Loom", "api"}},
+		{Name: "portal", Path: "/home/user/code/portal"},
+		{Name: "sorrel", Path: "/home/user/code/sorrel"},
+		{Name: "bramble", Path: "/home/user/code/bramble"},
+		{Name: "orchard-pipeline", Path: "/home/user/code/orchard-pipeline"},
+		{Name: "user", Path: "/home/user"},
+		{Name: "relayx", Path: "/home/user/code/loom/relayx"},
+		{Name: "atelier-web", Path: "/home/user/code/atelier/atelier-web"},
+		{Name: "lumen", Path: "/home/user/code/lumen"},
+		{Name: "tessera-proxy", Path: "/home/user/code/tessera"},
+		{Name: "kiln-aws-migration", Path: "/home/user/code/kiln"},
+		{Name: "quill", Path: "/home/user/code/quill"},
+		{Name: "loom", Path: "/home/user/code/loom"},
+		{Name: "lumen-sync-engine", Path: "/home/user/code/lumen-sync"},
 	}
 
 	return &Fixture{
@@ -812,8 +824,8 @@ func projectsFixture() *Fixture {
 		// modal's per-project lookup matches.
 		projectEditor: fakeProjectEditor{},
 		aliasEditor: fakeAliasEditor{aliases: map[string]string{
-			"fapi": flowPath,
-			"v1":   flowPath,
+			"rapi": relayPath,
+			"v1":   relayPath,
 		}},
 		initialMode: prefs.ModeFlat,
 		captureKeys: []tea.KeyPressMsg{keyRune('x')},
@@ -832,18 +844,18 @@ func projectsCommandPendingFixture() *Fixture {
 // specific tool.
 func previewScreenFixture() *Fixture {
 	sessions := []tmux.Session{
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
+		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/lumen"},
 	}
 
-	scrollback := "$ kubectl rollout status deploy/aviva-proxy\n" +
-		"deployment \"aviva-proxy\" successfully rolled out\n" +
+	scrollback := "$ kubectl rollout status deploy/tessera-proxy\n" +
+		"deployment \"tessera-proxy\" successfully rolled out\n" +
 		"$ make build\n" +
-		"go build -o bin/aviva-proxy ./cmd/aviva-proxy\n" +
+		"go build -o bin/tessera-proxy ./cmd/tessera-proxy\n" +
 		"build complete in 4.2s\n" +
-		"$ ./bin/aviva-proxy --check\n" +
+		"$ ./bin/tessera-proxy --check\n" +
 		"config ok · 3 routes · listening on :8080\n"
 
 	return &Fixture{

@@ -37,18 +37,18 @@ func TestFixtureByName(t *testing.T) {
 			attached bool
 		}
 		wants := []want{
-			{"agentic-workflows-code-based", 3, true},
-			{"agentic-workflows-codify", 2, false},
-			{"fab-flowx-explore", 1, false},
-			{"evvi webhooks and watchers", 4, false},
-			{"aviva-proxy-qNyfEO", 1, false},
-			{"designlab-web-r8suyU", 2, false},
-			{"evvi-sync-engine", 1, false},
-			{"fab-aws-migration", 5, false},
-			{"flow-v1-api-XkkhTN", 1, false},
-			{"flowx-7UKPZH", 2, false},
-			{"fabric-lk26UG", 1, false},
-			{"folio-Jiz4el", 1, false},
+			{"orchard-pipeline-code-based", 3, true},
+			{"orchard-pipeline-codify", 2, false},
+			{"kiln-relayx-explore", 1, false},
+			{"lumen webhooks and watchers", 4, false},
+			{"tessera-proxy-Vb3kQw", 1, false},
+			{"atelier-web-m4TzpD", 2, false},
+			{"lumen-sync-engine", 1, false},
+			{"kiln-aws-migration", 5, false},
+			{"relay-v1-api-Hq7wNe", 1, false},
+			{"relayx-3RJDWA", 2, false},
+			{"loom-p84cXa", 1, false},
+			{"quill-Ue9fLr", 1, false},
 		}
 
 		if len(sessions) != len(wants) {
@@ -379,10 +379,10 @@ func TestSessionsInlineFlashFixture(t *testing.T) {
 		t.Fatalf("ListSessions: %v", err)
 	}
 	wantNames := []string{
-		"fab-flowx-explore",
-		"agentic-workflows-codify",
-		"flowx-7UKPZH",
-		"aviva-proxy-qNyfEO",
+		"kiln-relayx-explore",
+		"orchard-pipeline-codify",
+		"relayx-3RJDWA",
+		"tessera-proxy-Vb3kQw",
 	}
 	if len(sessions) != len(wantNames) {
 		t.Fatalf("sessions-inline-flash has %d sessions, want %d (reference set)", len(sessions), len(wantNames))
@@ -393,7 +393,7 @@ func TestSessionsInlineFlashFixture(t *testing.T) {
 		}
 	}
 
-	const msg = "folio-Jiz4el closed externally — list updated"
+	const msg = "quill-Ue9fLr closed externally — list updated"
 	if got := fx.Deps(darkBuiltinTheme(t)).Capture.Flash; got != msg {
 		t.Errorf("Deps().Capture.Flash = %q, want %q (seeded warning flash)", got, msg)
 	}
@@ -456,10 +456,10 @@ func TestSessionsNoTagsSignpostFixture(t *testing.T) {
 		attached bool
 	}
 	wants := []want{
-		{"fab-flowx-explore", 3, true},
-		{"agentic-workflows-codify", 1, false},
-		{"flowx-7UKPZH", 2, false},
-		{"aviva-proxy-qNyfEO", 4, false},
+		{"kiln-relayx-explore", 3, true},
+		{"orchard-pipeline-codify", 1, false},
+		{"relayx-3RJDWA", 2, false},
+		{"tessera-proxy-Vb3kQw", 4, false},
 	}
 	if len(sessions) != len(wants) {
 		t.Fatalf("sessions-no-tags-signpost has %d sessions, want %d (reference set)", len(sessions), len(wants))
@@ -522,8 +522,8 @@ func TestProjectsFixture(t *testing.T) {
 		}
 		seen[p.Name] = true
 	}
-	if projects[0].Name != "flow-v1-api" {
-		t.Errorf("projects fixture first project = %q, want %q (the reference cursor row)", projects[0].Name, "flow-v1-api")
+	if projects[0].Name != "relay-v1-api" {
+		t.Errorf("projects fixture first project = %q, want %q (the reference cursor row)", projects[0].Name, "relay-v1-api")
 	}
 }
 
@@ -557,11 +557,11 @@ func TestPreviewScreenFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
-	if len(sessions) == 0 || sessions[0].Name != "aviva-proxy-qNyfEO" {
-		t.Fatalf("first session = %+v, want first to be aviva-proxy-qNyfEO", sessions)
+	if len(sessions) == 0 || sessions[0].Name != "tessera-proxy-Vb3kQw" {
+		t.Fatalf("first session = %+v, want first to be tessera-proxy-Vb3kQw", sessions)
 	}
 
-	groups, err := fx.Deps(darkBuiltinTheme(t)).Enumerator.ListWindowsAndPanesInSession("aviva-proxy-qNyfEO")
+	groups, err := fx.Deps(darkBuiltinTheme(t)).Enumerator.ListWindowsAndPanesInSession("tessera-proxy-Vb3kQw")
 	if err != nil {
 		t.Fatalf("Enumerator: %v", err)
 	}
@@ -611,18 +611,18 @@ func TestSessionsMultiSelectActiveFixture(t *testing.T) {
 		attached bool
 	}
 	wants := []want{
-		{"agentic-workflows-code-based", 3, true},
-		{"agentic-workflows-codify", 2, false},
-		{"fab-flowx-explore", 1, false},
-		{"evvi webhooks and watchers", 4, false},
-		{"aviva-proxy-qNyfEO", 1, false},
-		{"designlab-web-r8suyU", 2, false},
-		{"evvi-sync-engine", 1, false},
-		{"fab-aws-migration", 5, false},
-		{"flow-v1-api-XkkhTN", 1, false},
-		{"flowx-7UKPZH", 2, false},
-		{"fabric-lk26UG", 1, false},
-		{"folio-Jiz4el", 1, false},
+		{"orchard-pipeline-code-based", 3, true},
+		{"orchard-pipeline-codify", 2, false},
+		{"kiln-relayx-explore", 1, false},
+		{"lumen webhooks and watchers", 4, false},
+		{"tessera-proxy-Vb3kQw", 1, false},
+		{"atelier-web-m4TzpD", 2, false},
+		{"lumen-sync-engine", 1, false},
+		{"kiln-aws-migration", 5, false},
+		{"relay-v1-api-Hq7wNe", 1, false},
+		{"relayx-3RJDWA", 2, false},
+		{"loom-p84cXa", 1, false},
+		{"quill-Ue9fLr", 1, false},
 	}
 	if len(sessions) != len(wants) {
 		t.Fatalf("sessions-multi-select-active has %d sessions, want %d (the sessions-flat set)", len(sessions), len(wants))
@@ -635,7 +635,7 @@ func TestSessionsMultiSelectActiveFixture(t *testing.T) {
 	}
 
 	deps := fx.Deps(darkBuiltinTheme(t))
-	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	wantMarked := []string{"orchard-pipeline-codify", "kiln-relayx-explore", "atelier-web-m4TzpD"}
 	if len(deps.Capture.MultiSelect) != len(wantMarked) {
 		t.Fatalf("Deps().Capture.MultiSelect = %v, want %v", deps.Capture.MultiSelect, wantMarked)
 	}
@@ -644,7 +644,7 @@ func TestSessionsMultiSelectActiveFixture(t *testing.T) {
 			t.Errorf("Deps().Capture.MultiSelect[%d] = %q, want %q", i, deps.Capture.MultiSelect[i], w)
 		}
 	}
-	if got, want := deps.Capture.Cursor, "fab-flowx-explore"; got != want {
+	if got, want := deps.Capture.Cursor, "kiln-relayx-explore"; got != want {
 		t.Errorf("Deps().Capture.Cursor = %q, want %q (cursor on a marked, banded row)", got, want)
 	}
 
@@ -688,18 +688,18 @@ type flatFixtureWant struct {
 
 func flatFixtureWants() []flatFixtureWant {
 	return []flatFixtureWant{
-		{"agentic-workflows-code-based", 3, true},
-		{"agentic-workflows-codify", 2, false},
-		{"fab-flowx-explore", 1, false},
-		{"evvi webhooks and watchers", 4, false},
-		{"aviva-proxy-qNyfEO", 1, false},
-		{"designlab-web-r8suyU", 2, false},
-		{"evvi-sync-engine", 1, false},
-		{"fab-aws-migration", 5, false},
-		{"flow-v1-api-XkkhTN", 1, false},
-		{"flowx-7UKPZH", 2, false},
-		{"fabric-lk26UG", 1, false},
-		{"folio-Jiz4el", 1, false},
+		{"orchard-pipeline-code-based", 3, true},
+		{"orchard-pipeline-codify", 2, false},
+		{"kiln-relayx-explore", 1, false},
+		{"lumen webhooks and watchers", 4, false},
+		{"tessera-proxy-Vb3kQw", 1, false},
+		{"atelier-web-m4TzpD", 2, false},
+		{"lumen-sync-engine", 1, false},
+		{"kiln-aws-migration", 5, false},
+		{"relay-v1-api-Hq7wNe", 1, false},
+		{"relayx-3RJDWA", 2, false},
+		{"loom-p84cXa", 1, false},
+		{"quill-Ue9fLr", 1, false},
 	}
 }
 
@@ -819,7 +819,7 @@ func TestSessionsMultiSelectPreflightAbortFixture(t *testing.T) {
 	assertFlatFixtureSet(t, fx)
 
 	deps := fx.Deps(darkBuiltinTheme(t))
-	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	wantMarked := []string{"orchard-pipeline-codify", "kiln-relayx-explore", "atelier-web-m4TzpD"}
 	if len(deps.Capture.MultiSelect) != len(wantMarked) {
 		t.Fatalf("Deps().Capture.MultiSelect = %v, want %v", deps.Capture.MultiSelect, wantMarked)
 	}
@@ -828,10 +828,10 @@ func TestSessionsMultiSelectPreflightAbortFixture(t *testing.T) {
 			t.Errorf("Deps().Capture.MultiSelect[%d] = %q, want %q", i, deps.Capture.MultiSelect[i], w)
 		}
 	}
-	if got, want := deps.Capture.Cursor, "fab-flowx-explore"; got != want {
+	if got, want := deps.Capture.Cursor, "kiln-relayx-explore"; got != want {
 		t.Errorf("Deps().Capture.Cursor = %q, want %q (cursor on the gone row)", got, want)
 	}
-	wantGone := []string{"fab-flowx-explore"}
+	wantGone := []string{"kiln-relayx-explore"}
 	if len(deps.Capture.GoneFlagged) != len(wantGone) || deps.Capture.GoneFlagged[0] != wantGone[0] {
 		t.Errorf("Deps().Capture.GoneFlagged = %v, want %v", deps.Capture.GoneFlagged, wantGone)
 	}
@@ -858,7 +858,7 @@ func TestSessionsBurstOpeningFixture(t *testing.T) {
 	assertFlatFixtureSet(t, fx)
 
 	deps := fx.Deps(darkBuiltinTheme(t))
-	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	wantMarked := []string{"orchard-pipeline-codify", "kiln-relayx-explore", "atelier-web-m4TzpD"}
 	if len(deps.Capture.MultiSelect) != len(wantMarked) {
 		t.Fatalf("Deps().Capture.MultiSelect = %v, want %v", deps.Capture.MultiSelect, wantMarked)
 	}
@@ -902,7 +902,7 @@ func TestFakeSeamsAreInert(t *testing.T) {
 		t.Errorf("Creator.CreateFromDir returned %v, want nil (no-op)", err)
 	}
 
-	groups, err := d.Enumerator.ListWindowsAndPanesInSession("agentic-workflows-code-based")
+	groups, err := d.Enumerator.ListWindowsAndPanesInSession("orchard-pipeline-code-based")
 	if err != nil {
 		t.Errorf("Enumerator returned %v, want nil", err)
 	}
@@ -1067,8 +1067,8 @@ func TestSessionsSearchResultsFixture(t *testing.T) {
 				t.Errorf("the frame is missing the matching session %q:\n%s", name, frame)
 			}
 		}
-		if strings.Contains(frame, "evvi-sync-engine") {
-			t.Errorf("the frame carries evvi-sync-engine, which matches neither field — the list is not narrowed:\n%s", frame)
+		if strings.Contains(frame, "lumen-sync-engine") {
+			t.Errorf("the frame carries lumen-sync-engine, which matches neither field — the list is not narrowed:\n%s", frame)
 		}
 	})
 

@@ -1,0 +1,40 @@
+
+  P O R T A L ▌
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                                                                                        │
+  Projects 14                                                                           │ Themes
+                                                                                        │
+  ▌ relay-v1-api                                                                        │   catppuccin-latte
+  ▌ /home/user/code/loom/relayv1/relay-v1-api                                           │   gitlab-dark-grey
+    portal                                                                              │   horizon
+    /home/user/code/portal                                                              │ ▌ nord                ● dark
+    sorrel                                                                              │   nord-wave
+    /home/user/code/sorrel                                                              │   tokyo-night
+    bramble                                                                             │   tokyo-night-day    ● light
+    /home/user/code/bramble                                                             │
+    orchard-pipeline                                                                    │
+    /home/user/code/orchard-pipeline                                                    │
+    user                                                                                │
+    /home/user                                                                          │
+    relayx                                                                              │
+    /home/user/code/loom/relayx                                                         │
+    atelier-web                                                                         │
+    /home/user/code/atelier/atelier-web                                                 │
+    lumen                                                                               │
+    /home/user/code/lumen                                                               │
+    tessera-proxy                                                                       │
+    /home/user/code/tessera                                                             │
+    kiln-aws-migration                                                                  │
+    /home/user/code/kiln                                                                │
+    quill                                                                               │
+    /home/user/code/quill                                                               │
+    loom                                                                                │
+    /home/user/code/loom                                                                │
+    lumen-sync-engine                                                                   │
+    /home/user/code/lumen-sync                                                          │
+                                                                                        │
+                                                                                        │ ⏎   set theme
+                                                                                        │ d   set as dark
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔│ l   set as light
+  ⏎ new session · x sessions · e edit · / filter · t theme                              │ esc close
+

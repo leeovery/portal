@@ -1,6 +1,8 @@
 package capture
 
 import (
+	"cmp"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/tui"
@@ -31,7 +33,26 @@ func keyLineStart() tea.KeyPressMsg {
 // BootstrapCompleteMsg and LoadingMinElapsedMsg are deliberately never sent:
 // loading fixtures stay parked precisely because neither arrives.
 func (f *Fixture) ModelAt(th theme.Theme, w, h int) tui.Model {
+	return f.modelAt(f.Deps(th), w, h)
+}
+
+// drawing is the fixture's golden frame source, kept at its frame size with any
+// declared render size substituted, so the stem names the size it is drawn at.
+func (f *Fixture) drawing() Drawing {
+	w, h := f.renderSize(cmp.Or(f.frame.Width, harnessSize.Width), cmp.Or(f.frame.Height, harnessSize.Height))
+	return Drawing{name: f.name, size: Size{Width: w, Height: h}, draw: f.draw}
+}
+
+// colourless joins the fixture's own NO_COLOR, so the environment can take
+// colour away but never give it to a colourless fixture.
+func (f *Fixture) draw(th theme.Theme, colourless bool, size Size) (string, Size) {
 	deps := f.Deps(th)
+	deps.NoColor = deps.NoColor || colourless
+	w, h := f.renderSize(size.Width, size.Height)
+	return f.modelAt(deps, w, h).View().Content, Size{Width: w, Height: h}
+}
+
+func (f *Fixture) modelAt(deps tui.Deps, w, h int) tui.Model {
 	var model tea.Model = tui.Build(deps)
 	w, h = f.renderSize(w, h)
 	model, _ = model.Update(tea.WindowSizeMsg{Width: w, Height: h})

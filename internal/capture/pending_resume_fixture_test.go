@@ -20,10 +20,10 @@ const (
 
 // One session per attached × pending combination the fixture seeds.
 const (
-	comboNeither      = "fabric-lk26UG"
-	comboAttachedOnly = "agentic-workflows-codify"
-	comboPendingOnly  = "evvi-sync-engine"
-	comboBoth         = "folio-Jiz4el"
+	comboNeither      = "loom-p84cXa"
+	comboAttachedOnly = "orchard-pipeline-codify"
+	comboPendingOnly  = "lumen-sync-engine"
+	comboBoth         = "quill-Ue9fLr"
 )
 
 func pendingFixture(t *testing.T, name string) *capture.Fixture {

@@ -23,10 +23,13 @@ golangci-lint run                           # lint (config sets the integration 
 `cmd/capturetool` is a separate offline program (not a `portal` subcommand) that renders a named deterministic TUI fixture through `tui.Build` with every tmux seam faked (`internal/capture`, kept out of the production binary by an import guard). It is the only way to see a visual change before release — a scratch build of Portal disturbs the running daemon and touches real state.
 
 ```bash
-go run ./cmd/capturetool --fixture <name> [--theme <slug|path>]   # live view; capture.FixtureNames() lists fixtures
-vhs testdata/vhs/<tape>                                          # re-capture a still
+go run ./cmd/capturetool --fixture <name> [--theme <slug|path>]          # live view; capture.FixtureNames() lists fixtures
+go run ./cmd/capturetool --fixture <name> --print [--ansi] [--size WxH]  # its frame once, as text or in colour
+go run ./cmd/capturetool --frames testdata/vhs/frames [names…]           # regenerate golden frames (all without names)
+vhs testdata/vhs/<tape>                                                 # re-capture a still
 ```
 
+- **Golden frames.** `testdata/vhs/frames/` keeps a `.txt`/`.ansi` pair per fixture, standalone surfaces included, drawn in `tokyo-night` at the size in the stem (`sessions-flat-120x40`). `internal/capture`'s frame tests hold every fixture to its frame cell for cell (glyph, colours, bold, hyperlink; an unpainted background counts as the canvas) and check each draws the same twice. A change that alters a screen regenerates its frames with `--frames` in the same change. Never edit a frame by hand; an unintended frame change is a regression to fix, not a frame to rewrite. A new fixture keeps a frame from the start, and fixture data is invented: no real project or person names.
 - `testdata/vhs/*.tape` and `*.png` are scaffolding: written while work is in progress, deleted after sign-off. `testdata/vhs/reference/*.png` are committed design exports and are kept — nothing in Go points at them, so a sweep must not treat them as orphans. Retention table: `testdata/vhs/README.md`.
 - Fixture definitions in `internal/capture` are permanent: the swap-and-diff completeness guard enumerates them, so deleting one silently shrinks coverage. Standalone surfaces that aren't picker fixtures (contrast swatch, resume panel screens) are enumerated through `capture.StandaloneNames()`; a new one joins every guard at that one edit.
 

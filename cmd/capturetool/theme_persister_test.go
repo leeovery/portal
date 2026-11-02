@@ -43,7 +43,7 @@ func TestCapturetool_WritesNoPrefsFile(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("PORTAL_PREFS_FILE", filepath.Join(dir, "prefs.json"))
 
-	m, err := resolveModel("sessions-flat", themetest.Builtin(t, defaultThemeSlug))
+	m, err := resolveModel("sessions-flat", themetest.Builtin(t, defaultThemeSlug), false)
 	if err != nil {
 		t.Fatalf("resolveModel(sessions-flat): %v", err)
 	}
