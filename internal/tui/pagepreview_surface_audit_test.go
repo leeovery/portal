@@ -183,6 +183,8 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 
 	preExistingPackages := map[string]struct{}{
 		"alias":            {},
+		"backend":          {},
+		"backendtest":      {},
 		"bootstrapadapter": {},
 		"capture":          {},
 		"commandertest":    {},
@@ -222,6 +224,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"tui":              {},
 		"warning":          {},
 		"xdg":              {},
+		"zmxtest":          {},
 	}
 
 	forbiddenNames := map[string]struct{}{
