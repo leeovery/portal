@@ -3,7 +3,6 @@ package capture
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -99,7 +98,8 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		InitialMode:   f.initialMode,
 		Search:        f.search,
 		Command:       f.command,
-		CWD:           "/home/user",
+		CWD:           fixtureHome,
+		Home:          fixtureHome,
 		ServerStarted: f.serverStarted,
 		NoColor:       f.noColor,
 		Capture: tui.CaptureSeeds{
@@ -473,19 +473,9 @@ func sessionsNoTagsSignpostFixture() *Fixture {
 	}
 }
 
-// fixtureHome is the directory the search-results fixture's home-relative paths
-// are built under. It answers the running process's home so the renderer's
-// home-abbreviation folds them on whatever machine draws the frame, and falls
-// back to the /home/user literal on the same condition that abbreviation gives
-// up on — where it returns the path as given, so the frame carries whole
-// absolute paths rather than a half-folded one.
-func fixtureHome() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return "/home/user"
-	}
-	return home
-}
+// fixtureHome is the home directory every fixture's model abbreviates against,
+// handed to it through Deps, so no frame reads the process's $HOME.
+const fixtureHome = "/home/user"
 
 // One frame carrying every branch of the search-opened directory column: a home
 // path shown abbreviated, a row matched on its directory alone, a row whose
@@ -499,7 +489,7 @@ func fixtureHome() string {
 // routes it to the catch-all rather than issuing a pane read the harness has no
 // server for.
 func sessionsSearchResultsFixture() *Fixture {
-	home := fixtureHome()
+	home := fixtureHome
 	portalDir := filepath.Join(home, "code/portal")
 	gatewayDir := filepath.Join(home, "code/portal-gateway")
 	lumenDir := filepath.Join(home, "code/lumen")

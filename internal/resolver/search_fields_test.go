@@ -46,3 +46,14 @@ func TestSearchFields(t *testing.T) {
 		}
 	})
 }
+
+func TestSearchUnderAGivenHomeReadsNoEnvironment(t *testing.T) {
+	t.Setenv("HOME", "/elsewhere")
+
+	if got, want := resolver.SearchFieldsIn("/home/user", "api", "/home/user/code/api"), []string{"api", "~/code/api"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("SearchFieldsIn(/home/user, api, /home/user/code/api) = %v, want %v", got, want)
+	}
+	if !resolver.MatchesSearchTermIn("/home/user", "~/code", "api", "/home/user/code/api") {
+		t.Error("MatchesSearchTermIn(/home/user, ~/code, …) = false, want the directory abbreviated against the home given to match")
+	}
+}

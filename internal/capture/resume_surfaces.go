@@ -165,11 +165,11 @@ func (s *Surface) drawing() Drawing {
 	return Drawing{
 		name: s.name,
 		size: Size{Width: s.screen.Width, Height: s.screen.Height},
-		draw: func(th theme.Theme, colourless bool, size Size) (string, Size) {
+		draw: func(th theme.Theme, colourless bool, size Size) (tea.View, Size) {
 			painted := s.WithTheme(th, colourless)
 			painted.Update(tea.WindowSizeMsg{Width: size.Width, Height: size.Height})
 			w, h := substituteDeclaredSize(s.screen.Width, s.screen.Height, size.Width, size.Height)
-			return painted.View().Content, Size{Width: w, Height: h}
+			return painted.View(), Size{Width: w, Height: h}
 		},
 	}
 }

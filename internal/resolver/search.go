@@ -7,10 +7,16 @@ import "strings"
 // so a term hitting the home prefix cannot match a session on characters no row
 // shows. A session with no recorded directory is searchable by its name alone.
 func SearchFields(name, recordedDir string) []string {
+	return SearchFieldsIn(HomeOrProcess(""), name, recordedDir)
+}
+
+// SearchFieldsIn is SearchFields with the directory abbreviated against the
+// home directory given rather than the environment's.
+func SearchFieldsIn(home, name, recordedDir string) []string {
 	if recordedDir == "" {
 		return []string{name}
 	}
-	return []string{name, AbbreviateHome(recordedDir)}
+	return []string{name, AbbreviateHomeIn(home, recordedDir)}
 }
 
 // MatchesSearchTerm reports whether term appears as a contiguous run, case-folded,
@@ -20,13 +26,19 @@ func SearchFields(name, recordedDir string) []string {
 // find rather than a wildcard. An empty term matches nothing, so a caller missing
 // its own guard narrows to nothing rather than to everything.
 func MatchesSearchTerm(term, name, recordedDir string) bool {
+	return MatchesSearchTermIn(HomeOrProcess(""), term, name, recordedDir)
+}
+
+// MatchesSearchTermIn is MatchesSearchTerm with the directory abbreviated
+// against the home directory given rather than the environment's.
+func MatchesSearchTermIn(home, term, name, recordedDir string) bool {
 	if term == "" {
 		return false
 	}
 
 	folded := strings.ToLower(term)
 
-	for _, field := range SearchFields(name, recordedDir) {
+	for _, field := range SearchFieldsIn(home, name, recordedDir) {
 		if strings.Contains(strings.ToLower(field), folded) {
 			return true
 		}

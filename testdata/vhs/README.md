@@ -130,9 +130,15 @@ cells `cells_test.go` reads and compares:
   control character, or a glyph not one cell wide.
 - **Cell for cell** it's compared with the frame's `.ansi`, passing nothing but
   what a terminal shows alike:
-  - **the canvas:** a cell whose background isn't painted counts as `tokyo-night`'s
-    canvas, as the picker sets the terminal's background to it (OSC 11);
-  - **a blank's foreground, bold and link,** which nothing shows.
+  - **the terminal's background:** a cell whose background isn't painted shows
+    whatever the screen set the terminal's background to. The picker fixtures and
+    the contrast swatch set their canvas with OSC 11, so there an unpainted cell
+    counts as `tokyo-night`'s canvas. The resume surfaces are drawn into a pane and
+    set none, and a colourless fixture sets none, so there an unpainted cell
+    matches only an unpainted cell: a surface losing its painted canvas, or a
+    colourless screen gaining one, fails;
+  - **a blank's foreground and bold,** which nothing shows. A link is compared on
+    every cell, blank or not, since a linked space is clickable.
 
   A drawn row shorter than its frame's is read as blank and unpainted to the
   frame's width; a wider row, or a row more or fewer, fails. A failure names the
@@ -140,8 +146,12 @@ cells `cells_test.go` reads and compares:
   (counted from 1) and the frame's and the fixture's cell, then how many more.
 - **Every frame is a pair**, every frame has a fixture drawing it at its stem's
   size, every fixture keeps a frame, and each `.ansi` reads to its `.txt` at the
-  stem's size.
-- **Each fixture draws the same twice,** from two separately built worlds.
+  stem's size. A stored `.ansi` has no newline after its last row, so it is read
+  back at its stem's height: a frame whose last row is unwritten still holds.
+- **Each fixture draws the same twice,** from two separately built worlds, which
+  catches state one draw leaves for the next and map-order output. It can't see
+  a dependence on the environment or the clock, which is why the fixtures pin
+  theirs: the home directory comes through `tui.Deps.Home`, never `$HOME`.
 - **A frame written is a frame held:** a test writes frames with the capture tool's
   writer, reads them back and holds each fixture to its own.
 

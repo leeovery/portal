@@ -98,6 +98,9 @@ func TestRefusesWhatTheCommandLineCantMean(t *testing.T) {
 		{name: "frames for no fixture", args: []string{"--frames", t.TempDir(), "sessions-flat", "sessions-2"}, want: `--frames: unknown fixture "sessions-2" ` + listed},
 		{name: "frames in another theme", args: []string{"--theme", "nord", "--frames", t.TempDir()}, want: "--frames takes the fixtures' names alone, not --theme"},
 		{name: "frames printed", args: []string{"--frames", t.TempDir(), "--print", "--fixture", "sessions-flat"}, want: "--frames takes the fixtures' names alone, not --fixture, --print"},
+		{name: "frames into no directory", args: []string{"--frames=", "sessions-flat"}, want: "--frames takes the directory to write the frames into"},
+		{name: "a flag there isn't", args: []string{"--fixture", "sessions-flat", "--nope"}, want: "flag provided but not defined: -nope (--help lists the flags)"},
+		{name: "a flag's value missing", args: []string{"--fixture"}, want: "flag needs an argument: -fixture (--help lists the flags)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,6 +111,9 @@ func TestRefusesWhatTheCommandLineCantMean(t *testing.T) {
 			}
 			if stdout.Len() > 0 {
 				t.Errorf("run(%q) printed %q, want nothing", tt.args, stdout.String())
+			}
+			if stderr.Len() > 0 {
+				t.Errorf("run(%q) wrote %q to stderr, want the refusal said once, by main, from its error", tt.args, stderr.String())
 			}
 		})
 	}

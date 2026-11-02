@@ -1072,11 +1072,13 @@ func TestSessionsSearchResultsFixture(t *testing.T) {
 		}
 	})
 
-	t.Run("it renders the fixture's home paths abbreviated under an arbitrary home directory", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
-		frame := searchResultsFrame(t)
-		if !strings.Contains(frame, "portal-a1b2 ~/code/portal") {
-			t.Errorf("the frame does not carry the abbreviated directory under a home the fixture was not written against:\n%s", frame)
+	t.Run("it draws the same frame whatever the process's home directory", func(t *testing.T) {
+		want := searchResultsFrame(t)
+		for _, home := range []string{t.TempDir(), "", "/", "/home/user/", "/home/user"} {
+			t.Setenv("HOME", home)
+			if got := searchResultsFrame(t); got != want {
+				t.Errorf("under HOME=%q the frame differs — the fixture's home must come through Deps, never the environment:\n%s", home, got)
+			}
 		}
 	})
 

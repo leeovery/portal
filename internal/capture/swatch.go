@@ -219,10 +219,10 @@ func swatchDrawing() Drawing {
 	return Drawing{
 		name: ContrastValidationFixture,
 		size: harnessSize,
-		draw: func(th theme.Theme, _ bool, size Size) (string, Size) {
+		draw: func(th theme.Theme, _ bool, size Size) (tea.View, Size) {
 			var m tea.Model = newSwatchModel(th)
 			m, _ = m.Update(tea.WindowSizeMsg{Width: size.Width, Height: size.Height})
-			return m.View().Content, size
+			return m.View(), size
 		},
 	}
 }

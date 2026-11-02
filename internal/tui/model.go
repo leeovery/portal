@@ -185,6 +185,7 @@ type Model struct {
 	aliasEditor    AliasEditor
 	sessionCreator SessionCreator
 	cwd            string
+	home           string
 	activePage     page
 	projectList    list.Model
 	initialFilter  string
@@ -660,6 +661,14 @@ func WithCWD(path string) Option {
 	}
 }
 
+// WithHome sets the home directory session directories are abbreviated against;
+// empty takes the process's.
+func WithHome(home string) Option {
+	return func(m *Model) {
+		m.home = home
+	}
+}
+
 func WithProjectEditor(e ProjectEditor) Option {
 	return func(m *Model) {
 		m.projectEditor = e
@@ -953,6 +962,7 @@ func (m *Model) sessionDelegate() SessionDelegate {
 		Selected:    m.selectedSessions,
 		GoneFlagged: m.goneFlagged,
 		Pending:     m.pendingSessions,
+		Home:        m.home,
 	}
 }
 
@@ -1267,6 +1277,7 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	default:
 		items = ToListItems(filtered)
 	}
+	items = withHome(items, m.home)
 
 	// Recorded before the items are handed over, so the filter pass SetItems
 	// defers into a tea.Cmd can resolve the targets it is given.

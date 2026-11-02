@@ -428,3 +428,51 @@ func TestAbbreviateHome(t *testing.T) {
 		}
 	})
 }
+
+func TestAbbreviateHomeIn(t *testing.T) {
+	tests := []struct {
+		name, home, path, want string
+	}{
+		{name: "a path under the home given", home: "/home/user", path: "/home/user/code/portal", want: "~/code/portal"},
+		{name: "the home given itself", home: "/home/user", path: "/home/user", want: "~"},
+		{name: "a home given with a trailing slash", home: "/home/user/", path: "/home/user/code/portal", want: "~/code/portal"},
+		{name: "a home given with a trailing slash, itself", home: "/home/user/", path: "/home/user", want: "~"},
+		{name: "a home-prefix lookalike", home: "/home/user", path: "/home/userX/code", want: "/home/userX/code"},
+		{name: "a root home", home: "/", path: "/opt/tools", want: "~/opt/tools"},
+		{name: "an empty home", home: "", path: "/home/user/code", want: "/home/user/code"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolver.AbbreviateHomeIn(tt.home, tt.path); got != tt.want {
+				t.Errorf("AbbreviateHomeIn(%q, %q) = %q, want %q", tt.home, tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAbbreviateHomeIn_ReadsNoEnvironment(t *testing.T) {
+	t.Setenv("HOME", "/elsewhere")
+
+	if got, want := resolver.AbbreviateHomeIn("/home/user", "/home/user/code"), "~/code"; got != want {
+		t.Errorf("AbbreviateHomeIn(/home/user, /home/user/code) under HOME=/elsewhere = %q, want %q", got, want)
+	}
+}
+
+func TestAbbreviateHome_CleansATrailingSlashOnHome(t *testing.T) {
+	t.Setenv("HOME", "/home/user/")
+
+	if got, want := resolver.AbbreviateHome("/home/user/code/portal"), "~/code/portal"; got != want {
+		t.Errorf("AbbreviateHome(/home/user/code/portal) under HOME=/home/user/ = %q, want %q", got, want)
+	}
+}
+
+func TestHomeOrProcess(t *testing.T) {
+	t.Setenv("HOME", "/home/process")
+
+	if got := resolver.HomeOrProcess("/home/given"); got != "/home/given" {
+		t.Errorf("HomeOrProcess(/home/given) = %q, want the home given", got)
+	}
+	if got := resolver.HomeOrProcess(""); got != "/home/process" {
+		t.Errorf("HomeOrProcess(\"\") = %q, want the process's /home/process", got)
+	}
+}

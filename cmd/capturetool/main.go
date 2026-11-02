@@ -104,17 +104,24 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) er
 func parse(args []string, stderr io.Writer) (options, error) {
 	var o options
 	flags := flag.NewFlagSet("capturetool", flag.ContinueOnError)
-	flags.SetOutput(stderr)
 	flags.StringVar(&o.fixture, "fixture", "", "named fixture to render: "+strings.Join(capture.FixtureNames(), ", "))
 	flags.StringVar(&o.theme, "theme", defaultThemeSlug, "theme to render: a built-in slug (e.g. "+defaultThemeSlug+") or a path to a .theme file")
 	flags.BoolVar(&o.print, "print", false, "print its frame once, as text, rather than run it live")
 	flags.StringVar(&o.size, "size", "", "with --print, the terminal's size as WxH, such as 120x40: the fixture's frame size unless given")
 	flags.BoolVar(&o.ansi, "ansi", false, "with --print, print its colours too")
 	flags.StringVar(&o.frames, "frames", "", "write into the directory given the frames of the fixtures named after it, or of every fixture, in "+capture.FramesThemeSlug)
-	if err := flags.Parse(args); err != nil {
+	// Silent while parsing, so a bad flag is said once, by main, as every other
+	// refusal is; the usage is printed only when asked for.
+	flags.SetOutput(io.Discard)
+	err := flags.Parse(args)
+	switch {
+	case errors.Is(err, flag.ErrHelp):
+		flags.SetOutput(stderr)
+		flags.Usage()
 		return options{}, err
-	}
-	if o.frames != "" {
+	case err != nil:
+		return options{}, fmt.Errorf("%w (--help lists the flags)", err)
+	case isSet(flags, "frames"):
 		return framesOnly(o, flags)
 	}
 	switch {
@@ -132,6 +139,9 @@ func parse(args []string, stderr io.Writer) (options, error) {
 // frames are written as the tests hold them, in their own theme, at their own
 // sizes.
 func framesOnly(o options, flags *flag.FlagSet) (options, error) {
+	if o.frames == "" {
+		return options{}, errors.New("--frames takes the directory to write the frames into")
+	}
 	var others []string
 	flags.Visit(func(f *flag.Flag) {
 		if f.Name != "frames" {
@@ -143,6 +153,13 @@ func framesOnly(o options, flags *flag.FlagSet) (options, error) {
 	}
 	o.named = flags.Args()
 	return o, nil
+}
+
+// isSet reports whether the command line gave the flag, even as empty.
+func isSet(flags *flag.FlagSet, name string) bool {
+	set := false
+	flags.Visit(func(f *flag.Flag) { set = set || f.Name == name })
+	return set
 }
 
 // writeFrames writes the frames of the fixtures o names, or of every fixture,

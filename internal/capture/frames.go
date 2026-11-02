@@ -2,11 +2,13 @@ package capture
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
 )
@@ -43,7 +45,7 @@ type Drawing struct {
 	size Size
 	// draw renders the screen at the size asked and reports the size it was
 	// drawn at, which a screen that pins a dimension substitutes.
-	draw func(th theme.Theme, colourless bool, size Size) (string, Size)
+	draw func(th theme.Theme, colourless bool, size Size) (tea.View, Size)
 }
 
 func (d Drawing) Name() string { return d.name }
@@ -58,13 +60,21 @@ func (d Drawing) Stem() string { return d.name + "-" + d.size.String() }
 // Frame draws the screen as a terminal of the given size shows it: a line per
 // row, each ending in a newline, cut or padded to the height it was drawn at.
 func (d Drawing) Frame(th theme.Theme, colourless bool, size Size) string {
-	content, drawn := d.draw(th, colourless, size)
-	lines := strings.Split(content, "\n")
+	frame, _ := d.Draw(th, colourless, size)
+	return frame
+}
+
+// Draw is Frame, with the background a terminal shows beneath the frame's
+// unpainted cells: the colour the screen sets with OSC 11, or nil where it sets
+// none and the terminal's own shows through.
+func (d Drawing) Draw(th theme.Theme, colourless bool, size Size) (string, color.Color) {
+	view, drawn := d.draw(th, colourless, size)
+	lines := strings.Split(view.Content, "\n")
 	lines = lines[:min(len(lines), drawn.Height)]
 	for len(lines) < drawn.Height {
 		lines = append(lines, "")
 	}
-	return strings.Join(lines, "\n") + "\n"
+	return strings.Join(lines, "\n") + "\n", view.BackgroundColor
 }
 
 // WriteFrame writes the drawing's frame, at its own size, in the frames' theme

@@ -47,7 +47,10 @@ type Deps struct {
 	SpawnGetenv   func(string) string
 	SpawnLogger   *slog.Logger
 
-	CWD         string
+	CWD string
+	// Home is the home directory session directories are abbreviated against.
+	// Empty takes the process's; a capture pins one so no frame reads $HOME.
+	Home        string
 	InitialMode prefs.SessionListMode
 	Theme       theme.Nomination
 	// ThemeKeys are prefs.json's keys as read — post-translation, with no
@@ -110,6 +113,7 @@ func Build(deps Deps) Model {
 		WithProjectStore(deps.ProjectStore),
 		WithSessionCreator(deps.Creator),
 		WithCWD(deps.CWD),
+		WithHome(deps.Home),
 	}
 	if deps.ServerStarted {
 		opts = append(opts, WithServerStarted(true))

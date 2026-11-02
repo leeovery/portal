@@ -13,6 +13,7 @@ import (
 type searchEntry struct {
 	name string
 	dir  string
+	home string
 }
 
 // searchItemSource maps each session row's filter value to every distinct field
@@ -51,7 +52,7 @@ func (s *searchItemSource) set(items []list.Item) {
 		if !ok {
 			continue
 		}
-		entry := searchEntry{name: si.Session.Name, dir: si.Session.Dir}
+		entry := searchEntry{name: si.Session.Name, dir: si.Session.Dir, home: si.Home}
 		value := si.FilterValue()
 		if !slices.Contains(entries[value], entry) {
 			entries[value] = append(entries[value], entry)
@@ -102,7 +103,7 @@ func containmentFilter(term string, src *searchItemSource) list.FilterFunc {
 // filter value was built from.
 func everyEntryMatches(entries []searchEntry, term string) bool {
 	for _, entry := range entries {
-		if !resolver.MatchesSearchTerm(term, entry.name, entry.dir) {
+		if !resolver.MatchesSearchTermIn(resolver.HomeOrProcess(entry.home), term, entry.name, entry.dir) {
 			return false
 		}
 	}

@@ -89,6 +89,10 @@ type SessionItem struct {
 	// CatchAll marks an Unknown / Untagged bucket instance, pinning it last
 	// without string-matching the heading.
 	CatchAll bool
+
+	// Home is the home directory the session's directory is abbreviated against;
+	// empty takes the process's.
+	Home string
 }
 
 // FilterValue is the session's search fields flattened for the picker's own
@@ -97,7 +101,7 @@ type SessionItem struct {
 // directory is no part of it — a regroup must never make a session findable by a
 // path it was not findable by a moment earlier.
 func (i SessionItem) FilterValue() string {
-	return strings.Join(resolver.SearchFields(i.Session.Name, i.Session.Dir), " ")
+	return strings.Join(resolver.SearchFieldsIn(resolver.HomeOrProcess(i.Home), i.Session.Name, i.Session.Dir), " ")
 }
 
 // A genuine height-1 list.Item is load-bearing: pagination counts every rendered
@@ -142,6 +146,9 @@ type SessionDelegate struct {
 	// on Session.Name so a session carries one dot however many panes wait.
 	// Nil marks nothing.
 	Pending map[string]struct{}
+	// Home is the home directory a shown directory is abbreviated against; empty
+	// takes the process's.
+	Home string
 }
 
 func isSelected(set map[string]struct{}, name string) bool {
@@ -285,7 +292,7 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 		name = d.rowToken(nameBase, nameTok, selected).Render(it.Session.Name)
 		namePad = ""
 		if d.ShowDir && it.Session.Dir != "" {
-			dirText = resolver.AbbreviateHome(it.Session.Dir)
+			dirText = resolver.AbbreviateHomeIn(resolver.HomeOrProcess(d.Home), it.Session.Dir)
 		}
 	} else {
 		nameWidth := max(total-used, 1)
@@ -294,7 +301,7 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 		remaining := nameWidth - lipgloss.Width(visibleName)
 		if d.ShowDir {
 			// The separating space is the one cell withheld from the fit.
-			dirText = fitSessionDir(it.Session.Dir, remaining-1)
+			dirText = fitSessionDir(d.Home, it.Session.Dir, remaining-1)
 		}
 		if dirText != "" {
 			remaining -= 1 + lipgloss.Width(dirText)
@@ -374,6 +381,18 @@ func spaces(n int) string {
 		b[i] = ' '
 	}
 	return string(b)
+}
+
+// withHome stamps home on every session row in items, so a row's filter value
+// abbreviates its directory against the same home its delegate shows it under.
+func withHome(items []list.Item, home string) []list.Item {
+	for i, item := range items {
+		if si, ok := item.(SessionItem); ok {
+			si.Home = home
+			items[i] = si
+		}
+	}
+	return items
 }
 
 func ToListItems(sessions []tmux.Session) []list.Item {

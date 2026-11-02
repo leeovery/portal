@@ -92,15 +92,40 @@ func ExpandTilde(path string) string {
 // directory, so one value abbreviates differently under a different $HOME, and
 // a home directory that cannot be resolved degrades to the path as given.
 func AbbreviateHome(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	return AbbreviateHomeIn(HomeOrProcess(""), path)
+}
+
+// AbbreviateHomeIn is AbbreviateHome against the home directory given rather
+// than the environment's. The home is cleaned first, so one given with a
+// trailing separator abbreviates as the bare directory does. An empty home
+// abbreviates nothing.
+func AbbreviateHomeIn(home, path string) string {
+	if home == "" {
 		return path
 	}
+	home = filepath.Clean(home)
 	if path == home {
 		return "~"
 	}
-	if strings.HasPrefix(path, home+"/") {
-		return "~/" + path[len(home)+1:]
+	under := home
+	if !strings.HasSuffix(under, "/") {
+		under += "/"
+	}
+	if strings.HasPrefix(path, under) {
+		return "~/" + path[len(under):]
 	}
 	return path
+}
+
+// HomeOrProcess is home, or where it is empty the process's home directory:
+// empty again where that cannot be resolved.
+func HomeOrProcess(home string) string {
+	if home != "" {
+		return home
+	}
+	processHome, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return processHome
 }

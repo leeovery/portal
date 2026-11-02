@@ -3,6 +3,7 @@ package capture
 import (
 	"errors"
 	"fmt"
+	"image/color"
 	"maps"
 	"slices"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/theme"
 )
 
 // cell is a terminal's cell as a frame draws it: its glyph, in the pen it's
@@ -52,9 +52,12 @@ func rgb(r, g, b uint8) colour {
 	return colour{r: r, g: g, b: b, painted: true}
 }
 
-// colourOf is the token's colour as an SGR paints it.
-func colourOf(tok theme.Token) colour {
-	r, g, b, _ := tok.Color().RGBA()
+// colourOf is c as an SGR paints it, or unpainted where c is nil.
+func colourOf(c color.Color) colour {
+	if c == nil {
+		return colour{}
+	}
+	r, g, b, _ := c.RGBA()
 	return rgb(uint8(r>>8), uint8(g>>8), uint8(b>>8))
 }
 
@@ -255,8 +258,9 @@ type difference struct {
 }
 
 // compare lists the cells drawn differs from frame in. A cell whose background
-// isn't painted is the canvas's, as a terminal whose background the picker has
-// set to its canvas shows it; and a blank's foreground and weight aren't
+// isn't painted shows the terminal's background, canvas: the colour the screen
+// set with OSC 11, or unpainted where it set none, so there an unpainted cell
+// matches only an unpainted one. A blank's foreground and weight aren't
 // compared, as nothing shows them. A drawn row shorter than the frame's is
 // filled to its width with blank, unpainted cells, as a terminal shows what
 // wasn't written. The grids must have as many rows, and no drawn row may be
@@ -288,12 +292,12 @@ func filled(row []cell, width int) []cell {
 }
 
 // alike reports whether cells a and b look and act the same on a terminal
-// whose background is canvas: a glyph's link opens on a click.
+// whose background is canvas: a cell's link, blank or not, opens on a click.
 func alike(a, b cell, canvas colour) bool {
-	if a.glyph != b.glyph || a.bg.or(canvas) != b.bg.or(canvas) {
+	if a.glyph != b.glyph || a.bg.or(canvas) != b.bg.or(canvas) || a.link != b.link {
 		return false
 	}
-	return a.glyph == ' ' || a.bold == b.bold && a.fg == b.fg && a.link == b.link
+	return a.glyph == ' ' || a.bold == b.bold && a.fg == b.fg
 }
 
 // shown is how many cells a failure lists before it counts the rest.
@@ -430,7 +434,7 @@ func TestCompareHoldsEachCellToItsFrame(t *testing.T) {
 		{name: "a blank's foreground and weight", change: func(g grid) { g[0][2].fg = rgb(9, 9, 9); g[1][2].bold = true }},
 		{name: "a blank's background", change: func(g grid) { g[0][2].bg = rgb(9, 9, 9) }, want: [][2]int{{1, 3}}},
 		{name: "a glyph linked", change: func(g grid) { g[0][3].link = "https://x.test" }, want: [][2]int{{1, 4}}},
-		{name: "a blank linked", change: func(g grid) { g[0][2].link = "https://x.test" }},
+		{name: "a blank linked", change: func(g grid) { g[0][2].link = "https://x.test" }, want: [][2]int{{1, 3}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

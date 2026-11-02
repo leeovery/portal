@@ -33,6 +33,7 @@ func keyLineStart() tea.KeyPressMsg {
 // BootstrapCompleteMsg and LoadingMinElapsedMsg are deliberately never sent:
 // loading fixtures stay parked precisely because neither arrives.
 func (f *Fixture) ModelAt(th theme.Theme, w, h int) tui.Model {
+	w, h = f.renderSize(w, h)
 	return f.modelAt(f.Deps(th), w, h)
 }
 
@@ -45,16 +46,16 @@ func (f *Fixture) drawing() Drawing {
 
 // colourless joins the fixture's own NO_COLOR, so the environment can take
 // colour away but never give it to a colourless fixture.
-func (f *Fixture) draw(th theme.Theme, colourless bool, size Size) (string, Size) {
+func (f *Fixture) draw(th theme.Theme, colourless bool, size Size) (tea.View, Size) {
 	deps := f.Deps(th)
 	deps.NoColor = deps.NoColor || colourless
 	w, h := f.renderSize(size.Width, size.Height)
-	return f.modelAt(deps, w, h).View().Content, Size{Width: w, Height: h}
+	return f.modelAt(deps, w, h).View(), Size{Width: w, Height: h}
 }
 
+// modelAt takes the size as rendered: any declared size already substituted.
 func (f *Fixture) modelAt(deps tui.Deps, w, h int) tui.Model {
 	var model tea.Model = tui.Build(deps)
-	w, h = f.renderSize(w, h)
 	model, _ = model.Update(tea.WindowSizeMsg{Width: w, Height: h})
 
 	sessions, err := f.Lister.ListSessions()

@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/list"
 	"charm.land/lipgloss/v2"
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestFitSessionDir(t *testing.T) {
@@ -111,7 +113,7 @@ func TestFitSessionDir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := fitSessionDir(tt.dir, tt.width); got != tt.want {
+			if got := fitSessionDir("", tt.dir, tt.width); got != tt.want {
 				t.Errorf("fitSessionDir(%q, %d) = %q, want %q", tt.dir, tt.width, got, tt.want)
 			}
 		})
@@ -126,7 +128,7 @@ func TestFitSessionDirNeverCutsInsideASegment(t *testing.T) {
 	value := "~/Code/portal/internal/tui"
 
 	for width := 1; width <= lipgloss.Width(value); width++ {
-		got := fitSessionDir(dir, width)
+		got := fitSessionDir("", dir, width)
 		if got == "" || got == value {
 			continue
 		}
@@ -150,10 +152,10 @@ func TestFitSessionDirMeasuresDisplayWidth(t *testing.T) {
 	// 15 cells across 18 bytes — a byte-length measurement would drop it.
 	dir := "/opt/日本語/tui"
 
-	if got := fitSessionDir(dir, 15); got != dir {
+	if got := fitSessionDir("", dir, 15); got != dir {
 		t.Errorf("fitSessionDir(%q, 15) = %q, want it whole", dir, got)
 	}
-	if got := fitSessionDir(dir, 14); got != "…/日本語/tui" {
+	if got := fitSessionDir("", dir, 14); got != "…/日本語/tui" {
 		t.Errorf("fitSessionDir(%q, 14) = %q, want %q", dir, got, "…/日本語/tui")
 	}
 }
@@ -163,7 +165,37 @@ func TestFitSessionDirWithoutAResolvableHome(t *testing.T) {
 
 	dir := "/Users/someone/Code/portal"
 
-	if got := fitSessionDir(dir, 40); got != dir {
+	if got := fitSessionDir("", dir, 40); got != dir {
 		t.Errorf("fitSessionDir(%q, 40) = %q, want the raw path", dir, got)
+	}
+}
+
+func TestFitSessionDir_AbbreviatesAgainstTheHomeGiven(t *testing.T) {
+	t.Setenv("HOME", "/elsewhere")
+
+	if got, want := fitSessionDir("/home/user", "/home/user/code/portal", 40), "~/code/portal"; got != want {
+		t.Errorf("fitSessionDir(/home/user, /home/user/code/portal, 40) under HOME=/elsewhere = %q, want %q", got, want)
+	}
+}
+
+func TestFilterValue_AbbreviatesAgainstTheItemsHome(t *testing.T) {
+	t.Setenv("HOME", "/elsewhere")
+	item := SessionItem{Session: tmux.Session{Name: "api", Dir: "/home/user/code/api"}, Home: "/home/user"}
+
+	if got, want := item.FilterValue(), "api ~/code/api"; got != want {
+		t.Errorf("FilterValue() under HOME=/elsewhere = %q, want %q", got, want)
+	}
+}
+
+func TestRebuildStampsTheModelsHomeOnEverySessionRow(t *testing.T) {
+	items := withHome([]list.Item{SessionItem{Session: tmux.Session{Name: "a"}}, HeaderItem{}, SessionItem{Session: tmux.Session{Name: "b"}}}, "/home/user")
+
+	for i, item := range items {
+		if si, ok := item.(SessionItem); ok && si.Home != "/home/user" {
+			t.Errorf("item %d carries home %q, want /home/user", i, si.Home)
+		}
+	}
+	if _, ok := items[1].(HeaderItem); !ok {
+		t.Errorf("item 1 = %T, want the header left as it was", items[1])
 	}
 }
