@@ -112,6 +112,7 @@ Use the shared helper before writing a local one:
 - **`harnesstest`** — `TestingT`/`Recorder` to drive a fatal helper's own failure path; `PollUntil`; `AwaitProgress` for progress-based waits (use it for daemon lifecycle rather than wall-clock deadlines).
 - **`sourceguardtest`** — source-guard primitives (`RepoSources`, `PackageGoFiles`, `ParseSources`, `ForEachFuncCall`, `PackageDeps`/`AssertDepsWithin` with `Lanes`). A guard must fail when it scans nothing.
 - **`commandertest.Scripted`** — the tmux `Commander` fake; owns the `Run`/`RunRaw` trim-versus-verbatim contract.
+- **`backendtest`** — the fake `backend.Backend` and `Contract`, the behaviour table the fake and the zmx driver both pass. Pin backend behaviour in `Contract`, not in one implementation's tests, so the fake can't drift.
 - **`hookstest`** — the only route to seed keys and staged `hooks.json` files (`StageStore`, `HooksPath`, sidecar-lock fixtures).
 - **`themetest`** — built-in accessors and `.theme` fixture authoring. **`transienttest`** — `list-panes -a` failure modes for destructive-path suites. **`spawntest`** — adapter and ack fakes.
 

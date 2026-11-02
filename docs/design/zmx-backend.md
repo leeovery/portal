@@ -37,7 +37,7 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
 
 `internal/backend` defines the interface and the session model. `internal/backend/zmx` implements it over zmx's socket protocol, running the `zmx` binary only to create and attach. A fake implementation backs unit tests. Every method that does I/O takes a context, with per-operation ceilings beneath it.
 
-- `List(ctx)` returns every session in zmx's dir, found from its sockets and probed concurrently for name, cwd, attached client count, pid, created time and command. A session that doesn't answer is kept with only its name (`Answered` false), never dropped from the list. A socket that refuses is stale only when it predates this boot, and is then left out; one from this boot is kept as not answering, its per-session calls time out and `Create` refuses its name. So a crashed daemon holds its name until the next reboot, unless a plain `zmx list` or `zmx attach` (which delete any refused socket) clears it. Portal never deletes zmx's files. Only an unreadable dir is an error; a missing one means no sessions. Sessions whose names start with `_` are Portal's own and are hidden from listings.
+- `List(ctx)` returns every session in zmx's dir, found from its sockets and probed concurrently for name, cwd, attached client count, pid, created time and command. A session that doesn't answer is kept with only its name (`Answered` false), never dropped from the list. A socket that refuses is stale only when it predates this boot, and is then left out; one from this boot is kept as not answering. A session that doesn't answer, whether its socket refuses or its daemon stays silent, fails every per-session call with a timeout, and `Create` refuses its name. So a crashed daemon holds its name until the next reboot, unless a plain `zmx list` or `zmx attach` (which delete any refused socket) clears it. Portal never deletes zmx's files. Only an unreadable dir is an error; a missing one means no sessions. Sessions whose names start with `_` are Portal's own and are hidden from listings.
 - `Exists(ctx, name)`.
 - `Create(ctx, name, dir, command)` creates a detached session: `zmx attach <name> <cmd…>` with no terminal attached, succeeding only when zmx reports it created the session. A name already held, under any spelling the filesystem folds together, is refused with the held name. It starts 120×24 and reflows on attach.
 - `AttachCommand(ctx, name)` returns the argv the attach runner starts.
@@ -180,7 +180,7 @@ Borrowed from Switchboard, which grew these out of Portal's harness.
 - A `zmxtest` package gives each test its own short `ZMX_DIR` under the system temp dir, kept short for the socket limit, and kills every daemon in that directory at cleanup.
 - `TestMain` blanks `ZMX_DIR` and `ZMX_SESSION`, so a missed injection fails loudly instead of reaching the real sessions.
 - The test-safety rules in `CLAUDE.md` carry over with zmx in place of tmux: never the real `ZMX_DIR`, never a daemon the test didn't start.
-- Unit tests use the fake backend. The integration lane runs real zmx.
+- Unit tests use the fake backend, held to the driver by one contract suite (`backendtest.Contract`) that runs against the fake, the driver over fake daemons, and the driver over real zmx. The integration lane runs real zmx.
 
 ## Phases
 
