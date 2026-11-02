@@ -42,7 +42,7 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
 - `AttachCommand(name)` returns the argv the attach runner starts.
 - `Kill(name)`.
 - `Detach(name)` detaches every client of a session (`zmx detach`).
-- `History(name, rows)` returns the screen plus up to `rows` of scrollback, or everything, with colours (`zmx history --vt`).
+- `History(name)` returns the screen and all scrollback, with colours (`zmx history --vt`). zmx v0.8.1 has no bounded form, and cutting a VT stream by lines would break its modes, so callers take the last screenfuls they need after rendering.
 - `Current()` returns the session this process runs in, from `$ZMX_SESSION`.
 
 Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves about 70 bytes of name with `ZMX_DIR=$HOME/.local/state/zmx`. Generated names stay `{project}-{nanoid}`.
