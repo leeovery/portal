@@ -185,6 +185,7 @@ type Model struct {
 	aliasEditor    AliasEditor
 	sessionCreator SessionCreator
 	cwd            string
+	home           string
 	activePage     page
 	projectList    list.Model
 	initialFilter  string
@@ -660,6 +661,14 @@ func WithCWD(path string) Option {
 	}
 }
 
+// WithHome sets the home directory session directories are abbreviated against
+// in place of the process's; empty abbreviates nothing.
+func WithHome(home string) Option {
+	return func(m *Model) {
+		m.home = home
+	}
+}
+
 func WithProjectEditor(e ProjectEditor) Option {
 	return func(m *Model) {
 		m.projectEditor = e
@@ -889,6 +898,9 @@ func New(lister SessionLister, opts ...Option) Model {
 		// still themed — an empty Theme renders silently colourless. An injected
 		// nomination overwrites it in syncResolvedMode below.
 		themeState: themeState{active: defaultDarkTheme()},
+		// Resolved once, here, and overwritten by WithHome: nothing downstream
+		// reads the environment's home.
+		home: resolver.ProcessHome(),
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -953,6 +965,7 @@ func (m *Model) sessionDelegate() SessionDelegate {
 		Selected:    m.selectedSessions,
 		GoneFlagged: m.goneFlagged,
 		Pending:     m.pendingSessions,
+		Home:        m.home,
 	}
 }
 
@@ -1267,6 +1280,7 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	default:
 		items = ToListItems(filtered)
 	}
+	items = withHome(items, m.home)
 
 	// Recorded before the items are handed over, so the filter pass SetItems
 	// defers into a tea.Cmd can resolve the targets it is given.

@@ -17,15 +17,14 @@ const dirTruncationPrefix = "…"
 // separator-anchored tail behind dirTruncationPrefix. It returns the empty
 // string when not even the last whole segment fits beside that prefix — a
 // fragment of a segment reads as damage rather than as a path — and for an
-// empty directory or a non-positive width. Not environment-independent: the
-// abbreviation resolves the home directory, so one value renders differently
-// under a different $HOME.
-func fitSessionDir(dir string, width int) string {
+// empty directory or a non-positive width. The abbreviation is against home;
+// an empty home abbreviates nothing.
+func fitSessionDir(home, dir string, width int) string {
 	if dir == "" || width <= 0 {
 		return ""
 	}
 
-	value := resolver.AbbreviateHome(dir)
+	value := resolver.AbbreviateHome(home, dir)
 	if lipgloss.Width(value) <= width {
 		return value
 	}

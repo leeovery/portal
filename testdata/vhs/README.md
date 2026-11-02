@@ -6,6 +6,10 @@ judges the frame — against a committed design reference where one exists. It i
 what lets the implement → review loop terminate on something visual rather than on
 an assertion about a string.
 
+`frames/` holds the **golden frames**: what every fixture draws, as text and as
+24-bit ANSI, which the capture tests hold the code to cell for cell. Every screen
+change shows up as a frame diff. See "The golden frames" below.
+
 The capture mechanism is a **separate harness binary** (`cmd/capturetool`) that
 imports Portal's real `internal/tui`, builds the production model via the shared
 `tui.Build` constructor, and binds **every tmux seam to an in-memory fake**
@@ -22,9 +26,9 @@ before release.
 ## What lives here, and for how long
 
 **PNGs and the tapes that render them are scaffolding, not a durable asset.**
-There is no visual-regression obligation — nothing diffs a capture against a
-committed baseline — so a permanent image set would only be a directory of files
-that rot the first time a colour token is renamed. The rule:
+The regression baseline is `frames/`, which the tests read; nothing diffs a PNG
+against anything, so a permanent image set would only be a directory of files that
+rot the first time a colour token is renamed. The rule:
 
 > A capture and its tape are **created as work proceeds**, **committed while the
 > work is being collaborated on** (so the reviewer and the human open the same
@@ -41,6 +45,8 @@ when the work lands.
 |---|---|---|
 | `<fixture>.tape` | The `vhs` tape that drives one fixture and screenshots it | Scaffolding — cleared at sign-off |
 | `<fixture>.png` | The captured frame | Scaffolding — cleared at sign-off |
+| `frames/<stem>.txt` | A fixture's golden frame as its character grid: a line a row, trailing blanks trimmed | **Kept** — regenerated, never hand-edited |
+| `frames/<stem>.ansi` | The same frame in 24-bit colour, with no newline after the last row, so `cat` in a terminal of its size doesn't scroll it | **Kept** — regenerated, never hand-edited |
 | `reference/*.png` | Committed design exports — the frames the code was built *against* | **Kept** |
 | `LOCK-IN.md` | The light-tint lock-in record — pinned hexes, derivations, contrast ratios and the eyeball decision that settled them. A historical record; the captures it names were cleared long ago | **Kept** |
 | `.gifcache/*.gif` | Transient `vhs` byproduct (`vhs` requires an `Output`); tapes write it into the hidden subdir so the listing stays clean | **git-ignored**, never committed |
@@ -87,6 +93,94 @@ ttyd --version
 ffmpeg -version
 ```
 
+## The golden frames
+
+Every fixture, the standalone surfaces included, keeps a frame in `frames/`: a
+`.txt` and `.ansi` pair whose stem is the fixture's name and the terminal size it
+is drawn at, as in `sessions-flat-120x40`. All are drawn in `tokyo-night`
+(`capture.FramesThemeSlug`, pinned as a literal so moving the shipped default
+rewrites nothing), in colour whatever `NO_COLOR` says — the
+`sessions-pending-resume-colourless` fixture is colourless by its own declaration.
+
+The size is the one the screen is designed for:
+
+| Frames | Size | Why |
+|---|---|---|
+| Every picker fixture and the contrast swatch, unless below | `120x40` | the harness size the package's tests have always rendered at |
+| `theme-panel-narrow`, `theme-panel-confirm` | `63x40` | the panel's minimum-width terminal (`tui.ThemePanelMinWidthTerminal`); the narrow fixture declares it, the confirm wraps its message there |
+| `theme-panel-min-height-message` | `63x10` | its declared size: the minimum width on the panel's height floor |
+| `theme-panel-dir-unreadable` | `120x18` | short enough that the panel's list spans two pages, which is where the warning shows |
+| `resume-panel-*` (card) | `80x24` | the surface's pinned size |
+| `resume-panel-*-degraded` | `40x10` | the surface's pinned size, below the card |
+
+A fixture whose frame is a geometry declares its render size on the fixture; one
+designed for a size it doesn't pin sets its frame size there. Either way the
+stem names the size the frame is truly drawn at.
+
+### How the frames are held
+
+`internal/capture`'s `frames_test.go` holds each fixture to its frame, with the
+cells `cells_test.go` reads and compares:
+
+- **The fixture is drawn** at its frame's size in `tokyo-night` and read into cells
+  as a terminal reads it: a glyph a cell, each with its foreground, background, bold
+  and OSC 8 hyperlink, the SGR state carried from cell to cell until reset. What it
+  can't read as a terminal would is a failure, not a guess: an escape that is
+  neither SGR nor a hyperlink, an attribute but bold, a colour not in 24 bits, a
+  control character, or a glyph not one cell wide.
+- **Cell for cell** it's compared with the frame's `.ansi`, passing nothing but
+  what a terminal shows alike:
+  - **the terminal's background:** a cell whose background isn't painted shows
+    whatever the screen set the terminal's background to. The picker fixtures and
+    the contrast swatch set their canvas with OSC 11, so there an unpainted cell
+    counts as `tokyo-night`'s canvas. The resume surfaces are drawn into a pane and
+    set none, and a colourless fixture sets none, so there an unpainted cell
+    matches only an unpainted cell: a surface losing its painted canvas, or a
+    colourless screen gaining one, fails;
+  - **a blank's foreground and bold,** which nothing shows. A link is compared on
+    every cell, blank or not, since a linked space is clickable.
+
+  A drawn row shorter than its frame's is read as blank and unpainted to the
+  frame's width; a wider row, or a row more or fewer, fails. A failure names the
+  stem and lists the first 20 differing cells, each with its row and column
+  (counted from 1) and the frame's and the fixture's cell, then how many more.
+- **Every frame is a pair**, every frame has a fixture drawing it at its stem's
+  size, every fixture keeps a frame, and each `.ansi` reads to its `.txt` at the
+  stem's size. A stored `.ansi` has no newline after its last row, so it is read
+  back at its stem's height: a frame whose last row is unwritten still holds.
+- **Each fixture draws the same twice,** from two separately built worlds, which
+  catches state one draw leaves for the next and map-order output. Run in one
+  process, it can't see a dependence on the environment. Two such dependences are
+  known and closed:
+  - **the home directory:** the fixtures pass theirs as `tui.Deps.Home`, and every
+    frame is held again under `HOME` set to that home and to `/`;
+  - **East Asian ambiguous widths:** `RUNEWIDTH_EASTASIAN` or a CJK locale would
+    draw `▌` and the box glyphs two cells wide. The width libraries read them at
+    init, so the capture tests' `TestMain` (`capture.RunNarrow`) refuses to run
+    where they would, naming `RUNEWIDTH_EASTASIAN=0` as the fix. Write frames
+    with `--frames` from an environment without either.
+
+  No screen renders the time, so the clock isn't pinned.
+- **A frame written is a frame held:** a test writes frames with the capture tool's
+  writer, reads them back and holds each fixture to its own.
+
+### Regenerating the frames
+
+```bash
+go run ./cmd/capturetool --frames testdata/vhs/frames                          # every fixture
+go run ./cmd/capturetool --frames testdata/vhs/frames sessions-flat projects   # those named
+```
+
+`--frames` writes each named fixture's `.txt` and `.ansi`, at its own size, in
+`tokyo-night`: every fixture where none is named. It takes no other flag, writes
+nothing if a name has no fixture, and says each stem it writes. A fixture whose
+size changes writes a new stem; delete the old pair (the tests name it).
+
+**Regenerate in the same change that alters a screen,** once the new drawing is
+right, checking each altered frame with `--print`. **Never edit a frame by hand.**
+**An unintended frame change is a regression** to fix in the code, not a frame to
+rewrite.
+
 ## Viewing a screen live
 
 No tape needed to just *look* at something:
@@ -95,6 +189,17 @@ No tape needed to just *look* at something:
 go run ./cmd/capturetool --fixture sessions-flat
 go run ./cmd/capturetool --fixture theme-panel-confirm --theme nord
 ```
+
+Or print its frame once, without a terminal:
+
+```bash
+go run ./cmd/capturetool --fixture sessions-flat --print                         # text, at its frame size
+go run ./cmd/capturetool --fixture sessions-flat --print --ansi --size 100x30    # in colour, at a size
+```
+
+`--size` and `--ansi` take `--print`; live, the terminal gives the size and the
+frame is drawn in colour. A fixture or surface that pins a dimension keeps it
+whatever `--size` asks.
 
 `capture.FixtureNames()` lists every fixture; an empty or unknown `--fixture` errors
 with the list. **The tool replays no keys of its own**, so a screen reached by a
@@ -127,7 +232,7 @@ theme before renaming the file.
 
 There is no `--appearance` flag: a theme **is** light or dark, so there is no mode
 left to pin. Setting `NO_COLOR=1` in the environment renders the colourless path on
-the terminal's native background, whatever `--theme` named.
+the terminal's native background, whatever `--theme` named, live or printed.
 
 ## Running a tape
 
@@ -195,14 +300,16 @@ cmd/capturetool/main.go     # the separate harness binary (package main; NOT a p
 internal/capture/           # in-memory fakes + named fixtures (imported ONLY by the capture tool)
   fakes.go                  #   every tmux seam, faked: read seams return canned data; mutators are no-ops
   fixtures.go               #   FixtureByName / FixtureNames + the deterministic fixture data
+  frames.go                 #   Drawing (a fixture or surface at its frame size), WriteFrame, Plain
   theme_fake.go             #   the faked theme enumeration a panel fixture declares its rows through
   harness.go                #   builds a fixture's model and replays its captureKeys
   swatch.go                 #   the contrast-validation swatch (a standalone tea.Model; NOT tui.Build)
   resume_surfaces.go        #   the resume panel's standalone surfaces + StandaloneNames (NOT tui.Build)
 ```
 
-The tool takes `--fixture <name>`, resolves it via `resolveProgram`, and runs the
-resulting Bubble Tea model on the alt screen. Most fixtures resolve to the
+The tool's `run(args, stdout, stderr, getenv)` is the whole command, so its tests
+drive it as a user would. Live, it takes `--fixture <name>`, resolves it via
+`resolveProgram`, and runs the resulting Bubble Tea model on the alt screen. Most fixtures resolve to the
 production model with `tui.Build(fixture.Deps(theme))` — exactly the model and
 launch shape `cmd/open.go` uses, so the captured frame is the **real** TUI.
 
@@ -246,7 +353,10 @@ resolve them. All of them take a `--theme` like everything else.
    declared columns/rows. `Set Shell "bash"` for a deterministic
    prompt, launch `go run ./cmd/capturetool --fixture <name> --theme <slug>`, `Sleep`
    for the compile + first paint, type any keys, then `Screenshot "<...>.png"`.
-3. **Clear the tape and the PNG at sign-off.** Leave the fixture.
+3. **Write its frame** with `go run ./cmd/capturetool --frames testdata/vhs/frames <name>`
+   and commit it with the fixture; the tests fail until every fixture keeps one.
+   Set its frame size on the fixture if it's designed for one other than `120x40`.
+4. **Clear the tape and the PNG at sign-off.** Leave the fixture and its frame.
 
 **Do not delete a fixture to tidy up.** The swap-and-diff completeness guard renders
 *every* fixture the harness declares and never names one, so the fixture list **is**
@@ -270,7 +380,8 @@ orchestrator's job — there is no agent-runnable command for it.
 ## How the comparison is judged
 
 The capture is compared to its reference for **layout, structure, and colour-role
-match** — **agent/user-judged, NOT a pixel-diff gate**. The design export is an HTML
+match** — **agent/user-judged, NOT a pixel-diff gate** (the golden frames are the
+cell-for-cell gate; the reference is the design they began from). The design export is an HTML
 approximation (the real terminal uses the user's font and the theme's own hexes), so
 an exact pixel diff would always fail. The implementer self-checks, the reviewer
 gates, and the human opens both images side by side. Do not read colour values off a

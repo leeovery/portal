@@ -307,11 +307,10 @@ func escSeq(s string) string { return strings.ReplaceAll(s, "\x1b", "\\e") }
 
 func TestSessionRow_DirColumnSitsOneSpaceAfterTheName(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	for _, name := range []string{"a", "alpha-one", "a-considerably-longer-session-name"} {
 		items := flatItems(tmux.Session{Name: name, Windows: 2, Dir: home + "/Code/portal"})
-		out := renderRow(SessionDelegate{ShowDir: true}, 80, items, 0, 0)
+		out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 80, items, 0, 0)
 
 		nameCol := visibleColOf(out, name)
 		dirCol := visibleColOf(out, "~/Code/portal")
@@ -326,10 +325,9 @@ func TestSessionRow_DirColumnSitsOneSpaceAfterTheName(t *testing.T) {
 
 func TestSessionRow_DirColumnOffRendersTodaysRow(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		d := SessionDelegate{Theme: th}
+		d := SessionDelegate{Home: home, Theme: th}
 		withDir := renderRow(d, 80, flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal"}), 0, 0)
 		without := renderRow(d, 80, flatItems(tmux.Session{Name: "alpha", Windows: 2}), 0, 0)
 
@@ -353,7 +351,6 @@ func TestSessionRow_DirColumnRendersNoSeparatorWithoutARecordedDirectory(t *test
 
 func TestSessionRow_DirColumnKeepsTheRowExactlyTheListWidth(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	tests := []struct {
 		name  string
@@ -370,7 +367,7 @@ func TestSessionRow_DirColumnKeepsTheRowExactlyTheListWidth(t *testing.T) {
 			items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Attached: true, Dir: tc.dir})
 			for _, sel := range []int{0, 1} {
 				for _, colourless := range []bool{false, true} {
-					d := SessionDelegate{Theme: testDarkTheme(t), ShowDir: true, Colourless: colourless}
+					d := SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true, Colourless: colourless}
 					out := renderRow(d, tc.width, items, 0, sel)
 					if got := lipgloss.Width(out); got != tc.width {
 						t.Errorf("sel=%d colourless=%v row width = %d, want exactly %d: %q", sel, colourless, got, tc.width, ansi.Strip(out))
@@ -383,14 +380,13 @@ func TestSessionRow_DirColumnKeepsTheRowExactlyTheListWidth(t *testing.T) {
 
 func TestSessionRow_DirColumnKeepsTrailingSlotsAligned(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	items := flatItems(
 		tmux.Session{Name: "a", Windows: 1, Attached: true, Dir: home + "/Code/portal"},
 		tmux.Session{Name: "a-much-longer-session-name", Windows: 5, Attached: true, Dir: home + "/x"},
 		tmux.Session{Name: "mid-name", Windows: 2, Attached: true},
 	)
-	d := SessionDelegate{ShowDir: true}
+	d := SessionDelegate{Home: home, ShowDir: true}
 
 	var wantCount, wantBullet int
 	for i := range items {
@@ -415,10 +411,9 @@ func TestSessionRow_DirColumnKeepsTrailingSlotsAligned(t *testing.T) {
 
 func TestSessionRow_DirColumnLeftTruncatesTheDirectoryAndNeverTheName(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal/internal/tui"})
-	out := renderRow(SessionDelegate{ShowDir: true}, 41, items, 0, 0)
+	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 41, items, 0, 0)
 	vis := ansi.Strip(out)
 
 	if !strings.Contains(vis, "alpha") {
@@ -434,10 +429,9 @@ func TestSessionRow_DirColumnLeftTruncatesTheDirectoryAndNeverTheName(t *testing
 
 func TestSessionRow_DirColumnDropsTheDirectoryBelowTheFloor(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal/internal/tui"})
-	out := renderRow(SessionDelegate{ShowDir: true}, 25, items, 0, 0)
+	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 25, items, 0, 0)
 	vis := ansi.Strip(out)
 
 	if !strings.Contains(vis, "alpha") {
@@ -450,7 +444,6 @@ func TestSessionRow_DirColumnDropsTheDirectoryBelowTheFloor(t *testing.T) {
 
 func TestSessionRow_DirColumnLeavesAnOverLongNameTruncatedAsItIsWithTheColumnOff(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	sess := tmux.Session{
 		Name:     "this-is-a-really-very-long-session-name-that-overflows",
@@ -458,8 +451,8 @@ func TestSessionRow_DirColumnLeavesAnOverLongNameTruncatedAsItIsWithTheColumnOff
 		Attached: true,
 		Dir:      home + "/Code/portal",
 	}
-	on := renderRow(SessionDelegate{ShowDir: true}, 60, flatItems(sess), 0, 0)
-	off := renderRow(SessionDelegate{}, 60, flatItems(sess), 0, 0)
+	on := renderRow(SessionDelegate{Home: home, ShowDir: true}, 60, flatItems(sess), 0, 0)
+	off := renderRow(SessionDelegate{Home: home}, 60, flatItems(sess), 0, 0)
 
 	if on != off {
 		t.Errorf("an over-long name rendered differently with the column on:\n got %q\nwant %q", escSeq(on), escSeq(off))
@@ -471,7 +464,6 @@ func TestSessionRow_DirColumnLeavesAnOverLongNameTruncatedAsItIsWithTheColumnOff
 
 func TestSessionRow_DirColumnTakesTheWindowCountsToken(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 	const dirText = "~/Code/portal"
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
@@ -479,7 +471,7 @@ func TestSessionRow_DirColumnTakesTheWindowCountsToken(t *testing.T) {
 			tmux.Session{Name: "row-zero", Windows: 2, Dir: home + "/Code/portal"},
 			tmux.Session{Name: "row-one", Windows: 2, Dir: home + "/Code/portal"},
 		)
-		d := SessionDelegate{Theme: th, ShowDir: true}
+		d := SessionDelegate{Home: home, Theme: th, ShowDir: true}
 
 		sel := renderRow(d, 80, items, 0, 0)
 		wantSel := lipgloss.NewStyle().
@@ -503,11 +495,10 @@ func TestSessionRow_DirColumnTakesTheWindowCountsToken(t *testing.T) {
 
 func TestSessionRow_DirColumnSeparatingSpaceCarriesTheSelectionTint(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal"})
-		out := renderRow(SessionDelegate{Theme: th, ShowDir: true}, 80, items, 0, 0)
+		out := renderRow(SessionDelegate{Home: home, Theme: th, ShowDir: true}, 80, items, 0, 0)
 
 		cells := scanCellBackgrounds(out)
 		start := visibleColOf(out, "~/Code/portal") - 1
@@ -526,11 +517,10 @@ func TestSessionRow_DirColumnSeparatingSpaceCarriesTheSelectionTint(t *testing.T
 
 func TestSessionRow_DirColumnRendersTheSameSingleSpaceWhenColourless(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Attached: true, Dir: home + "/Code/portal"})
-	coloured := renderRow(SessionDelegate{Theme: testDarkTheme(t), ShowDir: true}, 80, items, 0, 0)
-	colourless := renderRow(SessionDelegate{Theme: testDarkTheme(t), ShowDir: true, Colourless: true}, 80, items, 0, 0)
+	coloured := renderRow(SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true}, 80, items, 0, 0)
+	colourless := renderRow(SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true, Colourless: true}, 80, items, 0, 0)
 
 	if got, want := ansi.Strip(colourless), strings.Replace(ansi.Strip(coloured), rowIndicatorGlyph, attachedIndicatorLetter, 1); got != want {
 		t.Errorf("colourless row text differs from the coloured row's:\n got %q\nwant %q", got, want)
@@ -539,10 +529,9 @@ func TestSessionRow_DirColumnRendersTheSameSingleSpaceWhenColourless(t *testing.
 
 func TestSessionRow_DirColumnNarrowsByAGroupedRowsIndent(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	sess := tmux.Session{Name: "s", Windows: 2, Dir: home + "/Code/portal/internal/tui"}
-	d := SessionDelegate{ShowDir: true}
+	d := SessionDelegate{Home: home, ShowDir: true}
 
 	flat := renderRow(d, 42, []list.Item{SessionItem{Session: sess}}, 0, 0)
 	grouped := renderRow(d, 42, []list.Item{SessionItem{Session: sess, GroupKey: "k"}}, 0, 0)
@@ -560,10 +549,9 @@ func TestSessionRow_DirColumnNarrowsByAGroupedRowsIndent(t *testing.T) {
 
 func TestSessionRow_DirColumnRendersWholeOnAnUnsizedList(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal/internal/tui"})
-	out := renderRow(SessionDelegate{ShowDir: true}, 0, items, 0, 0)
+	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 0, items, 0, 0)
 	vis := ansi.Strip(out)
 
 	if !strings.Contains(vis, "alpha ~/Code/portal/internal/tui") {
@@ -573,7 +561,6 @@ func TestSessionRow_DirColumnRendersWholeOnAnUnsizedList(t *testing.T) {
 
 func TestSessionRow_DirColumnNeverOverflowsAtNarrowWidths(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	for _, w := range []int{1, 5, 10, 20, 25, 26, 29, 40, 80} {
 		for _, sess := range []tmux.Session{
@@ -582,7 +569,7 @@ func TestSessionRow_DirColumnNeverOverflowsAtNarrowWidths(t *testing.T) {
 		} {
 			items := flatItems(sess)
 			for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-				out := renderRow(SessionDelegate{Theme: th, ShowDir: true}, w, items, 0, 0)
+				out := renderRow(SessionDelegate{Home: home, Theme: th, ShowDir: true}, w, items, 0, 0)
 				if got := lipgloss.Width(out); got > w {
 					t.Errorf("[w=%d %v %q] row width = %d, overflows the list width %d", w, themeLabel(th), sess.Name, got, w)
 				}
@@ -596,7 +583,6 @@ func TestSessionRow_DirColumnNeverOverflowsAtNarrowWidths(t *testing.T) {
 // out of the right margin. An intact margin is what says nothing was cut.
 func TestSessionRow_DirColumnNeverLeansOnThePathologicalWidthBackstop(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	margin := strings.Repeat(" ", rowRightMargin)
 	narrowest := leftBarColumnWidth + nameGap + countSlotWidth + indicatorSlotWidth + rowRightMargin + 1
@@ -610,7 +596,7 @@ func TestSessionRow_DirColumnNeverLeansOnThePathologicalWidthBackstop(t *testing
 			for _, attached := range []bool{false, true} {
 				items := flatItems(tmux.Session{Name: name, Windows: 3, Attached: attached, Dir: dir})
 				for w := narrowest; w <= 120; w++ {
-					out := renderRow(SessionDelegate{ShowDir: true}, w, items, 0, 0)
+					out := renderRow(SessionDelegate{Home: home, ShowDir: true}, w, items, 0, 0)
 					if vis := ansi.Strip(out); !strings.HasSuffix(vis, margin) {
 						t.Errorf("[w=%d %q %q attached=%v] row lost its right margin to the width backstop: %q", w, name, dir, attached, vis)
 					}

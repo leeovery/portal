@@ -1,0 +1,10 @@
+
+  P O R T A L ▌                      ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ Themes
+                                     │ ▌ nord          ● dark
+  Sessions 12                        │ ⚠ couldn't save theme
+                                     │ ⏎   set theme
+  ▌ orchard-pipeline-code-based      │ d   set as dark
+                                     │ l   set as light
+                         ••••••••••••│ esc close
+

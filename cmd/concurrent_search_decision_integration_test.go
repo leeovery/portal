@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -74,7 +75,7 @@ func driveSearchColdBoot(t *testing.T, client *tmux.Client, stateDir, term strin
 		if err != nil {
 			return "", err
 		}
-		if matches := searchMatches(term, sessions); len(matches) == 1 {
+		if matches := searchMatches(resolver.ProcessHome(), term, sessions); len(matches) == 1 {
 			return matches[0].Name, nil
 		}
 		return "", nil

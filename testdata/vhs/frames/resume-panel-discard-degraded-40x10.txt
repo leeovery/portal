@@ -1,0 +1,10 @@
+▲ Discard resume?
+cd ~/code/portal/internal/capture &&
+./scripts/watch --session 45604077-a9d0-
+41bd-9692-b97f63f237fc
+
+Removes this pane's resume command
+permanently. The session and its
+scrollback are untouched.
+y discard   esc cancel
+

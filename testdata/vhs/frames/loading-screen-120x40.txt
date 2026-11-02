@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+
+
+                                        █████ █████ █████ █████ █████ █       █
+                                        █   █ █   █ █   █   █   █   █ █       █
+                                        █████ █   █ █████   █   █████ █       █
+                                        █     █   █ █  █    █   █   █ █       █
+                                        █     █████ █   █   █   █   █ █████   █
+
+
+                                        ███████████████████████████████████████
+
+
+                                             ✓   Started tmux server
+                                             ✓   Registered hooks
+                                             ◐   Restoring sessions  8 / 12
+                                             ·   Replaying scrollback
+                                             ·   Running resume commands
+
+
+
+
+
+
+
+
+
+
+
+
+

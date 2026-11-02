@@ -1,0 +1,40 @@
+
+  P O R T A L ▌
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                                                                                        │
+  Sessions 12                                                                           │ Themes
+                                                                                        │
+  ▌ orchard-pipeline-code-based                                                         │   aurora-glow   ⚠ bad syntax
+    orchard-pipeline-codify                                                             │   gitlab-dark-grey
+    kiln-relayx-explore                                                                 │   horizon
+    lumen webhooks and watchers                                                         │   My Gorgeous Midnight Pa… ⚠
+    tessera-proxy-Vb3kQw                                                                │   nord
+    atelier-web-m4TzpD                                                                  │   nord-frost        ⚠ ● dark
+    lumen-sync-engine                                                                   │   nord-wave
+    kiln-aws-migration                                                                  │ ▌ tokyo-night
+    relay-v1-api-Hq7wNe                                                                 │   tokyo-night-day    ● light
+    relayx-3RJDWA                                                                       │
+    loom-p84cXa                                                                         │
+    quill-Ue9fLr                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │
+                                                                                        │ ⏎   set theme
+                                                                                        │ d   set as dark
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔│ l   set as light
+  ⏎ attach · / filter · ␣ preview · s switch view · x projects · t theme · m multi      │ esc close
+

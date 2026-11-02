@@ -89,11 +89,11 @@ func TestPanelFixture_InvalidRowFrame(t *testing.T) {
 	})
 
 	t.Run("the persisted invalid row keeps its badge and loses its reason", func(t *testing.T) {
-		if got := rows["nord-lee"].badge; !strings.Contains(got, "● dark") {
-			t.Errorf("the nord-lee row's trailing elements = %q, want the `● dark` badge — the badge marks what is SET, and a fallback never moves it", got)
+		if got := rows["nord-frost"].badge; !strings.Contains(got, "● dark") {
+			t.Errorf("the nord-frost row's trailing elements = %q, want the `● dark` badge — the badge marks what is SET, and a fallback never moves it", got)
 		}
-		if got := rows["nord-lee"].badge; strings.Contains(got, "bad colour") {
-			t.Errorf("the nord-lee row still renders its reason (%q); the badge outranks the reason, so a badged row has no reason slot to fill", got)
+		if got := rows["nord-frost"].badge; strings.Contains(got, "bad colour") {
+			t.Errorf("the nord-frost row still renders its reason (%q); the badge outranks the reason, so a badged row has no reason slot to fill", got)
 		}
 	})
 
@@ -111,7 +111,7 @@ func TestPanelFixture_InvalidRowFrame(t *testing.T) {
 		if !rows["tokyo-night"].cursor {
 			t.Error("the cursor is not on tokyo-night; the arrow skip keeps it off invalid rows, so a frame with it parked on one is a state production cannot reach")
 		}
-		for _, invalid := range []string{"aurora-glow", "nord-lee"} {
+		for _, invalid := range []string{"aurora-glow", "nord-frost"} {
 			if rows[invalid].cursor {
 				t.Errorf("the cursor is on the invalid row %s", invalid)
 			}
@@ -134,7 +134,7 @@ func TestPanelFixture_DirUnreadableIsChromeOnPageTwo(t *testing.T) {
 	frame := panelFrameAt(t, "theme-panel-dir-unreadable", themetest.Builtin(t, "tokyo-night"), harnessWidth, dirUnreadablePanelTermHeight)
 	visible := ansi.Strip(frame)
 
-	if strings.Contains(visible, "nord-lee") {
+	if strings.Contains(visible, "nord-frost") {
 		t.Fatalf("the frame still shows the page-1 rows, so the `Ctrl+↓` never paged and this asserts nothing about chrome:\n%s", visible)
 	}
 
@@ -147,7 +147,7 @@ func TestPanelFixture_DirUnreadableIsChromeOnPageTwo(t *testing.T) {
 	if dirRow <= header {
 		t.Errorf("the directory row is on line %d and the header on line %d; it is pinned DIRECTLY BENEATH the header", dirRow, header)
 	}
-	for _, row := range []string{"solarized-lee", "tokyo-night"} {
+	for _, row := range []string{"solarized-dusk", "tokyo-night"} {
 		at, _ := panelRowLine(t, frame, row)
 		if at <= dirRow {
 			t.Errorf("theme row %s renders on line %d, above the pinned directory row on line %d", row, at, dirRow)
@@ -166,8 +166,8 @@ func TestPanelFixture_RowsBeneathDirRow(t *testing.T) {
 	})
 
 	t.Run("a persisted-slug row keeps its badge beneath it", func(t *testing.T) {
-		if got := rows["solarized-lee"].badge; !strings.Contains(got, "● light") {
-			t.Errorf("the persisted row solarized-lee's trailing elements = %q, want the `● light` badge — losing it is the regression this pins", got)
+		if got := rows["solarized-dusk"].badge; !strings.Contains(got, "● light") {
+			t.Errorf("the persisted row solarized-dusk's trailing elements = %q, want the `● light` badge — losing it is the regression this pins", got)
 		}
 	})
 }
@@ -261,7 +261,7 @@ func TestPanelFixture_OverProjects(t *testing.T) {
 		if model.ActivePage() != tui.PageProjects {
 			t.Errorf("ActivePage() = %d, want PageProjects — the `x` its captureKeys type never landed", model.ActivePage())
 		}
-		if !strings.Contains(visible, "flow-v1-api") {
+		if !strings.Contains(visible, "relay-v1-api") {
 			t.Errorf("the frame carries no project rows:\n%s", visible)
 		}
 	})

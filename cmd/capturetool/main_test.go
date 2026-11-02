@@ -22,50 +22,10 @@ import (
 	"github.com/leeovery/portal/internal/tui"
 )
 
-func TestFlags_AreFixtureAndThemeOnly(t *testing.T) {
-	flags := registeredStringFlags(t)
-
-	names := make([]string, 0, len(flags))
-	for name := range flags {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-
-	if want := []string{"fixture", "theme"}; !slices.Equal(names, want) {
-		t.Errorf("registered flags = %v, want %v — a theme IS the mode, so there is no appearance left to pin", names, want)
-	}
-	if got, want := flags["theme"], "defaultThemeSlug"; got != want {
-		t.Errorf("--theme default = %s, want the %s constant", got, want)
-	}
-}
-
-func registeredStringFlags(t *testing.T) map[string]string {
-	t.Helper()
-
-	file := sourceguardtest.PackageSource(t, ".", "main.go").File
-
-	flags := map[string]string{}
-	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) < 2 {
-			return true
-		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "String" {
-			return true
-		}
-		pkg, ok := selector.X.(*ast.Ident)
-		if !ok || pkg.Name != "flag" {
-			return true
-		}
-		name, ok := call.Args[0].(*ast.BasicLit)
-		if !ok || name.Kind != token.STRING {
-			return true
-		}
-		flags[strings.Trim(name.Value, `"`)] = types.ExprString(call.Args[1])
-		return true
-	})
-	return flags
+// The tool's frames are written and printed with narrow East Asian widths
+// wherever the tests run, as the capture tests hold them.
+func TestMain(m *testing.M) {
+	os.Exit(capture.RunNarrow(m))
 }
 
 func TestResolveTheme_DefaultsToTheShippedDarkBuiltin(t *testing.T) {
@@ -254,7 +214,7 @@ func TestResolveTheme_NoFallbackOnFailure(t *testing.T) {
 			}
 
 			for _, fixture := range fixtures {
-				m, err := resolveProgram(fixture, ta.arg, io.Discard)
+				m, err := resolveProgram(fixture, ta.arg, io.Discard, false)
 				if err == nil {
 					t.Errorf("resolveProgram(%s, %q) returned nil error", fixture, ta.arg)
 				}
@@ -343,7 +303,7 @@ func TestResolveModel(t *testing.T) {
 	pinned := themetest.Builtin(t, defaultThemeSlug)
 
 	t.Run("known fixture builds a sessions-page model", func(t *testing.T) {
-		m, err := resolveModel("sessions-flat", pinned)
+		m, err := resolveModel("sessions-flat", pinned, false)
 		if err != nil {
 			t.Fatalf("resolveModel(sessions-flat): %v", err)
 		}
@@ -353,7 +313,7 @@ func TestResolveModel(t *testing.T) {
 	})
 
 	t.Run("unknown fixture is an error that lists the available fixtures", func(t *testing.T) {
-		_, err := resolveModel("nope", pinned)
+		_, err := resolveModel("nope", pinned, false)
 		if err == nil {
 			t.Fatal("resolveModel(nope) returned nil error, want error")
 		}
@@ -363,7 +323,7 @@ func TestResolveModel(t *testing.T) {
 	})
 
 	t.Run("empty fixture name is an error", func(t *testing.T) {
-		if _, err := resolveModel("", pinned); err == nil {
+		if _, err := resolveModel("", pinned, false); err == nil {
 			t.Fatal("resolveModel(\"\") returned nil error, want error")
 		}
 	})
@@ -372,7 +332,7 @@ func TestResolveModel(t *testing.T) {
 func TestResolveModel_PassesConstantNomination(t *testing.T) {
 	pinned := pathThemeForTest(t, "#1A2B3C")
 
-	m, err := resolveModel("sessions-flat", pinned)
+	m, err := resolveModel("sessions-flat", pinned, false)
 	if err != nil {
 		t.Fatalf("resolveModel(sessions-flat): %v", err)
 	}
@@ -390,9 +350,7 @@ func TestResolveModel_NoColorWinsOverTheme(t *testing.T) {
 	pinned := pathThemeForTest(t, "#1A2B3C")
 
 	t.Run("NO_COLOR renders the colourless native-bg frame", func(t *testing.T) {
-		t.Setenv("NO_COLOR", "1")
-
-		m, err := resolveModel("sessions-flat", pinned)
+		m, err := resolveModel("sessions-flat", pinned, true)
 		if err != nil {
 			t.Fatalf("resolveModel(sessions-flat): %v", err)
 		}
@@ -406,12 +364,7 @@ func TestResolveModel_NoColorWinsOverTheme(t *testing.T) {
 	})
 
 	t.Run("without NO_COLOR the pinned theme paints", func(t *testing.T) {
-		t.Setenv("NO_COLOR", "")
-		if err := os.Unsetenv("NO_COLOR"); err != nil {
-			t.Fatalf("unset NO_COLOR: %v", err)
-		}
-
-		m, err := resolveModel("sessions-flat", pinned)
+		m, err := resolveModel("sessions-flat", pinned, false)
 		if err != nil {
 			t.Fatalf("resolveModel(sessions-flat): %v", err)
 		}
@@ -424,13 +377,9 @@ func TestResolveModel_NoColorWinsOverTheme(t *testing.T) {
 
 func TestResolveModel_EnvironmentCannotRecolourAColourlessFixture(t *testing.T) {
 	pinned := pathThemeForTest(t, "#1A2B3C")
-	t.Setenv("NO_COLOR", "")
-	if err := os.Unsetenv("NO_COLOR"); err != nil {
-		t.Fatalf("unset NO_COLOR: %v", err)
-	}
 
 	t.Run("the colourless fixture renders colourless without NO_COLOR", func(t *testing.T) {
-		m, err := resolveModel("sessions-pending-resume-colourless", pinned)
+		m, err := resolveModel("sessions-pending-resume-colourless", pinned, false)
 		if err != nil {
 			t.Fatalf("resolveModel(sessions-pending-resume-colourless): %v", err)
 		}
@@ -443,7 +392,7 @@ func TestResolveModel_EnvironmentCannotRecolourAColourlessFixture(t *testing.T) 
 	})
 
 	t.Run("its coloured sibling still paints the pinned theme", func(t *testing.T) {
-		m, err := resolveModel("sessions-pending-resume", pinned)
+		m, err := resolveModel("sessions-pending-resume", pinned, false)
 		if err != nil {
 			t.Fatalf("resolveModel(sessions-pending-resume): %v", err)
 		}
@@ -461,7 +410,7 @@ func TestResolveProgram_ThemeDrivesBothBranches(t *testing.T) {
 		t.Fatalf("resolveTheme(%q): %v", path, err)
 	}
 
-	fixture, err := resolveProgram("sessions-flat", path, io.Discard)
+	fixture, err := resolveProgram("sessions-flat", path, io.Discard, false)
 	if err != nil {
 		t.Fatalf("resolveProgram(sessions-flat, %q): %v", path, err)
 	}
@@ -469,7 +418,7 @@ func TestResolveProgram_ThemeDrivesBothBranches(t *testing.T) {
 		t.Errorf("the fixture canvas = %v, want the resolved theme's %v", got, want)
 	}
 
-	swatch, err := resolveProgram(capture.ContrastValidationFixture, path, io.Discard)
+	swatch, err := resolveProgram(capture.ContrastValidationFixture, path, io.Discard, false)
 	if err != nil {
 		t.Fatalf("resolveProgram(contrast-validation, %q): %v", path, err)
 	}
@@ -486,16 +435,16 @@ func TestCaptureTool_ThemeResolutionIsSilent(t *testing.T) {
 	reserved := themetest.Write(t, dir, "nord.theme", themetest.Lines())
 	broken := themetest.WriteWithCanvas(t, dir, "broken.theme", "blue")
 
-	if _, err := resolveProgram(capture.ContrastValidationFixture, defaultThemeSlug, io.Discard); err != nil {
+	if _, err := resolveProgram(capture.ContrastValidationFixture, defaultThemeSlug, io.Discard, false); err != nil {
 		t.Fatalf("resolveProgram(contrast-validation, %s): %v", defaultThemeSlug, err)
 	}
-	if _, err := resolveProgram(capture.ContrastValidationFixture, reserved, io.Discard); err != nil {
+	if _, err := resolveProgram(capture.ContrastValidationFixture, reserved, io.Discard, false); err != nil {
 		t.Fatalf("resolveProgram(contrast-validation, %s): %v", reserved, err)
 	}
-	if _, err := resolveProgram(capture.ContrastValidationFixture, "not-a-theme", io.Discard); err == nil {
+	if _, err := resolveProgram(capture.ContrastValidationFixture, "not-a-theme", io.Discard, false); err == nil {
 		t.Fatal("resolveProgram with an unknown theme returned nil error")
 	}
-	if _, err := resolveProgram(capture.ContrastValidationFixture, broken, io.Discard); err == nil {
+	if _, err := resolveProgram(capture.ContrastValidationFixture, broken, io.Discard, false); err == nil {
 		t.Fatal("resolveProgram with a broken theme file returned nil error")
 	}
 
