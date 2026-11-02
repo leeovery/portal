@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/fileutil"
 )
 
@@ -29,7 +30,7 @@ func RecordRestoredPaneTokens(dir string, ties []RestoredPaneToken) error {
 	if len(ties) == 0 {
 		return nil
 	}
-	lock, err := acquireCommitLock(dir)
+	lock, err := commitlock.Acquire(dir)
 	if err != nil {
 		return err
 	}

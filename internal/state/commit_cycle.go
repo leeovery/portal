@@ -2,33 +2,21 @@ package state
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"slices"
-	"time"
 
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/fileutil"
-	"golang.org/x/sys/unix"
 )
-
-const commitLockName = "commit.lock"
 
 // ErrCommitLockHeld separates contention on the commit lock from a genuine
 // open(2)/flock failure.
-var ErrCommitLockHeld = errors.New("commit lock held by another committer")
-
-// commitLockTimeout bounds the acquire. An unbounded acquire would park the
-// daemon's tick loop behind a holder that is alive but stuck.
-var commitLockTimeout = 5 * time.Second
-
-var commitLockPollInterval = 5 * time.Millisecond
+var ErrCommitLockHeld = commitlock.ErrHeld
 
 // CommitLock is the sidecar every committing cycle holds exclusively. It is not
 // daemon.lock, which the daemon holds for its whole life.
-func CommitLock(dir string) string { return filepath.Join(dir, commitLockName) }
+func CommitLock(dir string) string { return commitlock.Path(dir) }
 
 // CommitCycle is one committing cycle: capture, re-file, the caller's dump,
 // then the commit and its housekeeping pass.
@@ -172,7 +160,7 @@ func (w ScrollbackWriter) savedTranscript(paneKey string) string {
 // committed names that file on the deferred pane's record alone. A failed
 // write is logged at WARN and does not fail the cycle, which has committed.
 func RunCommitCycle(cycle CommitCycle) (CaptureCycle, error) {
-	lock, err := acquireCommitLock(cycle.Dir)
+	lock, err := commitlock.Acquire(cycle.Dir)
 	if err != nil {
 		return CaptureCycle{}, err
 	}
@@ -396,31 +384,5 @@ func fileWritten(idx *Index, filed map[string]string) {
 				}
 			}
 		}
-	}
-}
-
-// The lock is released by closing the returned file, and by the kernel when
-// the holding process exits, so a crashed holder never wedges the next one.
-func acquireCommitLock(dir string) (*os.File, error) {
-	path := CommitLock(dir)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open commit lock: %w", err)
-	}
-	deadline := time.Now().Add(commitLockTimeout)
-	for {
-		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			return f, nil
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) {
-			_ = f.Close()
-			return nil, fmt.Errorf("flock commit lock %s: %w", path, err)
-		}
-		if !time.Now().Before(deadline) {
-			_ = f.Close()
-			return nil, fmt.Errorf("%w: %s", ErrCommitLockHeld, path)
-		}
-		time.Sleep(commitLockPollInterval)
 	}
 }
