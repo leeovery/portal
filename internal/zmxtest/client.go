@@ -19,7 +19,10 @@ type Client struct {
 // a client whose stdin reaches EOF.
 func Attach(t *testing.T, b *zmx.Backend, name string) *Client {
 	t.Helper()
-	attach := b.AttachCommand(name)
+	attach, err := b.AttachCommand(name)
+	if err != nil {
+		t.Fatalf("attach command for %s: %v", name, err)
+	}
 	cmd := exec.Command(attach.Argv[0], attach.Argv[1:]...)
 	cmd.Env = attach.Env
 	cmd.Stdout = io.Discard
@@ -34,7 +37,7 @@ func Attach(t *testing.T, b *zmx.Backend, name string) *Client {
 	go func() { c.done <- cmd.Wait() }()
 	t.Cleanup(func() {
 		_ = stdin.Close()
-		if !c.Exited(teardownTimeout) {
+		if !c.Exited(settle) {
 			_ = cmd.Process.Kill()
 			t.Errorf("zmx attach %s outlived its stdin", name)
 		}

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,12 +25,15 @@ import (
 // 103 bytes on macOS, and $TMPDIR there is ~50 bytes on its own.
 const root = "/tmp"
 
-const teardownTimeout = 5 * time.Second
+// settle bounds each wait at teardown for daemons to exit.
+const settle = 5 * time.Second
 
 // New returns a Backend bound to a fresh zmx directory under /tmp. Sessions
 // run /bin/sh with HOME in a temp dir, so none reads the developer's shell
-// config. At cleanup every session in the directory is killed, a daemon that
-// outlives its kill fails the test, and the directory is removed.
+// config, and no run inherits ZMX_SESSION or ZMX_SESSION_PREFIX, whatever the
+// consuming package's TestMain does. At cleanup every session in the
+// directory is killed, a daemon that outlives its kill fails the test and is
+// killed itself, and the directory is removed.
 func New(t *testing.T) *zmx.Backend {
 	t.Helper()
 	if _, err := exec.LookPath("zmx"); err != nil {
@@ -41,7 +45,10 @@ func New(t *testing.T) *zmx.Backend {
 	}
 	home := t.TempDir()
 	environ := func() []string {
-		return append(os.Environ(), "SHELL=/bin/sh", "HOME="+home)
+		env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+			return strings.HasPrefix(kv, "ZMX_SESSION=") || strings.HasPrefix(kv, "ZMX_SESSION_PREFIX=")
+		})
+		return append(env, "SHELL=/bin/sh", "HOME="+home)
 	}
 	b := zmx.New(dir, environ, zmx.ExecRunner{})
 	t.Cleanup(func() {
@@ -53,67 +60,101 @@ func New(t *testing.T) *zmx.Backend {
 	return b
 }
 
-func teardown(t *testing.T, b *zmx.Backend) {
+// teardown kills every session in the Backend's directory and waits for its
+// daemons to exit. A daemon still running after that fails t and is sent
+// SIGKILL. It finds daemons by their own environment as well as through zmx,
+// so a session zmx cannot list or reach is not orphaned.
+func teardown(t harnesstest.TestingT, b *zmx.Backend) {
+	t.Helper()
+	killSessions(t, b)
+	if awaitNoDaemons(t, b.Dir()) {
+		return
+	}
+	survivors := daemons(b.Dir())
+	t.Errorf("zmxtest teardown: daemons %v in %s survived their kill; sending SIGKILL", survivors, b.Dir())
+	for _, pid := range survivors {
+		// Re-proved just before signalling: a pid can be reused.
+		if ownedBy(pid, b.Dir()) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+	if !awaitNoDaemons(t, b.Dir()) {
+		t.Errorf("zmxtest teardown: daemons %v in %s survived SIGKILL", daemons(b.Dir()), b.Dir())
+	}
+}
+
+func killSessions(t harnesstest.TestingT, b *zmx.Backend) {
 	t.Helper()
 	sessions, err := b.List()
 	if err != nil {
-		t.Errorf("zmxtest teardown: list %s: %v", b.Dir(), err)
+		t.Errorf("zmxtest teardown: %v", err)
 		return
 	}
-	var daemons []int
 	for _, s := range sessions {
-		if pid := parentPID(s.PID); pid > 1 {
-			daemons = append(daemons, pid)
-		}
 		if err := b.Kill(s.Name); err != nil && !errors.Is(err, backend.ErrNoSuchSession) {
 			t.Errorf("zmxtest teardown: %v", err)
 		}
 	}
-	if harnesstest.PollUntil(t, teardownTimeout, 20*time.Millisecond, func() bool {
-		left, err := b.List()
-		return err == nil && len(left) == 0 && len(alive(daemons)) == 0
-	}) {
-		return
+}
+
+func awaitNoDaemons(t harnesstest.TestingT, dir string) bool {
+	t.Helper()
+	return harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+		return len(daemons(dir)) == 0
+	})
+}
+
+// daemons returns the pids of the zmx processes started for dir, daemons and
+// attach clients alike: this user's processes whose argv is zmx attach and
+// whose environment sets ZMX_DIR to dir. The Backend sets ZMX_DIR on every
+// run, and a daemon keeps the environment of the run that forked it.
+func daemons(dir string) []int {
+	out, err := exec.Command("ps", "-x", "-ww", "-E", "-o", "pid=,command=").Output()
+	if err != nil {
+		return nil
 	}
-	left, _ := b.List()
-	survivors := alive(daemons)
-	t.Errorf("zmxtest teardown: in %s, sessions %+v and daemons %v survived their kill", b.Dir(), left, survivors)
-	for _, pid := range survivors {
-		// Re-read just before signalling: a pid can be reused.
-		if isZmxDaemon(pid) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
+	var pids []int
+	for line := range strings.Lines(string(out)) {
+		pidField, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
+		pid, err := strconv.Atoi(pidField)
+		if err == nil && isDaemonOf(rest, dir) {
+			pids = append(pids, pid)
 		}
 	}
+	return pids
 }
 
-// parentPID is the parent of a session's process, which is the session's zmx
-// daemon; 0 when it cannot be read.
-func parentPID(pid int) int {
-	if pid <= 0 {
-		return 0
-	}
-	out, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+// Daemon returns the pid of the zmx daemon hosting a session in b's
+// directory: the parent of the session's process, proven to belong to that
+// directory.
+func Daemon(t *testing.T, b *zmx.Backend, name string) int {
+	t.Helper()
+	sessions, err := b.List()
 	if err != nil {
-		return 0
+		t.Fatalf("list %s: %v", b.Dir(), err)
 	}
-	ppid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	i := slices.IndexFunc(sessions, func(s backend.Session) bool { return s.Name == name })
+	if i < 0 || sessions[i].PID <= 0 {
+		t.Fatalf("no running session %q in %s", name, b.Dir())
+	}
+	out, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(sessions[i].PID)).Output()
 	if err != nil {
-		return 0
+		t.Fatalf("parent of session %q: %v", name, err)
 	}
-	return ppid
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || !ownedBy(pid, b.Dir()) {
+		t.Fatalf("parent %q of session %q is not a zmx daemon of %s", out, name, b.Dir())
+	}
+	return pid
 }
 
-func alive(pids []int) []int {
-	var out []int
-	for _, pid := range pids {
-		if syscall.Kill(pid, 0) == nil {
-			out = append(out, pid)
-		}
-	}
-	return out
+func ownedBy(pid int, dir string) bool {
+	out, err := exec.Command("ps", "-ww", "-E", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	return err == nil && isDaemonOf(strings.TrimSpace(string(out)), dir)
 }
 
-func isZmxDaemon(pid int) bool {
-	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
-	return err == nil && strings.HasPrefix(string(out), "zmx attach ")
+// isDaemonOf reads ps's command column, the argv then the environment.
+func isDaemonOf(command, dir string) bool {
+	return strings.HasPrefix(command, "zmx attach ") &&
+		slices.Contains(strings.Fields(command), "ZMX_DIR="+dir)
 }

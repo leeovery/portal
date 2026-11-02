@@ -11,8 +11,14 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Setenv("ZMX_DIR", "/nonexistent/zmx-poison")
-	_ = os.Unsetenv("ZMX_SESSION")
-	_ = os.Unsetenv("ZMX_SESSION_PREFIX")
+	for _, err := range []error{
+		os.Setenv("ZMX_DIR", "/nonexistent/zmx-poison"),
+		os.Unsetenv("ZMX_SESSION"),
+		os.Unsetenv("ZMX_SESSION_PREFIX"),
+	} {
+		if err != nil {
+			panic(err)
+		}
+	}
 	os.Exit(m.Run())
 }

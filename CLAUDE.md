@@ -32,11 +32,13 @@ vhs testdata/vhs/<tape>                                          # re-capture a 
 
 ## Test safety — ABSOLUTE INVARIANT
 
-**A test must never mutate or affect the real system:** not the filesystem outside its temp dirs, not the default tmux server, not any process it did not spawn. Tests run on the developer's machine, where their live tmux server, real sessions and `portal state daemon` are always running. All three boundaries are mandatory:
+**A test must never mutate or affect the real system:** not the filesystem outside its temp dirs, not the default tmux server, not any process it did not spawn. Tests run on the developer's machine, where their live tmux server, real sessions and `portal state daemon` are always running. All four boundaries are mandatory:
 
 1. **Filesystem/state.** Any test that runs `portal state daemon` — directly or via `portal open`/bootstrap — calls `portaltest.IsolateStateForTest(t)` and sets the returned env on every subprocess (`cmd.Env = env`). It scrubs `HOME`/`XDG_CONFIG_HOME`, poisons `TMUX`, enables the pgrep sandbox, and registers a fingerprint-diff cleanup. The fingerprint is defence in depth, not a substitute: it walks the state dir under the scrubbed `HOME`, so it catches a process that took the scrub and still resolved the default path, not one that escaped the scrub.
 2. **tmux.** Only per-test sockets from `tmuxtest`, never the default socket — including indirectly. A test that Executes a real Cobra command body inherits its production wiring, and `tmux.DefaultClient()` honours the ambient `TMUX`, so inject every tmux-touching `*Deps` seam. `cmd`'s `TestMain` poisons `TMUX` and the `PORTAL_*` paths package-wide, so a missed injection dials a dead socket and fails loudly. A subprocess that needs a server appends its own `TMUX=<test socket>,0,0` after the isolated env (last wins). A test asserting inside/outside-tmux behaviour sets `TMUX` itself with `t.Setenv`. *(Incident: an uninjected command body killed the developer's live `_portal-saver` and unregistered their global hooks on every `go test ./cmd`.)*
 3. **Processes.** The daemon is identified machine-wide by argv (`pgrep -fx '^portal state daemon( |$)'`), so file isolation does not make a test daemon distinguishable from the real one. `state.PgrepPortalDaemons` is filtered by a default-deny sandbox (`internal/state/pgrep_sandbox.go`, integration-tagged, absent from production) that surfaces only test-registered daemons, and reaches test-spawned binaries through `state.SandboxRegistryEnv` (`PORTAL_TEST_SANDBOX_REGISTRY`), a file of test-owned state dirs. Never run the production orphan sweep, `PgrepPortalDaemons`, or any `pgrep`/`pkill`/broad signal in a test without `IsolateStateForTest` active. *(Incident: a global-pgrep sweep test repeatedly SIGKILLed the developer's live daemon.)*
+
+4. **zmx.** Only per-test directories from `zmxtest.New` (`/tmp/zx-*`), never the developer's `ZMX_DIR`, which their shell exports. Every package whose tests run zmx has a `TestMain` that sets `ZMX_DIR=/nonexistent/zmx-poison` and unsets `ZMX_SESSION` and `ZMX_SESSION_PREFIX`, so a missed injection fails loudly. A test never signals a zmx daemon it didn't start: teardown proves ownership by `ZMX_DIR` in the process's environment before any signal. By hand, prefix every `zmx` command with a scratch `ZMX_DIR=`.
 
 For daemon-spawning tests use `portaltest.SpawnIsolatedDaemon` (pins `PORTAL_STATE_DIR` and `TMUX`, registers ownership) with `portaltest.RegisterSubprocessCleanup` (SIGKILL + Wait + reap — on macOS an unreaped subprocess holds state-dir fds past cleanup). Fixtures whose tmux server can host writers at teardown also call `portaltest.RegisterStateDirTeardownGuard(t, stateDir)`, after `IsolateStateForTest` and before `tmuxtest.New`. Integration tests that set `PORTAL_LOG_LEVEL` assert it propagated with `portaltest.AssertLogLevelResolved`.
 
@@ -72,6 +74,8 @@ Connecting to a session: outside tmux, `AttachConnector` `syscall.Exec`s `tmux a
 
 | Package | Role |
 |---|---|
+| `backend` | Session backend interface in Portal's terms: `Session`, `Command`, `Backend`, and its errors (`ErrNoSuchSession`, `ErrSessionExists`, `ErrInvalidName`, `ErrTimeout`, `ErrHistoryUnavailable`) |
+| `backend/zmx` | The zmx v0.8.1 driver: a context-bounded `Runner` seam, the list parser, name rules, `DisplayCommand` |
 | `tmux` | tmux CLI client (`Commander`: trimmed `Run`, verbatim `RunRaw`) — sessions, panes, options, global hooks, server and `_portal-saver` lifecycle. Owns target composition (see Invariants) |
 | `state` | Resurrection: capture, the commit cycle, scrollback dump/replay, FIFOs, markers, the daemon singleton (`daemon.lock`, `daemon.pid`, `IdentifyDaemon`, `PgrepPortalDaemons`) |
 | `restore` | Two-phase restore: skeleton (`respawn-pane -k` into the hydrate helper), then geometry and scrollback FIFOs |
@@ -89,7 +93,7 @@ Connecting to a session: outside tmux, `AttachConnector` `syscall.Exec`s `tmux a
 | `xdg` | Config path resolution and per-file identity (`ConfigFileID`, `ConfigDirID`) |
 | `alias`, `fuzzy`, `fileutil`, `storelog`, `warning` | Small shared pieces; `fileutil.AtomicWrite` is the temp-file-and-rename writer every store uses |
 | `nanoid`, `shellquote`, `resumekeys`, `resumemode`, `tmuxout`, `tmuxerr` | Stdlib-only leaf vocabularies shared by packages that must not import each other; a guard pins each one's dependency set |
-| `capture`, `portaltest`, `tmuxtest`, `portalbintest`, `restoretest`, `statetest`, `hookstest`, `logtest`, `harnesstest`, `sourceguardtest`, `commandertest`, `transienttest`, `spawntest`, `themetest` | Test-only — production code must not import them |
+| `capture`, `portaltest`, `tmuxtest`, `portalbintest`, `restoretest`, `statetest`, `hookstest`, `logtest`, `harnesstest`, `sourceguardtest`, `commandertest`, `transienttest`, `spawntest`, `themetest`, `backendtest`, `zmxtest` | Test-only — production code must not import them |
 
 ### Test helpers
 

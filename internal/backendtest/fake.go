@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 )
 
 // Op names a Backend method, for error injection and the call log.
@@ -160,7 +161,7 @@ func (f *Fake) Exists(name string) (bool, error) {
 	return ok, nil
 }
 
-// Create records the command joined with spaces as the session's Command.
+// Create renders the session's Command as zmx reports it.
 func (f *Fake) Create(name, dir string, command []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -179,16 +180,21 @@ func (f *Fake) Create(name, dir string, command []string) error {
 		Dir:     dir,
 		PID:     f.lastPID,
 		Created: f.now(),
-		Command: strings.Join(command, " "),
+		Command: zmx.DisplayCommand(command),
 	}
 	return nil
 }
 
-func (f *Fake) AttachCommand(name string) backend.Command {
+func (f *Fake) AttachCommand(name string) (backend.Command, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, Call{Op: OpAttachCommand, Name: name})
-	return backend.Command{Argv: []string{AttachProgram, name}}
+	if err := f.begin(Call{Op: OpAttachCommand, Name: name}); err != nil {
+		return backend.Command{}, err
+	}
+	if err := f.validate(name); err != nil {
+		return backend.Command{}, err
+	}
+	return backend.Command{Argv: []string{AttachProgram, name}}, nil
 }
 
 func (f *Fake) Kill(name string) error {

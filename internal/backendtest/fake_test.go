@@ -44,14 +44,14 @@ func TestFake(t *testing.T) {
 		f := backendtest.New()
 		f.Now = func() time.Time { return at }
 
-		if err := f.Create("work", "/srv", []string{"portal", "state", "hydrate"}); err != nil {
+		if err := f.Create("work", "/srv", []string{"sh", "-c", "sleep 1"}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		s, ok := f.Session("work")
 		if !ok {
 			t.Fatal("work not held after Create")
 		}
-		if s.Dir != "/srv" || s.Command != "portal state hydrate" || !s.Created.Equal(at) || s.Attached() || s.PID == 0 {
+		if s.Dir != "/srv" || s.Command != "sh -c 'sleep 1'" || !s.Created.Equal(at) || s.Attached() || s.PID == 0 {
 			t.Errorf("session = %+v", s)
 		}
 		if exists, err := f.Exists("work"); err != nil || !exists {
@@ -135,6 +135,9 @@ func TestFake(t *testing.T) {
 		if err := f.Create("x", "/", nil); !errors.Is(err, refusal) {
 			t.Errorf("Create = %v, want Validate's refusal", err)
 		}
+		if _, err := f.AttachCommand("x"); !errors.Is(err, refusal) {
+			t.Errorf("AttachCommand = %v, want Validate's refusal", err)
+		}
 		if _, ok := f.Session("x"); ok {
 			t.Error("Create made a session whose name was refused")
 		}
@@ -143,7 +146,7 @@ func TestFake(t *testing.T) {
 	t.Run("it returns an injected failure before changing anything, until cleared", func(t *testing.T) {
 		boom := errors.New("boom")
 		f := backendtest.New(backend.Session{Name: "a", Clients: 1})
-		for _, op := range []backendtest.Op{backendtest.OpList, backendtest.OpExists, backendtest.OpCreate, backendtest.OpKill, backendtest.OpDetach, backendtest.OpHistory} {
+		for _, op := range []backendtest.Op{backendtest.OpList, backendtest.OpExists, backendtest.OpCreate, backendtest.OpAttachCommand, backendtest.OpKill, backendtest.OpDetach, backendtest.OpHistory} {
 			f.Fail(op, boom)
 		}
 
@@ -155,6 +158,9 @@ func TestFake(t *testing.T) {
 		}
 		if err := f.Create("b", "/", nil); !errors.Is(err, boom) {
 			t.Errorf("Create = %v, want boom", err)
+		}
+		if _, err := f.AttachCommand("a"); !errors.Is(err, boom) {
+			t.Errorf("AttachCommand = %v, want boom", err)
 		}
 		if err := f.Kill("a"); !errors.Is(err, boom) {
 			t.Errorf("Kill = %v, want boom", err)
@@ -194,7 +200,10 @@ func TestFake(t *testing.T) {
 
 		_, _ = f.List()
 		_ = f.Create("b", "/srv", []string{"sh"})
-		cmd := f.AttachCommand("b")
+		cmd, err := f.AttachCommand("b")
+		if err != nil {
+			t.Fatalf("AttachCommand: %v", err)
+		}
 		_ = f.Kill("a")
 
 		want := []backendtest.Call{

@@ -1,11 +1,13 @@
 package zmx_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
@@ -29,23 +31,29 @@ type reply struct {
 type runCall struct {
 	raw bool
 	cmd backend.Command
+	// bound is how long the run had left on its context when it began.
+	bound time.Duration
 }
 
 func newRunner(t *testing.T, replies map[string]reply) *scriptedRunner {
 	return &scriptedRunner{t: t, replies: replies}
 }
 
-func (r *scriptedRunner) Run(cmd backend.Command) (string, error) {
-	out, err := r.answer(false, cmd)
+func (r *scriptedRunner) Run(ctx context.Context, cmd backend.Command) (string, error) {
+	out, err := r.answer(ctx, false, cmd)
 	return strings.TrimSpace(out), err
 }
 
-func (r *scriptedRunner) RunRaw(cmd backend.Command) (string, error) {
-	return r.answer(true, cmd)
+func (r *scriptedRunner) RunRaw(ctx context.Context, cmd backend.Command) (string, error) {
+	return r.answer(ctx, true, cmd)
 }
 
-func (r *scriptedRunner) answer(raw bool, cmd backend.Command) (string, error) {
-	r.calls = append(r.calls, runCall{raw: raw, cmd: cmd})
+func (r *scriptedRunner) answer(ctx context.Context, raw bool, cmd backend.Command) (string, error) {
+	call := runCall{raw: raw, cmd: cmd}
+	if deadline, ok := ctx.Deadline(); ok {
+		call.bound = time.Until(deadline)
+	}
+	r.calls = append(r.calls, call)
 	rep, ok := r.replies[cmd.Argv[1]]
 	if !ok {
 		r.t.Errorf("unscripted zmx run %v", cmd.Argv)

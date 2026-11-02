@@ -22,6 +22,14 @@ var (
 	// ErrInvalidName is returned, wrapped with the reason, for a name the
 	// backend cannot hold.
 	ErrInvalidName = errors.New("invalid session name")
+
+	// ErrTimeout is returned, wrapped, by an operation the backend did not
+	// answer in time, such as a kill of a wedged session.
+	ErrTimeout = errors.New("backend did not answer in time")
+
+	// ErrHistoryUnavailable is returned, wrapped, by History when the backend
+	// answered without the session's screen. It is never a blank transcript.
+	ErrHistoryUnavailable = errors.New("session history unavailable")
 )
 
 // portalPrefix marks Portal's own sessions, such as _portal-saver.
@@ -34,7 +42,9 @@ type Session struct {
 	// when the backend reports none it can name.
 	Dir     string
 	Clients int
-	PID     int
+	// PID is the process the session runs: its command or shell, not the
+	// backend's own process hosting it.
+	PID int
 	// Created is zero when the backend reports no creation time.
 	Created time.Time
 	// Command is the command the session was created with, for display; empty
@@ -68,16 +78,23 @@ type Backend interface {
 	List() ([]Session, error)
 	Exists(name string) (bool, error)
 	// Create starts a detached session running command in dir, with no
-	// terminal attached. An empty command runs the user's shell.
+	// terminal attached. An empty command runs the user's shell. It returns
+	// nil once the session is made, whatever the command does next: a command
+	// that exits at once still made a session. A held name is refused with
+	// ErrSessionExists, but the check and the creation are not atomic: a
+	// concurrent creator of the same name can win, and this call then joins
+	// its session and returns nil.
 	Create(name, dir string, command []string) error
 	// AttachCommand is the process that attaches the caller's terminal to the
 	// session.
-	AttachCommand(name string) Command
+	AttachCommand(name string) (Command, error)
 	Kill(name string) error
 	// Detach detaches every client of the session.
 	Detach(name string) error
 	// History returns the session's screen and scrollback with colours, as
-	// terminal escape sequences, verbatim.
+	// terminal escape sequences, verbatim. A live session always has a screen,
+	// so the result is never empty: an answer without one is
+	// ErrHistoryUnavailable.
 	History(name string) ([]byte, error)
 	// Current returns the session this process runs inside, "" outside one.
 	Current() string

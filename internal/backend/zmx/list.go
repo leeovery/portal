@@ -11,32 +11,36 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 )
 
-// zmx v0.8.1 prints one session per line, tab-separated, behind a two-column
-// marker that is "→ " on the caller's own session:
+// zmx v0.8.1 prints one entry per session, tab-separated, behind a
+// two-column marker that is "→ " on the caller's own session:
 //
 //	name=<n>\tpid=<n>\tclients=<n>\tcreated=<unix s>[\tcwd=<osc7>][\tcmd=<c>][\tended=…][\texit_code=…][\t<label>=<v>…]
 //	name=<n>\terr=<error>\tstatus=<cleaning up|unreachable>
 //
-// cwd and cmd are read by position, ahead of any labels: a label may be
-// named cwd.
+// cmd is shell-quoted, but a newline in it is printed raw, so an entry can run
+// over several lines; a tab in it ends the field early. cwd and cmd are read
+// by position, ahead of any labels. A label may be named cwd, but its value is
+// limited to [A-Za-z0-9._-] and so never reads as a directory.
 var listMarkers = []string{"  ", "→ "}
+
+const nameField = "name="
 
 // statusGone is the status of a session whose daemon refused the probe; zmx
 // deleted its socket during this listing.
 const statusGone = "cleaning up"
 
-var errUnparseable = errors.New("unparseable zmx list line")
+var errUnparseable = errors.New("unparseable zmx list output")
 
 func parseList(out string) ([]backend.Session, error) {
+	entries, err := splitEntries(out)
+	if err != nil {
+		return nil, err
+	}
 	sessions := []backend.Session{}
-	for line := range strings.Lines(out) {
-		line = strings.TrimSuffix(line, "\n")
-		if line == "" {
-			continue
-		}
-		s, live, err := parseLine(line)
+	for _, entry := range entries {
+		s, live, err := parseEntry(entry)
 		if err != nil {
-			return nil, fmt.Errorf("%w %q: %w", errUnparseable, line, err)
+			return nil, fmt.Errorf("%w: entry %q: %w", errUnparseable, entry, err)
 		}
 		if live {
 			sessions = append(sessions, s)
@@ -45,16 +49,40 @@ func parseList(out string) ([]backend.Session, error) {
 	return sessions, nil
 }
 
-// parseLine reports false for a session that is already gone.
-func parseLine(line string) (backend.Session, bool, error) {
+// splitEntries returns each entry without its marker. A line that does not
+// open an entry continues the one before it.
+func splitEntries(out string) ([]string, error) {
+	out = strings.TrimSuffix(out, "\n")
+	if out == "" {
+		return nil, nil
+	}
+	var entries []string
+	for line := range strings.SplitSeq(out, "\n") {
+		if entry, ok := entryStart(line); ok {
+			entries = append(entries, entry)
+			continue
+		}
+		if len(entries) == 0 {
+			return nil, fmt.Errorf("%w: %q opens no entry", errUnparseable, line)
+		}
+		entries[len(entries)-1] += "\n" + line
+	}
+	return entries, nil
+}
+
+func entryStart(line string) (string, bool) {
 	for _, marker := range listMarkers {
-		if rest, ok := strings.CutPrefix(line, marker); ok {
-			line = rest
-			break
+		if entry, ok := strings.CutPrefix(line, marker); ok && strings.HasPrefix(entry, nameField) {
+			return entry, true
 		}
 	}
-	fields := fieldCursor(strings.Split(line, "\t"))
-	name, err := fields.required("name=")
+	return "", false
+}
+
+// parseEntry reports false for a session that is already gone.
+func parseEntry(entry string) (backend.Session, bool, error) {
+	fields := fieldCursor(strings.Split(entry, "\t"))
+	name, err := fields.required(nameField)
 	if err != nil {
 		return backend.Session{}, false, err
 	}

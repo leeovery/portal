@@ -15,7 +15,7 @@ func TestValidateName(t *testing.T) {
 
 	t.Run("it accepts the names Portal makes and odd ones zmx holds", func(t *testing.T) {
 		for _, name := range []string{
-			"dotfiles-PpaTER", "_portal-saver", "a.b", "a:b", "has space", "a=b", "x*y", "mid-dash", "ünï", "...", "$x",
+			"dotfiles-PpaTER", "_portal-saver", "logs-1", "logs.d", "a.b", "a:b", "has space", "a=b", "x*y", "mid-dash", "ünï", "...", "$x",
 		} {
 			if err := b.ValidateName(name); err != nil {
 				t.Errorf("ValidateName(%q) = %v, want nil", name, err)
@@ -28,6 +28,7 @@ func TestValidateName(t *testing.T) {
 			"",        // zmx requires a name
 			".", "..", // zmx refuses directory entries
 			"a/b", "/x", // zmx refuses path separators
+			"logs", "Logs", "LOGS", // zmx keeps its log directory beside the sockets; macOS folds case
 			"-h", "--help", "--labels=x", "--vt", "--force", // zmx reads these as flags
 			"dotfiles*", "*", // zmx kill reads a trailing * as a prefix match
 			"a\tb", "a\nb", "a\x00b", "a\x7fb", "a\u0085b", // list output cannot carry them

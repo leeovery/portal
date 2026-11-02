@@ -13,14 +13,19 @@ import (
 // sockaddr_un path field less its NUL, as zmx computes it: 103 on macOS.
 var maxSocketPath = len(syscall.RawSockaddrUnix{}.Path) - 1
 
-// nameRules are zmx v0.8.1's own refusals plus the names its argv parsing or
-// list output cannot carry.
+// logDir is the one entry zmx v0.8.1 keeps beside the sockets in its
+// directory, when ZMX_DIR is set, as the Backend always sets it.
+const logDir = "logs"
+
+// nameRules are zmx v0.8.1's own refusals plus the names its argv parsing,
+// directory or list output cannot carry.
 var nameRules = []struct {
 	refuses func(string) bool
 	reason  string
 }{
 	{func(n string) bool { return n == "" }, "is empty"},
 	{func(n string) bool { return n == "." || n == ".." }, "names a directory entry"},
+	{func(n string) bool { return strings.EqualFold(n, logDir) }, "is zmx's log directory"},
 	{func(n string) bool { return strings.ContainsRune(n, '/') }, "contains '/'"},
 	{func(n string) bool { return strings.HasPrefix(n, "-") }, "starts with '-', which zmx reads as a flag"},
 	{func(n string) bool { return strings.HasSuffix(n, "*") }, "ends with '*', which zmx kill reads as a prefix match"},

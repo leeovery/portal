@@ -3,10 +3,12 @@
 package zmx_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -230,7 +232,12 @@ func TestBackendAgainstZmx(t *testing.T) {
 		if err := b.ValidateName(tooLong); !errors.Is(err, backend.ErrInvalidName) {
 			t.Errorf("ValidateName(%d bytes) = %v, want ErrInvalidName", len(tooLong), err)
 		}
-		_, err := zmx.ExecRunner{}.Run(b.AttachCommand(tooLong))
+		cmd, err := b.AttachCommand(longest)
+		if err != nil {
+			t.Fatalf("AttachCommand: %v", err)
+		}
+		cmd.Argv = []string{"zmx", "attach", tooLong}
+		_, err = zmx.ExecRunner{}.Run(context.Background(), cmd)
 		if ce, ok := errors.AsType[*zmx.CommandError](err); !ok || !strings.Contains(ce.Stderr, "too long") {
 			t.Errorf("zmx attach of %d bytes = %v, want zmx's own too-long refusal", len(tooLong), err)
 		}
@@ -250,6 +257,116 @@ func TestBackendAgainstZmx(t *testing.T) {
 		}
 		if got := session(t, b, "_portal-saver"); !got.PortalOwned() {
 			t.Errorf("_portal-saver not Portal-owned: %+v", got)
+		}
+	})
+
+	t.Run("it lists a session whose command holds a newline, and the sessions after it", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "a-multi", t.TempDir(), "sh", "-c", "echo a\nsleep 1000")
+		mustCreate(t, b, "b-tab", t.TempDir(), "sh", "-c", "echo a\tb; sleep 1000")
+		mustCreate(t, b, "c-after", t.TempDir(), "sleep", "1000")
+
+		sessions, err := b.List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		var got []string
+		for _, s := range sessions {
+			got = append(got, s.Name)
+		}
+		if strings.Join(got, ",") != "a-multi,b-tab,c-after" {
+			t.Fatalf("List names = %v", got)
+		}
+		if want := "sh -c 'echo a\nsleep 1000'"; sessions[0].Command != want {
+			t.Errorf("Command = %q, want %q", sessions[0].Command, want)
+		}
+		if want := "sh -c 'echo a"; sessions[1].Command != want {
+			t.Errorf("Command = %q, want it cut at the tab: %q", sessions[1].Command, want)
+		}
+	})
+
+	t.Run("it reports commands as DisplayCommand renders them", func(t *testing.T) {
+		b := zmxtest.New(t)
+		commands := map[string][]string{
+			"quoted":    {"sh", "-c", `sleep 1000 # it's "$HOME" (x) [y] {z} | & ; < > ? * ~ ! \ ` + "`"},
+			"empty-arg": {"sh", "-c", "sleep 1000", ""},
+			"long":      {"sh", "-c", "sleep 1000", strings.Repeat("a", 200), strings.Repeat("b", 60), "c"},
+		}
+		for name, command := range commands {
+			mustCreate(t, b, name, t.TempDir(), command...)
+		}
+
+		for name, command := range commands {
+			if got, want := session(t, b, name).Command, zmx.DisplayCommand(command); got != want {
+				t.Errorf("%s: zmx reports %q, DisplayCommand renders %q", name, got, want)
+			}
+		}
+	})
+
+	t.Run("it reports a session made even when its command exits at once", func(t *testing.T) {
+		b := zmxtest.New(t)
+
+		if err := b.Create("brief", t.TempDir(), []string{"true"}); err != nil {
+			t.Errorf("Create of a command that exits at once = %v, want nil", err)
+		}
+	})
+
+	t.Run("it returns a blank screen's history as something, never empty", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "blank", t.TempDir(), "sleep", "1000")
+
+		got, err := b.History("blank")
+		if err != nil || len(got) == 0 {
+			t.Errorf("History of a blank screen = %q, %v; want its VT state", got, err)
+		}
+	})
+
+	t.Run("it never acts on a session held under the name in another case", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "foo", t.TempDir(), "sleep", "1000")
+
+		if err := b.Kill("FOO"); !errors.Is(err, backend.ErrNoSuchSession) {
+			t.Errorf("Kill(FOO) = %v, want ErrNoSuchSession", err)
+		}
+		if err := b.Create("FOO", t.TempDir(), []string{"sleep", "1000"}); !errors.Is(err, backend.ErrSessionExists) {
+			t.Errorf("Create(FOO) = %v, want ErrSessionExists", err)
+		}
+		if exists, err := b.Exists("foo"); err != nil || !exists {
+			t.Errorf("Exists(foo) = %v, %v; want foo untouched", exists, err)
+		}
+	})
+
+	t.Run("it gives up on a wedged session within its bounds", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "wedged", t.TempDir(), "sleep", "1000")
+		daemon := zmxtest.Daemon(t, b, "wedged")
+		if err := syscall.Kill(daemon, syscall.SIGSTOP); err != nil {
+			t.Fatalf("stop daemon %d: %v", daemon, err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(daemon, syscall.SIGCONT) })
+
+		start := time.Now()
+		err := b.Kill("wedged")
+		if !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("Kill of a wedged session = %v, want ErrTimeout", err)
+		}
+		if took := time.Since(start); took > 8*time.Second {
+			t.Errorf("Kill of a wedged session took %s", took)
+		}
+
+		if got := session(t, b, "wedged"); !got.Unreachable {
+			t.Errorf("wedged session listed as %+v, want unreachable", got)
+		}
+		if _, err := b.History("wedged"); !errors.Is(err, backend.ErrHistoryUnavailable) {
+			t.Errorf("History of a wedged session = %v, want ErrHistoryUnavailable", err)
+		}
+	})
+
+	t.Run("it refuses zmx's log directory as a name", func(t *testing.T) {
+		b := zmxtest.New(t)
+
+		if err := b.Create("logs", t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
+			t.Errorf("Create(logs) = %v, want ErrInvalidName", err)
 		}
 	})
 }

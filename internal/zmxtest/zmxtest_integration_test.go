@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -67,7 +66,7 @@ func TestNew(t *testing.T) {
 			if err != nil || len(sessions) != 1 {
 				t.Fatalf("List = %+v, %v", sessions, err)
 			}
-			daemon = parentOf(t, sessions[0].PID)
+			daemon = zmxtest.Daemon(t, b, "left-running")
 		})
 
 		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
@@ -75,6 +74,33 @@ func TestNew(t *testing.T) {
 		}
 		if err := syscall.Kill(daemon, 0); err == nil {
 			t.Errorf("daemon %d survived cleanup", daemon)
+		}
+	})
+}
+
+func TestNewIgnoresAnInheritedSession(t *testing.T) {
+	t.Run("it never hands zmx the caller's session or prefix, whatever TestMain left", func(t *testing.T) {
+		t.Setenv("ZMX_SESSION", "live-session")
+		t.Setenv("ZMX_SESSION_PREFIX", "pre-")
+		b := zmxtest.New(t)
+
+		cmd, err := b.AttachCommand("fresh")
+		if err != nil {
+			t.Fatalf("AttachCommand: %v", err)
+		}
+		for _, kv := range cmd.Env {
+			if strings.HasPrefix(kv, "ZMX_SESSION=") || strings.HasPrefix(kv, "ZMX_SESSION_PREFIX=") {
+				t.Errorf("attach command carries %s", kv)
+			}
+		}
+		if got := b.Current(); got != "" {
+			t.Errorf("Current = %q, want none", got)
+		}
+		if err := b.Create("fresh", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if exists, err := b.Exists("fresh"); err != nil || !exists {
+			t.Errorf("Exists(fresh) = %v, %v; want the session made under its own name", exists, err)
 		}
 	})
 }
@@ -138,17 +164,4 @@ func clients(t *testing.T, b *zmx.Backend, name string) int {
 		}
 	}
 	return -1
-}
-
-func parentOf(t *testing.T, pid int) int {
-	t.Helper()
-	out, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		t.Fatalf("ps %d: %v", pid, err)
-	}
-	ppid, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		t.Fatalf("ps %d: %v", pid, err)
-	}
-	return ppid
 }

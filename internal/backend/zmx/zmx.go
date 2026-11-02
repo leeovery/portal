@@ -3,11 +3,13 @@
 package zmx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 )
@@ -21,11 +23,22 @@ const (
 	envPrefix = "ZMX_SESSION_PREFIX"
 )
 
-// What zmx v0.8.1 prints, after "error: ", for a session it does not hold.
+// Bounds on each zmx run. zmx gives a session's probe 1 s and a history read
+// 5 s, but kill waits on the daemon with no bound of its own, so a wedged
+// daemon would hold the caller for ever.
 const (
-	historyMissing = `session %q does not exist`
-	killMissing    = `failed to kill session=%s: SessionNotFound`
+	listTimeout    = 10 * time.Second
+	createTimeout  = 10 * time.Second
+	killTimeout    = 5 * time.Second
+	detachTimeout  = 5 * time.Second
+	historyTimeout = 10 * time.Second
 )
+
+// What zmx v0.8.1 prints for a session it does not hold, and on stdout once
+// attach has made a session, all with the name raw between the quotes.
+func historyMissing(name string) string { return `session "` + name + `" does not exist` }
+func killMissing(name string) string    { return "failed to kill session=" + name + ": SessionNotFound" }
+func created(name string) string        { return `session "` + name + `" created` + "\n" }
 
 // Backend drives the zmx sessions in one zmx directory.
 type Backend struct {
@@ -47,7 +60,7 @@ func New(dir string, environ func() []string, runner Runner) *Backend {
 func (b *Backend) Dir() string { return b.dir }
 
 func (b *Backend) List() ([]backend.Session, error) {
-	out, err := b.runner.RunRaw(b.command("list"))
+	out, err := b.run(listTimeout, b.command("list"), true)
 	if err != nil {
 		return nil, fmt.Errorf("list zmx sessions: %w", err)
 	}
@@ -64,21 +77,28 @@ func (b *Backend) Exists(name string) (bool, error) {
 
 // Create runs `zmx attach` with stdin at EOF, so its client detaches as soon
 // as the daemon is up. zmx attach on a live name would attach to that session
-// and ignore the command, so a live name is refused first.
+// and ignore the command, so a live name is refused first, compared without
+// case: on a case-insensitive filesystem foo's socket answers for FOO. When
+// the command exits before the client connects, zmx reports the session made
+// and then fails; that is still a made session.
 func (b *Backend) Create(name, dir string, command []string) error {
 	if err := b.ValidateName(name); err != nil {
 		return err
 	}
-	exists, err := b.Exists(name)
+	sessions, err := b.List()
 	if err != nil {
 		return fmt.Errorf("create session %q: %w", name, err)
 	}
-	if exists {
-		return fmt.Errorf("create session %q: %w", name, backend.ErrSessionExists)
+	if i := slices.IndexFunc(sessions, func(s backend.Session) bool { return strings.EqualFold(s.Name, name) }); i >= 0 {
+		return fmt.Errorf("create session %q: %w as %q", name, backend.ErrSessionExists, sessions[i].Name)
 	}
 	cmd := b.command(append([]string{"attach", name}, command...)...)
 	cmd.Dir = dir
-	if _, err := b.runner.Run(cmd); err != nil {
+	_, err = b.run(createTimeout, cmd, false)
+	if ce, ok := errors.AsType[*CommandError](err); ok && strings.Contains(ce.Stdout, created(name)) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("create session %q: %w", name, err)
 	}
 	return nil
@@ -86,56 +106,92 @@ func (b *Backend) Create(name, dir string, command []string) error {
 
 // AttachCommand keeps the caller's ZMX_SESSION: inside a session, zmx attach
 // then switches that session's clients to name instead of nesting.
-func (b *Backend) AttachCommand(name string) backend.Command {
+func (b *Backend) AttachCommand(name string) (backend.Command, error) {
+	if err := b.ValidateName(name); err != nil {
+		return backend.Command{}, err
+	}
 	return backend.Command{
 		Argv: []string{binary, "attach", name},
 		Env:  b.env(envDir, envPrefix),
-	}
+	}, nil
 }
 
 func (b *Backend) Kill(name string) error {
 	if err := b.ValidateName(name); err != nil {
 		return err
 	}
-	_, err := b.runner.Run(b.command("kill", name))
-	return sessionError("kill", name, err, fmt.Sprintf(killMissing, name))
+	if err := b.requireHeld("kill", name); err != nil {
+		return err
+	}
+	_, err := b.run(killTimeout, b.command("kill", name), false)
+	return sessionError("kill", name, err, killMissing(name))
 }
 
-// Detach checks the session exists first: zmx detach answers a missing
-// session with success.
 func (b *Backend) Detach(name string) error {
 	if err := b.ValidateName(name); err != nil {
 		return err
 	}
-	exists, err := b.Exists(name)
-	if err != nil {
-		return fmt.Errorf("detach session %q: %w", name, err)
-	}
-	if !exists {
-		return fmt.Errorf("detach session %q: %w", name, backend.ErrNoSuchSession)
+	if err := b.requireHeld("detach", name); err != nil {
+		return err
 	}
 	// zmx detach takes no name; it detaches the session named by ZMX_SESSION.
 	cmd := b.command("detach")
 	cmd.Env = append(cmd.Env, envSession+"="+name)
-	if _, err := b.runner.Run(cmd); err != nil {
+	if _, err := b.run(detachTimeout, cmd, false); err != nil {
 		return fmt.Errorf("detach session %q: %w", name, err)
 	}
 	return nil
 }
 
+// History treats empty output as a failed read: zmx exits 0 with nothing when
+// its read of the daemon times out or breaks, while a live session's VT
+// screen always carries at least its cursor position.
 func (b *Backend) History(name string) ([]byte, error) {
 	if err := b.ValidateName(name); err != nil {
 		return nil, err
 	}
-	out, err := b.runner.RunRaw(b.command("history", name, "--vt"))
+	if err := b.requireHeld("read history of", name); err != nil {
+		return nil, err
+	}
+	out, err := b.run(historyTimeout, b.command("history", name, "--vt"), true)
 	if err != nil {
-		return nil, sessionError("read history of", name, err, fmt.Sprintf(historyMissing, name))
+		return nil, sessionError("read history of", name, err, historyMissing(name))
+	}
+	if out == "" {
+		return nil, fmt.Errorf("read history of session %q: %w", name, backend.ErrHistoryUnavailable)
 	}
 	return []byte(out), nil
 }
 
 func (b *Backend) Current() string {
 	return lookup(b.environ(), envSession)
+}
+
+// requireHeld fails with ErrNoSuchSession unless zmx holds exactly name. zmx
+// finds a session by statting its socket, so on a case-insensitive filesystem
+// it would answer for foo when asked for FOO: kill FOO kills foo. zmx detach
+// also answers a missing session with success.
+func (b *Backend) requireHeld(op, name string) error {
+	exists, err := b.Exists(name)
+	if err != nil {
+		return fmt.Errorf("%s session %q: %w", op, name, err)
+	}
+	if !exists {
+		return fmt.Errorf("%s session %q: %w", op, name, backend.ErrNoSuchSession)
+	}
+	return nil
+}
+
+// run bounds one zmx run by timeout; a run cut short fails with
+// backend.ErrTimeout.
+func (b *Backend) run(timeout time.Duration, cmd backend.Command, raw bool) (string, error) {
+	cause := fmt.Errorf("%w: zmx %s gave no answer within %s", backend.ErrTimeout, cmd.Argv[1], timeout)
+	ctx, cancel := context.WithTimeoutCause(context.Background(), timeout, cause)
+	defer cancel()
+	if raw {
+		return b.runner.RunRaw(ctx, cmd)
+	}
+	return b.runner.Run(ctx, cmd)
 }
 
 // command is a zmx run with ZMX_SESSION removed: inherited, it would turn

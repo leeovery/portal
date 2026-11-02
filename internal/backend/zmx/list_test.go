@@ -135,6 +135,65 @@ func TestList(t *testing.T) {
 		}
 	})
 
+	// Captured from zmx v0.8.1 for sh -c $'echo a\nsleep 1000' and
+	// sh -c $'echo a\tb; sleep 1000'.
+	captured := "  name=nl\tpid=22908\tclients=0\tcreated=1793652632\tcwd=file://Lees-MacBook-Pro.local/private/tmp\tcmd=sh -c 'echo a\nsleep 1000'\n" +
+		"  name=tb\tpid=22911\tclients=0\tcreated=1793652632\tcwd=file://Lees-MacBook-Pro.local/private/tmp\tcmd=sh -c 'echo a\tb; sleep 1000'\n"
+
+	t.Run("it reads a command's raw newline as part of its entry", func(t *testing.T) {
+		got, err := newBackend(newRunner(t, listing(captured))).List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("List = %+v, want nl and tb", got)
+		}
+		if want := "sh -c 'echo a\nsleep 1000'"; got[0].Name != "nl" || got[0].Command != want || got[0].Dir != "/private/tmp" {
+			t.Errorf("nl = %+v, want command %q and dir /private/tmp", got[0], want)
+		}
+	})
+
+	t.Run("it cuts a command short at a tab without failing the entry", func(t *testing.T) {
+		got, err := newBackend(newRunner(t, listing(captured))).List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		want := backend.Session{Name: "tb", PID: 22911, Created: time.Unix(1793652632, 0), Dir: "/private/tmp", Command: "sh -c 'echo a"}
+		if !reflect.DeepEqual(got[1], want) {
+			t.Errorf("tb = %+v, want %+v", got[1], want)
+		}
+	})
+
+	t.Run("it keeps blank lines inside a command", func(t *testing.T) {
+		got, err := newBackend(newRunner(t, listing(
+			"  name=a\tpid=1\tclients=0\tcreated=1\tcwd=/\tcmd='x\n\n  y\n'\n",
+			"→ name=b\tpid=2\tclients=1\tcreated=1\n",
+		))).List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) != 2 || got[0].Command != "'x\n\n  y\n'" || got[1].Name != "b" {
+			t.Errorf("List = %+v, want a's command whole and then b", got)
+		}
+	})
+
+	t.Run("it fails on output that opens with no entry", func(t *testing.T) {
+		got, err := newBackend(newRunner(t, listing("stray\n", "  name=a\tpid=1\tclients=0\tcreated=1\n"))).List()
+		if err == nil || got != nil {
+			t.Errorf("List = %+v, %v; want nil and an error", got, err)
+		}
+	})
+
+	t.Run("it reads no directory from a label named cwd", func(t *testing.T) {
+		got, err := newBackend(newRunner(t, listing("  name=a\tpid=1\tclients=0\tcreated=1\tcwd=foo.bar\n"))).List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if got[0].Dir != "" {
+			t.Errorf("Dir = %q from a cwd label, want empty", got[0].Dir)
+		}
+	})
+
 	t.Run("it keeps a session that did not answer, marked unreachable", func(t *testing.T) {
 		r := newRunner(t, listing(
 			"  name=busy\terr=Timeout\tstatus=unreachable\n",
