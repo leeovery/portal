@@ -182,11 +182,12 @@ func searchCandidates(src SearchSessionSource) ([]tmux.Session, error) {
 	return tui.PickerSessions(sessions, currentPickerSession(src)), nil
 }
 
-// searchMatches returns, in enumeration order, the sessions the term matches.
-func searchMatches(term string, sessions []tmux.Session) []tmux.Session {
+// searchMatches returns, in enumeration order, the sessions the term matches,
+// their directories abbreviated against home as the picker shows them.
+func searchMatches(home, term string, sessions []tmux.Session) []tmux.Session {
 	var matches []tmux.Session
 	for _, s := range sessions {
-		if resolver.MatchesSearchTerm(term, s.Name, s.Dir) {
+		if resolver.MatchesSearchTerm(home, term, s.Name, s.Dir) {
 			matches = append(matches, s)
 		}
 	}
@@ -203,7 +204,7 @@ func searchDecision(src SearchSessionSource, term string) func() (string, error)
 		if err != nil {
 			return "", err
 		}
-		if matches := searchMatches(term, sessions); len(matches) == 1 {
+		if matches := searchMatches(resolver.ProcessHome(), term, sessions); len(matches) == 1 {
 			return matches[0].Name, nil
 		}
 		return "", nil

@@ -169,6 +169,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsBurstOpeningFixture,
 		sessionsNoTagsSignpostFixture,
 		sessionsSearchResultsFixture,
+		sessionsSearchHomeFixture,
 		sessionsPendingResumeFixture,
 		sessionsPendingResumeColourlessFixture,
 		projectsFixture,
@@ -517,6 +518,16 @@ func sessionsSearchResultsFixture() *Fixture {
 		initialMode:  prefs.ModeFlat,
 		search:       &tui.SearchForm{Term: "port"},
 	}
+}
+
+// The same sessions searched by a term only the home abbreviation can match:
+// every row present is there because its directory folded to ~/code under the
+// fixture's pinned home, which the process's $HOME never is in a test.
+func sessionsSearchHomeFixture() *Fixture {
+	fx := sessionsSearchResultsFixture()
+	fx.name = "sessions-search-home"
+	fx.search = &tui.SearchForm{Term: "~/code"}
+	return fx
 }
 
 // One row per attached × pending combination, so the indicators' packing is

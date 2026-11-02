@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,6 +21,12 @@ import (
 	"github.com/leeovery/portal/internal/themetest"
 	"github.com/leeovery/portal/internal/tui"
 )
+
+// The tool's frames are written and printed with narrow East Asian widths
+// wherever the tests run, as the capture tests hold them.
+func TestMain(m *testing.M) {
+	os.Exit(capture.RunNarrow(m))
+}
 
 func TestResolveTheme_DefaultsToTheShippedDarkBuiltin(t *testing.T) {
 	if defaultThemeSlug != theme.DefaultDarkSlug {

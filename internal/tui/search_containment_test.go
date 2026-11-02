@@ -369,3 +369,19 @@ func TestSearchContainmentIsNotInstalledForATermLessForm(t *testing.T) {
 	// "pro-tools" is a fuzzy-only survivor: no run of "prt" appears in it.
 	assertVisible(t, model.(tui.Model), []string{"pro-tools", "app-port"}, "term-less form")
 }
+
+// The term matches only through the abbreviation against Deps.Home, never the
+// process's home, so the rebuild must stamp that home on the rows the filter
+// reads, and the filter must match against it.
+func TestSearchNarrowsAgainstTheHomeTheModelWasGiven(t *testing.T) {
+	t.Setenv("HOME", "/elsewhere")
+	sessions := []tmux.Session{
+		{Name: "alpha", Windows: 1, Dir: "/home/user/code/alpha"},
+		{Name: "beta", Windows: 1, Dir: "/opt/code/beta"},
+		{Name: "gamma", Windows: 1, Dir: "/elsewhere/code/gamma"},
+	}
+
+	m := containmentPicker(t, tui.Deps{Home: "/home/user", Search: &tui.SearchForm{Term: "~/code"}}, sessions, nil)
+
+	assertVisible(t, m, []string{"alpha"}, "a term only the given home's abbreviation contains")
+}

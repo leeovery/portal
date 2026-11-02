@@ -49,7 +49,8 @@ type Deps struct {
 
 	CWD string
 	// Home is the home directory session directories are abbreviated against.
-	// Empty takes the process's; a capture pins one so no frame reads $HOME.
+	// Empty takes the process's, which New resolves once; a capture pins one so
+	// no frame reads $HOME.
 	Home        string
 	InitialMode prefs.SessionListMode
 	Theme       theme.Nomination
@@ -113,7 +114,9 @@ func Build(deps Deps) Model {
 		WithProjectStore(deps.ProjectStore),
 		WithSessionCreator(deps.Creator),
 		WithCWD(deps.CWD),
-		WithHome(deps.Home),
+	}
+	if deps.Home != "" {
+		opts = append(opts, WithHome(deps.Home))
 	}
 	if deps.ServerStarted {
 		opts = append(opts, WithServerStarted(true))

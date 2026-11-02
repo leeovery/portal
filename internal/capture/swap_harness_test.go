@@ -62,6 +62,7 @@ func capturedStates() []capturedStateWant {
 		// frame rather than missing from it.
 		{fixture: "theme-panel-min-height-message", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ couldn't save theme", "● dark"}, absent: []string{"No sessions yet", "● light"}},
 		{fixture: "sessions-search-results", page: tui.PageSessions, present: []string{"portal-a1b2", "api-work", "~/code/portal", "~/code/portal-gateway", "/opt/portal-tools"}, absent: []string{"lumen-sync-engine", "No sessions yet"}},
+		{fixture: "sessions-search-home", page: tui.PageSessions, present: []string{"portal-a1b2 ~/code/portal", "api-work ~/code/portal-gateway", "lumen-sync-engine ~/code/lumen"}, absent: []string{"legacy-port-shim", "portal-notes", "No sessions yet"}},
 		{fixture: "sessions-pending-resume", page: tui.PageSessions, present: []string{"orchard-pipeline-codify", "quill-Ue9fLr"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-pending-resume-colourless", page: tui.PageSessions, present: []string{"orchard-pipeline-codify", "quill-Ue9fLr"}, absent: []string{"No sessions yet", "●"}},
 		{fixture: "projects", page: tui.PageProjects, present: []string{"relay-v1-api", "Projects"}},

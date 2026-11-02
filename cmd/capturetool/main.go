@@ -148,6 +148,12 @@ func framesOnly(o options, flags *flag.FlagSet) (options, error) {
 			others = append(others, "--"+f.Name)
 		}
 	})
+	// Parsing stops at the first name, so a flag after one arrives as a name.
+	for _, arg := range flags.Args() {
+		if strings.HasPrefix(arg, "-") {
+			others = append(others, arg)
+		}
+	}
 	if len(others) > 0 {
 		return options{}, fmt.Errorf("--frames takes the fixtures' names alone, not %s", strings.Join(others, ", "))
 	}

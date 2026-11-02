@@ -91,7 +91,7 @@ type SessionItem struct {
 	CatchAll bool
 
 	// Home is the home directory the session's directory is abbreviated against;
-	// empty takes the process's.
+	// empty abbreviates nothing.
 	Home string
 }
 
@@ -101,7 +101,7 @@ type SessionItem struct {
 // directory is no part of it — a regroup must never make a session findable by a
 // path it was not findable by a moment earlier.
 func (i SessionItem) FilterValue() string {
-	return strings.Join(resolver.SearchFieldsIn(resolver.HomeOrProcess(i.Home), i.Session.Name, i.Session.Dir), " ")
+	return strings.Join(resolver.SearchFields(i.Home, i.Session.Name, i.Session.Dir), " ")
 }
 
 // A genuine height-1 list.Item is load-bearing: pagination counts every rendered
@@ -147,7 +147,7 @@ type SessionDelegate struct {
 	// Nil marks nothing.
 	Pending map[string]struct{}
 	// Home is the home directory a shown directory is abbreviated against; empty
-	// takes the process's.
+	// abbreviates nothing.
 	Home string
 }
 
@@ -292,7 +292,7 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 		name = d.rowToken(nameBase, nameTok, selected).Render(it.Session.Name)
 		namePad = ""
 		if d.ShowDir && it.Session.Dir != "" {
-			dirText = resolver.AbbreviateHomeIn(resolver.HomeOrProcess(d.Home), it.Session.Dir)
+			dirText = resolver.AbbreviateHome(d.Home, it.Session.Dir)
 		}
 	} else {
 		nameWidth := max(total-used, 1)

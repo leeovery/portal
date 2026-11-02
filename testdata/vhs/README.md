@@ -149,9 +149,18 @@ cells `cells_test.go` reads and compares:
   stem's size. A stored `.ansi` has no newline after its last row, so it is read
   back at its stem's height: a frame whose last row is unwritten still holds.
 - **Each fixture draws the same twice,** from two separately built worlds, which
-  catches state one draw leaves for the next and map-order output. It can't see
-  a dependence on the environment or the clock, which is why the fixtures pin
-  theirs: the home directory comes through `tui.Deps.Home`, never `$HOME`.
+  catches state one draw leaves for the next and map-order output. Run in one
+  process, it can't see a dependence on the environment. Two such dependences are
+  known and closed:
+  - **the home directory:** the fixtures pass theirs as `tui.Deps.Home`, and every
+    frame is held again under `HOME` set to that home and to `/`;
+  - **East Asian ambiguous widths:** `RUNEWIDTH_EASTASIAN` or a CJK locale would
+    draw `▌` and the box glyphs two cells wide. The width libraries read them at
+    init, so the capture tests' `TestMain` (`capture.RunNarrow`) runs the test
+    binary again with `RUNEWIDTH_EASTASIAN=0` where they would. Write frames
+    with `--frames` from an environment without either.
+
+  No screen renders the time, so the clock isn't pinned.
 - **A frame written is a frame held:** a test writes frames with the capture tool's
   writer, reads them back and holds each fixture to its own.
 

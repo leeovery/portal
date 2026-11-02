@@ -27,17 +27,18 @@ func rankIndexes(ranks []list.Rank) []int {
 	return indexes
 }
 
+// searchTestHome is the home the sessions below abbreviate against.
+const searchTestHome = "/home/user"
+
 // subsequenceOnlySession is matched by the picker's own fuzzy rule for the term
 // "port" (p·o·r·t across "~/Projects/rust-tools") and by containment not at all.
 func subsequenceOnlySession(t *testing.T) tmux.Session {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	return tmux.Session{Name: "rust-tools", Dir: filepath.Join(home, "Projects", "rust-tools")}
+	return tmux.Session{Name: "rust-tools", Dir: filepath.Join(searchTestHome, "Projects", "rust-tools")}
 }
 
 func TestContainmentFilterRanksAStaleGenerationsTargetsByContainment(t *testing.T) {
-	scattered := SessionItem{Session: subsequenceOnlySession(t)}
+	scattered := SessionItem{Session: subsequenceOnlySession(t), Home: searchTestHome}
 	matching := SessionItem{Session: tmux.Session{Name: "portal-a1b2"}}
 	src := &searchItemSource{}
 	// The source holds one generation; the pass is handed another's targets,
@@ -191,18 +192,16 @@ func TestContainmentFilterIsRaceFreeAgainstAConcurrentSet(t *testing.T) {
 // named for the very text the other's home-abbreviated directory renders as.
 func collidingSessions(t *testing.T) (named, recorded tmux.Session) {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
 	return tmux.Session{Name: "api ~/Code/api"},
-		tmux.Session{Name: "api", Dir: filepath.Join(home, "Code", "api")}
+		tmux.Session{Name: "api", Dir: filepath.Join(searchTestHome, "Code", "api")}
 }
 
 func TestContainmentFilterOnTwoSessionsSharingOneFilterValue(t *testing.T) {
 	t.Run("it ranks neither row when only one of them contains the term", func(t *testing.T) {
 		named, recorded := collidingSessions(t)
 		for _, order := range [][]list.Item{
-			{SessionItem{Session: named}, SessionItem{Session: recorded}},
-			{SessionItem{Session: recorded}, SessionItem{Session: named}},
+			{SessionItem{Session: named, Home: searchTestHome}, SessionItem{Session: recorded, Home: searchTestHome}},
+			{SessionItem{Session: recorded, Home: searchTestHome}, SessionItem{Session: named, Home: searchTestHome}},
 		} {
 			src := &searchItemSource{}
 			src.set(order)
@@ -221,7 +220,7 @@ func TestContainmentFilterOnTwoSessionsSharingOneFilterValue(t *testing.T) {
 
 	t.Run("it ranks both rows when both of them contain the term", func(t *testing.T) {
 		named, recorded := collidingSessions(t)
-		items := []list.Item{SessionItem{Session: named}, SessionItem{Session: recorded}}
+		items := []list.Item{SessionItem{Session: named, Home: searchTestHome}, SessionItem{Session: recorded, Home: searchTestHome}}
 		src := &searchItemSource{}
 		src.set(items)
 
@@ -236,10 +235,10 @@ func TestContainmentFilterOnTwoSessionsSharingOneFilterValue(t *testing.T) {
 func TestContainmentFilterAcrossGenerationsOfOneCollidingFilterValue(t *testing.T) {
 	t.Run("it ranks nothing when a held generation's colliding entry matches and the session the target came from does not", func(t *testing.T) {
 		named, recorded := collidingSessions(t)
-		fromRecorded := []list.Item{SessionItem{Session: recorded}}
+		fromRecorded := []list.Item{SessionItem{Session: recorded, Home: searchTestHome}}
 		src := &searchItemSource{}
 		src.set(fromRecorded)
-		src.set([]list.Item{SessionItem{Session: named}})
+		src.set([]list.Item{SessionItem{Session: named, Home: searchTestHome}})
 
 		got := containmentFilter("api ~", src)("api ~", filterTargets(fromRecorded))
 
@@ -250,9 +249,9 @@ func TestContainmentFilterAcrossGenerationsOfOneCollidingFilterValue(t *testing.
 
 	t.Run("it ranks nothing when the session the target came from matches and a since-departed generation's colliding entry does not", func(t *testing.T) {
 		named, recorded := collidingSessions(t)
-		fromNamed := []list.Item{SessionItem{Session: named}}
+		fromNamed := []list.Item{SessionItem{Session: named, Home: searchTestHome}}
 		src := &searchItemSource{}
-		src.set([]list.Item{SessionItem{Session: recorded}})
+		src.set([]list.Item{SessionItem{Session: recorded, Home: searchTestHome}})
 		src.set(fromNamed)
 
 		got := containmentFilter("api ~", src)("api ~", filterTargets(fromNamed))
@@ -265,9 +264,9 @@ func TestContainmentFilterAcrossGenerationsOfOneCollidingFilterValue(t *testing.
 	t.Run("it ranks every target under a colliding key once every generation's pairs contain the term", func(t *testing.T) {
 		named, recorded := collidingSessions(t)
 		src := &searchItemSource{}
-		src.set([]list.Item{SessionItem{Session: named}})
-		src.set([]list.Item{SessionItem{Session: recorded}})
-		targets := filterTargets([]list.Item{SessionItem{Session: named}, SessionItem{Session: recorded}})
+		src.set([]list.Item{SessionItem{Session: named, Home: searchTestHome}})
+		src.set([]list.Item{SessionItem{Session: recorded, Home: searchTestHome}})
+		targets := filterTargets([]list.Item{SessionItem{Session: named, Home: searchTestHome}, SessionItem{Session: recorded, Home: searchTestHome}})
 
 		got := containmentFilter("api", src)("api", targets)
 
@@ -278,7 +277,7 @@ func TestContainmentFilterAcrossGenerationsOfOneCollidingFilterValue(t *testing.
 
 	t.Run("it holds one entry per distinct field pair when the same generation is recorded repeatedly", func(t *testing.T) {
 		named, recorded := collidingSessions(t)
-		items := []list.Item{SessionItem{Session: named}, SessionItem{Session: recorded}}
+		items := []list.Item{SessionItem{Session: named, Home: searchTestHome}, SessionItem{Session: recorded, Home: searchTestHome}}
 		src := &searchItemSource{}
 		for range 3 {
 			src.set(items)

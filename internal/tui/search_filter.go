@@ -103,7 +103,7 @@ func containmentFilter(term string, src *searchItemSource) list.FilterFunc {
 // filter value was built from.
 func everyEntryMatches(entries []searchEntry, term string) bool {
 	for _, entry := range entries {
-		if !resolver.MatchesSearchTermIn(resolver.HomeOrProcess(entry.home), term, entry.name, entry.dir) {
+		if !resolver.MatchesSearchTerm(entry.home, term, entry.name, entry.dir) {
 			return false
 		}
 	}

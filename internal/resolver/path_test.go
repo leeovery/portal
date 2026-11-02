@@ -365,114 +365,60 @@ func TestNormalisePath(t *testing.T) {
 	})
 }
 
+// The abbreviation is a pure string test, so every case holds without touching
+// the disk.
 func TestAbbreviateHome(t *testing.T) {
-	// The abbreviation is a pure string test, so every case below holds without
-	// touching the disk.
-	const home = "/Users/leeovery"
-
-	t.Run("it abbreviates a path under the home directory", func(t *testing.T) {
-		t.Setenv("HOME", home)
-
-		got := resolver.AbbreviateHome(home + "/Code/portal")
-
-		if got != "~/Code/portal" {
-			t.Errorf("AbbreviateHome(%q) = %q, want %q", home+"/Code/portal", got, "~/Code/portal")
-		}
-	})
-
-	t.Run("it abbreviates the home directory itself to a bare tilde", func(t *testing.T) {
-		t.Setenv("HOME", home)
-
-		got := resolver.AbbreviateHome(home)
-
-		if got != "~" {
-			t.Errorf("AbbreviateHome(%q) = %q, want %q", home, got, "~")
-		}
-	})
-
-	t.Run("it leaves a home-prefix lookalike path unchanged", func(t *testing.T) {
-		t.Setenv("HOME", home)
-
-		got := resolver.AbbreviateHome("/Users/leeoveryX/Code")
-
-		if got != "/Users/leeoveryX/Code" {
-			t.Errorf("AbbreviateHome(%q) = %q, want it unchanged", "/Users/leeoveryX/Code", got)
-		}
-	})
-
-	t.Run("it leaves an unrelated absolute path unchanged", func(t *testing.T) {
-		t.Setenv("HOME", home)
-
-		got := resolver.AbbreviateHome("/opt/tools")
-
-		if got != "/opt/tools" {
-			t.Errorf("AbbreviateHome(%q) = %q, want it unchanged", "/opt/tools", got)
-		}
-	})
-
-	t.Run("it returns the path unchanged when the home directory cannot be resolved", func(t *testing.T) {
-		t.Setenv("HOME", "")
-
-		got := resolver.AbbreviateHome("/Users/leeovery/Code/portal")
-
-		if got != "/Users/leeovery/Code/portal" {
-			t.Errorf("AbbreviateHome(%q) = %q, want it unchanged", "/Users/leeovery/Code/portal", got)
-		}
-	})
-
-	t.Run("it is the inverse of ExpandTilde for a path under the home directory", func(t *testing.T) {
-		t.Setenv("HOME", home)
-
-		if got := resolver.ExpandTilde(resolver.AbbreviateHome(home + "/Code/portal")); got != home+"/Code/portal" {
-			t.Errorf("round trip = %q, want %q", got, home+"/Code/portal")
-		}
-	})
-}
-
-func TestAbbreviateHomeIn(t *testing.T) {
 	tests := []struct {
 		name, home, path, want string
 	}{
-		{name: "a path under the home given", home: "/home/user", path: "/home/user/code/portal", want: "~/code/portal"},
-		{name: "the home given itself", home: "/home/user", path: "/home/user", want: "~"},
-		{name: "a home given with a trailing slash", home: "/home/user/", path: "/home/user/code/portal", want: "~/code/portal"},
-		{name: "a home given with a trailing slash, itself", home: "/home/user/", path: "/home/user", want: "~"},
+		{name: "a path under the home", home: "/home/user", path: "/home/user/code/portal", want: "~/code/portal"},
+		{name: "the home itself", home: "/home/user", path: "/home/user", want: "~"},
+		{name: "a home with a trailing slash", home: "/home/user/", path: "/home/user/code/portal", want: "~/code/portal"},
+		{name: "a home with a trailing slash, itself", home: "/home/user/", path: "/home/user", want: "~"},
 		{name: "a home-prefix lookalike", home: "/home/user", path: "/home/userX/code", want: "/home/userX/code"},
-		{name: "a root home", home: "/", path: "/opt/tools", want: "~/opt/tools"},
+		{name: "an unrelated absolute path", home: "/home/user", path: "/opt/tools", want: "/opt/tools"},
+		{name: "a root home, itself", home: "/", path: "/", want: "~"},
+		{name: "a root home, a path under it", home: "/", path: "/opt/tools", want: "/opt/tools"},
 		{name: "an empty home", home: "", path: "/home/user/code", want: "/home/user/code"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolver.AbbreviateHomeIn(tt.home, tt.path); got != tt.want {
-				t.Errorf("AbbreviateHomeIn(%q, %q) = %q, want %q", tt.home, tt.path, got, tt.want)
+			if got := resolver.AbbreviateHome(tt.home, tt.path); got != tt.want {
+				t.Errorf("AbbreviateHome(%q, %q) = %q, want %q", tt.home, tt.path, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestAbbreviateHomeIn_ReadsNoEnvironment(t *testing.T) {
+func TestAbbreviateHomeReadsNoEnvironment(t *testing.T) {
 	t.Setenv("HOME", "/elsewhere")
 
-	if got, want := resolver.AbbreviateHomeIn("/home/user", "/home/user/code"), "~/code"; got != want {
-		t.Errorf("AbbreviateHomeIn(/home/user, /home/user/code) under HOME=/elsewhere = %q, want %q", got, want)
+	if got, want := resolver.AbbreviateHome("/home/user", "/home/user/code"), "~/code"; got != want {
+		t.Errorf("AbbreviateHome(/home/user, /home/user/code) under HOME=/elsewhere = %q, want %q", got, want)
 	}
 }
 
-func TestAbbreviateHome_CleansATrailingSlashOnHome(t *testing.T) {
-	t.Setenv("HOME", "/home/user/")
+func TestAbbreviateHomeIsTheInverseOfExpandTilde(t *testing.T) {
+	const home = "/home/user"
+	t.Setenv("HOME", home)
 
-	if got, want := resolver.AbbreviateHome("/home/user/code/portal"), "~/code/portal"; got != want {
-		t.Errorf("AbbreviateHome(/home/user/code/portal) under HOME=/home/user/ = %q, want %q", got, want)
+	if got := resolver.ExpandTilde(resolver.AbbreviateHome(home, home+"/code/portal")); got != home+"/code/portal" {
+		t.Errorf("round trip = %q, want %q", got, home+"/code/portal")
 	}
 }
 
-func TestHomeOrProcess(t *testing.T) {
-	t.Setenv("HOME", "/home/process")
+func TestProcessHome(t *testing.T) {
+	t.Run("it is the environment's home", func(t *testing.T) {
+		t.Setenv("HOME", "/home/process")
+		if got := resolver.ProcessHome(); got != "/home/process" {
+			t.Errorf("ProcessHome() = %q, want /home/process", got)
+		}
+	})
 
-	if got := resolver.HomeOrProcess("/home/given"); got != "/home/given" {
-		t.Errorf("HomeOrProcess(/home/given) = %q, want the home given", got)
-	}
-	if got := resolver.HomeOrProcess(""); got != "/home/process" {
-		t.Errorf("HomeOrProcess(\"\") = %q, want the process's /home/process", got)
-	}
+	t.Run("it is empty where the home cannot be resolved", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		if got := resolver.ProcessHome(); got != "" {
+			t.Errorf("ProcessHome() = %q, want empty", got)
+		}
+	})
 }

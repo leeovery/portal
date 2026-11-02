@@ -25,8 +25,7 @@ func TestSessionItem(t *testing.T) {
 
 	t.Run("it returns the name, one space and the abbreviated directory", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
-		item := tui.SessionItem{Session: tmux.Session{Name: "api-work", Windows: 3, Dir: home + "/Code/portal"}}
+		item := tui.SessionItem{Session: tmux.Session{Name: "api-work", Windows: 3, Dir: home + "/Code/portal"}, Home: home}
 
 		got := item.FilterValue()
 
@@ -37,26 +36,25 @@ func TestSessionItem(t *testing.T) {
 
 	t.Run("FilterValue is the SearchFields slice joined by a single space", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
 		session := tmux.Session{Name: "api-work", Windows: 3, Dir: home + "/Code/portal"}
-		item := tui.SessionItem{Session: session}
+		item := tui.SessionItem{Session: session, Home: home}
 
 		got := item.FilterValue()
 
-		want := strings.Join(resolver.SearchFields(session.Name, session.Dir), " ")
+		want := strings.Join(resolver.SearchFields(home, session.Name, session.Dir), " ")
 		if got != want {
 			t.Errorf("FilterValue() = %q, want %q (the search fields joined)", got, want)
 		}
 	})
 
 	t.Run("FilterValue for a session with no recorded directory has no trailing separator", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		home := t.TempDir()
 		session := tmux.Session{Name: "dev", Windows: 3}
-		item := tui.SessionItem{Session: session}
+		item := tui.SessionItem{Session: session, Home: home}
 
 		got := item.FilterValue()
 
-		want := strings.Join(resolver.SearchFields(session.Name, session.Dir), " ")
+		want := strings.Join(resolver.SearchFields(home, session.Name, session.Dir), " ")
 		if got != want {
 			t.Errorf("FilterValue() = %q, want %q (the one-element slice joins to the bare name)", got, want)
 		}
@@ -100,9 +98,9 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 
 	t.Run("returns the name and abbreviated directory from FilterValue regardless of group fields", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
 		item := tui.SessionItem{
 			Session:      tmux.Session{Name: "dev", Windows: 3, Attached: true, Dir: home + "/Code/portal"},
+			Home:         home,
 			GroupKey:     "work",
 			GroupHeading: "work",
 			CatchAll:     false,

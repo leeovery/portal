@@ -85,21 +85,13 @@ func ExpandTilde(path string) string {
 	return path
 }
 
-// AbbreviateHome is the inverse of ExpandTilde: a path under the user's home
-// directory is rewritten to its `~/…` form and every other path is returned
-// unchanged. It never touches the filesystem, so a path that does not exist
-// abbreviates exactly as one that does; it does read the environment's home
-// directory, so one value abbreviates differently under a different $HOME, and
-// a home directory that cannot be resolved degrades to the path as given.
-func AbbreviateHome(path string) string {
-	return AbbreviateHomeIn(HomeOrProcess(""), path)
-}
-
-// AbbreviateHomeIn is AbbreviateHome against the home directory given rather
-// than the environment's. The home is cleaned first, so one given with a
+// AbbreviateHome is the inverse of ExpandTilde: a path under home is rewritten
+// to its `~/…` form and every other path is returned unchanged. It never touches
+// the filesystem or the environment, so a path that does not exist abbreviates
+// exactly as one that does. The home is cleaned first, so one given with a
 // trailing separator abbreviates as the bare directory does. An empty home
-// abbreviates nothing.
-func AbbreviateHomeIn(home, path string) string {
+// abbreviates nothing, and a root home only itself, as a shell's prompt does.
+func AbbreviateHome(home, path string) string {
 	if home == "" {
 		return path
 	}
@@ -107,25 +99,18 @@ func AbbreviateHomeIn(home, path string) string {
 	if path == home {
 		return "~"
 	}
-	under := home
-	if !strings.HasSuffix(under, "/") {
-		under += "/"
-	}
-	if strings.HasPrefix(path, under) {
-		return "~/" + path[len(under):]
+	if strings.HasPrefix(path, home+"/") {
+		return "~/" + path[len(home)+1:]
 	}
 	return path
 }
 
-// HomeOrProcess is home, or where it is empty the process's home directory:
-// empty again where that cannot be resolved.
-func HomeOrProcess(home string) string {
-	if home != "" {
-		return home
-	}
-	processHome, err := os.UserHomeDir()
+// ProcessHome is the process's home directory, or empty where it cannot be
+// resolved, which AbbreviateHome reads as abbreviating nothing.
+func ProcessHome() string {
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return processHome
+	return home
 }

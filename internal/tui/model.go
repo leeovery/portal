@@ -661,8 +661,8 @@ func WithCWD(path string) Option {
 	}
 }
 
-// WithHome sets the home directory session directories are abbreviated against;
-// empty takes the process's.
+// WithHome sets the home directory session directories are abbreviated against
+// in place of the process's; empty abbreviates nothing.
 func WithHome(home string) Option {
 	return func(m *Model) {
 		m.home = home
@@ -898,6 +898,9 @@ func New(lister SessionLister, opts ...Option) Model {
 		// still themed — an empty Theme renders silently colourless. An injected
 		// nomination overwrites it in syncResolvedMode below.
 		themeState: themeState{active: defaultDarkTheme()},
+		// Resolved once, here, and overwritten by WithHome: nothing downstream
+		// reads the environment's home.
+		home: resolver.ProcessHome(),
 	}
 	for _, opt := range opts {
 		opt(&m)

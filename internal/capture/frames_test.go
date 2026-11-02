@@ -74,9 +74,6 @@ func TestEveryFramesANSIParsesToItsTextAtItsSize(t *testing.T) {
 				t.Errorf("its ANSI reads\n%s\nwant its .txt\n%s", strings.Join(got, "\n"), strings.Join(text, "\n"))
 			}
 			size := sizeOf(t, stem)
-			if len(g) != size.Height {
-				t.Errorf("it's %d rows, want %d", len(g), size.Height)
-			}
 			for r, row := range g {
 				if len(row) > size.Width {
 					t.Errorf("row %d is %d columns, want %d at most", r+1, len(row), size.Width)
@@ -203,23 +200,39 @@ func TestDrawingSetRefusesANameGivenTwice(t *testing.T) {
 // fixture sets none.
 func TestEachDrawingShowsTheTerminalBackgroundItSets(t *testing.T) {
 	th := framesTheme(t)
-	canvas := colourOf(th.Canvas.Color())
-	tests := []struct {
-		name string
-		want colour
-	}{
-		{name: "sessions-flat", want: canvas},
-		{name: "theme-panel-min-height-message", want: canvas},
-		{name: ContrastValidationFixture, want: canvas},
-		{name: "sessions-pending-resume-colourless", want: colour{}},
-		{name: "resume-panel-waiting", want: colour{}},
-		{name: "resume-panel-discard-degraded", want: colour{}},
+	for _, d := range Drawings() {
+		t.Run(d.Name(), func(t *testing.T) {
+			want := terminalBackgroundOf(d.Name(), colourOf(th.Canvas.Color()))
+			if _, got := d.Draw(th, false, d.Size()); colourOf(got) != want {
+				t.Errorf("%s shows the terminal background %s, want %s", d.Name(), colourOf(got), want)
+			}
+		})
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := drawingNamed(t, tt.name)
-			if _, got := d.Draw(th, false, d.Size()); colourOf(got) != tt.want {
-				t.Errorf("%s shows the terminal background %s, want %s", tt.name, colourOf(got), tt.want)
+}
+
+// terminalBackgroundOf is the background the screen named sets, by the rule: a
+// resume surface and a colourless fixture set none; a picker fixture and the
+// swatch set their canvas.
+func terminalBackgroundOf(name string, canvas colour) colour {
+	if _, surface := SurfaceByName(name); surface {
+		return colour{}
+	}
+	if fx, err := FixtureByName(name); err == nil && fx.Colourless() {
+		return colour{}
+	}
+	return canvas
+}
+
+// No screen may read the process's home: every frame holds under the home the
+// fixtures pin and under a root home, which abbreviates nothing but itself.
+func TestEveryDrawingHoldsItsFrameWhateverTheProcessHome(t *testing.T) {
+	th := framesTheme(t)
+	for _, home := range []string{fixtureHome, "/"} {
+		t.Run(home, func(t *testing.T) {
+			t.Setenv("HOME", home)
+			for _, d := range Drawings() {
+				frame, _ := keptFrame(t, framesDir, d.Stem())
+				heldToItsFrame(t, d, th, frame)
 			}
 		})
 	}
@@ -383,16 +396,68 @@ func keptFrame(t *testing.T, dir, stem string) (grid, []string) {
 	if err != nil {
 		t.Fatalf("read %s's text: %v", stem, err)
 	}
-	g, err := parse(string(ansi))
+	g, err := storedRows(string(ansi), sizeOf(t, stem).Height)
 	if err != nil {
-		t.Fatalf("parsing %s.ansi: %v", stem, err)
-	}
-	// A stored frame ends without its last newline, so an unwritten last row
-	// leaves nothing to parse: the stem's height restores it.
-	for len(g) < sizeOf(t, stem).Height {
-		g = append(g, nil)
+		t.Fatalf("reading %s.ansi: %v", stem, err)
 	}
 	return g, strings.Split(strings.TrimSuffix(string(txt), "\n"), "\n")
+}
+
+// storedRows reads a stored frame's ANSI as height rows. It is stored without
+// the newline after its last row, so an unwritten last row leaves nothing to
+// parse: that one row, and no more, is restored.
+func storedRows(ansi string, height int) (grid, error) {
+	g, err := parse(ansi)
+	if err != nil {
+		return nil, err
+	}
+	if len(g) == height-1 {
+		g = append(g, nil)
+	}
+	if len(g) != height {
+		return nil, fmt.Errorf("it's %d rows, want %d", len(g), height)
+	}
+	return g, nil
+}
+
+func TestStoredRowsRestoresOnlyTheRowAFinalNewlineLoses(t *testing.T) {
+	tests := []struct {
+		name, ansi string
+		want       []string
+	}{
+		{name: "every row written", ansi: "ab\ncd", want: []string{"ab", "cd"}},
+		{name: "the last row unwritten", ansi: "ab\n", want: []string{"ab", ""}},
+		{name: "the last two rows unwritten", ansi: "ab\n\n", want: []string{"ab", "", ""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g, err := storedRows(tt.ansi, len(tt.want))
+			if err != nil {
+				t.Fatalf("storedRows(%q, %d) error = %v", tt.ansi, len(tt.want), err)
+			}
+			if got := g.text(); !slices.Equal(got, tt.want) {
+				t.Errorf("storedRows(%q, %d) reads %q, want %q", tt.ansi, len(tt.want), got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStoredRowsRefusesAFrameOfAnotherHeight(t *testing.T) {
+	tests := []struct {
+		name, ansi string
+		height     int
+		want       string
+	}{
+		{name: "cut short by two rows", ansi: "ab", height: 3, want: "it's 1 rows, want 3"},
+		{name: "a row more", ansi: "ab\ncd\nef", height: 2, want: "it's 3 rows, want 2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := storedRows(tt.ansi, tt.height); err == nil || err.Error() != tt.want {
+				t.Errorf("storedRows(%q, %d) error = %v, want %s", tt.ansi, tt.height, err, tt.want)
+			}
+		})
+	}
 }
 
 // sizeOf is the size a frame's stem ends with, as in -120x40.

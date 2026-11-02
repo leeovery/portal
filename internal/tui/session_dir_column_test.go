@@ -11,7 +11,6 @@ import (
 
 func TestFitSessionDir(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	tests := []struct {
 		name  string
@@ -113,7 +112,7 @@ func TestFitSessionDir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := fitSessionDir("", tt.dir, tt.width); got != tt.want {
+			if got := fitSessionDir(home, tt.dir, tt.width); got != tt.want {
 				t.Errorf("fitSessionDir(%q, %d) = %q, want %q", tt.dir, tt.width, got, tt.want)
 			}
 		})
@@ -122,13 +121,12 @@ func TestFitSessionDir(t *testing.T) {
 
 func TestFitSessionDirNeverCutsInsideASegment(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	dir := home + "/Code/portal/internal/tui"
 	value := "~/Code/portal/internal/tui"
 
 	for width := 1; width <= lipgloss.Width(value); width++ {
-		got := fitSessionDir("", dir, width)
+		got := fitSessionDir(home, dir, width)
 		if got == "" || got == value {
 			continue
 		}
@@ -147,22 +145,20 @@ func TestFitSessionDirNeverCutsInsideASegment(t *testing.T) {
 }
 
 func TestFitSessionDirMeasuresDisplayWidth(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
 
 	// 15 cells across 18 bytes — a byte-length measurement would drop it.
 	dir := "/opt/日本語/tui"
 
-	if got := fitSessionDir("", dir, 15); got != dir {
+	if got := fitSessionDir(home, dir, 15); got != dir {
 		t.Errorf("fitSessionDir(%q, 15) = %q, want it whole", dir, got)
 	}
-	if got := fitSessionDir("", dir, 14); got != "…/日本語/tui" {
+	if got := fitSessionDir(home, dir, 14); got != "…/日本語/tui" {
 		t.Errorf("fitSessionDir(%q, 14) = %q, want %q", dir, got, "…/日本語/tui")
 	}
 }
 
-func TestFitSessionDirWithoutAResolvableHome(t *testing.T) {
-	t.Setenv("HOME", "")
-
+func TestFitSessionDirWithNoHome(t *testing.T) {
 	dir := "/Users/someone/Code/portal"
 
 	if got := fitSessionDir("", dir, 40); got != dir {

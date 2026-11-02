@@ -126,20 +126,16 @@ func TestMatchesSearchTerm(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HOME", home)
-
-			got := resolver.MatchesSearchTerm(tt.term, tt.session, tt.recordedDir)
+			got := resolver.MatchesSearchTerm(home, tt.term, tt.session, tt.recordedDir)
 			if got != tt.want {
-				t.Errorf("MatchesSearchTerm(%q, %q, %q) = %v, want %v", tt.term, tt.session, tt.recordedDir, got, tt.want)
+				t.Errorf("MatchesSearchTerm(%q, %q, %q, %q) = %v, want %v", home, tt.term, tt.session, tt.recordedDir, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMatchesSearchTermUnresolvableHome(t *testing.T) {
-	t.Setenv("HOME", "")
-
-	if !resolver.MatchesSearchTerm("Users", "api-work", "/Users/leeovery/Code/portal") {
-		t.Error("MatchesSearchTerm should compare the raw recorded path when the home directory cannot be resolved")
+func TestMatchesSearchTermWithNoHome(t *testing.T) {
+	if !resolver.MatchesSearchTerm("", "home", "api-work", "/home/user/code/portal") {
+		t.Error("MatchesSearchTerm with no home should compare the raw recorded path")
 	}
 }
