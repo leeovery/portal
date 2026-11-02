@@ -112,6 +112,17 @@ func TestSetLabel(t *testing.T) {
 			t.Errorf("Label = %q", got)
 		}
 	})
+
+	t.Run("a joined emoji is kept", func(t *testing.T) {
+		var idx sessionindex.Index
+		family := "team \U0001F468\u200d\U0001F469\u200d\U0001F467"
+		if err := idx.SetLabel("a", family); err != nil {
+			t.Fatalf("SetLabel: %v", err)
+		}
+		if got := idx.Label("a"); got != family {
+			t.Errorf("Label = %q, want %q", got, family)
+		}
+	})
 }
 
 func TestRemove(t *testing.T) {

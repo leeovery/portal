@@ -73,9 +73,10 @@ func (idx *Index) SetLabel(name, label string) error {
 	return nil
 }
 
+// The zero-width joiner is format-class but builds joined emoji, so it stays.
 func printable(label string) bool {
 	return utf8.ValidString(label) && !strings.ContainsFunc(label, func(r rune) bool {
-		return unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)
+		return r != '\u200d' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp))
 	})
 }
 
