@@ -61,3 +61,12 @@ func gone(pid int) bool {
 func goneFrom(procs []unix.KinfoProc) bool {
 	return len(procs) == 0 || procs[0].Proc.P_stat == zombie || procs[0].Proc.P_flag&exiting != 0
 }
+
+// Parent is pid's parent, read from the kernel as it is called.
+func Parent(pid int) (int, error) {
+	p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return 0, fmt.Errorf("read process %d: %w", pid, err)
+	}
+	return int(p.Eproc.Ppid), nil
+}

@@ -14,14 +14,27 @@ import (
 
 // procTree fakes the process reader: each pid's ZMX_DIR, or "" for an
 // environment the reader can't see, and its parent. A pid missing from either
-// map fails that read.
+// map fails that read. reusedAfterArgs stands in for a pid that exits once
+// its args are read and is taken by a process with the parent it names.
 type procTree struct {
-	dirs    map[int]string
-	parents map[int]int
+	dirs            map[int]string
+	parents         map[int]int
+	reusedAfterArgs map[int]int
 }
 
-func (p procTree) args(pid int) (proctable.Args, error) {
+func (p *procTree) List() ([]proctable.Process, error) {
+	var procs []proctable.Process
+	for pid := range p.dirs {
+		procs = append(procs, proctable.Process{PID: pid, PPID: p.parents[pid]})
+	}
+	return procs, nil
+}
+
+func (p *procTree) Args(pid int) (proctable.Args, error) {
 	dir, ok := p.dirs[pid]
+	if ppid, reused := p.reusedAfterArgs[pid]; reused {
+		p.dirs[pid], p.parents[pid] = "", ppid
+	}
 	if !ok {
 		return proctable.Args{}, errors.New("no such process")
 	}
@@ -31,7 +44,7 @@ func (p procTree) args(pid int) (proctable.Args, error) {
 	return proctable.Args{Argv: []string{"zmx"}, Env: []string{"HOME=/h", "ZMX_DIR=" + dir}}, nil
 }
 
-func (p procTree) parent(pid int) (int, error) {
+func (p *procTree) Parent(pid int) (int, error) {
 	ppid, ok := p.parents[pid]
 	if !ok {
 		return 0, errors.New("no such process")
@@ -71,21 +84,45 @@ func TestOwnedThrough(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := ownedThrough(10, dir, c.tree.args, c.tree.parent); got != c.want {
+			if got := ownedThrough(10, dir, &c.tree); got != c.want {
 				t.Errorf("ownedThrough(10) over %+v = %v, want %v", c.tree, got, c.want)
 			}
 		})
 	}
 }
 
-func TestParentsIn(t *testing.T) {
-	parent := parentsIn([]proctable.Process{{PID: 10, PPID: 11}, {PID: 11, PPID: 1}})
-
-	if ppid, err := parent(10); err != nil || ppid != 11 {
-		t.Errorf("parent(10) = %d, %v; want 11", ppid, err)
+// A proof reads each parent after the args it vouches for: a pid whose holder
+// exits once its args are read, and is taken by a stranger, is never proved
+// through the parent its last holder had, as a listing taken first would.
+func TestOwnership_ReadsEachParentAfterItsArgs(t *testing.T) {
+	const dir = "/tmp/zx-1"
+	world := func(reused bool) *procTree {
+		tree := &procTree{dirs: map[int]string{10: "", 20: dir}, parents: map[int]int{10: 20, 20: 1}}
+		if reused {
+			tree.reusedAfterArgs = map[int]int{10: 30}
+		}
+		return tree
 	}
-	if ppid, err := parent(12); err == nil {
-		t.Errorf("parent(12) = %d, want an error for a pid the reading doesn't hold", ppid)
+	use := func(t *testing.T, r procReader) {
+		old := processes
+		processes = r
+		t.Cleanup(func() { processes = old })
+	}
+
+	use(t, world(false))
+	if !ownedBy(10, dir) {
+		t.Fatal("ownedBy(10) = false while its parent is the directory's daemon, want it owned")
+	}
+
+	use(t, world(true))
+	if ownedBy(10, dir) {
+		t.Error("ownedBy(10) = true for a pid a stranger took, want it not owned")
+	}
+
+	use(t, world(true))
+	mine, err := owned(dir)
+	if err != nil || slices.Contains(mine, 10) || !slices.Contains(mine, 20) {
+		t.Errorf("owned = %v, %v; want the daemon 20 and never the pid a stranger took", mine, err)
 	}
 }
 

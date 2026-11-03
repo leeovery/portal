@@ -60,6 +60,9 @@ func TestReadsThisProcess(t *testing.T) {
 		if list[i].PPID != os.Getppid() {
 			t.Errorf("PPID = %d, want %d", list[i].PPID, os.Getppid())
 		}
+		if parent, err := Parent(os.Getpid()); err != nil || parent != os.Getppid() {
+			t.Errorf("Parent = %d, %v; want %d", parent, err, os.Getppid())
+		}
 	})
 }
 
