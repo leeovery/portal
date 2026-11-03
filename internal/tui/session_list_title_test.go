@@ -94,7 +94,7 @@ func TestSessionListTitleModeAware(t *testing.T) {
 		m := newRebuildTestModel(t, prefs.ModeByTag, nil, nil)
 		m.rebuildSessionList()
 
-		updated, _ := m.Update(SessionsMsg{Sessions: []Session{{Name: "alpha", Answered: true}}})
+		updated, _ := m.Update(SessionsMsg{Sessions: []Session{{Name: "alpha"}}})
 		if got := updated.(Model).SessionListTitle(); got != "Sessions — by tag" {
 			t.Errorf("post-refresh SessionListTitle() = %q, want %q", got, "Sessions — by tag")
 		}
@@ -108,7 +108,7 @@ func TestSessionListTitleModeAware(t *testing.T) {
 			t.Errorf("SessionListTitle() = %q, want %q", got, "Sessions — by tag (current: foo)")
 		}
 
-		updated, _ := m.Update(SessionsMsg{Sessions: []Session{{Name: "alpha", Answered: true}}})
+		updated, _ := m.Update(SessionsMsg{Sessions: []Session{{Name: "alpha"}}})
 		if got := updated.(Model).SessionListTitle(); got != "Sessions — by tag (current: foo)" {
 			t.Errorf("post-refresh SessionListTitle() = %q, want %q", got, "Sessions — by tag (current: foo)")
 		}

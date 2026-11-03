@@ -86,11 +86,11 @@ func drainCmdThroughUpdate(t *testing.T, m tea.Model, cmd tea.Cmd) tea.Model {
 
 func TestPreviewEscRefetchesSessionsList(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	postKill := []Session{
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -118,11 +118,11 @@ func TestPreviewEscRefetchesSessionsList(t *testing.T) {
 
 func TestExternallyKilledSessionNotInListAfterDismiss(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	postKill := []Session{
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -144,11 +144,11 @@ func TestExternallyKilledSessionNotInListAfterDismiss(t *testing.T) {
 
 func TestPreviewEscPreservesCursorWhenPreviousSessionStillExists(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	postKill := []Session{
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -173,11 +173,11 @@ func TestPreviewEscPreservesCursorWhenPreviousSessionStillExists(t *testing.T) {
 
 func TestPreviewEscCursorFallsBackToNeighbourWhenPreviousSessionGone(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	postKill := []Session{
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -202,8 +202,8 @@ func TestPreviewEscCursorFallsBackToNeighbourWhenPreviousSessionGone(t *testing.
 
 func TestPreviewEscRefreshIsObservablyNoOpWhenListUnchanged(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -229,9 +229,9 @@ func TestPreviewEscRefreshIsObservablyNoOpWhenListUnchanged(t *testing.T) {
 
 func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "alphabet", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "alphabet", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -279,8 +279,8 @@ func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
 
 func TestDrainCmdThroughUpdateNilCmdReturnsModelUnchanged(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -309,7 +309,7 @@ func TestDrainCmdThroughUpdateNilCmdReturnsModelUnchanged(t *testing.T) {
 
 func TestDrainCmdThroughUpdateInvokesCmdAndFeedsResultThroughUpdate(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -333,8 +333,8 @@ func TestDrainCmdThroughUpdateInvokesCmdAndFeedsResultThroughUpdate(t *testing.T
 
 func TestPreviewEscRefreshSilentOnListerError(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

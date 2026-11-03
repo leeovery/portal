@@ -24,7 +24,7 @@ func renderedSessionLines(t *testing.T, m Model) []string {
 func flashModelWithSessions(names ...string) Model {
 	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, Session{Name: n, Answered: true, Attached: false})
+		sessions = append(sessions, Session{Name: n, Attached: false})
 	}
 	m := NewModelWithSessions(sessions)
 	m.termWidth = 80

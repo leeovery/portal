@@ -9,8 +9,8 @@ import (
 
 func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

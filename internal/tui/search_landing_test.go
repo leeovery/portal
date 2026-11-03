@@ -40,9 +40,9 @@ func sessionNames(items []list.Item) []string {
 
 func TestSearchFormLanding(t *testing.T) {
 	sessions := []Session{
-		{Name: "myapp-dev", Answered: true},
-		{Name: "other", Answered: true},
-		{Name: "myapp-prod", Answered: true},
+		{Name: "myapp-dev"},
+		{Name: "other"},
+		{Name: "myapp-prod"},
 	}
 
 	t.Run("it lands a search term on the Sessions page with the filter committed", func(t *testing.T) {
@@ -94,9 +94,9 @@ func TestSearchFormLanding(t *testing.T) {
 				{Path: dirB, Name: "Bravo", Tags: []string{"play"}},
 			}
 			grouped := []Session{
-				{Name: "myapp-alpha", Answered: true, Dir: dirA},
-				{Name: "other", Answered: true, Dir: dirB},
-				{Name: "myapp-bravo", Answered: true, Dir: dirB},
+				{Name: "myapp-alpha", Dir: dirA},
+				{Name: "other", Dir: dirB},
+				{Name: "myapp-bravo", Dir: dirB},
 			}
 
 			m := searchLanding(t, mode.mode, "myapp", grouped, projects)
@@ -212,8 +212,8 @@ func TestSearchFormLanding(t *testing.T) {
 
 func TestSearchFormPrecedenceOverInitialFilter(t *testing.T) {
 	sessions := []Session{
-		{Name: "myapp-dev", Answered: true},
-		{Name: "other", Answered: true},
+		{Name: "myapp-dev"},
+		{Name: "other"},
 	}
 
 	t.Run("it lands on the search term when a Deps carries both a search form and an initial filter", func(t *testing.T) {

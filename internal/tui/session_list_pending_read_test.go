@@ -130,8 +130,8 @@ func assertDots(t *testing.T, m Model, want map[string]bool) {
 }
 
 var pendingReadSessions = []Session{
-	{Name: "alpha", Answered: true},
-	{Name: "bravo", Answered: true},
+	{Name: "alpha"},
+	{Name: "bravo"},
 }
 
 func TestSessionListLoad_TakesThePendingReadWithTheSessionEnumerationOnFirstLoad(t *testing.T) {
@@ -157,7 +157,7 @@ func TestSessionListLoad_TakesThePendingReadWithTheSessionEnumerationOnFirstLoad
 }
 
 func TestSessionListLoad_ReReadsBothAfterAKillARenameAndOnPreviewDismissal(t *testing.T) {
-	after := []Session{{Name: "bravo", Answered: true}, {Name: "charlie", Answered: true}}
+	after := []Session{{Name: "bravo"}, {Name: "charlie"}}
 	tests := []struct {
 		name string
 		run  func(t *testing.T, m Model) Model
@@ -322,7 +322,7 @@ func TestSessionListLoad_MarksNothingWhenTheSeamIsUnwired(t *testing.T) {
 func TestSessionListLoad_IssuesNoSecondReadOnAGroupedRebuild(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-	sessions := []Session{{Name: "alpha", Answered: true, Dir: dir}, {Name: "bravo", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "alpha", Dir: dir}, {Name: "bravo", Dir: dir}}
 	lister := &stepListerStub{steps: [][]Session{sessions}}
 	reader := &pendingReaderStub{steps: [][]string{{"alpha"}}}
 	m := pendingReadModel(t, prefs.ModeFlat, projects, lister, reader)
@@ -360,7 +360,7 @@ func TestSessionListLoad_IssuesNoSecondReadOnAGroupedRebuild(t *testing.T) {
 func TestSessionListLoad_ShowsTheDotOnEveryRowOfAMultiTagPendingSession(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-	sessions := []Session{{Name: "alpha", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "alpha", Dir: dir}}
 	lister := &stepListerStub{steps: [][]Session{sessions}}
 	reader := &pendingReaderStub{steps: [][]string{{"alpha"}}}
 	m := pendingReadModel(t, prefs.ModeByTag, projects, lister, reader)

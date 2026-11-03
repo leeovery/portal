@@ -312,7 +312,7 @@ func (d SessionDelegate) renderRowBar(name string, bg lipgloss.Style, selected b
 // A session that did not answer is dimmed: muted and not bold, so under
 // NO_COLOR it still differs from its neighbours beside its badge.
 func (d SessionDelegate) rowNameStyle(s Session, mutedTok theme.Token, selected bool) lipgloss.Style {
-	if !s.Answered {
+	if s.NotAnswering {
 		return d.rowToken(lipgloss.Style{}, mutedTok, selected)
 	}
 	nameTok := d.Theme.TextPrimary
@@ -329,7 +329,7 @@ func (d SessionDelegate) renderRowTrailing(s Session, bg lipgloss.Style, mutedTo
 	switch {
 	case isSelected(d.GoneFlagged, s.Name):
 		return d.rowToken(lipgloss.Style{}, d.Theme.StateDestructive, selected).Render(goneBadge), lipgloss.Width(goneBadge)
-	case !s.Answered:
+	case s.NotAnswering:
 		return d.rowToken(lipgloss.Style{}, mutedTok, selected).Render(notAnsweringBadge), lipgloss.Width(notAnsweringBadge)
 	}
 	cluster := d.indicatorCluster(rowIndicators{

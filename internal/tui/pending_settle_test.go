@@ -37,9 +37,9 @@ func (r *markerReaderStub) ListSkeletonMarkers() (map[string]struct{}, error) {
 }
 
 var settleSessions = []Session{
-	{Name: "alpha", Answered: true},
-	{Name: "bravo", Answered: true},
-	{Name: "charlie", Answered: true},
+	{Name: "alpha"},
+	{Name: "bravo"},
+	{Name: "charlie"},
 }
 
 const generousSettleBound = time.Minute

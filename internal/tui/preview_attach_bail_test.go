@@ -27,7 +27,7 @@ func pressSpaceThenBail(t *testing.T, m Model, session string) (Model, tea.Cmd) 
 }
 
 func TestPreviewAttachBailFlipsToPageSessions(t *testing.T) {
-	sessions := []Session{{Name: "alpha", Answered: true, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)
@@ -40,7 +40,7 @@ func TestPreviewAttachBailFlipsToPageSessions(t *testing.T) {
 }
 
 func TestPreviewAttachBailZerosPreviewModel(t *testing.T) {
-	sessions := []Session{{Name: "alpha", Answered: true, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)
@@ -55,12 +55,12 @@ func TestPreviewAttachBailZerosPreviewModel(t *testing.T) {
 
 func TestPreviewAttachBailDispatchesRefreshCmd(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
-	postKill := []Session{{Name: "bravo", Answered: true, Attached: false}}
+	postKill := []Session{{Name: "bravo", Attached: false}}
 	lister := &stepListerStub{steps: [][]Session{postKill}}
 	m := modelWithSeamsAndLister(t, sessions, enum, reader, lister)
 
@@ -87,8 +87,8 @@ func TestPreviewAttachBailDispatchesRefreshCmd(t *testing.T) {
 
 func TestPreviewAttachBailPreservesSessionNameFromMessage(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -114,7 +114,7 @@ func TestPreviewAttachBailPreservesSessionNameFromMessage(t *testing.T) {
 }
 
 func TestPreviewAttachBailNoListerStillEmitsTickCleanly(t *testing.T) {
-	sessions := []Session{{Name: "alpha", Answered: true, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)
@@ -138,8 +138,8 @@ func TestPreviewAttachBailNoListerStillEmitsTickCleanly(t *testing.T) {
 
 func TestPreviewAttachBailToleratesListerErrorSilently(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -173,7 +173,7 @@ func TestPreviewAttachBailToleratesListerErrorSilently(t *testing.T) {
 }
 
 func TestPreviewAttachBailEmptySessionNameStillTransitions(t *testing.T) {
-	sessions := []Session{{Name: "alpha", Answered: true, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]Session{sessions}}
@@ -201,7 +201,7 @@ func TestPreviewAttachBailEmptySessionNameStillTransitions(t *testing.T) {
 }
 
 func TestEscDismissPathUnchangedAfterBailHandlerAdded(t *testing.T) {
-	sessions := []Session{{Name: "alpha", Answered: true, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]Session{sessions}}

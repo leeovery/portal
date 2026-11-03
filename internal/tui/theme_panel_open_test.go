@@ -62,7 +62,7 @@ func themeOpenTestModel(t *testing.T, enumerator ThemeSource, keys theme.RawKeys
 // row action has to have a row to act on.
 func themeOpenTestPopulatedModel(t *testing.T, enumerator ThemeSource) Model {
 	t.Helper()
-	m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}, {Name: "bravo", Answered: true}})
+	m := NewModelWithSessions([]Session{{Name: "alpha"}, {Name: "bravo"}})
 	m.sessionKiller = keymapParityKiller{}
 	m.projectList.SetItems(ProjectsToListItems([]project.Project{{Path: "/p/one", Name: "one"}}))
 	m.projectList.Select(0)

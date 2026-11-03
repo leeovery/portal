@@ -58,7 +58,7 @@ func TestFixtureByName(t *testing.T) {
 			if got.Name != w.name {
 				t.Errorf("session[%d].Name = %q, want %q", i, got.Name, w.name)
 			}
-			if !got.Answered {
+			if got.NotAnswering {
 				t.Errorf("session[%d] does not answer (%s)", i, w.name)
 			}
 			if got.Attached != w.attached {
@@ -467,7 +467,7 @@ func TestSessionsNoTagsSignpostFixture(t *testing.T) {
 		if got.Name != w.name {
 			t.Errorf("session[%d].Name = %q, want %q", i, got.Name, w.name)
 		}
-		if !got.Answered {
+		if got.NotAnswering {
 			t.Errorf("session[%d] does not answer (%s)", i, w.name)
 		}
 		if got.Attached != w.attached {
@@ -626,8 +626,8 @@ func TestSessionsMultiSelectActiveFixture(t *testing.T) {
 	}
 	for i, w := range wants {
 		got := sessions[i]
-		if got.Name != w.name || !got.Answered || got.Attached != w.attached {
-			t.Errorf("session[%d] = {%q,answered=%t,%t}, want {%q,answered=true,%t}", i, got.Name, got.Answered, got.Attached, w.name, w.attached)
+		if got.Name != w.name || got.NotAnswering || got.Attached != w.attached {
+			t.Errorf("session[%d] = {%q,notAnswering=%t,%t}, want {%q,notAnswering=false,%t}", i, got.Name, got.NotAnswering, got.Attached, w.name, w.attached)
 		}
 	}
 
@@ -711,8 +711,8 @@ func assertFlatFixtureSet(t *testing.T, fx *capture.Fixture) {
 	}
 	for i, w := range wants {
 		got := sessions[i]
-		if got.Name != w.name || !got.Answered || got.Attached != w.attached {
-			t.Errorf("session[%d] = {%q,answered=%t,%t}, want {%q,answered=true,%t}", i, got.Name, got.Answered, got.Attached, w.name, w.attached)
+		if got.Name != w.name || got.NotAnswering || got.Attached != w.attached {
+			t.Errorf("session[%d] = {%q,notAnswering=%t,%t}, want {%q,notAnswering=false,%t}", i, got.Name, got.NotAnswering, got.Attached, w.name, w.attached)
 		}
 	}
 }

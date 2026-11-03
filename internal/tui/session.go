@@ -10,9 +10,9 @@ type Session struct {
 	// Dir is the session's recorded directory, empty when none is recorded.
 	Dir      string
 	Attached bool
-	// Answered is false for a session that is listed but did not answer, so
+	// NotAnswering marks a session that is listed but did not answer, so
 	// nothing beyond its name is known.
-	Answered bool
+	NotAnswering bool
 }
 
 // DisplayName is the text the session's row shows.

@@ -10,7 +10,7 @@ import (
 )
 
 func TestSessionRow_ShowsTheLabelInPlaceOfTheName(t *testing.T) {
-	items := flatItems(Session{Name: "dotfiles-PpaTER", Label: "user search", Answered: true})
+	items := flatItems(Session{Name: "dotfiles-PpaTER", Label: "user search"})
 	vis := ansi.Strip(renderRow(SessionDelegate{Theme: testDarkTheme(t)}, 80, items, 0, 0))
 
 	if !strings.Contains(vis, "user search") {
@@ -22,7 +22,7 @@ func TestSessionRow_ShowsTheLabelInPlaceOfTheName(t *testing.T) {
 }
 
 func TestSessionRow_ShowsTheNameWhenTheLabelIsEmpty(t *testing.T) {
-	items := flatItems(Session{Name: "dotfiles-PpaTER", Answered: true})
+	items := flatItems(Session{Name: "dotfiles-PpaTER"})
 	vis := ansi.Strip(renderRow(SessionDelegate{Theme: testDarkTheme(t)}, 80, items, 0, 0))
 
 	if !strings.Contains(vis, "dotfiles-PpaTER") {
@@ -31,7 +31,7 @@ func TestSessionRow_ShowsTheNameWhenTheLabelIsEmpty(t *testing.T) {
 }
 
 func TestSessionRow_KeysItsMarksOnTheNameNotTheLabel(t *testing.T) {
-	items := flatItems(Session{Name: "dotfiles-PpaTER", Label: "user search", Answered: true})
+	items := flatItems(Session{Name: "dotfiles-PpaTER", Label: "user search"})
 	d := SessionDelegate{Theme: testDarkTheme(t), Pending: markedSet("dotfiles-PpaTER")}
 	vis := ansi.Strip(renderRow(d, 80, items, 0, 0))
 
@@ -42,7 +42,7 @@ func TestSessionRow_KeysItsMarksOnTheNameNotTheLabel(t *testing.T) {
 
 func TestSessionRow_NotAnsweringIsDimmedAndBadged(t *testing.T) {
 	const w = 80
-	items := flatItems(Session{Name: "row-zero"}, Session{Name: "row-one"})
+	items := flatItems(Session{Name: "row-zero", NotAnswering: true}, Session{Name: "row-one", NotAnswering: true})
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
 		for i, tok := range []struct{ fg, bg theme.Token }{
@@ -70,7 +70,7 @@ func TestSessionRow_NotAnsweringIsDimmedAndBadged(t *testing.T) {
 }
 
 func TestSessionRow_NotAnsweringCarriesNoIndicators(t *testing.T) {
-	items := flatItems(Session{Name: "alpha", Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true, NotAnswering: true})
 	for _, colourless := range []bool{false, true} {
 		d := SessionDelegate{Theme: testDarkTheme(t), Colourless: colourless, Pending: markedSet("alpha")}
 		vis := ansi.Strip(renderRow(d, 80, items, 0, 0))
@@ -85,7 +85,7 @@ func TestSessionRow_NotAnsweringCarriesNoIndicators(t *testing.T) {
 }
 
 func TestSessionRow_NotAnsweringStaysTextBackedUnderNoColor(t *testing.T) {
-	items := flatItems(Session{Name: "alpha"}, Session{Name: "bravo", Answered: true})
+	items := flatItems(Session{Name: "alpha", NotAnswering: true}, Session{Name: "bravo"})
 	d := SessionDelegate{Theme: testDarkTheme(t), Colourless: true}
 
 	silent := renderRow(d, 80, items, 0, 1)
@@ -104,7 +104,7 @@ func TestSessionRow_NotAnsweringStaysTextBackedUnderNoColor(t *testing.T) {
 }
 
 func TestSessionRow_GoneBadgeTakesPrecedenceOverNotAnswering(t *testing.T) {
-	items := flatItems(Session{Name: "alpha"})
+	items := flatItems(Session{Name: "alpha", NotAnswering: true})
 	d := SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, GoneFlagged: markedSet("alpha")}
 	vis := ansi.Strip(renderRow(d, 80, items, 0, 0))
 

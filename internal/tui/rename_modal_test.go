@@ -372,7 +372,7 @@ type stubLister struct {
 func (l stubLister) ListSessions() ([]Session, error) { return l.sessions, nil }
 
 func newRenameTestModel(renamer SessionRenamer, target, value string) Model {
-	sessions := []Session{{Name: target, Answered: true}}
+	sessions := []Session{{Name: target}}
 	m := NewModelWithSessions(sessions)
 	m.sessionRenamer = renamer
 	m.sessionLister = stubLister{sessions: sessions}

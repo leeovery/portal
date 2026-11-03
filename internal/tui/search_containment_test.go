@@ -76,9 +76,9 @@ func scatteredSessions(t *testing.T) []tui.Session {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	return []tui.Session{
-		{Name: "portal-a1b2", Answered: true},
-		{Name: "rust-tools", Answered: true, Dir: filepath.Join(home, "Projects", "rust-tools")},
-		{Name: "other", Answered: true},
+		{Name: "portal-a1b2"},
+		{Name: "rust-tools", Dir: filepath.Join(home, "Projects", "rust-tools")},
+		{Name: "other"},
 	}
 }
 
@@ -109,8 +109,8 @@ func TestSearchContainmentNarrowsTheList(t *testing.T) {
 func TestSearchContainmentPreservesListOrder(t *testing.T) {
 	// Fuzzy ranks "portal-a1b2" above "app-port"; the list order is the reverse.
 	sessions := []tui.Session{
-		{Name: "app-port", Answered: true},
-		{Name: "portal-a1b2", Answered: true},
+		{Name: "app-port"},
+		{Name: "portal-a1b2"},
 	}
 
 	t.Run("it keeps the list's own order and re-ranks nothing", func(t *testing.T) {
@@ -144,10 +144,10 @@ func TestSearchContainmentMatchesTheRecordedDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	sessions := []tui.Session{
-		{Name: "api-work", Answered: true, Dir: filepath.Join(home, "Code", "portal")},
+		{Name: "api-work", Dir: filepath.Join(home, "Code", "portal")},
 		// A subsequence match for "portal" and nothing a run of it appears in.
-		{Name: "p-o-r-t-a-l", Answered: true},
-		{Name: "other", Answered: true},
+		{Name: "p-o-r-t-a-l"},
+		{Name: "other"},
 	}
 
 	m := containmentPicker(t, tui.Deps{
@@ -160,7 +160,7 @@ func TestSearchContainmentMatchesTheRecordedDirectory(t *testing.T) {
 
 func TestSearchContainmentMatchesASpacedNameOnItsOwnFields(t *testing.T) {
 	sessions := []tui.Session{
-		{Name: "my session", Answered: true, Dir: "/opt/api"},
+		{Name: "my session", Dir: "/opt/api"},
 	}
 
 	m := containmentPicker(t, tui.Deps{
@@ -204,9 +204,9 @@ func groupedFixture(t *testing.T) ([]tui.Session, []project.Project) {
 		{Path: dirB, Name: "Bravo", Tags: []string{"play"}},
 	}
 	sessions := []tui.Session{
-		{Name: "app-port", Answered: true, Dir: dirA},
-		{Name: "portal-a1b2", Answered: true, Dir: dirB},
-		{Name: "other", Answered: true, Dir: dirA},
+		{Name: "app-port", Dir: dirA},
+		{Name: "portal-a1b2", Dir: dirB},
+		{Name: "other", Dir: dirA},
 	}
 	return sessions, projects
 }
@@ -294,7 +294,7 @@ func TestSearchContainmentSurvivesReRenders(t *testing.T) {
 		sessions, projects := groupedFixture(t)
 		// Survives the refresh as a subsequence match for "port" (p·o·r·t
 		// scattered across the path) that no run of "port" appears in.
-		sessions = append(sessions, tui.Session{Name: "rust-tools", Answered: true, Dir: "/opt/projects/rust-tools"})
+		sessions = append(sessions, tui.Session{Name: "rust-tools", Dir: "/opt/projects/rust-tools"})
 
 		m := containmentPicker(t, tui.Deps{
 			InitialMode: prefs.ModeFlat,
@@ -311,9 +311,9 @@ func TestSearchContainmentSurvivesReRenders(t *testing.T) {
 
 func TestSearchContainmentHoldsOnTheFilterText(t *testing.T) {
 	sessions := []tui.Session{
-		{Name: "app-port", Answered: true},
-		{Name: "portal-a1b2", Answered: true},
-		{Name: "pro-tools", Answered: true},
+		{Name: "app-port"},
+		{Name: "portal-a1b2"},
+		{Name: "pro-tools"},
 	}
 	searched := func(t *testing.T) tui.Model {
 		t.Helper()
@@ -351,8 +351,8 @@ func TestSearchContainmentHoldsOnTheFilterText(t *testing.T) {
 
 func TestSearchContainmentIsNotInstalledForATermLessForm(t *testing.T) {
 	sessions := []tui.Session{
-		{Name: "app-port", Answered: true},
-		{Name: "pro-tools", Answered: true},
+		{Name: "app-port"},
+		{Name: "pro-tools"},
 	}
 
 	m := containmentPicker(t, tui.Deps{
@@ -376,9 +376,9 @@ func TestSearchContainmentIsNotInstalledForATermLessForm(t *testing.T) {
 func TestSearchNarrowsAgainstTheHomeTheModelWasGiven(t *testing.T) {
 	t.Setenv("HOME", "/elsewhere")
 	sessions := []tui.Session{
-		{Name: "alpha", Answered: true, Dir: "/home/user/code/alpha"},
-		{Name: "beta", Answered: true, Dir: "/opt/code/beta"},
-		{Name: "gamma", Answered: true, Dir: "/elsewhere/code/gamma"},
+		{Name: "alpha", Dir: "/home/user/code/alpha"},
+		{Name: "beta", Dir: "/opt/code/beta"},
+		{Name: "gamma", Dir: "/elsewhere/code/gamma"},
 	}
 
 	m := containmentPicker(t, tui.Deps{Home: "/home/user", Search: &tui.SearchForm{Term: "~/code"}}, sessions, nil)

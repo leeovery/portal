@@ -23,8 +23,8 @@ func sessionRowIndices(items []list.Item) []int {
 
 func TestMultiSelectEnterMode(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	if m.MultiSelectActive() {
@@ -46,8 +46,8 @@ func TestMultiSelectEnterMode(t *testing.T) {
 
 func TestMultiSelectToggleIdempotent(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = pressSession(t, m, pressM)
@@ -75,7 +75,7 @@ func TestMultiSelectToggleIdempotent(t *testing.T) {
 func TestMultiSelectByTagIdentity(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.rebuildSessionList()
@@ -109,7 +109,7 @@ func TestMultiSelectByTagIdentity(t *testing.T) {
 func TestMultiSelectHeaderRowNoop(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.rebuildSessionList()
@@ -140,8 +140,8 @@ func TestMultiSelectHeaderRowNoop(t *testing.T) {
 
 func TestMultiSelectEscExitsAndClears(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = pressSession(t, m, pressM)
@@ -164,7 +164,7 @@ func TestMultiSelectUppercaseMNoop(t *testing.T) {
 	pressUpperM := tea.KeyPressMsg{Code: 'M', Text: "M"}
 
 	t.Run("M does not enter the mode from the normal list", func(t *testing.T) {
-		m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m = pressSession(t, m, pressUpperM)
 		if m.MultiSelectActive() {
 			t.Errorf("uppercase M must NOT enter multi-select mode")
@@ -172,7 +172,7 @@ func TestMultiSelectUppercaseMNoop(t *testing.T) {
 	})
 
 	t.Run("M does not toggle a mark while in the mode", func(t *testing.T) {
-		m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m = pressSession(t, m, pressM)
 		before := m.SelectedSessionCount()
 		m = pressSession(t, m, pressUpperM)

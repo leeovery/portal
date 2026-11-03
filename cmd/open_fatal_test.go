@@ -51,7 +51,7 @@ func TestProcessTUIResult_NoFatalUnchanged(t *testing.T) {
 	})
 
 	t.Run("selection still connects", func(t *testing.T) {
-		m := tui.NewModelWithSessions([]tui.Session{{Name: "dev", Answered: true}})
+		m := tui.NewModelWithSessions([]tui.Session{{Name: "dev"}})
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

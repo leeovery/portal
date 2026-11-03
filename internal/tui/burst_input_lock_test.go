@@ -124,7 +124,7 @@ func TestBurstInputLock_CtrlCAndEscStayLive(t *testing.T) {
 }
 
 func TestBurstInputLock_AdvancesOpeningCounter(t *testing.T) {
-	m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}})
+	m := NewModelWithSessions([]Session{{Name: "alpha"}})
 	m.termWidth = 80
 	m.termHeight = 24
 	m.burstPending = true
@@ -151,7 +151,7 @@ func TestBurstInputLock_AdvancesOpeningCounter(t *testing.T) {
 }
 
 func TestBurstInputLock_HoldsDenominatorAtN(t *testing.T) {
-	m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}})
+	m := NewModelWithSessions([]Session{{Name: "alpha"}})
 	m.termWidth = 80
 	m.termHeight = 24
 	m.burstPending = true
@@ -177,9 +177,9 @@ func TestBurstInputLock_HoldsDenominatorAtN(t *testing.T) {
 func TestBurstInputLock_OpeningBandPrecedence(t *testing.T) {
 	newOpeningModel := func() Model {
 		m := NewModelWithSessions([]Session{
-			{Name: "alpha", Answered: true},
-			{Name: "bravo", Answered: true},
-			{Name: "charlie", Answered: true},
+			{Name: "alpha"},
+			{Name: "bravo"},
+			{Name: "charlie"},
 		})
 		m.termWidth = 80
 		m.termHeight = 24

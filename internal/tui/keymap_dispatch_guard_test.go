@@ -251,9 +251,9 @@ func TestPreviewDescriptorDispatchParity(t *testing.T) {
 func sessionsGuardModel(t *testing.T) Model {
 	t.Helper()
 	return NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	})
 }
 

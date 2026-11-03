@@ -133,13 +133,13 @@ func TestConcurrentInit_IncludesProgressReceiver(t *testing.T) {
 }
 
 func TestLoadingInert_NoEnumerationBeforeComplete(t *testing.T) {
-	lister := &mockSessionLister{sessions: []tui.Session{{Name: "a", Answered: true}}}
+	lister := &mockSessionLister{sessions: []tui.Session{{Name: "a"}}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "a", Answered: true}}})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "a"}}})
 	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
 	if model.(tui.Model).ActivePage() != tui.PageLoading {
 		t.Error("model left PageLoading before terminal complete (not inert)")

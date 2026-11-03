@@ -71,8 +71,12 @@ func rowLine(t *testing.T, frame, session string) string {
 
 // trailingIndicators is the run of indicator cells closing the row's visible
 // text, after the session's name.
-func trailingIndicators(line, session string) string {
-	_, after, _ := strings.Cut(ansi.Strip(line), " "+session+" ")
+func trailingIndicators(t *testing.T, line, session string) string {
+	t.Helper()
+	_, after, ok := strings.Cut(ansi.Strip(line), " "+session+" ")
+	if !ok {
+		t.Fatalf("no row for %s in %q", session, ansi.Strip(line))
+	}
 	return strings.TrimSpace(after)
 }
 
@@ -136,7 +140,7 @@ func TestPendingResumeFixture_RendersAllFourCombinationsInOneFrame(t *testing.T)
 	}
 	for _, c := range cases {
 		line := rowLine(t, frame, c.session)
-		if got := trailingIndicators(line, c.session); got != c.glyphs {
+		if got := trailingIndicators(t, line, c.session); got != c.glyphs {
 			t.Errorf("%s: trailing indicators = %q, want %q: %q", c.session, got, c.glyphs, ansi.Strip(line))
 		}
 		sgrs := indicatorSGRs(line)
@@ -186,7 +190,7 @@ func TestPendingResumeFixture_RendersTheProductionDelegate(t *testing.T) {
 			t.Errorf("%s: row is unchanged when the reader is withdrawn; its pending dot did not come through the reader", session)
 		}
 	}
-	if got := trailingIndicators(rowLine(t, withoutReader, comboBoth), comboBoth); got != "●" {
+	if got := trailingIndicators(t, rowLine(t, withoutReader, comboBoth), comboBoth); got != "●" {
 		t.Errorf("%s without the reader carries %q, want the attached dot alone", comboBoth, got)
 	}
 }
@@ -206,7 +210,7 @@ func TestPendingResumeColourlessFixture_RendersLetters(t *testing.T) {
 	}
 	for _, c := range cases {
 		line := rowLine(t, frame, c.session)
-		if got := trailingIndicators(line, c.session); got != c.letters {
+		if got := trailingIndicators(t, line, c.session); got != c.letters {
 			t.Errorf("%s: trailing indicators = %q, want %q: %q", c.session, got, c.letters, ansi.Strip(line))
 		}
 	}

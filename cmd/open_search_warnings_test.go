@@ -405,7 +405,7 @@ func warmPickerModel(t *testing.T, deps tui.Deps, warnings []warning.Warning) tu
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "portal-a1b2", Answered: true}}})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "portal-a1b2"}}})
 
 	updated, ok := model.(tui.Model)
 	if !ok {

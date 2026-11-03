@@ -32,9 +32,9 @@ func markTwoFlatSessions(t *testing.T, m Model, idxA, idxB int) Model {
 
 func TestMultiSelectMarksSurviveRegroup(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	})
 	m = markTwoFlatSessions(t, m, 0, 2)
 	beforeMode := m.sessionListMode
@@ -60,7 +60,7 @@ func TestMultiSelectMarksSurviveRegroup(t *testing.T) {
 func TestMultiSelectMarksSurvivePaging(t *testing.T) {
 	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, Session{Name: fmt.Sprintf("sess-%02d", i), Answered: true})
+		sessions = append(sessions, Session{Name: fmt.Sprintf("sess-%02d", i)})
 	}
 	m := NewModelWithSessions(sessions)
 	if m.sessionList.Paginator.TotalPages < 2 {
@@ -97,8 +97,8 @@ func TestMultiSelectFilteredOutSessionStaysMarked(t *testing.T) {
 	m.termWidth = filteringReskinWidth
 	m.termHeight = filteringReskinHeight
 	m.applySessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}, nil)
 	m.sessionList.Select(1)
 	m = enterMultiSelect(t, m)
@@ -144,9 +144,9 @@ func TestMultiSelectFilteredOutSessionStaysMarked(t *testing.T) {
 
 func TestMultiSelectPreviewRoundTripKeepsSelection(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -181,13 +181,13 @@ func TestMultiSelectPreviewRoundTripKeepsSelection(t *testing.T) {
 
 func TestMultiSelectPrunesExternallyKilledSession(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	postKill := []Session{
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -225,7 +225,7 @@ func TestMultiSelectPrunesExternallyKilledSession(t *testing.T) {
 func TestMultiSelectMarkedSessionSurvivesBucketMove(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newSwitchViewTestModel(t, prefs.ModeByProject, nil, sessions, projects)
 

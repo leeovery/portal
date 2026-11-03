@@ -236,7 +236,7 @@ func TestHeaderHeight_SubtractedFromListBudget(t *testing.T) {
 	const w, h = 90, 24
 	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
@@ -261,7 +261,7 @@ func TestHeaderHeight_CountedAtEverySizeApplySite(t *testing.T) {
 	const w, h = 90, 20
 	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))

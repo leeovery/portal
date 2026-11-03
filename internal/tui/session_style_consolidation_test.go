@@ -78,8 +78,8 @@ func TestSessionDelegateRender_ByteIdenticalAcrossConsolidation(t *testing.T) {
 
 	header := HeaderItem{Heading: "Portal", Count: 2, Key: "/p/portal"}
 	sessions := []list.Item{
-		SessionItem{Session: Session{Name: "dev", Answered: true, Attached: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-		SessionItem{Session: Session{Name: "work", Answered: true, Attached: false}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		SessionItem{Session: Session{Name: "dev", Attached: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		SessionItem{Session: Session{Name: "work", Attached: false}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 	}
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {

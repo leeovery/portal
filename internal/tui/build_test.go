@@ -25,7 +25,7 @@ func (stubCreator) CreateFromDir(string, []string) (string, error) { return "", 
 
 func TestBuild(t *testing.T) {
 	t.Run("wires the seam set and applies the initial mode", func(t *testing.T) {
-		lister := &mockSessionLister{sessions: []tui.Session{{Name: "dev", Answered: true}}}
+		lister := &mockSessionLister{sessions: []tui.Session{{Name: "dev"}}}
 
 		m := tui.Build(tui.Deps{
 			Lister:      lister,
@@ -137,9 +137,9 @@ func TestBuild(t *testing.T) {
 	t.Run("initial gone-flagged seeds the abort banner over a multi-select model", func(t *testing.T) {
 		m := tui.Build(tui.Deps{
 			Lister: &mockSessionLister{sessions: []tui.Session{
-				{Name: "agentic-workflows-codify", Answered: true},
-				{Name: "fab-flowx-explore", Answered: true},
-				{Name: "designlab-web-r8suyU", Answered: true},
+				{Name: "agentic-workflows-codify"},
+				{Name: "fab-flowx-explore"},
+				{Name: "designlab-web-r8suyU"},
 			}},
 			InitialMode: prefs.ModeFlat,
 			Capture: tui.CaptureSeeds{
@@ -155,9 +155,9 @@ func TestBuild(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{
-			{Name: "agentic-workflows-codify", Answered: true},
-			{Name: "fab-flowx-explore", Answered: true},
-			{Name: "designlab-web-r8suyU", Answered: true},
+			{Name: "agentic-workflows-codify"},
+			{Name: "fab-flowx-explore"},
+			{Name: "designlab-web-r8suyU"},
 		}})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{})
 

@@ -92,8 +92,8 @@ func TestModalBlankScreen_ColourlessClearsToNativeBg(t *testing.T) {
 	m.termWidth = w
 	m.termHeight = h
 	m.applySessions([]Session{
-		{Name: "alpha", Answered: true, Attached: true},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
 	}, nil)
 	openKillModal(&m, "alpha")
 

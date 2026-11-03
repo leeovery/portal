@@ -84,7 +84,7 @@ func dirColumnFixture(t *testing.T) (dir string, sessions []Session, projects []
 	t.Helper()
 	dir = t.TempDir()
 	return dir,
-		[]Session{{Name: "portal-abc", Answered: true, Dir: dir}},
+		[]Session{{Name: "portal-abc", Dir: dir}},
 		[]project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
 }
 
@@ -245,7 +245,7 @@ func TestSearchDirColumn(t *testing.T) {
 	t.Run("it shows no directory for a session whose directory is known only to grouping", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		m := dirColumnModel(t, Deps{
 			InitialMode: prefs.ModeByProject,
@@ -281,8 +281,8 @@ func TestSearchDirColumn(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
 		sessions := []Session{
-			{Name: "portal-abc", Answered: true, Dir: dir},
-			{Name: "portal-xyz", Answered: true, Dir: dir},
+			{Name: "portal-abc", Dir: dir},
+			{Name: "portal-xyz", Dir: dir},
 		}
 		wide := searchColumnModel(t, prefs.ModeFlat, "portal", sessions, projects)
 

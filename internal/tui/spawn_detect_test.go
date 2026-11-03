@@ -38,7 +38,7 @@ func appleTerminalIdentity() spawn.Identity {
 
 func press(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
 
-func oneNamedSession() []Session { return []Session{{Name: "alpha", Answered: true}} }
+func oneNamedSession() []Session { return []Session{{Name: "alpha"}} }
 
 func dispatchWarmDetection(t *testing.T, det TerminalDetector, res spawn.AdapterResolver) (Model, tea.Cmd) {
 	t.Helper()

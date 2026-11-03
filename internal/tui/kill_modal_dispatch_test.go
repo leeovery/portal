@@ -10,8 +10,8 @@ import (
 func killDispatchModel(t *testing.T) (Model, *killerStub) {
 	t.Helper()
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: true},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

@@ -14,8 +14,8 @@ func pressEnter(t *testing.T, m Model) (Model, tea.Cmd) {
 
 func TestMultiSelectEnterN0(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = enterMultiSelectEmpty(t, m)
@@ -42,8 +42,8 @@ func TestMultiSelectEnterN0(t *testing.T) {
 
 func TestMultiSelectEnterN1(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = pressSession(t, m, pressM)
@@ -63,8 +63,8 @@ func TestMultiSelectEnterN1(t *testing.T) {
 
 func TestMultiSelectEnterN1IgnoresCursor(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = pressSession(t, m, pressM)
@@ -92,8 +92,8 @@ func TestMultiSelectEnterN1IgnoresCursor(t *testing.T) {
 
 func TestMultiSelectEnterN2DetectionUnwired(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = pressSession(t, m, pressM)

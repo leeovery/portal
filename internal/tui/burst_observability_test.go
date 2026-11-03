@@ -12,8 +12,8 @@ import (
 
 func obsTwoSessions() []Session {
 	return []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 }
 

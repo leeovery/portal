@@ -505,7 +505,7 @@ func (r skeletonMarkerReader) ListSkeletonMarkers() (map[string]struct{}, error)
 func pickerSessions(sessions []tmux.Session) []tui.Session {
 	out := make([]tui.Session, 0, len(sessions))
 	for _, s := range sessions {
-		out = append(out, tui.Session{Name: s.Name, Dir: s.Dir, Attached: s.Attached, Answered: true})
+		out = append(out, tui.Session{Name: s.Name, Dir: s.Dir, Attached: s.Attached})
 	}
 	return out
 }

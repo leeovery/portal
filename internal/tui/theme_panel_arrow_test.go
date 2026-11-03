@@ -426,7 +426,7 @@ func newArrowRebuildProbeModel(t *testing.T, rows []theme.Row, reader *fakeStamp
 	projects := []project.Project{{Path: reader.path, Name: "Portal", Tags: []string{"work"}}}
 	sessions := make([]Session, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := Build(deps)
@@ -620,7 +620,7 @@ func TestPanelArrow_ColourlessStaysColourless(t *testing.T) {
 		deps.NoColor = colourless
 		m := Build(deps)
 		m.termWidth, m.termHeight = arrowTermW, arrowTermH
-		m.applySessions([]Session{{Name: "alpha", Answered: true}, {Name: "bravo", Answered: true}}, nil)
+		m.applySessions([]Session{{Name: "alpha"}, {Name: "bravo"}}, nil)
 		if colourless {
 			m = armPanelUnderNoColorForTest(t, m)
 		} else {

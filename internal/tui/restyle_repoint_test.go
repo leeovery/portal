@@ -40,7 +40,7 @@ func populateRestyleProbe(t *testing.T, m Model) Model {
 
 	sessions := make([]Session, 0, 60)
 	for i := range 60 {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 	projects := make([]project.Project, 0, 40)
 	for i := range 40 {

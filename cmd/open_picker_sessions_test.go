@@ -32,8 +32,8 @@ func TestPickerSessions_MapsEachTmuxSessionOntoAnAnsweringUnlabelledRow(t *testi
 		{Name: "blog-c3d4", Windows: 1},
 	})
 	want := []tui.Session{
-		{Name: "portal-a1b2", Attached: true, Dir: "/home/user/code/portal", Answered: true},
-		{Name: "blog-c3d4", Answered: true},
+		{Name: "portal-a1b2", Attached: true, Dir: "/home/user/code/portal"},
+		{Name: "blog-c3d4"},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("pickerSessions() = %+v, want %+v", got, want)
@@ -48,7 +48,7 @@ func TestPickerSessionSource_ListsTmuxSessionsAsPickerRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
-	if want := []tui.Session{{Name: "portal-a1b2", Attached: true, Answered: true}}; !slices.Equal(got, want) {
+	if want := []tui.Session{{Name: "portal-a1b2", Attached: true}}; !slices.Equal(got, want) {
 		t.Errorf("ListSessions() = %+v, want %+v", got, want)
 	}
 }

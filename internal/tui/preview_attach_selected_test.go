@@ -7,7 +7,7 @@ import (
 )
 
 func TestPreviewAttachSelected_RecordsSessionOnModel(t *testing.T) {
-	sessions := []Session{{Name: "alpha", Answered: true, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)
@@ -24,7 +24,7 @@ func TestPreviewAttachSelected_RecordsSessionOnModel(t *testing.T) {
 }
 
 func TestPreviewAttachSelected_ReturnsTeaQuit(t *testing.T) {
-	sessions := []Session{{Name: "alpha", Answered: true, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)
@@ -40,7 +40,7 @@ func TestPreviewAttachSelected_ReturnsTeaQuit(t *testing.T) {
 }
 
 func TestPreviewAttachSelected_ParityWithSessionsPageEnterShape(t *testing.T) {
-	sessions := []Session{{Name: "bravo", Answered: true, Attached: false}}
+	sessions := []Session{{Name: "bravo", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)

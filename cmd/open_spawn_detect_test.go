@@ -17,7 +17,7 @@ func TestBuildTUIModel_ThreadsDetectionSeams(t *testing.T) {
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "alpha", Answered: true}}})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "alpha"}}})
 
 	if !model.(tui.Model).DetectDispatched() {
 		t.Error("buildTUIModel must thread cfg.detector/cfg.resolve so reaching PageSessions dispatches detection")

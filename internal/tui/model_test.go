@@ -78,9 +78,9 @@ func TestView(t *testing.T) {
 		{
 			name: "renders all session names",
 			sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: true},
-				{Name: "work", Answered: true, Attached: false},
-				{Name: "misc", Answered: true, Attached: false},
+				{Name: "dev", Attached: true},
+				{Name: "work", Attached: false},
+				{Name: "misc", Attached: false},
 			},
 			checks: func(t *testing.T, view string) {
 				t.Helper()
@@ -94,8 +94,8 @@ func TestView(t *testing.T) {
 		{
 			name: "shows attached indicator for attached sessions",
 			sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: true},
-				{Name: "work", Answered: true, Attached: false},
+				{Name: "dev", Attached: true},
+				{Name: "work", Attached: false},
 			},
 			checks: func(t *testing.T, view string) {
 				t.Helper()
@@ -120,9 +120,9 @@ func TestView(t *testing.T) {
 		{
 			name: "cursor starts at first session",
 			sessions: []tui.Session{
-				{Name: "first", Answered: true, Attached: false},
-				{Name: "second", Answered: true, Attached: false},
-				{Name: "third", Answered: true, Attached: false},
+				{Name: "first", Attached: false},
+				{Name: "second", Attached: false},
+				{Name: "third", Attached: false},
 			},
 			checks: func(t *testing.T, view string) {
 				t.Helper()
@@ -147,7 +147,7 @@ func TestView(t *testing.T) {
 		{
 			name: "single session renders correctly",
 			sessions: []tui.Session{
-				{Name: "solo", Answered: true, Attached: true},
+				{Name: "solo", Attached: true},
 			},
 			checks: func(t *testing.T, view string) {
 				t.Helper()
@@ -165,7 +165,7 @@ func TestView(t *testing.T) {
 		{
 			name: "long session name truncates with an ellipsis",
 			sessions: []tui.Session{
-				{Name: "my-very-long-project-name-that-should-not-be-truncated-even-at-the-widest-flex-x7k2m9", Answered: true, Attached: false},
+				{Name: "my-very-long-project-name-that-should-not-be-truncated-even-at-the-widest-flex-x7k2m9", Attached: false},
 			},
 			checks: func(t *testing.T, view string) {
 				t.Helper()
@@ -183,9 +183,9 @@ func TestView(t *testing.T) {
 		{
 			name: "sessions displayed in order returned by tmux",
 			sessions: []tui.Session{
-				{Name: "zebra", Answered: true, Attached: false},
-				{Name: "alpha", Answered: true, Attached: false},
-				{Name: "middle", Answered: true, Attached: false},
+				{Name: "zebra", Attached: false},
+				{Name: "alpha", Attached: false},
+				{Name: "middle", Attached: false},
 			},
 			checks: func(t *testing.T, view string) {
 				t.Helper()
@@ -226,8 +226,8 @@ func (m *mockSessionLister) ListSessions() ([]tui.Session, error) {
 func TestInit(t *testing.T) {
 	t.Run("returns command that fetches sessions", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		}
 		mock := &mockSessionLister{sessions: sessions}
 		m := tui.New(mock)
@@ -260,8 +260,8 @@ func TestUpdate(t *testing.T) {
 	t.Run("sessionsMsg populates list items", func(t *testing.T) {
 		m := tui.New(nil)
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		}
 
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
@@ -299,9 +299,9 @@ func TestUpdate(t *testing.T) {
 
 func TestKeyboardNavigation(t *testing.T) {
 	threeSessions := []tui.Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
-		{Name: "charlie", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
+		{Name: "charlie", Attached: false},
 	}
 
 	t.Run("down arrow moves cursor to next item", func(t *testing.T) {
@@ -395,8 +395,8 @@ func TestKeyboardNavigation(t *testing.T) {
 
 func TestQuitHandling(t *testing.T) {
 	sessions := []tui.Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 
 	quitTests := []struct {
@@ -487,8 +487,8 @@ func TestEnterSelection(t *testing.T) {
 
 	t.Run("enter sets selected session and triggers quit", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 
@@ -513,8 +513,8 @@ func TestEnterSelection(t *testing.T) {
 
 	t.Run("quit without selecting leaves selected empty", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		}
 
 		quitKeys := []tea.KeyPressMsg{
@@ -538,9 +538,9 @@ func TestEnterSelection(t *testing.T) {
 
 	t.Run("selected returns correct session after navigation and enter", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
-			{Name: "charlie", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
+			{Name: "charlie", Attached: false},
 		}
 
 		var m tea.Model = tui.NewModelWithSessions(sessions)
@@ -571,7 +571,7 @@ func TestEnterSelection(t *testing.T) {
 func TestNKeyCreatesSessionInCWD(t *testing.T) {
 	t.Run("n creates session in cwd and quits", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		}
 		creator := &mockSessionCreator{
 			sessionName: "portal-abc123",
@@ -620,7 +620,7 @@ func TestNKeyCreatesSessionInCWD(t *testing.T) {
 
 	t.Run("n with no session creator is no-op", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		}
 
 		m := tui.New(
@@ -638,7 +638,7 @@ func TestNKeyCreatesSessionInCWD(t *testing.T) {
 
 	t.Run("session creation error is handled gracefully", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		}
 		creator := &mockSessionCreator{
 			err: fmt.Errorf("tmux failed"),
@@ -775,9 +775,9 @@ func TestInitialFilter(t *testing.T) {
 
 	t.Run("evaluateDefaultPage applies initial filter via built-in list filtering", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
-			{Name: "myapp-prod", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
+			{Name: "myapp-prod", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -818,8 +818,8 @@ func TestInitialFilter(t *testing.T) {
 
 	t.Run("initial filter consumed on first load only", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
 		}
 		m := tui.New(&mockSessionLister{sessions: sessions})
 		m = m.WithInitialFilter("myapp")
@@ -898,7 +898,7 @@ func TestEmptyState(t *testing.T) {
 	t.Run("non-empty sessions populates list", func(t *testing.T) {
 		m := tui.New(nil)
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		}
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
 
@@ -951,9 +951,9 @@ func TestEmptyState(t *testing.T) {
 func TestCurrentSessionExclusion(t *testing.T) {
 	t.Run("current session excluded from list inside a session", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "current-sess", Answered: true, Attached: true},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "current-sess", Attached: true},
+			{Name: "bravo", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions).WithCurrentSession("current-sess")
 
@@ -979,8 +979,8 @@ func TestCurrentSessionExclusion(t *testing.T) {
 
 	t.Run("an empty current session name excludes nothing and leaves the title plain", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true},
-			{Name: "bravo", Answered: true},
+			{Name: "alpha"},
+			{Name: "bravo"},
 		}
 		m := tui.NewModelWithSessions(sessions).WithCurrentSession("")
 
@@ -994,8 +994,8 @@ func TestCurrentSessionExclusion(t *testing.T) {
 
 	t.Run("title shows current session name inside a session", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
-			{Name: "my-project-x7k2m9", Answered: true, Attached: true},
+			{Name: "dev", Attached: false},
+			{Name: "my-project-x7k2m9", Attached: true},
 		}
 		m := tui.NewModelWithSessions(sessions).WithCurrentSession("my-project-x7k2m9")
 
@@ -1012,8 +1012,8 @@ func TestCurrentSessionExclusion(t *testing.T) {
 
 	t.Run("title is Sessions outside tmux", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
+			{Name: "work", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 
@@ -1025,7 +1025,7 @@ func TestCurrentSessionExclusion(t *testing.T) {
 
 	t.Run("empty list when only current session exists inside a session", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "only-session", Answered: true, Attached: true},
+			{Name: "only-session", Attached: true},
 		}
 		m := tui.NewModelWithSessions(sessions).WithCurrentSession("only-session")
 
@@ -1037,10 +1037,10 @@ func TestCurrentSessionExclusion(t *testing.T) {
 
 	t.Run("multiple sessions minus current renders correctly", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "current-one", Answered: true, Attached: true},
-			{Name: "bravo", Answered: true, Attached: false},
-			{Name: "charlie", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "current-one", Attached: true},
+			{Name: "bravo", Attached: false},
+			{Name: "charlie", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions).WithCurrentSession("current-one")
 
@@ -1067,8 +1067,8 @@ func TestCurrentSessionExclusion(t *testing.T) {
 	t.Run("very long current session name in title", func(t *testing.T) {
 		longName := "my-extremely-long-project-name-that-goes-on-and-on-forever-x7k2m9"
 		sessions := []tui.Session{
-			{Name: longName, Answered: true, Attached: true},
-			{Name: "other", Answered: true, Attached: false},
+			{Name: longName, Attached: true},
+			{Name: "other", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions).WithCurrentSession(longName)
 
@@ -1083,8 +1083,8 @@ func TestCurrentSessionExclusion(t *testing.T) {
 func TestKillSession(t *testing.T) {
 	t.Run("k opens kill confirmation modal for selected session", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1108,8 +1108,8 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("y in confirmation mode triggers kill and refresh", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1141,8 +1141,8 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("n in confirmation mode is ignored (no longer cancels)", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1164,8 +1164,8 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("Esc in confirmation mode cancels", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1190,11 +1190,11 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("session list refreshes after kill", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		remainingSessions := []tui.Session{
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1222,11 +1222,11 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("cursor adjusts when last session killed", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		remainingSessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1260,8 +1260,8 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("kill error returns error in SessionsMsg", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{err: fmt.Errorf("session not found")}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1291,8 +1291,8 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("kill error clears confirmation state via SessionsMsg", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{err: fmt.Errorf("session not found")}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1314,7 +1314,7 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("killing last remaining session empties list", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "solo", Answered: true, Attached: false},
+			{Name: "solo", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1338,7 +1338,7 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("NewWithDeps supports kill", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1358,7 +1358,7 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("NewWithAllDeps supports kill", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1378,8 +1378,8 @@ func TestKillSession(t *testing.T) {
 
 	t.Run("other keys ignored during kill modal", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1441,8 +1441,8 @@ func TestKillSession(t *testing.T) {
 func TestSessionListHelpBar(t *testing.T) {
 	t.Run("condensed footer shows the Core keys and omits the help-only keys", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
@@ -1483,8 +1483,8 @@ func newModelWithRenamer(lister *mockSessionLister, killer *mockSessionKiller, r
 func TestRenameSession(t *testing.T) {
 	t.Run("r opens rename modal with pre-populated session name", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1511,8 +1511,8 @@ func TestRenameSession(t *testing.T) {
 
 	t.Run("enter in rename modal renames session and refreshes", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1549,8 +1549,8 @@ func TestRenameSession(t *testing.T) {
 
 	t.Run("it reduces the in-TUI rename path to a single RenameSession with no hook re-keying", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1586,7 +1586,7 @@ func TestRenameSession(t *testing.T) {
 
 	t.Run("empty rename input is rejected on enter", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1616,8 +1616,8 @@ func TestRenameSession(t *testing.T) {
 
 	t.Run("Esc dismisses rename modal without renaming", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1643,7 +1643,7 @@ func TestRenameSession(t *testing.T) {
 
 	t.Run("rename to same name is allowed", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1675,7 +1675,7 @@ func TestRenameSession(t *testing.T) {
 
 	t.Run("rename error triggers refresh", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		renamer := &mockSessionRenamer{err: fmt.Errorf("duplicate session name")}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1721,7 +1721,7 @@ func TestRenameSession(t *testing.T) {
 
 	t.Run("r without renamer configured is no-op", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 
@@ -1736,12 +1736,12 @@ func TestRenameSession(t *testing.T) {
 
 	t.Run("session list refreshes after successful rename", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		renamedSessions := []tui.Session{
-			{Name: "new-alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "new-alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -1776,7 +1776,7 @@ func TestRenameSession(t *testing.T) {
 func TestFilterMode(t *testing.T) {
 	t.Run("q does not quit while filtering is active", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "quickfix", Answered: true, Attached: false},
+			{Name: "quickfix", Attached: false},
 		}
 		var m tea.Model = tui.NewModelWithSessions(sessions)
 
@@ -1800,8 +1800,8 @@ func TestFilterMode(t *testing.T) {
 
 	t.Run("shortcut keys functional after filter mode exit", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		var m tea.Model = tui.NewModelWithSessions(sessions)
 
@@ -1929,7 +1929,7 @@ func TestCommandPendingMode(t *testing.T) {
 
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{
-				{Name: "existing", Answered: true, Attached: false},
+				{Name: "existing", Attached: false},
 			}},
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
@@ -2043,7 +2043,7 @@ func TestCommandPendingMode(t *testing.T) {
 	t.Run("no command starts in session list view", func(t *testing.T) {
 		m := tui.New(&mockSessionLister{
 			sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: false},
+				{Name: "dev", Attached: false},
 			},
 		})
 
@@ -2129,7 +2129,7 @@ func TestCommandPendingMode(t *testing.T) {
 
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: false},
+				{Name: "dev", Attached: false},
 			}},
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
@@ -2163,7 +2163,7 @@ func TestCommandPendingMode(t *testing.T) {
 
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: false},
+				{Name: "dev", Attached: false},
 			}},
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
@@ -2308,8 +2308,8 @@ func TestCommandPendingMode(t *testing.T) {
 func TestSessionListWithBubblesList(t *testing.T) {
 	t.Run("SessionsMsg populates list items", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		}
 		m := tui.New(nil)
 
@@ -2346,8 +2346,8 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("enter selects session and quits", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 
@@ -2368,7 +2368,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("q key triggers quit", func(t *testing.T) {
 		m := tui.NewModelWithSessions([]tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		})
 
 		_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
@@ -2383,7 +2383,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("Ctrl+C triggers quit", func(t *testing.T) {
 		m := tui.NewModelWithSessions([]tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		})
 
 		_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -2398,9 +2398,9 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("inside a session excludes current session from list", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "current-sess", Answered: true, Attached: true},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "current-sess", Attached: true},
+			{Name: "bravo", Attached: false},
 		}
 		m := tui.New(nil)
 		m = m.WithCurrentSession("current-sess")
@@ -2422,8 +2422,8 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("inside a session sets title with current session name", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "my-project", Answered: true, Attached: true},
+			{Name: "alpha", Attached: false},
+			{Name: "my-project", Attached: true},
 		}
 		m := tui.New(nil)
 		m = m.WithCurrentSession("my-project")
@@ -2440,7 +2440,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("outside tmux sets title to Sessions", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		}
 		m := tui.New(nil)
 
@@ -2470,7 +2470,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("WindowSizeMsg updates list dimensions", func(t *testing.T) {
 		m := tui.NewModelWithSessions([]tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		})
 
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -2487,7 +2487,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("inside a session with only current session shows empty list", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "only-session", Answered: true, Attached: true},
+			{Name: "only-session", Attached: true},
 		}
 		m := tui.New(nil)
 		m = m.WithCurrentSession("only-session")
@@ -2503,8 +2503,8 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("sessions page renders using list View", func(t *testing.T) {
 		m := tui.NewModelWithSessions([]tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		})
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -2521,7 +2521,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 func TestNewWithFunctionalOptions(t *testing.T) {
 	t.Run("New with no options creates model with lister only", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		}
 		lister := &mockSessionLister{sessions: sessions}
 		m := tui.New(lister)
@@ -2541,7 +2541,7 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 
 	t.Run("WithKiller enables kill functionality", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -2558,7 +2558,7 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 
 	t.Run("WithRenamer enables rename functionality", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -2595,7 +2595,7 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 
 	t.Run("all options combined", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		renamer := &mockSessionRenamer{}
@@ -2627,9 +2627,9 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 func TestBuiltInFiltering(t *testing.T) {
 	t.Run("initial filter pre-applies filter text after items load", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
-			{Name: "myapp-prod", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
+			{Name: "myapp-prod", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -2675,8 +2675,8 @@ func TestBuiltInFiltering(t *testing.T) {
 
 	t.Run("initial filter with no matches shows empty filtered state", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -2707,8 +2707,8 @@ func TestBuiltInFiltering(t *testing.T) {
 
 	t.Run("empty initial filter is no-op", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		m := tui.New(&mockSessionLister{sessions: sessions})
 		m = m.WithInitialFilter("")
@@ -2730,8 +2730,8 @@ func TestBuiltInFiltering(t *testing.T) {
 
 	t.Run("list handles filter activation via slash key", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		var m tea.Model = tui.NewModelWithSessions(sessions)
 
@@ -2746,9 +2746,9 @@ func TestBuiltInFiltering(t *testing.T) {
 
 	t.Run("Esc clears active filter", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
-			{Name: "myapp-prod", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
+			{Name: "myapp-prod", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -2787,8 +2787,8 @@ func TestBuiltInFiltering(t *testing.T) {
 	t.Run("it narrows -f to a session found by its directory", func(t *testing.T) {
 		t.Setenv("HOME", "/Users/leeovery")
 		sessions := []tui.Session{
-			{Name: "api-work", Answered: true, Dir: "/Users/leeovery/Code/portal"},
-			{Name: "other", Answered: true},
+			{Name: "api-work", Dir: "/Users/leeovery/Code/portal"},
+			{Name: "other"},
 		}
 		m := tui.New(&mockSessionLister{sessions: sessions}).WithInitialFilter("portal")
 
@@ -2808,8 +2808,8 @@ func TestBuiltInFiltering(t *testing.T) {
 	t.Run("it narrows a hand-typed filter to a session found by its directory", func(t *testing.T) {
 		t.Setenv("HOME", "/Users/leeovery")
 		sessions := []tui.Session{
-			{Name: "api-work", Answered: true, Dir: "/Users/leeovery/Code/portal"},
-			{Name: "other", Answered: true},
+			{Name: "api-work", Dir: "/Users/leeovery/Code/portal"},
+			{Name: "other"},
 		}
 		var model tea.Model = tui.NewModelWithSessions(sessions)
 
@@ -2835,7 +2835,7 @@ func TestBuiltInFiltering(t *testing.T) {
 	t.Run("it does not match a session on the user's account name", func(t *testing.T) {
 		t.Setenv("HOME", "/Users/leeovery")
 		sessions := []tui.Session{
-			{Name: "api-work", Answered: true, Dir: "/Users/leeovery/Code/portal"},
+			{Name: "api-work", Dir: "/Users/leeovery/Code/portal"},
 		}
 		m := tui.New(&mockSessionLister{sessions: sessions}).WithInitialFilter("leeovery")
 
@@ -2853,8 +2853,8 @@ func TestBuiltInFiltering(t *testing.T) {
 func TestPageSwitching(t *testing.T) {
 	t.Run("p on sessions page no longer switches to projects page", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -2873,7 +2873,7 @@ func TestPageSwitching(t *testing.T) {
 
 	t.Run("s on projects page no longer switches to sessions page", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -2890,7 +2890,7 @@ func TestPageSwitching(t *testing.T) {
 
 	t.Run("x toggles from sessions to projects", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -2905,7 +2905,7 @@ func TestPageSwitching(t *testing.T) {
 
 	t.Run("x toggles from projects to sessions", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -2922,9 +2922,9 @@ func TestPageSwitching(t *testing.T) {
 
 	t.Run("switching to projects and back preserves session list state", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
-			{Name: "charlie", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
+			{Name: "charlie", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -2953,7 +2953,7 @@ func TestPageSwitching(t *testing.T) {
 
 	t.Run("switching to empty stub projects page shows empty message", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -3181,7 +3181,7 @@ func TestProjectsPage(t *testing.T) {
 
 	t.Run("q key quits from projects page", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -3200,7 +3200,7 @@ func TestProjectsPage(t *testing.T) {
 
 	t.Run("Ctrl+C quits from projects page", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -3219,7 +3219,7 @@ func TestProjectsPage(t *testing.T) {
 
 	t.Run("empty project list shows empty message", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -3304,7 +3304,7 @@ func TestProjectsPage(t *testing.T) {
 
 	t.Run("WindowSizeMsg updates project list dimensions", func(t *testing.T) {
 		m := tui.NewModelWithSessions([]tui.Session{
-			{Name: "dev", Answered: true, Attached: false},
+			{Name: "dev", Attached: false},
 		})
 
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -3366,7 +3366,7 @@ func TestProjectsPage(t *testing.T) {
 		}
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: false},
+				{Name: "dev", Attached: false},
 			}},
 			tui.WithProjectStore(store),
 		)
@@ -3795,7 +3795,7 @@ func TestSessionsPageEmptyText(t *testing.T) {
 func TestProjectsStubHelpBar(t *testing.T) {
 	t.Run("projects stub help bar includes s for sessions", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -3813,7 +3813,7 @@ func TestProjectsStubHelpBar(t *testing.T) {
 func TestSessionsPageHelpBarIncludesProjects(t *testing.T) {
 	t.Run("sessions page help bar includes p for projects", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
@@ -3828,8 +3828,8 @@ func TestSessionsPageHelpBarIncludesProjects(t *testing.T) {
 func TestEscProgressiveBack(t *testing.T) {
 	t.Run("Esc with no modal or filter quits TUI", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 
@@ -3845,8 +3845,8 @@ func TestEscProgressiveBack(t *testing.T) {
 
 	t.Run("Esc during kill modal dismisses modal", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		killer := &mockSessionKiller{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -3882,8 +3882,8 @@ func TestEscProgressiveBack(t *testing.T) {
 
 	t.Run("Esc during rename modal dismisses modal", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -3919,9 +3919,9 @@ func TestEscProgressiveBack(t *testing.T) {
 
 	t.Run("Esc with filter active clears filter", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
-			{Name: "myapp-prod", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
+			{Name: "myapp-prod", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -3965,9 +3965,9 @@ func TestEscProgressiveBack(t *testing.T) {
 
 	t.Run("Esc during SettingFilter cancels filter without quitting", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
-			{Name: "charlie", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
+			{Name: "charlie", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -3998,8 +3998,8 @@ func TestEscProgressiveBack(t *testing.T) {
 
 	t.Run("Ctrl+C force-quits from any state", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 
 		var model tea.Model = tui.NewModelWithSessions(sessions)
@@ -4074,8 +4074,8 @@ func TestEscProgressiveBack(t *testing.T) {
 
 	t.Run("Esc during rename then Esc again quits TUI", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
 		lister := &mockSessionLister{sessions: sessions}
@@ -4110,8 +4110,8 @@ func TestEscProgressiveBack(t *testing.T) {
 
 	t.Run("Esc clears filter then second Esc quits", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -4158,7 +4158,7 @@ func TestEscProgressiveBack(t *testing.T) {
 
 	t.Run("Esc on projects page with no filter quits TUI", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		var model tea.Model = m
@@ -4755,8 +4755,8 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		}
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{
-				{Name: "alpha", Answered: true, Attached: false},
-				{Name: "bravo", Answered: true, Attached: false},
+				{Name: "alpha", Attached: false},
+				{Name: "bravo", Attached: false},
 			}},
 			tui.WithProjectStore(store),
 		)
@@ -4766,8 +4766,8 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "alpha", Answered: true, Attached: false},
-				{Name: "bravo", Answered: true, Attached: false},
+				{Name: "alpha", Attached: false},
+				{Name: "bravo", Attached: false},
 			},
 		})
 
@@ -4805,8 +4805,8 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		}
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{
-				{Name: "alpha", Answered: true, Attached: false},
-				{Name: "bravo", Answered: true, Attached: false},
+				{Name: "alpha", Attached: false},
+				{Name: "bravo", Attached: false},
 			}},
 			tui.WithProjectStore(store),
 		)
@@ -4816,8 +4816,8 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "alpha", Answered: true, Attached: false},
-				{Name: "bravo", Answered: true, Attached: false},
+				{Name: "alpha", Attached: false},
+				{Name: "bravo", Attached: false},
 			},
 		})
 
@@ -4882,7 +4882,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		}
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{
-				{Name: "alpha", Answered: true, Attached: false},
+				{Name: "alpha", Attached: false},
 			}},
 			tui.WithProjectStore(store),
 		)
@@ -4891,7 +4891,7 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "alpha", Answered: true, Attached: false},
+				{Name: "alpha", Attached: false},
 			},
 		})
 
@@ -4917,8 +4917,8 @@ func TestDefaultPageSelection(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: true},
-				{Name: "work", Answered: true, Attached: false},
+				{Name: "dev", Attached: true},
+				{Name: "work", Attached: false},
 			},
 		})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -4997,7 +4997,7 @@ func TestDefaultPageSelection(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "only-session", Answered: true, Attached: true},
+				{Name: "only-session", Attached: true},
 			},
 		})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -5026,7 +5026,7 @@ func TestDefaultPageSelection(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: true},
+				{Name: "dev", Attached: true},
 			},
 		})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -5119,7 +5119,7 @@ func TestDefaultPageSelection(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: true},
+				{Name: "dev", Attached: true},
 			},
 		})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -5140,7 +5140,7 @@ func TestDefaultPageSelection(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "dev-renamed", Answered: true, Attached: true},
+				{Name: "dev-renamed", Attached: true},
 			},
 		})
 		updated = model.(tui.Model)
@@ -5225,8 +5225,8 @@ func TestDefaultPageSelection(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: true},
-				{Name: "work", Answered: true, Attached: false},
+				{Name: "dev", Attached: true},
+				{Name: "work", Attached: false},
 			},
 		})
 
@@ -5256,8 +5256,8 @@ func TestDefaultPageSelection(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: true},
-				{Name: "work", Answered: true, Attached: false},
+				{Name: "dev", Attached: true},
+				{Name: "work", Attached: false},
 			},
 		})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{
@@ -5736,7 +5736,7 @@ func TestCommandPendingNKey(t *testing.T) {
 
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: false},
+				{Name: "dev", Attached: false},
 			}},
 			tui.WithSessionCreator(creator),
 			tui.WithCWD("/home/user/mydir"),
@@ -5745,7 +5745,7 @@ func TestCommandPendingNKey(t *testing.T) {
 
 		model, _ = model.Update(tui.SessionsMsg{
 			Sessions: []tui.Session{
-				{Name: "dev", Answered: true, Attached: false},
+				{Name: "dev", Attached: false},
 			},
 		})
 
@@ -6051,9 +6051,9 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 func TestInitialFilterAppliedToDefaultPage(t *testing.T) {
 	t.Run("initial filter applied to Sessions page when sessions exist", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
-			{Name: "myapp-prod", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
+			{Name: "myapp-prod", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -6194,8 +6194,8 @@ func TestInitialFilterAppliedToDefaultPage(t *testing.T) {
 
 	t.Run("initial filter with no matches shows empty filtered state", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -6231,8 +6231,8 @@ func TestInitialFilterAppliedToDefaultPage(t *testing.T) {
 
 	t.Run("empty initial filter is no-op", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
-			{Name: "bravo", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
+			{Name: "bravo", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -6264,8 +6264,8 @@ func TestInitialFilterAppliedToDefaultPage(t *testing.T) {
 
 	t.Run("filter consumed after first application", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
 		}
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -6304,9 +6304,9 @@ func TestInitialFilterAppliedToDefaultPage(t *testing.T) {
 
 	t.Run("SessionsMsg handler no longer applies initial filter", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "myapp-dev", Answered: true, Attached: false},
-			{Name: "other", Answered: true, Attached: false},
-			{Name: "myapp-prod", Answered: true, Attached: false},
+			{Name: "myapp-dev", Attached: false},
+			{Name: "other", Attached: false},
+			{Name: "myapp-prod", Attached: false},
 		}
 		m := tui.New(
 			&mockSessionLister{sessions: sessions},
@@ -6347,7 +6347,7 @@ func executeBatchCmd(cmd tea.Cmd) []tea.Msg {
 func TestHelpBarQuitBinding(t *testing.T) {
 	t.Run("session footer omits quit (help-only) and shows the ? help hint", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "alpha", Answered: true, Attached: false},
+			{Name: "alpha", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
@@ -6768,7 +6768,7 @@ func TestLoadingPage(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		sessions := []tui.Session{{Name: "dev", Answered: true, Attached: false}}
+		sessions := []tui.Session{{Name: "dev", Attached: false}}
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		updated := model.(tui.Model)
@@ -6820,7 +6820,7 @@ func TestLoadingPage(t *testing.T) {
 			Projects: []project.Project{{Path: "/code/portal", Name: "portal"}},
 		})
 
-		sessions := []tui.Session{{Name: "dev", Answered: true, Attached: false}}
+		sessions := []tui.Session{{Name: "dev", Attached: false}}
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		model, _ = model.Update(tui.LoadingMinElapsedMsg{})

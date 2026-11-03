@@ -132,7 +132,7 @@ func TestMultiSelectFooter_PaintsCanvasNoEdgeBleed(t *testing.T) {
 }
 
 func TestSessionsFooterResolver_MultiSelectMode(t *testing.T) {
-	m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}, {Name: "bravo", Answered: true}})
+	m := NewModelWithSessions([]Session{{Name: "alpha"}, {Name: "bravo"}})
 	m.termWidth = 120
 	m.multiSelectMode = true
 
@@ -149,7 +149,7 @@ func TestSessionsFooterResolver_MultiSelectMode(t *testing.T) {
 }
 
 func TestSessionsFooterResolver_FilteringOverridesMultiSelect(t *testing.T) {
-	m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}, {Name: "bravo", Answered: true}})
+	m := NewModelWithSessions([]Session{{Name: "alpha"}, {Name: "bravo"}})
 	m.termWidth = 120
 	m.multiSelectMode = true
 	m.sessionList.SetFilterState(list.Filtering)

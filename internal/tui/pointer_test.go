@@ -29,7 +29,7 @@ var (
 func pointerSessions(names ...string) []Session {
 	sessions := make([]Session, 0, len(names))
 	for _, name := range names {
-		sessions = append(sessions, Session{Name: name, Answered: true})
+		sessions = append(sessions, Session{Name: name})
 	}
 	return sessions
 }
@@ -178,7 +178,7 @@ func TestTapOpensTheSessionUnderIt(t *testing.T) {
 	t.Run("in a grouped list a heading opens nothing and a session row opens", func(t *testing.T) {
 		dirA, dirB := t.TempDir(), t.TempDir()
 		projects := []project.Project{{Path: dirA, Name: "Orion"}, {Path: dirB, Name: "Vega"}}
-		sessions := []Session{{Name: "orion-1", Answered: true, Dir: dirA}, {Name: "vega-1", Answered: true, Dir: dirB}}
+		sessions := []Session{{Name: "orion-1", Dir: dirA}, {Name: "vega-1", Dir: dirB}}
 		m := pointerSessionsModel(t, pointerTermH, sessions)
 		m.sessionListMode = prefs.ModeByProject
 		m.sessionList.SetItems(buildByProject(sessions, project.NewIndex(projects), nil))
@@ -324,7 +324,7 @@ func TestSwipeMovesTheHighlightWithTheFinger(t *testing.T) {
 	t.Run("in a grouped list a step down skips the heading, and off the bottom wraps past the first", func(t *testing.T) {
 		dirA, dirB := t.TempDir(), t.TempDir()
 		projects := []project.Project{{Path: dirA, Name: "Orion"}, {Path: dirB, Name: "Vega"}}
-		sessions := []Session{{Name: "orion-1", Answered: true, Dir: dirA}, {Name: "vega-1", Answered: true, Dir: dirB}}
+		sessions := []Session{{Name: "orion-1", Dir: dirA}, {Name: "vega-1", Dir: dirB}}
 		m := pointerSessionsModel(t, pointerTermH, sessions)
 		m.sessionList.SetItems(buildByProject(sessions, project.NewIndex(projects), nil))
 		m.ensureSessionRowSelected()

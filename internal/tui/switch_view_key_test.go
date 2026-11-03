@@ -92,7 +92,7 @@ func TestSwitchViewKey(t *testing.T) {
 	t.Run("cycles unconditionally with zero tags", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 		persister := &fakeModePersister{}
 
 		m := newSwitchViewTestModel(t, prefs.ModeByProject, persister, sessions, projects)
@@ -174,7 +174,7 @@ func TestSwitchViewKey(t *testing.T) {
 	t.Run("re-renders the list into the new mode on press", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 		persister := &fakeModePersister{}
 
 		m := newSwitchViewTestModel(t, prefs.ModeFlat, persister, sessions, projects)
@@ -198,7 +198,7 @@ func TestSwitchViewKey(t *testing.T) {
 	t.Run("resets to the first page and first session row on view switch", func(t *testing.T) {
 		var sessions []Session
 		for i := range 60 {
-			sessions = append(sessions, Session{Name: fmt.Sprintf("sess-%02d", i), Answered: true})
+			sessions = append(sessions, Session{Name: fmt.Sprintf("sess-%02d", i)})
 		}
 		persister := &fakeModePersister{}
 		m := newSwitchViewTestModel(t, prefs.ModeFlat, persister, sessions, nil)

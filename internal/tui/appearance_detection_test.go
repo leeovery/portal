@@ -17,9 +17,9 @@ var (
 func detectModel(t *testing.T, n theme.Nomination) Model {
 	t.Helper()
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: true},
-		{Name: "bravo", Answered: true, Attached: false},
-		{Name: "charlie", Answered: true, Attached: false},
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
+		{Name: "charlie", Attached: false},
 	}
 	m := Build(Deps{Lister: fakeLister{}, Theme: n})
 	m.termWidth = 90

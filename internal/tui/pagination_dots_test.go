@@ -14,7 +14,7 @@ func newMultiPageSessionModel(t *testing.T, w, h int, appearance theme.Member, c
 	t.Helper()
 	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 	m := Build(Deps{Lister: fakeLister{}, Theme: testConstantFor(t, appearance), NoColor: colourless})
 	m.termWidth = w
@@ -104,9 +104,9 @@ func TestSessionsPaginationDots_CentredAboveFooter(t *testing.T) {
 func TestSessionsPaginationDots_SuppressedOnSinglePage(t *testing.T) {
 	const w, h = 120, 40
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w

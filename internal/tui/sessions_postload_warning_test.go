@@ -83,7 +83,7 @@ func TestColdTUIWarnings_SurfaceWhenMinElapsedArmTransitions(t *testing.T) {
 func TestColdTUIWarnings_RendersInSessionsViewChrome(t *testing.T) {
 	const line = "the session saver is not running"
 	warnings := []BootstrapWarning{{Lines: []string{line}}}
-	model, _ := transitionWithWarnings(coldTUIModel(t, []Session{{Name: "dev", Answered: true}}), warnings)
+	model, _ := transitionWithWarnings(coldTUIModel(t, []Session{{Name: "dev"}}), warnings)
 
 	content := model.(Model).View().Content
 	if !strings.Contains(content, line) {

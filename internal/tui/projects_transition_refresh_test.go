@@ -38,7 +38,7 @@ func TestProjectsTransitionDispatchesRefresh(t *testing.T) {
 	for _, key := range []rune{'x'} {
 		t.Run(string(key), func(t *testing.T) {
 			lister := &stepListerStub{steps: [][]Session{{
-				{Name: "alpha", Answered: true, Attached: false},
+				{Name: "alpha", Attached: false},
 			}}}
 			m := newProjectsTransitionModel(t, lister, nil, prefs.ModeFlat)
 
@@ -66,7 +66,7 @@ func TestProjectsTransitionRegroupsWithUpdatedTags(t *testing.T) {
 		{Path: "/p/one", Name: "one", Tags: []string{"work"}},
 	}
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false, Dir: "/p/one"},
+		{Name: "alpha", Attached: false, Dir: "/p/one"},
 	}
 	lister := &stepListerStub{steps: [][]Session{sessions}}
 	m := newProjectsTransitionModel(t, lister, projects, prefs.ModeByTag)
@@ -122,7 +122,7 @@ func TestProjectsTransitionPreservesCommandPendingGuard(t *testing.T) {
 	for _, key := range []rune{'s', 'x'} {
 		t.Run(string(key), func(t *testing.T) {
 			lister := &stepListerStub{steps: [][]Session{{
-				{Name: "alpha", Answered: true, Attached: false},
+				{Name: "alpha", Attached: false},
 			}}}
 			m := newProjectsTransitionModel(t, lister, nil, prefs.ModeFlat)
 			m.commandPending = true
@@ -144,7 +144,7 @@ func TestProjectsTransitionPreservesCommandPendingGuard(t *testing.T) {
 
 func TestProjectsNonTransitionKeyDoesNotRefresh(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}}}
 	m := newProjectsTransitionModel(t, lister, nil, prefs.ModeFlat)
 

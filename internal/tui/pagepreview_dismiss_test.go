@@ -42,7 +42,7 @@ func pressSpaceThenEsc(t *testing.T, m Model) Model {
 
 func TestPreviewEscReturnsToSessionsPage(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -61,10 +61,10 @@ func TestPreviewEscReturnsToSessionsPage(t *testing.T) {
 
 func TestPreviewEscPreservesListCursor(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
-		{Name: "charlie", Answered: true, Attached: false},
-		{Name: "delta", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
+		{Name: "charlie", Attached: false},
+		{Name: "delta", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -87,8 +87,8 @@ func TestPreviewEscPreservesListCursor(t *testing.T) {
 
 func TestPreviewEscPreservesNoFilterState(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -114,9 +114,9 @@ func TestPreviewEscPreservesNoFilterState(t *testing.T) {
 
 func TestPreviewEscPreservesCommittedFilter(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "alphabet", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "alphabet", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -146,9 +146,9 @@ func TestPreviewEscPreservesCommittedFilter(t *testing.T) {
 
 func TestSecondEscClearsCommittedFilterViaListDefault(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "alphabet", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "alphabet", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -183,7 +183,7 @@ func TestSecondEscClearsCommittedFilterViaListDefault(t *testing.T) {
 
 func TestPreviewReopenAfterDismissConstructsFreshPreviewModel(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

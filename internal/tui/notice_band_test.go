@@ -46,7 +46,7 @@ func viewHasNoticeMessage(t *testing.T, m Model, role noticeBandRole, message st
 func noticeBandModel(names ...string) Model {
 	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, Session{Name: n, Answered: true, Attached: false})
+		sessions = append(sessions, Session{Name: n, Attached: false})
 	}
 	m := NewModelWithSessions(sessions)
 	m.termWidth = 80
@@ -119,7 +119,7 @@ func TestRenderNoticeBand_NoColor(t *testing.T) {
 func TestNoticeSlot_SingleBand_TransientFlashWins(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80
@@ -144,7 +144,7 @@ func TestNoticeSlot_SingleBand_TransientFlashWins(t *testing.T) {
 func TestNoticeSlot_PersistentReturnsAfterFlashClear(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80
@@ -167,7 +167,7 @@ func TestNoticeSlot_PersistentReturnsAfterFlashClear(t *testing.T) {
 func TestNoticeSlot_NeverBothBandsSimultaneously(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80
@@ -425,7 +425,7 @@ func TestNoticeBand_ShortMessageSingleLine(t *testing.T) {
 func TestSessionBandHeight_TracksWrappedLineCount(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 40
@@ -447,7 +447,7 @@ func TestSessionBandHeight_TracksWrappedLineCount(t *testing.T) {
 func TestNoticeBand_WrappedFrameHeightStaysTermH(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 40

@@ -17,10 +17,10 @@ const filteringReskinHeight = 40
 func filteringTestModel(t *testing.T, th theme.Theme) Model {
 	t.Helper()
 	sessions := []Session{
-		{Name: "fab-flowx-explore", Answered: true, Attached: true},
-		{Name: "fab-aws-migration", Answered: true, Attached: false},
-		{Name: "fabric-lk26UG", Answered: true, Attached: false},
-		{Name: "other-session", Answered: true, Attached: false},
+		{Name: "fab-flowx-explore", Attached: true},
+		{Name: "fab-aws-migration", Attached: false},
+		{Name: "fabric-lk26UG", Attached: false},
+		{Name: "other-session", Attached: false},
 	}
 	m := Build(Deps{Lister: fakeLister{}, Theme: theme.ConstantNomination(th)})
 	m.termWidth = filteringReskinWidth

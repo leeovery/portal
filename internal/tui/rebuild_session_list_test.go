@@ -27,8 +27,8 @@ func newRebuildTestModel(t *testing.T, mode prefs.SessionListMode, sessions []Se
 func TestRebuildSessionList(t *testing.T) {
 	t.Run("builds flat items when the mode is Flat", func(t *testing.T) {
 		sessions := []Session{
-			{Name: "alpha", Answered: true},
-			{Name: "bravo", Answered: true},
+			{Name: "alpha"},
+			{Name: "bravo"},
 		}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
 
@@ -49,8 +49,8 @@ func TestRebuildSessionList(t *testing.T) {
 
 	t.Run("flat-mode output is byte-for-byte today's flat items", func(t *testing.T) {
 		sessions := []Session{
-			{Name: "alpha", Answered: true, Attached: true},
-			{Name: "bravo", Answered: true},
+			{Name: "alpha", Attached: true},
+			{Name: "bravo"},
 		}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
 
@@ -72,7 +72,7 @@ func TestRebuildSessionList(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 		m.rebuildSessionList()
@@ -98,7 +98,7 @@ func TestRebuildSessionList(t *testing.T) {
 	t.Run("builds By Tag items when the mode is By Tag", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()
@@ -122,7 +122,7 @@ func TestRebuildSessionList(t *testing.T) {
 	t.Run("feeds cached project records to the grouping builders", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		without := newRebuildTestModel(t, prefs.ModeByProject, sessions, nil)
 		without.rebuildSessionList()
@@ -155,7 +155,7 @@ func TestRebuildSessionList(t *testing.T) {
 	t.Run("is idempotent when re-rendering the same mode with the same inputs", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()
@@ -177,7 +177,7 @@ func TestRebuildSessionList(t *testing.T) {
 	t.Run("preserves the active mode across a SessionsMsg refresh", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 		m.activePage = PageSessions
@@ -199,7 +199,7 @@ func TestRebuildSessionList(t *testing.T) {
 	})
 
 	t.Run("excludes the current session when inside a session", func(t *testing.T) {
-		sessions := []Session{{Name: "alpha", Answered: true}, {Name: "current", Answered: true}}
+		sessions := []Session{{Name: "alpha"}, {Name: "current"}}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
 		m.currentSession = "current"
 
@@ -221,8 +221,8 @@ func TestWithCurrentSessionRoutesThroughRebuild(t *testing.T) {
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []Session{
-			{Name: "portal-abc", Answered: true, Dir: dir},
-			{Name: "current", Answered: true, Dir: dir},
+			{Name: "portal-abc", Dir: dir},
+			{Name: "current", Dir: dir},
 		}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
@@ -259,9 +259,9 @@ func TestWithCurrentSessionRoutesThroughRebuild(t *testing.T) {
 
 	t.Run("still excludes the current session under WithCurrentSession in flat mode", func(t *testing.T) {
 		sessions := []Session{
-			{Name: "alpha", Answered: true},
-			{Name: "current", Answered: true},
-			{Name: "bravo", Answered: true},
+			{Name: "alpha"},
+			{Name: "current"},
+			{Name: "bravo"},
 		}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
 		m = m.WithCurrentSession("current")

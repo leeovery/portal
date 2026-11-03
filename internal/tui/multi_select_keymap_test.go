@@ -42,8 +42,8 @@ func enterMultiSelectEmpty(t *testing.T, m Model) Model {
 
 func twoFlatSessions() []Session {
 	return []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 }
 
@@ -341,7 +341,7 @@ func TestMultiSelectEnterRoutesToBurstArm(t *testing.T) {
 
 func TestOutOfModeRowActionsUnchanged(t *testing.T) {
 	t.Run("k opens the kill confirm modal", func(t *testing.T) {
-		m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.sessionKiller = keymapParityKiller{}
 
 		m = pressSession(t, m, keyK)
@@ -355,7 +355,7 @@ func TestOutOfModeRowActionsUnchanged(t *testing.T) {
 	})
 
 	t.Run("x switches to the Projects page", func(t *testing.T) {
-		m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 
 		m = pressSession(t, m, keyX)
 
@@ -365,7 +365,7 @@ func TestOutOfModeRowActionsUnchanged(t *testing.T) {
 	})
 
 	t.Run("r opens the rename modal", func(t *testing.T) {
-		m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.sessionRenamer = keymapParityRenamer{}
 
 		m = pressSession(t, m, keyR)

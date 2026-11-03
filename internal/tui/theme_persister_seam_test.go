@@ -53,7 +53,7 @@ func TestBuild_NilThemePersisterIsTolerated(t *testing.T) {
 		var model tea.Model = Build(Deps{Lister: fakeLister{}})
 
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-		model, _ = model.Update(SessionsMsg{Sessions: []Session{{Name: "dev", Answered: true}}})
+		model, _ = model.Update(SessionsMsg{Sessions: []Session{{Name: "dev"}}})
 		model, _ = model.Update(ProjectsLoadedMsg{})
 		for _, key := range []tea.KeyPressMsg{
 			{Code: 's', Text: "s"},

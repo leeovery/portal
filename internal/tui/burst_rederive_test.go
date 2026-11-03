@@ -10,9 +10,9 @@ import (
 
 func TestBurstDispatch_RederivesLiveMarkedSetOnDeferredResolve(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -62,8 +62,8 @@ func TestBurstDispatch_RederivesLiveMarkedSetOnDeferredResolve(t *testing.T) {
 
 func TestBurstDispatch_AllUnmarkedDuringDefer_NoOp(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}

@@ -20,13 +20,13 @@ func (k *killerStub) KillSession(name string) error {
 
 func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 	first := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "alphabet", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "alphabet", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	postKill := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

@@ -1814,7 +1814,7 @@ func TestProcessTUIResult(t *testing.T) {
 
 	t.Run("selected session name forwarded to connector", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true},
+			{Name: "dev"},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

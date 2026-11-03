@@ -33,12 +33,12 @@ const searchTestHome = "/home/user"
 // "port" (p·o·r·t across "~/Projects/rust-tools") and by containment not at all.
 func subsequenceOnlySession(t *testing.T) Session {
 	t.Helper()
-	return Session{Name: "rust-tools", Answered: true, Dir: filepath.Join(searchTestHome, "Projects", "rust-tools")}
+	return Session{Name: "rust-tools", Dir: filepath.Join(searchTestHome, "Projects", "rust-tools")}
 }
 
 func TestContainmentFilterRanksAStaleGenerationsTargetsByContainment(t *testing.T) {
 	scattered := SessionItem{Session: subsequenceOnlySession(t), Home: searchTestHome}
-	matching := SessionItem{Session: Session{Name: "portal-a1b2", Answered: true}}
+	matching := SessionItem{Session: Session{Name: "portal-a1b2"}}
 	src := &searchItemSource{}
 	// The source holds one generation; the pass is handed another's targets,
 	// in an order that generation never held them in.
@@ -56,7 +56,7 @@ func TestContainmentFilterRanksAStaleGenerationsTargetsByContainment(t *testing.
 }
 
 func TestContainmentFilterRanksEveryRowOfASessionListedUnderMoreThanOneTag(t *testing.T) {
-	repeated := SessionItem{Session: Session{Name: "portal-a1b2", Answered: true}}
+	repeated := SessionItem{Session: Session{Name: "portal-a1b2"}}
 	items := []list.Item{
 		HeaderItem{Heading: "Work", Count: 1},
 		SessionItem{Session: repeated.Session, GroupKey: "work"},
@@ -75,8 +75,8 @@ func TestContainmentFilterRanksEveryRowOfASessionListedUnderMoreThanOneTag(t *te
 
 func TestContainmentFilterRanksNothingForATargetTheSourceDoesNotHold(t *testing.T) {
 	src := &searchItemSource{}
-	src.set([]list.Item{SessionItem{Session: Session{Name: "portal-a1b2", Answered: true}}})
-	targets := filterTargets([]list.Item{SessionItem{Session: Session{Name: "app-port", Answered: true}}})
+	src.set([]list.Item{SessionItem{Session: Session{Name: "portal-a1b2"}}})
+	targets := filterTargets([]list.Item{SessionItem{Session: Session{Name: "app-port"}}})
 
 	got := containmentFilter("port", src)("port", targets)
 
@@ -88,7 +88,7 @@ func TestContainmentFilterRanksNothingForATargetTheSourceDoesNotHold(t *testing.
 func TestContainmentFilterRanksNothingForAHeaderRowsEmptyFilterValue(t *testing.T) {
 	items := []list.Item{
 		HeaderItem{Heading: "Alpha", Count: 1},
-		SessionItem{Session: Session{Name: "app-port", Answered: true}},
+		SessionItem{Session: Session{Name: "app-port"}},
 	}
 	src := &searchItemSource{}
 	src.set(items)
@@ -102,10 +102,10 @@ func TestContainmentFilterRanksNothingForAHeaderRowsEmptyFilterValue(t *testing.
 
 func TestContainmentFilterNarrowsToTheTargetsItContains(t *testing.T) {
 	items := []list.Item{
-		SessionItem{Session: Session{Name: "app-port", Answered: true}},
+		SessionItem{Session: Session{Name: "app-port"}},
 		HeaderItem{Heading: "Alpha", Count: 2},
-		SessionItem{Session: Session{Name: "pro-tools", Answered: true}},
-		SessionItem{Session: Session{Name: "portal-a1b2", Answered: true}},
+		SessionItem{Session: Session{Name: "pro-tools"}},
+		SessionItem{Session: Session{Name: "portal-a1b2"}},
 	}
 	src := &searchItemSource{}
 	src.set(items)
@@ -124,8 +124,8 @@ func TestContainmentFilterNarrowsToTheTargetsItContains(t *testing.T) {
 
 func TestContainmentFilterReturnsToThePickersOwnRuleOnceTheTextIsNoLongerTheTerm(t *testing.T) {
 	items := []list.Item{
-		SessionItem{Session: Session{Name: "app-port", Answered: true}},
-		SessionItem{Session: Session{Name: "pro-tools", Answered: true}},
+		SessionItem{Session: Session{Name: "app-port"}},
+		SessionItem{Session: Session{Name: "pro-tools"}},
 	}
 	src := &searchItemSource{}
 	src.set(items)
@@ -153,8 +153,8 @@ func TestContainmentFilterOnASourceThatWasNeverSet(t *testing.T) {
 
 	t.Run("it yields no ranks for a non-empty target list", func(t *testing.T) {
 		targets := filterTargets([]list.Item{
-			SessionItem{Session: Session{Name: "app-port", Answered: true}},
-			SessionItem{Session: Session{Name: "pro-tools", Answered: true}},
+			SessionItem{Session: Session{Name: "app-port"}},
+			SessionItem{Session: Session{Name: "pro-tools"}},
 		})
 
 		got := containmentFilter("port", &searchItemSource{})("port", targets)
@@ -167,8 +167,8 @@ func TestContainmentFilterOnASourceThatWasNeverSet(t *testing.T) {
 
 func TestContainmentFilterIsRaceFreeAgainstAConcurrentSet(t *testing.T) {
 	items := []list.Item{
-		SessionItem{Session: Session{Name: "app-port", Answered: true}},
-		SessionItem{Session: Session{Name: "pro-tools", Answered: true}},
+		SessionItem{Session: Session{Name: "app-port"}},
+		SessionItem{Session: Session{Name: "pro-tools"}},
 	}
 	src := &searchItemSource{}
 	src.set(items)
@@ -178,7 +178,7 @@ func TestContainmentFilterIsRaceFreeAgainstAConcurrentSet(t *testing.T) {
 	var writers sync.WaitGroup
 	writers.Go(func() {
 		for i := range 500 {
-			src.set([]list.Item{SessionItem{Session: Session{Name: fmt.Sprintf("app-port-%d", i), Answered: true}}})
+			src.set([]list.Item{SessionItem{Session: Session{Name: fmt.Sprintf("app-port-%d", i)}}})
 		}
 	})
 	for range 500 {
@@ -191,8 +191,8 @@ func TestContainmentFilterIsRaceFreeAgainstAConcurrentSet(t *testing.T) {
 // named for the very text the other's home-abbreviated directory renders as.
 func collidingSessions(t *testing.T) (named, recorded Session) {
 	t.Helper()
-	return Session{Name: "api ~/Code/api", Answered: true},
-		Session{Name: "api", Answered: true, Dir: filepath.Join(searchTestHome, "Code", "api")}
+	return Session{Name: "api ~/Code/api"},
+		Session{Name: "api", Dir: filepath.Join(searchTestHome, "Code", "api")}
 }
 
 func TestContainmentFilterOnTwoSessionsSharingOneFilterValue(t *testing.T) {

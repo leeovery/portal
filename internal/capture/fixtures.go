@@ -224,18 +224,18 @@ func FixtureNames() []string {
 // fallback never fires (the harness has no tmux server).
 func sessionsFlatFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "kiln-relayx-explore", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "lumen webhooks and watchers", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
-		{Name: "atelier-web-m4TzpD", Answered: true, Attached: false, Dir: "/home/user/code/atelier"},
-		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "kiln-aws-migration", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "relay-v1-api-Hq7wNe", Answered: true, Attached: false, Dir: "/home/user/code/relay"},
-		{Name: "relayx-3RJDWA", Answered: true, Attached: false, Dir: "/home/user/code/relayx"},
-		{Name: "loom-p84cXa", Answered: true, Attached: false, Dir: "/home/user/code/loom"},
-		{Name: "quill-Ue9fLr", Answered: true, Attached: false, Dir: "/home/user/code/quill"},
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "kiln-aws-migration", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "relay-v1-api-Hq7wNe", Attached: false, Dir: "/home/user/code/relay"},
+		{Name: "relayx-3RJDWA", Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "loom-p84cXa", Attached: false, Dir: "/home/user/code/loom"},
+		{Name: "quill-Ue9fLr", Attached: false, Dir: "/home/user/code/quill"},
 	}
 
 	return &Fixture{
@@ -262,14 +262,14 @@ func sessionsEmptyFixture() *Fixture {
 // sides, so the grouping is deterministic without a real filesystem.
 func sessionsByProjectFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "kiln-relayx-explore", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "lumen webhooks and watchers", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
-		{Name: "atelier-web-m4TzpD", Answered: true, Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Attached: false, Dir: "/home/user/code/atelier"},
 		// Matches no project → lands in the Unknown catch-all.
-		{Name: "orphan-explore", Answered: true, Attached: false, Dir: "/home/user/code/untracked-scratch"},
+		{Name: "orphan-explore", Attached: false, Dir: "/home/user/code/untracked-scratch"},
 	}
 
 	projects := []project.Project{
@@ -292,14 +292,14 @@ func sessionsByProjectFixture() *Fixture {
 // sides, so the match is deterministic without a real filesystem.
 func sessionsByTagFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "kiln-relayx-explore", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "lumen webhooks and watchers", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
-		{Name: "atelier-web-m4TzpD", Answered: true, Attached: false, Dir: "/home/user/code/atelier"},
-		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "kiln-aws-migration", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "kiln-aws-migration", Attached: false, Dir: "/home/user/code/kiln"},
 	}
 
 	projects := []project.Project{
@@ -336,7 +336,6 @@ func sessionsPagedFixture() *Fixture {
 	for i := range count {
 		sessions = append(sessions, tui.Session{
 			Name:     fmt.Sprintf("session-%02d", i),
-			Answered: true,
 			Attached: i == 0,
 			Dir:      dirs[i%len(dirs)],
 		})
@@ -352,10 +351,10 @@ func sessionsPagedFixture() *Fixture {
 
 func sessionsInlineFlashFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "kiln-relayx-explore", Answered: true, Attached: true, Dir: "/home/user/code/kiln"},
-		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "relayx-3RJDWA", Answered: true, Attached: false, Dir: "/home/user/code/relayx"},
-		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "kiln-relayx-explore", Attached: true, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "relayx-3RJDWA", Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
 	}
 
 	return &Fixture{
@@ -454,10 +453,10 @@ func sessionsBurstOpeningFixture() *Fixture {
 // missing store, must drive the signpost.
 func sessionsNoTagsSignpostFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "kiln-relayx-explore", Answered: true, Attached: true, Dir: "/home/user/code/kiln"},
-		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "relayx-3RJDWA", Answered: true, Attached: false, Dir: "/home/user/code/relayx"},
-		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "kiln-relayx-explore", Attached: true, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "relayx-3RJDWA", Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
 	}
 
 	projects := []project.Project{
@@ -497,12 +496,12 @@ func sessionsSearchResultsFixture() *Fixture {
 	lumenDir := filepath.Join(home, "code/lumen")
 
 	sessions := []tui.Session{
-		{Name: "portal-a1b2", Answered: true, Attached: true, Dir: portalDir},
-		{Name: "api-work", Answered: true, Attached: false, Dir: gatewayDir},
-		{Name: "legacy-port-shim", Answered: true, Attached: false},
-		{Name: "portal-design-exports-review", Answered: true, Attached: false, Dir: filepath.Join(portalDir, "internal/capture/testdata/reference/design-exports/frames/archive/2026-q3")},
-		{Name: "portal-notes", Answered: true, Attached: false, Dir: "/opt/portal-tools"},
-		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: lumenDir},
+		{Name: "portal-a1b2", Attached: true, Dir: portalDir},
+		{Name: "api-work", Attached: false, Dir: gatewayDir},
+		{Name: "legacy-port-shim", Attached: false},
+		{Name: "portal-design-exports-review", Attached: false, Dir: filepath.Join(portalDir, "internal/capture/testdata/reference/design-exports/frames/archive/2026-q3")},
+		{Name: "portal-notes", Attached: false, Dir: "/opt/portal-tools"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: lumenDir},
 	}
 
 	projects := []project.Project{
@@ -535,10 +534,10 @@ func sessionsSearchHomeFixture() *Fixture {
 // seen in one frame rather than inferred from rows showing one each.
 func sessionsPendingResumeFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "orchard-pipeline-codify", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "loom-p84cXa", Answered: true, Attached: false, Dir: "/home/user/code/loom"},
-		{Name: "quill-Ue9fLr", Answered: true, Attached: true, Dir: "/home/user/code/quill"},
+		{Name: "orchard-pipeline-codify", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "loom-p84cXa", Attached: false, Dir: "/home/user/code/loom"},
+		{Name: "quill-Ue9fLr", Attached: true, Dir: "/home/user/code/quill"},
 	}
 
 	return &Fixture{
@@ -554,11 +553,11 @@ func sessionsPendingResumeFixture() *Fixture {
 // did — one under the cursor, so both the selected and the canvas dimming show.
 func sessionsNotAnsweringFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "kiln-relayx-explore"},
-		{Name: "orchard-pipeline-codify", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "lumen-sync-engine", Answered: true, Dir: "/home/user/code/lumen"},
-		{Name: "quill-Ue9fLr"},
-		{Name: "loom-p84cXa", Answered: true, Dir: "/home/user/code/loom"},
+		{Name: "kiln-relayx-explore", NotAnswering: true},
+		{Name: "orchard-pipeline-codify", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "lumen-sync-engine", Dir: "/home/user/code/lumen"},
+		{Name: "quill-Ue9fLr", NotAnswering: true},
+		{Name: "loom-p84cXa", Dir: "/home/user/code/loom"},
 	}
 
 	return &Fixture{
@@ -812,9 +811,9 @@ func themePanelProjectsFixture() *Fixture {
 // page the capture is of.
 func projectsFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "portal", Answered: true, Attached: false, Dir: "/home/user/code/portal"},
-		{Name: "relayx-3RJDWA", Answered: true, Attached: false, Dir: "/home/user/code/loom/relayx"},
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "portal", Attached: false, Dir: "/home/user/code/portal"},
+		{Name: "relayx-3RJDWA", Attached: false, Dir: "/home/user/code/loom/relayx"},
 	}
 
 	// relay-v1-api's tags render as the edit-project modal's seeded chips.
@@ -865,10 +864,10 @@ func projectsCommandPendingFixture() *Fixture {
 // specific tool.
 func previewScreenFixture() *Fixture {
 	sessions := []tui.Session{
-		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
-		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "kiln-relayx-explore", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
 	}
 
 	scrollback := "$ kubectl rollout status deploy/tessera-proxy\n" +

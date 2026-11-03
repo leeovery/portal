@@ -13,9 +13,9 @@ import (
 func colourlessTestModel(t *testing.T, w, h int) Model {
 	t.Helper()
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: true},
-		{Name: "bravo", Answered: true, Attached: false},
-		{Name: "charlie", Answered: true, Attached: false},
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
+		{Name: "charlie", Attached: false},
 	}
 	m := Build(Deps{Lister: fakeLister{}, NoColor: true})
 	m.termWidth = w

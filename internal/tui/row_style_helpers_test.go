@@ -193,8 +193,8 @@ func renderProjectRowSnapshot(d ProjectDelegate, width int, items []list.Item, i
 func TestRenderSessionRow_ByteIdenticalAcrossRefactor(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		Session{Name: "alpha", Answered: true, Attached: true},
-		Session{Name: "bravo", Answered: true, Attached: false},
+		Session{Name: "alpha", Attached: true},
+		Session{Name: "bravo", Attached: false},
 	)
 	for _, appearance := range []theme.Member{theme.MemberDark, theme.MemberLight} {
 		for _, colourless := range []bool{false, true} {

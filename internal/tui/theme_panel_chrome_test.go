@@ -23,7 +23,7 @@ func newChromePanelModel(t *testing.T) Model {
 
 	sessions := make([]Session, 0, len(chromeSessionNames()))
 	for _, name := range chromeSessionNames() {
-		sessions = append(sessions, Session{Name: name, Answered: true})
+		sessions = append(sessions, Session{Name: name})
 	}
 	m = openPanelForTestWithSessions(t, m, chromeContentW, chromeContentH, sessions)
 
@@ -420,7 +420,7 @@ func newChromeGateModel(t *testing.T, contentH int) Model {
 	rows := arrowValidRows(t, 6)
 	m := Build(newArrowPanelDeps(t, rows, rows[0].Slug))
 	m.termWidth, m.termHeight = geometryTerm(chromeContentW, contentH)
-	m.applySessions([]Session{{Name: chromeSessionNames()[0], Answered: true}}, nil)
+	m.applySessions([]Session{{Name: chromeSessionNames()[0]}}, nil)
 	m.applySessionListSize(m.contentWidth(), m.contentHeight())
 	if got := m.contentHeight(); got != contentH {
 		t.Fatalf("fixture: the content region is %d rows tall, want %d", got, contentH)

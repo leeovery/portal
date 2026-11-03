@@ -26,8 +26,8 @@ func wireTOCTOUResolveSeams(m *Model, detectAdapter spawn.Adapter, ack spawn.Ack
 
 func TestBurstDispatch_UsesCachedAdapter_AlreadyResolved(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	detectAdapter := &spawntest.FakeAdapter{Ack: ack}
@@ -59,8 +59,8 @@ func TestBurstDispatch_UsesCachedAdapter_AlreadyResolved(t *testing.T) {
 
 func TestBurstDispatch_UsesCachedAdapter_DeferredEntry(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	detectAdapter := &spawntest.FakeAdapter{Ack: ack}
@@ -97,8 +97,8 @@ func TestBurstDispatch_UsesCachedAdapter_DeferredEntry(t *testing.T) {
 
 func TestBurstDispatch_NilCachedAdapter_RoutesToUnsupportedNoOp(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	m := NewModelWithSessions(sessions)

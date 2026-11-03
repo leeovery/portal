@@ -88,8 +88,8 @@ func TestUnsupportedFlashText(t *testing.T) {
 
 func TestBurstUnsupported_NonNullAtomicNoOp(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -115,8 +115,8 @@ func TestBurstUnsupported_NonNullAtomicNoOp(t *testing.T) {
 
 func TestBurstUnsupported_NullFlash(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -142,8 +142,8 @@ func TestBurstUnsupported_NullFlash(t *testing.T) {
 
 func TestBurstUnsupported_DeferredThenUnsupported(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -182,8 +182,8 @@ func TestBurstUnsupported_DeferredThenUnsupported(t *testing.T) {
 
 func TestBurstUnsupported_SupportedStillDispatches(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}

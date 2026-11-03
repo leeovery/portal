@@ -8,18 +8,18 @@ import (
 
 func multiSelectFixtureSessions() []Session {
 	return []Session{
-		{Name: "agentic-workflows-code-based", Answered: true, Attached: true},
-		{Name: "agentic-workflows-codify", Answered: true},
-		{Name: "fab-flowx-explore", Answered: true},
-		{Name: "evvi webhooks and watchers", Answered: true},
-		{Name: "aviva-proxy-qNyfEO", Answered: true},
-		{Name: "designlab-web-r8suyU", Answered: true},
-		{Name: "evvi-sync-engine", Answered: true},
-		{Name: "fab-aws-migration", Answered: true},
-		{Name: "flow-v1-api-XkkhTN", Answered: true},
-		{Name: "flowx-7UKPZH", Answered: true},
-		{Name: "fabric-lk26UG", Answered: true},
-		{Name: "folio-Jiz4el", Answered: true},
+		{Name: "agentic-workflows-code-based", Attached: true},
+		{Name: "agentic-workflows-codify"},
+		{Name: "fab-flowx-explore"},
+		{Name: "evvi webhooks and watchers"},
+		{Name: "aviva-proxy-qNyfEO"},
+		{Name: "designlab-web-r8suyU"},
+		{Name: "evvi-sync-engine"},
+		{Name: "fab-aws-migration"},
+		{Name: "flow-v1-api-XkkhTN"},
+		{Name: "flowx-7UKPZH"},
+		{Name: "fabric-lk26UG"},
+		{Name: "folio-Jiz4el"},
 	}
 }
 

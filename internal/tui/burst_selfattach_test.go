@@ -185,8 +185,8 @@ func TestBurst_FullSuccess_ConfirmedWhileAttachedElsewhere(t *testing.T) {
 
 func TestBurst_NotAllConfirmed_ClearsPendingWithoutQuit(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack, Results: []spawn.Result{spawn.SpawnFailed("boom")}}

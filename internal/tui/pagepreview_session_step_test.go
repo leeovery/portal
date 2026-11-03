@@ -28,7 +28,7 @@ func (s *stepEnumerator) ListWindowsAndPanesInSession(session string) ([]tmux.Wi
 func stepSessions(names ...string) []Session {
 	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, Session{Name: n, Answered: true})
+		sessions = append(sessions, Session{Name: n})
 	}
 	return sessions
 }
@@ -157,10 +157,10 @@ func TestPreviewStep_SkipsGroupHeadings(t *testing.T) {
 	m := stepModel(t, &stepEnumerator{}, "alpha", "bravo", "charlie")
 	m.sessionList.SetItems([]list.Item{
 		HeaderItem{Heading: "one", Count: 2, Key: "one"},
-		SessionItem{Session: Session{Name: "alpha", Answered: true}, GroupKey: "one"},
-		SessionItem{Session: Session{Name: "bravo", Answered: true}, GroupKey: "one"},
+		SessionItem{Session: Session{Name: "alpha"}, GroupKey: "one"},
+		SessionItem{Session: Session{Name: "bravo"}, GroupKey: "one"},
 		HeaderItem{Heading: "two", Count: 1, Key: "two"},
-		SessionItem{Session: Session{Name: "charlie", Answered: true}, GroupKey: "two"},
+		SessionItem{Session: Session{Name: "charlie"}, GroupKey: "two"},
 	})
 	m = openPreviewAt(t, m, 2)
 

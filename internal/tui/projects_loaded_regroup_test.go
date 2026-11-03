@@ -26,7 +26,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeByProject, sessions)
 
@@ -52,7 +52,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 	t.Run("re-groups By Tag when ProjectsLoadedMsg arrives after sessions", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeByTag, sessions)
 
@@ -72,7 +72,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 	t.Run("batches the project-list SetItems command with the rebuild command", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeByProject, sessions)
 		m.termWidth, m.termHeight = 80, 24
@@ -92,7 +92,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 	t.Run("does NOT re-group in Flat mode", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeFlat, sessions)
 		m.rebuildSessionList()
@@ -116,8 +116,8 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 		dirB := t.TempDir()
 		keyB := project.CanonicalDirKey(dirB)
 		sessions := []Session{
-			{Name: "alpha", Answered: true, Dir: dirA},
-			{Name: "bravo", Answered: true, Dir: dirB},
+			{Name: "alpha", Dir: dirA},
+			{Name: "bravo", Dir: dirB},
 		}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeByProject, sessions)

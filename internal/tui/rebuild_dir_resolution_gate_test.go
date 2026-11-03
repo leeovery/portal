@@ -10,9 +10,9 @@ import (
 func TestRebuildSessionListResolutionGate(t *testing.T) {
 	t.Run("Flat (default) performs zero resolutions over un-stamped sessions", func(t *testing.T) {
 		sessions := []Session{
-			{Name: "portal-a", Answered: true, Dir: ""},
-			{Name: "portal-b", Answered: true, Dir: ""},
-			{Name: "portal-c", Answered: true, Dir: ""},
+			{Name: "portal-a", Dir: ""},
+			{Name: "portal-b", Dir: ""},
+			{Name: "portal-c", Dir: ""},
 		}
 
 		stamper := &fakeStamper{path: t.TempDir()}
@@ -34,8 +34,8 @@ func TestRebuildSessionListResolutionGate(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []Session{
-			{Name: "portal-a", Answered: true, Dir: ""},
-			{Name: "portal-b", Answered: true, Dir: ""},
+			{Name: "portal-a", Dir: ""},
+			{Name: "portal-b", Dir: ""},
 		}
 
 		stamper := &fakeStamper{path: dir}
@@ -60,9 +60,9 @@ func TestRebuildSessionListResolutionGate(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []Session{
-			{Name: "portal-a", Answered: true, Dir: ""},
-			{Name: "portal-b", Answered: true, Dir: ""},
-			{Name: "portal-c", Answered: true, Dir: ""},
+			{Name: "portal-a", Dir: ""},
+			{Name: "portal-b", Dir: ""},
+			{Name: "portal-c", Dir: ""},
 		}
 
 		stamper := &fakeStamper{path: dir}
@@ -81,8 +81,8 @@ func TestRebuildSessionListResolutionGate(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
 		sessions := []Session{
-			{Name: "portal-a", Answered: true, Dir: ""},
-			{Name: "portal-b", Answered: true, Dir: ""},
+			{Name: "portal-a", Dir: ""},
+			{Name: "portal-b", Dir: ""},
 		}
 
 		stamper := &fakeStamper{path: dir}

@@ -85,14 +85,14 @@ func TestGroupHeading_NoFaintAttributeAtCallSite(t *testing.T) {
 func TestGroupedRow_NestsOneLevelFurtherThanFlat(t *testing.T) {
 	const w = 80
 
-	flat := flatItems(Session{Name: "flatname", Answered: true})
+	flat := flatItems(Session{Name: "flatname"})
 	flatOut := renderRow(SessionDelegate{}, w, flat, 0, 0)
 	if got := visibleColOf(flatOut, "flatname"); got != 2 {
 		t.Errorf("flat name at col %d, want 2 (flush after the 2-cell selector bar)", got)
 	}
 
 	grouped := []list.Item{
-		SessionItem{Session: Session{Name: "grpname", Answered: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		SessionItem{Session: Session{Name: "grpname"}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 	}
 	grpOut := renderRow(SessionDelegate{}, w, grouped, 0, 0)
 	if got := visibleColOf(grpOut, "▌"); got != 2 {
@@ -105,7 +105,7 @@ func TestGroupedRow_NestsOneLevelFurtherThanFlat(t *testing.T) {
 
 func TestFlatRow_StaysFlushAtColTwo(t *testing.T) {
 	const w = 80
-	items := flatItems(Session{Name: "flatrow", Answered: true, Attached: false})
+	items := flatItems(Session{Name: "flatrow", Attached: false})
 	out := renderRow(SessionDelegate{}, w, items, 0, 0)
 
 	if got := visibleColOf(out, "▌"); got != 0 {
@@ -119,8 +119,8 @@ func TestFlatRow_StaysFlushAtColTwo(t *testing.T) {
 func TestGroupedRow_UnselectedAlsoIndents(t *testing.T) {
 	const w = 80
 	grouped := []list.Item{
-		SessionItem{Session: Session{Name: "row-zero", Answered: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-		SessionItem{Session: Session{Name: "row-one", Answered: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		SessionItem{Session: Session{Name: "row-zero"}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		SessionItem{Session: Session{Name: "row-one"}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 	}
 	out := renderRow(SessionDelegate{}, w, grouped, 1, 0)
 	if strings.Contains(ansi.Strip(out), "▌") {
@@ -164,8 +164,8 @@ func TestCatchAllRow_IndentsLikeResolvableGroupRow(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Known"}}
 	sessions := []Session{
-		{Name: "known-1", Answered: true, Dir: dir},
-		{Name: "orphan-1", Answered: true, Dir: "/nope/elsewhere"},
+		{Name: "known-1", Dir: dir},
+		{Name: "orphan-1", Dir: "/nope/elsewhere"},
 	}
 	items := buildByProject(sessions, project.NewIndex(projects), nil)
 
@@ -199,7 +199,7 @@ func TestGroupedRow_OneDelegateLine(t *testing.T) {
 	}
 
 	grouped := []list.Item{
-		SessionItem{Session: Session{Name: "grp-1", Answered: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		SessionItem{Session: Session{Name: "grp-1"}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 	}
 	row := renderRow(d, 80, grouped, 0, 0)
 	if strings.Contains(row, "\n") {
@@ -210,7 +210,7 @@ func TestGroupedRow_OneDelegateLine(t *testing.T) {
 func TestGroupedRow_NeverOverflowsAtNarrowWidths(t *testing.T) {
 	for _, w := range []int{1, 5, 10, 20, 26, 30, 40, 80} {
 		grouped := []list.Item{
-			SessionItem{Session: Session{Name: "a-fairly-long-grouped-session-name", Answered: true, Attached: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			SessionItem{Session: Session{Name: "a-fairly-long-grouped-session-name", Attached: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 		}
 		for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 			out := renderRow(SessionDelegate{Theme: th}, w, grouped, 0, 0)
@@ -242,9 +242,9 @@ func TestGroupingMachineryPreserved(t *testing.T) {
 			{Path: dirB, Name: "Bravo"},
 		}
 		sessions := []Session{
-			{Name: "alpha-1", Answered: true, Dir: dirA},
-			{Name: "bravo-1", Answered: true, Dir: dirB},
-			{Name: "orphan-1", Answered: true, Dir: "/nowhere"},
+			{Name: "alpha-1", Dir: dirA},
+			{Name: "bravo-1", Dir: dirB},
+			{Name: "orphan-1", Dir: "/nowhere"},
 		}
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
@@ -275,8 +275,8 @@ func TestGroupingMachineryPreserved(t *testing.T) {
 			{Path: other, Name: "Other"},
 		}
 		sessions := []Session{
-			{Name: "portal-1", Answered: true, Dir: dir},
-			{Name: "other-1", Answered: true, Dir: other},
+			{Name: "portal-1", Dir: dir},
+			{Name: "other-1", Dir: other},
 		}
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
@@ -303,7 +303,7 @@ func TestGroupingMachineryPreserved(t *testing.T) {
 func TestNoTagsSignpostPathUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []Session{{Name: "portal-1", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-1", Dir: dir}}
 
 	m := Model{
 		themeState:      themeState{active: testDarkTheme(t)},

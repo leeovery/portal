@@ -175,7 +175,7 @@ func TestFitSessionDir_AbbreviatesAgainstTheHomeGiven(t *testing.T) {
 
 func TestFilterValue_AbbreviatesAgainstTheItemsHome(t *testing.T) {
 	t.Setenv("HOME", "/elsewhere")
-	item := SessionItem{Session: Session{Name: "api", Answered: true, Dir: "/home/user/code/api"}, Home: "/home/user"}
+	item := SessionItem{Session: Session{Name: "api", Dir: "/home/user/code/api"}, Home: "/home/user"}
 
 	if got, want := item.FilterValue(), "api ~/code/api"; got != want {
 		t.Errorf("FilterValue() under HOME=/elsewhere = %q, want %q", got, want)
@@ -183,7 +183,7 @@ func TestFilterValue_AbbreviatesAgainstTheItemsHome(t *testing.T) {
 }
 
 func TestRebuildStampsTheModelsHomeOnEverySessionRow(t *testing.T) {
-	items := withHome([]list.Item{SessionItem{Session: Session{Name: "a", Answered: true}}, HeaderItem{}, SessionItem{Session: Session{Name: "b", Answered: true}}}, "/home/user")
+	items := withHome([]list.Item{SessionItem{Session: Session{Name: "a"}}, HeaderItem{}, SessionItem{Session: Session{Name: "b"}}}, "/home/user")
 
 	for i, item := range items {
 		if si, ok := item.(SessionItem); ok && si.Home != "/home/user" {

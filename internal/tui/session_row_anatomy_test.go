@@ -43,7 +43,7 @@ func flatItems(specs ...Session) []list.Item {
 
 func TestSessionRow_FlexNameFixedTrailingSlots(t *testing.T) {
 	const w = 80
-	items := flatItems(Session{Name: "alpha", Answered: true, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	out := renderRow(SessionDelegate{}, w, items, 0, 0)
 	vis := ansi.Strip(out)
 
@@ -66,8 +66,8 @@ func TestSessionRow_FlexNameFixedTrailingSlots(t *testing.T) {
 func TestSessionRow_ColumnAlignsRegardlessOfNameLength(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		Session{Name: "a", Answered: true, Attached: true},
-		Session{Name: "a-much-longer-session-name-here", Answered: true, Attached: true},
+		Session{Name: "a", Attached: true},
+		Session{Name: "a-much-longer-session-name-here", Attached: true},
 	)
 	short := renderRow(SessionDelegate{}, w, items, 0, 0)
 	long := renderRow(SessionDelegate{}, w, items, 1, 0)
@@ -85,8 +85,8 @@ func TestSessionRow_ColumnAlignsRegardlessOfNameLength(t *testing.T) {
 func TestSessionRow_EmptyAttachedSlotPreservesAlignment(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		Session{Name: "attached-one", Answered: true, Attached: true},
-		Session{Name: "detached-one", Answered: true, Attached: false},
+		Session{Name: "attached-one", Attached: true},
+		Session{Name: "detached-one", Attached: false},
 	)
 	attached := renderRow(SessionDelegate{}, w, items, 0, 0)
 	detached := renderRow(SessionDelegate{}, w, items, 1, 0)
@@ -102,7 +102,7 @@ func TestSessionRow_EmptyAttachedSlotPreservesAlignment(t *testing.T) {
 func TestSessionRow_SelectedShowsVioletBarTintAndOnSelectionName(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
-		items := flatItems(Session{Name: "selected-row", Answered: true, Attached: false})
+		items := flatItems(Session{Name: "selected-row", Attached: false})
 		out := renderRow(d, 80, items, 0, 0)
 
 		if !strings.Contains(ansi.Strip(out), "▌") {
@@ -124,8 +124,8 @@ func TestSessionRow_UnselectedHasNoBarOrTint(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
 		items := flatItems(
-			Session{Name: "row-zero", Answered: true, Attached: false},
-			Session{Name: "row-one", Answered: true, Attached: false},
+			Session{Name: "row-zero", Attached: false},
+			Session{Name: "row-one", Attached: false},
 		)
 		out := renderRow(d, 80, items, 1, 0)
 
@@ -145,8 +145,8 @@ func TestSessionRow_AttachedKeepsStateGreenWhenSelected(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
 		items := flatItems(
-			Session{Name: "attached-selected", Answered: true, Attached: true},
-			Session{Name: "attached-unselected", Answered: true, Attached: true},
+			Session{Name: "attached-selected", Attached: true},
+			Session{Name: "attached-unselected", Attached: true},
 		)
 
 		green := tokenFgSeq(t, th.StatePositive)
@@ -170,7 +170,7 @@ func TestSessionRow_AttachedKeepsStateGreenWhenSelected(t *testing.T) {
 func TestSessionRow_OverLongNameTruncatesWithoutPushingSlots(t *testing.T) {
 	const w = 40
 	longName := "this-is-a-really-very-long-session-name-that-overflows"
-	items := flatItems(Session{Name: longName, Answered: true, Attached: true})
+	items := flatItems(Session{Name: longName, Attached: true})
 	out := renderRow(SessionDelegate{}, w, items, 0, 0)
 	vis := ansi.Strip(out)
 
@@ -191,8 +191,8 @@ func TestSessionRow_OverLongNameTruncatesWithoutPushingSlots(t *testing.T) {
 func TestSessionRow_NeverOverflowsAtNarrowWidths(t *testing.T) {
 	for _, w := range []int{1, 5, 10, 20, 25, 26, 29, 40, 80} {
 		for _, sess := range []Session{
-			{Name: "x", Answered: true, Attached: false},
-			{Name: "agentic-workflows-code-based-that-is-quite-long", Answered: true, Attached: true},
+			{Name: "x", Attached: false},
+			{Name: "agentic-workflows-code-based-that-is-quite-long", Attached: true},
 		} {
 			items := flatItems(sess)
 			for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
@@ -208,7 +208,6 @@ func TestSessionRow_NeverOverflowsAtNarrowWidths(t *testing.T) {
 func TestSessionRow_FlatIsNameOnly(t *testing.T) {
 	items := flatItems(Session{
 		Name:     "flat-name",
-		Answered: true,
 		Attached: false,
 		Dir:      "/home/user/code/some-project",
 	})
@@ -226,7 +225,7 @@ func TestSessionRow_FlatIsNameOnly(t *testing.T) {
 func TestSessionRow_NoRawAnsiColourLiterals(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
-		items := flatItems(Session{Name: "alpha", Answered: true, Attached: true})
+		items := flatItems(Session{Name: "alpha", Attached: true})
 		out := renderRow(d, 80, items, 0, 0)
 
 		for _, banned := range []string{"38;5;212", "38;5;76", "48;5;212", "48;5;76"} {
@@ -245,7 +244,7 @@ func TestSessionRow_HeightStaysOne(t *testing.T) {
 	if d.Height() != 1 {
 		t.Fatalf("Height() = %d, want 1", d.Height())
 	}
-	items := flatItems(Session{Name: "alpha", Answered: true, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	out := renderRow(d, 80, items, 0, 0)
 	if strings.Contains(out, "\n") {
 		t.Errorf("session row emitted more than one line: %q", out)
@@ -267,7 +266,7 @@ func TestSessionRow_DirColumnSitsOneSpaceAfterTheName(t *testing.T) {
 	home := t.TempDir()
 
 	for _, name := range []string{"a", "alpha-one", "a-considerably-longer-session-name"} {
-		items := flatItems(Session{Name: name, Answered: true, Dir: home + "/Code/portal"})
+		items := flatItems(Session{Name: name, Dir: home + "/Code/portal"})
 		out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 80, items, 0, 0)
 
 		nameCol := visibleColOf(out, name)
@@ -286,8 +285,8 @@ func TestSessionRow_DirColumnOffRendersTodaysRow(t *testing.T) {
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Home: home, Theme: th}
-		withDir := renderRow(d, 80, flatItems(Session{Name: "alpha", Answered: true, Dir: home + "/Code/portal"}), 0, 0)
-		without := renderRow(d, 80, flatItems(Session{Name: "alpha", Answered: true}), 0, 0)
+		withDir := renderRow(d, 80, flatItems(Session{Name: "alpha", Dir: home + "/Code/portal"}), 0, 0)
+		without := renderRow(d, 80, flatItems(Session{Name: "alpha"}), 0, 0)
 
 		if withDir != without {
 			t.Errorf("[%v] with the column off a recorded directory changed the row:\n got %q\nwant %q", themeLabel(th), escSeq(withDir), escSeq(without))
@@ -297,7 +296,7 @@ func TestSessionRow_DirColumnOffRendersTodaysRow(t *testing.T) {
 
 func TestSessionRow_DirColumnRendersNoSeparatorWithoutARecordedDirectory(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		items := flatItems(Session{Name: "alpha", Answered: true})
+		items := flatItems(Session{Name: "alpha"})
 		on := renderRow(SessionDelegate{Theme: th, ShowDir: true}, 80, items, 0, 0)
 		off := renderRow(SessionDelegate{Theme: th}, 80, items, 0, 0)
 
@@ -322,7 +321,7 @@ func TestSessionRow_DirColumnKeepsTheRowExactlyTheListWidth(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			items := flatItems(Session{Name: "alpha", Answered: true, Attached: true, Dir: tc.dir})
+			items := flatItems(Session{Name: "alpha", Attached: true, Dir: tc.dir})
 			for _, sel := range []int{0, 1} {
 				for _, colourless := range []bool{false, true} {
 					d := SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true, Colourless: colourless}
@@ -340,9 +339,9 @@ func TestSessionRow_DirColumnKeepsTrailingSlotsAligned(t *testing.T) {
 	home := t.TempDir()
 
 	items := flatItems(
-		Session{Name: "a", Answered: true, Attached: true, Dir: home + "/Code/portal"},
-		Session{Name: "a-much-longer-session-name", Answered: true, Attached: true, Dir: home + "/x"},
-		Session{Name: "mid-name", Answered: true, Attached: true},
+		Session{Name: "a", Attached: true, Dir: home + "/Code/portal"},
+		Session{Name: "a-much-longer-session-name", Attached: true, Dir: home + "/x"},
+		Session{Name: "mid-name", Attached: true},
 	)
 	d := SessionDelegate{Home: home, ShowDir: true}
 
@@ -366,7 +365,7 @@ func TestSessionRow_DirColumnKeepsTrailingSlotsAligned(t *testing.T) {
 func TestSessionRow_DirColumnLeftTruncatesTheDirectoryAndNeverTheName(t *testing.T) {
 	home := t.TempDir()
 
-	items := flatItems(Session{Name: "alpha", Answered: true, Dir: home + "/Code/portal/internal/tui"})
+	items := flatItems(Session{Name: "alpha", Dir: home + "/Code/portal/internal/tui"})
 	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 30, items, 0, 0)
 	vis := ansi.Strip(out)
 
@@ -384,7 +383,7 @@ func TestSessionRow_DirColumnLeftTruncatesTheDirectoryAndNeverTheName(t *testing
 func TestSessionRow_DirColumnDropsTheDirectoryBelowTheFloor(t *testing.T) {
 	home := t.TempDir()
 
-	items := flatItems(Session{Name: "alpha", Answered: true, Dir: home + "/Code/portal/internal/tui"})
+	items := flatItems(Session{Name: "alpha", Dir: home + "/Code/portal/internal/tui"})
 	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 14, items, 0, 0)
 	vis := ansi.Strip(out)
 
@@ -401,7 +400,6 @@ func TestSessionRow_DirColumnLeavesAnOverLongNameTruncatedAsItIsWithTheColumnOff
 
 	sess := Session{
 		Name:     "this-is-a-really-very-long-session-name-that-overflows",
-		Answered: true,
 		Attached: true,
 		Dir:      home + "/Code/portal",
 	}
@@ -422,8 +420,8 @@ func TestSessionRow_DirColumnTakesTheMutedToken(t *testing.T) {
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		items := flatItems(
-			Session{Name: "row-zero", Answered: true, Dir: home + "/Code/portal"},
-			Session{Name: "row-one", Answered: true, Dir: home + "/Code/portal"},
+			Session{Name: "row-zero", Dir: home + "/Code/portal"},
+			Session{Name: "row-one", Dir: home + "/Code/portal"},
 		)
 		d := SessionDelegate{Home: home, Theme: th, ShowDir: true}
 
@@ -451,7 +449,7 @@ func TestSessionRow_DirColumnSeparatingSpaceCarriesTheSelectionTint(t *testing.T
 	home := t.TempDir()
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		items := flatItems(Session{Name: "alpha", Answered: true, Dir: home + "/Code/portal"})
+		items := flatItems(Session{Name: "alpha", Dir: home + "/Code/portal"})
 		out := renderRow(SessionDelegate{Home: home, Theme: th, ShowDir: true}, 80, items, 0, 0)
 
 		cells := scanCellBackgrounds(out)
@@ -472,7 +470,7 @@ func TestSessionRow_DirColumnSeparatingSpaceCarriesTheSelectionTint(t *testing.T
 func TestSessionRow_DirColumnRendersTheSameSingleSpaceWhenColourless(t *testing.T) {
 	home := t.TempDir()
 
-	items := flatItems(Session{Name: "alpha", Answered: true, Attached: true, Dir: home + "/Code/portal"})
+	items := flatItems(Session{Name: "alpha", Attached: true, Dir: home + "/Code/portal"})
 	coloured := renderRow(SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true}, 80, items, 0, 0)
 	colourless := renderRow(SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true, Colourless: true}, 80, items, 0, 0)
 
@@ -484,7 +482,7 @@ func TestSessionRow_DirColumnRendersTheSameSingleSpaceWhenColourless(t *testing.
 func TestSessionRow_DirColumnNarrowsByAGroupedRowsIndent(t *testing.T) {
 	home := t.TempDir()
 
-	sess := Session{Name: "s", Answered: true, Dir: home + "/Code/portal/internal/tui"}
+	sess := Session{Name: "s", Dir: home + "/Code/portal/internal/tui"}
 	d := SessionDelegate{Home: home, ShowDir: true}
 
 	flat := renderRow(d, 31, []list.Item{SessionItem{Session: sess}}, 0, 0)
@@ -504,7 +502,7 @@ func TestSessionRow_DirColumnNarrowsByAGroupedRowsIndent(t *testing.T) {
 func TestSessionRow_DirColumnRendersWholeOnAnUnsizedList(t *testing.T) {
 	home := t.TempDir()
 
-	items := flatItems(Session{Name: "alpha", Answered: true, Dir: home + "/Code/portal/internal/tui"})
+	items := flatItems(Session{Name: "alpha", Dir: home + "/Code/portal/internal/tui"})
 	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 0, items, 0, 0)
 	vis := ansi.Strip(out)
 
@@ -518,8 +516,8 @@ func TestSessionRow_DirColumnNeverOverflowsAtNarrowWidths(t *testing.T) {
 
 	for _, w := range []int{1, 5, 10, 20, 25, 26, 29, 40, 80} {
 		for _, sess := range []Session{
-			{Name: "x", Answered: true, Dir: home + "/Code/portal/internal/tui/deeply/nested"},
-			{Name: "agentic-workflows-code-based-that-is-quite-long", Answered: true, Attached: true, Dir: home + "/Code/portal/internal/tui/deeply/nested"},
+			{Name: "x", Dir: home + "/Code/portal/internal/tui/deeply/nested"},
+			{Name: "agentic-workflows-code-based-that-is-quite-long", Attached: true, Dir: home + "/Code/portal/internal/tui/deeply/nested"},
 		} {
 			items := flatItems(sess)
 			for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
@@ -548,7 +546,7 @@ func TestSessionRow_DirColumnNeverLeansOnThePathologicalWidthBackstop(t *testing
 	} {
 		for _, name := range []string{"a", "portal-a1b2", "a-considerably-longer-session-name"} {
 			for _, attached := range []bool{false, true} {
-				items := flatItems(Session{Name: name, Answered: true, Attached: attached, Dir: dir})
+				items := flatItems(Session{Name: name, Attached: attached, Dir: dir})
 				for w := narrowest; w <= 120; w++ {
 					out := renderRow(SessionDelegate{Home: home, ShowDir: true}, w, items, 0, 0)
 					if vis := ansi.Strip(out); !strings.HasSuffix(vis, margin) {
@@ -574,7 +572,7 @@ func sgrOpeningGlyph(line, glyph string) string {
 
 func TestSessionRow_AttachedIndicatorRendersWithoutItsWord(t *testing.T) {
 	const w = 80
-	items := flatItems(Session{Name: "alpha", Answered: true, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		vis := ansi.Strip(renderRow(SessionDelegate{Theme: th}, w, items, 0, 0))
 
@@ -589,9 +587,9 @@ func TestSessionRow_AttachedIndicatorRendersWithoutItsWord(t *testing.T) {
 
 func TestSessionRow_SameWidthAttachedUnattachedAndGone(t *testing.T) {
 	items := flatItems(
-		Session{Name: "attached-one", Answered: true, Attached: true},
-		Session{Name: "unattached-one", Answered: true, Attached: false},
-		Session{Name: "gone-one", Answered: true, Attached: true},
+		Session{Name: "attached-one", Attached: true},
+		Session{Name: "unattached-one", Attached: false},
+		Session{Name: "gone-one", Attached: true},
 	)
 	for _, w := range []int{40, 60, 80, 120} {
 		for _, colourless := range []bool{false, true} {
@@ -611,8 +609,8 @@ func TestSessionRow_ReclaimedCellsGoToTheName(t *testing.T) {
 	const w = 40
 	longName := "this-is-a-really-very-long-session-name-that-overflows"
 	items := flatItems(
-		Session{Name: longName, Answered: true, Attached: true},
-		Session{Name: longName, Answered: true, Attached: true},
+		Session{Name: longName, Attached: true},
+		Session{Name: longName, Attached: true},
 	)
 	d := SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, GoneFlagged: markedSet()}
 	attached := renderRow(d, w, items, 0, 0)
@@ -647,8 +645,8 @@ func TestSessionRow_ReclaimedCellsGoToTheName(t *testing.T) {
 func TestSessionRow_GoneBadgeReplacesTheWholeTrailingRegion(t *testing.T) {
 	const w = 60
 	items := flatItems(
-		Session{Name: "fab-flowx-explore", Answered: true, Attached: true},
-		Session{Name: "designlab-web-r8suyU", Answered: true, Attached: false},
+		Session{Name: "fab-flowx-explore", Attached: true},
+		Session{Name: "designlab-web-r8suyU", Attached: false},
 	)
 	goldens := map[bool][2]string{
 		false: {
@@ -680,8 +678,8 @@ func TestSessionRow_GoneBadgeReplacesTheWholeTrailingRegion(t *testing.T) {
 func TestSessionRow_IndicatorKeepsPositiveTokenWhenSelected(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		items := flatItems(
-			Session{Name: "attached-selected", Answered: true, Attached: true},
-			Session{Name: "attached-unselected", Answered: true, Attached: true},
+			Session{Name: "attached-selected", Attached: true},
+			Session{Name: "attached-unselected", Attached: true},
 		)
 		green := tokenFgSeq(t, th.StatePositive)
 		for i, wantBg := range []string{selectionBgParams(t, th), wantCanvasBgParams(t, th)} {
@@ -696,8 +694,8 @@ func TestSessionRow_IndicatorKeepsPositiveTokenWhenSelected(t *testing.T) {
 func TestSessionRow_ColourlessAttachedRendersLetterNotDot(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		Session{Name: "alpha", Answered: true, Attached: true},
-		Session{Name: "bravo", Answered: true, Attached: false},
+		Session{Name: "alpha", Attached: true},
+		Session{Name: "bravo", Attached: false},
 	)
 	d := SessionDelegate{Theme: testDarkTheme(t), Colourless: true}
 	margin := strings.Repeat(" ", rowRightMargin)
@@ -718,7 +716,7 @@ func TestSessionRow_ColourlessAttachedRendersLetterNotDot(t *testing.T) {
 
 func TestSessionRow_UnattachedRendersNothingInTheIndicatorCell(t *testing.T) {
 	const w = 80
-	items := flatItems(Session{Name: "bravo", Answered: true, Attached: false})
+	items := flatItems(Session{Name: "bravo", Attached: false})
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		out := renderRow(SessionDelegate{Theme: th}, w, items, 0, 0)
 		vis := ansi.Strip(out)
@@ -732,7 +730,7 @@ func TestSessionRow_UnattachedRendersNothingInTheIndicatorCell(t *testing.T) {
 }
 
 func TestSessionRow_IndicatorPacksHardRight(t *testing.T) {
-	items := flatItems(Session{Name: "alpha", Answered: true, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	for _, w := range []int{40, 80, 120} {
 		for _, d := range []SessionDelegate{{Theme: testDarkTheme(t)}, {Theme: testDarkTheme(t), Colourless: true}} {
 			glyph := rowIndicatorGlyph

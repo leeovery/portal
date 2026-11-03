@@ -112,8 +112,8 @@ func TestFooterRevision_MultiLabelIsShort(t *testing.T) {
 func footerRevisionSessionsModel(t *testing.T, colourless bool) Model {
 	t.Helper()
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 	m.termWidth = referenceFooterWidth + 2*Hinset
 	m.termHeight = 30 + 2*Vinset

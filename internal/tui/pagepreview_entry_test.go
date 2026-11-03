@@ -34,8 +34,8 @@ func modelWithSeams(t *testing.T, sessions []Session, enum TmuxEnumerator, reade
 
 func TestSpaceOnSessionsPageTransitionsToPagePreviewWhenHighlighted(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -93,7 +93,7 @@ func TestSpaceOnSessionsPageNoOpWhenListEmpty(t *testing.T) {
 
 func TestSpaceOnSessionsPageNoOpWhenSelectedItemNil(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -128,7 +128,7 @@ func TestSpaceOnSessionsPageNoOpWhenSelectedItemNil(t *testing.T) {
 
 func TestSpaceOnSessionsPageRemainsOnSessionsWhenEnumerationFails(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{err: errStub("boom")}
 	reader := &recordingReader{}
@@ -153,7 +153,7 @@ func TestSpaceOnSessionsPageRemainsOnSessionsWhenEnumerationFails(t *testing.T) 
 
 func TestSpaceOnSessionsPageRemainsOnSessionsWhenEnumerationEmpty(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{groups: nil}
 	reader := &recordingReader{}
@@ -175,7 +175,7 @@ func TestSpaceOnSessionsPageRemainsOnSessionsWhenEnumerationEmpty(t *testing.T) 
 
 func TestSpaceDuringSettingFilterDoesNotCallNewPreviewModel(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -255,7 +255,7 @@ func TestSpaceOnProjectsPageDoesNotCallNewPreviewModel(t *testing.T) {
 
 func TestPagePreviewRoutesUpdateToPreviewModel(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

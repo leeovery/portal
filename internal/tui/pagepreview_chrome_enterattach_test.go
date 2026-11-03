@@ -52,8 +52,8 @@ func TestPreviewFooter_ByteIdenticalAcrossViewportStates(t *testing.T) {
 
 func TestSessionsPageView_DoesNotContainPreviewChrome(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "beta", Answered: true},
+		{Name: "alpha"},
+		{Name: "beta"},
 	}
 	m := NewModelWithSessions(sessions)
 

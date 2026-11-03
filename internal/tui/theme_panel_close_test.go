@@ -31,9 +31,9 @@ func closePanelForTest(t *testing.T, m Model) (Model, tea.Cmd) {
 
 func closePanelSessions() []Session {
 	return []Session{
-		{Name: "alpha", Answered: true, Attached: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha", Attached: true},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 }
 

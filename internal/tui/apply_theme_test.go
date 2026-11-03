@@ -19,7 +19,7 @@ func newSwapProbeModel(t *testing.T, before theme.Theme, mode prefs.SessionListM
 	projects := []project.Project{{Path: reader.path, Name: "Portal", Tags: []string{"work"}}}
 	sessions := make([]Session, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := Build(Deps{
@@ -267,7 +267,7 @@ func newSwapFrameModel(t *testing.T, before theme.Theme, colourless bool) Model 
 	sessions := make([]Session, 0, swapProbeSessions)
 	projects := make([]project.Project, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true, Dir: "/Users/leeovery/Code/" + nameN(i)})
+		sessions = append(sessions, Session{Name: nameN(i), Dir: "/Users/leeovery/Code/" + nameN(i)})
 		projects = append(projects, project.Project{Name: nameN(i), Path: "/Users/leeovery/Code/" + nameN(i)})
 	}
 

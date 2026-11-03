@@ -12,7 +12,7 @@ import (
 func reskinFlashModel(names ...string) Model {
 	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, Session{Name: n, Answered: true, Attached: false})
+		sessions = append(sessions, Session{Name: n, Attached: false})
 	}
 	m := NewModelWithSessions(sessions)
 	m.termWidth = 80
@@ -140,7 +140,7 @@ func TestFlashReskin_NoColor(t *testing.T) {
 		{"success", func(m *Model) { m.setSuccessFlash("nocolor success") }, flashSuccessGlyph},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sessions := []Session{{Name: "alpha-row", Answered: true}}
+			sessions := []Session{{Name: "alpha-row"}}
 			m := NewModelWithSessions(sessions)
 			m.termWidth = 80
 			m.termHeight = 24
@@ -217,7 +217,7 @@ type reskinStubLister struct{ sessions []Session }
 func (l reskinStubLister) ListSessions() ([]Session, error) { return l.sessions, nil }
 
 func TestBuild_InitialFlashSeedsWarningFlash(t *testing.T) {
-	lister := reskinStubLister{sessions: []Session{{Name: "dev", Answered: true}}}
+	lister := reskinStubLister{sessions: []Session{{Name: "dev"}}}
 	const msg = "folio-Jiz4el closed externally — list updated"
 	m := Build(Deps{
 		Lister:  lister,
@@ -238,8 +238,8 @@ func TestBuild_InitialFlashSeedsWarningFlash(t *testing.T) {
 func TestBuild_InitialFlash_RendersWarningBand(t *testing.T) {
 	const msg = "folio-Jiz4el closed externally — list updated"
 	sessions := []Session{
-		{Name: "fab-flowx-explore", Answered: true, Attached: true},
-		{Name: "agentic-workflows-codify", Answered: true},
+		{Name: "fab-flowx-explore", Attached: true},
+		{Name: "agentic-workflows-codify"},
 	}
 	m := Build(Deps{
 		Lister:  reskinStubLister{sessions: sessions},

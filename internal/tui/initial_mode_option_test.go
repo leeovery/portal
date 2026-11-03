@@ -37,7 +37,7 @@ func TestWithInitialMode(t *testing.T) {
 	t.Run("groups the first SessionsMsg ingestion by the injected mode", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := New(fakeLister{}, WithInitialMode(prefs.ModeByTag))
 		m.setProjects(projects)

@@ -160,7 +160,7 @@ func TestContentInset_PaginationInvariantPreserved(t *testing.T) {
 
 	var sessions []Session
 	for i := range 40 {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w
@@ -193,7 +193,7 @@ func TestContentInset_GroupedPaginationInvariant(t *testing.T) {
 
 	var sessions []Session
 	for i := range 30 {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark), WithInitialMode(prefs.ModeByProject))
 	m.termWidth = w

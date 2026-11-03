@@ -15,8 +15,8 @@ func helpModelSessions(t *testing.T, appearance theme.Member) Model {
 	m.termWidth = 90
 	m.termHeight = 30
 	m.applySessions([]Session{
-		{Name: "alpha", Answered: true, Attached: true},
-		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
 	}, nil)
 	return m
 }

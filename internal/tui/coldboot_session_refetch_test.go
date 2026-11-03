@@ -54,8 +54,8 @@ func oneProjectLoaded() []project.Project {
 
 func twoRestoredSessions() []Session {
 	return []Session{
-		{Name: "restored-alpha", Answered: true},
-		{Name: "restored-bravo", Answered: true},
+		{Name: "restored-alpha"},
+		{Name: "restored-bravo"},
 	}
 }
 
@@ -169,7 +169,7 @@ func TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions(t *testing.T) {
 
 func TestColdBoot_PostCompleteRefetch_CompleteBeforeMinElapsed(t *testing.T) {
 	stale := []Session{}
-	restored := []Session{{Name: "fast-restored", Answered: true}}
+	restored := []Session{{Name: "fast-restored"}}
 	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
@@ -227,7 +227,7 @@ func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
 }
 
 func TestWarmRoute_NoPostCompleteRefetch(t *testing.T) {
-	sessions := []Session{{Name: "warm-already-live", Answered: true}}
+	sessions := []Session{{Name: "warm-already-live"}}
 	lister := &coldBootStepLister{steps: [][]Session{sessions}}
 
 	m := New(lister, WithServerStarted(true))
@@ -364,7 +364,7 @@ func TestWarmRoute_ZeroSessions_LandsOnProjects(t *testing.T) {
 }
 
 func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
-	sessions := []Session{{Name: "live-session", Answered: true}}
+	sessions := []Session{{Name: "live-session"}}
 	lister := &coldBootStepLister{steps: [][]Session{sessions}}
 
 	m := New(lister,

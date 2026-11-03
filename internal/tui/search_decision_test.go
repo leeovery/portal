@@ -22,7 +22,7 @@ func (d *decisionCounter) decide() (string, error) {
 
 func searchDecisionModel(t *testing.T, d *decisionCounter) tea.Model {
 	t.Helper()
-	lister := postloadStubLister{sessions: []Session{{Name: "portal", Answered: true}}}
+	lister := postloadStubLister{sessions: []Session{{Name: "portal"}}}
 	receiver := func() tea.Msg { return nil }
 	m := New(lister,
 		WithServerStarted(true),
@@ -255,7 +255,7 @@ func TestSearchDecision_CtrlCBeforeDecisionSelectsNothing(t *testing.T) {
 
 func TestSearchDecision_AbsentClosureLeavesTransitionUnchanged(t *testing.T) {
 	warnings := []BootstrapWarning{{Lines: []string{"saver is down"}}}
-	model, _ := transitionWithWarnings(coldTUIModel(t, []Session{{Name: "portal", Answered: true}}), warnings)
+	model, _ := transitionWithWarnings(coldTUIModel(t, []Session{{Name: "portal"}}), warnings)
 
 	m := model.(Model)
 	if m.ActivePage() != PageSessions {

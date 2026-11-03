@@ -37,9 +37,9 @@ func injectComplete(t *testing.T, m Model, msg spawnCompleteMsg) (Model, tea.Cmd
 
 func TestBurstPartialFailure_LeavesOpenedWindowsAndSkipsSelfAttach(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack, Results: []spawn.Result{spawn.SpawnFailed("boom")}}
@@ -182,9 +182,9 @@ func TestBurstPartialFailure_AckTimeoutAndSpawnFailedClassifyIdentically(t *test
 func TestBurstPartialFailure_PermissionGuidanceOnceAffectedStaysMarked(t *testing.T) {
 	const guidance = "grant Automation access to Ghostty in System Settings"
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{
@@ -231,10 +231,10 @@ func TestBurstPartialFailure_PermissionGuidanceOnceAffectedStaysMarked(t *testin
 
 func TestBurstPartialFailure_UnattemptedPostPermissionStayMarked(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
-		{Name: "delta", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
+		{Name: "delta"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{

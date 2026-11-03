@@ -121,7 +121,7 @@ func TestMultiSelectHeader_PaintsCanvasNoEdgeBleed(t *testing.T) {
 func multiSelectBannerModel(marked []string, names ...string) Model {
 	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, Session{Name: n, Answered: true, Attached: false})
+		sessions = append(sessions, Session{Name: n, Attached: false})
 	}
 	m := NewModelWithSessions(sessions)
 	m.termWidth = 80
@@ -195,8 +195,8 @@ func TestApplySectionHeader_FilterAppliedInMultiSelectShowsBanner(t *testing.T) 
 
 func TestApplySectionHeader_CountUpdatesLive(t *testing.T) {
 	m := NewModelWithSessions([]Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 	m.termWidth = 80
 	m.termHeight = 24
@@ -226,7 +226,7 @@ func TestApplySectionHeader_CountUpdatesLive(t *testing.T) {
 func TestApplySectionHeader_ByTagMultiMembershipCountsOnce(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-	sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80

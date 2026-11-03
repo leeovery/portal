@@ -40,8 +40,8 @@ func assertUnsupportedPreflightAbort(t *testing.T, m Model, adapter *spawntest.F
 
 func TestBurstUnsupported_PreflightAbortBeforeNoop(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -64,8 +64,8 @@ func TestBurstUnsupported_PreflightAbortBeforeNoop(t *testing.T) {
 
 func TestBurstUnsupported_DeferredPreflightAbortBeforeNoop(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true},
-		{Name: "bravo", Answered: true},
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}

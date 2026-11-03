@@ -167,9 +167,9 @@ func TestViewSessionList_ReplacesTitleWithSectionHeader(t *testing.T) {
 
 func TestViewSessionList_SectionHeaderCountMatchesVisible(t *testing.T) {
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: true},
-		{Name: "bravo", Answered: true},
-		{Name: "charlie", Answered: true},
+		{Name: "alpha", Attached: true},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	m := NewModelWithSessions(sessions).WithCurrentSession("alpha")
 	view := m.viewSessionList()

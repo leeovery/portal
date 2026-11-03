@@ -13,7 +13,7 @@ import (
 
 func TestSessionItem(t *testing.T) {
 	t.Run("it returns the session name alone when the session carries no recorded directory", func(t *testing.T) {
-		item := tui.SessionItem{Session: tui.Session{Name: "dev", Answered: true, Attached: true}}
+		item := tui.SessionItem{Session: tui.Session{Name: "dev", Attached: true}}
 
 		got := item.FilterValue()
 
@@ -24,7 +24,7 @@ func TestSessionItem(t *testing.T) {
 
 	t.Run("it returns the name, one space and the abbreviated directory", func(t *testing.T) {
 		home := t.TempDir()
-		item := tui.SessionItem{Session: tui.Session{Name: "api-work", Answered: true, Dir: home + "/Code/portal"}, Home: home}
+		item := tui.SessionItem{Session: tui.Session{Name: "api-work", Dir: home + "/Code/portal"}, Home: home}
 
 		got := item.FilterValue()
 
@@ -35,7 +35,7 @@ func TestSessionItem(t *testing.T) {
 
 	t.Run("FilterValue is the SearchFields slice joined by a single space", func(t *testing.T) {
 		home := t.TempDir()
-		session := tui.Session{Name: "api-work", Answered: true, Dir: home + "/Code/portal"}
+		session := tui.Session{Name: "api-work", Dir: home + "/Code/portal"}
 		item := tui.SessionItem{Session: session, Home: home}
 
 		got := item.FilterValue()
@@ -48,7 +48,7 @@ func TestSessionItem(t *testing.T) {
 
 	t.Run("FilterValue for a session with no recorded directory has no trailing separator", func(t *testing.T) {
 		home := t.TempDir()
-		session := tui.Session{Name: "dev", Answered: true}
+		session := tui.Session{Name: "dev"}
 		item := tui.SessionItem{Session: session, Home: home}
 
 		got := item.FilterValue()
@@ -69,7 +69,7 @@ func TestSessionItem(t *testing.T) {
 
 func TestSessionItemGroupMetadata(t *testing.T) {
 	t.Run("leaves Flat items with empty group metadata", func(t *testing.T) {
-		item := tui.SessionItem{Session: tui.Session{Name: "dev", Answered: true, Attached: true}}
+		item := tui.SessionItem{Session: tui.Session{Name: "dev", Attached: true}}
 
 		if item.GroupKey != "" {
 			t.Errorf("GroupKey = %q, want empty", item.GroupKey)
@@ -84,7 +84,7 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 
 	t.Run("returns the session name from FilterValue regardless of group fields", func(t *testing.T) {
 		item := tui.SessionItem{
-			Session:      tui.Session{Name: "dev", Answered: true, Attached: true},
+			Session:      tui.Session{Name: "dev", Attached: true},
 			GroupKey:     "work",
 			GroupHeading: "work",
 			CatchAll:     false,
@@ -98,7 +98,7 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 	t.Run("returns the name and abbreviated directory from FilterValue regardless of group fields", func(t *testing.T) {
 		home := t.TempDir()
 		item := tui.SessionItem{
-			Session:      tui.Session{Name: "dev", Answered: true, Attached: true, Dir: home + "/Code/portal"},
+			Session:      tui.Session{Name: "dev", Attached: true, Dir: home + "/Code/portal"},
 			Home:         home,
 			GroupKey:     "work",
 			GroupHeading: "work",
@@ -112,7 +112,7 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 
 	t.Run("the live render emits the session name regardless of group fields", func(t *testing.T) {
 		item := tui.SessionItem{
-			Session:      tui.Session{Name: "dev", Answered: true, Attached: true},
+			Session:      tui.Session{Name: "dev", Attached: true},
 			GroupKey:     "/home/me/project",
 			GroupHeading: "project",
 			CatchAll:     true,
@@ -129,7 +129,7 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 	})
 
 	t.Run("builds two instances of one session sharing the same underlying Session.Name", func(t *testing.T) {
-		session := tui.Session{Name: "dev", Answered: true, Attached: true}
+		session := tui.Session{Name: "dev", Attached: true}
 		work := tui.SessionItem{Session: session, GroupKey: "work", GroupHeading: "work"}
 		personal := tui.SessionItem{Session: session, GroupKey: "personal", GroupHeading: "personal"}
 
@@ -179,7 +179,7 @@ func TestSessionDelegate(t *testing.T) {
 	t.Run("renders the session name", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tui.Session{Name: "dev", Answered: true, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "dev", Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -195,7 +195,7 @@ func TestSessionDelegate(t *testing.T) {
 	t.Run("renders attached badge for attached session", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tui.Session{Name: "attached-session", Answered: true, Attached: true}},
+			tui.SessionItem{Session: tui.Session{Name: "attached-session", Attached: true}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -211,7 +211,7 @@ func TestSessionDelegate(t *testing.T) {
 	t.Run("does not render attached badge for detached session", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tui.Session{Name: "detached-session", Answered: true, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "detached-session", Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -227,8 +227,8 @@ func TestSessionDelegate(t *testing.T) {
 	t.Run("highlights selected item", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tui.Session{Name: "first", Answered: true, Attached: false}},
-			tui.SessionItem{Session: tui.Session{Name: "second", Answered: true, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "first", Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "second", Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -252,7 +252,7 @@ func TestSessionDelegate(t *testing.T) {
 		name := "my-project"
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tui.Session{Name: name, Answered: true, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: name, Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -290,7 +290,7 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 
 	t.Run("a SessionItem renders only its own row, never a heading line", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		item := tui.SessionItem{Session: tui.Session{Name: "a", Answered: true}, GroupKey: "/p/portal", GroupHeading: "Portal"}
+		item := tui.SessionItem{Session: tui.Session{Name: "a"}, GroupKey: "/p/portal", GroupHeading: "Portal"}
 		m := list.New([]list.Item{item}, d, 80, 10)
 
 		var buf bytes.Buffer
@@ -347,8 +347,8 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 	t.Run("injects no heading for flat items (byte-identical to today)", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tui.Session{Name: "first", Answered: true, Attached: true}},
-			tui.SessionItem{Session: tui.Session{Name: "second", Answered: true, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "first", Attached: true}},
+			tui.SessionItem{Session: tui.Session{Name: "second", Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -388,19 +388,19 @@ func TestSessionDelegateFlattenOnFilter(t *testing.T) {
 	projectItems := func() []list.Item {
 		return []list.Item{
 			tui.HeaderItem{Heading: "Portal", Count: 2, Key: "/p/portal"},
-			tui.SessionItem{Session: tui.Session{Name: "a", Answered: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-			tui.SessionItem{Session: tui.Session{Name: "b", Answered: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tui.Session{Name: "a"}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tui.Session{Name: "b"}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 			tui.HeaderItem{Heading: "Work", Count: 1, Key: "/p/work"},
-			tui.SessionItem{Session: tui.Session{Name: "c", Answered: true}, GroupKey: "/p/work", GroupHeading: "Work"},
+			tui.SessionItem{Session: tui.Session{Name: "c"}, GroupKey: "/p/work", GroupHeading: "Work"},
 		}
 	}
 
 	tagItems := func() []list.Item {
 		return []list.Item{
 			tui.HeaderItem{Heading: "personal", Count: 1, Key: "personal"},
-			tui.SessionItem{Session: tui.Session{Name: "dev", Answered: true}, GroupKey: "personal", GroupHeading: "personal"},
+			tui.SessionItem{Session: tui.Session{Name: "dev"}, GroupKey: "personal", GroupHeading: "personal"},
 			tui.HeaderItem{Heading: "work", Count: 1, Key: "work"},
-			tui.SessionItem{Session: tui.Session{Name: "dev", Answered: true}, GroupKey: "work", GroupHeading: "work"},
+			tui.SessionItem{Session: tui.Session{Name: "dev"}, GroupKey: "work", GroupHeading: "work"},
 		}
 	}
 
@@ -475,8 +475,8 @@ func TestSessionDelegateFlattenOnFilter(t *testing.T) {
 	t.Run("leaves Flat-mode filtering unchanged (no headers ever)", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		flat := []list.Item{
-			tui.SessionItem{Session: tui.Session{Name: "first", Answered: true, Attached: true}},
-			tui.SessionItem{Session: tui.Session{Name: "second", Answered: true, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "first", Attached: true}},
+			tui.SessionItem{Session: tui.Session{Name: "second", Attached: false}},
 		}
 		m := list.New(flat, d, 80, 10)
 		m.SetFilterText("first")
@@ -530,9 +530,9 @@ func TestSessionDelegateFlattenOnFilter(t *testing.T) {
 func TestToListItems(t *testing.T) {
 	t.Run("converts sessions to list items", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
-			{Name: "misc", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
+			{Name: "misc", Attached: false},
 		}
 
 		items := tui.ToListItems(sessions)
@@ -554,8 +554,8 @@ func TestToListItems(t *testing.T) {
 
 	t.Run("keeps producing flat items with no group metadata", func(t *testing.T) {
 		sessions := []tui.Session{
-			{Name: "dev", Answered: true, Attached: true},
-			{Name: "work", Answered: true, Attached: false},
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		}
 
 		items := tui.ToListItems(sessions)

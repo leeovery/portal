@@ -25,7 +25,7 @@ var indicatorCombos = []indicatorCombo{
 
 func comboRow(t *testing.T, d SessionDelegate, w int, c indicatorCombo) string {
 	t.Helper()
-	items := flatItems(Session{Name: "alpha", Answered: true, Attached: c.attached})
+	items := flatItems(Session{Name: "alpha", Attached: c.attached})
 	d.Pending = markedSet()
 	if c.pending {
 		d.Pending = markedSet("alpha")
@@ -36,8 +36,8 @@ func comboRow(t *testing.T, d SessionDelegate, w int, c indicatorCombo) string {
 func TestSessionRow_RendersThePendingDotForASessionInThePendingSet(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		Session{Name: "alpha", Answered: true},
-		Session{Name: "bravo", Answered: true},
+		Session{Name: "alpha"},
+		Session{Name: "bravo"},
 	)
 	margin := strings.Repeat(" ", rowRightMargin)
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
@@ -120,7 +120,7 @@ func TestSessionRow_RendersTheSameRowWidthAcrossAllFourIndicatorCombinations(t *
 func TestSessionRow_RendersOneDotForASessionHoldingSeveralWaitingPanes(t *testing.T) {
 	// The set is keyed on the session: however many of its panes wait, the
 	// session contributes one member and the row one dot.
-	items := flatItems(Session{Name: "alpha", Answered: true})
+	items := flatItems(Session{Name: "alpha"})
 	d := SessionDelegate{Theme: testDarkTheme(t), Pending: markedSet("alpha", "alpha", "alpha")}
 	vis := ansi.Strip(renderRow(d, 80, items, 0, 0))
 	if n := strings.Count(vis, rowIndicatorGlyph); n != 1 {
@@ -130,7 +130,7 @@ func TestSessionRow_RendersOneDotForASessionHoldingSeveralWaitingPanes(t *testin
 
 func TestSessionRow_ShowsNeitherIndicatorOnAGoneRow(t *testing.T) {
 	const w = 60
-	items := flatItems(Session{Name: "alpha", Answered: true, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	for _, colourless := range []bool{false, true} {
 		base := SessionDelegate{Theme: testDarkTheme(t), Colourless: colourless, MultiSelect: true, GoneFlagged: markedSet("alpha")}
 		want := renderRow(base, w, items, 0, 0)
@@ -177,8 +177,8 @@ func TestSessionRow_RendersAPAndAPUnderNoColor(t *testing.T) {
 
 func TestSessionRow_MarksNothingForANilPendingSet(t *testing.T) {
 	items := flatItems(
-		Session{Name: "alpha", Answered: true, Attached: true},
-		Session{Name: "bravo", Answered: true},
+		Session{Name: "alpha", Attached: true},
+		Session{Name: "bravo"},
 	)
 	for _, colourless := range []bool{false, true} {
 		nilSet := SessionDelegate{Theme: testDarkTheme(t), Colourless: colourless}
@@ -196,8 +196,8 @@ func TestSessionRow_MarksNothingForANilPendingSet(t *testing.T) {
 
 func TestSessionRow_RendersThePendingDotInTheAttentionToken(t *testing.T) {
 	items := flatItems(
-		Session{Name: "pending-selected", Answered: true},
-		Session{Name: "pending-unselected", Answered: true},
+		Session{Name: "pending-selected"},
+		Session{Name: "pending-unselected"},
 	)
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th, Pending: markedSet("pending-selected", "pending-unselected")}

@@ -104,7 +104,7 @@ func TestOuterFill_PaginationInvariantPreserved(t *testing.T) {
 
 	var sessions []Session
 	for i := range 40 {
-		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w
@@ -143,9 +143,9 @@ func TestOuterFill_ZeroSizeFallback(t *testing.T) {
 func newCanvasTestModel(t *testing.T, w, h int, appearance theme.Member) Model {
 	t.Helper()
 	sessions := []Session{
-		{Name: "alpha", Answered: true, Attached: true},
-		{Name: "bravo", Answered: true, Attached: false},
-		{Name: "charlie", Answered: true, Attached: false},
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
+		{Name: "charlie", Attached: false},
 	}
 	m := New(fakeLister{}, WithThemeNomination(testBuiltinPair(t)), WithCanvasMode(appearance))
 	m.termWidth = w

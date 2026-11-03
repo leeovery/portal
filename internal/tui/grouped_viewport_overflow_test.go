@@ -19,8 +19,8 @@ func TestGroupedViewDoesNotOverflowViewport(t *testing.T) {
 		dir := t.TempDir()
 		projects = append(projects, project.Project{Name: fmt.Sprintf("proj%02d", i), Path: dir})
 		sessions = append(sessions,
-			Session{Name: fmt.Sprintf("proj%02d-a", i), Dir: dir, Answered: true},
-			Session{Name: fmt.Sprintf("proj%02d-b", i), Dir: dir, Answered: true},
+			Session{Name: fmt.Sprintf("proj%02d-a", i), Dir: dir},
+			Session{Name: fmt.Sprintf("proj%02d-b", i), Dir: dir},
 		)
 	}
 
