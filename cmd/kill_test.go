@@ -48,7 +48,7 @@ func TestKillCommand(t *testing.T) {
 			t.Fatalf("kill: %v\nstderr: %s", err, stderr)
 		}
 
-		if _, held := fake.Session("api-x7Kd9a"); held {
+		if _, held := fake.Held("api-x7Kd9a"); held {
 			t.Error("the backend still holds the killed session")
 		}
 		if calls := fake.CallsTo(backendtest.OpKill); len(calls) != 1 || calls[0].Name != "api-x7Kd9a" {
@@ -65,7 +65,7 @@ func TestKillCommand(t *testing.T) {
 		if _, _, err := runRootCmd(t, "kill", "api-x7Kd9a"); err != nil {
 			t.Fatalf("kill: %v", err)
 		}
-		if _, held := fake.Session("api-x7Kd9a"); held {
+		if _, held := fake.Held("api-x7Kd9a"); held {
 			t.Error("the backend still holds the killed session")
 		}
 	})
@@ -79,7 +79,7 @@ func TestKillCommand(t *testing.T) {
 		if err == nil || err.Error() != "No session found: my-session" {
 			t.Errorf("error = %v, want %q", err, "No session found: my-session")
 		}
-		if _, held := fake.Session("my-session-abc123"); !held {
+		if _, held := fake.Held("my-session-abc123"); !held {
 			t.Error("a kill of a prefix of its name ended my-session-abc123")
 		}
 		assertIndexed(t, dir, "my-session-abc123", true)
@@ -108,7 +108,7 @@ func TestKillCommand(t *testing.T) {
 		if err == nil || err.Error() != want {
 			t.Errorf("error = %v, want %q", err, want)
 		}
-		if _, held := fake.Session("dotfiles-PpaTER"); !held {
+		if _, held := fake.Held("dotfiles-PpaTER"); !held {
 			t.Error("a kill under another spelling ended dotfiles-PpaTER")
 		}
 		assertIndexed(t, dir, "dotfiles-PpaTER", true)
@@ -161,7 +161,7 @@ func TestKillCommand(t *testing.T) {
 		if err == nil || !strings.HasPrefix(err.Error(), "killed api-x7Kd9a, but could not remove it from the session index: ") {
 			t.Errorf("error = %v, want the kill reported alongside the index failure", err)
 		}
-		if _, held := fake.Session("api-x7Kd9a"); held {
+		if _, held := fake.Held("api-x7Kd9a"); held {
 			t.Error("the backend still holds the killed session")
 		}
 	})

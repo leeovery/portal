@@ -51,7 +51,7 @@ func TestFake(t *testing.T) {
 		if _, err := f.Create(t.Context(), "work", "/srv", []string{"sh", "-c", "sleep 1"}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		s, ok := f.Session("work")
+		s, ok := f.Held("work")
 		if !ok {
 			t.Fatal("work not held after Create")
 		}
@@ -70,7 +70,7 @@ func TestFake(t *testing.T) {
 		if _, err := f.Create(t.Context(), "quoted", "/srv", command); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if s, _ := f.Session("quoted"); s.Command != zmx.DisplayCommand(command) {
+		if s, _ := f.Held("quoted"); s.Command != zmx.DisplayCommand(command) {
 			t.Errorf("Command = %q, want %q", s.Command, zmx.DisplayCommand(command))
 		}
 	})
@@ -90,7 +90,7 @@ func TestFake(t *testing.T) {
 		if _, err := f.Create(t.Context(), "linked", link, nil); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if s, _ := f.Session("linked"); s.Dir != want {
+		if s, _ := f.Held("linked"); s.Dir != want {
 			t.Errorf("Dir = %q, want %q", s.Dir, want)
 		}
 	})
@@ -117,7 +117,7 @@ func TestFake(t *testing.T) {
 		if err := f.Detach(t.Context(), "a"); err != nil {
 			t.Fatalf("Detach: %v", err)
 		}
-		if s, _ := f.Session("a"); s.Clients != 0 {
+		if s, _ := f.Held("a"); s.Clients != 0 {
 			t.Errorf("Clients after Detach = %d, want 0", s.Clients)
 		}
 	})
@@ -215,7 +215,7 @@ func TestFake(t *testing.T) {
 		if _, err := f.Create(t.Context(), "x", "/", nil); !errors.Is(err, refusal) {
 			t.Errorf("Create = %v, want Validate's refusal", err)
 		}
-		if _, ok := f.Session("x"); ok {
+		if _, ok := f.Held("x"); ok {
 			t.Error("Create made a session whose name was refused")
 		}
 	})
@@ -249,10 +249,10 @@ func TestFake(t *testing.T) {
 		if _, err := f.History(ctx, "a", 0); !errors.Is(err, boom) {
 			t.Errorf("History = %v, want boom", err)
 		}
-		if s, ok := f.Session("a"); !ok || s.Clients != 1 {
+		if s, ok := f.Held("a"); !ok || s.Clients != 1 {
 			t.Errorf("a failed call changed the session: %+v, %v", s, ok)
 		}
-		if _, ok := f.Session("b"); ok {
+		if _, ok := f.Held("b"); ok {
 			t.Error("a failed Create made a session")
 		}
 

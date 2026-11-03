@@ -127,6 +127,11 @@ type Backend interface {
 	// with Answered false. It fails with the context's cause only when the
 	// context ends before every session has answered or failed to.
 	List(ctx context.Context) ([]Session, error)
+	// Session reads the one live session of exactly this name, as List would
+	// report it, without asking any other. A name held only under another
+	// spelling is a *HeldAsError; a session that does not answer is
+	// ErrTimeout, never a Session with only its name.
+	Session(ctx context.Context, name string) (Session, error)
 	// Exists reports whether the backend holds a live session of exactly this
 	// name. A session it can tell neither live nor gone is ErrTimeout.
 	Exists(ctx context.Context, name string) (bool, error)

@@ -81,6 +81,10 @@ var perSession = []struct {
 	name string
 	call func(context.Context, backend.Backend, string) error
 }{
+	{"Session", func(ctx context.Context, b backend.Backend, name string) error {
+		_, err := b.Session(ctx, name)
+		return err
+	}},
 	{"AttachCommand", func(ctx context.Context, b backend.Backend, name string) error {
 		_, err := b.AttachCommand(ctx, name)
 		return err
@@ -114,6 +118,7 @@ func answeringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		b, ctx := s.Backend(), t.Context()
 
 		assertListing(t, listed(t, b, "work"), want)
+		assertSession(t, ctx, b, "work")
 		if exists, err := b.Exists(ctx, "work"); err != nil || !exists {
 			t.Errorf("Exists = %v, %v; want true", exists, err)
 		}
@@ -210,6 +215,7 @@ func historylessContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		b, ctx := s.Backend(), t.Context()
 
 		assertListing(t, listed(t, b, "blank"), want)
+		assertSession(t, ctx, b, "blank")
 		if exists, err := b.Exists(ctx, "blank"); err != nil || !exists {
 			t.Errorf("Exists = %v, %v; want true", exists, err)
 		}
@@ -506,6 +512,15 @@ func assertListing(t *testing.T, got, want backend.Session) {
 	rest.PID, rest.Created, wantRest.PID, wantRest.Created = 0, time.Time{}, 0, time.Time{}
 	if !pid || !created || rest != wantRest {
 		t.Errorf("listed %+v, want %+v (a zero PID or Created standing for one the backend chose)", got, want)
+	}
+}
+
+// assertSession asserts that Session reads name as List lists it.
+func assertSession(t *testing.T, ctx context.Context, b backend.Backend, name string) {
+	t.Helper()
+	got, err := b.Session(ctx, name)
+	if want := listed(t, b, name); err != nil || got != want {
+		t.Errorf("Session(%q) = %+v, %v; want %+v, as List lists it", name, got, err, want)
 	}
 }
 
