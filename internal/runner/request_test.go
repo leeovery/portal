@@ -55,6 +55,16 @@ func send(t *testing.T, requests chan<- runner.Request, req runner.Request) {
 	}
 }
 
+// goesOn checks the attach is still under way: Run takes a switch, and ends
+// the attach for it.
+func goesOn(t *testing.T, h *harness, requests chan<- runner.Request) {
+	t.Helper()
+	send(t, requests, runner.Request{Switch: "blog-c3d4"})
+	if out, err := h.finish(t); err != nil || out != (runner.Outcome{Switch: "blog-c3d4"}) {
+		t.Errorf("Run = %+v, %v; want the attach still under way, ended by the switch sent after", out, err)
+	}
+}
+
 // taken reports whether Run reads req within the wait.
 func taken(requests chan<- runner.Request, req runner.Request, within time.Duration) bool {
 	req.Answer = make(chan error, 1)
@@ -125,9 +135,9 @@ func TestRun_Requests(t *testing.T) {
 
 		send(t, requests, runner.Request{Confirm: "fake"})
 
-		h.detach(t)
+		goesOn(t, h, requests)
 		if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
-			t.Errorf("the child read %q, want only the detach key's ctrl+\\", got)
+			t.Errorf("the child read %q, want only the switch's ctrl+\\", got)
 		}
 	})
 

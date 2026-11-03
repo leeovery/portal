@@ -221,7 +221,7 @@ func TestRun_Unsure(t *testing.T) {
 		if n := calls.Load(); n != 2 {
 			t.Errorf("Confirm was asked %d times for two requests, want once each", n)
 		}
-		h.detach(t)
+		goesOn(t, h, requests)
 	})
 
 	t.Run("a request to confirm Confirm refuses is refused, and the attach goes on", func(t *testing.T) {
@@ -251,10 +251,15 @@ func TestRun_Unsure(t *testing.T) {
 			t.Fatalf("Run answered %v, want the request confirmed", err)
 		}
 
-		if got := <-asked; !got.Equal(due) {
-			t.Errorf("Confirm's deadline = %v, want the request's %v", got, due)
+		select {
+		case got := <-asked:
+			if !got.Equal(due) {
+				t.Errorf("Confirm's deadline = %v, want the request's %v", got, due)
+			}
+		case <-time.After(settle):
+			t.Error("Confirm was never asked")
 		}
-		h.detach(t)
+		goesOn(t, h, requests)
 	})
 
 	t.Run("a request for the picker Confirm confirms only past its deadline is refused, and the attach goes on", func(t *testing.T) {
@@ -277,7 +282,7 @@ func TestRun_Unsure(t *testing.T) {
 		if calls.Load() != 1 {
 			t.Fatal("Confirm was never asked: the request reached Run past its deadline, so the test proves nothing")
 		}
-		h.detach(t)
+		goesOn(t, h, requests)
 	})
 
 	t.Run("the detach keys still detach", func(t *testing.T) {
