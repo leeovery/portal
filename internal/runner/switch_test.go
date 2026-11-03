@@ -134,6 +134,13 @@ func TestRun_Unsure(t *testing.T) {
 		if got := rec.AttrString(t, "error"); got != doubt.Error() {
 			t.Errorf("kill unconfirmed error = %q, want Confirm's %q", got, doubt)
 		}
+		outcome := sink.Records().Matching("attach", "outcome").AtExactLevel(slog.LevelInfo).Only(t, "outcome record")
+		if got := outcome.AttrString(t, "reason"); got != "kill" {
+			t.Errorf("outcome reason = %q, want kill", got)
+		}
+		if got := outcome.ErrorAttr(t, "error"); !errors.Is(got, runner.ErrUnconfirmed) {
+			t.Errorf("outcome error = %v, want the refusal, %v", got, runner.ErrUnconfirmed)
+		}
 		assertDetachedCleanly(t, h, sink)
 	})
 
