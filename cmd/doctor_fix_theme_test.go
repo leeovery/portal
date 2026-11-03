@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +76,7 @@ func TestDoctorFix_AdvisoriesInBothPasses(t *testing.T) {
 	requireBothReportsEndWith(t, outBuf.String(), ""+
 		"  ⚠ theme a-missing: missing tokens — missing text.primary\n"+
 		"  ⚠ theme b-colour: bad colour — canvas = blue\n"+
-		"  7 checks passed · 2 advisories")
+		"  6 checks passed · 2 advisories")
 }
 
 func TestDoctorFix_SuffixInBothSummaries(t *testing.T) {
@@ -93,18 +92,15 @@ func TestDoctorFix_SuffixInBothSummaries(t *testing.T) {
 	}
 
 	out := outBuf.String()
-	if n := strings.Count(out, "\n  7 checks passed · 2 advisories\n"); n != 2 {
+	if n := strings.Count(out, "\n  6 checks passed · 2 advisories\n"); n != 2 {
 		t.Errorf("suffixed summary count = %d; want 2 (one per report render):\n%s", n, out)
 	}
 
 	t.Run("the suffix rides both summary forms", func(t *testing.T) {
-		dir := t.TempDir()
-		seedHealthyStateDir(t, dir)
-		// A stale hook entry makes the two summaries carry different checks
+		// A stale project makes the two summaries carry different checks
 		// halves and the same suffix.
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		projectStore, _ := seedProjectsJSON(t, t.TempDir())
-		deps := staleDeps(dir, &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB)}, hookStore, projectStore)
+		projectStore, _ := seedProjectsJSON(t, filepath.Join(t.TempDir(), "gone"))
+		deps := staleDeps(t, projectStore)
 		deps.ThemesDir = themesDirWith(t, map[string][]byte{
 			"a-missing.theme": sourceMissingTokens(t, "text.primary"),
 			"b-colour.theme":  sourceBadColours(t, themeOverride{"canvas", "blue"}),
@@ -119,10 +115,10 @@ func TestDoctorFix_SuffixInBothSummaries(t *testing.T) {
 			"  ⚠ theme a-missing: missing tokens — missing text.primary\n" +
 			"  ⚠ theme b-colour: bad colour — canvas = blue\n"
 		pre, post := requireTwoReports(t, outBuf.String())
-		if want := block + "  6 of 7 checks passed · 2 advisories"; !strings.HasSuffix(pre, want) {
+		if want := block + "  5 of 6 checks passed · 2 advisories"; !strings.HasSuffix(pre, want) {
 			t.Errorf("the initial diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, pre)
 		}
-		if want := block + "  7 checks passed · 2 advisories"; !strings.HasSuffix(post, want) {
+		if want := block + "  6 checks passed · 2 advisories"; !strings.HasSuffix(post, want) {
 			t.Errorf("the post-repair re-diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, post)
 		}
 	})
@@ -151,7 +147,7 @@ func TestDoctorFix_AdvisoryOnlyExitsZero(t *testing.T) {
 		"  ⚠ theme a-missing: missing tokens — missing text.primary\n"+
 		"  ⚠ theme b-colour: bad colour — canvas = blue\n"+
 		"  ⚠ theme gone does not resolve: not found\n"+
-		"  7 checks passed · 3 advisories")
+		"  6 checks passed · 3 advisories")
 }
 
 // The `appearance` key makes this a file the migrating loader would genuinely
@@ -356,7 +352,7 @@ func TestDoctorFix_RemainsBootstrapExempt(t *testing.T) {
 		requireBothReportsEndWith(t, outBuf.String(), ""+
 			"  ⚠ theme a-missing: missing tokens — missing text.primary\n"+
 			"  ⚠ theme gone does not resolve: not found\n"+
-			"  7 checks passed · 2 advisories")
+			"  6 checks passed · 2 advisories")
 	})
 
 	t.Run("the orchestrator seam runs for a non-exempt command", func(t *testing.T) {
@@ -380,13 +376,15 @@ func TestDoctorFix_RemainsBootstrapExempt(t *testing.T) {
 }
 
 func TestDoctorFix_ExistingRepairsUnchanged(t *testing.T) {
-	t.Run("the two prunes and the log sweep still run", func(t *testing.T) {
-		dir := t.TempDir()
-		deps, hooksPath, projectsPath, liveDir, goneDir := seedStalePruneFixture(t, dir, staleHookLister())
+	t.Run("the project prune and the log sweep still run", func(t *testing.T) {
+		liveDir := t.TempDir()
+		goneDir := filepath.Join(t.TempDir(), "gone")
+		projectStore, projectsPath := seedProjectsJSON(t, liveDir, goneDir)
+		deps := staleDeps(t, projectStore)
 		deps.ThemesDir = themesDirWith(t, map[string][]byte{
 			"a-missing.theme": sourceMissingTokens(t, "text.primary"),
 		})
-		staleLog := filepath.Join(dir, "portal.log.2000-01-01")
+		staleLog := filepath.Join(deps.StateDir, "portal.log.2000-01-01")
 		if err := os.WriteFile(staleLog, []byte("old\n"), 0o600); err != nil {
 			t.Fatalf("seed stale rotated log: %v", err)
 		}
@@ -397,38 +395,22 @@ func TestDoctorFix_ExistingRepairsUnchanged(t *testing.T) {
 		}
 
 		out := outBuf.String()
-		assertStalePrunesApplied(t, hooksPath, projectsPath, liveDir, goneDir, out)
-
+		if after := string(readFileBytes(t, projectsPath)); strings.Contains(after, goneDir) {
+			t.Errorf("stale project %q not pruned:\n%s", goneDir, after)
+		}
+		if !strings.Contains(out, "Pruned stale project: proj1 ("+goneDir+")") {
+			t.Errorf("missing pruned-project breadcrumb:\n%s", out)
+		}
 		if _, statErr := os.Stat(staleLog); !os.IsNotExist(statErr) {
 			t.Errorf("stale rotated log not swept (stat err = %v); the log sweep did not run", statErr)
 		}
 
 		const advisory = "  ⚠ theme a-missing: missing tokens — missing text.primary\n"
 		pre, post := requireTwoReports(t, out)
-		if want := advisory + "  5 of 7 checks passed · 1 advisory"; !strings.HasSuffix(pre, want) {
+		if want := advisory + "  5 of 6 checks passed · 1 advisory"; !strings.HasSuffix(pre, want) {
 			t.Errorf("the initial diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, pre)
 		}
-		if want := advisory + "  7 checks passed · 1 advisory"; !strings.HasSuffix(post, want) {
-			t.Errorf("the post-repair re-diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, post)
-		}
-	})
-
-	t.Run("the hazard guard still defers on a down server", func(t *testing.T) {
-		deps, hooksPath, projectsPath, goneDir := downServerDeferFixture(t, t.TempDir())
-		deps.ThemesDir = themesDirWith(t, map[string][]byte{
-			"a-missing.theme": sourceMissingTokens(t, "text.primary"),
-		})
-		hooksBefore := readFileBytes(t, hooksPath)
-
-		outBuf, _, execErr := runDoctorWith(t, deps, "--fix")
-		assertDownServerDeferral(t, hooksBefore, hooksPath, projectsPath, goneDir, execErr)
-
-		const advisory = "  ⚠ theme a-missing: missing tokens — missing text.primary\n"
-		pre, post := requireTwoReports(t, outBuf.String())
-		if want := advisory + "  2 of 6 checks passed · 1 advisory"; !strings.HasSuffix(pre, want) {
-			t.Errorf("the initial diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, pre)
-		}
-		if want := advisory + "  3 of 6 checks passed · 1 advisory"; !strings.HasSuffix(post, want) {
+		if want := advisory + "  6 checks passed · 1 advisory"; !strings.HasSuffix(post, want) {
 			t.Errorf("the post-repair re-diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, post)
 		}
 	})

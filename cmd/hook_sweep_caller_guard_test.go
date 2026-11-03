@@ -39,7 +39,7 @@ func TestHooksCleanStale_NoBootstrapStepIsAnAutomaticCaller(t *testing.T) {
 		if loc := forbidden.FindIndex(src); loc != nil {
 			line := 1 + strings.Count(string(src[:loc[0]]), "\n")
 			t.Errorf("%s:%d references the hooks CleanStale path; the daemon (maybeRunHookCleanup) "+
-				"and `doctor --fix` (pruneDoctorStaleHooks) are the only permitted callers — a bootstrap step must not clean hooks",
+				"is the only permitted caller — a bootstrap step must not clean hooks",
 				path, line)
 		}
 	}

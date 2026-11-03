@@ -484,7 +484,7 @@ func TestPersistedThemeAdvisory_TolerantOnDegeneratePrefs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute err = %v; a corrupt prefs.json must never abort the diagnosis", err)
 		}
-		if out := outBuf.String(); !strings.HasSuffix(out, "\n  7 checks passed\n") {
+		if out := outBuf.String(); !strings.HasSuffix(out, "\n  6 checks passed\n") {
 			t.Errorf("report does not close with the full all-passed summary:\n%s", out)
 		}
 	})
@@ -532,7 +532,7 @@ func TestPersistedThemeAdvisory_UsesNonMigratingRead(t *testing.T) {
 		out := outBuf.String()
 		want := "" +
 			"  ⚠ theme nord-lee does not resolve: not found\n" +
-			"  7 checks passed · 1 advisory\n"
+			"  6 checks passed · 1 advisory\n"
 		if !strings.HasSuffix(out, want) {
 			t.Errorf("report does not close with the persisted-theme advisory and its summary:\n%s", out)
 		}
@@ -716,7 +716,7 @@ func TestPersistedThemeAdvisory_EmitsNoThemeRecords(t *testing.T) {
 				t.Fatalf("report is missing %q — the zero-record assertion needs both emitting conditions to have been reached:\n%s", want, out)
 			}
 		}
-		if !strings.HasSuffix(out, "\n  7 checks passed · 2 advisories\n") {
+		if !strings.HasSuffix(out, "\n  6 checks passed · 2 advisories\n") {
 			t.Fatalf("report does not close with two advisories counted:\n%s", out)
 		}
 		if events := themeEvents(t, sink); len(events) != 0 {

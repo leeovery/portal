@@ -1,19 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
 
-	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // seamCase pins one field of a *Deps struct: what a test injects into it, and
@@ -43,20 +41,14 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 
 		deps := resolveDoctorDeps()
 
-		if deps.ServerRunning == nil {
-			t.Error("ServerRunning = nil; an unset seam must fall through to its production default")
+		if deps.ZmxDir == "" {
+			t.Error("ZmxDir is empty; an unset seam must fall through to its production default")
 		}
-		if deps.SaverPresent == nil {
-			t.Error("SaverPresent = nil; an unset seam must fall through to its production default")
+		if deps.LookPath == nil {
+			t.Error("LookPath = nil; an unset seam must fall through to its production default")
 		}
-		if deps.HookCounts == nil {
-			t.Error("HookCounts = nil; an unset seam must fall through to its production default")
-		}
-		if deps.HookLister == nil {
-			t.Error("HookLister = nil; an unset seam must fall through to its production default")
-		}
-		if deps.PendingResumes == nil {
-			t.Error("PendingResumes = nil; an unset seam must fall through to its production default")
+		if deps.ProtocolVersion == nil {
+			t.Error("ProtocolVersion = nil; an unset seam must fall through to its production default")
 		}
 		if deps.Detector == nil {
 			t.Error("Detector = nil; an unset seam must fall through to its production default")
@@ -66,11 +58,10 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 		}
 	})
 
-	t.Run("it loads no hook, project or prefs store when one is injected", func(t *testing.T) {
+	t.Run("it loads no project or prefs store when one is injected", func(t *testing.T) {
 		staged := stageApplicationSupportConfig(t)
 
 		withDoctorDeps(t, DoctorDeps{
-			HookStore:    hooks.NewStore(filepath.Join(t.TempDir(), "hooks.json")),
 			ProjectStore: project.NewStore(filepath.Join(t.TempDir(), "projects.json")),
 			PrefsStore:   prefs.NewStore(filepath.Join(t.TempDir(), "prefs.json")),
 		})
@@ -129,10 +120,8 @@ func TestResolveCommitNowDepsMergeConvention(t *testing.T) {
 // doctorSeamCases is a func rather than a var so each case's sentinels are minted
 // fresh per run, and so the coverage guard reads the same table the cases do.
 func doctorSeamCases() []seamCase {
-	sentinelHookStore := hooks.NewStore("/sentinel/hooks.json")
 	sentinelProjectStore := project.NewStore("/sentinel/projects.json")
 	sentinelPrefsStore := prefs.NewStore("/sentinel/prefs.json")
-	sentinelLister := &stubStaleSweepReader{}
 	sentinelDetector := fakeTerminalDetector{id: spawn.NewIdentity("com.sentinel.term", "Sentinel")}
 
 	return []seamCase{
@@ -155,71 +144,33 @@ func doctorSeamCases() []seamCase {
 			},
 		},
 		{
-			field: "ServerRunning",
+			field:  "ZmxDir",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{ZmxDir: "/sentinel/zmx"}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().ZmxDir; got != "/sentinel/zmx" {
+					t.Errorf("ZmxDir = %q; want the injected /sentinel/zmx", got)
+				}
+			},
+		},
+		{
+			field: "LookPath",
 			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{ServerRunning: func() bool { return true }})
+				withDoctorDeps(t, DoctorDeps{LookPath: func(string) (string, error) { return "/sentinel/zmx", nil }})
 			},
 			assert: func(t *testing.T) {
-				if !resolveDoctorDeps().ServerRunning() {
-					t.Error("ServerRunning() = false; want the injected seam's true")
+				if got, err := resolveDoctorDeps().LookPath("zmx"); err != nil || got != "/sentinel/zmx" {
+					t.Errorf("LookPath() = (%q, %v); want the injected seam's /sentinel/zmx", got, err)
 				}
 			},
 		},
 		{
-			field: "SaverPresent",
+			field: "ProtocolVersion",
 			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{SaverPresent: func() (bool, error) { return true, nil }})
+				withDoctorDeps(t, DoctorDeps{ProtocolVersion: func(context.Context, string) (int, error) { return 7, nil }})
 			},
 			assert: func(t *testing.T) {
-				present, err := resolveDoctorDeps().SaverPresent()
-				if err != nil || !present {
-					t.Errorf("SaverPresent() = (%v, %v); want the injected seam's (true, nil)", present, err)
-				}
-			},
-		},
-		{
-			field: "HookCounts",
-			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{HookCounts: func() (map[string]int, error) {
-					return map[string]int{"sentinel": 1}, nil
-				}})
-			},
-			assert: func(t *testing.T) {
-				counts, err := resolveDoctorDeps().HookCounts()
-				if err != nil || counts["sentinel"] != 1 {
-					t.Errorf("HookCounts() = (%v, %v); want the injected seam's sentinel count", counts, err)
-				}
-			},
-		},
-		{
-			field: "PendingResumes",
-			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{PendingResumes: func() (tmux.PendingResumeView, error) {
-					return tmux.PendingResumeView{Panes: 7}, nil
-				}})
-			},
-			assert: func(t *testing.T) {
-				view, err := resolveDoctorDeps().PendingResumes()
-				if err != nil || view.Panes != 7 {
-					t.Errorf("PendingResumes() = (%+v, %v); want the injected seam's sentinel count", view, err)
-				}
-			},
-		},
-		{
-			field:  "HookLister",
-			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{HookLister: sentinelLister}) },
-			assert: func(t *testing.T) {
-				if got := resolveDoctorDeps().HookLister; got != hooksweep.Reader(sentinelLister) {
-					t.Errorf("HookLister = %#v; want the injected lister", got)
-				}
-			},
-		},
-		{
-			field:  "HookStore",
-			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{HookStore: sentinelHookStore}) },
-			assert: func(t *testing.T) {
-				if got := resolveDoctorDeps().HookStore; got != sentinelHookStore {
-					t.Errorf("HookStore = %p; want the injected store %p", got, sentinelHookStore)
+				if got, err := resolveDoctorDeps().ProtocolVersion(t.Context(), "s"); err != nil || got != 7 {
+					t.Errorf("ProtocolVersion() = (%d, %v); want the injected seam's 7", got, err)
 				}
 			},
 		},
@@ -378,14 +329,14 @@ func stageApplicationSupportConfig(t *testing.T) stagedConfig {
 	configHome := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", configHome)
-	for _, envVar := range []string{"PORTAL_HOOKS_FILE", "PORTAL_PROJECTS_FILE", "PORTAL_PREFS_FILE"} {
+	for _, envVar := range []string{"PORTAL_PROJECTS_FILE", "PORTAL_PREFS_FILE"} {
 		t.Setenv(envVar, "")
 	}
 
 	staged := stagedConfig{
 		oldDir: filepath.Join(home, "Library", "Application Support", "portal"),
 		newDir: filepath.Join(configHome, "portal"),
-		files:  []string{"hooks.json", "projects.json", "prefs.json"},
+		files:  []string{"projects.json", "prefs.json"},
 	}
 	if err := os.MkdirAll(staged.oldDir, 0o755); err != nil {
 		t.Fatalf("stage Application Support dir: %v", err)
