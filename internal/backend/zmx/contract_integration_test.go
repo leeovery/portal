@@ -4,6 +4,7 @@ package zmx_test
 
 import (
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -32,37 +33,51 @@ func (s *zmxSubject) Backend() backend.Backend {
 		return s.b
 	}
 	b := mustNew(s.t, zmx.Config{
-		Binary:  zmxtest.Binary(s.t),
-		Dir:     s.b.Dir(),
-		Environ: func() []string { return []string{"PATH=/usr/bin:/bin", "ZMX_SESSION=" + s.current} },
+		Binary: zmxtest.Binary(s.t),
+		Dir:    s.b.Dir(),
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin:/bin", "ZMX_DIR=" + s.b.Dir(), "ZMX_SESSION=" + s.current}
+		},
 	})
 	zmx.ShortenCeilings(b, contractCeiling)
 	return b
 }
 
-func (s *zmxSubject) Answering(t *testing.T, name string) {
+func (s *zmxSubject) Hold(t *testing.T, name string, state backendtest.State) backend.Session {
 	t.Helper()
+	dir := t.TempDir()
 	cmd := exec.Command(zmxtest.Binary(t), "run", name, "-d", "sleep", "1000")
 	cmd.Env = []string{"ZMX_DIR=" + s.b.Dir(), "HOME=" + t.TempDir(), "PATH=/usr/bin:/bin", "SHELL=/bin/sh"}
-	cmd.Dir = t.TempDir()
+	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("zmx run %q = %q, %v", name, out, err)
 	}
-}
-
-func (s *zmxSubject) Silent(t *testing.T, name string) {
-	s.Answering(t, name)
-	zmxtest.StopDaemon(t, s.b, name)
-}
-
-func (s *zmxSubject) Refusing(t *testing.T, name string) {
-	s.Answering(t, name)
-	crash(t, s.b, name)
+	switch state {
+	case backendtest.Silent:
+		zmxtest.StopDaemon(t, s.b, name)
+		return backend.Session{Name: name}
+	case backendtest.Refusing:
+		crash(t, s.b, name)
+		return backend.Session{Name: name}
+	}
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backend.Session{Name: name, Answered: true, Dir: real}
 }
 
 func (s *zmxSubject) SetCurrent(name string) { s.current = name }
 
-func (s *zmxSubject) Lacks(b backendtest.Behaviour) string { return lacks(s.t, s.b.Dir(), b) }
+func (s *zmxSubject) Lacks(b backendtest.Behaviour) string {
+	switch b {
+	case backendtest.HangingUpSessions:
+		return "zmx answers every well-formed request it reads, so no real daemon hangs up without answering"
+	case backendtest.HistorylessSessions:
+		return "a live zmx session always has a screen to give"
+	}
+	return lacks(s.t, s.b.Dir(), b)
+}
 
 func TestContractAgainstZmx(t *testing.T) {
 	backendtest.Contract(t, func(t *testing.T) backendtest.Subject {

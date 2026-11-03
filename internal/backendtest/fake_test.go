@@ -190,10 +190,20 @@ func TestFake(t *testing.T) {
 		}
 	})
 
-	t.Run("it does not count a session added under a name no session can have", func(t *testing.T) {
-		f := backendtest.New(backend.Session{Name: "a/b"})
-		if exists, err := f.Exists(t.Context(), "a/b"); err != nil || exists {
-			t.Errorf("Exists(a/b) = %v, %v; want false, as the driver can hold no such session", exists, err)
+	t.Run("it refuses to hold what the driver never could, by panicking", func(t *testing.T) {
+		for call, do := range map[string]func(*backendtest.Fake){
+			`Add("a/b")`:             func(f *backendtest.Fake) { f.Add(backend.Session{Name: "a/b"}) },
+			`Add("")`:                func(f *backendtest.Fake) { f.Add(backend.Session{}) },
+			`StopAnswering("ghost")`: func(f *backendtest.Fake) { f.StopAnswering("ghost") },
+		} {
+			t.Run(call, func(t *testing.T) {
+				defer func() {
+					if recover() == nil {
+						t.Errorf("%s did not panic", call)
+					}
+				}()
+				do(backendtest.New())
+			})
 		}
 	})
 

@@ -62,9 +62,10 @@ type Session struct {
 	Name string
 	// Answered reports whether the session answered the listing. When it is
 	// false the session exists but only Name is known, and every other field
-	// is its zero value, not a reading. Such a session, silent or turning
-	// connections away, fails every call naming it with ErrTimeout until it
-	// answers again, and Create refuses its name.
+	// is its zero value, not a reading. Such a session, silent, turning
+	// connections away, or hanging up without a well-formed answer, fails
+	// every call naming it with ErrTimeout until it answers again, and Create
+	// refuses its name. Only Detach cannot tell a hangup from its own success.
 	Answered bool
 	// Dir is the session's working directory, empty when the backend reports
 	// none it can name on this machine.

@@ -83,24 +83,31 @@ func New(sessions ...backend.Session) *Fake {
 }
 
 // Add puts s in the Fake as a session that answers, whatever its Answered
-// says, replacing any session of the same name.
+// says, replacing any session of the same name. It panics on a name no zmx
+// session can have, which the driver could never report.
 func (f *Fake) Add(s backend.Session) {
+	if err := zmx.CheckLookup(s.Name); err != nil {
+		panic(fmt.Sprintf("backendtest: Add(%q): %v", s.Name, err))
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	s.Answered = true
 	f.sessions[s.Name] = s
 }
 
-// StopAnswering makes a held session stop answering, as a stopped, wedged or
-// busy daemon does: List reports only its name, every call naming it fails
-// with ErrTimeout, and Create refuses its name.
+// StopAnswering makes a held session stop answering, as a stopped, wedged,
+// busy or hanging-up daemon does: List reports only its name, every call
+// naming it fails with ErrTimeout, and Create refuses its name. It panics on
+// a name the Fake does not hold.
 func (f *Fake) StopAnswering(name string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if s, ok := f.sessions[name]; ok {
-		s.Answered = false
-		f.sessions[name] = s
+	s, ok := f.sessions[name]
+	if !ok {
+		panic(fmt.Sprintf("backendtest: StopAnswering(%q): no such session", name))
 	}
+	s.Answered = false
+	f.sessions[name] = s
 }
 
 // Remove drops a session as if it ended outside Portal.
@@ -186,20 +193,24 @@ func (f *Fake) List(ctx context.Context) ([]backend.Session, error) {
 }
 
 // Exists reports a name no session can have as not held, as the driver does.
+// Exists, as every call here, settles what needs no session before the
+// context: a name not held is false even once the context has ended.
 func (f *Fake) Exists(ctx context.Context, name string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.begin(ctx, Call{Op: OpExists, Name: name}); err != nil {
+	if err := f.record(Call{Op: OpExists, Name: name}); err != nil {
 		return false, err
 	}
-	if zmx.CheckLookup(name) != nil {
-		return false, nil
-	}
 	s, ok := f.sessions[name]
-	if ok && !s.Answered {
+	switch {
+	case !ok:
+		return false, nil
+	case ctx.Err() != nil:
+		return false, context.Cause(ctx)
+	case !s.Answered:
 		return false, notAnswering(OpExists, name)
 	}
-	return ok, nil
+	return true, nil
 }
 
 // Create reports the session as zmx does: its Dir with symlinks resolved, as
@@ -208,11 +219,14 @@ func (f *Fake) Exists(ctx context.Context, name string) (bool, error) {
 func (f *Fake) Create(ctx context.Context, name, dir string, command []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.begin(ctx, Call{Op: OpCreate, Name: name, Dir: dir, Command: slices.Clone(command)}); err != nil {
+	if err := f.record(Call{Op: OpCreate, Name: name, Dir: dir, Command: slices.Clone(command)}); err != nil {
 		return err
 	}
 	if err := f.validate(name); err != nil {
 		return err
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
 	}
 	if held, ok := f.heldUnder(name); ok {
 		return &backend.SessionExistsError{Name: name, Held: held}
@@ -292,18 +306,6 @@ func (f *Fake) ValidateName(name string) error {
 	return f.validate(name)
 }
 
-// begin records the call and returns the failure injected for its op, or the
-// context's cause. The caller holds mu.
-func (f *Fake) begin(ctx context.Context, c Call) error {
-	if err := f.record(c); err != nil {
-		return err
-	}
-	if ctx.Err() != nil {
-		return context.Cause(ctx)
-	}
-	return nil
-}
-
 // record records the call and returns the failure injected for its op. The
 // caller holds mu.
 func (f *Fake) record(c Call) error {
@@ -312,19 +314,23 @@ func (f *Fake) record(c Call) error {
 }
 
 // beginHeld begins a call on a session the Fake must hold, answering, under
-// exactly the call's name, which check must accept. The caller holds mu.
+// exactly the call's name, which check must accept. As the driver does, it
+// settles the name and whether it is held before the context, which only a
+// call that must reach the session needs. The caller holds mu.
 func (f *Fake) beginHeld(ctx context.Context, c Call, check func(string) error) error {
-	if err := f.begin(ctx, c); err != nil {
+	if err := f.record(c); err != nil {
 		return err
 	}
 	if err := check(c.Name); err != nil {
 		return err
 	}
 	s, ok := f.sessions[c.Name]
-	if !ok {
+	switch {
+	case !ok:
 		return fmt.Errorf("%s session %q: %w", strings.ToLower(string(c.Op)), c.Name, backend.ErrNoSuchSession)
-	}
-	if !s.Answered {
+	case ctx.Err() != nil:
+		return context.Cause(ctx)
+	case !s.Answered:
 		return notAnswering(c.Op, c.Name)
 	}
 	return nil

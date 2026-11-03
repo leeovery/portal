@@ -3,8 +3,11 @@ package backendtest
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 )
@@ -14,15 +17,12 @@ import (
 type Subject interface {
 	// Backend is the backend under test, as the latest SetCurrent left it.
 	Backend() backend.Backend
-	// Answering holds a session that answers every call, under any name a
-	// session can have, whatever Create would make of it.
-	Answering(t *testing.T, name string)
-	// Silent holds a session that takes every call and never answers, as a
-	// stopped or wedged daemon does.
-	Silent(t *testing.T, name string)
-	// Refusing holds a session that turns every call away, as a daemon with a
-	// full listen backlog does.
-	Refusing(t *testing.T, name string)
+	// Hold holds a session in state under name, which may be any name a
+	// session can have, whatever Create would make of it, and returns the
+	// session as List should report it. A zero PID there stands for any
+	// positive one, and a zero Created for any time up to now: the backend
+	// chooses those.
+	Hold(t *testing.T, name string, state State) backend.Session
 	// SetCurrent makes the backend run inside the named session, "" outside
 	// any.
 	SetCurrent(name string)
@@ -30,6 +30,26 @@ type Subject interface {
 	// Contract skips that case by name instead of leaving it out.
 	Lacks(b Behaviour) string
 }
+
+// State is how a held session meets the calls made on it.
+type State int
+
+const (
+	// Answering answers every call.
+	Answering State = iota
+	// Silent takes every call and never answers, as a stopped or wedged
+	// daemon does.
+	Silent
+	// Refusing turns every call away, as a daemon with a full listen backlog
+	// does.
+	Refusing
+	// HangingUp takes every call and hangs up on it without a well-formed
+	// answer.
+	HangingUp
+	// Historyless answers every call but History, which it answers with no
+	// screen.
+	Historyless
+)
 
 // Behaviour is one that a backend may be unable to show.
 type Behaviour int
@@ -40,6 +60,19 @@ const (
 	// FoldsNormalisation is holding a name under another Unicode
 	// normalisation of it.
 	FoldsNormalisation
+	// NonUTF8Names is holding a session under a name that is not UTF-8.
+	NonUTF8Names
+	// NameLengthLimit is refusing a name too long for the backend to hold.
+	NameLengthLimit
+	// Creating is making a session with Create.
+	Creating
+	// AttachEnvironment is an attach command that carries the environment it
+	// runs in.
+	AttachEnvironment
+	// HangingUpSessions is holding a session in the HangingUp state.
+	HangingUpSessions
+	// HistorylessSessions is holding a session in the Historyless state.
+	HistorylessSessions
 )
 
 // perSession is each call but Exists that acts on one held session, Kill last
@@ -65,30 +98,32 @@ var perSession = []struct {
 func Contract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	t.Run("a session that answers", func(t *testing.T) { answeringContract(t, newSubject) })
 	t.Run("a session that does not answer", func(t *testing.T) { notAnsweringContract(t, newSubject) })
+	t.Run("a session with no screen to give", func(t *testing.T) { historylessContract(t, newSubject) })
 	t.Run("a session that is gone", func(t *testing.T) { goneContract(t, newSubject) })
 	t.Run("a name held only under another spelling", func(t *testing.T) { spellingContract(t, newSubject) })
 	t.Run("the name rules", func(t *testing.T) { nameContract(t, newSubject) })
+	t.Run("a session made by Create", func(t *testing.T) { creatingContract(t, newSubject) })
 	t.Run("a caller context that has ended", func(t *testing.T) { endedContract(t, newSubject) })
 	t.Run("an attach from inside a session", func(t *testing.T) { switchContract(t, newSubject) })
 }
 
 func answeringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
-	t.Run("it is listed as answering and reached by every call", func(t *testing.T) {
+	t.Run("it is listed with its details and reached by every call", func(t *testing.T) {
 		s := newSubject(t)
-		s.Answering(t, "work")
+		want := s.Hold(t, "work", Answering)
 		b, ctx := s.Backend(), t.Context()
 
-		if got := listed(t, b, "work"); !got.Answered {
-			t.Errorf("work listed as %+v, want it answering", got)
-		}
+		assertListing(t, listed(t, b, "work"), want)
 		if exists, err := b.Exists(ctx, "work"); err != nil || !exists {
 			t.Errorf("Exists = %v, %v; want true", exists, err)
 		}
 		if cmd, err := b.AttachCommand(ctx, "work"); err != nil || len(cmd.Argv) == 0 || cmd.Switches {
 			t.Errorf("AttachCommand outside any session = %+v, %v; want an attach", cmd, err)
 		}
-		if vt, err := b.History(ctx, "work", 0); err != nil || len(vt) == 0 {
-			t.Errorf("History = %q, %v; want the screen", vt, err)
+		for _, rows := range []int{0, 10} {
+			if vt, err := b.History(ctx, "work", rows); err != nil || len(vt) == 0 {
+				t.Errorf("History(%d rows) = %q, %v; want the screen", rows, vt, err)
+			}
 		}
 		if err := b.Detach(ctx, "work"); err != nil {
 			t.Errorf("Detach = %v", err)
@@ -97,14 +132,14 @@ func answeringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 
 	t.Run("it is refused to Create, which names it", func(t *testing.T) {
 		s := newSubject(t)
-		s.Answering(t, "work")
+		s.Hold(t, "work", Answering)
 
 		assertExists(t, s.Backend().Create(t.Context(), "work", t.TempDir(), nil), "work")
 	})
 
 	t.Run("it ends on Kill, freeing its name", func(t *testing.T) {
 		s := newSubject(t)
-		s.Answering(t, "work")
+		s.Hold(t, "work", Answering)
 		b, ctx := s.Backend(), t.Context()
 
 		if err := b.Kill(ctx, "work"); err != nil {
@@ -124,15 +159,19 @@ func answeringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 
 func notAnsweringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	for _, state := range []struct {
-		name string
-		hold func(Subject, *testing.T, string)
+		name  string
+		state State
 	}{
-		{"silent", Subject.Silent},
-		{"refusing", Subject.Refusing},
+		{"silent", Silent},
+		{"refusing", Refusing},
+		{"hanging up", HangingUp},
 	} {
 		t.Run(state.name+": it is listed by name only, fails every call with ErrTimeout, and keeps its name from Create", func(t *testing.T) {
 			s := newSubject(t)
-			state.hold(s, t, "wedged")
+			if why := s.Lacks(HangingUpSessions); state.state == HangingUp && why != "" {
+				t.Skip(why)
+			}
+			s.Hold(t, "wedged", state.state)
 			b, ctx := s.Backend(), t.Context()
 
 			if got := listed(t, b, "wedged"); got != (backend.Session{Name: "wedged"}) {
@@ -142,6 +181,11 @@ func notAnsweringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 				t.Errorf("Exists = %v, want ErrTimeout", err)
 			}
 			for _, op := range perSession {
+				// Detach cannot tell a hangup on DetachAll from one that
+				// ignored it.
+				if op.name == "Detach" && state.state == HangingUp {
+					continue
+				}
 				if err := op.call(ctx, b, "wedged"); !errors.Is(err, backend.ErrTimeout) || errors.Is(err, backend.ErrNoSuchSession) {
 					t.Errorf("%s = %v, want ErrTimeout and not ErrNoSuchSession", op.name, err)
 				}
@@ -154,51 +198,51 @@ func notAnsweringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	}
 }
 
-func goneContract(t *testing.T, newSubject func(t *testing.T) Subject) {
-	t.Run("it is not listed, does not exist, and every call on it is ErrNoSuchSession", func(t *testing.T) {
+func historylessContract(t *testing.T, newSubject func(t *testing.T) Subject) {
+	t.Run("it answers every call but History, which is ErrHistoryUnavailable, never empty", func(t *testing.T) {
 		s := newSubject(t)
-		s.Answering(t, "other")
+		if why := s.Lacks(HistorylessSessions); why != "" {
+			t.Skip(why)
+		}
+		want := s.Hold(t, "blank", Historyless)
 		b, ctx := s.Backend(), t.Context()
 
-		if got := names(t, b); !slices.Equal(got, []string{"other"}) {
-			t.Errorf("List = %v, want only other", got)
+		assertListing(t, listed(t, b, "blank"), want)
+		if exists, err := b.Exists(ctx, "blank"); err != nil || !exists {
+			t.Errorf("Exists = %v, %v; want true", exists, err)
 		}
-		if exists, err := b.Exists(ctx, "gone"); err != nil || exists {
-			t.Errorf("Exists = %v, %v; want false", exists, err)
-		}
-		for _, op := range perSession {
-			if err := op.call(ctx, b, "gone"); !errors.Is(err, backend.ErrNoSuchSession) {
-				t.Errorf("%s = %v, want ErrNoSuchSession", op.name, err)
+		for _, rows := range []int{0, 10} {
+			if vt, err := b.History(ctx, "blank", rows); !errors.Is(err, backend.ErrHistoryUnavailable) {
+				t.Errorf("History(%d rows) = %q, %v; want ErrHistoryUnavailable", rows, vt, err)
 			}
 		}
 	})
 }
 
+func goneContract(t *testing.T, newSubject func(t *testing.T) Subject) {
+	t.Run("it is not listed, does not exist, and every call on it is ErrNoSuchSession", func(t *testing.T) {
+		s := newSubject(t)
+		s.Hold(t, "other", Answering)
+		b, ctx := s.Backend(), t.Context()
+
+		if got := names(t, b); !slices.Equal(got, []string{"other"}) {
+			t.Errorf("List = %v, want only other", got)
+		}
+		assertGone(t, ctx, b, "gone")
+	})
+}
+
 func spellingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
-	for _, spelling := range []struct {
-		name        string
-		behaviour   Behaviour
-		held, asked string
-	}{
-		{"case", FoldsCase, "work", "WORK"},
-		{"normalisation", FoldsNormalisation, "café", "café"},
-	} {
+	for _, spelling := range spellings {
 		t.Run(spelling.name+": no call reaches it under the other spelling, and Create is refused naming it", func(t *testing.T) {
 			s := newSubject(t)
 			if why := s.Lacks(spelling.behaviour); why != "" {
 				t.Skip(why)
 			}
-			s.Answering(t, spelling.held)
+			s.Hold(t, spelling.held, Answering)
 			b, ctx := s.Backend(), t.Context()
 
-			if exists, err := b.Exists(ctx, spelling.asked); err != nil || exists {
-				t.Errorf("Exists(%q) = %v, %v; want false", spelling.asked, exists, err)
-			}
-			for _, op := range perSession {
-				if err := op.call(ctx, b, spelling.asked); !errors.Is(err, backend.ErrNoSuchSession) {
-					t.Errorf("%s(%q) = %v, want ErrNoSuchSession", op.name, spelling.asked, err)
-				}
-			}
+			assertGone(t, ctx, b, spelling.asked)
 			assertExists(t, b.Create(ctx, spelling.asked, t.TempDir(), nil), spelling.held)
 			if exists, err := b.Exists(ctx, spelling.held); err != nil || !exists {
 				t.Errorf("Exists(%q) after the calls = %v, %v; want it still answering", spelling.held, exists, err)
@@ -207,27 +251,38 @@ func spellingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	}
 }
 
+// spellings are the ways a filesystem can hold one name under another.
+var spellings = []struct {
+	name        string
+	behaviour   Behaviour
+	held, asked string
+}{
+	{"case", FoldsCase, "work", "WORK"},
+	{"normalisation", FoldsNormalisation, "café", "café"},
+}
+
 func nameContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	t.Run("lookup: every call refuses a name no session can have", func(t *testing.T) {
-		b, ctx := newSubject(t).Backend(), t.Context()
-		for _, name := range []string{"", ".", "..", "a/b", "a\x00b"} {
-			if exists, err := b.Exists(ctx, name); err != nil || exists {
-				t.Errorf("Exists(%q) = %v, %v; want false", name, exists, err)
-			}
-			for _, op := range perSession {
-				if err := op.call(ctx, b, name); !errors.Is(err, backend.ErrInvalidName) {
-					t.Errorf("%s(%q) = %v, want ErrInvalidName", op.name, name, err)
-				}
-			}
-			if err := b.Create(ctx, name, t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
-				t.Errorf("Create(%q) = %v, want ErrInvalidName", name, err)
-			}
+		assertInvalid(t, t.Context(), newSubject(t).Backend(), "", ".", "..", "a/b", "a\x00b")
+	})
+
+	t.Run("length: every call refuses a name too long to hold", func(t *testing.T) {
+		s := newSubject(t)
+		if why := s.Lacks(NameLengthLimit); why != "" {
+			t.Skip(why)
+		}
+		b := s.Backend()
+		long := strings.Repeat("n", 300)
+
+		assertInvalid(t, t.Context(), b, long)
+		if err := b.ValidateName(long); !errors.Is(err, backend.ErrInvalidName) {
+			t.Errorf("ValidateName of %d bytes = %v, want ErrInvalidName", len(long), err)
 		}
 	})
 
 	t.Run("attach: a session named as zmx attach's own flag is reached by every call but AttachCommand", func(t *testing.T) {
 		s := newSubject(t)
-		s.Answering(t, "--labels")
+		s.Hold(t, "--labels", Answering)
 		b, ctx := s.Backend(), t.Context()
 
 		if exists, err := b.Exists(ctx, "--labels"); err != nil || !exists {
@@ -242,20 +297,22 @@ func nameContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	})
 
 	t.Run("creation: a session made elsewhere under a name Create refuses is reached by every call", func(t *testing.T) {
-		for _, name := range []string{"-x", "x*", "a\nb"} {
+		for _, name := range []string{"-x", "--vt", "x*", "a\nb"} {
 			s := newSubject(t)
-			s.Answering(t, name)
-			b, ctx := s.Backend(), t.Context()
+			s.Hold(t, name, Answering)
 
-			if exists, err := b.Exists(ctx, name); err != nil || !exists {
-				t.Errorf("Exists(%q) = %v, %v; want true", name, exists, err)
-			}
-			for _, op := range perSession {
-				if err := op.call(ctx, b, name); err != nil {
-					t.Errorf("%s(%q) = %v", op.name, name, err)
-				}
-			}
+			assertReached(t, t.Context(), s.Backend(), name)
 		}
+	})
+
+	t.Run("lookup: a session under a name that is not UTF-8 is reached by every call", func(t *testing.T) {
+		s := newSubject(t)
+		if why := s.Lacks(NonUTF8Names); why != "" {
+			t.Skip(why)
+		}
+		s.Hold(t, "bad\xffname", Answering)
+
+		assertReached(t, t.Context(), s.Backend(), "bad\xffname")
 	})
 
 	t.Run("creation: Create and ValidateName refuse what zmx misreads or cannot list", func(t *testing.T) {
@@ -276,14 +333,42 @@ func nameContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	})
 }
 
-func endedContract(t *testing.T, newSubject func(t *testing.T) Subject) {
-	t.Run("every call fails with the caller's cause, changing nothing", func(t *testing.T) {
+func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
+	t.Run("it makes a session that answers, running the command in the directory", func(t *testing.T) {
 		s := newSubject(t)
-		s.Answering(t, "work")
-		b := s.Backend()
+		if why := s.Lacks(Creating); why != "" {
+			t.Skip(why)
+		}
+		b, ctx, dir := s.Backend(), t.Context(), t.TempDir()
+
+		if err := b.Create(ctx, "made", dir, []string{"sleep", "1000"}); err != nil {
+			t.Fatalf("Create = %v", err)
+		}
+
+		real, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertListing(t, listed(t, b, "made"), backend.Session{Name: "made", Answered: true, Dir: real, Command: "sleep 1000"})
+		if exists, err := b.Exists(ctx, "made"); err != nil || !exists {
+			t.Errorf("Exists = %v, %v; want true", exists, err)
+		}
+	})
+}
+
+func endedContract(t *testing.T, newSubject func(t *testing.T) Subject) {
+	ended := func(t *testing.T) (context.Context, error) {
 		cause := errors.New("caller gave up")
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
+		return ctx, cause
+	}
+
+	t.Run("every call that must reach the session fails with the caller's cause, changing nothing", func(t *testing.T) {
+		s := newSubject(t)
+		s.Hold(t, "work", Answering)
+		b := s.Backend()
+		ctx, cause := ended(t)
 
 		if _, err := b.List(ctx); !errors.Is(err, cause) {
 			t.Errorf("List = %v, want the cause", err)
@@ -304,9 +389,27 @@ func endedContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		}
 	})
 
+	t.Run("checks that need no session come first, so their answers stand", func(t *testing.T) {
+		s := newSubject(t)
+		s.Hold(t, "work", Answering)
+		b := s.Backend()
+		ctx, _ := ended(t)
+
+		assertGone(t, ctx, b, "gone")
+		assertInvalid(t, ctx, b, "a/b")
+		if _, err := b.AttachCommand(ctx, "--labels"); !errors.Is(err, backend.ErrInvalidName) {
+			t.Errorf("AttachCommand(--labels) = %v, want ErrInvalidName", err)
+		}
+		if err := b.Create(ctx, "-x", t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
+			t.Errorf("Create(-x) = %v, want ErrInvalidName", err)
+		}
+		if why := s.Lacks(FoldsCase); why == "" {
+			assertGone(t, ctx, b, "WORK")
+		}
+	})
+
 	t.Run("List with no session to ask lists none", func(t *testing.T) {
-		ctx, cancel := context.WithCancelCause(t.Context())
-		cancel(errors.New("caller gave up"))
+		ctx, _ := ended(t)
 
 		if got, err := newSubject(t).Backend().List(ctx); err != nil || got == nil || len(got) != 0 {
 			t.Errorf("List = %#v, %v; want an empty, non-nil list", got, err)
@@ -322,20 +425,39 @@ func switchContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		{"home", true},
 		{"work", true},
 		{"wedged", false},
+		{"busy", false},
 		{"gone", false},
 		{"", false},
 	} {
 		t.Run("inside "+quoted(tt.current), func(t *testing.T) {
 			s := newSubject(t)
-			s.Answering(t, "work")
-			s.Answering(t, "home")
-			s.Silent(t, "wedged")
+			s.Hold(t, "work", Answering)
+			s.Hold(t, "home", Answering)
+			s.Hold(t, "wedged", Silent)
+			s.Hold(t, "busy", Refusing)
 			s.SetCurrent(tt.current)
 
 			cmd, err := s.Backend().AttachCommand(t.Context(), "work")
 			if err != nil || cmd.Switches != tt.switches {
-				t.Errorf("AttachCommand(work) = %+v, %v; want Switches %v", cmd, err, tt.switches)
+				t.Fatalf("AttachCommand(work) = %+v, %v; want Switches %v", cmd, err, tt.switches)
 			}
+
+			t.Run("its environment pins the directory and keeps the caller's session only to switch it", func(t *testing.T) {
+				if why := s.Lacks(AttachEnvironment); why != "" {
+					t.Skip(why)
+				}
+				dirs, sessions := values(cmd.Env, "ZMX_DIR"), values(cmd.Env, "ZMX_SESSION")
+				if len(dirs) != 1 || !filepath.IsAbs(dirs[0]) {
+					t.Errorf("Env ZMX_DIR = %q, want one absolute directory", dirs)
+				}
+				var want []string
+				if tt.switches {
+					want = []string{tt.current}
+				}
+				if !slices.Equal(sessions, want) {
+					t.Errorf("Env ZMX_SESSION = %q, want %q", sessions, want)
+				}
+			})
 		})
 	}
 }
@@ -366,11 +488,78 @@ func names(t *testing.T, b backend.Backend) []string {
 	return out
 }
 
+// assertListing compares a listed session with what Hold said to expect.
+func assertListing(t *testing.T, got, want backend.Session) {
+	t.Helper()
+	pid := got.PID == want.PID || want.PID == 0 && got.PID > 0
+	created := got.Created.Equal(want.Created) || want.Created.IsZero() && !got.Created.IsZero() && !got.Created.After(time.Now())
+	rest, wantRest := got, want
+	rest.PID, rest.Created, wantRest.PID, wantRest.Created = 0, time.Time{}, 0, time.Time{}
+	if !pid || !created || rest != wantRest {
+		t.Errorf("listed %+v, want %+v (a zero PID or Created standing for one the backend chose)", got, want)
+	}
+}
+
+// assertReached asserts that every call reaches the session held under name.
+func assertReached(t *testing.T, ctx context.Context, b backend.Backend, name string) {
+	t.Helper()
+	if exists, err := b.Exists(ctx, name); err != nil || !exists {
+		t.Errorf("Exists(%q) = %v, %v; want true", name, exists, err)
+	}
+	for _, op := range perSession {
+		if err := op.call(ctx, b, name); err != nil {
+			t.Errorf("%s(%q) = %v", op.name, name, err)
+		}
+	}
+}
+
+// assertGone asserts that no session is held under name.
+func assertGone(t *testing.T, ctx context.Context, b backend.Backend, name string) {
+	t.Helper()
+	if exists, err := b.Exists(ctx, name); err != nil || exists {
+		t.Errorf("Exists(%q) = %v, %v; want false", name, exists, err)
+	}
+	for _, op := range perSession {
+		if err := op.call(ctx, b, name); !errors.Is(err, backend.ErrNoSuchSession) {
+			t.Errorf("%s(%q) = %v, want ErrNoSuchSession", op.name, name, err)
+		}
+	}
+}
+
+// assertInvalid asserts that every call refuses each name.
+func assertInvalid(t *testing.T, ctx context.Context, b backend.Backend, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		if exists, err := b.Exists(ctx, name); err != nil || exists {
+			t.Errorf("Exists(%q) = %v, %v; want false", name, exists, err)
+		}
+		for _, op := range perSession {
+			if err := op.call(ctx, b, name); !errors.Is(err, backend.ErrInvalidName) {
+				t.Errorf("%s(%q) = %v, want ErrInvalidName", op.name, name, err)
+			}
+		}
+		if err := b.Create(ctx, name, "/", nil); !errors.Is(err, backend.ErrInvalidName) {
+			t.Errorf("Create(%q) = %v, want ErrInvalidName", name, err)
+		}
+	}
+}
+
 func assertExists(t *testing.T, err error, held string) {
 	t.Helper()
 	if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != held {
 		t.Errorf("Create = %v, want a SessionExistsError held as %q", err, held)
 	}
+}
+
+// values are key's values in env, in order.
+func values(env []string, key string) []string {
+	var out []string
+	for _, kv := range env {
+		if k, v, _ := strings.Cut(kv, "="); k == key {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func quoted(name string) string {

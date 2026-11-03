@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ var defaultCeilings = ceilings{
 	history: 10 * time.Second,
 }
 
-var errHungUp = errors.New("zmx daemon hung up without ending its session")
+var errHungUp = fmt.Errorf("zmx daemon hung up without ending its session: %w", backend.ErrTimeout)
 
 // Config binds a Backend.
 type Config struct {
@@ -102,12 +103,10 @@ func (b *Backend) Dir() string { return b.dir }
 
 // Exists reports whether a session that answers is held under exactly name.
 // A stale socket, a name held only under another spelling, or one no session
-// can have, does not count. A session that does not answer is neither live
-// nor gone, and is ErrTimeout.
+// can have, does not count. A session that gives no well-formed answer is
+// neither live nor gone, and is ErrTimeout.
 func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
-	ctx, cancel := b.bound(ctx, b.limits.probe, "")
-	defer cancel()
-	_, err := b.ask(ctx, name)
+	_, err := b.askWithin(ctx, name)
 	if errors.Is(err, backend.ErrNoSuchSession) || errors.Is(err, backend.ErrInvalidName) {
 		return false, nil
 	}
@@ -124,20 +123,19 @@ func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
 // command keeps the caller's ZMX_SESSION, so zmx switches that session's
 // clients to name and exits at once instead of nesting. Anywhere else it
 // drops ZMX_SESSION, with which zmx attach would switch a session it cannot
-// reach, or another directory's session of the same name.
+// reach, or another directory's session of the same name. Each session is
+// asked within a probe ceiling of its own, so a slow one cannot starve the
+// other.
 func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	if err := CheckAttach(name); err != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
 	}
-	caller := ctx
-	ctx, cancel := b.bound(ctx, b.limits.probe, "")
-	defer cancel()
-	if _, err := b.ask(ctx, name); err != nil {
+	if _, err := b.askWithin(ctx, name); err != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
 	}
-	switches, err := b.switches(caller, ctx)
-	if err != nil {
-		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
+	switches := b.switches(ctx)
+	if ctx.Err() != nil {
+		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, context.Cause(ctx))
 	}
 	cmd := backend.Command{Argv: []string{b.binary, "attach", name}, Switches: switches}
 	if switches {
@@ -149,44 +147,40 @@ func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Comma
 }
 
 // switches reports whether zmx attach, run in this process's environment,
-// would switch the caller's session: one that answers in the Backend's own
-// directory. A session that does not answer by the ceiling does not switch;
-// the caller's context ending first is its error.
-func (b *Backend) switches(caller, ctx context.Context) (bool, error) {
+// would switch the caller's session: one that answers in the zmx directory
+// that environment names, when that is the Backend's own.
+func (b *Backend) switches(ctx context.Context) bool {
 	env := b.environ()
-	if dir := lookup(env, envDir); dir != "" && filepath.Clean(dir) != b.dir {
-		return false, nil
-	}
 	current := lookup(env, envSession)
-	if current == "" {
-		return false, nil
+	if current == "" || filepath.Clean(DirFor(env)) != b.dir {
+		return false
 	}
-	_, err := b.ask(ctx, current)
-	if callerEnded(caller, err) {
-		return false, err
-	}
-	return err == nil, nil
+	_, err := b.askWithin(ctx, current)
+	return err == nil
 }
 
-// ask reads the Info record of the session held under exactly name, on a
-// connection of its own.
-func (b *Backend) ask(ctx context.Context, name string) (info, error) {
-	c, _, err := b.open(ctx, name)
+// askWithin asks the session held under exactly name for its Info record,
+// within the probe ceiling.
+func (b *Backend) askWithin(ctx context.Context, name string) (info, error) {
+	ctx, cancel := b.bound(ctx, b.limits.probe, "")
+	defer cancel()
+	c, s, err := b.open(ctx, name)
 	if err != nil {
 		return info{}, err
 	}
 	defer func() { _ = c.Close() }()
 	i, err := c.askInfo()
 	if err != nil {
-		return info{}, failure(ctx, err)
+		return info{}, b.noAnswer(ctx, s, err)
 	}
 	return i, nil
 }
 
 // Kill waits for the daemon to hang up. zmx unlinks a session's socket before
 // it closes the session's clients, so a hangup with the socket gone means the
-// name is free. A message to a stopped daemon waits in its socket and lands
-// once it runs again.
+// name is free, and one with the socket still there is a daemon not
+// answering. A message to a stopped daemon waits in its socket and lands once
+// it runs again.
 func (b *Backend) Kill(ctx context.Context, name string) error {
 	ctx, cancel := b.bound(ctx, b.limits.kill, "; the kill may still land")
 	defer cancel()
@@ -205,7 +199,8 @@ func (b *Backend) Kill(ctx context.Context, name string) error {
 }
 
 // Detach waits for the daemon to hang up: DetachAll answers nothing, but
-// closes every connection to the session, this one included.
+// closes every connection to the session, this one included. So a daemon
+// that hangs up on every request looks like one that detached.
 func (b *Backend) Detach(ctx context.Context, name string) error {
 	ctx, cancel := b.bound(ctx, b.limits.detach, "; the detach may still land")
 	defer cancel()
@@ -228,7 +223,7 @@ func (b *Backend) History(ctx context.Context, name string, rows int) ([]byte, e
 	}
 	ctx, cancel := b.bound(ctx, b.limits.history, "")
 	defer cancel()
-	c, _, err := b.open(ctx, name)
+	c, s, err := b.open(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("read history of session %q: %w", name, err)
 	}
@@ -238,14 +233,14 @@ func (b *Backend) History(ctx context.Context, name string, rows int) ([]byte, e
 		request, payload = tagCapture, encodeCapture(historyVT, uint32(min(rows, math.MaxUint32)))
 	}
 	if err := c.send(request, payload); err != nil {
-		return nil, fmt.Errorf("read history of session %q: %w", name, failure(ctx, err))
+		return nil, fmt.Errorf("read history of session %q: %w", name, b.noAnswer(ctx, s, err))
 	}
 	vt, err := c.await(request)
 	if errors.Is(err, errUnsupported) {
 		return nil, fmt.Errorf("read history of session %q: %w: %w", name, err, backend.ErrHistoryUnavailable)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read history of session %q: %w", name, failure(ctx, err))
+		return nil, fmt.Errorf("read history of session %q: %w", name, b.noAnswer(ctx, s, err))
 	}
 	if len(vt) == 0 {
 		return nil, fmt.Errorf("read history of session %q: %w", name, backend.ErrHistoryUnavailable)
@@ -265,17 +260,17 @@ func (b *Backend) Current() string {
 func (b *Backend) ProtocolVersion(ctx context.Context, name string) (int, error) {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
-	c, _, err := b.open(ctx, name)
+	c, s, err := b.open(ctx, name)
 	if err != nil {
 		return 0, fmt.Errorf("read protocol version of session %q: %w", name, err)
 	}
 	defer func() { _ = c.Close() }()
 	if err := c.send(tagInfo, nil); err != nil {
-		return 0, fmt.Errorf("read protocol version of session %q: %w", name, failure(ctx, err))
+		return 0, fmt.Errorf("read protocol version of session %q: %w", name, b.noAnswer(ctx, s, err))
 	}
 	h, err := c.header()
 	if err != nil && !errors.Is(err, errProtocolVersion) {
-		return 0, fmt.Errorf("read protocol version of session %q: %w", name, failure(ctx, err))
+		return 0, fmt.Errorf("read protocol version of session %q: %w", name, b.noAnswer(ctx, s, err))
 	}
 	return int(h.version), nil
 }
@@ -333,11 +328,35 @@ func (b *Backend) env(drop ...string) []string {
 // lookup is key's value in env, the last entry winning as it does in an
 // exec.Cmd's Env.
 func lookup(env []string, key string) string {
-	var value string
+	value, _ := lookupSet(env, key)
+	return value
+}
+
+// lookupSet is lookup that also reports whether key is set at all.
+func lookupSet(env []string, key string) (value string, set bool) {
 	for _, kv := range env {
 		if k, v, _ := strings.Cut(kv, "="); k == key {
-			value = v
+			value, set = v, true
 		}
 	}
-	return value
+	return value, set
+}
+
+// DirFor is the directory zmx uses in the environment environ, resolved as
+// zmx's cfg.zig does: ZMX_DIR when set, otherwise zmx in XDG_RUNTIME_DIR,
+// otherwise zmx-<uid> in TMPDIR, or in /tmp when TMPDIR is unset. zmx sets no
+// ZMX_DIR of its own in a session, so a session started without one is in
+// this default directory.
+func DirFor(environ []string) string {
+	if dir, ok := lookupSet(environ, envDir); ok {
+		return dir
+	}
+	if runtimeDir, ok := lookupSet(environ, "XDG_RUNTIME_DIR"); ok {
+		return runtimeDir + "/zmx"
+	}
+	tmp, ok := lookupSet(environ, "TMPDIR")
+	if !ok {
+		tmp = "/tmp"
+	}
+	return strings.TrimRight(tmp, "/") + "/zmx-" + strconv.Itoa(os.Getuid())
 }

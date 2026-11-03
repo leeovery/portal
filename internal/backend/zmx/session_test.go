@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
@@ -112,10 +114,10 @@ func TestPerSessionCalls(t *testing.T) {
 	}
 }
 
-// anyRequest answers every request as a zmx daemon would: Info with the fixture
-// record, History with a screen, Kill by unlinking its socket and hanging up,
-// DetachAll by hanging up.
-func anyRequest(info []byte) func(*daemon, net.Conn) {
+// anyRequest answers every request as a zmx daemon would: Info with info,
+// History and Capture with screen, Kill by unlinking its socket and hanging
+// up, DetachAll by hanging up.
+func anyRequest(info, screen []byte) func(*daemon, net.Conn) {
 	return func(d *daemon, c net.Conn) {
 		r, err := d.read(c)
 		if err != nil {
@@ -124,8 +126,8 @@ func anyRequest(info []byte) func(*daemon, net.Conn) {
 		switch r.tag {
 		case 6:
 			_, _ = c.Write(info)
-		case 8:
-			_, _ = c.Write(frame(8, 1, []byte("screen")))
+		case 8, 22:
+			_, _ = c.Write(frame(r.tag, 1, screen))
 		case 5:
 			_ = os.Remove(d.path)
 			return
@@ -140,7 +142,7 @@ func TestAttachFlags(t *testing.T) {
 	t.Run("AttachCommand refuses a name zmx attach reads as its own flag, sending nothing", func(t *testing.T) {
 		for _, name := range []string{"-h", "--help", "--labels", "--labels=a=1"} {
 			dir := socketDir(t)
-			d := serve(t, dir, name, anyRequest(infoFrame(t)))
+			d := serve(t, dir, name, anyRequest(infoFrame(t), []byte("screen")))
 
 			if _, err := newBackend(t, dir).AttachCommand(t.Context(), name); !errors.Is(err, backend.ErrInvalidName) {
 				t.Errorf("AttachCommand(%q) = %v, want ErrInvalidName", name, err)
@@ -165,14 +167,14 @@ func TestKill(t *testing.T) {
 		}
 	})
 
-	t.Run("it reports a daemon that hangs up but keeps its socket as a kill that did not land", func(t *testing.T) {
+	t.Run("it reports a daemon that hangs up but keeps its socket as not answering", func(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "survivor", hangingUp())
 
 		err := newBackend(t, dir).Kill(t.Context(), "survivor")
 
-		if err == nil || errors.Is(err, backend.ErrNoSuchSession) || errors.Is(err, backend.ErrTimeout) {
-			t.Errorf("Kill of a daemon that hung up and stayed = %v, want a plain failure", err)
+		if !errors.Is(err, backend.ErrTimeout) || !strings.Contains(err.Error(), "hung up without ending") {
+			t.Errorf("Kill of a daemon that hung up and stayed = %v, want ErrTimeout saying it hung up", err)
 		}
 	})
 
@@ -324,7 +326,11 @@ func TestAttachCommand(t *testing.T) {
 	})
 
 	t.Run("it keeps the caller's session, to switch it, only when it answers, held exactly, in the caller's own directory", func(t *testing.T) {
-		dir := socketDir(t)
+		runtimeDir := socketDir(t)
+		dir := filepath.Join(runtimeDir, "zmx")
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
 		serve(t, dir, "work", answering(infoFrame(t)))
 		home := serve(t, dir, "home", answering(infoFrame(t)))
 		refusing(t, dir, "busy")
@@ -333,11 +339,13 @@ func TestAttachCommand(t *testing.T) {
 			env      []string
 			switches bool
 		}{
-			{"home", []string{"ZMX_SESSION=home"}, true},
-			{"home, in the directory as given", []string{"ZMX_DIR=" + dir + "/", "ZMX_SESSION=home"}, true},
+			{"home", []string{"ZMX_DIR=" + dir, "ZMX_SESSION=home"}, true},
+			{"home, its directory given with a trailing slash", []string{"ZMX_DIR=" + dir + "/", "ZMX_SESSION=home"}, true},
+			{"home with no ZMX_DIR, in zmx's default directory, the Backend's", []string{"XDG_RUNTIME_DIR=" + runtimeDir, "ZMX_SESSION=home"}, true},
 			{"home in another directory", []string{"ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION=home"}, false},
-			{"a session that refuses", []string{"ZMX_SESSION=busy"}, false},
-			{"home in another case", []string{"ZMX_SESSION=HOME"}, false},
+			{"home with no ZMX_DIR, in zmx's default directory, another", []string{"TMPDIR=/tmp", "ZMX_SESSION=home"}, false},
+			{"a session that refuses", []string{"ZMX_DIR=" + dir, "ZMX_SESSION=busy"}, false},
+			{"home in another case", []string{"ZMX_DIR=" + dir, "ZMX_SESSION=HOME"}, false},
 		} {
 			t.Run("inside "+tt.inside, func(t *testing.T) {
 				cmd, err := newBackend(t, dir, tt.env...).AttachCommand(t.Context(), "work")
@@ -345,7 +353,7 @@ func TestAttachCommand(t *testing.T) {
 					t.Fatalf("AttachCommand: %v", err)
 				}
 
-				want := []string(nil)
+				var want []string
 				if tt.switches {
 					want = []string{lookupEnv(tt.env, "ZMX_SESSION")}
 				}
@@ -354,8 +362,21 @@ func TestAttachCommand(t *testing.T) {
 				}
 			})
 		}
-		if reqs := home.received(); len(reqs) != 2 {
+		if reqs := home.received(); len(reqs) != 3 {
 			t.Errorf("home received %+v, want one Info for each attach that could switch it", reqs)
+		}
+	})
+
+	t.Run("it asks each session within a ceiling of its own, so a slow target does not starve the caller's", func(t *testing.T) {
+		dir := socketDir(t)
+		const ceiling = time.Second
+		serve(t, dir, "work", answeringAfter(7*ceiling/10, infoFrame(t)))
+		serve(t, dir, "home", answeringAfter(5*ceiling/10, infoFrame(t)))
+		b := newBackend(t, dir, "ZMX_DIR="+dir, "ZMX_SESSION=home")
+		zmx.ShortenCeilings(b, ceiling)
+
+		if cmd, err := b.AttachCommand(t.Context(), "work"); err != nil || !cmd.Switches {
+			t.Errorf("AttachCommand = %+v, %v; want a switch of home, which answers within its own ceiling", cmd, err)
 		}
 	})
 
@@ -371,9 +392,29 @@ func TestAttachCommand(t *testing.T) {
 			_, _ = io.Copy(io.Discard, c)
 		})
 
-		cmd, err := newBackend(t, dir, "ZMX_SESSION=home").AttachCommand(ctx, "work")
+		cmd, err := newBackend(t, dir, "ZMX_DIR="+dir, "ZMX_SESSION=home").AttachCommand(ctx, "work")
 
 		if !errors.Is(err, cause) {
+			t.Errorf("AttachCommand = %+v, %v; want the caller's cause", cmd, err)
+		}
+	})
+
+	t.Run("it fails with the caller's cause when that ends after the target answers, with no session to ask", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "work", answering(infoFrame(t)))
+		cause := errors.New("caller gave up")
+		ctx, cancel := context.WithCancelCause(t.Context())
+		b := mustNew(t, zmx.Config{
+			Binary: "/nonexistent/zmx",
+			Dir:    dir,
+			// Read once the target has answered, to decide whether to switch.
+			Environ: func() []string {
+				cancel(cause)
+				return []string{"PATH=/usr/bin:/bin"}
+			},
+		})
+
+		if cmd, err := b.AttachCommand(ctx, "work"); !errors.Is(err, cause) {
 			t.Errorf("AttachCommand = %+v, %v; want the caller's cause", cmd, err)
 		}
 	})
@@ -440,6 +481,24 @@ func TestProtocolVersion(t *testing.T) {
 		})
 	}
 
+	t.Run("it reads a session under a name Create refuses", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "-x", answering(infoFrame(t)))
+
+		if got, err := newBackend(t, dir).ProtocolVersion(t.Context(), "-x"); err != nil || got != zmx.ProtocolVersion {
+			t.Errorf("ProtocolVersion(-x) = %d, %v; want %d", got, err, zmx.ProtocolVersion)
+		}
+	})
+
+	t.Run("it reports a daemon that hangs up before a header as not answering", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "odd", hangingUp())
+
+		if _, err := newBackend(t, dir).ProtocolVersion(t.Context(), "odd"); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("ProtocolVersion of a daemon that hung up = %v, want ErrTimeout", err)
+		}
+	})
+
 	t.Run("it reports a daemon that cannot read its request as a timeout", func(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "old", silent)
@@ -448,4 +507,112 @@ func TestProtocolVersion(t *testing.T) {
 			t.Errorf("ProtocolVersion of a silent daemon = %v, want ErrTimeout", err)
 		}
 	})
+}
+
+// asking is each call that asks a session for an answer, for the rules on a
+// daemon that gives no well-formed one.
+var asking = []struct {
+	name string
+	call func(context.Context, *zmx.Backend, string) error
+}{
+	{"Exists", func(ctx context.Context, b *zmx.Backend, name string) error {
+		_, err := b.Exists(ctx, name)
+		return err
+	}},
+	{"AttachCommand", func(ctx context.Context, b *zmx.Backend, name string) error {
+		_, err := b.AttachCommand(ctx, name)
+		return err
+	}},
+	{"History", func(ctx context.Context, b *zmx.Backend, name string) error {
+		_, err := b.History(ctx, name, 0)
+		return err
+	}},
+}
+
+func TestNoWellFormedAnswer(t *testing.T) {
+	record := infoFrame(t)[8:]
+	for _, op := range asking {
+		t.Run(op.name+" reads a daemon that hangs up or answers garbled as not answering", func(t *testing.T) {
+			for reply, handle := range map[string]func(*daemon, net.Conn){
+				"a hangup":                    hangingUp(),
+				"a short record, then hangup": hangingUp(frame(6, 1, record[:400])),
+				"a short record":              answering(frame(6, 1, record[:400])),
+				"a frame cut short":           hangingUp(frame(8, 1, []byte("scr"))[:10]),
+			} {
+				dir := socketDir(t)
+				serve(t, dir, "odd", handle)
+
+				if err := op.call(t.Context(), newBackend(t, dir), "odd"); !errors.Is(err, backend.ErrTimeout) {
+					t.Errorf("%s after %s = %v, want ErrTimeout", op.name, reply, err)
+				}
+			}
+		})
+	}
+
+	t.Run("a caller's context ending before the answer is the caller's cause", func(t *testing.T) {
+		for _, op := range asking {
+			dir := socketDir(t)
+			cause := errors.New("caller gave up")
+			ctx, cancel := context.WithCancelCause(t.Context())
+			serve(t, dir, "slow", func(d *daemon, c net.Conn) {
+				if _, err := d.read(c); err == nil {
+					cancel(cause)
+				}
+				_, _ = io.Copy(io.Discard, c)
+			})
+
+			if err := op.call(ctx, newBackend(t, dir), "slow"); !errors.Is(err, cause) {
+				t.Errorf("%s = %v, want the caller's cause", op.name, err)
+			}
+		}
+	})
+
+	t.Run("an answer in another protocol version keeps its own error", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "future", answering(frame(6, 2, record), frame(8, 2, []byte("screen"))))
+		b := newBackend(t, dir)
+
+		for _, op := range asking {
+			if err := op.call(t.Context(), b, "future"); err == nil || errors.Is(err, backend.ErrTimeout) || !strings.Contains(err.Error(), "protocol version") {
+				t.Errorf("%s = %v, want the protocol version mismatch", op.name, err)
+			}
+		}
+	})
+
+	t.Run("a session whose socket goes before it answers is gone", func(t *testing.T) {
+		for _, op := range asking[1:3] {
+			dir := socketDir(t)
+			serve(t, dir, "ending", ending)
+
+			if err := op.call(t.Context(), newBackend(t, dir), "ending"); !errors.Is(err, backend.ErrNoSuchSession) {
+				t.Errorf("%s = %v, want ErrNoSuchSession", op.name, err)
+			}
+		}
+		dir := socketDir(t)
+		serve(t, dir, "ending", ending)
+		if exists, err := newBackend(t, dir).Exists(t.Context(), "ending"); err != nil || exists {
+			t.Errorf("Exists = %v, %v; want false", exists, err)
+		}
+	})
+}
+
+func TestDirFor(t *testing.T) {
+	uid := strconv.Itoa(os.Getuid())
+	for _, tt := range []struct {
+		name    string
+		environ []string
+		want    string
+	}{
+		{"ZMX_DIR when set", []string{"ZMX_DIR=/z", "XDG_RUNTIME_DIR=/run/user/1", "TMPDIR=/t"}, "/z"},
+		{"ZMX_DIR when set empty", []string{"ZMX_DIR=", "XDG_RUNTIME_DIR=/run/user/1"}, ""},
+		{"zmx in XDG_RUNTIME_DIR", []string{"XDG_RUNTIME_DIR=/run/user/1", "TMPDIR=/t"}, "/run/user/1/zmx"},
+		{"zmx-<uid> in TMPDIR, its trailing slashes trimmed", []string{"TMPDIR=/var/folders/x/T//"}, "/var/folders/x/T/zmx-" + uid},
+		{"zmx-<uid> in /tmp", []string{"PATH=/bin"}, "/tmp/zmx-" + uid},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := zmx.DirFor(tt.environ); got != tt.want {
+				t.Errorf("DirFor(%q) = %q, want %q", tt.environ, got, tt.want)
+			}
+		})
+	}
 }

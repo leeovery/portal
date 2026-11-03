@@ -150,6 +150,21 @@ func answering(reply ...[]byte) func(*daemon, net.Conn) {
 	}
 }
 
+// answeringAfter reads a request, waits delay, writes reply, and holds the
+// connection until the client closes it.
+func answeringAfter(delay time.Duration, reply ...[]byte) func(*daemon, net.Conn) {
+	return func(d *daemon, c net.Conn) {
+		if _, err := d.read(c); err != nil {
+			return
+		}
+		time.Sleep(delay)
+		for _, r := range reply {
+			_, _ = c.Write(r)
+		}
+		_, _ = io.Copy(io.Discard, c)
+	}
+}
+
 // hangingUp reads a request, writes reply, and closes the connection.
 func hangingUp(reply ...[]byte) func(*daemon, net.Conn) {
 	return func(d *daemon, c net.Conn) {

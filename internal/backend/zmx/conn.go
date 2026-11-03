@@ -23,6 +23,7 @@ var (
 	// errNotAccepting marks a connect a daemon may be behind but did not
 	// accept: refused from a socket made since boot, or a full backlog.
 	errNotAccepting = fmt.Errorf("zmx daemon is not accepting connections: %w", backend.ErrTimeout)
+	errNoAnswer     = fmt.Errorf("zmx daemon gave no well-formed answer: %w", backend.ErrTimeout)
 )
 
 // conn is one connection to a session's daemon. Its reads and writes fail
@@ -171,11 +172,31 @@ func gone(err error) bool {
 // deadline dial sets once the context ends. An I/O that failed on its own
 // keeps its error, even if the context ended after.
 func failure(ctx context.Context, err error) error {
-	endedIO := errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-	if endedIO && ctx.Err() != nil {
+	if endedIO(err) && ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
 	return err
+}
+
+func endedIO(err error) bool {
+	return errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// noAnswer explains a request on the socket s that got no well-formed
+// answer: the context's cause when its end failed the I/O; an answer in
+// another protocol version as itself; ErrNoSuchSession when the socket has
+// gone since; and otherwise a daemon that hung up or answered garbled, which
+// is not answering.
+func (b *Backend) noAnswer(ctx context.Context, s socket, err error) error {
+	switch {
+	case endedIO(err) && ctx.Err() != nil:
+		return context.Cause(ctx)
+	case errors.Is(err, errProtocolVersion):
+		return err
+	case !b.stillHeld(s):
+		return fmt.Errorf("%w: %w", err, backend.ErrNoSuchSession)
+	}
+	return fmt.Errorf("%w: %w", err, errNoAnswer)
 }
 
 // callerEnded reports whether err, as failure reports it, is the end of the
