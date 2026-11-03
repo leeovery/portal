@@ -306,10 +306,11 @@ func (a *attach) kill(ctx context.Context) error {
 // for the picker or to confirm while Run is unsure which session the
 // terminal shows and Confirm, asked by the request's deadline, doesn't
 // confirm it. A switch is taken unsure: its asker found this runner by the
-// backend naming it the leader of the session it attached.
+// backend naming it the leader of the session it attached. The deadline is
+// read again once Confirm returns, as one may overrun it.
 func (a *attach) admit(ctx context.Context, req Request) error {
 	switch {
-	case !req.Deadline.IsZero() && !time.Now().Before(req.Deadline):
+	case past(req):
 		return ErrPastDeadline
 	case req.Confirm != "" && req.Confirm != a.cfg.Session:
 		return fmt.Errorf("the attach shows %s, not %s", a.cfg.Session, req.Confirm)
@@ -324,7 +325,15 @@ func (a *attach) admit(ctx context.Context, req Request) error {
 	if err := a.unconfirmed(ctx); err != nil {
 		return fmt.Errorf("%w: %w", ErrUnconfirmed, err)
 	}
+	if past(req) {
+		return ErrPastDeadline
+	}
 	return nil
+}
+
+// past reports whether req's asker has stopped waiting for its answer.
+func past(req Request) bool {
+	return !req.Deadline.IsZero() && !time.Now().Before(req.Deadline)
 }
 
 // unconfirmed is why the terminal may not show the attach's session, nil

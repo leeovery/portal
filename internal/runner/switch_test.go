@@ -257,6 +257,29 @@ func TestRun_Unsure(t *testing.T) {
 		h.detach(t)
 	})
 
+	t.Run("a request for the picker Confirm confirms only past its deadline is refused, and the attach goes on", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		calls := new(atomic.Int32)
+		var due time.Time
+		h := unsure(t, withRequests(requests), func(_ *harness, cfg *runner.Config) {
+			cfg.Confirm = func(context.Context) error {
+				calls.Add(1)
+				time.Sleep(time.Until(due) + time.Millisecond)
+				return nil
+			}
+		})
+		// Far enough off for Run to read the request before it, under load.
+		due = time.Now().Add(time.Second)
+
+		if err := ask(t, requests, runner.Request{Deadline: due}); !errors.Is(err, runner.ErrPastDeadline) {
+			t.Errorf("Run answered %v, want ErrPastDeadline", err)
+		}
+		if calls.Load() != 1 {
+			t.Fatal("Confirm was never asked: the request reached Run past its deadline, so the test proves nothing")
+		}
+		h.detach(t)
+	})
+
 	t.Run("the detach keys still detach", func(t *testing.T) {
 		for key, action := range map[string]attachkeys.Action{keyDetach: attachkeys.Detach, keyDetachToShell: attachkeys.DetachToShell} {
 			h := unsure(t)
