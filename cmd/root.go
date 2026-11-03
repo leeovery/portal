@@ -90,7 +90,7 @@ func runBootstrap(ctx context.Context, runner bootstrap.Runner) (bool, []bootstr
 
 var rootCmd = &cobra.Command{
 	Use:   "portal",
-	Short: "An interactive session picker for tmux",
+	Short: "An interactive session picker for zmx",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if !inChain(cmd, stateCheckExempt) {
 			if err := refuseUnusableState(); err != nil {

@@ -17,7 +17,8 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 		isolateTerminalsFile(t)
 
 		client := tmux.NewClient(commandertest.Quiet())
-		cmd := cmdWithClient(client)
+		withFuncSeam(t, &defaultTmuxClient, func() *tmux.Client { return client })
+		cmd := &cobra.Command{}
 
 		injectedAdapter := &spawntest.FakeAdapter{}
 		injectedResolve := func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
@@ -91,7 +92,8 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 		isolateTerminalsFile(t)
 
 		client := tmux.NewClient(commandertest.Quiet())
-		cmd := cmdWithClient(client)
+		withFuncSeam(t, &defaultTmuxClient, func() *tmux.Client { return client })
+		cmd := &cobra.Command{}
 
 		// LocalMint deliberately absent so it takes the production default.
 		withOpenBurstDeps(t, OpenBurstDeps{

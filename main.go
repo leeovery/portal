@@ -1,4 +1,4 @@
-// Portal is a Go CLI that provides an interactive session picker for tmux.
+// Portal is a Go CLI that provides an interactive session picker for zmx.
 package main
 
 import (

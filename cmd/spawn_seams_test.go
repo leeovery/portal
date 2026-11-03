@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,7 +10,6 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/tmux"
-	"github.com/spf13/cobra"
 )
 
 type fakeTerminalDetector struct {
@@ -27,10 +25,15 @@ func isolateTerminalsFile(t *testing.T) {
 	t.Setenv("PORTAL_TERMINALS_FILE", filepath.Join(t.TempDir(), "terminals.json"))
 }
 
-func cmdWithClient(client *tmux.Client) *cobra.Command {
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.WithValue(context.Background(), tmuxClientKey, client))
-	return cmd
+func TestDefaultTmuxClient_FailsLoudlyUnderTheTestPoison(t *testing.T) {
+	t.Setenv("TMUX", "")
+
+	defer func() {
+		if r := recover(); r != refusedDefaultTmuxClient {
+			t.Errorf("recovered %v, want the poison's panic %q", r, refusedDefaultTmuxClient)
+		}
+	}()
+	defaultTmuxClient()
 }
 
 func TestBuildProductionSpawnSeams(t *testing.T) {

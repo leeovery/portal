@@ -8,7 +8,6 @@ import (
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/xdg"
-	"github.com/spf13/cobra"
 )
 
 var spawnLogger = log.For("spawn")
@@ -42,8 +41,13 @@ func buildProductionSpawnSeams(client *tmux.Client) productionSpawnSeams {
 	}
 }
 
-func spawnDetector(cmd *cobra.Command) TerminalDetector {
-	return spawn.NewDetector(tmuxClient(cmd))
+// defaultTmuxClient honours the ambient TMUX, so cmd's TestMain swaps it for
+// one that fails loudly: a test that misses a seam must not reach the
+// developer's live server. It starts no server.
+var defaultTmuxClient = tmux.DefaultClient
+
+func spawnDetector() TerminalDetector {
+	return spawn.NewDetector(defaultTmuxClient())
 }
 
 // Fails safe: an unresolvable config path degrades to an empty config —

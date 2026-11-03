@@ -3,7 +3,10 @@
 package bootstrap_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,8 +150,7 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 	restoretest.WaitForSkeletonMarkersCleared(t, client, restoretest.PaneReactionBudget, restoretest.PaneReactionTick)
 
 	// Force a newline-terminated record into the pane: a freshly-exec'd shell
-	// can leave only a partial prompt line, and TailScrollback then returns
-	// nothing.
+	// can leave only a partial prompt line, which is no record.
 	betaPaneKey := state.SanitizePaneKey("beta", 0, 0)
 	betaTarget := tmux.PaneTargetExact("beta", 0, 0)
 	ts.SendKeys(t, betaTarget, "echo ac4-marker")
@@ -157,11 +159,11 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 	runDaemonTick(t, client, stateDir)
 
 	scrollbackPath := state.ScrollbackFile(stateDir, betaPaneKey)
-	tail, err := state.TailScrollback(scrollbackPath, 10)
-	if err != nil {
-		t.Fatalf("TailScrollback %s: %v", scrollbackPath, err)
+	scrollback, err := os.ReadFile(scrollbackPath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("read %s: %v", scrollbackPath, err)
 	}
-	if tail == nil {
+	if !bytes.Contains(scrollback, []byte("\n")) {
 		t.Fatalf("AC4 violation: scrollback for non-attached pane %s "+
 			"holds no terminated records after daemon tick; want "+
 			"non-empty (Fix 1: eager-signal unset beta's marker → "+

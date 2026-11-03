@@ -15,13 +15,11 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/commandertest"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -74,9 +72,6 @@ func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
 	resetRootCmd()
-	// The session-domain pre-check reads the tmux client from context before
-	// path resolution runs.
-	openCmd.SetContext(context.WithValue(context.Background(), tmuxClientKey, tmux.NewClient(stubTmuxCommander())))
 	buf := new(bytes.Buffer)
 	rootCmd.SetErr(buf)
 	rootCmd.SetOut(buf)
@@ -103,9 +98,6 @@ func TestOpenCommand_PathArgument_FileNotDirectory(t *testing.T) {
 	}
 
 	resetRootCmd()
-	// The session-domain pre-check reads the tmux client from context before
-	// path resolution runs.
-	openCmd.SetContext(context.WithValue(context.Background(), tmuxClientKey, tmux.NewClient(stubTmuxCommander())))
 	buf := new(bytes.Buffer)
 	rootCmd.SetErr(buf)
 	rootCmd.SetOut(buf)
@@ -1260,12 +1252,6 @@ func (s *stubAliasEditor) DeleteAndSave(name, _ string) (bool, error) {
 	}
 	delete(s.aliases, name)
 	return true, nil
-}
-
-// stubTmuxCommander answers the session enumeration with one stub row and
-// stays quiet for every other tmux call.
-func stubTmuxCommander() *commandertest.Scripted {
-	return commandertest.Quiet(commandertest.Returns("stub|1|0|", "list-sessions"))
 }
 
 func defaultTestTUIConfig() tuiConfig {

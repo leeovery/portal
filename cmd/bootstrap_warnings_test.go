@@ -2,14 +2,12 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/backendtest"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -267,10 +265,8 @@ func TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg(t *testing.T) {
 	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	// Resolution fails on the non-existent path; warning emission happens before
-	// RunE, so that failure is irrelevant here. The session-domain check at the
-	// front of open resolution reads the tmux client staged in the context.
+	// RunE, so that failure is irrelevant here.
 	resetRootCmd()
-	openCmd.SetContext(context.WithValue(context.Background(), tmuxClientKey, tmux.NewClient(stubTmuxCommander())))
 	var stderr bytes.Buffer
 	rootCmd.SetErr(&stderr)
 	rootCmd.SetArgs([]string{"open", "/nonexistent/path-for-test"})

@@ -53,7 +53,7 @@ func pinToolchainCaches() error {
 	return nil
 }
 
-const refusedDefaultTmuxClient = "tmuxClient: no client staged — stage one in the command's context; the default client would reach the real tmux server"
+const refusedDefaultTmuxClient = "defaultTmuxClient: no client staged — stage one with withFuncSeam; the default client would reach the real tmux server"
 
 func refuseDefaultTmuxClient() *tmux.Client {
 	panic(refusedDefaultTmuxClient)

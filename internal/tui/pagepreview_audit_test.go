@@ -39,7 +39,7 @@ func TestPreviewLayerAudit_NoPortalSaverReferences(t *testing.T) {
 				t.Errorf(
 					"preview source file %s mentions %q; "+
 						"the preview layer must not introduce a name-based blacklist. "+
-						"Exclusion belongs to the Sessions-list source (internal/tmux Client.ListSessions).",
+						"Exclusion belongs to the Sessions-list source (userSessions in cmd/backend.go).",
 					path, forbidden,
 				)
 			}
@@ -59,19 +59,19 @@ func TestPreviewLayerAudit_ExclusionAppliedAtSource_NotPreviewLayer(t *testing.T
 		t.Errorf("preview model file %s mentions %q; preview must not introduce name-based suppression", previewModel, forbidden)
 	}
 
-	listSource := filepath.Join("..", "tmux", "tmux.go")
+	listSource := filepath.Join("..", "..", "cmd", "backend.go")
 	listBytes, err := os.ReadFile(listSource)
 	if err != nil {
 		t.Fatalf("read %s: %v", listSource, err)
 	}
 	listSrc := string(listBytes)
 
-	if !strings.Contains(listSrc, `strings.HasPrefix(s.Name, "_")`) {
+	if !strings.Contains(listSrc, "slices.DeleteFunc(sessions, backend.Session.PortalOwned)") {
 		t.Errorf(
 			"canonical Sessions-list filter at %s no longer contains "+
-				`strings.HasPrefix(s.Name, "_") — the underscore-prefix `+
-				"exclusion has been removed or relocated. Exclusion must "+
-				"remain at the list-population source.",
+				"slices.DeleteFunc(sessions, backend.Session.PortalOwned) — the "+
+				"Portal-owned exclusion has been removed or relocated. Exclusion "+
+				"must remain at the list-population source.",
 			listSource,
 		)
 	}

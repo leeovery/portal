@@ -73,7 +73,7 @@ Cobra CLI + Bubble Tea v2 TUI + Lipgloss v2; all tmux access goes through `inter
 3. for `open`, the zmx binary lookup;
 4. `bootstrapFor`.
 
-No command runs the tmux bootstrap; `cmd/no_tmux_bootstrap_guard_test.go` pins that. The bootstrap runner seam stays dormant until phase 3. Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). Commands not yet moved get tmux through `tmuxClient(cmd)`, whose fallback cmd's `TestMain` replaces with one that panics.
+No command runs the tmux bootstrap; `cmd/no_tmux_bootstrap_guard_test.go` pins that. The bootstrap runner seam stays dormant until phase 3. Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). `open`'s burst and ack writer reach tmux through the `defaultTmuxClient` seam (`cmd/spawn_seams.go`), which cmd's `TestMain` replaces with one that panics. Only the production sources allow-listed in `internal/tmux/import_allowlist_guard_test.go` import `internal/tmux`, each entry naming the phase that removes it; only `cmd/state_*.go` may reach `hooksweep` or `hooks.StaleKeys` (`cmd/hook_sweep_caller_guard_test.go`), since zmx session names are token-shaped and the sweep would reap them.
 
 ### Commands
 

@@ -28,7 +28,7 @@ type OpenBurstDeps struct {
 }
 
 // The shared seam bundle is memoised lazily so a fully-injected caller never
-// resolves a tmux client (there is none in context) nor loads terminals.json.
+// resolves a tmux client nor loads terminals.json.
 func buildOpenBurstDeps(cmd *cobra.Command) *OpenBurstDeps {
 	deps := &OpenBurstDeps{}
 	if openBurstDeps != nil {
@@ -41,14 +41,14 @@ func buildOpenBurstDeps(cmd *cobra.Command) *OpenBurstDeps {
 	)
 	sharedSeams := func() productionSpawnSeams {
 		if !seamsBuilt {
-			seams = buildProductionSpawnSeams(tmuxClient(cmd))
+			seams = buildProductionSpawnSeams(defaultTmuxClient())
 			seamsBuilt = true
 		}
 		return seams
 	}
 
 	if deps.Detector == nil {
-		deps.Detector = spawnDetector(cmd)
+		deps.Detector = spawnDetector()
 	}
 	if deps.Resolve == nil {
 		deps.Resolve = sharedSeams().Resolve

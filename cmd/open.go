@@ -285,7 +285,7 @@ func writeAckMarker(cmd *cobra.Command) {
 	if !ok {
 		return // unreachable: RunE rejects a malformed --ack before dispatch
 	}
-	if err := buildAckWriter(cmd).Write(batch, token); err != nil {
+	if err := buildAckWriter().Write(batch, token); err != nil {
 		spawnLogger.Debug("spawn-ack marker write failed",
 			"batch", batch,
 			"detail", err.Error(),
@@ -293,11 +293,11 @@ func writeAckMarker(cmd *cobra.Command) {
 	}
 }
 
-func buildAckWriter(cmd *cobra.Command) spawn.AckWriter {
+func buildAckWriter() spawn.AckWriter {
 	if openDeps != nil && openDeps.AckWriter != nil {
 		return openDeps.AckWriter
 	}
-	client := tmuxClient(cmd)
+	client := defaultTmuxClient()
 	return spawn.NewServerOptionAckChannel(client, client)
 }
 
