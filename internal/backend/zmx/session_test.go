@@ -300,12 +300,12 @@ func envValues(env []string, key string) []string {
 }
 
 func TestAttachCommand(t *testing.T) {
-	t.Run("it runs zmx attach on the session, pinned to the directory, without the caller's prefix or tmux", func(t *testing.T) {
+	t.Run("it runs zmx attach on the session, pinned to the directory, without the caller's prefix, tmux or detach-key switch", func(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "work", answering(infoFrame(t)))
 		b := newBackendRunning(t, "/opt/zmx/bin/zmx", dir,
 			"PATH=/usr/bin:/bin", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION_PREFIX=pre-", "TERM=xterm-ghostty",
-			"TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1")
+			"TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1", "ZMX_NO_DETACH_KEY=1")
 
 		cmd, err := b.AttachCommand(t.Context(), "work")
 		if err != nil {
@@ -320,6 +320,7 @@ func TestAttachCommand(t *testing.T) {
 			"ZMX_SESSION_PREFIX": nil,
 			"TMUX":               nil,
 			"TMUX_PANE":          nil,
+			"ZMX_NO_DETACH_KEY":  nil,
 			"PATH":               {"/usr/bin:/bin"},
 			"TERM":               {"xterm-ghostty"},
 		} {

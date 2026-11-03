@@ -12,7 +12,7 @@ Portal's logging is incidental — lines added ad hoc, not a deliberate observab
 - Calendar-daily log rotation with a configurable size-cap safety valve, replacing the 1 MiB churn-prone scheme.
 - Bounded, auditable retention (default 30 days) with per-deletion breadcrumbs.
 - A locked log-level contract (DEBUG/INFO/WARN/ERROR), production default INFO.
-- A closed subsystem-prefix taxonomy (18 components), a closed attr-key vocabulary, and mandatory per-record baseline attrs.
+- A closed subsystem-prefix taxonomy (19 components), a closed attr-key vocabulary, and mandatory per-record baseline attrs.
 - Defensive invariants (per-process lifecycle markers, rotated-file immutability, `O_CREAT|O_EXCL` first-of-day open) that make log destruction detectable post-hoc.
 - Instrumentation catalogs: state-mutation audit trail, cycle-level summaries, saver/daemon lifecycle events, hydrate-helper forensic trail, and a boundary-context-preservation sweep.
 
@@ -151,12 +151,12 @@ Grep idiom preserved: `grep "hydrate:" portal.log` produces the per-subsystem au
 
 Call-site binding is the factory pattern defined in *The `internal/log` package* — a consumer binds each component it emits under once at init via `var logger = log.For("<component>")`, or is handed an already-bound logger through a seam and binds nothing.
 
-### Closed component value space (18 total)
+### Closed component value space (19 total)
 
 ```
 bootstrap  daemon  restore  hydrate  notify  hooks  preview
 saver  capture  signal  log-rotate  clean  aliases  projects
-process  spawn  resolve  theme
+process  spawn  resolve  theme  attach
 ```
 
 This list is the **single source of truth** for the component count.
@@ -181,6 +181,7 @@ This list is the **single source of truth** for the component count.
 | `spawn` | The multi-window spawn service — host-terminal detection, adapter resolution, per-window ack outcomes, and the burst's batch summary. Bound in `internal/spawn` and again in `cmd`; both burst surfaces (the picker's multi-select burst and `portal open`'s multi-target burst) emit through `internal/spawn`'s single-sourced renderers, so the two paths cannot drift |
 | `resolve` | `portal open`'s resolution decision — one INFO per bare positional resolved through the guessing chain (glob and domain-pinned targets are deterministic and emit nothing). Bound and emitted **only** in `cmd/open.go`; `internal/resolver` stays a pure, log-free library |
 | `theme` | Theme load / enumeration / persistence **outcomes**, emitted from three sites across two packages: the loader in `internal/theme` (which binds nothing — it emits through an injected logger seam), `cmd/config.go`'s one-shot `appearance` → theme translation, and the `cmd`-owned theme persister behind the panel's commit. Full catalog, levels and cadences: *The `theme` component event catalog* |
+| `attach` | The attach runner in `internal/runner`: `zmx attach` run in a pseudo-terminal Portal owns. Once per attach that starts: a DEBUG `started` (`session`, `target_pid`), a DEBUG `ended` (`session`, `took`), then one INFO `outcome` on every end, error ends included (`session`; `reason` ∈ {`detach`, `detach_to_shell`, `kill`, `exit`, `signal`, `context`, `panic`, `goexit`}, the action names being `attachkeys.Action`'s and `goexit` an end where Run's goroutine left through `runtime.Goexit`; a panic outranks a signal, which outranks how the attach otherwise ended; `code` when Run returns an outcome, absent when it returns an error; `detail` naming the signal on a `signal` end; `error` for a kill that failed, or the error the attach ended with). As they happen: a DEBUG `terminal input ended` (`session`) when the terminal's input ends, which then ends the attach as SIGHUP; a WARN `child did not exit` per signal the bounded wait sends (`session`, `detail` names it); a WARN `resize failed` (`session`, `error`); a WARN `panic` per panic recovered from a copy loop or from Run's own goroutine, which Run raises again once the attach is torn down (`session`, `error` the panic's value, `detail` its stack); and a DEBUG `terminal reset` (`session`, `reason` ∈ {`exit`, `drain`}) when Portal writes the reset zmx could not: the child did not exit by its own hand, or its last output did not all reach the terminal. Every key is cross-listed from its own group, so the attr-key total is unchanged |
 
 `process` is reserved for portal-binary lifecycle/diagnostic markers only; subsystem-level lifecycle events have their own components. `tmux` is **deliberately excluded** — `internal/tmux` is a thin wrapper; logging at that layer produces extreme volume per tmux call. Tmux-call detail rides as DEBUG breadcrumbs under the caller's component.
 

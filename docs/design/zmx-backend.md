@@ -112,6 +112,7 @@ Portal starts `zmx attach <name>` as a child in a pseudo-terminal it owns:
   - **detach to shell:** the same, then Portal exits to the shell.
   - **kill:** kills the current session through the backend; the picker follows.
 - The picker follows only when Portal asked for it: one of its keys, or Esc on the resume panel through the registry. Any other end of the child (`ctrl+\`, a `zmx detach` from elsewhere, the session ending) exits to the shell, as plain `zmx attach` does.
+- When the attach ends, Portal resets the terminal unless zmx's own reset is known to have reached it. Restoring the terminal (`TCSAFLUSH`) waits for the terminal to take its output, reset or not, and ends early only if the terminal hangs up.
 
 ### Key config
 

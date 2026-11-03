@@ -10,28 +10,6 @@ import (
 	"strings"
 )
 
-// actionName is an action's name in prefs.json's keys object.
-type actionName struct {
-	action Action
-	name   string
-}
-
-// actionNames is in the order warnings and summaries name the actions.
-var actionNames = []actionName{
-	{Detach, "detach"},
-	{DetachToShell, "detach_to_shell"},
-	{Kill, "kill"},
-}
-
-func nameOf(a Action) string {
-	for _, n := range actionNames {
-		if n.action == a {
-			return n.name
-		}
-	}
-	return ""
-}
-
 var defaultKeys = map[Action]Key{
 	Detach:        {mods: modAlt, char: 'd'},
 	DetachToShell: {mods: modAlt | modShift, char: 'd'},
@@ -53,17 +31,17 @@ func Defaults() Bindings {
 
 // String names each action and its keys, or off.
 func (b Bindings) String() string {
-	parts := make([]string, 0, len(actionNames))
-	for _, n := range actionNames {
+	parts := make([]string, 0, len(actions))
+	for _, a := range actions {
 		keys := "off"
-		if bound := b[n.action]; len(bound) > 0 {
+		if bound := b[a]; len(bound) > 0 {
 			names := make([]string, 0, len(bound))
 			for _, k := range bound {
 				names = append(names, k.String())
 			}
 			keys = strings.Join(names, ", ")
 		}
-		parts = append(parts, n.name+" "+keys)
+		parts = append(parts, a.String()+" "+keys)
 	}
 	return strings.Join(parts, "; ")
 }
@@ -86,7 +64,7 @@ func (w Warning) String() string {
 	if w.Action == 0 {
 		return fmt.Sprintf("keys: %s %s", w.Value, w.Reason)
 	}
-	return fmt.Sprintf("%s falls back to %s: %s %s", nameOf(w.Action), defaultKeys[w.Action], w.Value, w.Reason)
+	return fmt.Sprintf("%s falls back to %s: %s %s", w.Action, defaultKeys[w.Action], w.Value, w.Reason)
 }
 
 // Parse reads prefs.json's keys object. A missing entry keeps its action's
@@ -106,21 +84,21 @@ func Parse(raw json.RawMessage) (Bindings, []Warning) {
 
 	var warnings []Warning
 	configured := map[Action]bool{}
-	for _, n := range actionNames {
-		value, ok := entries[n.name]
+	for _, a := range actions {
+		value, ok := entries[a.String()]
 		if !ok {
 			continue
 		}
 		keys, w := parseEntry(value)
 		if w != nil {
-			w.Action = n.action
+			w.Action = a
 			warnings = append(warnings, *w)
 			continue
 		}
-		b[n.action] = keys
+		b[a] = keys
 		// An entry naming just its default holds it against a clash, as a
 		// missing entry does.
-		configured[n.action] = !slices.Equal(keys, []Key{defaultKeys[n.action]})
+		configured[a] = !slices.Equal(keys, []Key{defaultKeys[a]})
 	}
 	warnings = append(warnings, settleClashes(b, configured)...)
 	return b, append(warnings, unknownEntries(entries)...)
@@ -130,7 +108,7 @@ func Parse(raw json.RawMessage) (Bindings, []Warning) {
 func unknownEntries(entries map[string]json.RawMessage) []Warning {
 	var warnings []Warning
 	for _, name := range slices.Sorted(maps.Keys(entries)) {
-		if !slices.ContainsFunc(actionNames, func(n actionName) bool { return n.name == name }) {
+		if !slices.ContainsFunc(actions, func(a Action) bool { return a.String() == name }) {
 			warnings = append(warnings, Warning{Value: strconv.Quote(name), Reason: "is not an action, so it is ignored"})
 		}
 	}
@@ -205,7 +183,7 @@ func settleClashes(b Bindings, configured map[Action]bool) []Warning {
 			warnings = append(warnings, Warning{
 				Action: mine,
 				Value:  strconv.Quote(k.String()),
-				Reason: "is also bound to " + nameOf(theirs),
+				Reason: "is also bound to " + theirs.String(),
 			})
 			b[mine] = []Key{defaultKeys[mine]}
 			configured[mine] = false
@@ -218,12 +196,12 @@ func settleClashes(b Bindings, configured map[Action]bool) []Warning {
 // whole of what the matcher tells apart.
 func findClash(b Bindings) (Key, Action, Action, bool) {
 	owners := map[Key]Action{}
-	for _, n := range actionNames {
-		for _, k := range b[n.action] {
-			if owner, ok := owners[k]; ok && owner != n.action {
-				return k, owner, n.action, true
+	for _, a := range actions {
+		for _, k := range b[a] {
+			if owner, ok := owners[k]; ok && owner != a {
+				return k, owner, a, true
 			}
-			owners[k] = n.action
+			owners[k] = a
 		}
 	}
 	return Key{}, 0, 0, false
