@@ -86,10 +86,14 @@ const BinaryEnv = "PORTAL_TEST_ZMX_BINARY"
 
 // Binary is the path of the zmx build the tests drive: the one BinaryEnv
 // names, or else the pinned build. It fails the test when that build is
-// missing or cannot run, and when the weekly zmx check doesn't run the test.
-// Every real zmx a test runs comes from here, New's included.
+// missing or cannot run, outside the integration lane, and when the weekly
+// zmx check doesn't run the test. Every real zmx a test runs comes from here,
+// New's included.
 func Binary(t *testing.T) string {
 	t.Helper()
+	if !integrationLane {
+		t.Fatal("zmxtest: a real zmx runs only in the integration lane, the one the weekly zmx check runs: tag the test's file //go:build integration")
+	}
 	requireWeeklyCheck(t)
 	binary, err := resolveBinary(os.Getenv, portalbintest.ProjectRoot)
 	if err != nil {
