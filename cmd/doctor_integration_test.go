@@ -104,7 +104,7 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 			"✓ zmx: "+zmxBinary,
 			"✓ zmx dir: "+b.Dir(),
 			"✓ sessions: 1 session answering",
-			"6 checks passed",
+			"7 checks passed",
 		)
 	})
 
