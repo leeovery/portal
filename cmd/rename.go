@@ -38,9 +38,12 @@ func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via st
 		return err
 	}
 	// The claim ties the label to this creation of the session, so a later
-	// session under the same name starts without it.
+	// session under the same name starts without it. It records no dir: a
+	// recorded dir is only ever where Portal minted the session, and the live
+	// cwd frozen in its place would regroup the session by an exact key it
+	// does not match.
 	return updateSessionIndex(via, func(idx *sessionindex.Index) error {
-		idx.Claim(name, live.Dir, live.Created)
+		idx.Claim(name, "", live.Created)
 		return idx.SetLabel(name, label)
 	})
 }

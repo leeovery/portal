@@ -16,13 +16,9 @@ func completionSessions() (names []string, current string) {
 	if err != nil {
 		return nil, ""
 	}
-	sessions, err := userSessions(context.Background(), b)
+	names, err = userSessionNames(context.Background(), b)
 	if err != nil {
 		return nil, ""
-	}
-	names = make([]string, 0, len(sessions))
-	for _, s := range sessions {
-		names = append(names, s.Name)
 	}
 	return names, b.Current()
 }
@@ -41,7 +37,7 @@ func completeSessionNames(toComplete string) ([]string, cobra.ShellCompDirective
 	return matches, cobra.ShellCompDirectiveNoFileComp
 }
 
-// Reads only the aliases config file, so it needs no tmux client on the
+// Reads only the aliases config file, so it needs no backend on the
 // bootstrap-exempt __complete path. Any error yields nil, degrading to zero
 // suggestions rather than a failure.
 var completionAliasKeys = func() []string {

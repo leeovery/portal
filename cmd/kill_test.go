@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -139,6 +141,20 @@ func TestKillCommand(t *testing.T) {
 			t.Errorf("error = %v, want %q", err, want)
 		}
 		assertIndexed(t, dir, "wedged-Lp4s", true)
+	})
+
+	t.Run("it says a session whose daemon has crashed will not be killed, and how to clear it", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "crashed-Lp4s"})
+		fake.Fail(backendtest.OpKill, fmt.Errorf("kill crashed-Lp4s: %w", zmx.ErrRefusing))
+		dir := stageKill(t, fake, "crashed-Lp4s")
+
+		_, _, err := runRootCmd(t, "kill", "crashed-Lp4s")
+
+		want := "session crashed-Lp4s refuses connections: " + crashedDaemon
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		assertIndexed(t, dir, "crashed-Lp4s", true)
 	})
 
 	t.Run("it returns any other backend failure as given, keeping the entry", func(t *testing.T) {

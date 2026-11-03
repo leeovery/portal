@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/spf13/cobra"
 )
@@ -52,11 +53,19 @@ func killError(name string, err error) error {
 	if gone, ok := sessionGoneError(name, err); ok {
 		return gone
 	}
+	// Before the timeout it wraps: a crashed daemon's kill never lands.
+	if errors.Is(err, zmx.ErrRefusing) {
+		return fmt.Errorf("session %s refuses connections: %s", name, crashedDaemon)
+	}
 	if errors.Is(err, backend.ErrTimeout) {
 		return fmt.Errorf("session %s is not answering; the kill may still land", name)
 	}
 	return err
 }
+
+// crashedDaemon words a session whose daemon refuses connections, for kill
+// and doctor alike.
+const crashedDaemon = "its daemon has crashed; `zmx list` clears its socket"
 
 // sessionGoneError words a refusal of name as one the backend does not hold,
 // naming the spelling it does hold where there is one, and reports whether

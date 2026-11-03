@@ -9,6 +9,7 @@ import (
 
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/zmxtest"
 )
 
 func TestMain(m *testing.M) {
@@ -344,4 +345,27 @@ func under(path, dir string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// A subprocess carries no zmx session of the developer's: their exported
+// ZMX_DIR is poisoned, and running go test inside one of their sessions puts
+// none of its names in the env.
+func TestPoisonsTheZmxEnv(t *testing.T) {
+	t.Setenv("ZMX_DIR", "/Users/dev/.local/state/zmx")
+	t.Setenv("ZMX_SESSION", "dotfiles-PpaTER")
+	t.Setenv("ZMX_SESSION_PREFIX", "dev-")
+
+	env, _ := portaltest.IsolateStateForTest(t)
+
+	if got, _ := envValue(env, "ZMX_DIR"); got != zmxtest.PoisonedDir {
+		t.Errorf("ZMX_DIR = %q, want the poison %q", got, zmxtest.PoisonedDir)
+	}
+	if n := envCount(env, "ZMX_DIR"); n != 1 {
+		t.Errorf("ZMX_DIR appears %d times, want once", n)
+	}
+	for _, key := range []string{"ZMX_SESSION", "ZMX_SESSION_PREFIX"} {
+		if got, ok := envValue(env, key); ok {
+			t.Errorf("%s = %q survives in the env, want it dropped", key, got)
+		}
+	}
 }

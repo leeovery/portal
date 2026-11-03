@@ -20,7 +20,6 @@ import (
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -100,7 +99,7 @@ func resolveDoctorDeps() *DoctorDeps {
 		}
 	}
 	if deps.Detector == nil || deps.Resolve == nil {
-		seams := buildProductionSpawnSeams(tmux.DefaultClient())
+		seams := buildProductionSpawnSeams(defaultTmuxClient())
 		if deps.Detector == nil {
 			deps.Detector = seams.Detector
 		}
@@ -136,7 +135,7 @@ func resolveDoctorDeps() *DoctorDeps {
 // zmxSessionReads are the driver's listing and protocol read, both bound on
 // dir. A dir the driver refuses to bind answers every read with that refusal.
 func zmxSessionReads(dir string) (func(context.Context) ([]backend.Session, error), func(context.Context, string) (int, error)) {
-	driver, err := zmx.New(zmx.Config{Binary: zmxProgram, Dir: dir})
+	driver, err := bindZmxAt(zmxProgram, dir)
 	if err != nil {
 		return func(context.Context) ([]backend.Session, error) { return nil, err },
 			func(context.Context, string) (int, error) { return 0, err }
@@ -340,7 +339,7 @@ func unansweredReason(ctx context.Context, protocolVersion func(context.Context,
 	case errors.Is(err, backend.ErrNoSuchSession):
 		return ""
 	case errors.Is(err, zmx.ErrRefusing):
-		return "refuses connections; `zmx list` clears a crashed session's socket"
+		return "refuses connections: " + crashedDaemon
 	case err != nil || version == zmx.ProtocolVersion:
 		return "no answer"
 	default:

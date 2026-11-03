@@ -102,16 +102,16 @@ func TestCurrentCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("it prints nothing and fails in one line outside a session", func(t *testing.T) {
+	t.Run("it prints nothing and fails silently outside a session", func(t *testing.T) {
 		isolateStateDir(t)
 
-		stdout, _, err := runRootCmd(t, "current")
+		stdout, stderr, err := runRootCmd(t, "current")
 
-		if !errors.Is(err, errNotInSession) || err.Error() != "not inside a Portal session" {
-			t.Errorf("error = %v, want %q", err, "not inside a Portal session")
+		if !errors.Is(err, errNoCurrentSession) || !IsSilentExitError(err) {
+			t.Errorf("error = %v, want the silent %v", err, errNoCurrentSession)
 		}
-		if stdout.Len() != 0 {
-			t.Errorf("stdout = %q, want empty", stdout)
+		if stdout.Len() != 0 || stderr.Len() != 0 {
+			t.Errorf("stdout = %q, stderr = %q, want both empty", stdout, stderr)
 		}
 	})
 

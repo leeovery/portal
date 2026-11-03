@@ -7,7 +7,7 @@ Guidance for agents working in this repository. The code is the source of truth 
 ```bash
 go build -o portal .                        # build binary
 go test ./...                               # unit lane: fast, hermetic
-go test -tags integration -p 1 ./...        # integration lane: real tmux + daemons + built binaries; -p 1 is REQUIRED
+go test -tags integration -p 1 -timeout 30m ./...   # integration lane: real tmux + daemons + built binaries; -p 1 is REQUIRED
 go test ./cmd -run TestOpenCommand_PathArgument_SkipsTUI   # single unit test
 go test -tags integration ./cmd -run TestCommitNowSymptom   # single integration test
 golangci-lint run                           # lint (config sets the integration tag, so tagged files are covered)
@@ -16,12 +16,13 @@ scripts/zmx-build                           # build the zmx commit pinned in scr
 
 - **Lane rule.** Any test that *builds* a `portal` binary, spawns a `portal state daemon`, or execs a built `portal` binary carries `//go:build integration`. The unit lane may still hold fast real-tmux *client* tests on disposable `tmuxtest` servers (`-S <tmpdir>/ptl-*/s`) — no daemons, no portal binary. Build `portal` in a test only through `internal/portalbintest`, which builds with `-tags integration` and so compiles in the daemon-pgrep sandbox; never hand-roll `go build`.
 - **`-p 1` is load-bearing.** There is no CI; daemon-timing suites flake when packages run in parallel on one machine.
+- **`-timeout 30m` too.** `./cmd` alone takes about 10 minutes under load, and a package timeout kills the test binary before its cleanups run, leaking `tmuxtest` servers and their daemons.
 - **No `t.Parallel()`.** `cmd` injects mocks through package-level mutable state. Stage `*Deps` structs with the `withXDeps(t, …)` helpers and function-var seams with `withFuncSeam(t, &seam, fn)` (both in `cmd/testhelpers_test.go`, both self-restoring). `cmd/seam_guard_test.go` fails any test that assigns a seam directly.
 - `golangci-lint` cannot see files gated `//go:build !integration`. It is not wired into CI. There is no code generation.
 
 ### Visual capture harness
 
-`cmd/capturetool` is a separate offline program (not a `portal` subcommand) that renders a named deterministic TUI fixture through `tui.Build` with every tmux seam faked (`internal/capture`, kept out of the production binary by an import guard). It is the only way to see a visual change before release — a scratch build of Portal disturbs the running daemon and touches real state.
+`cmd/capturetool` is a separate offline program (not a `portal` subcommand) that renders a named deterministic TUI fixture through `tui.Build` with the backend and every remaining seam faked (`internal/capture`, kept out of the production binary by an import guard). It is the only way to see a visual change before release — a scratch build of Portal disturbs the running daemon and touches real state.
 
 ```bash
 go run ./cmd/capturetool --fixture <name> [--theme <slug|path>]          # live view; capture.FixtureNames() lists fixtures
@@ -41,11 +42,11 @@ vhs testdata/vhs/<tape>                                                 # re-cap
 
 **A test must never mutate or affect the real system:** not the filesystem outside its temp dirs, not the default tmux server, not any process it did not spawn. Tests run on the developer's machine, where their live tmux server, real sessions and `portal state daemon` are always running. All four boundaries are mandatory:
 
-1. **Filesystem/state.** Any test that runs `portal state daemon` — directly or via `portal open`/bootstrap — calls `portaltest.IsolateStateForTest(t)` and sets the returned env on every subprocess (`cmd.Env = env`). It scrubs `HOME`/`XDG_CONFIG_HOME`, poisons `TMUX`, enables the pgrep sandbox, and registers a fingerprint-diff cleanup. The fingerprint is defence in depth, not a substitute: it walks the state dir under the scrubbed `HOME`, so it catches a process that took the scrub and still resolved the default path, not one that escaped the scrub.
+1. **Filesystem/state.** Any test that runs `portal state daemon` — directly or via `portal open`/bootstrap — calls `portaltest.IsolateStateForTest(t)` and sets the returned env on every subprocess (`cmd.Env = env`). It scrubs `HOME`/`XDG_CONFIG_HOME`, poisons `TMUX` and `ZMX_DIR` (dropping `ZMX_SESSION` and `ZMX_SESSION_PREFIX`), enables the pgrep sandbox, and registers a fingerprint-diff cleanup. The fingerprint is defence in depth, not a substitute: it walks the state dir under the scrubbed `HOME`, so it catches a process that took the scrub and still resolved the default path, not one that escaped the scrub.
 2. **tmux.** Only per-test sockets from `tmuxtest`, never the default socket — including indirectly. A test that Executes a real Cobra command body inherits its production wiring, and `tmux.DefaultClient()` honours the ambient `TMUX`, so inject every tmux-touching `*Deps` seam. `cmd`'s `TestMain` poisons `TMUX` and the `PORTAL_*` paths package-wide, so a missed injection dials a dead socket and fails loudly. A subprocess that needs a server appends its own `TMUX=<test socket>,0,0` after the isolated env (last wins). A test asserting inside/outside-tmux behaviour sets `TMUX` itself with `t.Setenv`. *(Incident: an uninjected command body killed the developer's live `_portal-saver` and unregistered their global hooks on every `go test ./cmd`.)*
 3. **Processes.** The daemon is identified machine-wide by argv (`pgrep -fx '^portal state daemon( |$)'`), so file isolation does not make a test daemon distinguishable from the real one. `state.PgrepPortalDaemons` is filtered by a default-deny sandbox (`internal/state/pgrep_sandbox.go`, integration-tagged, absent from production) that surfaces only test-registered daemons, and reaches test-spawned binaries through `state.SandboxRegistryEnv` (`PORTAL_TEST_SANDBOX_REGISTRY`), a file of test-owned state dirs. Never run the production orphan sweep, `PgrepPortalDaemons`, or any `pgrep`/`pkill`/broad signal in a test without `IsolateStateForTest` active. *(Incident: a global-pgrep sweep test repeatedly SIGKILLed the developer's live daemon.)*
 
-4. **zmx.** Only per-test directories from `zmxtest.New` (`/tmp/zx-*`), never the developer's `ZMX_DIR`, which their shell exports. Every package whose tests run zmx has a `TestMain` that sets `ZMX_DIR=zmxtest.PoisonedDir` and unsets `ZMX_SESSION` and `ZMX_SESSION_PREFIX`, so a missed injection fails loudly; `zmxtest.New` fails, not skips, without the pinned build or the poison. A test never signals a zmx daemon it didn't start: teardown proves ownership by `ZMX_DIR=<dir>` in the process's environment, read with `kern.procargs2` and re-proved before each signal, and fails when it can't read processes. By hand, prefix every `zmx` command with a scratch `ZMX_DIR=`.
+4. **zmx.** Only per-test directories from `zmxtest.New` (`/tmp/zx-*`), never the developer's `ZMX_DIR`, which their shell exports. Every package whose tests run zmx has a `TestMain` that sets `ZMX_DIR=zmxtest.PoisonedDir` and unsets `ZMX_SESSION` and `ZMX_SESSION_PREFIX`, and every package whose tests exec a portal binary hands it the same through `IsolateStateForTest`'s env. The poison sits under `/dev/null`, so a missed injection fails loudly with ENOTDIR rather than listing no sessions; a subprocess that needs sessions appends its own `ZMX_DIR` (last wins); `zmxtest.New` fails, not skips, without the pinned build or the poison. A test never signals a zmx daemon it didn't start: teardown proves ownership by `ZMX_DIR=<dir>` in the process's environment, read with `kern.procargs2` and re-proved before each signal, and fails when it can't read processes. By hand, prefix every `zmx` command with a scratch `ZMX_DIR=`.
 
 For daemon-spawning tests use `portaltest.SpawnIsolatedDaemon` (pins `PORTAL_STATE_DIR` and `TMUX`, registers ownership) with `portaltest.RegisterSubprocessCleanup` (SIGKILL + Wait + reap — on macOS an unreaped subprocess holds state-dir fds past cleanup). Fixtures whose tmux server can host writers at teardown also call `portaltest.RegisterStateDirTeardownGuard(t, stateDir)`, after `IsolateStateForTest` and before `tmuxtest.New`. Integration tests that set `PORTAL_LOG_LEVEL` assert it propagated with `portaltest.AssertLogLevelResolved`.
 
@@ -68,12 +69,12 @@ For load generators, match the exact command (`ps -eo ppid,command | awk '$1==1 
 ## Architecture
 
 Cobra CLI + Bubble Tea v2 TUI + Lipgloss v2; all tmux access goes through `internal/tmux`. `main.go` → `cmd/root.go` → subcommands. Mid-move to zmx (see `docs/design/zmx-backend.md`), `PersistentPreRunE` runs:
-1. the version 1 `sessions.json` stop (every command but `version` and the `state` tree);
+1. the `sessions.json` stop, refusing a version 1, corrupt or newer index (every command but `version`, `doctor` and the `state` tree);
 2. the `bootstrapExempt` check;
 3. for `open`, the zmx binary lookup;
 4. `bootstrapFor`.
 
-No command runs the tmux bootstrap; `cmd/no_tmux_bootstrap_guard_test.go` pins that. The bootstrap runner seam stays dormant until phase 3. Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). `open`'s burst and ack writer reach tmux through the `defaultTmuxClient` seam (`cmd/spawn_seams.go`), which cmd's `TestMain` replaces with one that panics. Only the production sources allow-listed in `internal/tmux/import_allowlist_guard_test.go` import `internal/tmux`, each entry naming the phase that removes it; only `cmd/state_*.go` may reach `hooksweep` or `hooks.StaleKeys` (`cmd/hook_sweep_caller_guard_test.go`), since zmx session names are token-shaped and the sweep would reap them.
+No command runs the tmux bootstrap; `cmd/no_tmux_bootstrap_guard_test.go` pins that. The bootstrap runner seam stays dormant until phase 3. Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). Terminal detection, for `open`'s burst and doctor's host-terminal line, reaches tmux through the `defaultTmuxClient` seam (`cmd/spawn_seams.go`), which cmd's `TestMain` replaces with one that panics. Only the production sources allow-listed in `internal/tmux/import_allowlist_guard_test.go` import `internal/tmux`, each entry naming the phase that removes it. Only `cmd/state_*.go` may reach `hooksweep`, `hooks.StaleKeys` or a hooks store's `CleanStale` (`cmd/hook_sweep_caller_guard_test.go`, type-checked): a six-character alphanumeric zmx name such as `notes1` is token-shaped, so the sweep would reap its hooks. Generated names never are.
 
 ### Commands
 
@@ -81,6 +82,7 @@ No command runs the tmux bootstrap; `cmd/no_tmux_bootstrap_guard_test.go` pins t
 - **`doctor [--fix]`** (`cmd/doctor.go`) — read-only health catalog with a scriptable exit code (0 iff no check fails; info and not-evaluable lines never fail it). In phase 1 it checks zmx (binary, directory, and every session's daemon answering protocol 1), the state dir and `sessions.json`, projects, the host terminal and resume mode; the saver, daemon, hook and pending-resume checks return in phase 3. `--fix` prunes stale projects and sweeps logs, then re-diagnoses. It must start nothing and heal nothing on the read-only path.
 - **`uninstall`** — refuses until the zmx saver lands (phase 3): its tmux teardown would kill an installed Portal's saver.
 - **`hook set/rm/list`** (`cmd/hooks.go`; `hooks` is a permanent silent alias) — see Resume hooks. `hook list` is a machine interface: tab-separated key, event, command, location, mode. Never add columns before the existing ones, or header/footer lines.
+- **`current`** prints the current session's label (its name when it has none); outside a session it prints nothing and exits 1. **`rename <text>`** sets that label; empty text resets it.
 - `list`, `kill`, `alias`, `theme export`, `version`, `init`, and the hidden `state` subcommands (`daemon`, `commit-now`, `hydrate`, `notify`, `signal-hydrate`, `resume-draw`, `resume-wait`, `resume-recover`).
 
 Connecting to a session: `attachConnector` `syscall.Exec`s the backend's `AttachCommand` (`zmx attach <name>`), replacing Portal's process. The attach runner (phase 2) takes this over, with switching from inside a session.
@@ -102,7 +104,9 @@ Connecting to a session: `attachConnector` `syscall.Exec`s the backend's `Attach
 | `project` | `projects.json` store, directory-anchored tags, `CanonicalDirKey` / `Index` |
 | `prefs` | `prefs.json` leaf store (grouping mode, theme keys, `resume_mode`) |
 | `hooks` | `hooks.json` store with its `hooks.json.lock` sidecar and the `StaleKeys` staleness rule |
-| `hooksweep` | The hook-staleness cycle and its stand-down reasons, shared by the daemon sweep, `doctor --fix` and doctor's read-only count |
+| `hooksweep` | The hook-staleness cycle and its stand-down reasons, run only by the tmux daemon's sweep |
+| `sessionindex` | `sessions.json` version 2, the session index: each session's label, recorded dir, created time and scrollback file, keyed by name; `Claim` ties an entry to one creation |
+| `commitlock` | `commit.lock`, the lock every writer of `sessions.json` holds; a leaf so `state` and `sessionindex` share it |
 | `log` | Sole owner of logging (see Logging) |
 | `bootstrapadapter` | Production adapters for `cmd/bootstrap`'s Orchestrator seams |
 | `xdg` | Config path resolution and per-file identity (`ConfigFileID`, `ConfigDirID`) |
@@ -116,7 +120,7 @@ Use the shared helper before writing a local one:
 
 - **`logtest.Sink`** — captured log records. Query with `sink.Records()` and chain `Matching(component, msg)`, `WithMessage`, `AtExactLevel`, `AtOrAboveLevel`, ending in `.Only(t, desc)`. Don't add combined query methods. `AssertRecord` and `AssertWriteFailure` cover audit-trail lines.
 - **`harnesstest`** — `TestingT`/`Recorder` to drive a fatal helper's own failure path; `PollUntil`; `AwaitProgress` for progress-based waits (use it for daemon lifecycle rather than wall-clock deadlines).
-- **`sourceguardtest`** — source-guard primitives (`RepoSources`, `PackageGoFiles`, `ParseSources`, `ForEachFuncCall`, `PackageDeps`/`AssertDepsWithin` with `Lanes`). A guard must fail when it scans nothing.
+- **`sourceguardtest`** — source-guard primitives (`RepoSources`, `PackageGoFiles`, `ParseSources`, `ForEachFuncCall`, `PackageDeps`/`AssertDepsWithin` with `Lanes`, and `TypeChecker` for a rule that needs types). A guard must fail when it scans nothing.
 - **`commandertest.Scripted`** — the tmux `Commander` fake; owns the `Run`/`RunRaw` trim-versus-verbatim contract.
 - **`backendtest`** — the fake `backend.Backend` and `Contract`, the behaviour table the fake and the zmx driver both pass. Pin backend behaviour in `Contract`, not in one implementation's tests, so the fake can't drift.
 - **`hookstest`** — the only route to seed keys and staged `hooks.json` files (`StageStore`, `HooksPath`, sidecar-lock fixtures).
@@ -154,7 +158,7 @@ No user-facing command reaches this any more; it survives for the `state` comman
 9. **CleanStaleMarkers.**
 10. **SweepOrphanFIFOs.**
 
-Steps 1, 2, 3 and 8 are fatal; the rest log WARN and surface warnings. Hook and project stale-cleanup run on the daemon's throttled idle tick, with `doctor --fix` as the manual backstop.
+Steps 1, 2, 3 and 8 are fatal; the rest log WARN and surface warnings. Hook and project stale-cleanup run on the daemon's throttled idle tick; `doctor --fix` is the manual backstop for projects only.
 
 **Cold-path flip.** When a full bootstrap is owed and the launch is a picker (`shouldRunConcurrentBootstrap`, `isTUIPath`), the bootstrap runs concurrently with the TUI and streams progress messages (`cmd/bootstrap_progress.go`; labels in `internal/tui/loading_progress.go`). A fatal becomes an in-TUI error frame and a non-zero exit; warnings become a post-load notice band. The search form holds the loading page until bootstrap completes; a command-pending pick is held (`stagedMint`) and minted on completion. Warm and CLI paths run synchronously, unchanged.
 

@@ -26,8 +26,10 @@ import (
 
 // PoisonedDir is the ZMX_DIR that the TestMain of every package whose tests
 // run zmx sets, so a zmx run that misses the Backend's own directory fails
-// instead of reaching the developer's live sessions.
-const PoisonedDir = "/nonexistent/zmx-poison"
+// instead of reaching the developer's live sessions. It sits under a file, not
+// a missing directory: zmx reads a missing directory as holding no sessions,
+// but every read under a file fails with ENOTDIR.
+const PoisonedDir = "/dev/null/zmx-poison"
 
 // root is short on purpose: a session's socket is <dir>/<name>, capped at
 // 103 bytes on macOS, and $TMPDIR there is ~50 bytes on its own.

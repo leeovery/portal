@@ -43,7 +43,6 @@ type OpenDeps struct {
 	AliasLookup   resolver.AliasLookup
 	Zoxide        resolver.ZoxideQuerier
 	DirValidator  resolver.DirValidator
-	AckWriter     spawn.AckWriter
 	ThemeLoader   *theme.Loader
 	// Execer replaces the exec that hands the terminal to the backend's
 	// attach command.
@@ -123,7 +122,7 @@ sessions instead of resolving:
   open /          open the picker with the filter empty and ready to type
 
 The term is matched case-folded, as a contiguous run, against each live session's
-name and its recorded directory. Exactly one match attaches that session outright;
+label, name and directory. Exactly one match attaches that session outright;
 no match or several open the picker pre-filtered by the term — never an error.
 A single-segment absolute directory is read as a search, not a path: mint there
 with -p /tmp.
@@ -147,12 +146,10 @@ expands to several sessions), isn't available yet, and is refused.`,
 			return err
 		}
 
-		// Ahead of every branch that touches tmux, so a malformed --ack is a usage
-		// error rather than a tmux failure.
-		if ackVal, _ := cmd.Flags().GetString("ack"); ackVal != "" {
-			if _, _, ok := spawn.ParseSpawnAckFlag(ackVal); !ok {
-				return NewUsageError("open: --ack must be <batch>:<token>")
-			}
+		// --ack is the receipt a window the burst spawned writes, and nothing
+		// spawns one until the attach runner, so it is refused as the burst is.
+		if cmd.Flags().Changed("ack") {
+			return errSeveralSessions
 		}
 
 		// Ahead of the multi-target gate as much as of resolution: a term carrying
@@ -254,51 +251,20 @@ func resolvePinAndOpen(cmd *cobra.Command, flag string, resolve func(*resolver.Q
 
 // openResolved handles no MissResult — the bare-positional path renders its own
 // message and pins never miss — so any other result type is a defensive error.
-// A command (-e/--) is mint-scoped: an attach target has no safe injection
-// channel (send-keys corrupts a busy pane, respawn-pane -k destroys running work).
+// A command (-e/--) is mint-scoped: an attach target is already running its own
+// program, so there is nothing safe to inject it into.
 func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []string) error {
 	switch r := result.(type) {
 	case *resolver.SessionResult:
 		if len(command) > 0 {
 			return NewUsageError(commandAttachOnlyMessage)
 		}
-		// After the command guard: a command+attach usage error must fire without
-		// writing a marker.
-		writeAckMarker(cmd)
 		return openSessionFunc(cmd, r.Name)
 	case *resolver.PathResult:
-		writeAckMarker(cmd)
 		return openPathFunc(cmd, r.Path, command)
 	default:
 		return fmt.Errorf("unexpected resolution result: %T", result)
 	}
-}
-
-// writeAckMarker is best-effort: a failed write still attaches, which the
-// parent's poll classifies as a failed window rather than leaving an orphan.
-func writeAckMarker(cmd *cobra.Command) {
-	ackVal, _ := cmd.Flags().GetString("ack")
-	if ackVal == "" {
-		return
-	}
-	batch, token, ok := spawn.ParseSpawnAckFlag(ackVal)
-	if !ok {
-		return // unreachable: RunE rejects a malformed --ack before dispatch
-	}
-	if err := buildAckWriter().Write(batch, token); err != nil {
-		spawnLogger.Debug("spawn-ack marker write failed",
-			"batch", batch,
-			"detail", err.Error(),
-		)
-	}
-}
-
-func buildAckWriter() spawn.AckWriter {
-	if openDeps != nil && openDeps.AckWriter != nil {
-		return openDeps.AckWriter
-	}
-	client := defaultTmuxClient()
-	return spawn.NewServerOptionAckChannel(client, client)
 }
 
 // emitResolveDecision logs one line per resolved query: globs are deterministic
@@ -695,15 +661,7 @@ func (l backendSessionNames) ListSessionNames() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := userSessions(l.ctx, b)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(sessions))
-	for _, s := range sessions {
-		names = append(names, s.Name)
-	}
-	return names, nil
+	return userSessionNames(l.ctx, b)
 }
 
 func init() {
@@ -713,7 +671,7 @@ func init() {
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")
-	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — write the @portal-spawn-<batch>-<token> ack marker before the attach/mint handoff")
+	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — a spawned window's receipt; refused until the attach runner")
 	_ = openCmd.Flags().MarkHidden("ack")
 
 	// -p/--path and -z/--zoxide deliberately register no completer, so cobra emits

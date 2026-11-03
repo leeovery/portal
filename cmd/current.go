@@ -13,6 +13,10 @@ import (
 // outside one.
 var errNotInSession = errors.New("not inside a Portal session")
 
+// errNoCurrentSession is current's answer outside a session: nothing printed
+// and exit 1, so a footer reading it shows nothing.
+var errNoCurrentSession = errors.New("no current session")
+
 // currentSession is the name of the session this process runs in, the key of
 // everything Portal stores about it.
 func currentSession() (string, error) {
@@ -42,6 +46,9 @@ var currentCmd = &cobra.Command{
 			return err
 		}
 		name, err := currentSessionIn(b)
+		if errors.Is(err, errNotInSession) {
+			return errNoCurrentSession
+		}
 		if err != nil {
 			return err
 		}

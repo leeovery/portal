@@ -2,7 +2,8 @@ package cmd
 
 // No command runs the tmux bootstrap: its kill-barrier would take down the
 // installed Portal's _portal-saver, its hook registration would rewrite that
-// Portal's global hooks, and its orphan sweep would SIGKILL that Portal's
+// Portal's global hooks, and unregistering them would strip them, as the old
+// uninstall did in tests; its orphan sweep would SIGKILL that Portal's
 // daemon. That rests on the binary holding no path to them, which this guard
 // pins over the binary's production dependency closure rather than leaving
 // to absence.
@@ -37,7 +38,7 @@ const (
 // binary may reference. A package names its own declarations unqualified, so
 // only another package's reference matches.
 var tmuxBootstrapEntries = map[string][]string{
-	portalModule + "/internal/tmux":  {"EnsurePortalSaverVersion", "BootstrapPortalSaver", "RegisterPortalHooks"},
+	portalModule + "/internal/tmux":  {"EnsurePortalSaverVersion", "BootstrapPortalSaver", "RegisterPortalHooks", "UnregisterPortalHooks"},
 	portalModule + "/internal/state": {"PgrepPortalDaemons"},
 	bootstrapPkgPath:                 {"Orchestrator", "NewWithDefaults", "OrphanSweepCore"},
 }

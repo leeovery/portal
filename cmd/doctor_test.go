@@ -325,7 +325,7 @@ func TestDoctorSessionsCheck(t *testing.T) {
 			"wedged":  {err: backend.ErrTimeout},
 		}
 		assertCheck(t, sessionsCheck(t, silentSessions("crashed", "wedged"), answers.read), checkFail,
-			"2 of 2 not answering: crashed (refuses connections; `zmx list` clears a crashed session's socket), wedged (no answer)")
+			"2 of 2 not answering: crashed (refuses connections: its daemon has crashed; `zmx list` clears its socket), wedged (no answer)")
 	})
 
 	t.Run("it names Portal's own sessions too", func(t *testing.T) {

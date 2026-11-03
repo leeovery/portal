@@ -46,14 +46,19 @@ func attachingBackend() (backend.Backend, error) {
 	return bindZmx(binary)
 }
 
-// bindZmx does no I/O, so binding per call costs nothing. zmx.New refuses a
-// relative or empty directory, which no command can work around.
+// bindZmx binds the zmx directory the environment names.
 func bindZmx(binary string) (backend.Backend, error) {
-	b, err := zmx.New(zmx.Config{Binary: binary, Dir: zmx.DirFor(os.Environ())})
+	b, err := bindZmxAt(binary, zmx.DirFor(os.Environ()))
 	if err != nil {
 		return nil, err
 	}
 	return b, nil
+}
+
+// bindZmxAt does no I/O, so binding per call costs nothing. zmx.New refuses a
+// relative or empty directory, which no command can work around.
+func bindZmxAt(binary, dir string) (*zmx.Backend, error) {
+	return zmx.New(zmx.Config{Binary: binary, Dir: dir})
 }
 
 // userSessions is every session b lists but Portal's own, the one listing
@@ -64,4 +69,18 @@ func userSessions(ctx context.Context, b backend.Backend) ([]backend.Session, er
 		return nil, err
 	}
 	return slices.DeleteFunc(sessions, backend.Session.PortalOwned), nil
+}
+
+// userSessionNames is the names of b's user sessions: what a target resolves
+// against and completion offers, names and never labels.
+func userSessionNames(ctx context.Context, b backend.Backend) ([]string, error) {
+	sessions, err := userSessions(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		names = append(names, s.Name)
+	}
+	return names, nil
 }

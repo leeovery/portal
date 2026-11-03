@@ -181,6 +181,7 @@ func TestListCommand(t *testing.T) {
 
 func TestListCommand_DoesNotNeedTheZmxBinary(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("ZMX_DIR", t.TempDir())
 	withListDeps(t, ListDeps{IsTTY: func() bool { return false }})
 
 	stdout, _, err := runRootCmd(t, "list")
@@ -188,6 +189,6 @@ func TestListCommand_DoesNotNeedTheZmxBinary(t *testing.T) {
 		t.Fatalf("list with no zmx on PATH: %v", err)
 	}
 	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want nothing from the poisoned, missing zmx dir", stdout.String())
+		t.Errorf("stdout = %q, want nothing from the empty zmx dir", stdout.String())
 	}
 }

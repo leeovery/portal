@@ -2,7 +2,7 @@ package tui
 
 // PickerSessions returns the sessions the picker lists: the enumeration less the
 // session the caller is attached to. An empty currentSession drops nothing, so a
-// caller outside tmux — or one whose current-session read answered nothing —
+// caller outside a session — or one whose current-session read answered nothing —
 // passes "" rather than branching.
 //
 // It never deletes in place: callers hand it an enumeration they go on reading,

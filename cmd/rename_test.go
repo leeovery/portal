@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/tui"
 )
 
 // The live session the rename suite runs inside.
@@ -69,14 +70,14 @@ func TestRenameCommand(t *testing.T) {
 		assertLabel(t, dir, currentSessionName, "dotfiles · user search")
 	})
 
-	t.Run("it records the live session's created time and dir on a session with no entry", func(t *testing.T) {
+	t.Run("it records the live session's created time, and no dir, on a session with no entry", func(t *testing.T) {
 		fake, dir := stageRename(t)
 
 		if _, _, err := runRootCmd(t, "rename", "api work"); err != nil {
 			t.Fatalf("rename: %v", err)
 		}
 
-		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", Dir: renameDir, CreatedAt: renameCreated}
+		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", CreatedAt: renameCreated}
 		if e := entryOf(t, dir, currentSessionName); e != want {
 			t.Errorf("entry = %+v, want %+v", e, want)
 		}
@@ -85,6 +86,29 @@ func TestRenameCommand(t *testing.T) {
 		}
 		if calls := fake.CallsTo(backendtest.OpSession); len(calls) != 1 || calls[0].Name != currentSessionName {
 			t.Errorf("backend Session calls = %+v, want one for %s", calls, currentSessionName)
+		}
+	})
+
+	// Grouping prefers the recorded dir and matches a project by exact key, so
+	// a session sitting below its project's root would move out of its group
+	// if rename froze that cwd as its dir.
+	t.Run("it leaves the picker grouping a session in a subdirectory as it did before", func(t *testing.T) {
+		subdir := renameDir + "/cmd"
+		fake := inSession(t, "", backend.Session{Name: currentSessionName, Dir: subdir, Created: renameCreated, Answered: true})
+		fake.SetCurrent(currentSessionName)
+		before := shownRows(t, fake)
+
+		if _, _, err := runRootCmd(t, "rename", "api work"); err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+
+		after := shownRows(t, fake)
+		if len(before) != 1 || len(after) != 1 {
+			t.Fatalf("rows before = %+v, after = %+v; want one each", before, after)
+		}
+		before[0].Label = "api work"
+		if after[0] != before[0] {
+			t.Errorf("row after rename = %+v, want %+v: only the label changes, so the picker groups it by its cwd %s as before", after[0], before[0], subdir)
 		}
 	})
 
@@ -112,7 +136,7 @@ func TestRenameCommand(t *testing.T) {
 			t.Fatalf("rename: %v", err)
 		}
 
-		want := sessionindex.Entry{Name: currentSessionName, Label: "new", Dir: renameDir, CreatedAt: renameCreated}
+		want := sessionindex.Entry{Name: currentSessionName, Label: "new", CreatedAt: renameCreated}
 		if e := entryOf(t, dir, currentSessionName); e != want {
 			t.Errorf("entry = %+v, want %+v", e, want)
 		}
@@ -267,7 +291,7 @@ func TestPickerLabeller(t *testing.T) {
 			t.Fatalf("SetLabel: %v", err)
 		}
 
-		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", Dir: renameDir, CreatedAt: renameCreated}
+		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", CreatedAt: renameCreated}
 		if e := entryOf(t, dir, currentSessionName); e != want {
 			t.Errorf("entry = %+v, want %+v", e, want)
 		}
@@ -346,4 +370,14 @@ func TestPickerLabeller(t *testing.T) {
 		}
 		assertLabel(t, dir, currentSessionName, "dotfiles")
 	})
+}
+
+// shownRows is the picker's rows over b.
+func shownRows(t *testing.T, b backend.Backend) []tui.Session {
+	t.Helper()
+	rows, err := listShownSessions(t.Context(), b)
+	if err != nil {
+		t.Fatalf("list shown sessions: %v", err)
+	}
+	return rows
 }

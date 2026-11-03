@@ -55,7 +55,7 @@ func TestKillModal_BodyColourRoles(t *testing.T) {
 
 func TestKillModal_ConsequenceLine(t *testing.T) {
 	content := renderKillModalContent("aviva-proxy-qNyfEO", testDarkTheme(t), false)
-	for _, fragment := range []string{"Ends the tmux session", "undone."} {
+	for _, fragment := range []string{"Ends the session.", "Can't be undone."} {
 		if !killModalContains(content, fragment) {
 			t.Errorf("consequence line must contain %q; got:\n%s", fragment, content)
 		}
@@ -108,7 +108,7 @@ func TestKillModal_BodyRowLayout(t *testing.T) {
 		if nameIdx < 0 && strings.Contains(line, "aviva-proxy-qNyfEO") {
 			nameIdx = i
 		}
-		if consequenceIdx < 0 && strings.Contains(line, "Ends the tmux session") {
+		if consequenceIdx < 0 && strings.Contains(line, "Ends the session") {
 			consequenceIdx = i
 		}
 	}

@@ -7,8 +7,8 @@ import (
 	"slices"
 )
 
-// SessionLister returns the user-visible (leading-underscore-filtered) set of
-// running tmux session names. An error is treated as "no sessions".
+// SessionLister returns the names of the user's live sessions, Portal's own
+// left out. An error is treated as "no sessions".
 type SessionLister interface {
 	ListSessionNames() ([]string, error)
 }

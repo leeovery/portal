@@ -62,7 +62,7 @@ type pickerLanding struct {
 // both ways or scoped emptily, and a filter beside a target or with no text. It
 // runs as open's Args validator because each of those refusals is decided from
 // the arguments alone, and cobra validates args before PersistentPreRunE — so a
-// refused line starts no tmux server, restores nothing and paints no frame.
+// refused line bootstraps nothing, restores nothing and paints no frame.
 //
 // The refusals are tested in a fixed order, so a line colliding several ways
 // always names the same one.
@@ -212,7 +212,7 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 	if name != "" {
 		// No picker is painted on this route, so the notice band never surfaces
 		// what the bootstrap accumulated: it goes to the terminal instead, before
-		// the attach hands that terminal to tmux.
+		// the attach hands that terminal to the session.
 		bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 		return openSessionFunc(cmd, name)
 	}

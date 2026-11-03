@@ -6,7 +6,7 @@ import (
 
 const (
 	killTitle       = "Kill session?"
-	killConsequence = "Ends the tmux session and all its panes. Can't be undone."
+	killConsequence = "Ends the session. Can't be undone."
 
 	killKeyConfirm   = "y"
 	killLabelConfirm = "kill"

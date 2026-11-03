@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/zmxtest"
 )
 
 // IsolateStateForTest returns an env slice and a stateDir scoped to a per-test
@@ -102,6 +103,11 @@ func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 	// (exec.Cmd env dedupe is last-wins), and one that forgets fails loudly.
 	env = filterEnvKeys(env, "TMUX", "TMUX_PANE")
 	env = append(env, "TMUX="+PoisonedTmuxSocket+",0,0")
+
+	// The same for zmx: a subprocess that needs sessions appends its own
+	// ZMX_DIR, and none runs as if inside the developer's current session.
+	env = filterEnvKeys(env, "ZMX_DIR", "ZMX_SESSION", "ZMX_SESSION_PREFIX")
+	env = append(env, "ZMX_DIR="+zmxtest.PoisonedDir)
 
 	if devStateDir != "" {
 		installBackstop(t, devStateDir, preSnapshot)

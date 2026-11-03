@@ -162,6 +162,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsPagedFixture,
 		sessionsInlineFlashFixture,
 		sessionsRenameRefusedLabelFixture,
+		sessionsKillConfirmFixture,
 		sessionsMultiSelectActiveFixture,
 		sessionsUnsupportedTerminalFixture,
 		sessionsUnsupportedNullFixture,
@@ -403,6 +404,16 @@ func sessionsRenameRefusedLabelFixture() *Fixture {
 	fx.name = "sessions-rename-refused-label"
 	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyRune('\u200b'), keyEnter()}
 	fx.landsLastKeyRead = true
+	return fx
+}
+
+// The modal opens over a labelled row, so the frame shows which of the
+// session's names the confirmation asks about.
+func sessionsKillConfirmFixture() *Fixture {
+	fx := sessionsByProjectLabelledFixture()
+	fx.name = "sessions-kill-confirm"
+	fx.initialCursor = "orchard-pipeline-Hq7wNe"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('k')}
 	return fx
 }
 

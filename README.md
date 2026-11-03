@@ -175,7 +175,7 @@ An exact session name **attaches** that existing session; a path, alias, or zoxi
 
 **Session search.** A positional beginning with `/` and containing no further `/` is a search across your live sessions rather than a target to resolve — `x /port`. The rule tests the shape of the argument alone and never asks the filesystem anything, so the same command line means the same thing on every machine. Everything else is untouched: `x ./port`, `x ~/port`, `x /Users/me/Code/portal` and `x /tmp/` are the paths they always were (the trailing slash is the second one).
 
-The term is matched **case-folded, as a contiguous run**, against each live session's name and its recorded directory — home-abbreviated (`~/Code/portal`), exactly as the picker's row displays it. Three outcomes, by how many sessions match:
+The term is matched **case-folded, as a contiguous run**, against each live session's label, name and directory — home-abbreviated (`~/Code/portal`), exactly as the picker's row displays it. Three outcomes, by how many sessions match:
 
 - **exactly one** — that session is attached outright, no picker;
 - **several** — the picker opens pre-filtered by the term, cursor on the first match;
@@ -248,7 +248,7 @@ xctl alias list                      # list all aliases
 
 ### `xctl hook`
 
-Register per-pane commands to bring back after a reboot. Under the shipped default a restored pane comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it; a registration pinned `eager` runs its command as the pane is restored, with no panel. `hook set` must be run from inside a tmux pane; `hook rm` defaults to the current pane's token but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including panes that no longer exist, and the old-format `<session>:<window>.<pane>` keys the stale-entry sweep retains forever rather than guessing at — hand removal through this flag is the sanctioned route for those). `hook rm` exits non-zero when it removes nothing — a missing entry, a pane with no hook of its own, or a pane that is already gone — so a scripted caller can tell a real removal from a no-op.
+Register per-session commands to bring back after a reboot. Under the shipped default a restored session comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it; a registration pinned `eager` runs its command as the session is restored, with no panel. `hook set` must be run from inside a session; `hook rm` defaults to the current session's name but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including sessions that no longer exist, and the keys the tmux version wrote — pane tokens and old-format `<session>:<window>.<pane>` keys — which hand removal through this flag is the sanctioned route for). `hook rm` exits non-zero when it removes nothing — a missing entry or a session with no hook of its own — so a scripted caller can tell a real removal from a no-op.
 
 The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent alias, so existing `xctl hooks …` scripts keep working unchanged.
 
@@ -259,9 +259,9 @@ A label takes any printable text. Only a label holding a control or formatting c
 ```bash
 xctl hook set --on-resume "npm start"            # register a resume hook
 xctl hook set --on-resume "npm start" --resume-mode lazy   # register it pinned to a resume mode
-xctl hook rm --on-resume                         # remove the current pane's hook
-xctl hook rm --on-resume --pane-key 'k3Xp7Q'     # remove the entry under any hook key, verbatim (works outside tmux)
-xctl hook list                                   # list hooks: key, event, command, the pane's current location (4th column, empty if no live pane carries the token), and the registration's resume mode (5th column: eager, lazy, or empty when it follows the install)
+xctl hook rm --on-resume                         # remove the current session's hook
+xctl hook rm --on-resume --pane-key 'k3Xp7Q'     # remove the entry under any hook key, verbatim (works outside a session)
+xctl hook list                                   # list hooks: key, event, command, the session's label (4th column, empty if no live session carries the key), and the registration's resume mode (5th column: eager, lazy, or empty when it follows the install)
 ```
 
 `--resume-mode` takes `eager` or `lazy` and nothing else; any other value is refused and nothing is written. A registration carries eager, lazy or nothing, and carrying nothing means it follows the install-wide setting in `prefs.json`. The flag's zero value is "names no mode" rather than "keep what was there", so a `hook set` that does not pass it writes a registration carrying no mode whatever its predecessor carried — re-pass the mode alongside the command to keep a pin.

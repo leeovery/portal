@@ -16,16 +16,6 @@ import (
 // to portal.log instead.
 var errCommitNowFailed = errors.New("commit-now failed")
 
-// IsSilentExitError reports whether the top-level handler must suppress err's
-// stderr emission.
-func IsSilentExitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, errCommitNowFailed) ||
-		errors.Is(err, ErrDoctorUnhealthy)
-}
-
 // A non-nil commitNowDeps need not populate every field: each unset field falls
 // back to its production implementation.
 var commitNowDeps *CommitNowDeps

@@ -14,8 +14,9 @@ import (
 )
 
 // Bootstrap must not run for these: it would heal doctor's subject, build what
-// uninstall then tears down, recurse for `state` subcommands fired from hooks,
-// and run on every __complete TAB. A match anywhere in the parent chain exempts
+// uninstall then tears down, run again inside the saver and the helpers its
+// `state` subcommands are, and run on every __complete TAB; the rest only read
+// or label sessions. A match anywhere in the parent chain exempts
 // the invocation, keyed on cobra's canonical Name() so the silent `hooks` alias
 // rides on "hook".
 var bootstrapExempt = map[string]bool{

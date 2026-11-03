@@ -121,7 +121,7 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 			t.Errorf("exit code = %d, want 1:\n%s", code, out)
 		}
 		assertLines(t, out,
-			"✗ sessions: 3 of 4 not answering: crashed-9 (refuses connections; `zmx list` clears a crashed session's socket), "+
+			"✗ sessions: 3 of 4 not answering: crashed-9 (refuses connections: its daemon has crashed; `zmx list` clears its socket), "+
 				"future-2 (speaks protocol 2; Portal speaks 1), wedged-Lp4s (no answer)",
 			"5 of 6 checks passed",
 		)
